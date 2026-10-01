@@ -1,0 +1,7 @@
+{
+  "version": "0.0.1",
+  "configurations": [
+    { "name": "agir-v2", "runtimeExecutable": "npm", "runtimeArgs": ["run", "start"], "port": 8787 },
+    { "name": "agir-v2-dev", "runtimeExecutable": "npm", "runtimeArgs": ["run", "dev"], "port": 5173 }
+  ]
+}

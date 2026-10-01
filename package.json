@@ -1,0 +1,30 @@
+{
+  "name": "agir-v2",
+  "private": true,
+  "type": "module",
+  "engines": {
+    "node": ">=22 <25"
+  },
+  "workspaces": [
+    "packages/*",
+    "apps/*"
+  ],
+  "scripts": {
+    "dev": "node scripts/dev.mjs",
+    "api": "npm run dev -w @agir/api",
+    "web": "npm run dev -w @agir/web",
+    "seed": "npm run seed -w @agir/api",
+    "typecheck": "tsc -b",
+    "test": "vitest run",
+    "gate": "node scripts/gate.mjs",
+    "build": "npm run build -w @agir/web",
+    "start": "npm run build -w @agir/web && npm run start -w @agir/api"
+  },
+  "devDependencies": {
+    "@types/node": "^22.10.0",
+    "fast-check": "^4.3.0",
+    "tsx": "^4.20.0",
+    "typescript": "^5.9.0",
+    "vitest": "^4.0.0"
+  }
+}

@@ -1,0 +1,130 @@
+{
+  "slug": "maple-heights",
+  "name": "Maple Heights",
+  "assetType": "Multifamily",
+  "location": "Burnaby, British Columbia",
+  "purpose": "A complete V2 deal: every required input is stated once, so it runs from documents to a verdict with no analyst entry beyond approval.",
+  "documents": [
+    {
+      "name": "Maple_Heights_Sponsor_Summary.pdf",
+      "kind": "pdf",
+      "title": "Maple Heights: Sponsor Summary",
+      "lines": [
+        "Residential rental units: 160 units",
+        "Common equity contribution: $21,000,000",
+        "Construction period: 18 months",
+        "Lease-up period: 12 months",
+        "Sponsor track record: six completed Metro Vancouver rental buildings"
+      ]
+    },
+    {
+      "name": "Maple_Heights_Market_Study.pdf",
+      "kind": "pdf",
+      "title": "Maple Heights: Market Study",
+      "lines": [
+        "Residential rent: $2,650 per unit per month",
+        "Stabilized occupancy: 95%",
+        "Annual rent growth: 3%",
+        "Expense growth: 2.5%",
+        "Other income: $96,000 per year",
+        "Comparable projects report a projected NOI of $3,900,000"
+      ]
+    },
+    {
+      "name": "Maple_Heights_Appraisal.pdf",
+      "kind": "pdf",
+      "title": "Maple Heights: Appraisal Summary",
+      "lines": [
+        "Exit cap rate: 4.75%"
+      ]
+    },
+    {
+      "name": "Maple_Heights_Lender_Term_Sheet.pdf",
+      "kind": "pdf",
+      "title": "Maple Heights: Lender Term Sheet",
+      "lines": [
+        "Senior loan amount: $31,000,000",
+        "Interest rate: 5.90%",
+        "Amortization: 30-year",
+        "Interest-only period: 36 months",
+        "Minimum DSCR covenant: 1.20x",
+        "Loan to cost: 60%"
+      ]
+    },
+    {
+      "name": "Maple_Heights_Operating_Assumptions.pdf",
+      "kind": "pdf",
+      "title": "Maple Heights: Operating Assumptions",
+      "lines": [
+        "Operating expense ratio: 32%",
+        "Hold period: 5 years",
+        "Selling costs: 2%"
+      ]
+    },
+    {
+      "name": "Maple_Heights_Construction_Budget.xlsx",
+      "kind": "xlsx",
+      "sheet": "Construction Budget",
+      "rows": [
+        [
+          "Line item",
+          "Amount"
+        ],
+        [
+          "Land acquisition",
+          9500000
+        ],
+        [
+          "Hard costs",
+          33000000
+        ],
+        [
+          "Soft costs",
+          5200000
+        ],
+        [
+          "Contingency",
+          1650000
+        ],
+        [
+          "Financing costs",
+          2600000
+        ]
+      ]
+    }
+  ],
+  "expect": {
+    "conflicts": [],
+    "missing": [],
+    "values": {
+      "unit_count|Residential": 160,
+      "unit_rent_monthly|Residential": 2650,
+      "equity_amount": 21000000,
+      "construction_months": 18,
+      "lease_up_months": 12,
+      "stabilized_occupancy_pct": 95,
+      "rent_growth_pct": 3,
+      "expense_growth_pct": 2.5,
+      "other_income_annual": 96000,
+      "exit_cap_rate_pct": 4.75,
+      "senior_loan_amount": 31000000,
+      "senior_rate_pct": 5.9,
+      "senior_amort_years": 30,
+      "senior_io_months": 36,
+      "min_dscr_covenant": 1.2,
+      "stated_ltc_pct": 60,
+      "expense_ratio_pct": 32,
+      "hold_years": 5,
+      "selling_costs_pct": 2,
+      "land_cost": 9500000,
+      "hard_cost": 33000000,
+      "soft_cost": 5200000,
+      "contingency": 1650000,
+      "stated_interest_reserve": 2600000
+    },
+    "neverInputs": [
+      3900000
+    ],
+    "runs": true
+  }
+}

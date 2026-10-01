@@ -1,0 +1,31 @@
+{
+  "slug": "bergendal-kvarter",
+  "name": "Bergendal Kvarter",
+  "assetType": "Multifamily",
+  "location": "Hammarby Sjostad, Stockholm",
+  "purpose": "Every figure in a non-US convention. A misreading must fail loudly (no candidate, a visible note), never enter the model at the wrong magnitude.",
+  "documents": [
+    { "name": "Bergendal_Kvarter_Sponsor_Summary.pdf", "kind": "pdf", "title": "Bergendal Kvarter: Sponsor Summary", "lines": [
+      "Common equity contribution: 31.200.000", "Residential rental units: four hundred twelve units", "Retail area: 9 400 SF" ] },
+    { "name": "Bergendal_Kvarter_Market_Study.pdf", "kind": "pdf", "title": "Bergendal Kvarter: Market Study", "lines": [
+      "Residential rent: 2 640,50 per unit per month", "Residential occupancy: 94,5 %", "Retail rent: 268,75 per square foot", "Retail occupancy: 91,0 %",
+      "Annual rent growth: 0,025", "Stabilized occupancy: 94,5 %" ] },
+    { "name": "Bergendal_Kvarter_Term_Sheet.pdf", "kind": "pdf", "title": "Bergendal Kvarter: Senior Facility Terms", "lines": [
+      "Senior construction debt: 48.750.000", "Interest rate: 5,85 %", "Amortization: 30 years", "Minimum DSCR: 1,20x", "Exit cap rate: 6,25 %" ] },
+    { "name": "Bergendal_Kvarter_Operating_Assumptions.pdf", "kind": "pdf", "title": "Bergendal Kvarter: Operating Assumptions", "lines": [
+      "Operating expense ratio: 0,32", "Hold period: 7 years", "Selling costs: 1,75 %", "Lease-up period: 14 months" ] },
+    { "name": "Bergendal_Kvarter_Construction_Budget.csv", "kind": "csv", "rows": [
+      ["Line item", "Amount"], ["Land acquisition", "12.400.000"], ["Hard costs", "41 500 000"], ["Soft costs", "7,250,000"], ["Contingency", "2 900 000"], ["Financing costs", "3.450.000"], ["Utility incentive credit", "−2 150 000"] ] }
+  ],
+  "expect": {
+    "conflicts": [],
+    "missing": ["unit_count|Residential", "rentable_area_sf|Retail", "expense_ratio_pct", "construction_months"],
+    "values": {
+      "equity_amount": 31200000, "unit_rent_monthly|Residential": 2640.5, "item_occupancy_pct|Residential": 94.5, "rent_psf_annual|Retail": 268.75,
+      "senior_loan_amount": 48750000, "senior_rate_pct": 5.85, "min_dscr_covenant": 1.2, "exit_cap_rate_pct": 6.25, "selling_costs_pct": 1.75,
+      "land_cost": 12400000, "hard_cost": 41500000, "soft_cost": 7250000, "contingency": 2900000
+    },
+    "neverValues": { "rent_growth_pct": [0.025], "expense_ratio_pct": [0.32] },
+    "runs": false
+  }
+}

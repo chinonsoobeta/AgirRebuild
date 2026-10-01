@@ -1,0 +1,24 @@
+{
+  "slug": "northgate-cold-storage",
+  "name": "Northgate Cold Storage",
+  "assetType": "Industrial",
+  "location": "Rutherford County, Tennessee",
+  "purpose": "Unit and scale traps plus four genuinely absent inputs. No trap may be misread, and the run must block on the missing values rather than defaulting them.",
+  "documents": [
+    { "name": "Northgate_Sponsor_Summary.pdf", "kind": "pdf", "title": "Northgate Cold Storage: Sponsor Summary", "lines": [
+      "Land basis: $9.4MM", "Common equity contribution: $28,400,000", "Cold storage area: 210,000 SF", "Dry warehouse area: 96,000 SF", "Construction period: 20 months", "Lease-up period: 10 months" ] },
+    { "name": "Northgate_Market_Study.pdf", "kind": "pdf", "title": "Northgate Cold Storage: Market Study", "lines": [
+      "Cold storage rent: $18.75 per square foot", "Cold storage occupancy: 93%", "Dry warehouse rent: $9.40 per square foot", "Dry warehouse occupancy: 90%",
+      "Caretaker suite rent: $1,540 per unit per month", "Annual rent growth: 3.25%" ] },
+    { "name": "Northgate_Lender_Term_Sheet.pdf", "kind": "pdf", "title": "Northgate Cold Storage: Lender Term Sheet", "lines": [
+      "Senior loan amount: $63,000,000", "Interest rate: SOFR plus 425 bps, all-in 7.85%", "Amortization: 25-year", "Minimum DSCR covenant: 1.35x", "Minimum debt yield covenant: 9%" ] },
+    { "name": "Northgate_Construction_Budget.xlsx", "kind": "xlsx", "sheet": "Construction Budget", "rows": [
+      ["Line item", "Amount"], ["Land acquisition", 9400000], ["Hard costs", 68500000], ["Soft costs", 9900000], ["Contingency", 3600000], ["Financing costs", 7100000], ["Utility incentive credit", "(2,150,000)"] ] }
+  ],
+  "expect": {
+    "conflicts": [],
+    "missing": ["exit_cap_rate_pct", "hold_years", "selling_costs_pct", "expense_ratio_pct", "stabilized_occupancy_pct", "unit_count|Caretaker Suite"],
+    "values": { "land_cost": 9400000, "senior_rate_pct": 7.85, "rent_psf_annual|Cold Storage": 18.75, "rentable_area_sf|Cold Storage": 210000 },
+    "runs": false
+  }
+}

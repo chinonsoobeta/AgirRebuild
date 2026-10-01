@@ -1,0 +1,23 @@
+{
+  "name": "@agir/api",
+  "version": "0.1.0",
+  "private": true,
+  "type": "module",
+  "scripts": {
+    "dev": "tsx watch --clear-screen=false src/main.ts",
+    "start": "tsx src/main.ts",
+    "seed": "tsx src/seed.ts"
+  },
+  "dependencies": {
+    "@agir/artifacts": "*",
+    "@agir/contracts": "*",
+    "@agir/db": "*",
+    "@agir/engine": "*",
+    "@agir/extraction": "*",
+    "@agir/worker": "*",
+    "@hono/node-server": "^1.19.0",
+    "hono": "^4.9.0",
+    "zod": "^4.1.0",
+    "@agir/testkit": "*"
+  }
+}

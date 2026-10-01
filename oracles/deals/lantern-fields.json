@@ -1,0 +1,28 @@
+{
+  "slug": "lantern-fields",
+  "name": "Lantern Fields Flex Park",
+  "assetType": "Industrial",
+  "location": "Meridian, Idaho",
+  "purpose": "A broker teaser full of attractive figures that are not inputs. None of them may become a candidate, let alone reach a memo.",
+  "documents": [
+    { "name": "Lantern_Fields_Sponsor_Summary.pdf", "kind": "pdf", "title": "Lantern Fields Flex Park: Sponsor Summary", "lines": [
+      "Common equity contribution: $22,600,000", "Last-mile flex area: 164,000 SF", "Retail area: 12,000 SF", "Construction period: 14 months" ] },
+    { "name": "Lantern_Fields_Market_Study.pdf", "kind": "pdf", "title": "Lantern Fields Flex Park: Market Study", "lines": [
+      "Last-mile flex rent: $14.25 per square foot", "Last-mile flex occupancy: 94%", "Retail rent: $28 per square foot", "Retail occupancy: 91%", "Annual rent growth: 2.75%", "Other income: $85,000 per year" ] },
+    { "name": "Lantern_Fields_Appraisal.pdf", "kind": "pdf", "title": "Lantern Fields Flex Park: Appraisal Summary", "lines": [ "Exit cap rate: 6.25%" ] },
+    { "name": "Lantern_Fields_Lender_Term_Sheet.pdf", "kind": "pdf", "title": "Lantern Fields Flex Park: Lender Term Sheet", "lines": [
+      "Senior loan amount: $41,000,000", "Interest rate: 6.90%", "Amortization: 30-year", "Minimum DSCR covenant: 1.25x" ] },
+    { "name": "Lantern_Fields_Operating_Assumptions.pdf", "kind": "pdf", "title": "Lantern Fields Flex Park: Operating Assumptions", "lines": [
+      "Operating expense ratio: 30%", "Hold period: 6 years", "Selling costs: 2%", "Lease-up period: 9 months" ] },
+    { "name": "Lantern_Fields_Broker_Teaser.pdf", "kind": "pdf", "title": "Lantern Fields Flex Park: Confidential Broker Teaser", "lines": [
+      "Projected stabilized NOI: $9,450,000", "Indicative valuation: $189,000,000", "Target IRR to limited partners: 21.4%", "Anticipated equity multiple: 2.9x", "Broker estimate of unlevered yield: 11.8%" ] },
+    { "name": "Lantern_Fields_Construction_Budget.xlsx", "kind": "xlsx", "sheet": "Construction Budget", "rows": [
+      ["Line item", "Amount"], ["Land acquisition", 8800000], ["Hard costs", 42000000], ["Soft costs", 6400000], ["Contingency", 2200000] ] }
+  ],
+  "expect": {
+    "conflicts": [],
+    "missing": [],
+    "teaserNeverCandidates": ["Lantern_Fields_Broker_Teaser.pdf"],
+    "runs": true
+  }
+}

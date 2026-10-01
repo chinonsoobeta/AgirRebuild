@@ -1,0 +1,182 @@
+// The field catalog: every input Agir underwrites, declared once.
+//
+// A field is either a scalar (one value per deal) or itemized (one value per
+// revenue component, keyed by an item key such as "1BR" or "Retail").
+// Extraction maps document candidates onto these keys, review approves them,
+// and the engine input is assembled from approved rows of these keys only.
+
+export type FieldUnit =
+  | "$"
+  | "%"
+  | "months"
+  | "years"
+  | "units"
+  | "sf"
+  | "$/unit/mo"
+  | "$/sf/yr"
+  | "x"
+  | "flag";
+
+export type FieldGroup =
+  | "budget"
+  | "revenue"
+  | "timeline"
+  | "operations"
+  | "exit"
+  | "senior"
+  | "mezzanine"
+  | "equity"
+  | "refinance"
+  | "waterfall"
+  | "stated";
+
+/** Which way is "more conservative" when two documents disagree. */
+export type ConservativeDirection = "max" | "min" | null;
+
+export type FieldDef = {
+  key: string;
+  label: string;
+  group: FieldGroup;
+  unit: FieldUnit;
+  /** One value per revenue component rather than per deal. */
+  itemized?: boolean;
+  /**
+   * `true`: always required. `false`: optional (absence has a stated meaning,
+   * given in `absentMeans`). A string names another field whose presence makes
+   * this one required (e.g. the mezzanine rate once a mezzanine amount exists).
+   */
+  required: boolean | string;
+  absentMeans?: string;
+  /** Overriding an extracted value needs a second, different approver. */
+  material: boolean;
+  conservative: ConservativeDirection;
+  /** A static default an analyst may accept explicitly. Never applied silently. */
+  default?: number;
+  min?: number;
+  max?: number;
+  /** Must the value be a whole number? */
+  integer?: boolean;
+  /** Can a document state it, or is it a modelling choice made in review? */
+  extractable: boolean;
+  /** Label phrases the extractor matches, lower case. */
+  aliases: string[];
+  help?: string;
+};
+
+const pct = { min: 0, max: 100 };
+
+export const FIELDS: readonly FieldDef[] = [
+  // ---- Budget -------------------------------------------------------------
+  { key: "land_cost", label: "Land cost", group: "budget", unit: "$", required: true, material: false, conservative: "max", min: 0, extractable: true, aliases: ["land cost", "land acquisition", "land purchase", "land", "acquisition cost", "site acquisition"] },
+  { key: "hard_cost", label: "Hard costs", group: "budget", unit: "$", required: true, material: false, conservative: "max", min: 0, extractable: true, aliases: ["hard costs", "hard cost", "construction costs", "construction cost", "building costs", "hard construction"] },
+  { key: "soft_cost", label: "Soft costs", group: "budget", unit: "$", required: true, material: false, conservative: "max", min: 0, extractable: true, aliases: ["soft costs", "soft cost", "professional fees", "design and permits"] },
+  { key: "contingency", label: "Contingency", group: "budget", unit: "$", required: true, material: false, conservative: "max", min: 0, extractable: true, aliases: ["contingency", "hard cost contingency", "construction contingency"], help: "Enter 0 if the budget carries none." },
+  { key: "other_cost", label: "Other costs", group: "budget", unit: "$", required: false, absentMeans: "no other costs", material: false, conservative: "max", min: 0, extractable: true, aliases: ["other costs", "other development costs", "developer fee"] },
+
+  // ---- Revenue (itemized per component) -----------------------------------
+  { key: "unit_count", label: "Units", group: "revenue", unit: "units", itemized: true, required: true, material: false, conservative: "min", min: 0, integer: true, extractable: true, aliases: ["units", "unit count", "number of units", "# units", "count"] },
+  { key: "unit_rent_monthly", label: "Rent per unit per month", group: "revenue", unit: "$/unit/mo", itemized: true, required: false, absentMeans: "rent is per square foot", material: false, conservative: "min", min: 0, extractable: true, aliases: ["monthly rent", "rent per unit", "rent/unit", "market rent", "avg rent", "average rent"] },
+  { key: "rentable_area_sf", label: "Rentable area", group: "revenue", unit: "sf", itemized: true, required: false, absentMeans: "rent is per unit", material: false, conservative: "min", min: 0, extractable: true, aliases: ["rentable area", "leasable area", "nrsf", "gla", "square feet", "area"] },
+  { key: "rent_psf_annual", label: "Rent per SF per year", group: "revenue", unit: "$/sf/yr", itemized: true, required: false, absentMeans: "rent is per unit", material: false, conservative: "min", min: 0, extractable: true, aliases: ["rent psf", "rent per sf", "rent per square foot", "$/sf", "base rent"] },
+  { key: "item_occupancy_pct", label: "Component occupancy", group: "revenue", unit: "%", itemized: true, required: false, absentMeans: "use the deal's stabilized occupancy", material: false, conservative: "min", ...pct, extractable: true, aliases: ["occupancy"] },
+
+  // ---- Timeline -----------------------------------------------------------
+  { key: "construction_months", label: "Construction period", group: "timeline", unit: "months", required: true, material: false, conservative: "max", min: 0, max: 120, integer: true, extractable: true, aliases: ["construction period", "construction duration", "build period", "construction months", "construction term"] },
+  { key: "lease_up_months", label: "Lease-up period", group: "timeline", unit: "months", required: true, material: false, conservative: "max", min: 0, max: 120, integer: true, extractable: true, aliases: ["lease-up period", "lease up period", "lease-up", "absorption period", "lease-up months"], help: "Enter 0 if the asset is stabilized at completion." },
+  { key: "hold_years", label: "Hold period", group: "timeline", unit: "years", required: true, material: false, conservative: null, default: 5, min: 1, max: 40, integer: true, extractable: true, aliases: ["hold period", "holding period", "investment horizon", "hold"] },
+
+  // ---- Operations ---------------------------------------------------------
+  { key: "stabilized_occupancy_pct", label: "Stabilized occupancy", group: "operations", unit: "%", required: true, material: false, conservative: "min", ...pct, extractable: true, aliases: ["stabilized occupancy", "stabilised occupancy", "occupancy", "economic occupancy"] },
+  { key: "expense_ratio_pct", label: "Operating expense ratio", group: "operations", unit: "%", required: "!fixed_opex_annual", material: false, conservative: "max", default: 35, ...pct, extractable: true, aliases: ["expense ratio", "operating expense ratio", "opex ratio", "operating expenses"], help: "A share of year-one EGI, held as fixed dollars and grown at expense growth." },
+  { key: "fixed_opex_annual", label: "Fixed operating costs", group: "operations", unit: "$", required: false, absentMeans: "use the expense ratio", material: false, conservative: "max", min: 0, extractable: true, aliases: ["fixed operating expenses", "fixed opex", "fixed expenses"] },
+  { key: "variable_expense_pct", label: "Variable expenses (share of EGI)", group: "operations", unit: "%", required: false, absentMeans: "no variable expenses", material: false, conservative: "max", ...pct, extractable: true, aliases: ["management fee", "variable expenses", "variable opex"] },
+  { key: "other_income_annual", label: "Other income", group: "operations", unit: "$", required: false, absentMeans: "no other income", material: false, conservative: "min", min: 0, extractable: true, aliases: ["other income", "ancillary income", "parking income"] },
+  { key: "rent_growth_pct", label: "Rent growth", group: "operations", unit: "%", required: false, absentMeans: "flat rents", material: false, conservative: "min", min: -20, max: 20, extractable: true, aliases: ["rent growth", "rental growth", "revenue growth"] },
+  { key: "expense_growth_pct", label: "Expense growth", group: "operations", unit: "%", required: false, absentMeans: "flat expenses", material: false, conservative: "max", min: -20, max: 20, extractable: true, aliases: ["expense growth", "opex growth", "expense inflation"] },
+  { key: "lease_up_ramp", label: "Credit income during lease-up", group: "operations", unit: "flag", required: false, absentMeans: "no income before stabilization", material: false, conservative: "min", min: 0, max: 1, integer: true, extractable: false, aliases: [] },
+  { key: "s_curve_draws", label: "S-curve construction draws", group: "operations", unit: "flag", required: false, absentMeans: "straight-line draws", material: false, conservative: null, min: 0, max: 1, integer: true, extractable: false, aliases: [] },
+
+  // ---- Exit ---------------------------------------------------------------
+  { key: "exit_cap_rate_pct", label: "Exit cap rate", group: "exit", unit: "%", required: true, material: true, conservative: "max", min: 0.01, max: 30, extractable: true, aliases: ["exit cap rate", "exit cap", "terminal cap rate", "reversion cap rate", "exit capitalization rate", "terminal capitalization rate"] },
+  { key: "selling_costs_pct", label: "Selling costs", group: "exit", unit: "%", required: true, material: false, conservative: "max", default: 2, ...pct, extractable: true, aliases: ["selling costs", "disposition costs", "sale costs", "cost of sale"] },
+
+  // ---- Senior loan --------------------------------------------------------
+  { key: "senior_loan_amount", label: "Senior loan amount", group: "senior", unit: "$", required: true, material: true, conservative: "min", min: 0, extractable: true, aliases: ["senior loan amount", "loan amount", "senior loan", "construction loan", "loan commitment", "senior debt", "construction debt", "senior construction debt", "senior facility"], help: "Enter 0 for an all-equity deal." },
+  { key: "senior_rate_pct", label: "Senior interest rate", group: "senior", unit: "%", required: "senior_loan_amount", material: true, conservative: "max", min: 0, max: 30, extractable: true, aliases: ["interest rate", "loan rate", "senior rate", "all-in rate", "coupon"] },
+  { key: "senior_amort_years", label: "Senior amortization", group: "senior", unit: "years", required: "senior_loan_amount", material: true, conservative: "min", min: 1, max: 50, integer: true, extractable: true, aliases: ["amortization", "amortization period", "amortisation", "amortization term"] },
+  { key: "senior_io_months", label: "Senior interest-only period", group: "senior", unit: "months", required: false, absentMeans: "amortizing from stabilization", material: true, conservative: "min", min: 0, max: 600, integer: true, extractable: true, aliases: ["interest-only period", "interest only period", "io period", "interest-only"] },
+  { key: "min_dscr_covenant", label: "Minimum DSCR covenant", group: "senior", unit: "x", required: false, absentMeans: "no stated covenant", material: true, conservative: "max", min: 0, max: 5, extractable: true, aliases: ["minimum dscr", "min dscr", "dscr covenant", "debt service coverage covenant"] },
+
+  // ---- Mezzanine ----------------------------------------------------------
+  { key: "mezz_loan_amount", label: "Mezzanine amount", group: "mezzanine", unit: "$", required: false, absentMeans: "no mezzanine loan", material: true, conservative: "min", min: 0, extractable: true, aliases: ["mezzanine loan", "mezzanine amount", "mezz loan", "mezzanine debt"] },
+  { key: "mezz_rate_pct", label: "Mezzanine rate", group: "mezzanine", unit: "%", required: "mezz_loan_amount", material: true, conservative: "max", min: 0, max: 40, extractable: true, aliases: ["mezzanine rate", "mezz rate", "mezzanine interest rate"] },
+  { key: "mezz_amort_years", label: "Mezzanine amortization", group: "mezzanine", unit: "years", required: "mezz_loan_amount", material: true, conservative: "min", min: 1, max: 50, integer: true, extractable: true, aliases: ["mezzanine amortization", "mezz amortization"] },
+  { key: "mezz_io_months", label: "Mezzanine interest-only period", group: "mezzanine", unit: "months", required: false, absentMeans: "amortizing from stabilization", material: true, conservative: "min", min: 0, max: 600, integer: true, extractable: true, aliases: ["mezzanine interest-only", "mezz io"] },
+
+  // ---- Equity -------------------------------------------------------------
+  { key: "equity_amount", label: "Stated equity", group: "equity", unit: "$", required: false, absentMeans: "equity is whatever the debt does not fund", material: true, conservative: "min", min: 0, extractable: true, aliases: ["equity", "equity contribution", "sponsor equity", "common equity", "total equity"] },
+
+  // ---- Refinance ----------------------------------------------------------
+  { key: "refinance_month", label: "Refinance month", group: "refinance", unit: "months", required: false, absentMeans: "no refinance", material: true, conservative: null, min: 1, max: 600, integer: true, extractable: true, aliases: ["refinance month", "refinancing month", "refinance in month"] },
+  { key: "refinance_amount", label: "Refinance loan amount", group: "refinance", unit: "$", required: false, absentMeans: "sized by loan-to-value", material: true, conservative: "min", min: 0, extractable: true, aliases: ["refinance amount", "takeout loan", "permanent loan amount", "refinance loan"] },
+  { key: "refinance_ltv_pct", label: "Refinance loan-to-value", group: "refinance", unit: "%", required: false, absentMeans: "sized by amount", material: true, conservative: "min", ...pct, extractable: true, aliases: ["refinance ltv", "takeout ltv", "permanent loan ltv"] },
+  { key: "refinance_rate_pct", label: "Refinance rate", group: "refinance", unit: "%", required: "refinance_month", material: true, conservative: "max", min: 0, max: 30, extractable: true, aliases: ["refinance rate", "permanent loan rate", "takeout rate"] },
+  { key: "refinance_amort_years", label: "Refinance amortization", group: "refinance", unit: "years", required: "refinance_month", material: true, conservative: "min", min: 1, max: 50, integer: true, extractable: true, aliases: ["refinance amortization", "permanent loan amortization"] },
+  { key: "refinance_io_months", label: "Refinance interest-only period", group: "refinance", unit: "months", required: false, absentMeans: "amortizing from the refinance", material: true, conservative: "min", min: 0, max: 600, integer: true, extractable: true, aliases: ["refinance interest-only", "permanent loan io"] },
+
+  // ---- LP/GP waterfall ----------------------------------------------------
+  { key: "lp_share_pct", label: "LP share of equity", group: "waterfall", unit: "%", required: false, absentMeans: "no LP/GP split", material: true, conservative: null, ...pct, extractable: true, aliases: ["lp share", "lp equity", "limited partner share", "investor share"] },
+  { key: "preferred_return_pct", label: "Preferred return", group: "waterfall", unit: "%", required: "lp_share_pct", material: true, conservative: null, min: 0, max: 50, extractable: true, aliases: ["preferred return", "pref", "hurdle rate"] },
+  { key: "gp_promote_pct", label: "GP promote above the preferred return", group: "waterfall", unit: "%", required: "lp_share_pct", material: true, conservative: null, ...pct, extractable: true, aliases: ["promote", "carried interest", "gp promote"] },
+
+  // ---- Stated figures (checks, never inputs to the model) -----------------
+  { key: "stated_total_cost", label: "Stated total project cost", group: "stated", unit: "$", required: false, absentMeans: "nothing to check against", material: true, conservative: null, min: 0, extractable: true, aliases: ["total project cost", "total development cost", "tdc", "total cost"] },
+  { key: "stated_ltc_pct", label: "Stated loan-to-cost", group: "stated", unit: "%", required: false, absentMeans: "nothing to check against", material: false, conservative: null, ...pct, extractable: true, aliases: ["loan to cost", "loan-to-cost", "ltc"] },
+  { key: "stated_interest_reserve", label: "Stated interest reserve", group: "stated", unit: "$", required: false, absentMeans: "nothing to check against", material: false, conservative: null, min: 0, extractable: true, aliases: ["interest reserve", "financing costs", "financing interest", "capitalized interest", "construction interest"] },
+];
+
+export const FIELD_BY_KEY: ReadonlyMap<string, FieldDef> = new Map(FIELDS.map((f) => [f.key, f]));
+
+export function fieldDef(key: string): FieldDef {
+  const def = FIELD_BY_KEY.get(key);
+  if (!def) throw new Error(`Unknown field "${key}"`);
+  return def;
+}
+
+/**
+ * Phrases that name an OUTPUT of underwriting. A number next to one of these
+ * in a document (a broker's projected NOI, a target IRR, an indicative value)
+ * is never mapped to an input field, however well it matches an alias.
+ */
+export const OUTPUT_LIKE_PHRASES: readonly string[] = [
+  "noi",
+  "net operating income",
+  "irr",
+  "internal rate of return",
+  "equity multiple",
+  "yield on cost",
+  "valuation",
+  "indicative value",
+  "market value",
+  "as-stabilized value",
+  "projected",
+  "target",
+  "profit",
+  "cash-on-cash",
+  "cash on cash",
+];
+
+/** Fields a person may enter without a document (all of them), grouped for display. */
+export const FIELD_GROUP_LABELS: Record<FieldGroup, string> = {
+  budget: "Budget",
+  revenue: "Revenue",
+  timeline: "Timeline",
+  operations: "Operations",
+  exit: "Exit",
+  senior: "Senior loan",
+  mezzanine: "Mezzanine loan",
+  equity: "Equity",
+  refinance: "Refinance",
+  waterfall: "LP/GP split",
+  stated: "Stated figures (checks)",
+};

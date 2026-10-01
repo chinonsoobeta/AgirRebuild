@@ -1,0 +1,29 @@
+{
+  "slug": "cascade-row",
+  "name": "Cascade Row Townhomes",
+  "assetType": "Multifamily",
+  "location": "Fleetwood, Surrey, British Columbia",
+  "purpose": "The clean baseline: every document agrees. The rent roll repeats the market study and must not double count.",
+  "documents": [
+    { "name": "Cascade_Row_Sponsor_Summary.pdf", "kind": "pdf", "title": "Cascade Row Townhomes: Sponsor Summary", "lines": [
+      "Common equity contribution: $25,900,000", "Residential rental units: 180 units", "Retail area: 9,000 SF", "Construction period: 22 months", "Lease-up period: 14 months" ] },
+    { "name": "Cascade_Row_Market_Study.pdf", "kind": "pdf", "title": "Cascade Row Townhomes: Market Study", "lines": [
+      "Residential rent: $2,850 per unit per month", "Residential occupancy: 95%", "Retail rent: $34 per square foot", "Retail occupancy: 90%", "Annual rent growth: 3%", "Other income: $120,000 per year" ] },
+    { "name": "Cascade_Row_Appraisal.pdf", "kind": "pdf", "title": "Cascade Row Townhomes: Appraisal Summary", "lines": [ "Exit cap rate: 4.50%" ] },
+    { "name": "Cascade_Row_Lender_Term_Sheet.pdf", "kind": "pdf", "title": "Cascade Row Townhomes: Lender Term Sheet", "lines": [
+      "Senior loan amount: $46,000,000", "Interest rate: 6.25%", "Amortization: 30-year", "Minimum DSCR covenant: 1.25x" ] },
+    { "name": "Cascade_Row_Operating_Assumptions.pdf", "kind": "pdf", "title": "Cascade Row Townhomes: Operating Assumptions", "lines": [
+      "Operating expense ratio: 33%", "Hold period: 5 years", "Selling costs: 2%" ] },
+    { "name": "Cascade_Row_Construction_Budget.xlsx", "kind": "xlsx", "sheet": "Construction Budget", "rows": [
+      ["Line item", "Amount"], ["Land acquisition", 12000000], ["Hard costs", 46000000], ["Soft costs", 7500000], ["Contingency", 2500000], ["Financing costs", 3900000] ] },
+    { "name": "Cascade_Row_Rent_Roll.xlsx", "kind": "xlsx", "sheet": "Rent Roll", "rows": [
+      ["Component", "Value"], ["Residential units", "180 units"], ["Residential rent", "$2,850 per unit per month"], ["Residential occupancy", "95%"],
+      ["Retail area", "9,000 SF"], ["Retail rent", "$34 per square foot"], ["Retail occupancy", "90%"] ] }
+  ],
+  "expect": {
+    "conflicts": [],
+    "missing": [],
+    "values": { "unit_count|Residential": 180, "rentable_area_sf|Retail": 9000, "equity_amount": 25900000, "exit_cap_rate_pct": 4.5, "hard_cost": 46000000 },
+    "runs": true
+  }
+}

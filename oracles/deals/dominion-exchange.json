@@ -1,0 +1,34 @@
+{
+  "slug": "dominion-exchange",
+  "name": "Dominion Exchange",
+  "assetType": "Mixed-use",
+  "location": "Beltline, Calgary, Alberta",
+  "purpose": "Three deliberate cross-document conflicts. All three must be detected and named, and the run must stay blocked; picking either side silently is a failure.",
+  "documents": [
+    { "name": "Dominion_Exchange_Sponsor_Summary.pdf", "kind": "pdf", "title": "Dominion Exchange: Sponsor Summary", "lines": [
+      "Common equity contribution: $31,000,000", "Residential rental units: 140 units", "Retail area: 22,000 SF", "Office area: 85,000 SF", "Senior loan amount: $58,000,000" ] },
+    { "name": "Dominion_Exchange_Market_Study.pdf", "kind": "pdf", "title": "Dominion Exchange: Market Study", "lines": [
+      "Residential rent: $2,400 per unit per month", "Residential occupancy: 94%", "Retail rent: $31 per square foot", "Retail occupancy: 88%",
+      "Office rent: $38 per square foot", "Office occupancy: 82%", "Annual rent growth: 2.5%" ] },
+    { "name": "Dominion_Exchange_Appraisal.pdf", "kind": "pdf", "title": "Dominion Exchange: Appraisal Summary", "lines": [ "Exit cap rate: 5.25%" ] },
+    { "name": "Dominion_Exchange_Lender_Term_Sheet.pdf", "kind": "pdf", "title": "Dominion Exchange: Lender Term Sheet", "lines": [
+      "Senior loan amount: $54,500,000", "Interest rate: 7.10%", "Amortization: 25-year", "Minimum DSCR covenant: 1.30x", "Lender stabilization requirement: 88%", "Terminal cap rate: 6.00%" ] },
+    { "name": "Dominion_Exchange_Operating_Assumptions.pdf", "kind": "pdf", "title": "Dominion Exchange: Operating Assumptions", "lines": [
+      "Operating expense ratio: 38%", "Hold period: 7 years", "Selling costs: 2.5%", "Construction period: 26 months", "Lease-up period: 18 months" ] },
+    { "name": "Dominion_Exchange_Construction_Budget.xlsx", "kind": "xlsx", "sheet": "Construction Budget", "rows": [
+      ["Line item", "Amount"], ["Land acquisition", 21000000], ["Hard costs", 74000000], ["Soft costs", 13500000], ["Contingency", 5000000], ["Financing costs", 8200000] ] },
+    { "name": "Dominion_Exchange_Rent_Roll.xlsx", "kind": "xlsx", "sheet": "Rent Roll", "rows": [
+      ["Component", "Value"], ["Residential units", "140 units"], ["Residential rent", "$2,400 per unit per month"], ["Residential occupancy", "94%"],
+      ["Retail area", "22,000 SF"], ["Retail rent", "$31 per square foot"], ["Retail occupancy", "88%"],
+      ["Office area", "85,000 SF"], ["Office rent", "$34.50 per square foot"], ["Office occupancy", "82%"] ] }
+  ],
+  "expect": {
+    "conflicts": [
+      { "key": "exit_cap_rate_pct", "values": [5.25, 6] },
+      { "key": "senior_loan_amount", "values": [54500000, 58000000] },
+      { "key": "rent_psf_annual|Office", "values": [34.5, 38] }
+    ],
+    "missing": [],
+    "runs": false
+  }
+}
