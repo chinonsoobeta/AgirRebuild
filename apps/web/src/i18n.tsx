@@ -4,7 +4,7 @@
 // the language: 51,962,556 and 6.45% in English, 51 962 556 $ and 6,45 % in French.
 
 import { createContext, useContext, useMemo, useState, type ReactNode } from "react";
-import { FIELD_BY_KEY, METRIC_BY_KEY } from "@agir/contracts";
+import { CURRENCY_NAMES, FIELD_BY_KEY, METRIC_BY_KEY, placeLabel, type Currency } from "@agir/contracts";
 
 export type Lang = "en" | "fr";
 
@@ -69,7 +69,15 @@ const EN = {
   "deals.name": "Name",
   "deals.assetType": "Asset type",
   "deals.location": "Location",
-  "deals.locationHint": "City, province or state",
+  "deals.locationHint": "City (and state, outside Canada)",
+  "deals.country": "Country",
+  "deals.country.CA": "Canada",
+  "deals.country.US": "United States",
+  "deals.province": "Province or territory",
+  "deals.provinceChoose": "Choose one",
+  "deals.currency": "Currency",
+  "deals.currencyHint": "Every amount in this deal is in this currency. It is set now and cannot be changed later.",
+  "deals.currencyNone": "Currency not stated",
   "deals.create": "Create deal",
 
   "step.documents": "Documents",
@@ -436,7 +444,15 @@ const FR: Record<Key, Entry> = {
   "deals.name": "Nom",
   "deals.assetType": "Type d'actif",
   "deals.location": "Emplacement",
-  "deals.locationHint": "Ville, province ou État",
+  "deals.locationHint": "Ville (et État, hors du Canada)",
+  "deals.country": "Pays",
+  "deals.country.CA": "Canada",
+  "deals.country.US": "États-Unis",
+  "deals.province": "Province ou territoire",
+  "deals.provinceChoose": "Choisissez-en une",
+  "deals.currency": "Devise",
+  "deals.currencyHint": "Tous les montants de ce projet sont dans cette devise. Elle est fixée maintenant et ne peut plus être modifiée.",
+  "deals.currencyNone": "Devise non indiquée",
   "deals.create": "Créer le projet",
 
   "step.documents": "Documents",
@@ -1045,6 +1061,12 @@ function build(lang: Lang, setLang: (l: Lang) => void) {
     decision: (d: string) => DECISION[d]?.[idx] ?? d,
     role: (r: string) => ROLES[r]?.[idx] ?? r,
     asset: (a: string) => (lang === "fr" ? ASSETS[a] ?? a : a),
+    place: (location: string, province: string | null) => placeLabel(location, province, lang),
+    currency: (c: string | null) => {
+      const names = CURRENCY_NAMES[c as Currency];
+      if (!names) return t("deals.currencyNone") as string;
+      return `${names[idx][0]!.toUpperCase()}${names[idx].slice(1)} (${c})`;
+    },
   };
   const msg = (text: string | null | undefined) => (lang === "fr" ? translateMessage(text) : text ?? "");
   const err = (e: unknown) => msg(e instanceof Error ? e.message : String(e ?? ""));

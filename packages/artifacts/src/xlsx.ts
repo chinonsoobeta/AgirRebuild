@@ -1,4 +1,4 @@
-import { FIELD_BY_KEY } from "@agir/contracts";
+import { FIELD_BY_KEY, placeLabel } from "@agir/contracts";
 import type { ArtifactInput } from "./model.ts";
 
 /**
@@ -22,7 +22,8 @@ export async function renderXlsx(x: ArtifactInput): Promise<Uint8Array> {
 
   const summary = wb.addWorksheet("Summary");
   summary.addRow([x.deal.name]).font = { bold: true, size: 14 };
-  summary.addRow([`${x.deal.assetType} · ${x.deal.location}`]);
+  summary.addRow([[x.deal.assetType, placeLabel(x.deal.location, x.deal.province)].filter(Boolean).join(" · ")]);
+  summary.addRow(["Currency", x.deal.currency ?? "Not stated"]);
   summary.addRow([`Run ${x.run.runNumber}`, x.run.createdAt]);
   summary.addRow(["Engine", x.run.engineVersion, "Policy", x.run.policyVersion]);
   summary.addRow(["Input hash", x.run.inputHash]);

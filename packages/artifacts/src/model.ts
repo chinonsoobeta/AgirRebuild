@@ -2,14 +2,15 @@
 // and the inputs that run used, and from nothing else: it never recomputes a
 // verdict, a gate or a metric.
 
-import type { EngineInput, FieldUnit, RunResult, VerdictCode } from "@agir/contracts";
+import { CURRENCY_NAMES, placeLabel, type Currency, type EngineInput, type FieldUnit, type RunResult, type VerdictCode } from "@agir/contracts";
 import { Formatter, formatValue } from "./format.ts";
 
 export type ArtifactKind = "ic_memo" | "lender_package" | "model_export";
 
 export type ArtifactInput = {
   kind: ArtifactKind;
-  deal: { name: string; assetType: string; location: string };
+  /** Currency and province as the deal stated them when it was created; null when it never did. */
+  deal: { name: string; assetType: string; location: string; currency: Currency | null; province: string | null };
   run: {
     id: string;
     runNumber: number;
@@ -265,10 +266,20 @@ export function buildModel(x: ArtifactInput): DocModel {
     `Every figure traces to an approved input or to ${runLabel} of this deal. ` +
     `Engine ${f.ident(x.run.engineVersion, "run.engine")}, ${f.ident(x.run.policyVersion, "run.policy")}. ` +
     `Inputs ${f.ident(x.run.inputHash.slice(0, 16), "run.inputHash")}, result ${f.ident(x.run.resultHash.slice(0, 16), "run.resultHash")}.`;
+  // Every amount prints with "$"; the deal says once which dollar that is.
+  const currency = x.deal.currency ? `All amounts in ${CURRENCY_NAMES[x.deal.currency][0]} (${x.deal.currency})` : "Currency not stated";
   return {
     title: f.ident(x.deal.name, "deal.name"),
     kicker: x.kind === "ic_memo" ? "Investment Committee memorandum" : "Lender package",
-    meta: [f.ident(x.deal.assetType, "deal.assetType"), f.ident(x.deal.location, "deal.location"), runLabel, date].filter(Boolean).join(" · "),
+    meta: [
+      f.ident(x.deal.assetType, "deal.assetType"),
+      f.ident(placeLabel(x.deal.location, x.deal.province), "deal.location"),
+      runLabel,
+      date,
+      f.ident(currency, "deal.currency"),
+    ]
+      .filter(Boolean)
+      .join(" · "),
     blocks,
     footer,
     formatter: f,

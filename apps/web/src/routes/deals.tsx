@@ -1,6 +1,7 @@
 import { Link, useNavigate } from "@tanstack/react-router";
 import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
 import { useRef, useState, type FormEvent } from "react";
+import { COUNTRIES, CURRENCIES, PROVINCES, type Country, type Currency } from "@agir/contracts";
 import { api, type DealOverview } from "../api";
 import { canEdit, ErrorText, StatusTag, useSession } from "../components/ui";
 import * as I from "../components/icons";
@@ -18,12 +19,15 @@ const ASSET_TYPES = ["Multifamily", "Mixed-use", "Industrial", "Office", "Retail
 
 export function Deals() {
   const i = useI18n();
-  const { t, L } = i;
+  const { t, L, lang } = i;
   const { workspaceId, role } = useSession();
   const navigate = useNavigate();
   const qc = useQueryClient();
   const [filter, setFilter] = useState<(typeof FILTERS)[number]["key"]>("all");
   const [q, setQ] = useState("");
+  // The currency follows the country until someone picks another.
+  const [country, setCountry] = useState<Country>("CA");
+  const [currency, setCurrency] = useState<Currency>("CAD");
   const dialog = useRef<HTMLDialogElement>(null);
   const deals = useQuery({
     queryKey: ["deals", workspaceId],
@@ -31,7 +35,8 @@ export function Deals() {
     refetchInterval: (query) => (query.state.data?.some((d) => d.documents.processing > 0) ? 2000 : false),
   });
   const create = useMutation({
-    mutationFn: (body: { name: string; assetType: string; location: string }) => api.post<{ id: string }>(`/workspaces/${workspaceId}/deals`, body),
+    mutationFn: (body: { name: string; assetType: string; location: string; country: Country; province: string | null; currency: Currency }) =>
+      api.post<{ id: string }>(`/workspaces/${workspaceId}/deals`, body),
     onSuccess: async (r) => {
       dialog.current?.close();
       await qc.invalidateQueries({ queryKey: ["deals"] });
@@ -46,7 +51,14 @@ export function Deals() {
   const submit = (e: FormEvent<HTMLFormElement>) => {
     e.preventDefault();
     const f = new FormData(e.currentTarget);
-    create.mutate({ name: String(f.get("name")), assetType: String(f.get("assetType")), location: String(f.get("location") ?? "") });
+    create.mutate({
+      name: String(f.get("name")),
+      assetType: String(f.get("assetType")),
+      location: String(f.get("location") ?? ""),
+      country,
+      province: country === "CA" ? String(f.get("province")) : null,
+      currency,
+    });
   };
   return (
     <>
@@ -85,7 +97,7 @@ export function Deals() {
                   <td>
                     <div className="stack" style={{ gap: 2 }}>
                       <Link to={`/deals/$dealId/${d.step}`} params={{ dealId: d.deal.id }} style={{ fontWeight: 600, textDecoration: "none" }}>{d.deal.name}</Link>
-                      <span className="small faint">{[L.asset(d.deal.asset_type), d.deal.location].filter(Boolean).join(" · ")}{d.documents.total ? ` · ${t("deals.docs", { n: d.documents.total })}` : ""}</span>
+                      <span className="small faint">{[L.asset(d.deal.asset_type), L.place(d.deal.location, d.deal.province)].filter(Boolean).join(" · ")}{d.documents.total ? ` · ${t("deals.docs", { n: d.documents.total })}` : ""}</span>
                     </div>
                   </td>
                   <td className="muted"><span className="num faint" style={{ marginRight: 8 }}>{STEP_N[d.step]}</span>{t(`step.${d.step}`)}</td>
@@ -108,7 +120,40 @@ export function Deals() {
           <h2 id="new-deal-title" className="h-section">{t("deals.new")}</h2>
           <div className="field"><label htmlFor="nd-name">{t("deals.name")}</label><input className="input" id="nd-name" name="name" required maxLength={160} /></div>
           <div className="field"><label htmlFor="nd-type">{t("deals.assetType")}</label><select className="select" id="nd-type" name="assetType">{ASSET_TYPES.map((a) => <option key={a} value={a}>{L.asset(a)}</option>)}</select></div>
+          <div className="field">
+            <label htmlFor="nd-country">{t("deals.country")}</label>
+            <select
+              className="select"
+              id="nd-country"
+              value={country}
+              onChange={(e) => {
+                const c = e.target.value as Country;
+                setCountry(c);
+                setCurrency(c === "CA" ? "CAD" : "USD");
+              }}
+            >
+              {COUNTRIES.map((c) => <option key={c} value={c}>{t(`deals.country.${c}`)}</option>)}
+            </select>
+          </div>
+          {country === "CA" && (
+            <div className="field">
+              <label htmlFor="nd-prov">{t("deals.province")}</label>
+              <select className="select" id="nd-prov" name="province" required defaultValue="">
+                <option value="" disabled>{t("deals.provinceChoose")}</option>
+                {[...PROVINCES]
+                  .sort((a, b) => a[lang].localeCompare(b[lang], lang === "fr" ? "fr-CA" : "en-CA"))
+                  .map((p) => <option key={p.code} value={p.code}>{p[lang]}</option>)}
+              </select>
+            </div>
+          )}
           <div className="field"><label htmlFor="nd-loc">{t("deals.location")}</label><input className="input" id="nd-loc" name="location" maxLength={160} placeholder={t("deals.locationHint")} /></div>
+          <div className="field">
+            <label htmlFor="nd-cur">{t("deals.currency")}</label>
+            <select className="select" id="nd-cur" value={currency} onChange={(e) => setCurrency(e.target.value as Currency)} aria-describedby="nd-cur-help">
+              {CURRENCIES.map((c) => <option key={c} value={c}>{L.currency(c)}</option>)}
+            </select>
+            <span className="help" id="nd-cur-help">{t("deals.currencyHint")}</span>
+          </div>
           <ErrorText error={create.error} />
           <div className="row"><button className="btn primary" type="submit" disabled={create.isPending}>{t("deals.create")}</button><button className="btn quiet" type="button" onClick={() => dialog.current?.close()}>{t("common.cancel")}</button></div>
         </form>

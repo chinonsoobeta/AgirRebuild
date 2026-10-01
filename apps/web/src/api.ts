@@ -29,7 +29,17 @@ export const api = {
 export type Me = { user: { id: string; email: string; name: string }; workspaces: { id: string; name: string; role: "owner" | "admin" | "analyst" | "viewer" }[] };
 export type Tone = "pass" | "review" | "stop" | "neutral";
 export type DealOverview = {
-  deal: { id: string; workspace_id: string; name: string; asset_type: string; location: string; created_at: string };
+  deal: {
+    id: string;
+    workspace_id: string;
+    name: string;
+    asset_type: string;
+    location: string;
+    currency: string | null;
+    country: string | null;
+    province: string | null;
+    created_at: string;
+  };
   step: "documents" | "review" | "run" | "decision" | "reports";
   status: { tone: Tone; text: string };
   next: string;

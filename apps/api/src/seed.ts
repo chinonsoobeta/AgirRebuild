@@ -28,10 +28,21 @@ export async function seedDemo(db: Db, store: BlobStore, log = (m: string) => co
   const [{ id: ws }] = (await asUser(db, analyst, (tx) => tx.query<{ id: string }>(`select fn_create_workspace('Northbank Development Partners') as id`))) as [{ id: string }];
   await asUser(db, analyst, (tx) => tx.query(`select fn_add_member($1, $2, 'admin')`, [ws, DEMO.approver.email]));
 
+  // The oracle files do not state a currency, so the demo states one from each
+  // deal's location. Bergendal, in Stockholm, is left without one: its reports
+  // say so rather than print its figures as dollars of a guessed kind.
+  const place: Record<string, [currency: string | null, country: string | null, province: string | null]> = {
+    "maple-heights": ["CAD", "CA", "BC"],
+    "cascade-row": ["CAD", "CA", "BC"],
+    "dominion-exchange": ["CAD", "CA", "AB"],
+    "lantern-fields": ["USD", "US", null],
+    "northgate-cold-storage": ["USD", "US", null],
+  };
   const deals = new Map<string, string>();
   for (const deal of loadOracles()) {
+    const [currency, country, province] = place[deal.slug] ?? [null, null, null];
     const [{ id }] = (await asUser(db, analyst, (tx) =>
-      tx.query<{ id: string }>(`select fn_create_deal($1, $2, $3, $4) as id`, [ws, deal.name, deal.assetType, deal.location]),
+      tx.query<{ id: string }>(`select fn_create_deal($1, $2, $3, $4, $5, $6, $7) as id`, [ws, deal.name, deal.assetType, deal.location, currency, country, province]),
     )) as [{ id: string }];
     deals.set(deal.slug, id);
     for (const doc of deal.documents) {

@@ -186,7 +186,7 @@ export function DealHeader({ o, active }: { o: DealOverview; active: string }) {
         <div className="spread" style={{ alignItems: "flex-end" }}>
           <div className="stack" style={{ gap: 6 }}>
             <h1 className="h-title">{o.deal.name}</h1>
-            <span className="muted">{[L.asset(o.deal.asset_type), o.deal.location].filter(Boolean).join(" · ")}</span>
+            <span className="muted">{[L.asset(o.deal.asset_type), L.place(o.deal.location, o.deal.province), L.currency(o.deal.currency)].filter(Boolean).join(" · ")}</span>
           </div>
           <Link to="/deals/$dealId/audit" params={{ dealId: o.deal.id }} className="btn small">{t("step.audit")}</Link>
         </div>

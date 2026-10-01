@@ -1,7 +1,7 @@
 import { Hono, type Context } from "hono";
 import { getCookie, setCookie, deleteCookie } from "hono/cookie";
 import { z } from "zod";
-import { FIELDS, FIELD_GROUP_LABELS, METRICS, POLICY_V1, type EngineInput } from "@agir/contracts";
+import { COUNTRIES, CURRENCIES, FIELDS, FIELD_GROUP_LABELS, METRICS, POLICY_V1, PROVINCE_CODES, type EngineInput } from "@agir/contracts";
 import { asUser, type BlobStore, type Db } from "@agir/db";
 import { DRIVERS, explore, grid, tornado, type DriverKey, type Shock } from "@agir/engine";
 import { kindOf } from "@agir/extraction";
@@ -151,8 +151,28 @@ export function createApp({ db, store, secureCookies, demoSignIn = false }: AppD
   });
 
   app.post("/api/workspaces/:ws/deals", async (c) => {
-    const body = z.object({ name: z.string().min(1).max(160), assetType: z.string().min(1).max(60), location: z.string().max(160).default("") }).parse(await c.req.json());
-    const [r] = await as(c, (tx) => tx.query<{ id: string }>(`select fn_create_deal($1, $2, $3, $4) as id`, [c.req.param("ws"), body.name, body.assetType, body.location]));
+    const body = z
+      .object({
+        name: z.string().min(1).max(160),
+        assetType: z.string().min(1).max(60),
+        location: z.string().max(160).default(""),
+        currency: z.enum(CURRENCIES).default("CAD"),
+        country: z.enum(COUNTRIES).default("CA"),
+        province: z.enum(PROVINCE_CODES).nullable().default(null),
+      })
+      .refine((b) => b.province === null || b.country === "CA", { message: "A province is given only for a deal in Canada.", path: ["province"] })
+      .parse(await c.req.json());
+    const [r] = await as(c, (tx) =>
+      tx.query<{ id: string }>(`select fn_create_deal($1, $2, $3, $4, $5, $6, $7) as id`, [
+        c.req.param("ws"),
+        body.name,
+        body.assetType,
+        body.location,
+        body.currency,
+        body.country,
+        body.province,
+      ]),
+    );
     return c.json({ id: r!.id });
   });
 

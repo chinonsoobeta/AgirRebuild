@@ -3,7 +3,7 @@
 // It drains the jobs table with leases, retries with backoff, and a dead
 // letter. It runs as the trusted service principal.
 
-import { FIELD_BY_KEY, type EngineInput, type FieldUnit, type RunResult } from "@agir/contracts";
+import { FIELD_BY_KEY, type Currency, type EngineInput, type FieldUnit, type RunResult } from "@agir/contracts";
 import { renderArtifact, RendererUnavailableError, type ArtifactInput } from "@agir/artifacts";
 import { sha256Hex, type BlobStore, type Db } from "@agir/db";
 import { consolidate, extractCandidates, kindOf, parseDocument, type SourcedCandidate } from "@agir/extraction";
@@ -249,7 +249,10 @@ async function renderJob(deps: WorkerDeps, artifactId: string) {
     id: string; run_number: number; created_at: string | Date; engine_version: string; policy_version: string; policy_hash: string;
     input_hash: string; result_hash: string; result: RunResult; input_snapshot: { input: EngineInput; assumptions: ArtifactInput["assumptions"] };
   }>(`select * from runs where id = $1`, [a.run_id]);
-  const [deal] = await db.query<{ name: string; asset_type: string; location: string }>(`select name, asset_type, location from deals where id = $1`, [a.deal_id]);
+  const [deal] = await db.query<{ name: string; asset_type: string; location: string; currency: Currency | null; province: string | null }>(
+    `select name, asset_type, location, currency, province from deals where id = $1`,
+    [a.deal_id],
+  );
   const [decision] = await db.query<{ decision: string; rationale: string; conditions: string | null; decided_by: string; created_at: string | Date; name: string }>(
     `select d.decision, d.rationale, d.conditions, d.decided_by, d.created_at, u.name from decisions d join users u on u.id = d.decided_by where d.run_id = $1 order by d.created_at desc limit 1`,
     [a.run_id],
@@ -257,7 +260,7 @@ async function renderJob(deps: WorkerDeps, artifactId: string) {
   if (!run || !deal) return;
   const input: ArtifactInput = {
     kind: a.kind,
-    deal: { name: deal.name, assetType: deal.asset_type, location: deal.location },
+    deal: { name: deal.name, assetType: deal.asset_type, location: deal.location, currency: deal.currency, province: deal.province },
     run: {
       id: run.id,
       runNumber: run.run_number,

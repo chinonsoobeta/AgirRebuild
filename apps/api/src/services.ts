@@ -91,8 +91,11 @@ export function sourceLabel(a: AssumptionDb): string {
 export type DealOverview = Awaited<ReturnType<typeof dealOverview>>;
 
 export async function dealOverview(tx: Db, dealId: string) {
-  const [deal] = await tx.query<{ id: string; workspace_id: string; name: string; asset_type: string; location: string; created_at: string }>(
-    `select id, workspace_id, name, asset_type, location, created_at from deals where id = $1`,
+  const [deal] = await tx.query<{
+    id: string; workspace_id: string; name: string; asset_type: string; location: string;
+    currency: string | null; country: string | null; province: string | null; created_at: string;
+  }>(
+    `select id, workspace_id, name, asset_type, location, currency, country, province, created_at from deals where id = $1`,
     [dealId],
   );
   if (!deal) throw new HttpError(404, "Deal not found");
@@ -311,7 +314,7 @@ export async function auditPackage(tx: Db, runId: string) {
     result_hash: string; signature: string; result: RunResult; input_snapshot: { input: EngineInput; assumptions: unknown[] }; created_at: string;
   }>(`select * from runs where id = $1`, [runId]);
   if (!run) throw new HttpError(404, "Run not found");
-  const [deal] = await tx.query(`select id, name, asset_type, location from deals where id = $1`, [run.deal_id]);
+  const [deal] = await tx.query(`select id, name, asset_type, location, currency, country, province from deals where id = $1`, [run.deal_id]);
   const decisions = await tx.query<{ run_id: string }>(`select * from decisions where run_id = $1`, [runId]);
   const artifacts = await tx.query(`select id, kind, format, status, sha256, provenance, created_at from artifacts where run_id = $1`, [runId]);
   const events = await tx.query(`select seq, action, entity, entity_id, payload, prev_hash, hash, created_at from audit_events where deal_id = $1 order by seq`, [run.deal_id]);
