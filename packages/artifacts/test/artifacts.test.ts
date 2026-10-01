@@ -20,7 +20,7 @@ function mapleInput(kind: ArtifactInput["kind"]): ArtifactInput {
   const result = underwrite(input!, POLICY_V1);
   return {
     kind,
-    deal: { name: deal.name, assetType: deal.assetType, location: deal.location },
+    deal: { name: deal.name, assetType: deal.assetType, location: deal.location, currency: "CAD", province: "BC" },
     run: { id: "r1", runNumber: 1, createdAt: "2026-09-24T12:00:00.000Z", engineVersion: result.engineVersion, policyVersion: result.policyVersion, policyHash: "p", inputHash: "a".repeat(64), resultHash: "b".repeat(64) },
     result,
     input: input!,
@@ -67,6 +67,31 @@ describe("artifacts", () => {
     expect(pdf.provenance.pass).toBe(true);
     expect(new TextDecoder().decode(pdf.bytes.slice(0, 5))).toBe("%PDF-");
   }, 60_000);
+  test("every report says once which dollar its figures are in", () => {
+    for (const kind of ["ic_memo", "lender_package"] as const) {
+      const model = buildModel(mapleInput(kind));
+      const text = visibleText(renderHtml(model));
+      expect(text).toContain("All amounts in Canadian dollars (CAD)");
+      expect(verifyProvenance(text, model.formatter.manifest).pass).toBe(true);
+    }
+    const x = mapleInput("lender_package");
+    expect(buildModel({ ...x, deal: { ...x.deal, currency: null } }).meta).toContain("Currency not stated");
+  });
+  test("the province is added to a location that does not already name it", () => {
+    const x = mapleInput("ic_memo");
+    expect(buildModel({ ...x, deal: { ...x.deal, location: "Edmonton", province: "AB" } }).meta).toContain("Edmonton, Alberta ·");
+    expect(buildModel(x).meta).toContain("Burnaby, British Columbia ·");
+    expect(buildModel(x).meta).not.toContain("British Columbia, British Columbia");
+  });
+  test("the model export states the currency", async () => {
+    const xlsx = await renderArtifact(mapleInput("model_export"), "xlsx");
+    const ExcelJS = (await import("exceljs")).default;
+    const wb = new ExcelJS.Workbook();
+    await wb.xlsx.load(Buffer.from(xlsx.bytes) as never);
+    const rows: unknown[][] = [];
+    wb.getWorksheet("Summary")!.eachRow((row) => rows.push((row.values as unknown[]).slice(1)));
+    expect(rows).toContainEqual(["Currency", "CAD"]);
+  });
   test("screen, Word and PDF show the same figures", async () => {
     const model = buildModel(mapleInput("ic_memo"));
     const html = visibleText(renderHtml(model));

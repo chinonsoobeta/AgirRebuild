@@ -45,6 +45,24 @@ describe("isolation", () => {
   });
 });
 
+describe("deals", () => {
+  test("a deal states its currency, country and province when it is created", async () => {
+    const [{ id }] = (await asUser(db, ids.alice, (tx) =>
+      tx.query<{ id: string }>(`select fn_create_deal($1, 'Whyte Fourplex', 'Multifamily', 'Edmonton', 'CAD', 'CA', 'AB') as id`, [ids.ws]),
+    )) as [{ id: string }];
+    const [d] = await asUser(db, ids.alice, (tx) => tx.query(`select currency, country, province from deals where id = $1`, [id]));
+    expect(d).toEqual({ currency: "CAD", country: "CA", province: "AB" });
+  });
+  test("a deal created without them records none, rather than a guess", async () => {
+    const [d] = await asUser(db, ids.alice, (tx) => tx.query(`select currency, country, province from deals where id = $1`, [ids.deal]));
+    expect(d).toEqual({ currency: null, country: null, province: null });
+  });
+  test("an unknown currency, or a province outside Canada, is refused", async () => {
+    await expect(asUser(db, ids.alice, (tx) => tx.query(`select fn_create_deal($1, 'x', 'Office', '', 'EUR', null, null)`, [ids.ws]))).rejects.toThrow(/check/);
+    await expect(asUser(db, ids.alice, (tx) => tx.query(`select fn_create_deal($1, 'x', 'Office', 'Boise', 'USD', 'US', 'BC')`, [ids.ws]))).rejects.toThrow(/check/);
+  });
+});
+
 describe("review", () => {
   test("a material override waits for a different second approver", async () => {
     await db.query(`insert into assumptions (deal_id, workspace_id, field_key, status, value, source_kind) values ($1, $2, 'exit_cap_rate_pct', 'needs_review', 5.25, 'document')`, [ids.deal, ids.ws]);

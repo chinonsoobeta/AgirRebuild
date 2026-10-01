@@ -53,7 +53,7 @@ beforeAll(async () => {
 
 describe("the whole workflow, from documents to an audit package", () => {
   test("upload the Maple Heights documents; the worker verifies and extracts them", async () => {
-    deal = (await call(alice, "POST", `/api/workspaces/${ws}/deals`, { name: "Maple Heights", assetType: "Multifamily", location: "Burnaby" })).json.id;
+    deal = (await call(alice, "POST", `/api/workspaces/${ws}/deals`, { name: "Maple Heights", assetType: "Multifamily", location: "Burnaby", province: "BC" })).json.id;
     for (const doc of loadOracle("maple-heights").documents) {
       const r = await call(alice, "PUT", `/api/deals/${deal}/documents?name=${encodeURIComponent(doc.name)}`, undefined, await documentBytes(doc));
       expect(r.status).toBe(200);
@@ -61,6 +61,13 @@ describe("the whole workflow, from documents to an audit package", () => {
     await work();
     const docs = (await call(alice, "GET", `/api/deals/${deal}/documents`)).json;
     expect(docs.map((d: any) => d.stage)).toEqual(docs.map(() => "extracted"));
+  });
+
+  test("a new deal is in Canadian dollars unless it says otherwise", async () => {
+    expect((await call(alice, "GET", `/api/deals/${deal}`)).json.deal).toMatchObject({ currency: "CAD", country: "CA", province: "BC" });
+    const us = await call(alice, "POST", `/api/workspaces/${ws}/deals`, { name: "Boise Flats", assetType: "Multifamily", location: "Boise, Idaho", currency: "USD", country: "US" });
+    expect((await call(alice, "GET", `/api/deals/${us.json.id}`)).json.deal).toMatchObject({ currency: "USD", country: "US", province: null });
+    expect((await call(alice, "POST", `/api/workspaces/${ws}/deals`, { name: "Nowhere", assetType: "Office", country: "US", province: "BC" })).status).toBe(422);
   });
 
   test("the same file uploaded twice is one document", async () => {
