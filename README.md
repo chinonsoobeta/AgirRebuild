@@ -5,7 +5,8 @@ investment-committee decision, where every number traces to a document, an analy
 decision or a named default, and a run blocks rather than guesses.
 
 V2 is a ground-up rebuild. Nothing is ported from V4; V4's test deals are reused as data
-under `oracles/`. The build plan is in [docs/plan.md](docs/plan.md).
+under `oracles/`. The build plan is in [docs/plan.md](docs/plan.md); what is verified, on which branch,
+and still open is in [docs/STATUS.md](docs/STATUS.md).
 
 ## Run it
 
@@ -26,7 +27,7 @@ To start empty: `AGIR_SEED=0 npm start`. To reset: delete `.data/`.
 ## Check it
 
 ```bash
-npm run gate -- --tier=release   # typecheck, 111 tests, web build
+npm run gate -- --tier=release   # typecheck, every test, web build
 ```
 
 ## What is where

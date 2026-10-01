@@ -1,0 +1,23 @@
+# The one gate (scripts/gate.mjs): the pr tier on pull requests, the release tier on main.
+name: gate
+
+on:
+  pull_request:
+  push:
+    branches: [main]
+
+jobs:
+  gate:
+    runs-on: ubuntu-latest
+    timeout-minutes: 20
+    steps:
+      - uses: actions/checkout@v5
+      - uses: actions/setup-node@v5
+        with:
+          node-version: 22
+          cache: npm
+      - run: npm ci
+      - name: Headless Chromium for the PDF tests
+        run: npx playwright-core install --with-deps --only-shell chromium
+      - name: Gate
+        run: npm run gate -- --tier=${{ github.event_name == 'push' && 'release' || 'pr' }}
