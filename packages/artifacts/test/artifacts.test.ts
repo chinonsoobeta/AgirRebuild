@@ -82,6 +82,8 @@ describe("artifacts", () => {
     expect(buildModel({ ...x, deal: { ...x.deal, location: "Edmonton", province: "AB" } }).meta).toContain("Edmonton, Alberta ·");
     expect(buildModel(x).meta).toContain("Burnaby, British Columbia ·");
     expect(buildModel(x).meta).not.toContain("British Columbia, British Columbia");
+    expect(buildModel({ ...x, deal: { ...x.deal, location: "Toronto, ON", province: "ON" } }).meta).toContain("Toronto, ON ·");
+    expect(buildModel({ ...x, deal: { ...x.deal, location: "Niagara-on-the-Lake", province: "ON" } }).meta).toContain("Niagara-on-the-Lake, Ontario ·");
   });
   test("the model export states the currency", async () => {
     const xlsx = await renderArtifact(mapleInput("model_export"), "xlsx");
