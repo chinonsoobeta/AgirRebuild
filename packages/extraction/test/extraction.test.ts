@@ -1,6 +1,6 @@
 import { describe, expect, test } from "vitest";
 import { assemble, type AssumptionRow } from "@agir/engine";
-import { consolidate, extractCandidates, scoreExtraction, type SourcedCandidate } from "../src/index.ts";
+import { consolidate, extractCandidates, scoreExtraction, type NormalizedDocument, type SourcedCandidate, type Table } from "../src/index.ts";
 import { loadOracles, toNormalized } from "./oracle.ts";
 
 const key = (f: string, i: string | null) => (i ? `${f}|${i}` : f);
@@ -83,3 +83,63 @@ for (const deal of loadOracles()) {
     }
   });
 }
+
+describe("square metres become square feet at entry (decision 7)", () => {
+  const doc = (lines: string[], tables: Table[] = []): NormalizedDocument => ({
+    kind: "pdf",
+    lines: lines.map((text, i) => ({ text, location: `page 1, line ${i + 1}` })),
+    tables,
+    pageCount: 1,
+    needsOcr: false,
+    fullText: lines.join("\n"),
+  });
+  const only = (r: ReturnType<typeof extractCandidates>, fieldKey: string) => {
+    const found = r.candidates.filter((c) => c.fieldKey === fieldKey);
+    expect(found, fieldKey).toHaveLength(1);
+    return found[0]!;
+  };
+
+  test("an area in m² is read as square feet, and the candidate keeps what the document said", () => {
+    const c = only(extractCandidates(doc(["Retail area: 1,000 m²"])), "rentable_area_sf");
+    expect(c).toMatchObject({ itemKey: "Retail", raw: "1,000 m²", unitSeen: "m2" });
+    expect(c.value).toBeCloseTo(10_763.91, 2);
+  });
+  test("a rent per m² is read as a rent per square foot", () => {
+    const c = only(extractCandidates(doc(["Retail rent: $366/m²"])), "rent_psf_annual");
+    expect(c).toMatchObject({ itemKey: "Retail", unitSeen: "$/m2" });
+    expect(c.value).toBeCloseTo(34.0025, 4);
+  });
+  test("a component named with only an area in m²", () => {
+    const c = only(extractCandidates(doc(["Retail: 836 m²"])), "rentable_area_sf");
+    expect(c).toMatchObject({ itemKey: "Retail", unitSeen: "m2" });
+    expect(c.value).toBeCloseTo(8_998.63, 2);
+  });
+  test("a rent roll whose headers are in m² is converted cell by cell", () => {
+    const table: Table = {
+      name: "Rent roll",
+      rows: [
+        [{ text: "Unit type", ref: "A1" }, { text: "Area (m²)", ref: "B1" }, { text: "Rent ($/m²/yr)", ref: "C1" }],
+        [{ text: "Retail", ref: "A2" }, { text: "836", number: 836, ref: "B2" }, { text: "366", number: 366, unit: "$", ref: "C2" }],
+      ],
+    };
+    const r = extractCandidates(doc([], [table]));
+    const area = only(r, "rentable_area_sf");
+    const rent = only(r, "rent_psf_annual");
+    expect(area).toMatchObject({ itemKey: "Retail", unitSeen: "m2" });
+    expect(area.value).toBeCloseTo(8_998.63, 2);
+    expect(rent).toMatchObject({ itemKey: "Retail", unitSeen: "$/m2" });
+    expect(rent.value).toBeCloseTo(34.0025, 4);
+    expect(r.candidates.some((c) => c.fieldKey === "unit_rent_monthly")).toBe(false);
+  });
+  test("one document in m² and another in square feet are compared in square feet", () => {
+    const a = extractCandidates(doc(["Retail area: 1,000 m²"])).candidates.map((c) => ({ ...c, documentId: "a", documentName: "Plans" }));
+    const b = extractCandidates(doc(["Retail area: 10,764 SF"])).candidates.map((c) => ({ ...c, documentId: "b", documentName: "Rent roll" }));
+    const [p] = consolidate([...a, ...b]);
+    expect(p!.status).toBe("conflicting");
+    expect(p!.values.map((v) => v.value)).toEqual([expect.closeTo(10_763.91, 2), 10_764]);
+  });
+  test("pi² in a French document is square feet", () => {
+    const c = only(extractCandidates(doc(["Commerce : 9 400 pi²", "Prix demandé : 31 200 000"])), "rentable_area_sf");
+    expect(c).toMatchObject({ itemKey: "Commerce", value: 9_400, unitSeen: "sf" });
+  });
+});

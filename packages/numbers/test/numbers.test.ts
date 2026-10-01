@@ -76,3 +76,32 @@ describe("units and scale", () => {
     expect(first("Residential rent: 2 640,50 per unit per month", EU).value).toBe(2_640.5);
   });
 });
+
+describe("square metres and pi² (decision 7)", () => {
+  test("square metres are their own unit, never square feet", () => {
+    for (const line of ["Retail area: 1,000 m²", "Retail area: 1,000 m2", "Retail area: 1,000 sq m", "Retail area: 1,000 sq. m.", "Retail area: 1,000 square metres", "Retail area: 1,000 square meters"]) {
+      expect(first(line, US), line).toMatchObject({ value: 1_000, unit: "m2" });
+    }
+  });
+  test("square miles are not square metres", () => {
+    expect(first("Trade area: 12 sq mi", US).unit).toBeNull();
+  });
+  test("a rent per square metre", () => {
+    expect(first("Retail rent: $366/m²", US)).toMatchObject({ value: 366, unit: "$/m2" });
+    expect(first("Retail rent: $366 per square metre", US)).toMatchObject({ value: 366, unit: "$/m2" });
+    expect(first("Retail rent: $366 psm", US)).toMatchObject({ value: 366, unit: "$/m2" });
+  });
+  test("m² after an amount is never read as million", () => {
+    expect(first("Land: $450 m²", US)).toMatchObject({ value: 450, scaled: false });
+    expect(first("Land: $4.5 m", US).value).toBe(4_500_000);
+  });
+  test("an area in m² groups thousands, like one in square feet", () => {
+    expect(first("Retail area: 1.000 m²", UNKNOWN)).toMatchObject({ value: 1_000, unit: "m2" });
+  });
+  test("pi², the French square foot, is square feet", () => {
+    const FR: DocumentFormat = { ...EU, spaceGroups: true };
+    for (const line of ["Commerce : 9 400 pi²", "Commerce : 9 400 pi2", "Commerce : 9 400 pi ca", "Commerce : 9 400 pieds carrés"]) {
+      expect(first(line, FR), line).toMatchObject({ value: 9_400, unit: "sf" });
+    }
+  });
+});

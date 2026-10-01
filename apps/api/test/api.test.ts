@@ -6,6 +6,7 @@ import { fileStore, migrate, openPglite, type Db } from "@agir/db";
 import { drain } from "@agir/worker";
 import { documentBytes, loadOracle } from "@agir/testkit";
 import { createApp } from "../src/app.ts";
+import { sourceLabel } from "../src/services.ts";
 
 let db: Db;
 let app: ReturnType<typeof createApp>;
@@ -210,5 +211,15 @@ describe("controls", () => {
     await work();
     const after = (await call(alice, "GET", `/api/deals/${deal}/review`)).json.assumptions.find((a: any) => a.fieldKey === "exit_cap_rate_pct");
     expect(after.status).toBe("approved");
+  });
+
+  test("an area stated in square metres is reviewed in square feet, and its source says it was converted", async () => {
+    const d = (await call(alice, "POST", `/api/workspaces/${ws}/deals`, { name: "Whyte Fourplex", assetType: "Multifamily", location: "Edmonton", province: "AB" })).json.id;
+    await call(alice, "PUT", `/api/deals/${d}/documents?name=plans.txt`, undefined, new TextEncoder().encode("Floor plans\nRetail area: 1,000 m²\n"));
+    await work();
+    const area = (await call(alice, "GET", `/api/deals/${d}/review`)).json.assumptions.find((a: any) => a.fieldKey === "rentable_area_sf");
+    expect(area.value).toBeCloseTo(10_763.91, 2);
+    expect(area.sources[0]).toMatchObject({ raw: "1,000 m²", unit_seen: "m2" });
+    expect(sourceLabel({ source_kind: "document", sources: area.sources } as never)).toMatch(/^plans\.txt, .+, converted from square metres \("1,000 m²"\)$/);
   });
 });
