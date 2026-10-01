@@ -223,3 +223,38 @@ describe("controls", () => {
     expect(sourceLabel({ source_kind: "document", sources: area.sources } as never)).toMatch(/^plans\.txt, .+, converted from square metres \("1,000 m²"\)$/);
   });
 });
+
+describe("a new run after a change", () => {
+  const selling = async () => (await call(alice, "GET", `/api/deals/${deal}/review`)).json.assumptions.find((a: any) => a.fieldKey === "selling_costs_pct");
+  const review = async (action: string) => {
+    const a = await selling();
+    expect((await call(alice, "POST", `/api/assumptions/${a.id}/review`, { action, version: a.version })).status).toBe(200);
+  };
+  const acceptDefault = async () => {
+    await review("reject");
+    expect((await call(alice, "POST", `/api/deals/${deal}/defaults`, { fields: ["selling_costs_pct"] })).json.accepted).toBe(1);
+  };
+  const runNow = async () => {
+    const r = await call(alice, "POST", `/api/deals/${deal}/runs`);
+    expect(r.status).toBe(200);
+    return (await call(alice, "GET", `/api/runs/${r.json.id}`)).json;
+  };
+
+  test("is current when only a status changed: a default approved as it stands", async () => {
+    await acceptDefault();
+    const first = await runNow();
+    await review("reopen");
+    await review("approve");
+    const second = await runNow();
+    expect(second.id).not.toBe(first.id);
+    expect(second.fresh).toBe(true);
+  });
+
+  test("is current when the inputs change back to an earlier run's", async () => {
+    const before = await runNow();
+    await acceptDefault();
+    const back = await runNow();
+    expect(back.number).toBe(before.number + 1);
+    expect([back.fresh, back.isLatest]).toEqual([true, true]);
+  });
+});
