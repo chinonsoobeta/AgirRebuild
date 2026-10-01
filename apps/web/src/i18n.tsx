@@ -960,7 +960,7 @@ const FR_REASONS: [RegExp, string | ((m: RegExpMatchArray) => string)][] = [
   [/^(.+) (cannot be below|cannot be above|must be a whole number|needs a number)(.*)$/, (m) => `${m[1]} : ${m[2] === "cannot be below" ? "ne peut pas être inférieur à" : m[2] === "cannot be above" ? "ne peut pas être supérieur à" : m[2] === "must be a whole number" ? "doit être un nombre entier" : "exige un nombre"}${m[3]}`],
 ];
 
-function translateMessage(text: string | null | undefined): string {
+export function translateMessage(text: string | null | undefined): string {
   if (!text) return "";
   for (const [re, out] of FR_REASONS) {
     const m = text.match(re);
