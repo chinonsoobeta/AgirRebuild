@@ -9,7 +9,7 @@ work it describes.
 | Command | Result | Verified |
 |---|---|---|
 | `npm install` | Node 22 (`engines` allows 22 to 24); `.npmrc` sets `legacy-peer-deps` | 2026-10-01 |
-| `npm run gate -- --tier=release` | Both typechecks, 141 tests in 9 files (119 on `main`), web build | 2026-10-01, `task/02-metric-area` |
+| `npm run gate -- --tier=release` | Both typechecks, 143 tests in 9 files (119 on `main`), web build | 2026-10-01, `task/03-run-reuse` |
 | `VITEST_MAX_WORKERS=2 npm run gate -- --tier=release` | The same gate with two test workers: peak memory about 1 GB, no swap | 2026-10-01 |
 | `AGIR_DATA_DIR=<empty folder> PORT=8791 npm start` | Builds the web app, applies `0001` to `0004`, seeds six deals, serves on that port. An empty data folder leaves `.data/` untouched | 2026-10-01, `task/01-deal-currency` |
 
@@ -31,6 +31,7 @@ later tasks build on earlier migrations. Review and merge them in order.
 | `task/00-status-and-ci` | 0 | This file, the approved plan in `docs/`, the CI gate | |
 | `task/01-deal-currency` | 1 | A deal states its currency (CAD unless it says otherwise), country and province when it is created, in migration `0004`. Every report says once which dollar its figures are in, and the model export has a Currency row | Yes: a migration, and a new signature for `fn_create_deal` |
 | `task/02-metric-area` | 1 | Areas and rents in m² (and the French pi²) are read from documents and converted to square feet where they are mapped, at 10.7639 SF per m². Each source keeps the unit the document used. Review says a value was converted, and a run's source label quotes the original | Not required: extraction is not on rule 7's list, and no reference deal's values moved. Advised, because it changes how new documents are read |
+| `task/03-run-reuse` | 2 | A run is reused only when it is the deal's latest run and was made from the same approved inputs, in migration `0005`. Before, a run after a status-only change came back as the out-of-date run before it, and no decision could be recorded. Solo mode needs this: confirming a value changes its status, not its figure | Yes: a migration, and the rule for when a signed run is reused |
 
 The plan for small Canadian developers is [plan-small-developers.md](plan-small-developers.md). Release 1 steps 0 to 3 are
 being built now. Steps 4 to 6 wait on the people-owned items listed below.
@@ -46,12 +47,6 @@ being built now. Steps 4 to 6 wait on the people-owned items listed below.
   only when its unit names the field and the label names a component ("Commerce : 9 400 pi²").
 - **An area cannot be entered by hand in m².** Review and manual entry take square feet. An m² option
   belongs with the quick-start questions (step 3).
-- **A new run can come back as the old one.** A run is identified by its deal, input hash, engine version
-  and policy hash, and `fn_persist_run` returns the stored run when those match (`0002_functions.sql`).
-  Reopening an accepted default and approving the same value changes the deal's assumptions hash but not
-  its input hash. The next run is therefore the old run, which is out of date against the new assumptions
-  hash, and a decision is refused until some input value changes. To reproduce: accept a default, reopen
-  it, approve it unchanged, then run.
 
 ## Deviations from the plan
 
