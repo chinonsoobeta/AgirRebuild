@@ -6,13 +6,14 @@ import * as I from "../components/icons";
 import { useI18n } from "../i18n";
 
 function Quote({ s }: { s: Source }) {
-  const { msg } = useI18n();
+  const { t, msg } = useI18n();
   const i = s.context.indexOf(s.raw);
   return (
     <div className="stack" style={{ gap: 6 }}>
       <span className="row small" style={{ gap: 8, fontWeight: 600 }}><I.Doc />{s.document_name}</span>
       <div className="source-quote">{i >= 0 ? (<>{s.context.slice(0, i)}<mark>{s.raw}</mark>{s.context.slice(i + s.raw.length)}</>) : s.context}</div>
       <span className="small faint">{msg(s.location)}</span>
+      {(s.unit_seen === "m2" || s.unit_seen === "$/m2") && <span className="small faint">{t("review.fromM2")}</span>}
     </div>
   );
 }

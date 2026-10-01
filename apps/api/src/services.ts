@@ -53,7 +53,8 @@ type AssumptionDb = {
   value: number | null;
   pending_value: number | null;
   source_kind: "document" | "analyst" | "default";
-  sources: { document_id: string; document_name: string; value: number; location: string; raw: string; context: string }[];
+  /** unit_seen is the unit the document wrote; sources recorded before it was kept have none. */
+  sources: { document_id: string; document_name: string; value: number; location: string; raw: string; unit_seen?: string | null; context: string }[];
   conflict_values: { value: number; documents: string[] }[] | null;
   reason: string | null;
   decided_by: string | null;
@@ -83,7 +84,10 @@ export function sourceLabel(a: AssumptionDb): string {
   if (a.source_kind === "default") return "Default accepted";
   if (a.source_kind === "analyst") return `Entered by ${a.decided_by_name ?? "an analyst"}${a.reason ? `: ${a.reason}` : ""}`;
   const s = a.sources[0];
-  return s ? `${s.document_name}, ${s.location}` : "Approved";
+  if (!s) return "Approved";
+  // A figure the document gave in square metres was converted to square feet at entry: say so, with what it said.
+  const converted = s.unit_seen === "m2" || s.unit_seen === "$/m2" ? `, converted from square metres ("${s.raw}")` : "";
+  return `${s.document_name}, ${s.location}${converted}`;
 }
 
 // ---- Deal overview ----------------------------------------------------------------

@@ -3,10 +3,10 @@
 // sits next to an output figure, is kept as unmapped so the analyst can see it,
 // but it never becomes an input.
 
-import { FIELDS, OUTPUT_LIKE_PHRASES, type FieldDef } from "@agir/contracts";
-import type { NumberToken } from "@agir/numbers";
+import { FIELD_BY_KEY, FIELDS, OUTPUT_LIKE_PHRASES, type FieldDef } from "@agir/contracts";
+import { SF_PER_M2, type NumberToken } from "@agir/numbers";
 
-export type LabelUnit = "$" | "%" | "months" | "years" | "sf" | "x" | null;
+export type LabelUnit = "$" | "%" | "months" | "years" | "sf" | "m2" | "x" | null;
 
 export type Mapped =
   | { kind: "field"; fieldKey: string; itemKey: string | null; value: number; unitSeen: string }
@@ -37,11 +37,13 @@ export function normalizeLabel(raw: string): { label: string; labelUnit: LabelUn
     else if (/^(%|percent|pct)$/.test(inner)) labelUnit = "%";
     else if (/^(months?|mos?)$/.test(inner)) labelUnit = "months";
     else if (/^(years?|yrs?)$/.test(inner)) labelUnit = "years";
-    else if (/^(sf|sq\.? ?ft|square feet)$/.test(inner)) labelUnit = "sf";
+    else if (/^(sf|sq\.? ?ft|square feet|pi²|pi2|pi\.? ?ca\.?)$/.test(inner)) labelUnit = "sf";
+    else if (/^(m²|m2|sq\.? ?m|sqm|square met(re|er)s)$/.test(inner)) labelUnit = "m2";
     else if (/^x$/.test(inner)) labelUnit = "x";
   }
   const label = raw
     .replace(/\([^)]*\)/g, " ")
+    .replace(/²/g, "2")
     .toLowerCase()
     .replace(/[^a-z0-9/#$%&\s-]/g, " ")
     .replace(/\b(is|are|of|at|to|was|will be|approximately|approx|about)\s*$/g, " ")
@@ -67,7 +69,11 @@ function itemName(prefix: string): string {
   return words.map((w) => (/^\d/.test(w) ? w.toUpperCase() : w[0]!.toUpperCase() + w.slice(1))).join(" ");
 }
 
-/** Convert a token to the field's canonical unit, or return null if they are not compatible. */
+/**
+ * Convert a token to the field's canonical unit, or return null if they are not
+ * compatible. Areas are canonical in square feet: m² is converted here, and
+ * unitSeen keeps the unit the document used (decision 7).
+ */
 function compatibleValue(def: FieldDef, t: NumberToken, label: string, labelUnit: LabelUnit): { value: number; unitSeen: string } | null {
   const v = t.value;
   if (v === null) return null;
@@ -94,6 +100,7 @@ function compatibleValue(def: FieldDef, t: NumberToken, label: string, labelUnit
       return null;
     case "sf":
       if (u === "sf" || (u === null && labelUnit === "sf")) return { value: v, unitSeen: "sf" };
+      if (u === "m2" || (u === null && labelUnit === "m2")) return { value: v * SF_PER_M2, unitSeen: "m2" };
       if (u === null && labelUnit === null && hasPhrase(label, "area") && v >= 100) return { value: v, unitSeen: "number" };
       return null;
     case "$/unit/mo":
@@ -102,7 +109,9 @@ function compatibleValue(def: FieldDef, t: NumberToken, label: string, labelUnit
       return null;
     case "$/sf/yr":
       if (u === "$/sf") return { value: v, unitSeen: "$/sf" };
+      if (u === "$/m2") return { value: v / SF_PER_M2, unitSeen: "$/m2" };
       if ((u === "$" || u === null) && /\b(psf|per sf|\/sf|per square foot)\b/.test(label)) return { value: v, unitSeen: "$" };
+      if ((u === "$" || u === null) && /\b(psm|per m2|\/m2|per sq m|per square met(re|er))\b/.test(label)) return { value: v / SF_PER_M2, unitSeen: "$/m2" };
       return null;
     case "x":
       if (u === "x") return { value: v, unitSeen: "x" };
@@ -161,12 +170,28 @@ export function mapToken(rawLabel: string, t: NumberToken): Mapped {
   // A component named by itself with a self-describing unit: "Retail: 9,000 SF".
   const name = itemName(label);
   if (name && label.split(" ").length <= 3) {
-    const byUnit: Record<string, string> = { units: "unit_count", sf: "rentable_area_sf", "$/mo": "unit_rent_monthly", "$/sf": "rent_psf_annual" };
+    const byUnit: Record<string, string> = {
+      units: "unit_count",
+      sf: "rentable_area_sf",
+      m2: "rentable_area_sf",
+      "$/mo": "unit_rent_monthly",
+      "$/sf": "rent_psf_annual",
+      "$/m2": "rent_psf_annual",
+    };
     const key = t.unit ? byUnit[t.unit] : undefined;
-    if (key) return { kind: "field", fieldKey: key, itemKey: name, value: t.value, unitSeen: t.unit! };
+    const c = key ? compatibleValue(FIELD_BY_KEY.get(key)!, t, label, labelUnit) : null;
+    if (key && c) return { kind: "field", fieldKey: key, itemKey: name, value: c.value, unitSeen: c.unitSeen };
   }
   if (aliasOnly) {
-    const want: Record<string, string> = { "%": "a % sign", "$": "a dollar amount", months: "months", years: "years", x: "an x multiple", sf: "square feet", units: "a unit count" };
+    const want: Record<string, string> = {
+      "%": "a % sign",
+      "$": "a dollar amount",
+      months: "months",
+      years: "years",
+      x: "an x multiple",
+      sf: "square feet or square metres",
+      units: "a unit count",
+    };
     return {
       kind: "ignored",
       reason: `Looks like ${aliasOnly.def.label.toLowerCase()}, but the number is not written as ${want[aliasOnly.def.unit] ?? aliasOnly.def.unit}. Enter it by hand if it is.`,

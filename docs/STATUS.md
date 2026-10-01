@@ -9,7 +9,7 @@ work it describes.
 | Command | Result | Verified |
 |---|---|---|
 | `npm install` | Node 22 (`engines` allows 22 to 24); `.npmrc` sets `legacy-peer-deps` | 2026-10-01 |
-| `npm run gate -- --tier=release` | Both typechecks, 126 tests in 8 files (119 on `main`), web build | 2026-10-01, `task/01-deal-currency` |
+| `npm run gate -- --tier=release` | Both typechecks, 141 tests in 9 files (119 on `main`), web build | 2026-10-01, `task/02-metric-area` |
 | `VITEST_MAX_WORKERS=2 npm run gate -- --tier=release` | The same gate with two test workers: peak memory about 1 GB, no swap | 2026-10-01 |
 | `AGIR_DATA_DIR=<empty folder> PORT=8791 npm start` | Builds the web app, applies `0001` to `0004`, seeds six deals, serves on that port. An empty data folder leaves `.data/` untouched | 2026-10-01, `task/01-deal-currency` |
 
@@ -30,6 +30,7 @@ later tasks build on earlier migrations. Review and merge them in order.
 | `main` | | The rebuild as it stood on 2026-09-24, committed as the baseline | |
 | `task/00-status-and-ci` | 0 | This file, the approved plan in `docs/`, the CI gate | |
 | `task/01-deal-currency` | 1 | A deal states its currency (CAD unless it says otherwise), country and province when it is created, in migration `0004`. Every report says once which dollar its figures are in, and the model export has a Currency row | Yes: a migration, and a new signature for `fn_create_deal` |
+| `task/02-metric-area` | 1 | Areas and rents in m² (and the French pi²) are read from documents and converted to square feet where they are mapped, at 10.7639 SF per m². Each source keeps the unit the document used. Review says a value was converted, and a run's source label quotes the original | Not required: extraction is not on rule 7's list, and no reference deal's values moved. Advised, because it changes how new documents are read |
 
 The plan for small Canadian developers is [plan-small-developers.md](plan-small-developers.md). Release 1 steps 0 to 3 are
 being built now. Steps 4 to 6 wait on the people-owned items listed below.
@@ -40,6 +41,11 @@ being built now. Steps 4 to 6 wait on the people-owned items listed below.
   records only that a token is money (`currency: boolean` in `packages/numbers/src/index.ts`), not which
   currency, so a USD figure in a CAD deal is read as CAD. Bergendal's figures carry no currency mark at all.
 - **CI has never run.** `.github/workflows/gate.yml` is written but unexercised until the repo is pushed.
+- **French documents are barely read.** Labels are matched only against English aliases, `normalizeLabel`
+  drops accented letters, and a trailing dollar sign ("18,75 $") is not read as money. A French line maps
+  only when its unit names the field and the label names a component ("Commerce : 9 400 pi²").
+- **An area cannot be entered by hand in m².** Review and manual entry take square feet. An m² option
+  belongs with the quick-start questions (step 3).
 - **A new run can come back as the old one.** A run is identified by its deal, input hash, engine version
   and policy hash, and `fn_persist_run` returns the stored run when those match (`0002_functions.sql`).
   Reopening an accepted default and approving the same value changes the deal's assumptions hash but not

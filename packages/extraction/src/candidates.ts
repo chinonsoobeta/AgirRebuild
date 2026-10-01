@@ -1,5 +1,5 @@
 import { FIELD_BY_KEY } from "@agir/contracts";
-import { detectFormat, tokenize, type DocumentFormat, type NumberToken } from "@agir/numbers";
+import { detectFormat, SF_PER_M2, tokenize, type DocumentFormat, type NumberToken } from "@agir/numbers";
 import type { Cell, NormalizedDocument, Table } from "./document.ts";
 import { mapToken, normalizeLabel } from "./mapping.ts";
 
@@ -99,21 +99,39 @@ function fromLines(doc: NormalizedDocument, result: ExtractionResult) {
   }
 }
 
-type Roles = { item: number[]; units?: number; rent?: number; basis?: number; area?: number; occupancy?: number; psfHeader: boolean };
+type Roles = {
+  item: number[];
+  units?: number;
+  rent?: number;
+  basis?: number;
+  area?: number;
+  occupancy?: number;
+  psfHeader: boolean;
+  /** The column headers say the area, or the rent, is per square metre. */
+  areaM2: boolean;
+  rentPerM2: boolean;
+};
+
+// Matched after "²" is written "2", so "m²" and "m2" read the same.
+const M2_RE = /\b(m2|sq\.? ?m|sqm|square met(re|er)s?)\b/;
+const PER_M2_RE = /(psm|\/\s?(m2|sq\.? ?m|sqm)\b|per (m2|sq\.? ?m|sqm|square met(re|er))\b)/;
 
 function rentRollRoles(header: Cell[]): Roles | null {
-  const roles: Roles = { item: [], psfHeader: false };
+  const roles: Roles = { item: [], psfHeader: false, areaM2: false, rentPerM2: false };
   header.forEach((c, i) => {
-    const h = c.text.toLowerCase();
+    const h = c.text.toLowerCase().replace(/²/g, "2");
     if (!h) return;
     if (/\b(unit\s*type|type|component|space|tenant|suite|plan|floor\s*plan|use)\b/.test(h)) roles.item.push(i);
     else if (/\b(units|unit count|count|#|doors)\b/.test(h)) roles.units = i;
     else if (/\brent\b/.test(h) && !/basis/.test(h)) {
       roles.rent = i;
-      roles.psfHeader = /(psf|\/\s?sf|per sf)/.test(h);
+      roles.rentPerM2 = PER_M2_RE.test(h);
+      roles.psfHeader = /(psf|\/\s?sf|per sf)/.test(h) || roles.rentPerM2;
     } else if (/basis/.test(h)) roles.basis = i;
-    else if (/\b(area|sf|nrsf|rsf|gla|square feet)\b/.test(h)) roles.area = i;
-    else if (/occupancy|occ\b/.test(h)) roles.occupancy = i;
+    else if (/\b(area|sf|nrsf|rsf|gla|square feet)\b/.test(h) || M2_RE.test(h)) {
+      roles.area = i;
+      roles.areaM2 = M2_RE.test(h);
+    } else if (/occupancy|occ\b/.test(h)) roles.occupancy = i;
   });
   return roles.item.length > 0 && roles.rent !== undefined && (roles.units !== undefined || roles.area !== undefined) ? roles : null;
 }
@@ -136,8 +154,9 @@ function fromRentRoll(table: Table, headerRow: number, roles: Roles, result: Ext
     const itemText = itemParts.join(" ").trim();
     if (!itemText || itemParts.some((p) => TOTAL_RE.test(p))) continue;
     const itemKey = itemText.replace(/\s+/g, " ");
-    const basisText = roles.basis !== undefined ? (row[roles.basis]?.text ?? "").toLowerCase() : "";
-    const psf = roles.psfHeader || /sf|psf/.test(basisText);
+    const basisText = roles.basis !== undefined ? (row[roles.basis]?.text ?? "").toLowerCase().replace(/²/g, "2") : "";
+    const perM2 = roles.rentPerM2 || /psm|m2/.test(basisText);
+    const psf = roles.psfHeader || perM2 || /sf|psf/.test(basisText);
     const add = (fieldKey: string, idx: number | undefined) => {
       if (idx === undefined) return;
       const cell = row[idx];
@@ -149,8 +168,18 @@ function fromRentRoll(table: Table, headerRow: number, roles: Roles, result: Ext
       }
       const def = FIELD_BY_KEY.get(fieldKey)!;
       let value = t.value;
+      let unitSeen: string | null = t.unit;
       if (def.unit === "%" && t.unit !== "%" && value <= 1 && cell.number !== undefined) value = value * 100;
-      result.candidates.push({ fieldKey, itemKey, value, raw: t.raw, unitSeen: t.unit, location: cell.ref, context: `${table.name}: ${itemText}`, rule: "table:rent-roll" });
+      // Square metres, stated by the cell or by its column, become square feet (decision 7).
+      if (fieldKey === "rentable_area_sf" && (t.unit === "m2" || (t.unit === null && roles.areaM2))) {
+        value *= SF_PER_M2;
+        unitSeen = "m2";
+      }
+      if (fieldKey === "rent_psf_annual" && (t.unit === "$/m2" || ((t.unit === null || t.unit === "$") && perM2))) {
+        value /= SF_PER_M2;
+        unitSeen = "$/m2";
+      }
+      result.candidates.push({ fieldKey, itemKey, value, raw: t.raw, unitSeen, location: cell.ref, context: `${table.name}: ${itemText}`, rule: "table:rent-roll" });
     };
     add("unit_count", roles.units);
     add(psf ? "rent_psf_annual" : "unit_rent_monthly", roles.rent);

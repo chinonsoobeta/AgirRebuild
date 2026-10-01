@@ -12,8 +12,13 @@
 //  5. Unicode minus signs and dashes before a number are a minus sign;
 //     "(2,150,000)" is negative.
 //  6. Words are never numbers: "one hundred" yields nothing.
+//  7. Square metres are their own unit. The engine works in square feet, so a
+//     figure in m² is converted where it is mapped, never here.
 
 export type DecimalSeparator = "." | ",";
+
+/** Square feet in one square metre: the foot is exactly 0.3048 m. */
+export const SF_PER_M2 = 1 / 0.3048 ** 2;
 
 export type DocumentFormat = {
   decimal: DecimalSeparator | null;
@@ -30,10 +35,12 @@ export type TokenUnit =
   | "bps"
   | "x"
   | "sf"
+  | "m2"
   | "units"
   | "months"
   | "years"
   | "$/sf"
+  | "$/m2"
   | "$/mo"
   | null;
 
@@ -161,14 +168,20 @@ export function parseCore(
   return Number.isFinite(v) ? { value: v } : { value: null, refusal: `"${core}" is not a number` };
 }
 
-const SCALE_RE = /^\s?(billion|bn|million|mm|mn|m|thousand|k)\b/i;
+// "m" is million only when it is not the m of m²: "$450 m²" is not $450,000,000.
+const SCALE_RE = /^\s?(billion|bn|million|mm|mn|m(?!²)|thousand|k)\b/i;
+// "²" is not a word character, so the rules that end in it close with a lookahead, not \b.
 const UNIT_RULES: { re: RegExp; unit: TokenUnit }[] = [
   { re: /^\s?(%|percent\b|pct\b)/i, unit: "%" },
   { re: /^\s?(bps|basis points)\b/i, unit: "bps" },
   { re: /^\s?(x|×)(?![a-z])/i, unit: "x" },
   { re: /^\s?(\/\s?sf|psf|per\s+(sq\.?\s*ft|square\s+foot|sf))\b/i, unit: "$/sf" },
+  { re: /^\s?(\/\s?(m²|m2|sq\.?\s?m\.?|sqm)|psm|per\s+(m²|m2|sq\.?\s?m\.?|sqm|square\s+met(re|er)))(?![\p{L}\d])/iu, unit: "$/m2" },
   { re: /^\s?(\/\s?(unit\s?\/\s?)?mo(nth)?|(per\s+unit\s+)?per\s+month|(per\s+unit\s+)?monthly|per\s+unit\s+per\s+mo)\b/i, unit: "$/mo" },
   { re: /^\s?(sf|sq\.?\s?ft\.?|square\s+feet|rsf|nrsf)\b/i, unit: "sf" },
+  // pi², the French square foot ("pi ca", "pieds carrés"). Never "p.c.", which is French for percent.
+  { re: /^\s?(pi²|pi2|pi\.?\s?ca\.?|pieds?\s+carrés?)(?![\p{L}\d])/iu, unit: "sf" },
+  { re: /^\s?(m²|m2|sq\.?\s?m\.?|sqm|square\s+met(re|er)s?|mètres?\s+carrés?)(?![\p{L}\d])/iu, unit: "m2" },
   { re: /^\s?(units?|homes|suites|apartments|doors)\b/i, unit: "units" },
   { re: /^[-\s]?(months?|mos?\.?)\b/i, unit: "months" },
   { re: /^[-\s]?(years?|yrs?\.?)\b/i, unit: "years" },
@@ -195,7 +208,7 @@ export function tokenize(line: string, format: DocumentFormat): NumberToken[] {
     let unit: TokenUnit = currency ? "$" : null;
     const scale = rest.match(SCALE_RE);
     const upcoming = UNIT_RULES.find((r) => r.re.test(scale && currency ? rest.slice(scale[0].length) : rest))?.unit ?? null;
-    const grouping = currency || upcoming === "units" || upcoming === "sf";
+    const grouping = currency || upcoming === "units" || upcoming === "sf" || upcoming === "m2";
     const parsed = parseCore(core!, format, grouping);
     let value = parsed.value;
     // A scale word counts only in a money context: "18 M" alone is not $18,000,000.
@@ -208,7 +221,7 @@ export function tokenize(line: string, format: DocumentFormat): NumberToken[] {
     for (const r of UNIT_RULES) {
       const u = after.match(r.re);
       if (u) {
-        if (currency && (r.unit === "$/sf" || r.unit === "$/mo")) unit = r.unit;
+        if (currency && (r.unit === "$/sf" || r.unit === "$/m2" || r.unit === "$/mo")) unit = r.unit;
         else if (!currency) unit = r.unit;
         if (unit === r.unit) end += u[0].length;
         break;

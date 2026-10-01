@@ -165,7 +165,15 @@ export async function reconcileDeal(db: Db, dealId: string) {
     for (const p of proposals) {
       const key = `${p.fieldKey}|${p.itemKey ?? ""}`;
       seen.add(key);
-      const sources = p.sources.map((s) => ({ document_id: s.documentId, document_name: s.documentName, value: s.value, location: s.location, raw: s.raw, context: s.context }));
+      const sources = p.sources.map((s) => ({
+        document_id: s.documentId,
+        document_name: s.documentName,
+        value: s.value,
+        location: s.location,
+        raw: s.raw,
+        unit_seen: s.unitSeen,
+        context: s.context,
+      }));
       const conflictFromDocs = p.values.map((v) => ({ value: v.value, documents: [...new Set(v.sources.map((s) => s.documentName))] }));
       const e = byKey.get(key);
       if (!e) {
