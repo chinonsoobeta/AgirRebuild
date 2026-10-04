@@ -53,6 +53,10 @@ export type DocumentStage = (typeof DOCUMENT_STAGES)[number];
 export const WORKSPACE_ROLES = ["owner", "admin", "analyst", "viewer"] as const;
 export type WorkspaceRole = (typeof WORKSPACE_ROLES)[number];
 
+/** team: a material value entered by hand waits for a second person. solo: it is used at once, labelled sponsor-stated. */
+export const REVIEW_MODES = ["team", "solo"] as const;
+export type ReviewMode = (typeof REVIEW_MODES)[number];
+
 export const DECISIONS = ["approve", "approve_with_conditions", "reject", "return_to_underwriting"] as const;
 export type Decision = (typeof DECISIONS)[number];
 

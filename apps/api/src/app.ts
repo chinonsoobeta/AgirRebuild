@@ -1,7 +1,7 @@
 import { Hono, type Context } from "hono";
 import { getCookie, setCookie, deleteCookie } from "hono/cookie";
 import { z } from "zod";
-import { COUNTRIES, CURRENCIES, FIELDS, FIELD_GROUP_LABELS, METRICS, POLICY_V1, PROVINCE_CODES, type EngineInput } from "@agir/contracts";
+import { COUNTRIES, CURRENCIES, FIELDS, FIELD_GROUP_LABELS, METRICS, POLICY_V1, PROVINCE_CODES, REVIEW_MODES, type EngineInput } from "@agir/contracts";
 import { asUser, type BlobStore, type Db } from "@agir/db";
 import { DRIVERS, explore, grid, tornado, type DriverKey, type Shock } from "@agir/engine";
 import { kindOf } from "@agir/extraction";
@@ -106,7 +106,7 @@ export function createApp({ db, store, secureCookies, demoSignIn = false }: AppD
   app.get("/api/me", async (c) => {
     const workspaces = await as(c, (tx) =>
       tx.query(
-        `select w.id, w.name, m.role from workspaces w join workspace_members m on m.workspace_id = w.id and m.user_id = agir_uid() order by w.created_at`,
+        `select w.id, w.name, w.review_mode, m.role from workspaces w join workspace_members m on m.workspace_id = w.id and m.user_id = agir_uid() order by w.created_at`,
       ),
     );
     return c.json({ user: c.get("user"), workspaces });
@@ -121,6 +121,12 @@ export function createApp({ db, store, secureCookies, demoSignIn = false }: AppD
     const { name } = z.object({ name: z.string().min(1).max(120) }).parse(await c.req.json());
     const [r] = await as(c, (tx) => tx.query<{ id: string }>(`select fn_create_workspace($1) as id`, [name]));
     return c.json({ id: r!.id });
+  });
+
+  app.post("/api/workspaces/:ws/review-mode", async (c) => {
+    const { mode } = z.object({ mode: z.enum(REVIEW_MODES) }).parse(await c.req.json());
+    await as(c, (tx) => tx.query(`select fn_set_review_mode($1, $2)`, [c.req.param("ws"), mode]));
+    return c.json({ ok: true });
   });
 
   app.get("/api/workspaces/:ws/members", async (c) => {

@@ -10,6 +10,7 @@ export function Settings() {
   const qc = useQueryClient();
   const members = useQuery({ queryKey: ["members", workspaceId], queryFn: () => api.get<{ id: string; name: string; email: string; role: string }[]>(`/workspaces/${workspaceId}/members`) });
   const add = useMutation({ mutationFn: (b: { email: string; role: string }) => api.post(`/workspaces/${workspaceId}/members`, b), onSuccess: () => qc.invalidateQueries({ queryKey: ["members"] }) });
+  const mode = useMutation({ mutationFn: (m: "team" | "solo") => api.post(`/workspaces/${workspaceId}/review-mode`, { mode: m }), onSuccess: () => qc.invalidateQueries({ queryKey: ["me"] }) });
   const create = useMutation({ mutationFn: (name: string) => api.post(`/workspaces`, { name }), onSuccess: () => qc.invalidateQueries({ queryKey: ["me"] }) });
   const ws = me.workspaces.find((w) => w.id === workspaceId);
   return (
@@ -48,6 +49,15 @@ export function Settings() {
           )}
         </div>
         <div className="stack" style={{ gap: 16 }}>
+          <fieldset className="panel stack" style={{ margin: 0 }} disabled={role !== "owner"}>
+            <legend className="h-section" style={{ padding: "0 4px" }}>{t("settings.reviewMode")}</legend>
+            {(["team", "solo"] as const).map((m) => (
+              <label key={m} className="choice"><input type="radio" name="review-mode" checked={ws?.review_mode === m} onChange={() => mode.mutate(m)} />
+                <span><strong>{t(`settings.mode.${m}`)}</strong><span className="small muted" style={{ display: "block" }}>{t(`settings.mode.${m}Body`)}</span></span>
+              </label>
+            ))}
+            <ErrorText error={mode.error} />
+          </fieldset>
           <fieldset className="panel stack" style={{ margin: 0 }}>
             <legend className="h-section" style={{ padding: "0 4px" }}>{t("settings.language")}</legend>
             <p className="small muted">{t("settings.languageBody")}</p>

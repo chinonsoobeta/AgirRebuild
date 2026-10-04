@@ -61,14 +61,18 @@ type AssumptionDb = {
   decided_by_name: string | null;
   decided_at: string | null;
   second_approver_name: string | null;
+  /** Approved on one person's say, a material field, no second approver (agir_sponsor_stated in the database). */
+  sponsor_stated: boolean;
   version: number;
   updated_at: string;
 };
 
 async function loadAssumptions(tx: Db, dealId: string): Promise<AssumptionDb[]> {
   return tx.query<AssumptionDb>(
-    `select a.*, u.name as decided_by_name, s.name as second_approver_name
-     from assumptions a left join users u on u.id = a.decided_by left join users s on s.id = a.second_approver
+    `select a.*, u.name as decided_by_name, s.name as second_approver_name,
+       (a.status = 'approved' and a.source_kind = 'analyst' and a.second_approver is null and f.material) as sponsor_stated
+     from assumptions a join field_catalog f on f.key = a.field_key
+       left join users u on u.id = a.decided_by left join users s on s.id = a.second_approver
      where a.deal_id = $1 order by a.field_key, a.item_key`,
     [dealId],
   );
@@ -214,6 +218,7 @@ export async function reviewView(tx: Db, dealId: string) {
         decidedById: a.decided_by,
         decidedAt: a.decided_at,
         secondApprover: a.second_approver_name,
+        sponsorStated: a.sponsor_stated,
         version: a.version,
       };
     }),
@@ -247,6 +252,8 @@ export async function createRun(tx: Db, dealId: string) {
       value: a.value!,
       sourceKind: a.source_kind,
       source: sourceLabel(a),
+      sponsorStated: a.sponsor_stated,
+      confirmedBy: a.second_approver_name,
     }));
   const inputHash = sha256(canonicalJson(input));
   const resultHash = sha256(canonicalJson(result));

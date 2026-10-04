@@ -216,7 +216,7 @@ export function Run({ dealId }: { dealId: string }) {
             <table className="tbl" style={{ marginTop: 12 }}>
               <tbody>
                 {v.inputs.map((x, n) => (
-                  <tr key={n}><td className="small">{L.field(x.fieldKey, x.itemKey)}<div className="faint">{i.msg(x.source)}</div></td><td className="r num small">{f.value(x.value, FIELD_BY_KEY.get(x.fieldKey)?.unit ?? "count")}</td></tr>
+                  <tr key={n}><td className="small">{L.field(x.fieldKey, x.itemKey)}<div className="faint">{i.msg(x.source)}{x.sponsorStated ? ` · ${t("run.notConfirmed")}` : x.confirmedBy ? ` · ${t("run.confirmedBy", { who: x.confirmedBy })}` : ""}</div></td><td className="r num small">{f.value(x.value, FIELD_BY_KEY.get(x.fieldKey)?.unit ?? "count")}</td></tr>
                 ))}
               </tbody>
             </table>

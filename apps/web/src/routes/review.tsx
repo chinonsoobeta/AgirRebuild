@@ -33,7 +33,8 @@ function ValueInput({ unit, id, defaultValue }: { unit: string; id: string; defa
 
 export function Review({ dealId }: { dealId: string }) {
   const { t, f, L, msg } = useI18n();
-  const { me, role } = useSession();
+  const { me, role, workspaceId } = useSession();
+  const solo = me.workspaces.find((w) => w.id === workspaceId)?.review_mode === "solo";
   const qc = useQueryClient();
   const deal = useDeal(dealId);
   const review = useQuery({ queryKey: ["review", dealId], queryFn: () => api.get<ReviewData>(`/deals/${dealId}/review`) });
@@ -95,7 +96,7 @@ export function Review({ dealId }: { dealId: string }) {
     >
       <div className="field"><label htmlFor={`v-${a.id}`}>{t("review.differentValue")}</label><ValueInput unit={a.unit} id={`v-${a.id}`} defaultValue={a.value} /></div>
       <div className="field"><label htmlFor={`r-${a.id}`}>{t("review.why")}</label><input className="input" id={`r-${a.id}`} name="reason" minLength={10} required placeholder={t("review.whyHint")} /></div>
-      {a.material && <p className="help row" style={{ gap: 6 }}><I.Lock />{t("review.materialNote")}</p>}
+      {a.material && <p className="help row" style={{ gap: 6 }}><I.Lock />{t(solo ? "review.materialNoteSolo" : "review.materialNote")}</p>}
       <ErrorText error={formError ?? act.error} />
       <div className="row"><button className="btn primary small" type="submit">{t("review.saveValue")}</button><button className="btn quiet small" type="button" onClick={() => setEditing(null)}>{t("common.cancel")}</button></div>
     </form>
@@ -301,8 +302,12 @@ export function Review({ dealId }: { dealId: string }) {
                     <td className="small muted">
                       {a.sourceKind === "default" ? <StatusTag tone="pass" glyph={I.Bookmark}>{t("review.defaultAccepted")}</StatusTag> : a.sourceKind === "analyst" ? t("review.enteredByShort", { who: a.decidedBy }) : a.sources[0]?.document_name}
                       {a.secondApprover && <span>{t("review.confirmedBy", { who: a.secondApprover })}</span>}
+                      {a.sponsorStated && <div>{t("review.statedBy", { who: a.decidedBy })}</div>}
                     </td>
-                    <td className="r">{editable && <button className="btn quiet small" type="button" onClick={() => act.mutate({ id: a.id, action: "reopen", version: a.version })}>{t("review.reopen")}</button>}</td>
+                    <td className="r">
+                      {editable && a.sponsorStated && <button className="btn primary small" type="button" disabled={a.decidedById === me.user.id} onClick={() => act.mutate({ id: a.id, action: "second_approve" })}>{t("review.confirm")}</button>}
+                      {editable && <button className="btn quiet small" type="button" onClick={() => act.mutate({ id: a.id, action: "reopen", version: a.version })}>{t("review.reopen")}</button>}
+                    </td>
                   </tr>
                 ))}
               </tbody>
