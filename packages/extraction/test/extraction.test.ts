@@ -975,3 +975,208 @@ describe("which loan a term belongs to, and the words small developers use", () 
     });
   });
 });
+
+describe("reading safety: a figure that may be the wrong one is shown, never used", () => {
+  const doc = (lines: string[], tables: Table[] = []): NormalizedDocument => ({
+    kind: tables.length ? "xlsx" : "pdf",
+    lines: lines.map((t, i) => ({ text: t, location: `page 1, line ${i + 1}` })),
+    tables,
+    pageCount: 1,
+    needsOcr: false,
+    fullText: lines.join("\n"),
+  });
+  const read = (...text: string[]) => extractCandidates(doc(text));
+  const pick = (r: ReturnType<typeof extractCandidates>) => r.candidates.map((c) => [c.fieldKey, c.value]);
+  const items = (r: ReturnType<typeof extractCandidates>) => r.candidates.map((c) => [c.fieldKey, c.itemKey, c.value]);
+  const noteOf = (r: ReturnType<typeof extractCandidates>, value: number) => r.other.find((o) => o.value === value)?.note ?? "";
+  // A grid: a string is a text cell, a number a bare number, [n, unit] a number whose format names its unit.
+  type Cellish = string | number | [number, "$" | "%" | "months" | "years"];
+  const grid = (name: string, ...rows: Cellish[][]): Table => ({
+    name,
+    rows: rows.map((r, i) =>
+      r.map((v, c): Cell => {
+        const ref = `${name}!${"ABCDE"[c]}${i + 1}`;
+        if (Array.isArray(v)) return { text: String(v[0]), number: v[0], unit: v[1], ref };
+        return typeof v === "number" ? { text: String(v), number: v, ref } : { text: v, ref };
+      }),
+    ),
+  });
+  const sheets = (...tables: Table[]) => extractCandidates(doc([], tables));
+
+  test("a year in a label line is no amount; a figure with no mark of a year is still read", () => {
+    expect(pick(read("Operating costs: the 2028 budget, $48,000"))).toEqual([["fixed_opex_annual", 48_000]]);
+    expect(pick(read("Frais d'exploitation : budget 2028, 48 000 $"))).toEqual([["fixed_opex_annual", 48_000]]);
+    expect(noteOf(read("Operating costs: since 2026, $48,000"), 2026)).toMatch(/year/i);
+    expect(pick(read("Operating costs: 48,000 for 2027"))).toEqual([["fixed_opex_annual", 48_000]]);
+    // negative: nothing marks 1950 as a year, so it stays a figure
+    expect(pick(read("Land cost: 1950"))).toEqual([["land_cost", 1950]]);
+  });
+
+  describe("a floating rate's spread is not the rate", () => {
+    test("with an all-in figure that figure is the rate, and the note names the index and spread", () => {
+      const r = read("Rate: prime + 1.25%, about 6.2% today");
+      expect(pick(r)).toEqual([["senior_rate_pct", 6.2]]);
+      expect(r.candidates[0]!.note).toMatch(/prime/i);
+      expect(r.candidates[0]!.note).toMatch(/1\.25/);
+      expect(noteOf(r, 1.25)).toMatch(/spread/i);
+      expect(pick(read("Taux : taux préférentiel + 1,25 %, soit 6,2 % aujourd'hui"))).toEqual([["senior_rate_pct", 6.2]]);
+      expect(pick(read("The interest rate is CORRA + 2.1%, which is 7.4% currently."))).toEqual([["senior_rate_pct", 7.4]]);
+    });
+    test("without one nothing is read, and the spread is kept with a plain note", () => {
+      for (const line of ["Rate: prime + 1.25%", "Rate: P + 1.25", "Taux : préférentiel majoré de 1,25 %", "Rate: BA + 2.5%, floor 5%"]) {
+        const r = read(line);
+        expect(r.candidates, line).toEqual([]);
+        expect(r.other.some((o) => /spread is not the rate/i.test(o.note ?? "")), line).toBe(true);
+      }
+    });
+    test("negative: a plain rate, and a sheet cell holding a spread", () => {
+      expect(pick(read("Rate: 6.2%"))).toEqual([["senior_rate_pct", 6.2]]);
+      const r = sheets(grid("S", ["Rate", "prime + 1.25%"]));
+      expect(r.candidates).toEqual([]);
+      expect(r.other.length).toBeGreaterThan(0);
+    });
+  });
+
+  test("a parenthesised number is negative only when it is money", () => {
+    expect(pick(read("Interest-only: during the build (16 months)"))).toEqual([["senior_io_months", 16]]);
+    expect(pick(read("Amortization: 30 (years)"))).toEqual([["senior_amort_years", 30]]);
+    expect(pick(read("Occupancy: (95%)"))).toEqual([["stabilized_occupancy_pct", 95]]);
+    // still negative: money
+    expect(pick(read("Contingency: ($50,000)"))).toEqual([["contingency", -50_000]]);
+    expect(pick(read("Contingency (50,000)"))).toEqual([["contingency", -50_000]]);
+  });
+
+  test("a range with a tight or mixed-spacing dash, or a hedge, is refused", () => {
+    for (const line of ["Rate: 3-4%", "Rate: 3–4%", "Rate: 3 - 4 %", "Rate: 3 -4%", "Rate: 3% to 4%", "Taux : 3 à 4 %", "The rate is somewhere in the 3-4% range."]) {
+      const r = read(line);
+      expect(r.candidates, line).toEqual([]);
+      expect(r.other.length, line).toBeGreaterThan(0);
+    }
+    for (const line of ["The rate is around about 5%.", "Rate: 5%, give or take", "Rate: 5% or thereabouts", "Le taux est quelque part à 5 %.", "Le taux est d'environ 5 % ou plus."]) expect(read(line).candidates, line).toEqual([]);
+    // negative: a plain approximation, a date and a phone number are no range, and a negative number is not made positive
+    expect(pick(read("Rate: approximately 5%"))).toEqual([["senior_rate_pct", 5]]);
+    expect(pick(read("Rate: around 5%"))).toEqual([["senior_rate_pct", 5]]);
+    expect(pick(read("Rent growth: -3%"))).toEqual([["rent_growth_pct", -3]]);
+    expect(read("Closing date: 2026-09-30").other.every((o) => !/range/i.test(o.note ?? ""))).toBe(true);
+    expect(read("Contact: 604-555-1234").other.every((o) => !/range/i.test(o.note ?? ""))).toBe(true);
+  });
+
+  describe("a subtotal row in a sheet is checked against the lines above it", () => {
+    const conflicts = (r: ReturnType<typeof extractCandidates>) => consolidate(r.candidates.map((c) => ({ ...c, documentId: "d", documentName: "d" }))).filter((p) => p.status === "conflicting");
+    test("a French sheet whose sous-total is not the sum of its lines conflicts", () => {
+      const r = sheets(grid("Budget", ["Excavation", [300_000, "$"]], ["Charpente", [900_000, "$"]], ["Finition", [500_000, "$"]], ["Sous-total coûts directs", [1_900_000, "$"]]));
+      expect(r.candidates.map((c) => [c.fieldKey, c.value, c.rule])).toEqual(expect.arrayContaining([["hard_cost", 1_900_000, "table:label-value"], ["hard_cost", 1_700_000, "table:budget-sum"]]));
+      expect(conflicts(r).map((p) => [p.fieldKey, p.values.map((v) => v.value)])).toEqual([["hard_cost", [1_700_000, 1_900_000]]]);
+    });
+    test("an English subtotal counts the lines since the previous total", () => {
+      const r = sheets(grid("Budget", ["Framing", [900_000, "$"]], ["Subtotal hard costs", [900_000, "$"]], ["Permits", [40_000, "$"]], ["Design", [60_000, "$"]], ["Total soft costs", [150_000, "$"]]));
+      expect(conflicts(r).map((p) => [p.fieldKey, p.values.map((v) => v.value)])).toEqual([["soft_cost", [100_000, 150_000]]]);
+    });
+    test("negative: a subtotal that equals its lines (within a dollar) is read once, and one with no lines above is just read", () => {
+      const ok = sheets(grid("Budget", ["Excavation", [300_000, "$"]], ["Charpente", [900_000, "$"]], ["Sous-total coûts directs", [1_200_000.5, "$"]]));
+      expect(conflicts(ok)).toEqual([]);
+      expect(pick(sheets(grid("Budget", ["Sous-total coûts directs", [1_200_000, "$"]])))).toEqual([["hard_cost", 1_200_000]]);
+    });
+  });
+
+  describe("a builder's contract price is the hard cost", () => {
+    test("a revised or fixed price is read; the figure it replaces is only shown", () => {
+      expect(pick(read("The builder has revised the stipulated price to $2,310,000."))).toEqual([["hard_cost", 2_310_000]]);
+      expect(pick(read("Construction contract: $2,200,000"))).toEqual([["hard_cost", 2_200_000]]);
+      const r = read("Our revised fixed price is $2,310,000, which replaces the earlier $2,150,000.");
+      expect(pick(r)).toEqual([["hard_cost", 2_310_000]]);
+      expect(noteOf(r, 2_150_000)).toMatch(/replace/i);
+      const fr = read("Le prix forfaitaire révisé est de 2 310 000 $; il remplace le montant précédent de 2 150 000 $.");
+      expect(pick(fr)).toEqual([["hard_cost", 2_310_000]]);
+      expect(noteOf(fr, 2_150_000)).toMatch(/replace|remplac/i);
+      expect(pick(read("Contrat à forfait : 2 200 000 $"))).toEqual([["hard_cost", 2_200_000]]);
+    });
+    test("negative: an alias in an earlier sentence names nothing, and a price that is not the contract's is not hard cost", () => {
+      expect(read("The contract price was discussed. The total is $2,000,000.").candidates).toEqual([]);
+      expect(read("The price per door is $2,000.").candidates).toEqual([]);
+    });
+  });
+
+  describe("occupancy is the stabilized assumption only", () => {
+    test("a rent roll's summary row is not an assumption, whether or not a label row precedes it", () => {
+      const roll = grid("Roll", ["Type", "Units", "Rent"], ["Studio", 4, [1_450, "$"]], ["1BR", 6, [1_750, "$"]], ["Current occupancy", [94, "%"]], ["Summary"], ["Occupancy", [93, "%"]], ["Total units", 10], ["Stabilized occupancy", [95, "%"]]);
+      const r = sheets(roll);
+      expect(items(r)).toEqual([["unit_count", "Studio", 4], ["unit_rent_monthly", "Studio", 1_450], ["unit_count", "1BR", 6], ["unit_rent_monthly", "1BR", 1_750], ["stabilized_occupancy_pct", null, 95]]);
+      expect(noteOf(r, 93)).toMatch(/summary row is not an assumption/i);
+      expect(noteOf(r, 94)).toMatch(/summary row is not an assumption/i);
+    });
+    test("negative: with no rent roll, a row labelled occupancy is the assumption", () => {
+      expect(pick(sheets(grid("Inputs", ["Occupancy", [95, "%"]])))).toEqual([["stabilized_occupancy_pct", 95]]);
+    });
+    test("a lender's condition, or today's occupancy, is shown and not used", () => {
+      for (const line of [
+        "The lender requires minimum occupancy of 92% before we fund.",
+        "Funding is subject to occupancy of at least 92% prior to closing.",
+        "Occupancy covenant: 92%",
+        "Occupation minimale de 92 % avant le déboursement.",
+        "Current occupancy is 94%.",
+        "Occupancy today: 94%",
+        "Occupancy as of June is 94%.",
+        "Taux d'occupation actuel : 94 %",
+        "Taux d'occupation en date du 1er juin : 94 %",
+      ]) {
+        const r = read(line);
+        expect(r.candidates, line).toEqual([]);
+        expect(r.other.length, line).toBeGreaterThan(0);
+      }
+      // negative: the stabilized assumption beside a current figure is still read
+      expect(pick(read("Stabilized occupancy: 95% (current: 88%)"))).toEqual([["stabilized_occupancy_pct", 95]]);
+      expect(pick(read("Occupancy: 95%"))).toEqual([["stabilized_occupancy_pct", 95]]);
+    });
+  });
+
+  describe("revenue items", () => {
+    const suites = (...rows: (string | number)[][]) => grid("Roll", ["Suite", "Type", "Area (sf)", "Rent per month"], ...rows);
+    const summary = grid("Summary", ["Type", "Units", "Rent per month"], ["2-bed", 2, [1_800, "$"]], ["1-bed", 1, [1_500, "$"]]);
+    test("a per-suite roll beside a type summary gives way to the summary", () => {
+      const r = sheets(suites(["204", "2-bed", 720, 1_800], ["205", "2-bed", 720, 1_800], ["301", "1-bed", 500, 1_500]), summary);
+      expect(items(r)).toEqual([["unit_count", "2BR", 2], ["unit_rent_monthly", "2BR", 1_800], ["unit_count", "1BR", 1], ["unit_rent_monthly", "1BR", 1_500]]);
+      expect(r.other.length).toBeGreaterThanOrEqual(6);
+      expect(r.other.every((o) => /summary/i.test(o.note ?? "") || o.note)).toBe(true);
+    });
+    test("a per-suite roll alone is grouped by type: rows counted, areas summed, rent read only when equal", () => {
+      const r = sheets(suites(["204", "2-bed", 700, 1_800], ["205", "2-bed", 700, 1_800], ["101", "1-bed", 500, 1_500], ["102", "1-bed", 520, 1_550]));
+      expect(items(r)).toEqual(expect.arrayContaining([["unit_count", "2BR", 2], ["rentable_area_sf", "2BR", 1_400], ["unit_rent_monthly", "2BR", 1_800], ["unit_count", "1BR", 2], ["rentable_area_sf", "1BR", 1_020]]));
+      expect(r.candidates.some((c) => c.fieldKey === "unit_rent_monthly" && c.itemKey === "1BR")).toBe(false);
+      expect(noteOf(r, 1_500)).toMatch(/different amounts/i);
+      expect(r.candidates.every((c) => !/\d{3}/.test(c.itemKey ?? "") || /^\d½$/.test(c.itemKey!))).toBe(true);
+    });
+    test("codes such as TH-1 to TH-3 are suites of one type", () => {
+      const r = sheets(grid("Roll", ["Unit", "Area (sf)", "Rent per month"], ["TH-1", 720, 1_900], ["TH-2", 720, 1_900], ["TH-3", 760, 1_900]));
+      expect(items(r)).toEqual([["unit_count", "TH", 3], ["rentable_area_sf", "TH", 2_200], ["unit_rent_monthly", "TH", 1_900]]);
+    });
+    test("negative: rows that are each a different type are not a per-suite roll", () => {
+      const r = sheets(grid("Roll", ["Space", "Area (sf)", "Rent per month"], ["Cafe", 900, 3_000], ["Gym", 1_200, 4_000]));
+      expect(r.candidates.map((c) => c.itemKey)).toEqual(expect.arrayContaining(["Cafe", "Gym"]));
+    });
+    test("a type is one item whichever way it is written, in a sheet or in prose", () => {
+      const table = sheets(grid("Types", ["Type", "Units", "Rent per month"], ["One-bed", 2, 1_700], ["1 chambre", 3, 1_650], ["Bachelor", 1, 1_200], ["End units (3 bed)", 2, 2_400], ["three-bedroom", 1, 2_300], ["Studio", 1, 1_300]));
+      expect(table.candidates.filter((c) => c.fieldKey === "unit_count").map((c) => [c.itemKey, c.value])).toEqual([["1BR", 2], ["1BR", 3], ["Bachelor", 1], ["3BR", 2], ["3BR", 1], ["Studio", 1]]);
+      expect(items(read("The one-bedroom suites rent for $1,800 a month."))).toEqual([["unit_rent_monthly", "1BR", 1_800]]);
+      expect(items(sheets(grid("Types", ["Type", "Units", "Rent per month"], ["One-bed", 2, 1_700])))[0]).toEqual(["unit_count", "1BR", 2]);
+    });
+    test("a number before a street word is an address, not a value", () => {
+      expect(pick(read("Units: 1450 Oak Road"))).toEqual([]);
+      expect(pick(read("Units: 1450 Oak Rd., Suite 4"))).toEqual([]);
+      expect(pick(read("Logements : 12, 1450 rue des Érables"))).toEqual([["unit_count", 12]]);
+      expect(pick(read("Units: civic 1450"))).toEqual([]);
+      expect(read("Units: 1450 Oak Road").other.some((o) => /address/i.test(o.note ?? ""))).toBe(true);
+      // negative: a count that merely precedes a street name, and a real count
+      expect(pick(read("Units: 24 on Oak Road"))).toEqual([["unit_count", 24]]);
+      expect(pick(read("Units: 1450"))).toEqual([["unit_count", 1450]]);
+    });
+    test("a deal-wide value beside named items for the same field is only shown", () => {
+      const r = read("Studio units: 4", "Units: 10");
+      expect(items(r)).toEqual([["unit_count", "Studio", 4]]);
+      expect(r.other.some((o) => o.value === 10 && o.note)).toBe(true);
+      // negative: alone it is read; and a rent for another field is not affected
+      expect(items(read("Units: 10"))).toEqual([["unit_count", "All units", 10]]);
+      expect(items(read("Studio units: 4", "Monthly rent: $1,500"))).toEqual([["unit_count", "Studio", 4], ["unit_rent_monthly", "All units", 1_500]]);
+    });
+  });
+});
