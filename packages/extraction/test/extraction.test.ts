@@ -387,3 +387,89 @@ describe("a French Canadian pro forma (fr-CA: comma decimals, space groups, trai
     expect(budget2.map((c) => [c.fieldKey, c.value])).toEqual([["soft_cost", 620_000]]);
   });
 });
+
+describe("parsers keep a document's structure", () => {
+  const esc = (s: string) => s.replace(/&/g, "&amp;").replace(/</g, "&lt;");
+  const para = (s: string) => `<w:p><w:r><w:t xml:space="preserve">${esc(s)}</w:t></w:r></w:p>`;
+  const table = (rows: string[][]) =>
+    `<w:tbl>${rows.map((r) => `<w:tr>${r.map((c) => `<w:tc>${para(c)}</w:tc>`).join("")}</w:tr>`).join("")}</w:tbl>`;
+  /** A minimal Word file: the body's XML in a zip with the three parts Word needs. */
+  async function docx(body: string): Promise<Uint8Array> {
+    const JSZip = (await import("jszip")).default;
+    const zip = new JSZip();
+    zip.file("[Content_Types].xml", `<?xml version="1.0" encoding="UTF-8"?><Types xmlns="http://schemas.openxmlformats.org/package/2006/content-types"><Default Extension="rels" ContentType="application/vnd.openxmlformats-package.relationships+xml"/><Default Extension="xml" ContentType="application/xml"/><Override PartName="/word/document.xml" ContentType="application/vnd.openxmlformats-officedocument.wordprocessingml.document.main+xml"/></Types>`);
+    zip.file("_rels/.rels", `<?xml version="1.0" encoding="UTF-8"?><Relationships xmlns="http://schemas.openxmlformats.org/package/2006/relationships"><Relationship Id="rId1" Type="http://schemas.openxmlformats.org/officeDocument/2006/relationships/officeDocument" Target="word/document.xml"/></Relationships>`);
+    zip.file("word/document.xml", `<?xml version="1.0" encoding="UTF-8"?><w:document xmlns:w="http://schemas.openxmlformats.org/wordprocessingml/2006/main"><w:body>${body}</w:body></w:document>`);
+    return new Uint8Array(await zip.generateAsync({ type: "uint8array" }));
+  }
+  async function workbook(cells: [string, number | string, string?][]): Promise<NormalizedDocument> {
+    const ExcelJS = (await import("exceljs")).default;
+    const wb = new ExcelJS.Workbook();
+    const ws = wb.addWorksheet("Sheet");
+    cells.forEach(([label, value, fmt], i) => {
+      ws.getCell(i + 1, 1).value = label;
+      const c = ws.getCell(i + 1, 2);
+      c.value = value;
+      if (fmt) c.numFmt = fmt;
+    });
+    return parseDocument(new Uint8Array(await wb.xlsx.writeBuffer()), "w.xlsx");
+  }
+
+  test("a two-column Word table is read as label and value, and its text is not also a line", async () => {
+    const d = await parseDocument(await docx(para("Summary") + table([["Land", "$290,000"], ["Hard costs", "$4,100,000"]]) + para("End")), "t.docx");
+    expect(d.tables).toHaveLength(1);
+    expect(d.tables[0]).toMatchObject({ name: "Table 1" });
+    expect(d.tables[0]!.rows[1]![1]).toEqual({ text: "$4,100,000", ref: "Table 1 R2C2" });
+    expect(d.lines.map((l) => l.text)).toEqual(["Summary", "End"]);
+    expect(d.fullText).toContain("$290,000");
+    const r = extractCandidates(d);
+    expect(r.candidates.map((c) => [c.fieldKey, c.value, c.location])).toEqual([["land_cost", 290_000, "Table 1 R1C2"], ["hard_cost", 4_100_000, "Table 1 R2C2"]]);
+  });
+  test("paragraphs before and after a table keep their order and number only the paragraphs outside tables", async () => {
+    const d = await parseDocument(await docx(para("First") + table([["Land", "$1"]]) + para("") + para("Second") + table([["A", "B"]]) + para("Third")), "t.docx");
+    expect(d.lines).toEqual([{ text: "First", location: "paragraph 1" }, { text: "Second", location: "paragraph 2" }, { text: "Third", location: "paragraph 3" }]);
+    expect(d.tables.map((t) => t.name)).toEqual(["Table 1", "Table 2"]);
+  });
+  test("a Word rent table is read as a rent roll and a budget table with a total row as a budget", async () => {
+    const rent = extractCandidates(await parseDocument(await docx(table([["Unit type", "Units", "Monthly rent"], ["Studio", "4", "$1,450"]])), "r.docx"));
+    expect(rent.candidates.map((c) => [c.fieldKey, c.itemKey, c.value, c.location])).toEqual([
+      ["unit_count", "Studio", 4, "Table 1 R2C2"],
+      ["unit_rent_monthly", "Studio", 1_450, "Table 1 R2C3"],
+    ]);
+    const budget = extractCandidates(await parseDocument(await docx(table([["Line item", "Amount"], ["Land acquisition", "$1,000,000"], ["Hard costs", "$5,000,000"], ["Total", "$6,000,000"]])), "b.docx"));
+    expect(budget.candidates.map((c) => [c.fieldKey, c.value])).toEqual([["land_cost", 1_000_000], ["hard_cost", 5_000_000]]);
+  });
+  test("entities decode, and a note in a cell is text that no table finder reads as a figure", async () => {
+    const d = await parseDocument(await docx(table([["Fees & levies", "Note: 5% of cost"]])), "t.docx");
+    expect(d.tables[0]!.rows[0]![0]!.text).toBe("Fees & levies");
+    expect(d.tables[0]!.rows[0]![1]!.number).toBeUndefined();
+  });
+
+  test("a quoted literal percent sign is not Excel's percent format, a real one is, and neither carries float noise", async () => {
+    const d = await workbook([["Occupancy", 97, '0.0 "%"'], ["Rate", 0.28, "0.0%"], ["Escaped", 5, "0\\%"]]);
+    const cells = d.tables[0]!.rows.map((r) => r[1]!);
+    expect(cells[0]).toMatchObject({ number: 97, unit: "%" });
+    expect(cells[1]).toMatchObject({ number: 28, unit: "%" });
+    expect(cells[2]).toMatchObject({ number: 5, unit: "%" });
+  });
+  test("a quoted literal names the unit the cell is written in", async () => {
+    const d = await workbook([["a", 15, '0 "mois"'], ["b", 3, '0 "ans"'], ["c", 2, '0 "years"'], ["d", 1_250_000, '#,##0 "$"'], ["e", 4, '0.0 "x"'], ["f", 900, '0 "pi²"'], ["g", 80, '0 "m²"'], ["h", 7, '0 "Note: 5%"']]);
+    expect(d.tables[0]!.rows.map((r) => r[1]!.unit)).toEqual(["months", "years", "years", "$", "x", "sf", "m2", undefined]);
+    expect(d.tables[0]!.rows[3]![1]!.currency).toBeUndefined();
+  });
+  test("a months cell under a French label is read as months", async () => {
+    const d = await workbook([["Durée des travaux", 15, '0 "mois"']]);
+    expect(extractCandidates(d).candidates.map((c) => [c.fieldKey, c.value])).toEqual([["construction_months", 15]]);
+  });
+  test("a value cell with no unit followed by a cell holding only a unit word reads that unit; a longer note does not", async () => {
+    const ExcelJS = (await import("exceljs")).default;
+    const wb = new ExcelJS.Workbook();
+    const ws = wb.addWorksheet("S");
+    ws.addRow(["a", 15, "mois"]);
+    ws.addRow(["b", 3, "years"]);
+    ws.addRow(["c", 80, "%"]);
+    ws.addRow(["d", 6, "months, approximately"]);
+    const d = await parseDocument(new Uint8Array(await wb.xlsx.writeBuffer()), "u.xlsx");
+    expect(d.tables[0]!.rows.map((r) => r[1]!.unit)).toEqual(["months", "years", "%", undefined]);
+  });
+});
