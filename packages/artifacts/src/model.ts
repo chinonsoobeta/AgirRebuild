@@ -229,7 +229,7 @@ function sponsorStatedBlocks(f: Formatter, x: ArtifactInput): Block[] {
     { type: "heading", text: "Stated by the sponsor, not independently confirmed" },
     {
       type: "paragraph",
-      text: `${n} of the ${m} material inputs this run used were stated by the sponsor and not confirmed by anyone else. Check them before relying on this ${x.kind === "ic_memo" ? "memo" : "package"}.`,
+      text: `${n} of the ${m} material inputs this run used ${stated.length === 1 ? "was" : "were"} stated by the sponsor and not confirmed by anyone else. Check them before relying on this ${x.kind === "ic_memo" ? "memo" : "package"}.`,
     },
     { type: "table", columns: INPUT_COLUMNS, rows: stated.map((a) => inputRow(f, a)) },
   ];

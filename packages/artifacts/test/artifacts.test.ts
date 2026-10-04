@@ -112,7 +112,7 @@ describe("artifacts", () => {
       const text = visibleText(renderHtml(model));
       const heading = "Stated by the sponsor, not independently confirmed";
       expect(text).toContain(heading);
-      expect(text).toContain(`1 of the ${m} material inputs this run used were stated by the sponsor and not confirmed by anyone else. Check them before relying on this ${kind === "ic_memo" ? "memo" : "package"}.`);
+      expect(text).toContain(`1 of the ${m} material inputs this run used was stated by the sponsor and not confirmed by anyone else. Check them before relying on this ${kind === "ic_memo" ? "memo" : "package"}.`);
       expect(text).toContain(stated!.label);
       expect(text.indexOf(heading)).toBeLessThan(text.indexOf(kind === "ic_memo" ? "Sources and uses" : "Debt and coverage"));
       expect(text).toContain("Confirmed by Agir review on 2026-10-03");
