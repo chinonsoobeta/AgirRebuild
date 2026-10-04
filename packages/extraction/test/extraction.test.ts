@@ -476,3 +476,127 @@ describe("parsers keep a document's structure", () => {
     expect(extractCandidates(d).candidates.map((c) => [c.fieldKey, c.value])).toEqual([["senior_loan_amount", 2_000_000], ["senior_rate_pct", 5.85], ["refinance_amount", 2_600_000], ["refinance_rate_pct", 4.55], ["refinance_amort_years", 40]]);
   });
 });
+
+describe("tables written as lines of text, and what a table's rows mean", () => {
+  const lines = (...text: string[]): NormalizedDocument => ({
+    kind: "pdf",
+    lines: text.map((t, i) => ({ text: t, location: `page 1, line ${i + 1}` })),
+    tables: [],
+    pageCount: 1,
+    needsOcr: false,
+    fullText: text.join("\n"),
+  });
+  const grid = (...rows: (string | number)[][]): Table => ({
+    name: "Sheet",
+    rows: rows.map((r, i) => r.map((x, c) => (typeof x === "number" ? { text: String(x), number: x, ref: `${"ABCDE"[c]}${i + 1}` } : { text: x, ref: `${"ABCDE"[c]}${i + 1}` }))),
+  });
+  const tableDoc = (t: Table): NormalizedDocument => ({ ...lines(), tables: [t] });
+  const pick = (r: ReturnType<typeof extractCandidates>) => r.candidates.map((c) => [c.fieldKey, c.itemKey, c.value]);
+
+  test("a header line, then one line per unit type, is a rent roll; the area is per unit, so the item's area is count x area", () => {
+    const r = extractCandidates(lines("Plan Count Floor area (sf) Rent per month", "Loft 3 480 $1,495", "Penthouse 2 910 $2,240"));
+    expect(pick(r)).toEqual([
+      ["unit_count", "Loft", 3], ["unit_rent_monthly", "Loft", 1_495], ["rentable_area_sf", "Loft", 1_440],
+      ["unit_count", "Penthouse", 2], ["unit_rent_monthly", "Penthouse", 2_240], ["rentable_area_sf", "Penthouse", 1_820],
+    ]);
+    expect(r.candidates.find((c) => c.fieldKey === "rentable_area_sf")).toMatchObject({ note: "3 × 480 sf", location: "page 1, line 2", rule: "table:rent-roll" });
+  });
+  test("a total area column is not multiplied by the count, and a count of one leaves the area as it is", () => {
+    const total = extractCandidates(lines("Plan Count Total area (sf) Rent per month", "Loft 3 1,440 $1,495"));
+    expect(pick(total).find((c) => c[0] === "rentable_area_sf")).toEqual(["rentable_area_sf", "Loft", 1_440]);
+    const one = extractCandidates(lines("Plan Count Area (sf) Rent per month", "Corner 1 700 $1,900"));
+    expect(one.candidates.find((c) => c.fieldKey === "rentable_area_sf")).toMatchObject({ value: 700 });
+  });
+  test("a per-suite roll keeps each suite's own rent, ignores the status words after the numbers and skips the total", () => {
+    const r = extractCandidates(lines("Suite Type Units Monthly rent Status", "Suite 12 Bachelor 1 $1,100 vacant", "Suite 14 Bachelor 1 $1,125 leased 2026", "Total 2 $2,225"));
+    expect(pick(r).filter((c) => c[0] === "unit_rent_monthly")).toEqual([["unit_rent_monthly", "Suite 12 Bachelor", 1_100], ["unit_rent_monthly", "Suite 14 Bachelor", 1_125]]);
+    expect(r.candidates.some((c) => c.itemKey?.startsWith("Total"))).toBe(false);
+  });
+  test("French header and rows are read the same way", () => {
+    const r = extractCandidates(lines("Type de logement Nombre Loyer mensuel", "2 chambres 4 1895 $", "Studio 2 1450 $"));
+    expect(pick(r)).toEqual([["unit_count", "2 chambres", 4], ["unit_rent_monthly", "2 chambres", 1_895], ["unit_count", "Studio", 2], ["unit_rent_monthly", "Studio", 1_450]]);
+  });
+  test("an annual rent column is a yearly rent per unit: the monthly rent is that over twelve", () => {
+    const r = extractCandidates(lines("Plan Count Annual rent", "One-bed 6 $18,000"));
+    expect(pick(r)).toEqual([["unit_count", "One-bed", 6], ["unit_rent_monthly", "One-bed", 1_500]]);
+    expect(r.candidates[1]).toMatchObject({ unitSeen: "$/yr", note: expect.stringContaining("yearly") });
+    const fr = extractCandidates(lines("Type de logement Nombre Loyer annuel", "Studio 2 15600 $"));
+    expect(pick(fr).find((c) => c[0] === "unit_rent_monthly")).toEqual(["unit_rent_monthly", "Studio", 1_300]);
+  });
+  test("a rent per square foot header is not divided", () => {
+    const r = extractCandidates(lines("Space Area (sf) Annual rent per sf", "Shop 1,200 $32"));
+    expect(pick(r)).toEqual([["rent_psf_annual", "Shop", 32], ["rentable_area_sf", "Shop", 1_200]]);
+  });
+  test("a mixed table: notes after it say which rows are per square foot and which are yearly per apartment", () => {
+    const r = extractCandidates(lines("Use Count Area (sf) Rent", "Retail 1 2,000 $30", "Residential 8 650 $21,600", "Retail rents are net annual per square foot of area.", "Residential rents are annual rent per apartment."));
+    expect(pick(r).filter((c) => c[0] === "rent_psf_annual" || c[0] === "unit_rent_monthly")).toEqual([["rent_psf_annual", "Retail", 30], ["unit_rent_monthly", "Residential", 1_800]]);
+    expect(pick(r)).toContainEqual(["rentable_area_sf", "Retail", 2_000]);
+  });
+  test("a note about the whole table settles every row; the same in a spreadsheet's own rows", () => {
+    const text = extractCandidates(lines("Type Count Area (sf) Rent", "Studio 4 400 $1,500", "All rents are monthly per unit."));
+    expect(pick(text)).toContainEqual(["unit_rent_monthly", "Studio", 1_500]);
+    const sheet = extractCandidates(tableDoc(grid(["Unit", "Use", "Count", "Area (sf)", "Rent"], ["A", "Retail", 1, 900, 25], ["B", "Flat", 2, 600, 1_800], ["Flat rents are monthly per unit."], ["Retail rents are per square foot per year."])));
+    expect(pick(sheet).filter((c) => c[0] === "unit_rent_monthly" || c[0] === "rent_psf_annual")).toEqual([["rent_psf_annual", "A Retail", 25], ["unit_rent_monthly", "B Flat", 1_800]]);
+  });
+  test("a bare Rent column beside an area column with no note is not a value: it is shown with the reason", () => {
+    const r = extractCandidates(lines("Type Count Area (sf) Rent", "Studio 4 400 $1,500"));
+    expect(r.candidates.some((c) => c.fieldKey === "unit_rent_monthly" || c.fieldKey === "rent_psf_annual")).toBe(false);
+    expect(pick(r)).toContainEqual(["unit_count", "Studio", 4]);
+    expect(r.other.find((o) => o.value === 1_500)).toMatchObject({ note: "The rent's basis (per month, per year or per square foot) is not stated" });
+  });
+  test("a bare Rent column with no area column is still monthly, as before", () => {
+    expect(pick(extractCandidates(lines("Type Count Rent", "Studio 4 $1,500")))).toContainEqual(["unit_rent_monthly", "Studio", 1_500]);
+  });
+  test("a number in parentheses in a label is part of the label, with or without a colon", () => {
+    expect(pick(extractCandidates(lines("Parking income (14 stalls) $8,400 per year")))).toEqual([["other_income_annual", null, 8_400]]);
+    expect(pick(extractCandidates(lines("Parking income (14 stalls): $8,400 per year")))).toEqual([["other_income_annual", null, 8_400]]);
+    // A line whose only number is in parentheses is unchanged.
+    expect(pick(extractCandidates(lines("Hard costs ($4,100,000)")))).toEqual([["hard_cost", null, 4_100_000]]);
+  });
+  test("a budget line whose label holds a number in parentheses keeps its amount", () => {
+    const r = extractCandidates(lines("Item Amount", "Land (closed, 0.3 ha) $410,000", "Hard costs $1,100,000"));
+    expect(pick(r)).toEqual([["land_cost", null, 410_000], ["hard_cost", null, 1_100_000]]);
+    expect(r.candidates[0]).toMatchObject({ rule: "table:budget", location: "page 1, line 2" });
+    expect(pick(extractCandidates(lines("Poste Montant", "Terrain 310 000 $")))).toEqual([["land_cost", null, 310_000]]);
+  });
+  test("a bid whose division lines do not add up to its total raises both; one that adds up gives the value once", () => {
+    const off = extractCandidates(lines("Division Amount", "Framing $400,000", "Mechanical $200,000", "Interior finishing $150,000", "Total hard cost $800,000"));
+    const hard = off.candidates.filter((c) => c.fieldKey === "hard_cost");
+    expect(hard.map((c) => [c.value, c.rule])).toEqual([[750_000, "table:budget-sum"], [800_000, "table:budget-total"]]);
+    expect(hard[0]!.location).toBe("page 1, line 2, page 1, line 3, page 1, line 4");
+    expect(hard[1]!.note).toContain("The printed total does not equal the sum of its lines");
+    const same = extractCandidates(lines("Division Amount", "Framing $400,000", "Mechanical $200,000", "Interior finishing $200,000", "Total hard cost $800,000"));
+    expect(same.candidates.filter((c) => c.fieldKey === "hard_cost").map((c) => c.value)).toEqual([800_000]);
+  });
+  test("unmapped lines in a spreadsheet budget are the components of the total below them; with no total they stay in other", () => {
+    const t = (rows: (string | number)[][]) => extractCandidates(tableDoc(grid(["Description", "Cost"], ...rows)));
+    const r = t([["Framing", 400_000], ["Mechanical", 200_000], ["Total des coûts directs", 650_000]]);
+    expect(r.candidates.map((c) => [c.fieldKey, c.value])).toEqual([["hard_cost", 600_000], ["hard_cost", 650_000]]);
+    const none = t([["Framing", 400_000], ["Mechanical", 200_000]]);
+    expect(none.candidates).toEqual([]);
+    expect(none.other.map((o) => o.value)).toEqual([400_000, 200_000]);
+    // Within a dollar is the same figure.
+    expect(t([["Framing", 400_000], ["Mechanical", 200_000.5], ["Total hard cost", 600_000]]).candidates.map((c) => c.value)).toHaveLength(1);
+  });
+  test("a total starts a new run of lines: lines before an earlier total are not summed into the next one", () => {
+    const r = extractCandidates(tableDoc(grid(["Item", "Amount"], ["Framing", 400_000], ["Total hard cost", 400_000], ["Design fees", 50_000], ["Total soft cost", 50_000])));
+    expect(r.candidates.map((c) => [c.fieldKey, c.value])).toEqual([["hard_cost", 400_000], ["soft_cost", 50_000]]);
+  });
+
+  test("negative: a sentence that merely holds the words item and amount is not a header", () => {
+    const r = extractCandidates(lines("The item amount below is only approximate", "Land (closed, 0.3 ha) $410,000"));
+    expect(r.candidates.every((c) => c.rule === "line:prose")).toBe(true);
+    expect(r.candidates.length).toBeGreaterThan(0);
+  });
+  test("negative: a header with no rows under it is nothing, and a row with too few numbers is left to the prose reader", () => {
+    expect(extractCandidates(lines("Plan Count Rent per month", "Rents follow the lender's schedule.")).candidates).toEqual([]);
+    const r = extractCandidates(lines("Plan Count Floor area (sf) Rent per month", "Loft 3 480 $1,495", "Studio 480 $1,100"));
+    expect(r.candidates.filter((c) => c.rule === "table:rent-roll").every((c) => c.itemKey === "Loft")).toBe(true);
+    expect(r.candidates.some((c) => c.itemKey === "Studio" && c.rule === "table:rent-roll")).toBe(false);
+  });
+  test("negative: a footer or a figure that is not money does not become a budget line", () => {
+    const r = extractCandidates(lines("Item Amount", "Land $410,000", "Prepared for the lender - page 1"));
+    expect(r.candidates.map((c) => [c.fieldKey, c.value])).toEqual([["land_cost", 410_000]]);
+    expect(r.other.some((o) => o.rule === "table:budget")).toBe(false);
+  });
+});
