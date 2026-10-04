@@ -9,9 +9,9 @@ work it describes.
 | Command | Result | Verified |
 |---|---|---|
 | `npm install` | Node 22 (`engines` allows 22 to 24); `.npmrc` sets `legacy-peer-deps` | 2026-10-01 |
-| `npm run gate -- --tier=release` | Both typechecks, 149 tests in 9 files (119 on `main`), web build | 2026-10-03, `task/04-solo-mode` |
+| `npm run gate -- --tier=release` | Both typechecks, 151 tests in 9 files (119 on `main`), web build | 2026-10-03, `task/05-agir-review` |
 | `VITEST_MAX_WORKERS=2 npm run gate -- --tier=release` | The same gate with two test workers: peak memory about 1 GB, no swap | 2026-10-01 |
-| `AGIR_DATA_DIR=<empty folder> PORT=8791 npm start` | Builds the web app, applies `0001` to `0004`, seeds six deals, serves on that port. An empty data folder leaves `.data/` untouched | 2026-10-01, `task/01-deal-currency` |
+| `AGIR_DATA_DIR=<empty folder> PORT=8791 npm start` | Builds the web app, applies `0001` to `0007`, seeds six deals, serves on that port. An empty data folder leaves `.data/` untouched | 2026-10-01, `task/01-deal-currency` |
 
 `npm start` without `AGIR_DATA_DIR` migrates `.data/` in place, and a migration cannot be undone there.
 Point it at an empty folder to try a branch.
@@ -33,6 +33,7 @@ later tasks build on earlier migrations. Review and merge them in order.
 | `task/02-metric-area` | 1 | Areas and rents in m² (and the French pi²) are read from documents and converted to square feet where they are mapped, at 10.7639 SF per m². Each source keeps the unit the document used. Review says a value was converted, and a run's source label quotes the original | Not required: extraction is not on rule 7's list, and no reference deal's values moved. Advised, because it changes how new documents are read |
 | `task/03-run-reuse` | 2 | A run is reused only when it is the deal's latest run and was made from the same approved inputs, in migration `0005`. Before, a run after a status-only change came back as the out-of-date run before it, and no decision could be recorded. Solo mode needs this: confirming a value changes its status, not its figure | Yes: a migration, and the rule for when a signed run is reused |
 | `task/04-solo-mode` | 2 | A workspace owner can switch review to solo. A material value entered by hand is then used at once, and stays labelled sponsor-stated (approved, entered by a person, no second approver) until a different person confirms it, in migration `0006`. The label is derived, so no review path removes it; it is part of the assumptions hash, so confirming makes earlier runs out of date, and runs and review show it | Yes: it relaxes the dual-control rule, and a migration |
+| `task/05-agir-review` | 2 | The paid, done-with-you confirmation. An owner grants a person a time-limited `reviewer` role (1 to 90 days) in migration `0007`. A reviewer reads the workspace and may only confirm a sponsor-stated value; every other action is refused, and an expired membership grants nothing. A value they confirm is labelled "Confirmed by Agir review" on review and in a run's inputs, and the label outlives the expiry | Yes: a role, the RLS helpers `agir_is_member` and `agir_require`, and a migration |
 
 The plan for small Canadian developers is [plan-small-developers.md](plan-small-developers.md). Release 1 steps 0 to 3 are
 being built now. Steps 4 to 6 wait on the people-owned items listed below.

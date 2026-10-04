@@ -129,9 +129,15 @@ export function createApp({ db, store, secureCookies, demoSignIn = false }: AppD
     return c.json({ ok: true });
   });
 
+  app.post("/api/workspaces/:ws/review-grant", async (c) => {
+    const body = z.object({ email: z.string().email(), days: z.number().int().min(1).max(90) }).parse(await c.req.json());
+    await as(c, (tx) => tx.query(`select fn_grant_review($1, $2, $3)`, [c.req.param("ws"), body.email, body.days]));
+    return c.json({ ok: true });
+  });
+
   app.get("/api/workspaces/:ws/members", async (c) => {
     const rows = await as(c, (tx) =>
-      tx.query(`select u.id, u.name, u.email, m.role from workspace_members m join users u on u.id = m.user_id where m.workspace_id = $1 order by u.name`, [c.req.param("ws")]),
+      tx.query(`select u.id, u.name, u.email, m.role, m.expires_at from workspace_members m join users u on u.id = m.user_id where m.workspace_id = $1 order by u.name`, [c.req.param("ws")]),
     );
     return c.json(rows);
   });

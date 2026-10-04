@@ -301,11 +301,11 @@ export function Review({ dealId }: { dealId: string }) {
                     <td className="r num">{f.value(a.value, a.unit)}</td>
                     <td className="small muted">
                       {a.sourceKind === "default" ? <StatusTag tone="pass" glyph={I.Bookmark}>{t("review.defaultAccepted")}</StatusTag> : a.sourceKind === "analyst" ? t("review.enteredByShort", { who: a.decidedBy }) : a.sources[0]?.document_name}
-                      {a.secondApprover && <span>{t("review.confirmedBy", { who: a.secondApprover })}</span>}
+                      {a.confirmedByReview ? <span>{t("review.confirmedByReview", { date: f.date(a.secondApprovedAt!) })}</span> : a.secondApprover && <span>{t("review.confirmedBy", { who: a.secondApprover })}</span>}
                       {a.sponsorStated && <div>{t("review.statedBy", { who: a.decidedBy })}</div>}
                     </td>
                     <td className="r">
-                      {editable && a.sponsorStated && <button className="btn primary small" type="button" disabled={a.decidedById === me.user.id} onClick={() => act.mutate({ id: a.id, action: "second_approve" })}>{t("review.confirm")}</button>}
+                      {(editable || role === "reviewer") && a.sponsorStated && <button className="btn primary small" type="button" disabled={a.decidedById === me.user.id} onClick={() => act.mutate({ id: a.id, action: "second_approve" })}>{t("review.confirm")}</button>}
                       {editable && <button className="btn quiet small" type="button" onClick={() => act.mutate({ id: a.id, action: "reopen", version: a.version })}>{t("review.reopen")}</button>}
                     </td>
                   </tr>

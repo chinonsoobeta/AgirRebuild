@@ -61,6 +61,9 @@ type AssumptionDb = {
   decided_by_name: string | null;
   decided_at: string | null;
   second_approver_name: string | null;
+  second_approved_at: string | null;
+  /** The confirmer is an Agir reviewer. The membership row outlives its expiry, so the label survives. */
+  confirmed_by_review: boolean;
   /** Approved on one person's say, a material field, no second approver (agir_sponsor_stated in the database). */
   sponsor_stated: boolean;
   version: number;
@@ -70,6 +73,7 @@ type AssumptionDb = {
 async function loadAssumptions(tx: Db, dealId: string): Promise<AssumptionDb[]> {
   return tx.query<AssumptionDb>(
     `select a.*, u.name as decided_by_name, s.name as second_approver_name,
+       exists (select 1 from workspace_members m where m.workspace_id = a.workspace_id and m.user_id = a.second_approver and m.role = 'reviewer') as confirmed_by_review,
        (a.status = 'approved' and a.source_kind = 'analyst' and a.second_approver is null and f.material) as sponsor_stated
      from assumptions a join field_catalog f on f.key = a.field_key
        left join users u on u.id = a.decided_by left join users s on s.id = a.second_approver
@@ -218,6 +222,8 @@ export async function reviewView(tx: Db, dealId: string) {
         decidedById: a.decided_by,
         decidedAt: a.decided_at,
         secondApprover: a.second_approver_name,
+        confirmedByReview: a.confirmed_by_review,
+        secondApprovedAt: a.second_approved_at,
         sponsorStated: a.sponsor_stated,
         version: a.version,
       };
@@ -254,6 +260,8 @@ export async function createRun(tx: Db, dealId: string) {
       source: sourceLabel(a),
       sponsorStated: a.sponsor_stated,
       confirmedBy: a.second_approver_name,
+      confirmedByReview: a.confirmed_by_review,
+      confirmedAt: a.second_approved_at,
     }));
   const inputHash = sha256(canonicalJson(input));
   const resultHash = sha256(canonicalJson(result));

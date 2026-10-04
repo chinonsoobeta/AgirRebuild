@@ -26,7 +26,7 @@ export const api = {
 };
 
 // ---- Response shapes ---------------------------------------------------------------
-export type Me = { user: { id: string; email: string; name: string }; workspaces: { id: string; name: string; review_mode: "team" | "solo"; role: "owner" | "admin" | "analyst" | "viewer" }[] };
+export type Me = { user: { id: string; email: string; name: string }; workspaces: { id: string; name: string; review_mode: "team" | "solo"; role: "owner" | "admin" | "analyst" | "viewer" | "reviewer" }[] };
 export type Tone = "pass" | "review" | "stop" | "neutral";
 export type DealOverview = {
   deal: {
@@ -58,7 +58,7 @@ export type Assumption = {
   id: string; fieldKey: string; itemKey: string | null; label: string; group: string; groupLabel: string; unit: string; material: boolean;
   conservative: "max" | "min" | null; status: string; value: number | null; pendingValue: number | null; sourceKind: "document" | "analyst" | "default";
   sources: Source[]; conflictValues: { value: number; documents: string[] }[] | null; reason: string | null; decidedBy: string | null;
-  decidedById: string | null; decidedAt: string | null; secondApprover: string | null; sponsorStated: boolean; version: number;
+  decidedById: string | null; decidedAt: string | null; secondApprover: string | null; confirmedByReview: boolean; secondApprovedAt: string | null; sponsorStated: boolean; version: number;
 };
 export type ReadinessItem = { fieldKey: string; itemKey?: string; label: string; detail?: string };
 export type Review = {
@@ -78,7 +78,7 @@ export type RunView = {
     annual: { year: number; gpr: number; egi: number; opex: number; noi: number; debtService: number; sizingDebtService: number; cashFlow: number }[];
     warnings: { key: string; message: string }[];
   };
-  inputs: { fieldKey: string; itemKey: string | null; label: string; value: number; sourceKind: string; source: string; sponsorStated: boolean; confirmedBy: string | null }[];
+  inputs: { fieldKey: string; itemKey: string | null; label: string; value: number; sourceKind: string; source: string; sponsorStated: boolean; confirmedBy: string | null; confirmedByReview: boolean; confirmedAt: string | null }[];
   decisions: { id: string; decision: string; rationale: string; conditions: string | null; override_reason: string | null; created_at: string; decided_by: string }[];
 };
 export type Artifact = { id: string; kind: string; format: string; status: string; error: string | null; sha256: string | null; created_at: string; run_id: string; run_number: number; provenance_entries: number | null };

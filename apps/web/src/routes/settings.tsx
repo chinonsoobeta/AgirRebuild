@@ -5,11 +5,12 @@ import { ErrorText, useSession } from "../components/ui";
 import { useI18n } from "../i18n";
 
 export function Settings() {
-  const { t, L, lang, setLang } = useI18n();
+  const { t, f, L, lang, setLang } = useI18n();
   const { me, workspaceId, role } = useSession();
   const qc = useQueryClient();
-  const members = useQuery({ queryKey: ["members", workspaceId], queryFn: () => api.get<{ id: string; name: string; email: string; role: string }[]>(`/workspaces/${workspaceId}/members`) });
+  const members = useQuery({ queryKey: ["members", workspaceId], queryFn: () => api.get<{ id: string; name: string; email: string; role: string; expires_at: string | null }[]>(`/workspaces/${workspaceId}/members`) });
   const add = useMutation({ mutationFn: (b: { email: string; role: string }) => api.post(`/workspaces/${workspaceId}/members`, b), onSuccess: () => qc.invalidateQueries({ queryKey: ["members"] }) });
+  const grant = useMutation({ mutationFn: (b: { email: string; days: number }) => api.post(`/workspaces/${workspaceId}/review-grant`, b), onSuccess: () => qc.invalidateQueries({ queryKey: ["members"] }) });
   const mode = useMutation({ mutationFn: (m: "team" | "solo") => api.post(`/workspaces/${workspaceId}/review-mode`, { mode: m }), onSuccess: () => qc.invalidateQueries({ queryKey: ["me"] }) });
   const create = useMutation({ mutationFn: (name: string) => api.post(`/workspaces`, { name }), onSuccess: () => qc.invalidateQueries({ queryKey: ["me"] }) });
   const ws = me.workspaces.find((w) => w.id === workspaceId);
@@ -24,7 +25,7 @@ export function Settings() {
           <h2 className="h-section">{t("settings.people")}</h2>
           <table className="tbl">
             <thead><tr><th>{t("settings.col.name")}</th><th>{t("settings.col.email")}</th><th>{t("settings.col.role")}</th></tr></thead>
-            <tbody>{(members.data ?? []).map((m) => <tr key={m.id}><td>{m.name}</td><td className="muted">{m.email}</td><td>{L.role(m.role)}</td></tr>)}</tbody>
+            <tbody>{(members.data ?? []).map((m) => <tr key={m.id}><td>{m.name}</td><td className="muted">{m.email}</td><td>{L.role(m.role)}{m.expires_at && <span className="small muted"> · {new Date(m.expires_at) > new Date() ? t("settings.expires", { date: f.date(m.expires_at) }) : t("settings.expired")}</span>}</td></tr>)}</tbody>
           </table>
           {(role === "owner" || role === "admin") && (
             <form
@@ -58,6 +59,26 @@ export function Settings() {
             ))}
             <ErrorText error={mode.error} />
           </fieldset>
+          {role === "owner" && (
+            <form
+              className="panel stack"
+              onSubmit={(e: FormEvent<HTMLFormElement>) => {
+                e.preventDefault();
+                const fd = new FormData(e.currentTarget);
+                grant.mutate({ email: String(fd.get("email")), days: Number(fd.get("days")) });
+                e.currentTarget.reset();
+              }}
+            >
+              <strong>{t("settings.review")}</strong>
+              <p className="small muted">{t("settings.reviewBody")}</p>
+              <div className="row" style={{ alignItems: "flex-end" }}>
+                <div className="field grow"><label htmlFor="r-email">{t("settings.col.email")}</label><input className="input" id="r-email" name="email" type="email" required /></div>
+                <div className="field"><label htmlFor="r-days">{t("settings.reviewDays")}</label><input className="input" id="r-days" name="days" type="number" min={1} max={90} step={1} defaultValue={14} required /></div>
+                <button className="btn" type="submit">{t("settings.reviewBtn")}</button>
+              </div>
+              <ErrorText error={grant.error} />
+            </form>
+          )}
           <fieldset className="panel stack" style={{ margin: 0 }}>
             <legend className="h-section" style={{ padding: "0 4px" }}>{t("settings.language")}</legend>
             <p className="small muted">{t("settings.languageBody")}</p>
@@ -69,7 +90,7 @@ export function Settings() {
           <h2 className="h-section">{t("settings.roles")}</h2>
           <table className="tbl small">
             <tbody>
-              {(["viewer", "analyst", "admin", "owner"] as const).map((r) => <tr key={r}><th scope="row">{L.role(r)}</th><td className="muted">{t(`settings.r.${r}`)}</td></tr>)}
+              {(["viewer", "reviewer", "analyst", "admin", "owner"] as const).map((r) => <tr key={r}><th scope="row">{L.role(r)}</th><td className="muted">{t(`settings.r.${r}`)}</td></tr>)}
             </tbody>
           </table>
           <form
