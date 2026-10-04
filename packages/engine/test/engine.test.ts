@@ -264,4 +264,46 @@ describe("quick-start templates", () => {
     expect(r.checks.map((c) => c.key)).toContain("equity_wipeout");
     expect(input!.revenue).toHaveLength(1);
   });
+
+  // Readiness runs the engine's own cross-field rules, so "ready" means the engine will accept the input.
+  describe("a refinance the engine would refuse", () => {
+    const withRefi = (fields: Record<string, number>) => [
+      ...rowsFor("multiplex"),
+      ...Object.entries(fields).map(([fieldKey, valueNumeric]) => ({ fieldKey, itemKey: null, status: "approved" as AssumptionStatus, valueNumeric })),
+    ];
+    const takeOut = { refinance_rate_pct: 5, refinance_amort_years: 30 };
+
+    test("a month, rate and amortization with neither amount nor loan-to-value is blocked, naming the problem", () => {
+      const { readiness, input } = assemble(withRefi({ refinance_month: 24, ...takeOut }));
+      expect(input).toBeNull();
+      expect(readiness.status).toBe("blocked");
+      expect(readiness.impossible).toHaveLength(1);
+      expect(readiness.impossible[0]).toMatchObject({ fieldKey: "refinance_amount", label: "give the refinance either a loan amount or a loan-to-value, not both or neither" });
+    });
+
+    test("both an amount and a loan-to-value is blocked", () => {
+      const { readiness, input } = assemble(withRefi({ refinance_month: 24, refinance_amount: 1_200_000, refinance_ltv_pct: 65, ...takeOut }));
+      expect(input).toBeNull();
+      expect(readiness.status).toBe("blocked");
+      expect(readiness.impossible.map((i) => i.label)).toEqual(["give the refinance either a loan amount or a loan-to-value, not both or neither"]);
+    });
+
+    test("exactly one of the two is ready, with the refinance in the input", () => {
+      for (const sizing of [{ refinance_amount: 1_200_000 }, { refinance_ltv_pct: 65 }]) {
+        const { readiness, input } = assemble(withRefi({ refinance_month: 24, ...sizing, ...takeOut }));
+        expect(readiness).toMatchObject({ status: "ready", impossible: [] });
+        expect(input!.refinance).toMatchObject({ month: 24 });
+      }
+    });
+
+    test("a refinance month before stabilization is blocked", () => {
+      // 12 months of construction and 3 of lease-up: stabilization is month 15.
+      const { readiness, input } = assemble(withRefi({ refinance_month: 10, refinance_amount: 1_200_000, ...takeOut }));
+      expect(input).toBeNull();
+      expect(readiness.status).toBe("blocked");
+      expect(readiness.impossible).toHaveLength(1);
+      expect(readiness.impossible[0]).toMatchObject({ fieldKey: "refinance_month" });
+      expect(readiness.impossible[0]!.label).toMatch(/^refinance month must fall from stabilization \(month 15\)/);
+    });
+  });
 });

@@ -146,6 +146,22 @@ describe("sensitivity", () => {
     expect(g.json.cells.length).toBe(5);
     expect(await count()).toBe(before);
   });
+  test("an input the engine refuses is a 422 with the reason, never a 500", async () => {
+    // Runs are append-only; lift that for one statement to put an invalid input where readiness should have stopped it, then restore it.
+    const [{ snap }] = await db.query<{ snap: unknown }>(`select input_snapshot as snap from runs where id = $1`, [run]);
+    const bad = JSON.stringify({ month: 1, ratePct: 5, amortYears: 30, ioMonths: 0 });
+    await db.query(`alter table runs disable trigger runs_append_only`);
+    try {
+      await db.query(`update runs set input_snapshot = jsonb_set(input_snapshot, '{input,refinance}', $2::jsonb) where id = $1`, [run, bad]);
+      const r = await call(alice, "POST", `/api/runs/${run}/explore`, { shock: {} });
+      expect(r.status).toBe(422);
+      expect(r.json.error).toMatch(/give the refinance either a loan amount or a loan-to-value/);
+      expect(r.json.problems.length).toBeGreaterThan(0);
+    } finally {
+      await db.query(`update runs set input_snapshot = $2::jsonb where id = $1`, [run, JSON.stringify(snap)]);
+      await db.query(`alter table runs enable trigger runs_append_only`);
+    }
+  });
   test("refuses shocks outside a driver's range", async () => {
     expect((await call(alice, "POST", `/api/runs/${run}/explore`, { shock: { exitCapBps: 5000 } })).status).toBe(422);
   });
