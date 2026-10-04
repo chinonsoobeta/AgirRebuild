@@ -1,5 +1,5 @@
 import { FIELD_BY_KEY, placeLabel } from "@agir/contracts";
-import type { ArtifactInput } from "./model.ts";
+import { confirmationLabel, type ArtifactInput } from "./model.ts";
 
 /**
  * The model export: every number of the run as a number, never as text, so an
@@ -79,9 +79,9 @@ export async function renderXlsx(x: ArtifactInput): Promise<Uint8Array> {
   }
 
   const inputs = wb.addWorksheet("Inputs");
-  head(inputs, ["Field", "Component", "Value", "Unit", "Source"]);
+  head(inputs, ["Field", "Component", "Value", "Unit", "Source", "Confirmation"]);
   for (const a of x.assumptions) {
-    inputs.addRow([FIELD_BY_KEY.get(a.fieldKey)?.label ?? a.fieldKey, a.itemKey ?? "", a.value, a.unit, a.source]);
+    inputs.addRow([FIELD_BY_KEY.get(a.fieldKey)?.label ?? a.fieldKey, a.itemKey ?? "", a.value, a.unit, a.source, confirmationLabel(a)]);
   }
   inputs.columns.forEach((c, i) => (c.width = i === 4 ? 60 : 22));
 

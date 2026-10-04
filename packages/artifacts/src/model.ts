@@ -2,7 +2,7 @@
 // and the inputs that run used, and from nothing else: it never recomputes a
 // verdict, a gate or a metric.
 
-import { CURRENCY_NAMES, placeLabel, type Currency, type EngineInput, type FieldUnit, type RunResult, type VerdictCode } from "@agir/contracts";
+import { CURRENCY_NAMES, FIELD_BY_KEY, placeLabel, type Currency, type EngineInput, type FieldUnit, type RunResult, type VerdictCode } from "@agir/contracts";
 import { Formatter, formatValue } from "./format.ts";
 
 export type ArtifactKind = "ic_memo" | "lender_package" | "model_export";
@@ -31,6 +31,11 @@ export type ArtifactInput = {
     value: number;
     sourceKind: "document" | "analyst" | "default";
     source: string;
+    /** Absent on runs made before solo review: read as false and null. */
+    sponsorStated?: boolean;
+    confirmedBy?: string | null;
+    confirmedByReview?: boolean;
+    confirmedAt?: string | null;
   }[];
   decision: { decision: string; rationale: string; conditions: string | null; decidedBy: string; createdAt: string } | null;
 };
@@ -192,13 +197,42 @@ function checks(f: Formatter, r: RunResult): Block {
   };
 }
 
+type Assumption = ArtifactInput["assumptions"][number];
+
+/** How an input was confirmed, in words; "" when it was approved the ordinary way. `id` prints the date or name. */
+export function confirmationLabel(a: Assumption, id: (text: string, ref: string) => string = (t) => t): string {
+  if (a.sponsorStated) return "Stated by the sponsor, not independently confirmed";
+  if (a.confirmedByReview) return `Confirmed by Agir review on ${id((a.confirmedAt ?? "").slice(0, 10), `confirmedAt.${a.fieldKey}`)}`;
+  if (a.confirmedBy) return `Confirmed by ${id(a.confirmedBy, `confirmedBy.${a.fieldKey}`)}`;
+  return "";
+}
+
+function inputRow(f: Formatter, a: Assumption): string[] {
+  const note = confirmationLabel(a, (t, ref) => f.ident(t, ref));
+  return [f.ident(a.itemKey ? `${a.label} (${a.itemKey})` : a.label, `field.${a.fieldKey}`), inputValue(f, a), f.ident(a.source, `source.${a.fieldKey}`) + (note ? ` · ${note}` : "")];
+}
+
+const INPUT_COLUMNS = [{ label: "Input" }, { label: "Value", numeric: true }, { label: "Source" }];
+
 function inputsAppendix(f: Formatter, x: ArtifactInput): Block {
-  return {
-    type: "table",
-    caption: "Approved inputs and where each came from",
-    columns: [{ label: "Input" }, { label: "Value", numeric: true }, { label: "Source" }],
-    rows: x.assumptions.map((a) => [f.ident(a.itemKey ? `${a.label} (${a.itemKey})` : a.label, `field.${a.fieldKey}`), inputValue(f, a), f.ident(a.source, `source.${a.fieldKey}`)]),
-  };
+  return { type: "table", caption: "Approved inputs and where each came from", columns: INPUT_COLUMNS, rows: x.assumptions.map((a) => inputRow(f, a)) };
+}
+
+/** The inputs a sponsor stated and nobody else confirmed, up front; nothing when there are none. */
+function sponsorStatedBlocks(f: Formatter, x: ArtifactInput): Block[] {
+  const stated = x.assumptions.filter((a) => a.sponsorStated);
+  if (stated.length === 0) return [];
+  const material = x.assumptions.filter((a) => a.sponsorStated || a.confirmedBy || a.confirmedByReview || FIELD_BY_KEY.get(a.fieldKey)?.material).length;
+  const n = f.ident(String(stated.length), "sponsorStated.count");
+  const m = f.ident(String(material), "materialInputs.count");
+  return [
+    { type: "heading", text: "Stated by the sponsor, not independently confirmed" },
+    {
+      type: "paragraph",
+      text: `${n} of the ${m} material inputs this run used were stated by the sponsor and not confirmed by anyone else. Check them before relying on this ${x.kind === "ic_memo" ? "memo" : "package"}.`,
+    },
+    { type: "table", columns: INPUT_COLUMNS, rows: stated.map((a) => inputRow(f, a)) },
+  ];
 }
 
 export function buildModel(x: ArtifactInput): DocModel {
@@ -215,7 +249,7 @@ export function buildModel(x: ArtifactInput): DocModel {
   };
   const blocks: Block[] = [];
   if (x.kind === "ic_memo") {
-    blocks.push(verdict);
+    blocks.push(verdict, ...sponsorStatedBlocks(f, x));
     blocks.push({
       type: "stats",
       items: [
@@ -236,7 +270,7 @@ export function buildModel(x: ArtifactInput): DocModel {
     blocks.push({ type: "heading", text: "Checks" }, checks(f, r));
     blocks.push(inputsAppendix(f, x));
   } else {
-    blocks.push(verdict);
+    blocks.push(verdict, ...sponsorStatedBlocks(f, x));
     const i = x.input;
     const debtRows: string[][] = [];
     if (i.senior.amount > 0) {
