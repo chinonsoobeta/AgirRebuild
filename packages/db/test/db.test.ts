@@ -89,6 +89,48 @@ describe("review", () => {
   });
 });
 
+describe("solo review", () => {
+  const sw: Record<string, string> = {};
+  const hash = async () => (await db.query<{ h: string }>(`select fn_assumptions_hash($1) as h`, [sw.deal]))[0]!.h;
+  const row = async (field = "exit_cap_rate_pct") => (await db.query<{ status: string; value: number | null; pending_value: number | null; second_approver: string | null }>(
+    `select status, value, pending_value, second_approver from assumptions where deal_id = $1 and field_key = $2`, [sw.deal, field]))[0]!;
+  beforeAll(async () => {
+    sw.ws = (await asUser(db, ids.alice, (tx) => tx.query<{ id: string }>(`select fn_create_workspace('Solo') as id`)))[0]!.id;
+    await asUser(db, ids.alice, (tx) => tx.query(`select fn_add_member($1, 'bob@example.com', 'admin')`, [sw.ws]));
+    sw.deal = (await asUser(db, ids.alice, (tx) => tx.query<{ id: string }>(`select fn_create_deal($1, 'Solo deal', 'Multifamily', '') as id`, [sw.ws])))[0]!.id;
+  });
+  test("only an owner changes the mode", async () => {
+    await expect(asUser(db, ids.bob, (tx) => tx.query(`select fn_set_review_mode($1, 'solo')`, [sw.ws]))).rejects.toThrow(/role/);
+  });
+  test("in team mode a material entry still waits", async () => {
+    await asUser(db, ids.alice, (tx) => tx.query(`select fn_enter_value($1, 'senior_rate_pct', null, 6.1, 'Lender term sheet')`, [sw.deal]));
+    expect((await row("senior_rate_pct")).status).toBe("awaiting_second_approval");
+  });
+  test("in solo mode a material entry is approved at once and the hash marks it", async () => {
+    await asUser(db, ids.alice, (tx) => tx.query(`select fn_set_review_mode($1, 'solo')`, [sw.ws]));
+    const before = await hash();
+    await asUser(db, ids.alice, (tx) => tx.query(`select fn_enter_value($1, 'exit_cap_rate_pct', null, 5.5, 'Broker opinion of value')`, [sw.deal]));
+    expect(await row()).toEqual({ status: "approved", value: 5.5, pending_value: null, second_approver: null });
+    await asUser(db, ids.alice, (tx) => tx.query(`select fn_enter_value($1, 'senior_amort_years', null, 30, 'Lender term sheet')`, [sw.deal]));
+    sw.stated = await hash();
+    expect(sw.stated).not.toBe(before);
+  });
+  test("its author cannot confirm it, a different person can, and that changes the hash", async () => {
+    const [a] = await db.query<{ id: string }>(`select id from assumptions where deal_id = $1 and field_key = 'exit_cap_rate_pct'`, [sw.deal]);
+    await expect(asUser(db, ids.alice, (tx) => tx.query(`select fn_review($1, 'second_approve', null, null, null)`, [a!.id]))).rejects.toThrow(/different person/);
+    await asUser(db, ids.bob, (tx) => tx.query(`select fn_review($1, 'second_approve', null, null, null)`, [a!.id]));
+    const r = await row();
+    expect(r.status).toBe("approved");
+    expect(r.second_approver).toBe(ids.bob);
+    expect(await hash()).not.toBe(sw.stated);
+  });
+  test("switching back to team makes an unconfirmed stated value wait again", async () => {
+    await asUser(db, ids.alice, (tx) => tx.query(`select fn_set_review_mode($1, 'team')`, [sw.ws]));
+    expect(await row("senior_amort_years")).toEqual({ status: "awaiting_second_approval", value: null, pending_value: 30, second_approver: null });
+    expect((await row()).status).toBe("approved");
+  });
+});
+
 describe("runs and decisions", () => {
   test("a run is bound to the inputs approved right now", async () => {
     const payload = (hash: string) => ({

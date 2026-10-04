@@ -258,3 +258,30 @@ describe("a new run after a change", () => {
     expect([back.fresh, back.isLatest]).toEqual([true, true]);
   });
 });
+
+describe("solo review", () => {
+  const cap = async () => (await call(alice, "GET", `/api/deals/${deal}/review`)).json.assumptions.find((a: any) => a.fieldKey === "exit_cap_rate_pct");
+  const runNow = async () => {
+    const r = await call(alice, "POST", `/api/deals/${deal}/runs`);
+    expect(r.status).toBe(200);
+    return (await call(alice, "GET", `/api/runs/${r.json.id}`)).json;
+  };
+  const exitCap = (view: any) => view.inputs.find((i: any) => i.fieldKey === "exit_cap_rate_pct");
+
+  test("a value you state is used at once, labelled until someone else confirms it", async () => {
+    expect((await call(alice, "POST", `/api/workspaces/${ws}/review-mode`, { mode: "solo" })).status).toBe(200);
+    expect((await call(alice, "GET", "/api/me")).json.workspaces[0].review_mode).toBe("solo");
+    const a = await cap();
+    const m = await call(alice, "POST", `/api/assumptions/${a.id}/review`, { action: "modify", value: 5, reason: "Lender term sheet", version: a.version });
+    expect(m.json.status).toBe("approved");
+    expect((await cap()).sponsorStated).toBe(true);
+    const first = await runNow();
+    expect(exitCap(first)).toMatchObject({ sponsorStated: true, confirmedBy: null });
+    const b = await cap();
+    expect((await call(bob, "POST", `/api/assumptions/${b.id}/review`, { action: "second_approve", version: b.version })).status).toBe(200);
+    expect((await call(alice, "GET", `/api/runs/${first.id}`)).json.fresh).toBe(false);
+    const second = await runNow();
+    expect(exitCap(second)).toMatchObject({ sponsorStated: false, confirmedBy: "Bob Approver" });
+    expect((await call(alice, "POST", `/api/workspaces/${ws}/review-mode`, { mode: "team" })).status).toBe(200);
+  });
+});
