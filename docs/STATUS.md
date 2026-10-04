@@ -9,9 +9,9 @@ work it describes.
 | Command | Result | Verified |
 |---|---|---|
 | `npm install` | Node 22 (`engines` allows 22 to 24); `.npmrc` sets `legacy-peer-deps` | 2026-10-01 |
-| `npm run gate -- --tier=release` | Both typechecks, 159 tests in 9 files (119 on `main`), web build | 2026-10-03, `task/08-plain-language` |
+| `npm run gate -- --tier=release` | Both typechecks, 163 tests in 9 files (119 on `main`), web build | 2026-10-03, `task/08-plain-language` (the stack 05, 07, 06, 08) |
 | `VITEST_MAX_WORKERS=2 npm run gate -- --tier=release` | The same gate with two test workers: peak memory about 1 GB, no swap | 2026-10-01 |
-| `AGIR_DATA_DIR=<empty folder> PORT=8791 npm start` | Builds the web app, applies `0001` to `0007`, seeds six deals, serves on that port. An empty data folder leaves `.data/` untouched | 2026-10-01, `task/01-deal-currency` |
+| `AGIR_DATA_DIR=<empty folder> PORT=8791 npm start` | Builds the web app, applies `0001` to `0007`, seeds six deals, serves on that port. An empty data folder leaves `.data/` untouched | 2026-10-03, `task/08-plain-language` |
 
 `npm start` without `AGIR_DATA_DIR` migrates `.data/` in place, and a migration cannot be undone there.
 Point it at an empty folder to try a branch.
@@ -52,6 +52,12 @@ being built now. Steps 4 to 6 wait on the people-owned items listed below.
   only when its unit names the field and the label names a component ("Commerce : 9 400 pi²").
 - **An area cannot be entered by hand in m².** Review and manual entry take square feet. An m² option
   belongs with the quick-start questions (step 3).
+
+- **A quick-start deal's step bar still says "Waiting for documents"** under Review, though its values are entered
+  and the deal is ready to run. Seen in the browser check on 2026-10-03.
+- **Some French is unfinished or unreviewed.** The quick start's "Not asked" list prints each field's `absentMeans`
+  in English, which has no French source. The new French wording (solo review, Agir review, "réviseur", the
+  glossary) needs a qualified Canadian French reader.
 
 ## Deviations from the plan
 

@@ -71,6 +71,7 @@ export function Review({ dealId }: { dealId: string }) {
   const pending = by("needs_review");
   const awaiting = by("awaiting_second_approval");
   const approved = r.assumptions.filter((a) => a.status === "approved" || a.status === "default_accepted");
+  const stated = approved.filter((a) => a.sponsorStated).length;
   const rejected = by("rejected");
   const total = conflicts.length + r.missing.length + pending.length + awaiting.length + approved.length;
   const focused = r.assumptions.find((a) => a.id === focus) ?? conflicts[0] ?? pending[0];
@@ -134,7 +135,7 @@ export function Review({ dealId }: { dealId: string }) {
           {r.readiness.status === "blocked" ? (
             <Banner tone="stop" title={t("review.blocked")}><span>{blockedLine}{t("review.b.tail")}</span></Banner>
           ) : (
-            <Banner tone="neutral" title={t("review.clear")}>{t("review.clearBody")}</Banner>
+            <Banner tone="neutral" title={t("review.clear")}>{t("review.clearBody")}{stated > 0 && ` ${t("review.statedWaiting", { n: stated })}`}</Banner>
           )}
 
           {(conflicts.length > 0 || r.missing.length > 0 || awaiting.length > 0) && <h2 className="h-section">{t("review.needsDecision")}</h2>}
@@ -290,7 +291,7 @@ export function Review({ dealId }: { dealId: string }) {
           )}
           <ErrorText error={act.error ?? bulk.error} />
 
-          <details style={{ borderTop: "1px solid var(--rule)", paddingTop: 16 }}>
+          <details style={{ borderTop: "1px solid var(--rule)", paddingTop: 16 }} open={stated > 0 || undefined}>
             <summary>{t("review.approved")} <span className="num faint" style={{ fontWeight: 400 }}>{approved.length}</span></summary>
             <table className="tbl" style={{ marginTop: 14 }}>
               <thead><tr><th>{t("review.col.input")}</th><th className="r">{t("review.col.value")}</th><th>{t("review.col.source")}</th><th className="r"><span className="sr-only">{t("docs.actions")}</span></th></tr></thead>
