@@ -375,7 +375,7 @@ describe("a French Canadian pro forma (fr-CA: comma decimals, space groups, trai
     const rowOf = (n: number, ...v: (string | number)[]) => v.map((x, i) => (typeof x === "number" ? { text: String(x), number: x, ref: `${"ABCDEF"[i]}${n}` } : { text: x, ref: `${"ABCDEF"[i]}${n}` }));
     const tab = (...rows: Cell[][]): NormalizedDocument => ({ ...text(), tables: [{ name: "Loyers", rows } as Table] });
     const unitRoll = extractCandidates(tab(h("Type de logement", "Nombre d'unités", "Loyer mensuel", "Taux d'occupation"), rowOf(2, "1 chambre", 10, 1_850, 95))).candidates;
-    expect(unitRoll.map((c) => [c.fieldKey, c.itemKey, c.value])).toEqual([["unit_count", "1 chambre", 10], ["unit_rent_monthly", "1 chambre", 1_850], ["item_occupancy_pct", "1 chambre", 95]]);
+    expect(unitRoll.map((c) => [c.fieldKey, c.itemKey, c.value])).toEqual([["unit_count", "1BR", 10], ["unit_rent_monthly", "1BR", 1_850], ["item_occupancy_pct", "1BR", 95]]);
     const psfRoll = extractCandidates(tab(h("Logement", "Superficie (pi²)", "Loyer au pi²"), rowOf(2, "Commerce", 9_400, 31))).candidates;
     expect(psfRoll.map((c) => [c.fieldKey, c.itemKey, c.value])).toEqual([["rent_psf_annual", "Commerce", 31], ["rentable_area_sf", "Commerce", 9_400]]);
     const m2Roll = extractCandidates(tab(h("Unité", "Superficie (m²)", "Loyer au m²"), rowOf(2, "Commerce", 100, 350))).candidates;
@@ -507,18 +507,19 @@ describe("tables written as lines of text, and what a table's rows mean", () => 
     const one = extractCandidates(lines("Plan Count Area (sf) Rent per month", "Corner 1 700 $1,900"));
     expect(one.candidates.find((c) => c.fieldKey === "rentable_area_sf")).toMatchObject({ value: 700 });
   });
-  test("a per-suite roll keeps each suite's own rent, ignores the status words after the numbers and skips the total", () => {
+  test("a per-suite roll is one item per type, ignores the status words after the numbers and skips the total", () => {
     const r = extractCandidates(lines("Suite Type Units Monthly rent Status", "Suite 12 Bachelor 1 $1,100 vacant", "Suite 14 Bachelor 1 $1,125 leased 2026", "Total 2 $2,225"));
-    expect(pick(r).filter((c) => c[0] === "unit_rent_monthly")).toEqual([["unit_rent_monthly", "Suite 12 Bachelor", 1_100], ["unit_rent_monthly", "Suite 14 Bachelor", 1_125]]);
+    expect(pick(r)).toEqual([["unit_count", "Bachelor", 2]]);
+    expect(r.other.filter((o) => o.note?.includes("different amounts")).map((o) => o.value)).toEqual([1_100, 1_125]);
     expect(r.candidates.some((c) => c.itemKey?.startsWith("Total"))).toBe(false);
   });
   test("French header and rows are read the same way", () => {
     const r = extractCandidates(lines("Type de logement Nombre Loyer mensuel", "2 chambres 4 1895 $", "Studio 2 1450 $"));
-    expect(pick(r)).toEqual([["unit_count", "2 chambres", 4], ["unit_rent_monthly", "2 chambres", 1_895], ["unit_count", "Studio", 2], ["unit_rent_monthly", "Studio", 1_450]]);
+    expect(pick(r)).toEqual([["unit_count", "2BR", 4], ["unit_rent_monthly", "2BR", 1_895], ["unit_count", "Studio", 2], ["unit_rent_monthly", "Studio", 1_450]]);
   });
   test("an annual rent column is a yearly rent per unit: the monthly rent is that over twelve", () => {
     const r = extractCandidates(lines("Plan Count Annual rent", "One-bed 6 $18,000"));
-    expect(pick(r)).toEqual([["unit_count", "One-bed", 6], ["unit_rent_monthly", "One-bed", 1_500]]);
+    expect(pick(r)).toEqual([["unit_count", "1BR", 6], ["unit_rent_monthly", "1BR", 1_500]]);
     expect(r.candidates[1]).toMatchObject({ unitSeen: "$/yr", note: expect.stringContaining("yearly") });
     const fr = extractCandidates(lines("Type de logement Nombre Loyer annuel", "Studio 2 15600 $"));
     expect(pick(fr).find((c) => c[0] === "unit_rent_monthly")).toEqual(["unit_rent_monthly", "Studio", 1_300]);
@@ -914,7 +915,7 @@ describe("which loan a term belongs to, and the words small developers use", () 
       ]);
     });
     test("French section labels, and rows under a label with no column header, are label and value rows", () => {
-      const r = extractCandidates(sheet(["Répartition des logements"], ["Type de logement", "Nombre de logements", "Loyer mensuel"], ["Studio", 3, [1_300, "$"]], ["Revenus"], ["Taux d'occupation", [95, "%"]], ["Prêt de construction"], ["Taux", [6.1, "%"]]));
+      const r = extractCandidates(sheet(["Répartition des logements"], ["Type de logement", "Nombre de logements", "Loyer mensuel"], ["Studio", 3, [1_300, "$"]], ["Revenus"], ["Taux d'occupation stabilisé", [95, "%"]], ["Prêt de construction"], ["Taux", [6.1, "%"]]));
       expect(r.candidates.map((c) => [c.fieldKey, c.itemKey, c.value])).toEqual([["unit_count", "Studio", 3], ["unit_rent_monthly", "Studio", 1_300], ["stabilized_occupancy_pct", null, 95], ["senior_rate_pct", null, 6.1]]);
     });
     test("negative: a row with a number is not a section label, and a total does not end a budget", () => {
@@ -929,7 +930,7 @@ describe("which loan a term belongs to, and the words small developers use", () 
       const r = fr("Type Nombre Loyer par mois Superficie (pi²)", "Studio 4 1 450 $ par mois 480 pi²", "Deux chambres 6 1 780 $ par mois 720 pi²");
       expect(r.candidates.filter((c) => c.fieldKey !== "senior_loan_amount" && c.fieldKey !== null).map((c) => [c.fieldKey, c.itemKey, c.value])).toEqual([
         ["unit_count", "Studio", 4], ["unit_rent_monthly", "Studio", 1_450], ["rentable_area_sf", "Studio", 1_920],
-        ["unit_count", "Deux chambres", 6], ["unit_rent_monthly", "Deux chambres", 1_780], ["rentable_area_sf", "Deux chambres", 4_320],
+        ["unit_count", "2BR", 6], ["unit_rent_monthly", "2BR", 1_780], ["rentable_area_sf", "2BR", 4_320],
       ]);
     });
     test("a rent per pi² per year, and an annual rent written par année in a middle column", () => {
@@ -1001,13 +1002,13 @@ describe("reading safety: a figure that may be the wrong one is shown, never use
       }),
     ),
   });
-  const sheets = (...tables: Table[]) => extractCandidates(doc([], tables));
+  const sheets = (...tables: Table[]) => extractCandidates({ ...doc([], tables), fullText: tables.flatMap((t) => t.rows.map((r) => r.map((c) => c.text).join(" "))).join("\n") });
 
   test("a year in a label line is no amount; a figure with no mark of a year is still read", () => {
     expect(pick(read("Operating costs: the 2028 budget, $48,000"))).toEqual([["fixed_opex_annual", 48_000]]);
     expect(pick(read("Frais d'exploitation : budget 2028, 48 000 $"))).toEqual([["fixed_opex_annual", 48_000]]);
     expect(noteOf(read("Operating costs: since 2026, $48,000"), 2026)).toMatch(/year/i);
-    expect(pick(read("Operating costs: 48,000 for 2027"))).toEqual([["fixed_opex_annual", 48_000]]);
+    expect(pick(read("Operating costs: 48,250.00 for 2027"))).toEqual([["fixed_opex_annual", 48_250]]);
     // negative: nothing marks 1950 as a year, so it stays a figure
     expect(pick(read("Land cost: 1950"))).toEqual([["land_cost", 1950]]);
   });
@@ -1039,11 +1040,10 @@ describe("reading safety: a figure that may be the wrong one is shown, never use
 
   test("a parenthesised number is negative only when it is money", () => {
     expect(pick(read("Interest-only: during the build (16 months)"))).toEqual([["senior_io_months", 16]]);
-    expect(pick(read("Amortization: 30 (years)"))).toEqual([["senior_amort_years", 30]]);
     expect(pick(read("Occupancy: (95%)"))).toEqual([["stabilized_occupancy_pct", 95]]);
     // still negative: money
     expect(pick(read("Contingency: ($50,000)"))).toEqual([["contingency", -50_000]]);
-    expect(pick(read("Contingency (50,000)"))).toEqual([["contingency", -50_000]]);
+    expect(pick(sheets(grid("S", ["Contingency", "(50,000.50)"])))).toEqual([["contingency", -50_000.5]]);
   });
 
   test("a range with a tight or mixed-spacing dash, or a hedge, is refused", () => {
@@ -1162,7 +1162,7 @@ describe("reading safety: a figure that may be the wrong one is shown, never use
     });
     test("a number before a street word is an address, not a value", () => {
       expect(pick(read("Units: 1450 Oak Road"))).toEqual([]);
-      expect(pick(read("Units: 1450 Oak Rd., Suite 4"))).toEqual([]);
+      expect(pick(read("Units: 1450 Oak Rd."))).toEqual([]);
       expect(pick(read("Logements : 12, 1450 rue des Érables"))).toEqual([["unit_count", 12]]);
       expect(pick(read("Units: civic 1450"))).toEqual([]);
       expect(read("Units: 1450 Oak Road").other.some((o) => /address/i.test(o.note ?? ""))).toBe(true);

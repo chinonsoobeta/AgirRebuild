@@ -10,7 +10,7 @@
 //  4. Both edges of a number are guarded, so the tail of "31 200 000" can
 //     never be read as "31" or "200".
 //  5. Unicode minus signs and dashes before a number are a minus sign;
-//     "(2,150,000)" is negative.
+//     "(2,150,000)" is negative, but only money or a bare number is: "(16 months)" is 16.
 //  6. Words are never numbers: "one hundred" yields nothing.
 //  6b. A small count or duration written as a word ("eighteen months", "a
 //     three-month lease-up", "douze mois") is a number, but only when a unit
@@ -69,6 +69,8 @@ export type NumberToken = {
   unit: TokenUnit;
   /** A money scale word was applied (million, k, ...). */
   scaled: boolean;
+  /** Written in parentheses. Negative only as money; a mapper that reads it as another unit takes its absolute value. */
+  paren?: true;
 };
 
 const SPACE_CLASS = "    ";
@@ -208,10 +210,18 @@ export function unitTypesIn(text: string): string[] {
   const found: { at: number; name: string }[] = [];
   for (const m of text.matchAll(new RegExp(String.raw`(?<![\p{L}\p{N}])(?:(${TYPE_BED})|(${TYPE_NAMED})|((?:one|two|three|un|deux|trois|[123])-)(?=\s+(?:and|or|et|ou)\s))(?![\p{L}\p{N}])`, "giu"))) {
     const w = m[0].toLowerCase();
-    const name = m[1] || m[3] ? BED_NAMES[/^[a-z0-9]+/.exec(w)![0]]! : /^\d/.test(w) ? w : /^studio/.test(w) ? "Studio" : /^bachelor/.test(w) ? "Bachelor" : /^loft/.test(w) ? "Loft" : /^maison/.test(w) ? "Maison de ville" : "Townhome";
+    const name = m[1] || m[3] ? BED_NAMES[/^(?:one|two|three|une?|deux|trois|[123])/.exec(w)![0]]! : /^\d/.test(w) ? w : /^studio/.test(w) ? "Studio" : /^bachelor/.test(w) ? "Bachelor" : /^loft/.test(w) ? "Loft" : /^maison/.test(w) ? "Maison de ville" : "Townhome";
     found.push({ at: m.index!, name });
   }
   return [...new Set(found.sort((a, b) => a.at - b.at).map((f) => f.name))];
+}
+
+const WHOLE_TYPE_RE = new RegExp(String.raw`^(?:${TYPE_BED}|${TYPE_NAMED})(?:[\s-]+(?:units?|suites?|homes?|apartments?|logements?|unités?))?$`, "iu");
+
+/** The unit type a text is wholly made of ("One-bed", "1 chambre", "studio units"), else null: "2-bed + den" is a type of its own. */
+export function wholeUnitType(text: string): string | null {
+  const t = text.trim();
+  return WHOLE_TYPE_RE.test(t) ? (unitTypesIn(t)[0] ?? null) : null;
 }
 
 // "m" is million only when it is not the m of m²: "$450 m²" is not $450,000,000.
@@ -329,7 +339,9 @@ export function tokenize(line: string, format: DocumentFormat): NumberToken[] {
     // "month 26", "au mois 26": an ordinal point in time.
     if (unit === null && /\b(month|mois)\s+$/i.test(text.slice(0, start))) unit = "months";
     reached = end;
-    const negative = Boolean(sign) || (Boolean(paren) && text[end] === ")");
+    // "(2,150,000)" is negative; "(16 months)", "(95%)" and "(3x)" are not.
+    const parenthesised = Boolean(paren) && text[end] === ")";
+    const negative = Boolean(sign) || (parenthesised && (currency || unit === null));
     if (value !== null && negative) value = -value;
     out.push({
       raw: text.slice(start, end).trim(),
@@ -341,6 +353,7 @@ export function tokenize(line: string, format: DocumentFormat): NumberToken[] {
       currencyCode,
       unit,
       scaled,
+      ...(parenthesised ? { paren: true as const } : {}),
     });
   }
   return [...out, ...wordTokens(text)].sort((a, b) => a.start - b.start);

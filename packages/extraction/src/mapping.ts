@@ -4,7 +4,7 @@
 // but it never becomes an input.
 
 import { FIELD_BY_KEY, FIELDS, OUTPUT_LIKE_PHRASES, type FieldDef } from "@agir/contracts";
-import { codeOf, SF_PER_M2, type CurrencyCode, type NumberToken } from "@agir/numbers";
+import { codeOf, SF_PER_M2, wholeUnitType, type CurrencyCode, type NumberToken } from "@agir/numbers";
 
 export type LabelUnit = "$" | "%" | "months" | "years" | "sf" | "m2" | "x" | null;
 
@@ -63,6 +63,12 @@ const FUNDING_RE = /\b(fund\w*|repa\w+|clos\w*|advance\w*|draw\w*|financement|re
 const CAP_RE = /\b(cap rate|capitali[sz]ation rate|taux de capitalisation)\b/;
 const EXIT_RE = /\b(sell|sale|sold|exit|reversion|disposition|sortie|vente|vendre|vendrons|vendons|revente)\b/;
 const VALUE_RE = /\b(value|valeur)\b/;
+
+const AREA_WORD_RE = /\b(area|sf|sq ft|superficie|surface|gla|nrsf|rsf)\b/;
+// A lender's condition, or a figure true only today, is not the stabilized assumption.
+const CONDITION_RE = /\b(minimum|min|at least|before fund\w*|prior to|conditions?|covenants?|required|requires?|au moins|minimale?|avant le deboursement)\b/;
+const CURRENT_RE = /\b(current|currently|today|as of|actuel(?:le)?|en date du)\b/;
+const STABILIZED_RE = /\b(stabili[sz]ed|stabilisee?|projected|pro forma|projete\w*)\b/;
 
 // Words too common to name a field alone. Each loses to any longer alias in the label, must stand at the end of the label
 // (or before "income"/"amount"), and never matches inside a longer word.
@@ -139,10 +145,24 @@ function endsWithPhrase(label: string, phrase: string): string | null {
   return null;
 }
 
+/** The unit type written in parentheses ("End units (3 bed)"), if there is one. */
+function parenType(raw: string): string | null {
+  for (const m of raw.matchAll(/\(([^)]*)\)/g)) {
+    const t = wholeUnitType(m[1]!);
+    if (t) return t;
+  }
+  return null;
+}
+
+/** A unit type written in any of its ways is one name ("One-bed", "1BR", "1 chambre" are "1BR"); a name with more to it ("2-bed + den") is kept as written. */
+export function canonicalItem(name: string): string {
+  return wholeUnitType(name) ?? parenType(name) ?? name;
+}
+
 function itemName(prefix: string): string {
   const words = prefix.split(" ").filter((w) => w && !GENERIC.has(w));
   if (words.length === 0 || words.length > 4) return "";
-  return words.map((w) => (/^\d/.test(w) ? w.toUpperCase() : w[0]!.toUpperCase() + w.slice(1))).join(" ");
+  return canonicalItem(words.map((w) => (/^\d/.test(w) ? w.toUpperCase() : w[0]!.toUpperCase() + w.slice(1))).join(" "));
 }
 
 /**
@@ -157,8 +177,9 @@ function compatibleValue(def: FieldDef, t: NumberToken, label: string, labelUnit
 }
 
 function convert(def: FieldDef, t: NumberToken, label: string, labelUnit: LabelUnit, prose: boolean): { value: number; unitSeen: string } | null {
-  const v = t.value;
-  if (v === null) return null;
+  if (t.value === null) return null;
+  // A parenthesised figure is negative only as money: "(16 months)" is 16.
+  const v = t.paren && def.unit !== "$" ? Math.abs(t.value) : t.value;
   const u = t.unit;
   switch (def.unit) {
     case "$":
@@ -183,7 +204,8 @@ function convert(def: FieldDef, t: NumberToken, label: string, labelUnit: LabelU
       return null;
     case "units":
       if (u === "units") return { value: v, unitSeen: "units" };
-      if (u === null && labelUnit === null && Number.isInteger(v) && v > 0) return { value: v, unitSeen: "number" };
+      // An area is never a count.
+      if (u === null && labelUnit === null && Number.isInteger(v) && v > 0 && !AREA_WORD_RE.test(label)) return { value: v, unitSeen: "number" };
       return null;
     case "sf":
       if (u === "sf" || (u === null && labelUnit === "sf")) return { value: v, unitSeen: "sf" };
@@ -313,12 +335,21 @@ export function mapToken(rawLabel: string, t: NumberToken, opts: MapOptions = {}
       }
     }
   }
+  // An occupancy that is a lender's condition, or true only today, is not the stabilized assumption.
+  const notAssumed = (key: string): Mapped | null => {
+    if (key !== "stabilized_occupancy_pct" && key !== "item_occupancy_pct") return null;
+    const where = prose && opts.context ? normalizeLabel(opts.context).label : label;
+    if (CONDITION_RE.test(where)) return { kind: "ignored", reason: "A lender's occupancy condition is not the stabilized assumption" };
+    return CURRENT_RE.test(where) && !STABILIZED_RE.test(label) ? { kind: "ignored", reason: "A current occupancy is not the stabilized assumption" } : null;
+  };
+  // A unit type in parentheses ("End units (3 bed)") names the item.
+  const typed = parenType(rawLabel);
   if (item && item.itemKey && (!best || item.alias.length >= best.alias.length)) {
-    return { kind: "field", fieldKey: item.def.key, itemKey: item.itemKey, value: item.value, unitSeen: item.unitSeen };
+    return notAssumed(item.def.key) ?? { kind: "field", fieldKey: item.def.key, itemKey: typed ?? item.itemKey, value: item.value, unitSeen: item.unitSeen };
   }
-  if (best) return { kind: "field", fieldKey: best.def.key, itemKey: null, value: best.value, unitSeen: best.unitSeen };
+  if (best) return notAssumed(best.def.key) ?? { kind: "field", fieldKey: best.def.key, itemKey: null, value: best.value, unitSeen: best.unitSeen };
   if (item) {
-    return { kind: "field", fieldKey: item.def.key, itemKey: "All units", value: item.value, unitSeen: item.unitSeen };
+    return notAssumed(item.def.key) ?? { kind: "field", fieldKey: item.def.key, itemKey: "All units", value: item.value, unitSeen: item.unitSeen };
   }
   // A component named by itself with a self-describing unit: "Retail: 9,000 SF".
   const name = itemName(label);
@@ -334,7 +365,7 @@ export function mapToken(rawLabel: string, t: NumberToken, opts: MapOptions = {}
     };
     const key = t.unit ? byUnit[t.unit] : undefined;
     const c = key ? compatibleValue(FIELD_BY_KEY.get(key)!, t, label, labelUnit, labelCode, prose) : null;
-    if (key && c) return { kind: "field", fieldKey: key, itemKey: name, value: c.value, unitSeen: c.unitSeen };
+    if (key && c) return { kind: "field", fieldKey: key, itemKey: typed ?? name, value: c.value, unitSeen: c.unitSeen };
   }
   if (aliasOnly) {
     const want: Record<string, string> = {
