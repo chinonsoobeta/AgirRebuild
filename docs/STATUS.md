@@ -9,7 +9,7 @@ work it describes.
 | Command | Result | Verified |
 |---|---|---|
 | `npm install` | Node 22 (`engines` allows 22 to 24); `.npmrc` sets `legacy-peer-deps` | 2026-10-01 |
-| `npm run gate -- --tier=release` | Both typechecks, 153 tests in 9 files (119 on `main`), web build | 2026-10-03, `task/07-artifact-labels` |
+| `npm run gate -- --tier=release` | Both typechecks, 154 tests in 9 files (119 on `main`), web build | 2026-10-03, `task/06-quick-start` |
 | `VITEST_MAX_WORKERS=2 npm run gate -- --tier=release` | The same gate with two test workers: peak memory about 1 GB, no swap | 2026-10-01 |
 | `AGIR_DATA_DIR=<empty folder> PORT=8791 npm start` | Builds the web app, applies `0001` to `0007`, seeds six deals, serves on that port. An empty data folder leaves `.data/` untouched | 2026-10-01, `task/01-deal-currency` |
 
@@ -35,6 +35,7 @@ later tasks build on earlier migrations. Review and merge them in order.
 | `task/04-solo-mode` | 2 | A workspace owner can switch review to solo. A material value entered by hand is then used at once, and stays labelled sponsor-stated (approved, entered by a person, no second approver) until a different person confirms it, in migration `0006`. The label is derived, so no review path removes it; it is part of the assumptions hash, so confirming makes earlier runs out of date, and runs and review show it | Yes: it relaxes the dual-control rule, and a migration |
 | `task/05-agir-review` | 2 | The paid, done-with-you confirmation. An owner grants a person a time-limited `reviewer` role (1 to 90 days) in migration `0007`. A reviewer reads the workspace and may only confirm a sponsor-stated value; every other action is refused, and an expired membership grants nothing. A value they confirm is labelled "Confirmed by Agir review" on review and in a run's inputs, and the label outlives the expiry | Yes: a role, the RLS helpers `agir_is_member` and `agir_require`, and a migration |
 | `task/07-artifact-labels` | 2 | Every artifact says which inputs were stated by the sponsor and not confirmed. The lender package and IC memo carry a "Stated by the sponsor, not independently confirmed" block with the count and the inputs, right after the verdict. The inputs appendix and the model export's Inputs sheet label each input as sponsor-stated, confirmed by Agir review (with the date) or confirmed by a named person. Runs made before this label render as before | Advised: it changes what lenders read; no migration or engine change |
+| `task/06-quick-start` | 3 | A deal with no documents offers a quick start: a multiplex (2–4 units) or small apartment (5–30 units) template of about 13 plain questions, in English and French, in `TEMPLATES` in `packages/contracts/src/fields.ts`. Answers are entered through the existing manual-entry endpoint (`fn_enter_value`) and the three named defaults are accepted only when the owner ticks the box, through `fn_accept_defaults`. A retry after a partial failure resumes. A test checks that each template covers every required field | Not required: no migration, engine, auth or governance change; it uses the existing governed functions |
 
 The plan for small Canadian developers is [plan-small-developers.md](plan-small-developers.md). Release 1 steps 0 to 3 are
 being built now. Steps 4 to 6 wait on the people-owned items listed below.
