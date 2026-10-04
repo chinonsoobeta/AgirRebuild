@@ -12,6 +12,11 @@
 //  5. Unicode minus signs and dashes before a number are a minus sign;
 //     "(2,150,000)" is negative.
 //  6. Words are never numbers: "one hundred" yields nothing.
+//  6b. A small count or duration written as a word ("eighteen months", "a
+//     three-month lease-up", "douze mois") is a number, but only when a unit
+//     word follows it directly: "three-bedroom" names an item, not a count.
+//  6c. "month 26", "au mois 26" and "au 26e mois" are an ordinal point in time,
+//     in months. "1.20 times" and "1,15 fois" are a multiple.
 //  7. Square metres are their own unit. The engine works in square feet, so a
 //     figure in m² is converted where it is mapped, never here.
 
@@ -192,7 +197,7 @@ const SCALE_RE = /^\s?(billion|bn|million|mm|mn|m(?!²)|thousand|k)\b/i;
 const UNIT_RULES: { re: RegExp; unit: TokenUnit }[] = [
   { re: /^\s?(%|percent\b|pct\b)/i, unit: "%" },
   { re: /^\s?(bps|basis points)\b/i, unit: "bps" },
-  { re: /^\s?(x|×)(?![a-z])/i, unit: "x" },
+  { re: /^\s?((x|×)(?![a-z])|(times|fois)\b)/i, unit: "x" },
   // "$/pi²", "$ par pi²" and "$ au pi²" are the French rent per square foot.
   { re: /^\s?((?:\/\s?sf|psf|per\s+(?:sq\.?\s*ft|square\s+foot|sf))\b|(?:\/\s?|par\s+|au\s+)(?:pi²|pi2|pi\.?\s?ca\.?|pieds?\s+carrés?)(?![\p{L}\d]))/iu, unit: "$/sf" },
   { re: /^\s?(\/\s?(m²|m2|sq\.?\s?m\.?|sqm)|psm|per\s+(m²|m2|sq\.?\s?m\.?|sqm|square\s+met(re|er)))(?![\p{L}\d])/iu, unit: "$/m2" },
@@ -203,9 +208,43 @@ const UNIT_RULES: { re: RegExp; unit: TokenUnit }[] = [
   { re: /^\s?(m²|m2|sq\.?\s?m\.?|sqm|square\s+met(re|er)s?|mètres?\s+carrés?)(?![\p{L}\d])/iu, unit: "m2" },
   { re: /^\s?(units?|homes|suites|apartments|doors)\b/i, unit: "units" },
   { re: /^\s?(logements?|unités?|unites?|appartements?)(?![\p{L}\d])/iu, unit: "units" },
+  // "au 26e mois": the ordinal's own "mois" is the unit.
+  { re: /^(e|er|ème|eme)\s+mois\b/i, unit: "months" },
   { re: /^[-\s]?(months?|mos?\.?|mois)\b/i, unit: "months" },
   { re: /^[-\s]?(years?|yrs?\.?|ans?)\b/i, unit: "years" },
 ];
+
+const WORD_VALUES: Record<string, number> = {
+  zero: 0, zéro: 0, one: 1, un: 1, une: 1, two: 2, deux: 2, three: 3, trois: 3, four: 4, quatre: 4, five: 5, cinq: 5, six: 6, seven: 7, sept: 7,
+  eight: 8, huit: 8, nine: 9, neuf: 9, ten: 10, dix: 10, eleven: 11, onze: 11, twelve: 12, douze: 12, thirteen: 13, treize: 13, fourteen: 14, quatorze: 14,
+  fifteen: 15, quinze: 15, sixteen: 16, seize: 16, seventeen: 17, "dix-sept": 17, eighteen: 18, "dix-huit": 18, nineteen: 19, "dix-neuf": 19,
+  twenty: 20, vingt: 20, thirty: 30, trente: 30, forty: 40, quarante: 40, fifty: 50, cinquante: 50, sixty: 60, soixante: 60,
+};
+const TENS = "twenty|thirty|forty|fifty|sixty|vingt|trente|quarante|cinquante|soixante";
+const DIGIT_WORDS = "one|two|three|four|five|six|seven|eight|nine|un|deux|trois|quatre|cinq|six|sept|huit|neuf";
+// A number word, then (directly, or after a hyphen) a unit word. Compounds ("twenty-four") first, so they win over their first word.
+const WORD_RE = new RegExp(
+  String.raw`(?<![\p{L}\p{N}-])((?:${TENS})-(?:${DIGIT_WORDS})|dix-sept|dix-huit|dix-neuf|${Object.keys(WORD_VALUES).filter((w) => !w.includes("-")).join("|")})(?:-|\s+)(months?|mois|years?|ans?|units?|suites?|homes?|apartments?|logements?|unités?)(?![\p{L}\p{N}])`,
+  "giu",
+);
+const PRECEDING_NUMBER_WORD = /(?:hundred|thousand|million|cent|cents|mille|and|et|-)\s*$/i;
+
+/** Number words directly followed by a unit word. "one hundred twenty units" is not read: a word that continues a larger number is skipped. */
+function wordTokens(text: string): NumberToken[] {
+  const out: NumberToken[] = [];
+  for (const m of text.matchAll(WORD_RE)) {
+    const word = m[1]!.toLowerCase();
+    const noun = m[2]!.toLowerCase();
+    const unit: TokenUnit = /^(month|mois)/.test(noun) ? "months" : /^(year|an)/.test(noun) ? "years" : "units";
+    // "any one unit", "un logement": one of a thing is not a count.
+    if (unit === "units" && /^(one|un|une)$/.test(word)) continue;
+    if (PRECEDING_NUMBER_WORD.test(text.slice(0, m.index!))) continue;
+    const [a, b] = word.includes("-") ? word.split("-") : [word, null];
+    const value = b === null || a === "dix" ? WORD_VALUES[word]! : WORD_VALUES[a!]! + WORD_VALUES[b]!;
+    out.push({ raw: m[0], start: m.index!, end: m.index! + m[0].length, value, currency: false, currencyCode: null, unit, scaled: false });
+  }
+  return out;
+}
 
 function scaleOf(word: string): number {
   const w = word.toLowerCase();
@@ -254,6 +293,8 @@ export function tokenize(line: string, format: DocumentFormat): NumberToken[] {
         break;
       }
     }
+    // "month 26", "au mois 26": an ordinal point in time.
+    if (unit === null && /\b(month|mois)\s+$/i.test(text.slice(0, start))) unit = "months";
     const negative = Boolean(sign) || (Boolean(paren) && text[end] === ")");
     if (value !== null && negative) value = -value;
     out.push({
@@ -268,5 +309,5 @@ export function tokenize(line: string, format: DocumentFormat): NumberToken[] {
       scaled,
     });
   }
-  return out;
+  return [...out, ...wordTokens(text)].sort((a, b) => a.start - b.start);
 }

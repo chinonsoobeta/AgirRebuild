@@ -1,7 +1,7 @@
-import { FIELD_BY_KEY } from "@agir/contracts";
-import { detectFormat, SF_PER_M2, tokenize, type DocumentFormat, type NumberToken } from "@agir/numbers";
+import { FIELD_BY_KEY, OUTPUT_LIKE_PHRASES } from "@agir/contracts";
+import { detectFormat, normalizeText, SF_PER_M2, tokenize, type DocumentFormat, type NumberToken } from "@agir/numbers";
 import type { Cell, NormalizedDocument, Table } from "./document.ts";
-import { currencyOf, mapToken, normalizeLabel, withCurrency } from "./mapping.ts";
+import { currencyOf, hasPhrase, mapToken, normalizeLabel, withCurrency, type Mapped } from "./mapping.ts";
 
 /** One value found in one document, with where it came from and why it was (or was not) mapped. */
 export type Candidate = {
@@ -41,9 +41,9 @@ function cellToken(cell: Cell, format: DocumentFormat): NumberToken | null {
   return tokenize(cell.text, format)[0] ?? null;
 }
 
-function push(result: ExtractionResult, label: string, token: NumberToken, location: string, context: string, rule: string) {
-  const mapped = mapToken(label, token);
-  const base = { raw: token.raw, location, context: context.slice(0, 240), rule };
+type Base = { raw: string; location: string; context: string; rule: string };
+
+function record(result: ExtractionResult, mapped: Mapped, token: NumberToken, base: Base) {
   if (mapped.kind === "field") {
     result.candidates.push({ ...base, fieldKey: mapped.fieldKey, itemKey: mapped.itemKey, value: mapped.value, unitSeen: mapped.unitSeen });
   } else {
@@ -56,6 +56,10 @@ function push(result: ExtractionResult, label: string, token: NumberToken, locat
       note: mapped.kind === "ignored" ? mapped.reason : "No field matches this label",
     });
   }
+}
+
+function push(result: ExtractionResult, label: string, token: NumberToken, location: string, context: string, rule: string, prose = false) {
+  record(result, mapToken(label, token, prose), token, { raw: token.raw, location, context: context.slice(0, 240), rule });
 }
 
 /** The [start, end) of every balanced "( ... )" in a line. */
@@ -72,52 +76,192 @@ function parenSpans(text: string): [number, number][] {
   return spans;
 }
 
-/** Lines of prose: "Label: value", "Label (unit): value", or "the label is value". Lines in `skip` were read as table rows. */
-function fromLines(doc: NormalizedDocument, result: ExtractionResult, skip: Set<number>) {
+type Paragraph = { text: string; segs: { start: number; location: string }[] };
+
+/** A line joins the next when it does not end a sentence and the next continues it (lower case, a number or a currency sign). */
+function continues(prev: string, next: string): boolean {
+  if (/[.!?:]\s*$/.test(prev) || !/^(\p{Ll}|\d|[$€£])/u.test(next)) return false;
+  return !(/[\d%]\s*$/.test(prev) && /^[\d$€£]/.test(next));
+}
+
+/** The lines the table reader did not consume, with a sentence wrapped across lines made one paragraph. */
+function paragraphs(doc: NormalizedDocument, skip: Set<number>): Paragraph[] {
+  const out: Paragraph[] = [];
+  let cur: Paragraph | null = null;
+  let prev = "";
   doc.lines.forEach((line, li) => {
-    if (skip.has(li)) return;
-    let tokens = tokenize(line.text, result.format);
-    // A number inside parentheses before the first number outside them is part of the label ("Parking (14 stalls) $8,400").
-    const spans = parenSpans(line.text);
-    const inParen = (t: NumberToken) => spans.some(([a, b]) => t.start >= a && t.end <= b);
-    const firstOutside = tokens.find((t) => !inParen(t));
-    if (firstOutside) tokens = tokens.filter((t) => !(inParen(t) && t.start < firstOutside.start));
-    if (tokens.length === 0) return;
-    const colon = line.text.indexOf(":");
-    if (colon > 0 && tokens[0]!.start > colon) {
-      // Label-first: every number after the colon shares the label. The first
-      // number compatible with a field wins; the rest are kept as "other".
-      const label = line.text.slice(0, colon);
+    if (skip.has(li)) {
+      cur = null;
+      return;
+    }
+    const text = line.text.trim();
+    if (cur && continues(prev, text)) {
+      cur.segs.push({ start: cur.text.length + 1, location: line.location });
+      cur.text += " " + text;
+    } else {
+      cur = { text, segs: [{ start: 0, location: line.location }] };
+      out.push(cur);
+    }
+    prev = text;
+  });
+  return out;
+}
+
+const ABBREVIATIONS = new Set(["ltd", "inc", "approx", "st", "ste", "no", "corp", "co", "cie", "ave", "dr", "mr", "mrs", "ms", "mme", "vs", "etc", "est", "apt", "blvd"]);
+
+/** Split on . ! ? ; followed by a space and an upper-case letter or the end, never after a one-letter initial or an abbreviation. */
+function sentences(text: string): { text: string; start: number }[] {
+  const out: { text: string; start: number }[] = [];
+  let from = 0;
+  const add = (to: number) => {
+    const raw = text.slice(from, to);
+    const lead = raw.length - raw.trimStart().length;
+    if (raw.trim()) out.push({ text: raw.trim(), start: from + lead });
+    from = to;
+  };
+  for (const m of text.matchAll(/[.!?;](?=\s+\p{Lu}|\s*$)/gu)) {
+    const word = /(\p{L}+)$/u.exec(text.slice(0, m.index!))?.[1] ?? "";
+    if (m[0] === "." && (word.length === 1 || ABBREVIATIONS.has(word.toLowerCase()))) continue;
+    add(m.index! + 1);
+  }
+  add(text.length);
+  return out;
+}
+
+const fold = (t: string) => t.toLowerCase().normalize("NFD").replace(/[̀-ͯ]/g, "");
+const HEDGE_RE = /\b(i.?d guess|i guess|or so|probably|maybe|perhaps|roughly|ballpark|not confirmed|unconfirmed|to be confirmed|tbc|a confirmer|je pense|peut-etre)\b|(?:\d|-)ish\b/;
+const BORROWED_RE = /\b(my other (?:building|property)s?|another (?:property|building)|comparables?|comps|autres? immeubles?)\b/;
+const MONTH_BEFORE_YEAR = /\b(jan(?:uary)?|feb(?:ruary)?|mar(?:ch)?|apr(?:il)?|may|jun(?:e)?|jul(?:y)?|aug(?:ust)?|sep(?:t(?:ember)?)?|oct(?:ober)?|nov(?:ember)?|dec(?:ember)?|janvier|fevrier|mars|avril|mai|juin|juillet|aout|septembre|octobre|novembre|decembre|in|en|since|depuis)\.?[,\s]*$/;
+const RANGE_NOTE = "A range is not a value; enter the figure to use";
+
+/** Why a sentence's numbers are no inputs, when it says so: a hedge, another property or an output figure. */
+function sentenceRefusal(text: string): string | null {
+  // An output figure comes first: it is the oldest reason, and the one the review screen explains.
+  const label = normalizeLabel(text).label;
+  const output = OUTPUT_LIKE_PHRASES.find((p) => hasPhrase(label, p));
+  if (output) return `This sentence names an output figure ("${output}"), which is never taken as an input`;
+  const f = fold(text);
+  const hedge = HEDGE_RE.exec(f);
+  if (hedge) return `A hedged figure ("${hedge[0]}") is not a value; enter the figure to use`;
+  const other = BORROWED_RE.exec(f);
+  return other ? `This sentence speaks of another property ("${other[0]}"); its figures are not inputs` : null;
+}
+
+/** Tokens that are the two ends of a range ("between X and Y", "from X to Y", "X - Y", "X to Y"), by index. */
+function rangeEnds(text: string, tokens: NumberToken[]): Set<number> {
+  const out = new Set<number>();
+  for (let i = 0; i + 1 < tokens.length; i++) {
+    const a = tokens[i]!;
+    const b = tokens[i + 1]!;
+    if (a.value === null || b.value === null) continue;
+    const between = text.slice(a.end, b.start);
+    const before = text.slice(0, a.start);
+    const lead = /\b(from|de|d['’])\s*$/i.test(before);
+    const same = a.unit === b.unit && a.currency === b.currency;
+    const open = same || (a.unit === null && !a.currency);
+    // "5 - 7": the tokenizer read the dash as the second number's minus sign.
+    const spaced = /^\s*[-–—]\s+$/.test(between) || (/^[-−]/.test(b.raw) && /^\s+$/.test(between));
+    const isRange =
+      (/^[-–—]$/.test(between) && open) ||
+      (spaced && same) ||
+      (/^\s+(to|à)\s+$/i.test(between) && (open || lead)) ||
+      (/^\s+(and|et)\s+$/i.test(between) && /\b(between|entre)\s*$/i.test(before));
+    if (isRange) {
+      out.add(i);
+      out.add(i + 1);
+    }
+  }
+  return out;
+}
+
+/** The words right after a number and its unit, up to the next number, comma, semicolon, "and"/"et" or the end of the sentence. */
+function followingLabel(rest: string): string | null {
+  if (!/^\s+\S/.test(rest)) return null;
+  let cut = rest.length;
+  for (const re of [/[,;:]/, /\s(?:and|et)\s/i, /[.!?](?:\s|$)/]) {
+    const m = re.exec(rest);
+    if (m && m.index < cut) cut = m.index;
+  }
+  return rest.slice(0, cut).trim() ? rest.slice(0, cut) : null;
+}
+
+/** One sentence: "Label: value" gives the label to the numbers after the colon; anything else is prose. */
+function readSentence(sentence: { text: string; start: number }, para: Paragraph, result: ExtractionResult) {
+  const text = normalizeText(sentence.text);
+  const locationOf = (pos: number) => para.segs.reduce((loc, g) => (g.start <= sentence.start + pos ? g.location : loc), para.segs[0]!.location);
+  let tokens = tokenize(text, result.format);
+  // A number inside parentheses before the first number outside them is part of the label ("Parking (14 stalls) $8,400").
+  const spans = parenSpans(text);
+  const inParen = (t: NumberToken) => spans.some(([a, b]) => t.start >= a && t.end <= b);
+  const firstOutside = tokens.find((t) => !inParen(t));
+  if (firstOutside) tokens = tokens.filter((t) => !(inParen(t) && t.start < firstOutside.start));
+  if (tokens.length === 0) return;
+  const context = sentence.text.slice(0, 240);
+  // A range's "5 - 7" is read with the dash as the second number's sign: shown as written, positive.
+  const shown = (t: NumberToken, note: string) => (t.value !== null && t.value < 0 && note === RANGE_NOTE && /^[-−]\s*[$\d]/.test(t.raw) ? -t.value : t.value);
+  const other = (t: NumberToken, rule: string, note: string) =>
+    result.other.push({ fieldKey: null, itemKey: null, value: shown(t, note), raw: t.raw, unitSeen: t.unit, location: locationOf(t.start), context, rule, note });
+  const refusal = sentenceRefusal(text);
+  if (refusal) {
+    for (const t of tokens) other(t, "line:prose", refusal);
+    return;
+  }
+  const colon = text.indexOf(":");
+  let proseFrom = 0;
+  if (colon > 0 && tokens[0]!.start > colon) {
+    // Label-first: every number after the colon shares the label. The first
+    // number compatible with a field wins; the rest are kept as "other".
+    const label = text.slice(0, colon);
+    // A label that names nothing for any number ("Financing: a loan of ...") is an introduction: what follows is prose.
+    if (tokens.every((t) => mapToken(label, t).kind === "unmapped")) proseFrom = colon + 1;
+    else {
       let used = false;
       for (const t of tokens) {
         const mapped = used ? { kind: "unmapped" as const } : mapToken(label, t);
         if (!used && mapped.kind === "field") {
-          push(result, label, t, line.location, line.text, "line:label-value");
+          push(result, label, t, locationOf(t.start), context, "line:label-value");
           used = true;
         } else if (!used || t.value !== null) {
-          result.other.push({
-            fieldKey: null,
-            itemKey: null,
-            value: t.value,
-            raw: t.raw,
-            unitSeen: t.unit,
-            location: line.location,
-            context: line.text.slice(0, 240),
-            rule: "line:label-value",
-            note: mapped.kind === "ignored" ? mapped.reason : used ? "Another number on this line was used" : "No field matches this label",
-          });
+          other(t, "line:label-value", mapped.kind === "ignored" ? mapped.reason : used ? "Another number on this line was used" : "No field matches this label");
         }
       }
       return;
     }
-    // Prose: each number's label is the text since the previous number.
-    let from = 0;
-    for (const t of tokens) {
-      const label = line.text.slice(from, t.start);
-      push(result, label, t, line.location, line.text, "line:prose");
+  }
+  // Prose: each number's label is the text since the previous number or the sentence start; when that names nothing, the words right after it.
+  const ranged = rangeEnds(text, tokens);
+  let from = proseFrom;
+  tokens.forEach((t, i) => {
+    const where = locationOf(t.start);
+    if (ranged.has(i)) {
+      other(t, "line:prose", RANGE_NOTE);
       from = t.end;
+      return;
     }
+    const label = text.slice(from, t.start);
+    const bare = t.unit === null && !t.currency && /^\d{4}$/.test(t.raw) && t.value !== null && t.value >= 1900 && t.value <= 2100;
+    if (bare && MONTH_BEFORE_YEAR.test(fold(label))) {
+      other(t, "line:prose", "This is a year, not an amount");
+      from = t.end;
+      return;
+    }
+    let mapped = mapToken(label, t, true);
+    from = t.end;
+    if (mapped.kind === "unmapped" || (mapped.kind === "ignored" && mapped.reason.startsWith("Looks like"))) {
+      const after = followingLabel(text.slice(t.end, tokens[i + 1]?.start ?? text.length));
+      const viaAfter = after === null ? null : mapToken(after, t, true);
+      if (after !== null && viaAfter!.kind === "field") {
+        mapped = viaAfter!;
+        from = t.end + after.length;
+      }
+    }
+    record(result, mapped, t, { raw: t.raw, location: where, context, rule: "line:prose" });
   });
+}
+
+/** Prose: sentences of text, each read on its own. Lines in `skip` were read as table rows. */
+function fromLines(doc: NormalizedDocument, result: ExtractionResult, skip: Set<number>) {
+  for (const para of paragraphs(doc, skip)) for (const s of sentences(para.text)) readSentence(s, para, result);
 }
 
 type RentBasis = "monthly" | "annual" | "psf";
@@ -505,6 +649,7 @@ function textTables(doc: NormalizedDocument, format: DocumentFormat): { tables: 
       used.add(j);
     }
     if (rows.length === 0) continue;
+    used.add(i);
     out.push({ table: { name: `Table at ${head.location}`, rows: [cols, ...rows] }, notes: lines.slice(j, j + 4).map((l) => l.text) });
     i = j - 1;
   }

@@ -18,6 +18,8 @@ const GENERIC = new Set([
   "stabilized", "stabilised", "economic", "physical", "lender", "average", "avg", "annual", "total", "overall",
   "project", "portfolio", "minimum", "min", "target", "market", "gross", "net", "blended", "monthly", "base", "the",
   "of", "per", "unit", "all", "in", "place", "in-place", "asking", "effective", "current", "residential rental",
+  // The heading of a letter or email, not a component.
+  "subject", "objet", "re", "note", "notes", "purpose",
 ]);
 
 const ITEMIZED_ALIASES: Record<string, string[]> = {
@@ -72,10 +74,20 @@ export function normalizeLabel(raw: string): { label: string; labelUnit: LabelUn
   return { label, labelUnit, labelCode };
 }
 
-function hasPhrase(label: string, phrase: string): boolean {
-  const esc = phrase.replace(/[.*+?^${}()|[\]\\/]/g, "\\$&");
-  return new RegExp(`(^|[^a-z0-9])${esc}($|[^a-z0-9])`).test(label);
+export function hasPhrase(label: string, phrase: string): boolean {
+  return phraseAt(label, phrase) !== null;
 }
+
+/** Where the phrase last occurs in the label, as [start, end). */
+function phraseAt(label: string, phrase: string): [number, number] | null {
+  const esc = phrase.replace(/[.*+?^${}()|[\]\\/]/g, "\\$&");
+  let found: [number, number] | null = null;
+  for (const m of label.matchAll(new RegExp(`(^|[^a-z0-9])${esc}(?=$|[^a-z0-9])`, "g"))) found = [m.index! + m[1]!.length, m.index! + m[0].length];
+  return found;
+}
+
+// An alias right after one of these (and at most three words) is a reference, not what the number is: "above the preferred return".
+const REFERENCE_RE = /\b(above|over|beyond|after|in excess of|au dela de|au dela du|au dela des|apres)\s+(?:\S+\s+){0,3}$/;
 
 function endsWithPhrase(label: string, phrase: string): string | null {
   if (label === phrase) return "";
@@ -95,19 +107,20 @@ function itemName(prefix: string): string {
  * unitSeen keeps the unit the document used (decision 7). A currency named by
  * the label applies to a figure that names none of its own.
  */
-function compatibleValue(def: FieldDef, t: NumberToken, label: string, labelUnit: LabelUnit, labelCode: CurrencyCode | null): { value: number; unitSeen: string } | null {
-  const c = convert(def, t, label, labelUnit);
+function compatibleValue(def: FieldDef, t: NumberToken, label: string, labelUnit: LabelUnit, labelCode: CurrencyCode | null, prose = false): { value: number; unitSeen: string } | null {
+  const c = convert(def, t, label, labelUnit, prose);
   return c && { ...c, unitSeen: withCurrency(c.unitSeen, t.currencyCode ?? labelCode) };
 }
 
-function convert(def: FieldDef, t: NumberToken, label: string, labelUnit: LabelUnit): { value: number; unitSeen: string } | null {
+function convert(def: FieldDef, t: NumberToken, label: string, labelUnit: LabelUnit, prose: boolean): { value: number; unitSeen: string } | null {
   const v = t.value;
   if (v === null) return null;
   const u = t.unit;
   switch (def.unit) {
     case "$":
       if (u === "$" || labelUnit === "$") return { value: v, unitSeen: "$" };
-      if (u === null && Math.abs(v) >= 1000) return { value: v, unitSeen: "number" };
+      // In prose a bare number is never money (a year, a count): tables and label/value lines keep the rule.
+      if (u === null && !prose && Math.abs(v) >= 1000) return { value: v, unitSeen: "number" };
       return null;
     case "%":
       if (u === "%" || (u === null && labelUnit === "%")) return { value: v, unitSeen: "%" };
@@ -148,27 +161,28 @@ function convert(def: FieldDef, t: NumberToken, label: string, labelUnit: LabelU
   }
 }
 
-/** Map one labelled number onto a field. */
-export function mapToken(rawLabel: string, t: NumberToken): Mapped {
+/** Map one labelled number onto a field. In prose the alias nearest the number names it, and a bare number is never money. */
+export function mapToken(rawLabel: string, t: NumberToken, prose = false): Mapped {
   const { label, labelUnit, labelCode } = normalizeLabel(rawLabel);
   const output = OUTPUT_LIKE_PHRASES.find((p) => hasPhrase(label, p));
   if (output) return { kind: "ignored", reason: `"${rawLabel.trim()}" is an output figure, which is never taken as an input` };
   if (t.value === null) return { kind: "ignored", reason: t.refusal ?? "The number could not be read without guessing" };
 
-  // Scalars: longest alias found anywhere in the label, among compatible fields.
-  let best: { def: FieldDef; alias: string; value: number; unitSeen: string } | null = null;
+  // Scalars: longest alias found anywhere in the label, among compatible fields (in prose: the alias ending nearest the number).
+  let best: { def: FieldDef; alias: string; end: number; value: number; unitSeen: string } | null = null;
   let aliasOnly: { def: FieldDef; alias: string } | null = null;
   for (const def of FIELDS) {
     if (def.itemized || !def.extractable) continue;
     for (const alias of def.aliases) {
-      if (!hasPhrase(label, alias)) continue;
-      const c = compatibleValue(def, t, label, labelUnit, labelCode);
+      const at = phraseAt(label, alias);
+      if (!at || (prose && REFERENCE_RE.test(label.slice(0, at[0])))) continue;
+      const c = compatibleValue(def, t, label, labelUnit, labelCode, prose);
       if (!c) {
         if (!aliasOnly || alias.length > aliasOnly.alias.length) aliasOnly = { def, alias };
         continue;
       }
-      if (best && alias.length <= best.alias.length) continue;
-      best = { def, alias, ...c };
+      if (best && (prose ? at[1] < best.end || (at[1] === best.end && alias.length <= best.alias.length) : alias.length <= best.alias.length)) continue;
+      best = { def, alias, end: at[1], ...c };
     }
   }
   // Itemized: an alias at the end of the label, with a component name before it.
@@ -179,7 +193,7 @@ export function mapToken(rawLabel: string, t: NumberToken): Mapped {
       const prefix = endsWithPhrase(label, alias);
       if (prefix === null) continue;
       const name = itemName(prefix);
-      const c = compatibleValue(def, t, label, labelUnit, labelCode);
+      const c = compatibleValue(def, t, label, labelUnit, labelCode, prose);
       if (!c) continue;
       if (!item || alias.length > item.alias.length || (name && !item.itemKey)) {
         item = { def, alias, itemKey: name, ...c };
@@ -195,7 +209,8 @@ export function mapToken(rawLabel: string, t: NumberToken): Mapped {
   }
   // A component named by itself with a self-describing unit: "Retail: 9,000 SF".
   const name = itemName(label);
-  if (name && label.split(" ").length <= 3) {
+  // In prose the words before a number are a clause ("Pinegate, 12 suites"), not a name.
+  if (name && label.split(" ").length <= 3 && !prose) {
     const byUnit: Record<string, string> = {
       units: "unit_count",
       sf: "rentable_area_sf",
@@ -205,7 +220,7 @@ export function mapToken(rawLabel: string, t: NumberToken): Mapped {
       "$/m2": "rent_psf_annual",
     };
     const key = t.unit ? byUnit[t.unit] : undefined;
-    const c = key ? compatibleValue(FIELD_BY_KEY.get(key)!, t, label, labelUnit, labelCode) : null;
+    const c = key ? compatibleValue(FIELD_BY_KEY.get(key)!, t, label, labelUnit, labelCode, prose) : null;
     if (key && c) return { kind: "field", fieldKey: key, itemKey: name, value: c.value, unitSeen: c.unitSeen };
   }
   if (aliasOnly) {

@@ -663,8 +663,8 @@ describe("prose: sentences, labels and refusals", () => {
     const r = read("Equity was contributed in May 2026.");
     expect(r.candidates).toEqual([]);
     expect(r.other.map((o) => o.value)).toEqual([2_026]);
-    expect(read("We will invest equity of 720,000.").candidates).toEqual([]);
-    expect(pick(read("Equity: 720,000"))).toEqual([["equity_amount", 720_000]]);
+    expect(read("We will invest equity of 720000.").candidates).toEqual([]);
+    expect(pick(read("Equity: 720000"))).toEqual([["equity_amount", 720_000]]);
     expect(pick(read("Equity of $2,026,000 in May."))).toEqual([["equity_amount", 2_026_000]]);
   });
   test("a range is refused, in English and French", () => {
@@ -698,5 +698,10 @@ describe("prose: sentences, labels and refusals", () => {
   test("a sentence that names an output gives no input for any number in it", () => {
     expect(read("At a 5.0% exit cap rate the indicative value is $12,000,000.").candidates).toEqual([]);
     expect(pick(read("The exit cap rate is 5.5%."))).toEqual([["exit_cap_rate_pct", 5.5]]);
+  });
+  test("a colon label that names nothing introduces prose; a heading is not an item", () => {
+    expect(pick(read("Terms: the hold period is 5 years and the lease-up period is 6 months."))).toEqual([["hold_years", 5], ["lease_up_months", 6]]);
+    expect(read("Objet : projet locatif de douze logements.").candidates).toEqual([]);
+    expect(read("Purpose: a sixteen-suite rental building.").candidates).toEqual([]);
   });
 });

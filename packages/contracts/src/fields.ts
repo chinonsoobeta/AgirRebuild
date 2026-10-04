@@ -82,7 +82,7 @@ export const FIELDS: readonly FieldDef[] = [
 
   // ---- Timeline -----------------------------------------------------------
   { key: "construction_months", label: "Construction period", group: "timeline", unit: "months", required: true, material: false, conservative: "max", min: 0, max: 120, integer: true, extractable: true, aliases: ["construction period", "construction duration", "build period", "construction months", "construction term", "duree des travaux", "duree de construction", "duree de la construction", "periode de construction"] },
-  { key: "lease_up_months", label: "Lease-up period", group: "timeline", unit: "months", required: true, material: false, conservative: "max", min: 0, max: 120, integer: true, extractable: true, aliases: ["lease-up period", "lease up period", "lease-up", "absorption period", "lease-up months", "periode d absorption"], help: "Enter 0 if the asset is stabilized at completion." },
+  { key: "lease_up_months", label: "Lease-up period", group: "timeline", unit: "months", required: true, material: false, conservative: "max", min: 0, max: 120, integer: true, extractable: true, aliases: ["lease-up period", "lease up period", "lease-up", "absorption period", "lease-up months", "periode d absorption", "mise en location"], help: "Enter 0 if the asset is stabilized at completion." },
   { key: "hold_years", label: "Hold period", group: "timeline", unit: "years", required: true, material: false, conservative: null, default: 5, min: 1, max: 40, integer: true, extractable: true, aliases: ["hold period", "holding period", "investment horizon", "hold", "periode de detention", "duree de detention"] },
 
   // ---- Operations ---------------------------------------------------------
