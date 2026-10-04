@@ -250,6 +250,50 @@ describe("a figure in another currency", () => {
   });
 });
 
+describe("reading a later document", () => {
+  const enc = (t: string) => new TextEncoder().encode(t);
+  const newDeal = async (name: string) =>
+    (await call(alice, "POST", `/api/workspaces/${ws}/deals`, { name, assetType: "Multifamily", location: "Windsor", province: "ON" })).json.id;
+  const field = async (d: string, key: string) => (await call(alice, "GET", `/api/deals/${d}/review`)).json.assumptions.find((a: any) => a.fieldKey === key);
+  const read = async (d: string, name: string, text: string) => {
+    await call(alice, "PUT", `/api/deals/${d}/documents?name=${name}`, undefined, enc(text));
+    await work();
+  };
+
+  test("leaves a value's version alone when nothing it shows changed, so a confirm still lands", async () => {
+    const d = await newDeal("Stable Versions");
+    await read(d, "land.txt", "Budget\nLand cost: $1,200,000\n");
+    const before = await field(d, "land_cost");
+    expect(before).toMatchObject({ status: "needs_review", value: 1_200_000 });
+    await read(d, "hard.txt", "Budget\nHard costs: $5,000,000\n");
+    const after = await field(d, "land_cost");
+    expect(after.version).toBe(before.version);
+    const ok = await call(alice, "POST", `/api/assumptions/${before.id}/review`, { action: "approve", version: before.version });
+    expect(ok.status).toBe(200);
+  });
+
+  test("bumps the version when a second document adds a source to the same value", async () => {
+    const d = await newDeal("Added Source");
+    await read(d, "land.txt", "Budget\nLand cost: $1,200,000\n");
+    const before = await field(d, "land_cost");
+    await read(d, "land-again.txt", "Closing summary\nLand cost: $1,200,000\n");
+    const after = await field(d, "land_cost");
+    expect(after).toMatchObject({ status: "needs_review", value: 1_200_000 });
+    expect(after.sources).toHaveLength(2);
+    expect(after.version).toBe(before.version + 1);
+  });
+
+  test("bumps the version when a second document disagrees", async () => {
+    const d = await newDeal("Disagreement");
+    await read(d, "land.txt", "Budget\nLand cost: $1,200,000\n");
+    const before = await field(d, "land_cost");
+    await read(d, "land-other.txt", "Closing summary\nLand cost: $1,300,000\n");
+    const after = await field(d, "land_cost");
+    expect(after.status).toBe("conflicting");
+    expect(after.version).toBe(before.version + 1);
+  });
+});
+
 describe("a new run after a change", () => {
   const selling = async () => (await call(alice, "GET", `/api/deals/${deal}/review`)).json.assumptions.find((a: any) => a.fieldKey === "selling_costs_pct");
   const review = async (action: string) => {
