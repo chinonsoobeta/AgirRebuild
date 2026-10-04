@@ -99,4 +99,45 @@ describe("artifacts", () => {
     const html = visibleText(renderHtml(model));
     for (const e of model.formatter.manifest.filter((m) => m.ref.startsWith("metric:base.")).slice(0, 20)) expect(html).toContain(e.text);
   });
+  test("sponsor-stated and confirmed inputs are labelled, and old runs are unchanged", async () => {
+    const material = (a: ArtifactInput["assumptions"][number]) => FIELD_BY_KEY.get(a.fieldKey)!.material;
+    for (const kind of ["lender_package", "ic_memo"] as const) {
+      const x = mapleInput(kind);
+      const [stated, reviewed] = x.assumptions.filter(material);
+      expect(stated && reviewed).toBeTruthy();
+      stated!.sponsorStated = true;
+      Object.assign(reviewed!, { confirmedByReview: true, confirmedBy: "Rowan Reviewer", confirmedAt: "2026-10-03T12:00:00Z" });
+      const m = x.assumptions.filter((a) => material(a) || a.sponsorStated || a.confirmedBy || a.confirmedByReview).length;
+      const model = buildModel(x);
+      const text = visibleText(renderHtml(model));
+      const heading = "Stated by the sponsor, not independently confirmed";
+      expect(text).toContain(heading);
+      expect(text).toContain(`1 of the ${m} material inputs this run used were stated by the sponsor and not confirmed by anyone else. Check them before relying on this ${kind === "ic_memo" ? "memo" : "package"}.`);
+      expect(text).toContain(stated!.label);
+      expect(text.indexOf(heading)).toBeLessThan(text.indexOf(kind === "ic_memo" ? "Sources and uses" : "Debt and coverage"));
+      expect(text).toContain("Confirmed by Agir review on 2026-10-03");
+      expect(verifyProvenance(text, model.formatter.manifest).orphans).toEqual([]);
+      const docx = await renderArtifact(x, "docx");
+      expect(docx.provenance.pass).toBe(true);
+      // Confirmed by a named person, without review.
+      Object.assign(reviewed!, { confirmedByReview: false });
+      expect(visibleText(renderHtml(buildModel(x)))).toContain("Confirmed by Rowan Reviewer");
+    }
+    for (const kind of ["lender_package", "ic_memo"] as const) {
+      expect(visibleText(renderHtml(buildModel(mapleInput(kind))))).not.toContain("Stated by the sponsor");
+    }
+  });
+  test("the model export carries a Confirmation column", async () => {
+    const x = mapleInput("model_export");
+    x.assumptions[0]!.sponsorStated = true;
+    const xlsx = await renderArtifact(x, "xlsx");
+    const ExcelJS = (await import("exceljs")).default;
+    const wb = new ExcelJS.Workbook();
+    await wb.xlsx.load(Buffer.from(xlsx.bytes) as never);
+    const rows: unknown[][] = [];
+    wb.getWorksheet("Inputs")!.eachRow((row) => rows.push((row.values as unknown[]).slice(1)));
+    expect(rows[0]![5]).toBe("Confirmation");
+    expect(rows[1]![5]).toBe("Stated by the sponsor, not independently confirmed");
+    expect(rows[2]![5] ?? "").toBe("");
+  });
 });
