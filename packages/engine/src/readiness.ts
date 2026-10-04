@@ -17,6 +17,7 @@ import {
   type ReadinessItem,
   type RevenueComponent,
 } from "@agir/contracts";
+import { EngineInputError, validateInput } from "./validate.ts";
 
 export type AssumptionRow = {
   fieldKey: string;
@@ -38,6 +39,13 @@ function impossibleReason(def: FieldDef, v: number): string | null {
 function labelFor(def: FieldDef, itemKey?: string | null) {
   return itemKey ? `${def.label} (${itemKey})` : def.label;
 }
+
+// The cross-field rules live in validateInput and are not repeated here. Its sentences are shown as they are; this only
+// names the field a person should look at, when the sentence is about one.
+const PROBLEM_FIELD: [RegExp, string][] = [
+  [/^refinance month /, "refinance_month"],
+  [/^give the refinance /, "refinance_amount"],
+];
 
 export function assemble(rows: readonly AssumptionRow[]): { readiness: Readiness; input: EngineInput | null } {
   const missing: ReadinessItem[] = [];
@@ -198,5 +206,13 @@ export function assemble(rows: readonly AssumptionRow[]): { readiness: Readiness
       ...(v("min_dscr_covenant") !== undefined ? { minDscrCovenant: n("min_dscr_covenant") } : {}),
     },
   };
+  // "Ready" means the engine will accept this input: run its own checks, and name whatever it would refuse.
+  try {
+    validateInput(input);
+  } catch (e) {
+    if (!(e instanceof EngineInputError)) throw e;
+    const problems = e.problems.map((label): ReadinessItem => ({ fieldKey: PROBLEM_FIELD.find(([re]) => re.test(label))?.[1] ?? "input", label }));
+    return { readiness: { ...readiness, status: "blocked", impossible: problems }, input: null };
+  }
   return { readiness, input };
 }

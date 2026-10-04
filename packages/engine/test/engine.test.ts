@@ -289,7 +289,7 @@ describe("quick-start templates", () => {
     });
 
     test("exactly one of the two is ready, with the refinance in the input", () => {
-      for (const sizing of [{ refinance_amount: 1_200_000 }, { refinance_ltv_pct: 65 }]) {
+      for (const sizing of [{ refinance_amount: 1_200_000 }, { refinance_ltv_pct: 65 }] as Record<string, number>[]) {
         const { readiness, input } = assemble(withRefi({ refinance_month: 24, ...sizing, ...takeOut }));
         expect(readiness).toMatchObject({ status: "ready", impossible: [] });
         expect(input!.refinance).toMatchObject({ month: 24 });

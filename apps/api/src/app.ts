@@ -3,7 +3,7 @@ import { getCookie, setCookie, deleteCookie } from "hono/cookie";
 import { z } from "zod";
 import { COUNTRIES, CURRENCIES, FIELDS, FIELD_GROUP_LABELS, METRICS, POLICY_V1, PROVINCE_CODES, REVIEW_MODES, type EngineInput } from "@agir/contracts";
 import { asUser, type BlobStore, type Db } from "@agir/db";
-import { DRIVERS, explore, grid, tornado, type DriverKey, type Shock } from "@agir/engine";
+import { DRIVERS, EngineInputError, explore, grid, tornado, type DriverKey, type Shock } from "@agir/engine";
 import { kindOf } from "@agir/extraction";
 import { MAX_UPLOAD_BYTES } from "@agir/worker";
 import { checkPassword, createSession, endSession, hashPassword, rateLimiter, SESSION_DAYS, userForSession } from "./auth.ts";
@@ -21,6 +21,7 @@ export function createApp({ db, store, secureCookies, demoSignIn = false }: AppD
 
   app.onError((err, c) => {
     if (err instanceof HttpError) return c.json({ error: err.message, ...(err.body ? { detail: err.body } : {}) }, err.status as 400);
+    if (err instanceof EngineInputError) return c.json({ error: err.message, problems: err.problems }, 422);
     if (err instanceof z.ZodError) return c.json({ error: "Some fields are missing or not valid.", issues: err.issues }, 422);
     const code = (err as { code?: string }).code;
     if (code && PG_STATUS[code]) return c.json({ error: err.message }, PG_STATUS[code] as 400);

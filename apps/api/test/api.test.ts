@@ -148,7 +148,7 @@ describe("sensitivity", () => {
   });
   test("an input the engine refuses is a 422 with the reason, never a 500", async () => {
     // Runs are append-only; lift that for one statement to put an invalid input where readiness should have stopped it, then restore it.
-    const [{ snap }] = await db.query<{ snap: unknown }>(`select input_snapshot as snap from runs where id = $1`, [run]);
+    const [{ snap }] = (await db.query<{ snap: unknown }>(`select input_snapshot as snap from runs where id = $1`, [run])) as [{ snap: unknown }];
     const bad = JSON.stringify({ month: 1, ratePct: 5, amortYears: 30, ioMonths: 0 });
     await db.query(`alter table runs disable trigger runs_append_only`);
     try {
