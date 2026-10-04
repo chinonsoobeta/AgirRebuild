@@ -1,3 +1,4 @@
+import { codeOf } from "@agir/numbers";
 import { columnName, type Cell, type Line, type NormalizedDocument, type Table } from "./document.ts";
 
 export class UnsupportedDocumentError extends Error {}
@@ -112,9 +113,11 @@ async function parseXlsx(bytes: Uint8Array): Promise<NormalizedDocument> {
         if (typeof v === "number" && Number.isFinite(v)) {
           const fmt = String(cell.numFmt ?? "");
           const isPct = fmt.includes("%");
-          const isMoney = fmt.includes("$");
+          // Only an explicit mark names a currency; "$" and "[$$-409]" name none.
+          const code = codeOf(/(?<![A-Za-z])(?:US|CA|C|A)\$|\b(?:USD|CAD|AUD)\b/.exec(fmt)?.[0]);
+          const isMoney = fmt.includes("$") || code !== null;
           const number = isPct ? v * 100 : v;
-          cells.push({ text: String(number), number, ...(isPct ? { unit: "%" as const } : isMoney ? { unit: "$" as const } : {}), ref });
+          cells.push({ text: String(number), number, ...(isPct ? { unit: "%" as const } : isMoney ? { unit: "$" as const, ...(code ? { currency: code } : {}) } : {}), ref });
         } else if (v === null || v === undefined) {
           cells.push({ text: "", ref });
         } else {

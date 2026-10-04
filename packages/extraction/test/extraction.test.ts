@@ -280,7 +280,7 @@ describe("a French Canadian pro forma (fr-CA: comma decimals, space groups, trai
   test("accents are folded, not dropped; English labels are unchanged", () => {
     expect(normalizeLabel("Coût du terrain").label).toBe("cout du terrain");
     expect(normalizeLabel("Période d'amortissement").label).toBe("periode d amortissement");
-    expect(normalizeLabel("Land cost (CAD)")).toEqual({ label: "land cost", labelUnit: "$" });
+    expect(normalizeLabel("Land cost (CAD)")).toEqual({ label: "land cost", labelUnit: "$", labelCode: "CAD" });
     expect(normalizeLabel("Durée (mois)").labelUnit).toBe("months");
   });
   test("every line maps to its field, value and unit", () => {

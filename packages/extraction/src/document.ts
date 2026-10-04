@@ -1,3 +1,5 @@
+import type { CurrencyCode } from "@agir/numbers";
+
 // The normalized document: what every parser produces and every finder reads.
 // Every line and cell keeps the location it came from, so each extracted value
 // can name its page and line, or its sheet and cell.
@@ -9,6 +11,8 @@ export type Cell = {
   /** A spreadsheet cell that holds a number is read as that number, with no parsing. */
   number?: number;
   unit?: "%" | "$";
+  /** The currency the cell's number format names ("[$USD]", "US$"); absent for a plain or locale-only dollar. */
+  currency?: CurrencyCode;
   ref: string;
 };
 

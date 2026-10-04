@@ -4,7 +4,7 @@
 // but it never becomes an input.
 
 import { FIELD_BY_KEY, FIELDS, OUTPUT_LIKE_PHRASES, type FieldDef } from "@agir/contracts";
-import { SF_PER_M2, type CurrencyCode, type NumberToken } from "@agir/numbers";
+import { codeOf, SF_PER_M2, type CurrencyCode, type NumberToken } from "@agir/numbers";
 
 export type LabelUnit = "$" | "%" | "months" | "years" | "sf" | "m2" | "x" | null;
 
@@ -41,13 +41,17 @@ export function currencyOf(unitSeen: string | null | undefined): CurrencyCode | 
   return (/(?:^|\s)(CAD|USD|AUD)$/.exec(unitSeen ?? "")?.[1] as CurrencyCode | undefined) ?? null;
 }
 
-export function normalizeLabel(raw: string): { label: string; labelUnit: LabelUnit } {
+export function normalizeLabel(raw: string): { label: string; labelUnit: LabelUnit; labelCode: CurrencyCode | null } {
   let labelUnit: LabelUnit = null;
+  let labelCode: CurrencyCode | null = null;
   const paren = raw.match(/\(([^)]*)\)/g) ?? [];
   for (const p of paren) {
     const inner = p.slice(1, -1).trim().toLowerCase();
-    if (/^(\$|usd|cad|dollars)$/.test(inner)) labelUnit = "$";
-    else if (/^(%|percent|pct)$/.test(inner)) labelUnit = "%";
+    // "(USD)", "($ US)", "(US$)" name a currency; "($)" and "(dollars)" name none.
+    if (/^(\$|usd|cad|dollars|\$\s?(us|can?)|(us|ca)\$)$/.test(inner)) {
+      labelUnit = "$";
+      labelCode = codeOf(inner.toUpperCase());
+    } else if (/^(%|percent|pct)$/.test(inner)) labelUnit = "%";
     else if (/^(months?|mos?|mois)$/.test(inner)) labelUnit = "months";
     else if (/^(years?|yrs?|ans?)$/.test(inner)) labelUnit = "years";
     else if (/^(sf|sq\.? ?ft|square feet|pi²|pi2|pi\.? ?ca\.?)$/.test(inner)) labelUnit = "sf";
@@ -65,7 +69,7 @@ export function normalizeLabel(raw: string): { label: string; labelUnit: LabelUn
     .replace(/\b(is|are|of|at|to|was|will be|approximately|approx|about)\s*$/g, " ")
     .replace(/\s+/g, " ")
     .trim();
-  return { label, labelUnit };
+  return { label, labelUnit, labelCode };
 }
 
 function hasPhrase(label: string, phrase: string): boolean {
@@ -88,11 +92,12 @@ function itemName(prefix: string): string {
 /**
  * Convert a token to the field's canonical unit, or return null if they are not
  * compatible. Areas are canonical in square feet: m² is converted here, and
- * unitSeen keeps the unit the document used (decision 7).
+ * unitSeen keeps the unit the document used (decision 7). A currency named by
+ * the label applies to a figure that names none of its own.
  */
-function compatibleValue(def: FieldDef, t: NumberToken, label: string, labelUnit: LabelUnit): { value: number; unitSeen: string } | null {
+function compatibleValue(def: FieldDef, t: NumberToken, label: string, labelUnit: LabelUnit, labelCode: CurrencyCode | null): { value: number; unitSeen: string } | null {
   const c = convert(def, t, label, labelUnit);
-  return c && { ...c, unitSeen: withCurrency(c.unitSeen, t.currencyCode) };
+  return c && { ...c, unitSeen: withCurrency(c.unitSeen, t.currencyCode ?? labelCode) };
 }
 
 function convert(def: FieldDef, t: NumberToken, label: string, labelUnit: LabelUnit): { value: number; unitSeen: string } | null {
@@ -145,7 +150,7 @@ function convert(def: FieldDef, t: NumberToken, label: string, labelUnit: LabelU
 
 /** Map one labelled number onto a field. */
 export function mapToken(rawLabel: string, t: NumberToken): Mapped {
-  const { label, labelUnit } = normalizeLabel(rawLabel);
+  const { label, labelUnit, labelCode } = normalizeLabel(rawLabel);
   const output = OUTPUT_LIKE_PHRASES.find((p) => hasPhrase(label, p));
   if (output) return { kind: "ignored", reason: `"${rawLabel.trim()}" is an output figure, which is never taken as an input` };
   if (t.value === null) return { kind: "ignored", reason: t.refusal ?? "The number could not be read without guessing" };
@@ -157,7 +162,7 @@ export function mapToken(rawLabel: string, t: NumberToken): Mapped {
     if (def.itemized || !def.extractable) continue;
     for (const alias of def.aliases) {
       if (!hasPhrase(label, alias)) continue;
-      const c = compatibleValue(def, t, label, labelUnit);
+      const c = compatibleValue(def, t, label, labelUnit, labelCode);
       if (!c) {
         if (!aliasOnly || alias.length > aliasOnly.alias.length) aliasOnly = { def, alias };
         continue;
@@ -174,7 +179,7 @@ export function mapToken(rawLabel: string, t: NumberToken): Mapped {
       const prefix = endsWithPhrase(label, alias);
       if (prefix === null) continue;
       const name = itemName(prefix);
-      const c = compatibleValue(def, t, label, labelUnit);
+      const c = compatibleValue(def, t, label, labelUnit, labelCode);
       if (!c) continue;
       if (!item || alias.length > item.alias.length || (name && !item.itemKey)) {
         item = { def, alias, itemKey: name, ...c };
@@ -200,7 +205,7 @@ export function mapToken(rawLabel: string, t: NumberToken): Mapped {
       "$/m2": "rent_psf_annual",
     };
     const key = t.unit ? byUnit[t.unit] : undefined;
-    const c = key ? compatibleValue(FIELD_BY_KEY.get(key)!, t, label, labelUnit) : null;
+    const c = key ? compatibleValue(FIELD_BY_KEY.get(key)!, t, label, labelUnit, labelCode) : null;
     if (key && c) return { kind: "field", fieldKey: key, itemKey: name, value: c.value, unitSeen: c.unitSeen };
   }
   if (aliasOnly) {

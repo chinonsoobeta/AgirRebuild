@@ -79,7 +79,7 @@ const TOKEN_RE = new RegExp(
 const SUFFIX_RE = /^\s?(USD|CAD|\$\s?US\b|\$\s?CAN?\b|\$(?!\s?\d))/;
 
 /** The currency a mark names: "US$", "USD", "$ US" are USD; "CA$", "C$", "CAD", "$ CA" are CAD; "A$" is AUD; a bare "$" names none. */
-function codeOf(mark: string | undefined): CurrencyCode | null {
+export function codeOf(mark: string | undefined): CurrencyCode | null {
   const m = (mark ?? "").replace(/[\s$]/g, "");
   if (m === "US" || m === "USD") return "USD";
   if (m === "CA" || m === "C" || m === "CAN" || m === "CAD") return "CAD";
@@ -128,10 +128,12 @@ export function parseCore(
   format: DocumentFormat,
   /** The token is money, a count or an area: never written to three decimal places. */
   grouping = false,
+  /** A trailing "$" follows: fr-CA format on its own, so one space group is a thousands group. */
+  trailingDollar = false,
 ): { value: number | null; refusal?: string } {
   const spaced = new RegExp(`[${SPACE_CLASS}]`).test(core);
   const plainSpaceGroups = (core.match(/ \d{3}/g) ?? []).length;
-  if (plainSpaceGroups === 1 && !/[.,]\d/.test(core) && !format.spaceGroups) {
+  if (plainSpaceGroups === 1 && !/[.,]\d/.test(core) && !format.spaceGroups && !trailingDollar) {
     const [a, b] = core.split(" ");
     return { value: null, refusal: `"${core}" could be ${a}${b} or ${a} and ${b}; the document does not group thousands with spaces elsewhere` };
   }
@@ -229,7 +231,7 @@ export function tokenize(line: string, format: DocumentFormat): NumberToken[] {
     let unit: TokenUnit = currency ? "$" : null;
     const upcoming = UNIT_RULES.find((r) => r.re.test(scale && currency ? rest.slice(scale[0].length) : rest))?.unit ?? null;
     const grouping = currency || upcoming === "units" || upcoming === "sf" || upcoming === "m2";
-    const parsed = parseCore(core!, format, grouping);
+    const parsed = parseCore(core!, format, grouping, Boolean(suffix?.[1]?.startsWith("$")));
     let value = parsed.value;
     // A scale word counts only in a money context: "18 M" alone is not $18,000,000.
     if (scale && currency && value !== null) {

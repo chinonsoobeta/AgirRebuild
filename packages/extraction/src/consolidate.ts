@@ -23,14 +23,15 @@ const same = (a: number, b: number) => Math.abs(a - b) <= 1e-9 * Math.max(1, Mat
 /**
  * Gather candidates from every live document into one proposal per field.
  * Agreement yields one value for review. Disagreement yields a conflict that
- * lists every documented value; Agir never picks between them. When the deal's
- * currency is known, a figure marked in another currency is never a value: the
- * field conflicts, and the person enters the amount in the deal's currency.
+ * lists every documented value; Agir never picks between them. A figure marked
+ * in another currency is never a value, and neither is one marked in any currency
+ * when the deal states none (it cannot be compared): the field conflicts, and the
+ * person enters the amount in the deal's currency.
  */
 export function consolidate(candidates: readonly SourcedCandidate[], dealCurrency: string | null = null): Proposal[] {
   const isForeign = (c: SourcedCandidate) => {
     const code = currencyOf(c.unitSeen);
-    return dealCurrency !== null && code !== null && code !== dealCurrency;
+    return code !== null && code !== dealCurrency; // a deal with no currency compares none
   };
   const groups = new Map<string, SourcedCandidate[]>();
   for (const c of candidates) {
@@ -61,7 +62,9 @@ export function consolidate(candidates: readonly SourcedCandidate[], dealCurrenc
       values,
       foreign,
       reason: foreign.length
-        ? `A document states this in ${[...new Set(foreign.map((c) => currencyOf(c.unitSeen)))].join(" and ")}; this deal is in ${dealCurrency}. Enter the amount in ${dealCurrency}.`
+        ? `A document states this in ${[...new Set(foreign.map((c) => currencyOf(c.unitSeen)))].join(" and ")}; ${
+            dealCurrency ? `this deal is in ${dealCurrency}. Enter the amount in ${dealCurrency}.` : "this deal does not state its currency. Enter the amount."
+          }`
         : null,
     });
   }

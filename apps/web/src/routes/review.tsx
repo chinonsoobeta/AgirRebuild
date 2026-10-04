@@ -7,9 +7,13 @@ import * as I from "../components/icons";
 import { useI18n, type Lang } from "../i18n";
 
 // A source that says which currency it is in records it at the end of unit_seen ("USD", "$/mo USD").
-const currencyIn = (s: Source) => /(?:^|\s)(CAD|USD|AUD)$/.exec(s.unit_seen ?? "")?.[1];
+// It is a foreign figure, shown but never used, only when that differs from the deal's currency or the deal states none.
+export const foreignIn = (s: Source, dealCurrency: string | null | undefined) => {
+  const code = /(?:^|\s)(CAD|USD|AUD)$/.exec(s.unit_seen ?? "")?.[1];
+  return code && code !== dealCurrency ? code : undefined;
+};
 
-function Quote({ s }: { s: Source }) {
+function Quote({ s, currency }: { s: Source; currency: string | null | undefined }) {
   const { t, msg } = useI18n();
   const i = s.context.indexOf(s.raw);
   return (
@@ -18,7 +22,7 @@ function Quote({ s }: { s: Source }) {
       <div className="source-quote">{i >= 0 ? (<>{s.context.slice(0, i)}<mark>{s.raw}</mark>{s.context.slice(i + s.raw.length)}</>) : s.context}</div>
       <span className="small faint">{msg(s.location)}</span>
       {(s.unit_seen?.startsWith("m2") || s.unit_seen?.startsWith("$/m2")) && <span className="small faint">{t("review.fromM2")}</span>}
-      {currencyIn(s) && <span className="small faint">{t("review.statedIn", { code: currencyIn(s) })}</span>}
+      {foreignIn(s, currency) && <span className="small faint">{t("review.statedIn", { code: foreignIn(s, currency) })}</span>}
     </div>
   );
 }
@@ -57,6 +61,7 @@ export function Review({ dealId }: { dealId: string }) {
   const { me, role, solo } = useSession();
   const qc = useQueryClient();
   const deal = useDeal(dealId);
+  const dealCurrency = deal.data?.deal.currency;
   const review = useQuery({ queryKey: ["review", dealId], queryFn: () => api.get<ReviewData>(`/deals/${dealId}/review`) });
   const [focus, setFocus] = useState<string | null>(null);
   const [editing, setEditing] = useState<string | null>(null);
@@ -173,11 +178,11 @@ export function Review({ dealId }: { dealId: string }) {
                   <StatusTag tone="stop" glyph={I.Conflict}>{t("review.conflicting")}</StatusTag>
                   {a.material && <span className="chip"><I.Lock />{t("common.material")}</span>}
                 </div>
-                {a.sources.some(currencyIn) && a.reason && (
+                {a.sources.some((s) => foreignIn(s, dealCurrency)) && a.reason && (
                   // A figure in another currency is never a choice: say why, show it, and leave the amount to be entered.
                   <div className="stack" style={{ gap: 8 }}>
                     <p>{msg(a.reason)}</p>
-                    {a.sources.filter(currencyIn).map((s, i) => <Quote key={i} s={s} />)}
+                    {a.sources.filter((s) => foreignIn(s, dealCurrency)).map((s, i) => <Quote key={i} s={s} currency={dealCurrency} />)}
                   </div>
                 )}
                 <div style={{ display: "grid", gridTemplateColumns: "repeat(auto-fit, minmax(220px, 1fr))", gap: 12 }}>
@@ -370,7 +375,7 @@ export function Review({ dealId }: { dealId: string }) {
           {focused ? (
             <>
               <strong>{name(focused)}</strong>
-              {focused.sources.length ? focused.sources.slice(0, 4).map((src, n) => <Quote key={n} s={src} />) : <p className="small muted">{focused.sourceKind === "default" ? t("review.namedDefault") : t("review.enteredByShort", { who: focused.decidedBy ?? "—" })}</p>}
+              {focused.sources.length ? focused.sources.slice(0, 4).map((src, n) => <Quote key={n} s={src} currency={dealCurrency} />) : <p className="small muted">{focused.sourceKind === "default" ? t("review.namedDefault") : t("review.enteredByShort", { who: focused.decidedBy ?? "—" })}</p>}
             </>
           ) : (
             <p className="small muted">{t("review.selectValue")}</p>

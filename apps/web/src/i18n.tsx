@@ -1103,6 +1103,7 @@ const FR_REASONS: [RegExp, string | ((m: RegExpMatchArray) => string)][] = [
   [/^(.+), converted from square metres \("(.+)"\)$/, (m) => `${translateMessage(m[1])}, converti de mètres carrés (« ${m[2]} »)`],
   [/^(.+?), (page \d+, line \d+|line \d+|paragraph \d+)$/, (m) => `${m[1]}, ${translateMessage(m[2])}`],
   [/^A document states this in (.+); this deal is in (CAD|USD|AUD)\. Enter the amount in \2\.$/, (m) => `Un document l'indique en ${m[1]!.replace(" and ", " et ")} ; ce dossier est en ${m[2]}. Saisissez le montant en ${m[2]}.`],
+  [/^A document states this in (.+); this deal does not state its currency\. Enter the amount\.$/, (m) => `Un document l'indique en ${m[1]!.replace(" and ", " et ")} ; ce dossier n'indique pas sa devise. Saisissez le montant.`],
   [/^No field matches this label$/, "Aucun champ ne correspond à ce libellé"],
   [/^No budget line matches this label$/, "Aucune ligne de budget ne correspond à ce libellé"],
   [/^Another number on this line was used$/, "Un autre nombre de cette ligne a été retenu"],

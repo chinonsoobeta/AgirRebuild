@@ -33,7 +33,7 @@ function cellToken(cell: Cell, format: DocumentFormat): NumberToken | null {
       end: cell.text.length,
       value: cell.number,
       currency: cell.unit === "$",
-      currencyCode: null,
+      currencyCode: cell.currency ?? null,
       unit: cell.unit === "%" ? "%" : cell.unit === "$" ? "$" : null,
       scaled: false,
     };
@@ -113,26 +113,29 @@ type Roles = {
   rentPerM2: boolean;
 };
 
-// Matched after "²" is written "2", so "m²" and "m2" read the same.
+// A column header, lower case, "²" written "2" and accents folded ("unité" is "unite"), so "m²" and "m2" read the same.
+const headerOf = (c: Cell) => c.text.toLowerCase().replace(/²/g, "2").normalize("NFD").replace(/[\u0300-\u036f]/g, "");
 const M2_RE = /\b(m2|sq\.? ?m|sqm|square met(re|er)s?)\b/;
-const PER_M2_RE = /(psm|\/\s?(m2|sq\.? ?m|sqm)\b|per (m2|sq\.? ?m|sqm|square met(re|er))\b)/;
+const PER_M2_RE = /(psm|\/\s?(m2|sq\.? ?m|sqm)\b|(per|au|par) (m2|sq\.? ?m|sqm|square met(re|er))\b)/;
 
 function rentRollRoles(header: Cell[]): Roles | null {
   const roles: Roles = { item: [], psfHeader: false, areaM2: false, rentPerM2: false };
   header.forEach((c, i) => {
-    const h = c.text.toLowerCase().replace(/²/g, "2");
+    const h = headerOf(c);
     if (!h) return;
-    if (/\b(unit\s*type|type|component|space|tenant|suite|plan|floor\s*plan|use)\b/.test(h)) roles.item.push(i);
-    else if (/\b(units|unit count|count|#|doors)\b/.test(h)) roles.units = i;
-    else if (/\brent\b/.test(h) && !/basis/.test(h)) {
+    // French: "Nombre de logements" counts units; "Type de logement" and "Unité" name them; "Loyer par logement" is a rent.
+    if (/\b(nombre|nbre|nb|quantite)\b/.test(h)) roles.units = i;
+    else if (/\b(unit\s*type|type|component|space|tenant|suite|plan|floor\s*plan|use)\b/.test(h) || (/\b(logement|unite|appartement|locataire|espace|local)\b/.test(h) && !/\bloyer\b/.test(h))) roles.item.push(i);
+    else if (/\b(units|unit count|count|#|doors|logements|unites|appartements)\b/.test(h)) roles.units = i;
+    else if (/\b(rent|loyer)\b/.test(h) && !/basis/.test(h)) {
       roles.rent = i;
       roles.rentPerM2 = PER_M2_RE.test(h);
-      roles.psfHeader = /(psf|\/\s?sf|per sf)/.test(h) || roles.rentPerM2;
+      roles.psfHeader = /(psf|\/\s?sf|per sf|(au|par) (pi2|pi\.? ?ca))/.test(h) || roles.rentPerM2;
     } else if (/basis/.test(h)) roles.basis = i;
-    else if (/\b(area|sf|nrsf|rsf|gla|square feet)\b/.test(h) || M2_RE.test(h)) {
+    else if (/\b(area|sf|nrsf|rsf|gla|square feet|superficie|surface|pi2)\b/.test(h) || M2_RE.test(h)) {
       roles.area = i;
       roles.areaM2 = M2_RE.test(h);
-    } else if (/occupancy|occ\b/.test(h)) roles.occupancy = i;
+    } else if (/occupancy|occupation|occ\b/.test(h)) roles.occupancy = i;
   });
   return roles.item.length > 0 && roles.rent !== undefined && (roles.units !== undefined || roles.area !== undefined) ? roles : null;
 }
@@ -141,9 +144,9 @@ function budgetRoles(header: Cell[]): { label: number; amount: number } | null {
   let label = -1;
   let amount = -1;
   header.forEach((c, i) => {
-    const h = c.text.toLowerCase();
-    if (label < 0 && /\b(line\s*item|description|category|item|cost\s*item|use)\b/.test(h)) label = i;
-    else if (amount < 0 && /\b(amount|cost|budget|total|\$)\b/.test(h)) amount = i;
+    const h = headerOf(c);
+    if (label < 0 && /\b(line\s*item|description|category|item|cost\s*item|use|poste|libelle|designation|categorie|rubrique)\b/.test(h)) label = i;
+    else if (amount < 0 && /\b(amount|cost|budget|total|montant|couts?|\$)\b/.test(h)) amount = i;
   });
   return label >= 0 && amount >= 0 ? { label, amount } : null;
 }
@@ -225,7 +228,7 @@ function fromBudget(table: Table, headerRow: number, roles: { label: number; amo
       itemKey: null,
       value: mapped.value,
       raw: t.raw,
-      unitSeen: withCurrency("$", t.currencyCode),
+      unitSeen: withCurrency("$", t.currencyCode ?? currencyOf(mapped.unitSeen)),
       location: amountCell.ref,
       context: `${table.name}: ${labelCell.text}`,
       rule: isTotal ? "table:budget-total" : "table:budget",

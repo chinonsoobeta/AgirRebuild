@@ -40,24 +40,25 @@ later tasks build on earlier migrations. Review and merge them in order.
 | `task/09-foreign-currency` | 1 | A figure marked in another currency ("US$", "USD", "A$", or after the number "1 250 000 $ US") is never read as the deal's. Each token carries a `currencyCode`; the candidate records it at the end of `unit_seen` ("USD", "$/mo USD"), so no migration. When the deal's currency is known and differs, `consolidate` makes the field conflicting with the reason "A document states this in USD; this deal is in CAD. Enter the amount in CAD.", keeps the figure in sources, and offers only deal-currency figures in `conflict_values`, so `resolve` cannot pick it and the person uses "enter a different value". Review shows the reason and the foreign source. A bare "$" is still read as the deal's currency | Not required: no migration, engine or governance change. Advised, because it changes how documents are read |
 | `task/10-french-documents` | 1 | A French Canadian pro forma is read. `normalizeLabel` folds accents ("coût" is "cout") instead of dropping the letter. A trailing dollar sign ("18,75 $", "2 100 $/mois", "18,75 $/pi²") is money with the right per-unit reading, and "/mois", "par mois", "mois", "ans" and "logements" are units. French aliases sit in the existing `aliases` arrays in `packages/contracts/src/fields.ts` (and `ITEMIZED_ALIASES` for the itemized fields, which is what the matcher reads for them), including mezzanine and refinance forms so they cannot fall to the senior loan | Not required: no migration, engine or governance change. Advised, because it changes how documents are read |
 | `task/11-web-gaps` | 3 | The step bar no longer says "Waiting for documents" on a quick-start deal: Review waits only with no documents and no values, or while documents are read (`reviewWaiting`, `components/ui.tsx`). The quick start's "Not asked" list has French for every `absentMeans` (`FR_ABSENT`, `L.absent`). Review and manual entry offer sf / m² for an area and $/sf/yr / $/m²/yr for a rent: the value is converted with `SF_PER_M2` before posting (`enteredInUnit`, `routes/review.tsx`) and the reason records what was typed. `@agir/numbers` added as a web dependency | Not required: display and entry only; the value still goes through the governed functions |
+| `task/12-reading-gaps` | 1 | Closes the gaps task/09 and task/10 listed. A currency named in a label ("Land cost (USD)", "($ US)") applies to a figure with no mark of its own (`labelCode` from `normalizeLabel`, through `withCurrency`). An Excel cell whose number format names a currency (`[$USD]`, `"US$"`, `A$`, `CAD`, `CA$`; a plain or locale-only `$` names none) carries it (`Cell.currency`). A deal with no stored currency (`deals.currency` null) cannot compare a figure that names one: it conflicts, the figure stays last in sources and is no value, with the reason "A document states this in USD; this deal does not state its currency. Enter the amount." (the worker's `like 'A document states this in %'` clearing still covers it). Review shows the foreign note only when the code differs from the deal's currency or the deal has none. French table headers for rent rolls and budgets, French output phrases, the remaining French field aliases (the bare "taux de capitalisation" is removed from the exit cap rate: it is ambiguous with the going-in rate), and one space group before a trailing "$" ("2 100 $/mois") is read | Not required: no migration, engine or governance change. Advised, because it changes how documents are read |
 
 The plan for small Canadian developers is [plan-small-developers.md](plan-small-developers.md). Release 1 steps 0 to 3 are
 being built now. Steps 4 to 6 wait on the people-owned items listed below.
 
 ## Known gaps
 
-- **Foreign currency is detected only where a figure carries a mark.** A bare "$" is read as the deal's
-  currency, and Bergendal's figures carry no mark at all. A label such as "Land cost (USD)", an Excel cell
-  formatted as USD, and a deal with no stored currency (created before migration `0004`) are not checked.
+- **Foreign currency is detected only where a figure names it.** A bare "$" is read as the deal's currency
+  (and Bergendal's figures carry no mark at all), including a "$" in an Excel format. A currency named in a
+  table's column header ("Amount (USD)") or in a sheet title is not read; only the figure, its own label and
+  the cell's number format are. Other currencies than CAD, USD and AUD are not recognised.
 - **CI has never run.** `.github/workflows/gate.yml` is written but unexercised until the repo is pushed.
-- **French documents are read only where a label matches an alias.** A French pro forma in fr-CA format maps
-  the fields listed in `fields.ts` (budget, units, rents, occupancy, expenses, exit cap rate, senior loan,
-  rate, amortization, construction and hold periods, other income, rentable area). Not covered: French
-  column headers in tables (`rentRollRoles` and `budgetRoles` match English headers only), French output
-  phrases in `OUTPUT_LIKE_PHRASES` (a French "revenu net d'exploitation" is not recognised as an output),
-  fields with no French alias yet (interest-only periods, LTC, equity, waterfall, growth rates, selling
-  costs), and word orders the aliases do not list. A figure with a single space group ("2 100 $") is still
-  refused unless the document groups thousands with spaces elsewhere. There is no vacancy field.
+- **French documents are read only where a label matches an alias.** Aliases and table headers are fixed
+  word orders; a phrasing no alias lists is not mapped, and a figure the label's parenthesis qualifies
+  ("Intérêts seulement (mezzanine)") is read from the label without the parenthesis, so it can fall to the
+  senior field. French DSCR terms (RCD, CCD, RCSD) are not output phrases, because the minimum covenant uses
+  them, as in English. A French LP share written as a share of equity is only read in the forms listed. A
+  single space group is accepted only before a trailing "$"; "2 100 pi²" in a document with no other
+  space-grouped figure is still refused. There is no vacancy field.
 
 ## Deviations from the plan
 
