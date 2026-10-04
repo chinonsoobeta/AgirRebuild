@@ -124,6 +124,37 @@ describe("solo review", () => {
     expect(r.second_approver).toBe(ids.bob);
     expect(await hash()).not.toBe(sw.stated);
   });
+  test("a reviewer confirms a stated value and can do nothing else; an expired reviewer cannot even read", async () => {
+    const [ana, rowan, ed] = [await user("ana@example.com"), await user("rowan@example.com"), await user("ed@example.com")];
+    const [a] = await db.query<{ id: string }>(`select id from assumptions where deal_id = $1 and field_key = 'exit_cap_rate_pct'`, [sw.deal]);
+    await asUser(db, ids.alice, (tx) => tx.query(`select fn_add_member($1, 'ana@example.com', 'analyst')`, [sw.ws]));
+    await expect(asUser(db, ids.alice, (tx) => tx.query(`select fn_add_member($1, 'rowan@example.com', 'reviewer')`, [sw.ws]))).rejects.toThrow(/requesting Agir review/);
+    await expect(asUser(db, ids.bob, (tx) => tx.query(`select fn_grant_review($1, 'rowan@example.com', 14)`, [sw.ws]))).rejects.toThrow(/role/);
+    await expect(asUser(db, ids.alice, (tx) => tx.query(`select fn_grant_review($1, 'ana@example.com', 14)`, [sw.ws]))).rejects.toThrow(/already a member/);
+    await expect(asUser(db, ids.alice, (tx) => tx.query(`select fn_grant_review($1, 'rowan@example.com', 91)`, [sw.ws]))).rejects.toThrow(/1 and 90/);
+    for (const who of ["rowan", "ed"]) await asUser(db, ids.alice, (tx) => tx.query(`select fn_grant_review($1, $2, 14)`, [sw.ws, `${who}@example.com`]));
+    await expect(asUser(db, ids.alice, (tx) => tx.query(`select fn_add_member($1, 'rowan@example.com', 'analyst')`, [sw.ws]))).rejects.toThrow(/Agir reviewer/);
+    expect((await db.query(`select 1 from audit_events where action = 'review.granted' and workspace_id = $1`, [sw.ws])).length).toBe(2);
+
+    // A stated value for the reviewers to look at.
+    await asUser(db, ids.alice, (tx) => tx.query(`select fn_review($1, 'modify', 5.6, 'Broker opinion, revised', null)`, [a!.id]));
+    expect((await row()).second_approver).toBeNull();
+
+    // An expired reviewer sees nothing and confirms nothing.
+    await db.query(`update workspace_members set expires_at = now() - interval '1 day' where user_id = $1`, [ed]);
+    expect((await asUser(db, ed, (tx) => tx.query<{ m: boolean }>(`select agir_is_member($1) as m`, [sw.ws])))[0]!.m).toBe(false);
+    expect(await asUser(db, ed, (tx) => tx.query(`select id from workspaces where id = $1`, [sw.ws]))).toEqual([]);
+    await expect(asUser(db, ed, (tx) => tx.query(`select fn_review($1, 'second_approve', null, null, null)`, [a!.id]))).rejects.toThrow(/role/);
+
+    // A live reviewer confirms, and only confirms.
+    expect((await asUser(db, rowan, (tx) => tx.query<{ m: boolean }>(`select agir_is_member($1) as m`, [sw.ws])))[0]!.m).toBe(true);
+    for (const call of [`'modify', 5.9, 'A different value entirely'`, `'approve', null, null`, `'reject', null, null`, `'reopen', null, null`])
+      await expect(asUser(db, rowan, (tx) => tx.query(`select fn_review($1, ${call}, null)`, [a!.id]))).rejects.toThrow(/role/);
+    await expect(asUser(db, rowan, (tx) => tx.query(`select fn_enter_value($1, 'senior_rate_pct', null, 6.2, 'Lender term sheet')`, [sw.deal]))).rejects.toThrow(/role/);
+    await expect(asUser(db, rowan, (tx) => tx.query(`select fn_persist_run($1, '{}'::jsonb)`, [sw.deal]))).rejects.toThrow(/role/);
+    await asUser(db, rowan, (tx) => tx.query(`select fn_review($1, 'second_approve', null, null, null)`, [a!.id]));
+    expect((await row()).second_approver).toBe(rowan);
+  });
   test("switching back to team makes an unconfirmed stated value wait again", async () => {
     await asUser(db, ids.alice, (tx) => tx.query(`select fn_set_review_mode($1, 'team')`, [sw.ws]));
     expect(await row("senior_amort_years")).toEqual({ status: "awaiting_second_approval", value: null, pending_value: 30, second_approver: null });

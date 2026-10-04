@@ -285,3 +285,28 @@ describe("solo review", () => {
     expect((await call(alice, "POST", `/api/workspaces/${ws}/review-mode`, { mode: "team" })).status).toBe(200);
   });
 });
+
+describe("Agir review", () => {
+  test("a reviewer's confirmation is labelled on the review and on the next run", async () => {
+    const rowan = await signup("rowan@example.com", "Rowan Reviewer");
+    const cap = async () => (await call(alice, "GET", `/api/deals/${deal}/review`)).json.assumptions.find((a: any) => a.fieldKey === "exit_cap_rate_pct");
+    expect((await call(alice, "POST", `/api/workspaces/${ws}/review-mode`, { mode: "solo" })).status).toBe(200);
+    const a = await cap();
+    expect((await call(alice, "POST", `/api/assumptions/${a.id}/review`, { action: "modify", value: 5.5, reason: "Broker opinion of value", version: a.version })).status).toBe(200);
+    expect((await call(bob, "POST", `/api/workspaces/${ws}/review-grant`, { email: "rowan@example.com", days: 14 })).status).toBe(403);
+    expect((await call(alice, "POST", `/api/workspaces/${ws}/review-grant`, { email: "rowan@example.com", days: 0 })).status).toBe(400);
+    expect((await call(alice, "POST", `/api/workspaces/${ws}/review-grant`, { email: "rowan@example.com", days: 14 })).status).toBe(200);
+    const members = (await call(alice, "GET", `/api/workspaces/${ws}/members`)).json;
+    expect(members.find((m: any) => m.email === "rowan@example.com")).toMatchObject({ role: "reviewer" });
+    expect(members.find((m: any) => m.email === "rowan@example.com").expires_at).not.toBeNull();
+    const b = await cap();
+    expect(b).toMatchObject({ sponsorStated: true, confirmedByReview: false });
+    expect((await call(rowan, "POST", `/api/assumptions/${b.id}/review`, { action: "second_approve", version: b.version })).status).toBe(200);
+    expect(await cap()).toMatchObject({ sponsorStated: false, confirmedByReview: true, secondApprover: "Rowan Reviewer" });
+    const r = await call(alice, "POST", `/api/deals/${deal}/runs`);
+    const input = (await call(alice, "GET", `/api/runs/${r.json.id}`)).json.inputs.find((i: any) => i.fieldKey === "exit_cap_rate_pct");
+    expect(input).toMatchObject({ confirmedBy: "Rowan Reviewer", confirmedByReview: true });
+    expect(input.confirmedAt).not.toBeNull();
+    expect((await call(alice, "POST", `/api/workspaces/${ws}/review-mode`, { mode: "team" })).status).toBe(200);
+  });
+});
