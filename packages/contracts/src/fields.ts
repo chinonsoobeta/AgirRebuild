@@ -180,3 +180,46 @@ export const FIELD_GROUP_LABELS: Record<FieldGroup, string> = {
   waterfall: "LP/GP split",
   stated: "Stated figures (checks)",
 };
+
+// ---- Quick-start templates ------------------------------------------------------------------
+// Structure only; the wording lives in the web i18n. Each answer is entered through fn_enter_value
+// and the named defaults are accepted explicitly through fn_accept_defaults, never applied silently.
+
+export type TemplateQuestion = { field: string; item?: string; optional?: true; repeatable?: true; zeroAllowed?: true; skipsIfZero?: string[] };
+export type Template = { key: "multiplex" | "apartment"; minUnits: number; maxUnits: number; questions: TemplateQuestion[]; defaults: string[] };
+
+const q = (field: string, o: Omit<TemplateQuestion, "field"> = {}): TemplateQuestion => ({ field, ...o });
+const DEFAULTS = ["hold_years", "selling_costs_pct", "expense_ratio_pct"];
+const loan = [
+  q("senior_loan_amount", { zeroAllowed: true, skipsIfZero: ["senior_rate_pct", "senior_amort_years"] }),
+  q("senior_rate_pct"),
+  q("senior_amort_years"),
+];
+const timeline = [q("construction_months", { zeroAllowed: true }), q("lease_up_months", { zeroAllowed: true })];
+
+export const TEMPLATES: readonly Template[] = [
+  {
+    key: "multiplex",
+    minUnits: 2,
+    maxUnits: 4,
+    questions: [
+      q("land_cost"), q("hard_cost"), q("soft_cost"), q("contingency", { zeroAllowed: true }),
+      ...timeline,
+      q("unit_count", { item: "Residential" }), q("unit_rent_monthly", { item: "Residential" }),
+      q("stabilized_occupancy_pct"), q("exit_cap_rate_pct"), ...loan,
+    ],
+    defaults: DEFAULTS,
+  },
+  {
+    key: "apartment",
+    minUnits: 5,
+    maxUnits: 30,
+    questions: [
+      q("land_cost"), q("hard_cost"), q("soft_cost"), q("contingency", { zeroAllowed: true }), q("other_cost", { optional: true }),
+      ...timeline,
+      q("unit_count", { repeatable: true }), q("unit_rent_monthly", { repeatable: true }),
+      q("stabilized_occupancy_pct"), q("other_income_annual", { optional: true }), q("exit_cap_rate_pct"), ...loan,
+    ],
+    defaults: DEFAULTS,
+  },
+];
