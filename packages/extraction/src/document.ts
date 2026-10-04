@@ -19,7 +19,8 @@ export type Cell = {
   ref: string;
 };
 
-export type Table = { name: string; rows: Cell[][] };
+/** `at`: how many of the document's lines come before the table, so a heading above it can be found (Word files). */
+export type Table = { name: string; rows: Cell[][]; at?: number };
 
 export type NormalizedDocument = {
   kind: "pdf" | "xlsx" | "csv" | "docx" | "txt";

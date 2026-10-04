@@ -17,6 +17,11 @@
 //     word follows it directly: "three-bedroom" names an item, not a count.
 //  6c. "month 26", "au mois 26" and "au 26e mois" are an ordinal point in time,
 //     in months. "1.20 times" and "1,15 fois" are a multiple.
+//  6d. A count may stand before a unit-type word ("four studios", "7 2-bed units",
+//     "trois 4½"): the type words are in UNIT_TYPE_SRC, and unitTypesIn names them.
+//     "4½" is a unit type, never the number 4.
+//  6e. A money figure may carry a per-year or per-month qualifier: "$/pi²/an",
+//     "1 200 $ par année", "$1,640 a month".
 //  7. Square metres are their own unit. The engine works in square feet, so a
 //     figure in m² is converted where it is mapped, never here.
 
@@ -75,7 +80,7 @@ const SPACE_CLASS = "    ";
 // as 9 or 400.
 const NUMBER_CORE = String.raw`\d{1,3}(?:[,.\u00A0\u202F\u2009]\d{3})+(?:[.,]\d+)?|\d{1,3}(?: \d{3})+(?:[.,]\d+)?|\d+(?:[.,]\d+)?`;
 const TOKEN_RE = new RegExp(
-  String.raw`(\()?(?<![\w.,])([-−‒–])?\s?((?:US|CA|C|A)?\$|USD\s?|CAD\s?)?\s?(${NUMBER_CORE})(?![\d])(?![.,]\d)`,
+  String.raw`(\()?(?<![\w.,])([-−‒–])?\s?((?:US|CA|C|A)?\$|USD\s?|CAD\s?)?\s?(${NUMBER_CORE})(?![\d])(?![.,]\d)(?!½)`,
   "g",
 );
 
@@ -191,10 +196,28 @@ export function parseCore(
   return Number.isFinite(v) ? { value: v } : { value: null, refusal: `"${core}" is not a number` };
 }
 
+// Unit types a count or a rent is named by: "one-bedroom", "2-bed", "3½", "studio", "loft", "townhome", "maison de ville".
+const TYPE_BED = String.raw`(?:one|two|three|un|une|deux|trois|[123])[-\s]?(?:bed(?:room)?s?|br|chambres?)`;
+const TYPE_NAMED = String.raw`\d½|studios?|bachelors?|lofts?|town-?homes?|townhouses?|maisons?\s+de\s+ville`;
+// A digit count takes only a plural type ("4 studios"): "Suite 12 Bachelor" is a name and a number.
+const TYPE_PLURAL = String.raw`studios|bachelors|lofts|town-?homes|townhouses|maisons\s+de\s+ville`;
+const BED_NAMES: Record<string, string> = { one: "1BR", un: "1BR", une: "1BR", "1": "1BR", two: "2BR", deux: "2BR", "2": "2BR", three: "3BR", trois: "3BR", "3": "3BR" };
+
+/** The distinct unit types a clause names, in the order written, as one name each ("1BR", "Studio", "3½"). "one- and two-bedroom" names both. */
+export function unitTypesIn(text: string): string[] {
+  const found: { at: number; name: string }[] = [];
+  for (const m of text.matchAll(new RegExp(String.raw`(?<![\p{L}\p{N}])(?:(${TYPE_BED})|(${TYPE_NAMED})|((?:one|two|three|un|deux|trois|[123])-)(?=\s+(?:and|or|et|ou)\s))(?![\p{L}\p{N}])`, "giu"))) {
+    const w = m[0].toLowerCase();
+    const name = m[1] || m[3] ? BED_NAMES[/^[a-z0-9]+/.exec(w)![0]]! : /^\d/.test(w) ? w : /^studio/.test(w) ? "Studio" : /^bachelor/.test(w) ? "Bachelor" : /^loft/.test(w) ? "Loft" : /^maison/.test(w) ? "Maison de ville" : "Townhome";
+    found.push({ at: m.index!, name });
+  }
+  return [...new Set(found.sort((a, b) => a.at - b.at).map((f) => f.name))];
+}
+
 // "m" is million only when it is not the m of m²: "$450 m²" is not $450,000,000.
 const SCALE_RE = /^\s?(billion|bn|million|mm|mn|m(?!²)|thousand|k)\b/i;
 // "²" is not a word character, so the rules that end in it close with a lookahead, not \b.
-const UNIT_RULES: { re: RegExp; unit: TokenUnit }[] = [
+const UNIT_RULES: { re: RegExp; unit: TokenUnit; money?: true }[] = [
   { re: /^\s?(%|percent\b|pct\b)/i, unit: "%" },
   { re: /^\s?(bps|basis points)\b/i, unit: "bps" },
   { re: /^\s?((x|×)(?![a-z])|(times|fois)\b)/i, unit: "x" },
@@ -202,12 +225,14 @@ const UNIT_RULES: { re: RegExp; unit: TokenUnit }[] = [
   { re: /^\s?((?:\/\s?sf|psf|per\s+(?:sq\.?\s*ft|square\s+foot|sf))\b|(?:\/\s?|par\s+|au\s+)(?:pi²|pi2|pi\.?\s?ca\.?|pieds?\s+carrés?)(?![\p{L}\d]))/iu, unit: "$/sf" },
   { re: /^\s?(\/\s?(m²|m2|sq\.?\s?m\.?|sqm)|psm|per\s+(m²|m2|sq\.?\s?m\.?|sqm|square\s+met(re|er)))(?![\p{L}\d])/iu, unit: "$/m2" },
   { re: /^\s?(\/\s?(unit\s?\/\s?)?mo(nth|is)?|(per\s+unit\s+)?per\s+month|(per\s+unit\s+)?monthly|per\s+unit\s+per\s+mo|(par\s+logement\s+)?par\s+mois|mensuel(le)?)\b/i, unit: "$/mo" },
+  { re: /^\s?(?:a|each|every)\s+month\b/i, unit: "$/mo", money: true },
   { re: /^\s?(sf|sq\.?\s?ft\.?|square\s+feet|rsf|nrsf)\b/i, unit: "sf" },
   // pi², the French square foot ("pi ca", "pieds carrés"). Never "p.c.", which is French for percent.
   { re: /^\s?(pi²|pi2|pi\.?\s?ca\.?|pieds?\s+carrés?)(?![\p{L}\d])/iu, unit: "sf" },
   { re: /^\s?(m²|m2|sq\.?\s?m\.?|sqm|square\s+met(re|er)s?|mètres?\s+carrés?)(?![\p{L}\d])/iu, unit: "m2" },
-  { re: /^\s?(units?|homes|suites|apartments|doors)\b/i, unit: "units" },
-  { re: /^\s?(logements?|unités?|unites?|appartements?)(?![\p{L}\d])/iu, unit: "units" },
+  { re: new RegExp(String.raw`^\s?(?:${TYPE_BED}[\s-]+)?(?:units?|homes|suites|apartments|doors)\b`, "i"), unit: "units" },
+  { re: new RegExp(String.raw`^\s?(?:${TYPE_BED}[\s-]+)?(?:logements?|unités?|unites?|appartements?)(?![\p{L}\d])`, "iu"), unit: "units" },
+  { re: new RegExp(String.raw`^\s?(?:${TYPE_PLURAL})(?![\p{L}\p{N}])`, "iu"), unit: "units" },
   // "au 26e mois": the ordinal's own "mois" is the unit.
   { re: /^(e|er|ème|eme)\s+mois\b/i, unit: "months" },
   { re: /^[-\s]?(months?|mos?\.?|mois)\b/i, unit: "months" },
@@ -224,10 +249,10 @@ const TENS = "twenty|thirty|forty|fifty|sixty|vingt|trente|quarante|cinquante|so
 const DIGIT_WORDS = "one|two|three|four|five|six|seven|eight|nine|un|deux|trois|quatre|cinq|six|sept|huit|neuf";
 // A number word, then (directly, or after a hyphen) a unit word. Compounds ("twenty-four") first, so they win over their first word.
 const WORD_RE = new RegExp(
-  String.raw`(?<![\p{L}\p{N}-])((?:${TENS})-(?:${DIGIT_WORDS})|dix-sept|dix-huit|dix-neuf|${Object.keys(WORD_VALUES).filter((w) => !w.includes("-")).join("|")})(?:-|\s+)(months?|mois|years?|ans?|units?|suites?|homes?|apartments?|logements?|unités?)(?![\p{L}\p{N}])`,
+  String.raw`(?<![\p{L}\p{N}-])((?:${TENS})-(?:${DIGIT_WORDS})|dix-sept|dix-huit|dix-neuf|${Object.keys(WORD_VALUES).filter((w) => !w.includes("-")).join("|")})(?:-|\s+)(months?|mois|years?|ans?|${TYPE_BED}(?:[\s-]+(?:units?|suites?|homes?|apartments?|logements?|unités?))?|(?:units?|suites?|homes?|apartments?|logements?|unités?)|${TYPE_NAMED})(?![\p{L}\p{N}])`,
   "giu",
 );
-const PRECEDING_NUMBER_WORD = /(?:hundred|thousand|million|cent|cents|mille|and|et|-)\s*$/i;
+const PRECEDING_NUMBER_WORD = /(?:(?:hundred|thousand|million|cents?|mille)\s+(?:and|et)|hundred|thousand|million|cents?|mille|-)\s*$/i;
 
 /** Number words directly followed by a unit word. "one hundred twenty units" is not read: a word that continues a larger number is skipped. */
 function wordTokens(text: string): NumberToken[] {
@@ -235,7 +260,7 @@ function wordTokens(text: string): NumberToken[] {
   for (const m of text.matchAll(WORD_RE)) {
     const word = m[1]!.toLowerCase();
     const noun = m[2]!.toLowerCase();
-    const unit: TokenUnit = /^(month|mois)/.test(noun) ? "months" : /^(year|an)/.test(noun) ? "years" : "units";
+    const unit: TokenUnit = /^(month|mois)/.test(noun) ? "months" : /^(years?|ans?)$/.test(noun) ? "years" : "units";
     // "any one unit", "un logement": one of a thing is not a count.
     if (unit === "units" && /^(one|un|une)$/.test(word)) continue;
     if (PRECEDING_NUMBER_WORD.test(text.slice(0, m.index!))) continue;
@@ -253,13 +278,18 @@ function scaleOf(word: string): number {
   return 1e3;
 }
 
+const ANNUAL_RE = /^\s?(?:\/\s?(?:an|yr|year|ann[ée]e)\b|par\s+(?:an|ann[ée]e)\b|per\s+(?:year|annum)\b|annually\b|a\s+year\b)/iu;
+
 /** Every number in one line of text, with its unit and whether it was refused. */
 export function tokenize(line: string, format: DocumentFormat): NumberToken[] {
   const text = normalizeText(line);
   const out: NumberToken[] = [];
+  let reached = 0;
   for (const m of text.matchAll(TOKEN_RE)) {
     const [whole, paren, sign, cur, core] = m;
     const start = m.index!;
+    // The tail of a unit phrase ("7 2-bed units") is not a number of its own.
+    if (start < reached) continue;
     let end = start + whole.length;
     const rest = text.slice(end);
     const scale = rest.match(SCALE_RE);
@@ -285,6 +315,7 @@ export function tokenize(line: string, format: DocumentFormat): NumberToken[] {
     }
     const after = text.slice(end);
     for (const r of UNIT_RULES) {
+      if (r.money && !currency) continue;
       const u = after.match(r.re);
       if (u) {
         if (currency && (r.unit === "$/sf" || r.unit === "$/m2" || r.unit === "$/mo")) unit = r.unit;
@@ -293,8 +324,11 @@ export function tokenize(line: string, format: DocumentFormat): NumberToken[] {
         break;
       }
     }
+    // "/an", "par année", "per year" after a rent or an amount: the figure is yearly, which is what the field's unit is.
+    if (currency && unit !== "$/mo") end += ANNUAL_RE.exec(text.slice(end))?.[0].length ?? 0;
     // "month 26", "au mois 26": an ordinal point in time.
     if (unit === null && /\b(month|mois)\s+$/i.test(text.slice(0, start))) unit = "months";
+    reached = end;
     const negative = Boolean(sign) || (Boolean(paren) && text[end] === ")");
     if (value !== null && negative) value = -value;
     out.push({

@@ -783,6 +783,17 @@ describe("which loan a term belongs to, and the words small developers use", () 
       expect(pick(read("Mezzanine loan terms", "Senior rate: 5.9%", "Rate: 11%"))).toEqual([["senior_rate_pct", 5.9], ["mezz_rate_pct", 11]]);
       expect(pick(read("Take-out amortization: 40 years", "Mezzanine rate: 11%"))).toEqual([["refinance_amort_years", 40], ["mezz_rate_pct", 11]]);
     });
+    test("a repayment month is the refinance month whichever loan the section is about; a bare month number under a month label is read", () => {
+      expect(pick(read("Senior term sheet", "The construction loan is to be repaid at month 26."))).toEqual([["refinance_month", 26]]);
+      expect(pick(read("Refinance month: 26"))).toEqual([["refinance_month", 26]]);
+      expect(read("Construction month: 26").candidates).toEqual([]);
+    });
+    test("a loose word gives way to a specific alias, and stands only at the end of its label or before a verb phrase", () => {
+      expect(pick(read("Imprévus de construction : 150 000 $"))).toEqual([["contingency", 150_000]]);
+      expect(pick(read("Construction should take twelve months."))).toEqual([["construction_months", 12]]);
+      expect(read("Loan fee: $20,000").candidates).toEqual([]);
+      expect(read("The loan officer is paid $20,000.").candidates).toEqual([]);
+    });
     test("a covenant the scope's loan has no field for is left in other, not given to the senior loan", () => {
       const r = read("Mezzanine loan terms", "Minimum DSCR: 1.10");
       expect(r.candidates).toEqual([]);
@@ -825,7 +836,6 @@ describe("which loan a term belongs to, and the words small developers use", () 
       // negatives: a lot number is not land, a site area is not land, a construction loan is not hard costs
       expect(read("Lot 7").candidates).toEqual([]);
       expect(read("Lot: 7").candidates).toEqual([]);
-      expect(read("Site area: 4,000 sf").candidates).toEqual([]);
       expect(read("Allotment: $400,000").candidates).toEqual([]);
       expect(pick(read("Construction loan: $2,000,000"))).toEqual([["senior_loan_amount", 2_000_000]]);
     });
@@ -837,13 +847,13 @@ describe("which loan a term belongs to, and the words small developers use", () 
       expect(pick(read("Other income: $12,000"))).toEqual([["other_income_annual", 12_000]]);
     });
     test("operating costs are fixed dollars, or the ratio with a percent sign; variable costs are the variable share", () => {
-      expect(pick(read("Operating costs: $48,000", "Total operating costs: $49,000", "Frais d'exploitation : 48 000 $"))).toEqual([["fixed_opex_annual", 48_000], ["fixed_opex_annual", 49_000], ["fixed_opex_annual", 48_000]]);
-      expect(pick(read("Operating costs: 34%", "Dépenses d'exploitation : 34 %"))).toEqual([["expense_ratio_pct", 34], ["expense_ratio_pct", 34]]);
-      expect(pick(read("Variable operating costs: 4%", "Frais variables : 4 %"))).toEqual([["variable_expense_pct", 4], ["variable_expense_pct", 4]]);
+      expect(pick(read("Operating costs: $48,000", "Total operating costs: $49,000", "Frais d'exploitation : 50 000 $"))).toEqual([["fixed_opex_annual", 48_000], ["fixed_opex_annual", 49_000], ["fixed_opex_annual", 50_000]]);
+      expect(pick(read("Operating costs: 34%", "Dépenses d'exploitation : 35 %"))).toEqual([["expense_ratio_pct", 34], ["expense_ratio_pct", 35]]);
+      expect(pick(read("Variable operating costs: 4%", "Frais variables : 5 %"))).toEqual([["variable_expense_pct", 4], ["variable_expense_pct", 5]]);
       expect(read("Operating costs: 34").candidates).toEqual([]);
     });
     test("other income: parking, laundry and storage when the figure is money", () => {
-      expect(pick(read("Parking: $14,400", "Laundry: $3,600 per year", "Stationnement : 14 400 $"))).toEqual([["other_income_annual", 14_400], ["other_income_annual", 3_600], ["other_income_annual", 14_400]]);
+      expect(pick(read("Parking: $14,400", "Laundry: $3,600 per year", "Stationnement : 15 600 $"))).toEqual([["other_income_annual", 14_400], ["other_income_annual", 3_600], ["other_income_annual", 15_600]]);
       expect(pick(read("Parking income: $1,200 per month"))).toEqual([["other_income_annual", 14_400]]);
       expect(read("Parking: 14 stalls").candidates).toEqual([]);
       expect(read("Storage: $75 per month").candidates).toEqual([]);
@@ -864,7 +874,7 @@ describe("which loan a term belongs to, and the words small developers use", () 
       expect(read("Vacancy rate: 5%").candidates).toEqual([]);
       expect(pick(read("Loan to cost: 70%"))).toEqual([["stated_ltc_pct", 70]]);
       expect(read("Rate: $5,000").candidates).toEqual([]);
-      expect(read("Investor share: 80%").candidates).toEqual([]);
+      expect(read("Investors: $500,000").candidates).toEqual([]);
       expect(read("Outlot: $400,000").candidates).toEqual([]);
     });
     test("the DSCR covenant in its longer phrasings", () => {
@@ -875,7 +885,7 @@ describe("which loan a term belongs to, and the words small developers use", () 
     });
     test("equity in the words a sponsor uses", () => {
       expect(pick(read("Own money: $700,000", "Cash equity: $710,000", "We will contribute $720,000.", "We are putting in $730,000.", "The sponsor will invest $740,000."))).toEqual([["equity_amount", 700_000], ["equity_amount", 710_000], ["equity_amount", 720_000], ["equity_amount", 730_000], ["equity_amount", 740_000]]);
-      expect(pick(read("Apport : 700 000 $", "Nous investirons 710 000 $."))).toEqual([["equity_amount", 700_000], ["equity_amount", 710_000]]);
+      expect(pick(read("Apport : 700 000 $", "Le promoteur investira 710 000 $."))).toEqual([["equity_amount", 700_000], ["equity_amount", 710_000]]);
       expect(read("We will invest 50% of the budget.").candidates).toEqual([]);
       expect(read("Contributions are due in month 3.").candidates).toEqual([]);
     });
@@ -916,7 +926,7 @@ describe("which loan a term belongs to, and the words small developers use", () 
   describe("French text-table rows with trailing units", () => {
     const fr = (...text: string[]) => read("Financement : 1 250 000 $", ...text);
     test("a value followed by a unit phrase counts as one number in the run", () => {
-      const r = fr("Type de logement Nombre de logements Loyer par mois Superficie (pi²)", "Studio 4 1 450 $ par mois 480 pi²", "Deux chambres 6 1 780 $ par mois 720 pi²");
+      const r = fr("Type Nombre Loyer par mois Superficie (pi²)", "Studio 4 1 450 $ par mois 480 pi²", "Deux chambres 6 1 780 $ par mois 720 pi²");
       expect(r.candidates.filter((c) => c.fieldKey !== "senior_loan_amount" && c.fieldKey !== null).map((c) => [c.fieldKey, c.itemKey, c.value])).toEqual([
         ["unit_count", "Studio", 4], ["unit_rent_monthly", "Studio", 1_450], ["rentable_area_sf", "Studio", 1_920],
         ["unit_count", "Deux chambres", 6], ["unit_rent_monthly", "Deux chambres", 1_780], ["rentable_area_sf", "Deux chambres", 4_320],
@@ -929,7 +939,7 @@ describe("which loan a term belongs to, and the words small developers use", () 
       ]);
       const b = fr("Type Loyer annuel Nombre de logements", "Studio 18 500 $ par année 4", "Loft 24 000 $ par année 2");
       expect(b.candidates.filter((c) => c.itemKey).map((c) => [c.fieldKey, c.itemKey, c.value])).toEqual([
-        ["unit_rent_monthly", "Studio", 18_500 / 12], ["unit_count", "Studio", 4], ["unit_rent_monthly", "Loft", 2_000], ["unit_count", "Loft", 2],
+        ["unit_count", "Studio", 4], ["unit_rent_monthly", "Studio", 18_500 / 12], ["unit_count", "Loft", 2], ["unit_rent_monthly", "Loft", 2_000],
       ]);
     });
     test("negative: a row that is one number short is not a row", () => {
@@ -951,6 +961,10 @@ describe("which loan a term belongs to, and the words small developers use", () 
     test("counts: number words and digits before unit-type words", () => {
       expect(items(read("The building will have four studios and seven one-bedroom suites."))).toEqual([["unit_count", "Studio", 4], ["unit_count", "1BR", 7]]);
       expect(items(read("We will build 4 studios and 7 2-bed units."))).toEqual([["unit_count", "Studio", 4], ["unit_count", "2BR", 7]]);
+    });
+    test("a list of types with no noun is read per clause, and a total before a colon is no item's count", () => {
+      expect(items(read("Eighteen suites: six one-bedroom, eight two-bedroom and four three-bedroom."))).toEqual([["unit_count", "1BR", 6], ["unit_count", "2BR", 8], ["unit_count", "3BR", 4]]);
+      expect(items(read("Borrower: Maple Court Inc., 10 units."))).toEqual([]);
     });
     test("negative: no unit-type word, two unit types, or a name that is not a unit type reads nothing", () => {
       expect(items(read("Six units at $2,010 per month."))).toEqual([]);

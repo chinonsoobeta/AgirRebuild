@@ -197,7 +197,7 @@ async function parseDocx(bytes: Uint8Array): Promise<NormalizedDocument> {
       if (!closing) {
         if (depth++ === 0) {
           flush();
-          table = { name: `Table ${tables.length + 1}`, rows: [] };
+          table = { name: `Table ${tables.length + 1}`, rows: [], at: lines.length };
         } else cell += " ";
       } else if (--depth === 0 && table) {
         tables.push(table);

@@ -1,7 +1,7 @@
 import { FIELD_BY_KEY, OUTPUT_LIKE_PHRASES } from "@agir/contracts";
-import { detectFormat, normalizeText, SF_PER_M2, tokenize, type DocumentFormat, type NumberToken } from "@agir/numbers";
+import { detectFormat, normalizeText, SF_PER_M2, tokenize, unitTypesIn, type DocumentFormat, type NumberToken } from "@agir/numbers";
 import type { Cell, NormalizedDocument, Table } from "./document.ts";
-import { currencyOf, hasPhrase, mapToken, normalizeLabel, withCurrency, type Mapped } from "./mapping.ts";
+import { currencyOf, hasPhrase, mapToken, normalizeLabel, scopeIn, withCurrency, type MapOptions, type Mapped, type Scope } from "./mapping.ts";
 
 /** One value found in one document, with where it came from and why it was (or was not) mapped. */
 export type Candidate = {
@@ -58,8 +58,8 @@ function record(result: ExtractionResult, mapped: Mapped, token: NumberToken, ba
   }
 }
 
-function push(result: ExtractionResult, label: string, token: NumberToken, location: string, context: string, rule: string, prose = false) {
-  record(result, mapToken(label, token, prose), token, { raw: token.raw, location, context: context.slice(0, 240), rule });
+function push(result: ExtractionResult, label: string, token: NumberToken, location: string, context: string, rule: string, opts: MapOptions = {}) {
+  record(result, mapToken(label, token, opts), token, { raw: token.raw, location, context: context.slice(0, 240), rule });
 }
 
 /** The [start, end) of every balanced "( ... )" in a line. */
@@ -76,7 +76,23 @@ function parenSpans(text: string): [number, number][] {
   return spans;
 }
 
-type Paragraph = { text: string; segs: { start: number; location: string }[] };
+type Paragraph = { text: string; segs: { start: number; location: string }[]; scope: Scope };
+
+/**
+ * The loan each line is about, set only by a title or heading: the first line, a "Subject:" / "Re:" / "Objet :" line,
+ * or a short line with no number and no sentence end. A body sentence never changes it, and a heading that names two loans sets none.
+ */
+function lineScopes(doc: NormalizedDocument, format: DocumentFormat): Scope[] {
+  let scope: Scope = "senior";
+  return doc.lines.map((line, i) => {
+    const text = line.text.trim();
+    const words = text.split(/\s+/).length;
+    const title = i === 0 || /^(subject|re|objet|object)\s*:/i.test(text);
+    const heading = !/[.!?]$/.test(text) && (title ? words <= 14 : words <= 8 && !/:\s*\S/.test(text) && tokenize(text, format).length === 0);
+    if (heading) scope = scopeIn(text) ?? scope;
+    return scope;
+  });
+}
 
 /** A line joins the next when it does not end a sentence and the next continues it (lower case, a number or a currency sign). */
 function continues(prev: string, next: string): boolean {
@@ -85,7 +101,7 @@ function continues(prev: string, next: string): boolean {
 }
 
 /** The lines the table reader did not consume, with a sentence wrapped across lines made one paragraph. */
-function paragraphs(doc: NormalizedDocument, skip: Set<number>): Paragraph[] {
+function paragraphs(doc: NormalizedDocument, skip: Set<number>, scopes: Scope[]): Paragraph[] {
   const out: Paragraph[] = [];
   let cur: Paragraph | null = null;
   let prev = "";
@@ -99,7 +115,7 @@ function paragraphs(doc: NormalizedDocument, skip: Set<number>): Paragraph[] {
       cur.segs.push({ start: cur.text.length + 1, location: line.location });
       cur.text += " " + text;
     } else {
-      cur = { text, segs: [{ start: 0, location: line.location }] };
+      cur = { text, segs: [{ start: 0, location: line.location }], scope: scopes[li]! };
       out.push(cur);
     }
     prev = text;
@@ -185,6 +201,27 @@ function followingLabel(rest: string): string | null {
   return rest.slice(0, cut).trim() ? rest.slice(0, cut) : null;
 }
 
+/** The clause of a sentence a number stands in: between commas, semicolons and "and" (but not after a hanging hyphen, "one- and two-bedroom"). */
+function clauseOf(text: string, t: NumberToken): string {
+  let from = 0;
+  for (const m of text.matchAll(/[,;:]|(?<!-)\s(?:and|et|but|mais)\s/g)) {
+    if (m.index! + m[0].length <= t.start) from = m.index! + m[0].length;
+    else if (m.index! >= t.end) return text.slice(from, m.index!);
+  }
+  return text.slice(from);
+}
+
+/** A count or a monthly rent in prose, named by the one unit type its clause names ("two-bedroom", "studio", "4½"); none or several name nothing. */
+function clauseItem(text: string, t: NumberToken): Mapped | null {
+  const count = t.unit === "units";
+  if (t.value === null || (!count && t.unit !== "$/mo")) return null;
+  const types = unitTypesIn(clauseOf(text, t));
+  if (types.length !== 1) return null;
+  return count
+    ? { kind: "field", fieldKey: "unit_count", itemKey: types[0]!, value: t.value, unitSeen: "units" }
+    : { kind: "field", fieldKey: "unit_rent_monthly", itemKey: types[0]!, value: t.value, unitSeen: withCurrency("$/mo", t.currencyCode) };
+}
+
 /** One sentence: "Label: value" gives the label to the numbers after the colon; anything else is prose. */
 function readSentence(sentence: { text: string; start: number }, para: Paragraph, result: ExtractionResult) {
   const text = normalizeText(sentence.text);
@@ -213,13 +250,14 @@ function readSentence(sentence: { text: string; start: number }, para: Paragraph
     // number compatible with a field wins; the rest are kept as "other".
     const label = text.slice(0, colon);
     // A label that names nothing for any number ("Financing: a loan of ...") is an introduction: what follows is prose.
-    if (tokens.every((t) => mapToken(label, t).kind === "unmapped")) proseFrom = colon + 1;
+    const scope = para.scope;
+    if (tokens.every((t) => mapToken(label, t, { scope }).kind === "unmapped")) proseFrom = colon + 1;
     else {
       let used = false;
       for (const t of tokens) {
-        const mapped = used ? { kind: "unmapped" as const } : mapToken(label, t);
+        const mapped = used ? { kind: "unmapped" as const } : mapToken(label, t, { scope });
         if (!used && mapped.kind === "field") {
-          push(result, label, t, locationOf(t.start), context, "line:label-value");
+          push(result, label, t, locationOf(t.start), context, "line:label-value", { scope });
           used = true;
         } else if (!used || t.value !== null) {
           other(t, "line:label-value", mapped.kind === "ignored" ? mapped.reason : used ? "Another number on this line was used" : "No field matches this label");
@@ -245,23 +283,30 @@ function readSentence(sentence: { text: string; start: number }, para: Paragraph
       from = t.end;
       return;
     }
-    let mapped = mapToken(label, t, true);
+    const opts: MapOptions = { prose: true, scope: para.scope, context: text };
+    let mapped = mapToken(label, t, opts);
     from = t.end;
     if (mapped.kind === "unmapped" || (mapped.kind === "ignored" && mapped.reason.startsWith("Looks like"))) {
       const after = followingLabel(text.slice(t.end, tokens[i + 1]?.start ?? text.length));
-      const viaAfter = after === null ? null : mapToken(after, t, true);
+      const viaAfter = after === null ? null : mapToken(after, t, opts);
       if (after !== null && viaAfter!.kind === "field") {
         mapped = viaAfter!;
         from = t.end + after.length;
-      }
+      } else if (after !== null && viaAfter!.kind === "ignored" && mapped.kind === "unmapped") mapped = viaAfter!;
+    }
+    if (mapped.kind === "unmapped" || (mapped.kind === "ignored" && mapped.reason.startsWith("Looks like"))) mapped = clauseItem(text, t) ?? mapped;
+    else if (mapped.kind === "field" && mapped.itemKey !== null && (mapped.fieldKey === "unit_count" || mapped.fieldKey === "unit_rent_monthly")) {
+      // The clause's unit type names the item, not the words before the label ("Studios will rent at ...").
+      const types = unitTypesIn(clauseOf(text, t));
+      if (types.length === 1) mapped = { ...mapped, itemKey: types[0]! };
     }
     record(result, mapped, t, { raw: t.raw, location: where, context, rule: "line:prose" });
   });
 }
 
 /** Prose: sentences of text, each read on its own. Lines in `skip` were read as table rows. */
-function fromLines(doc: NormalizedDocument, result: ExtractionResult, skip: Set<number>) {
-  for (const para of paragraphs(doc, skip)) for (const s of sentences(para.text)) readSentence(s, para, result);
+function fromLines(doc: NormalizedDocument, result: ExtractionResult, skip: Set<number>, scopes: Scope[]) {
+  for (const para of paragraphs(doc, skip, scopes)) for (const s of sentences(para.text)) readSentence(s, para, result);
 }
 
 type RentBasis = "monthly" | "annual" | "psf";
@@ -441,7 +486,7 @@ function fromRentRoll(table: Table, headerRow: number, roles: Roles, result: Ext
   }
 }
 
-function fromBudget(table: Table, headerRow: number, roles: { label: number; amount: number }, result: ExtractionResult) {
+function fromBudget(table: Table, headerRow: number, roles: { label: number; amount: number }, result: ExtractionResult, scope: Scope) {
   // Sum component lines per field; use a "Total X" row only when no component
   // line mapped to X, and raise both when they disagree. A line that maps to no
   // field, between the header (or the previous total) and a total row for X, is a component of X.
@@ -458,7 +503,7 @@ function fromBudget(table: Table, headerRow: number, roles: { label: number; amo
     if (!t) continue;
     // A row in a budget sheet that is not money ("Loan-to-cost | 70%") is a label and value.
     if (t.unit !== null && t.unit !== "$") {
-      push(result, labelCell.text, t, amountCell.ref, `${table.name}: ${labelCell.text} ${amountCell.text}`, "table:label-value");
+      push(result, labelCell.text, t, amountCell.ref, `${table.name}: ${labelCell.text} ${amountCell.text}`, "table:label-value", { scope });
       continue;
     }
     const isTotal = TOTAL_RE.test(labelCell.text);
@@ -466,7 +511,7 @@ function fromBudget(table: Table, headerRow: number, roles: { label: number; amo
     if (isTotal) segment = [];
     const labelText = isTotal ? labelCell.text.replace(TOTAL_RE, "").trim() || labelCell.text : labelCell.text;
     const moneyToken: NumberToken = { ...t, currency: true, unit: t.unit ?? "$" };
-    const mapped = mapToken(isTotal && /development|project/i.test(labelCell.text) ? labelCell.text : labelText, moneyToken);
+    const mapped = mapToken(isTotal && /development|project/i.test(labelCell.text) ? labelCell.text : labelText, moneyToken, { scope, budget: true });
     if (mapped.kind !== "field" || FIELD_BY_KEY.get(mapped.fieldKey)?.unit !== "$") {
       if (mapped.kind === "unmapped" && !isTotal && t.value !== null) segment.push({ value: t.value, unitSeen: withCurrency("$", t.currencyCode), ref: amountCell.ref, label: labelCell.text });
       result.other.push({
@@ -528,27 +573,70 @@ function fromBudget(table: Table, headerRow: number, roles: { label: number; amo
   }
 }
 
-function fromTable(table: Table, result: ExtractionResult, notes: string[] = []) {
-  for (let r = 0; r < Math.min(table.rows.length, 12); r++) {
-    const header = table.rows[r]!;
-    const rr = rentRollRoles(header);
-    if (rr) return fromRentRoll(table, r, rr, result, notes);
-    const br = budgetRoles(header);
-    if (br) return fromBudget(table, r, br, result);
-  }
-  // A plain two-column sheet: each row is "label: value".
+/** A row that is only a short text, no number: a section label ("SENIOR LOAN", "Unit mix", "Répartition des logements"). */
+function sectionLabel(row: Cell[]): string | null {
+  const filled = row.filter((c) => c.text || c.number !== undefined);
+  const c = filled[0];
+  if (filled.length !== 1 || !c || c.number !== undefined || /\d/.test(c.text) || /[.!?]$/.test(c.text) || c.text.trim().split(/\s+/).length > 8) return null;
+  return c.text;
+}
+
+type Section = { rows: Cell[][]; scope: Scope; rent?: Roles; budget?: { label: number; amount: number } };
+
+/**
+ * A sheet may stack sections. A row that is itself a header (a rent roll's or a budget's) ends the section before it and starts
+ * its own; a section label row ends it too, sets the loan scope when it names a loan, and the rows under it with no column header
+ * are label and value rows. Rows above the first header, when there is one and no label came first, are a title and read as nothing.
+ */
+function fromTable(table: Table, result: ExtractionResult, notes: string[] = [], scope0: Scope = "senior") {
+  let scope = scope0;
+  let labelled = false;
+  const sections: Section[] = [];
+  let cur: Section = { rows: [], scope };
+  const close = () => {
+    if (cur.rows.length > 0) sections.push(cur);
+  };
   table.rows.forEach((row) => {
-    const labelCell = row.find((c) => c.text && c.number === undefined && !/^[\d$(.,\s%-]+$/.test(c.text));
-    if (!labelCell) return;
-    const after = row.slice(row.indexOf(labelCell) + 1);
-    for (const cell of after) {
-      const t = cellToken(cell, result.format);
-      if (t) {
-        push(result, labelCell.text, t, cell.ref, `${table.name}: ${labelCell.text} ${cell.text}`, "table:label-value");
-        break;
-      }
+    const numeric = row.some((c) => c.number !== undefined);
+    const rent = numeric ? null : rentRollRoles(row);
+    const budget = numeric || rent ? null : budgetRoles(row);
+    if (rent || budget) {
+      if (!cur.rent && !cur.budget && sections.length === 0 && !labelled) cur.rows = [];
+      close();
+      cur = { rows: [row], scope, ...(rent ? { rent } : { budget: budget! }) };
+      return;
     }
+    const label = sectionLabel(row);
+    if (label !== null) {
+      close();
+      scope = scopeIn(label) ?? scope;
+      labelled = true;
+      cur = { rows: [], scope };
+      return;
+    }
+    cur.rows.push(row);
   });
+  close();
+  for (const s of sections) {
+    const part = { ...table, rows: s.rows };
+    if (s.rent) fromRentRoll(part, 0, s.rent, result, notes);
+    else if (s.budget) fromBudget(part, 0, s.budget, result, s.scope);
+    else {
+      // A plain two-column sheet: each row is "label: value".
+      s.rows.forEach((row) => {
+        const labelCell = row.find((c) => c.text && c.number === undefined && !/^[\d$(.,\s%-]+$/.test(c.text));
+        if (!labelCell) return;
+        const after = row.slice(row.indexOf(labelCell) + 1);
+        for (const cell of after) {
+          const t = cellToken(cell, result.format);
+          if (t) {
+            push(result, labelCell.text, t, cell.ref, `${table.name}: ${labelCell.text} ${cell.text}`, "table:label-value", { scope: s.scope });
+            break;
+          }
+        }
+      });
+    }
+  }
 }
 
 // Words that make a line a sentence, not a column header.
@@ -589,8 +677,8 @@ function headerColumns(text: string, roleOf: (h: string) => string | null, ref: 
  * Each table is rebuilt as a Table, so the same finders read it as read a spreadsheet's. Returns the table with
  * the lines after it (where a note may say what the rent column is per), and the lines it consumed.
  */
-function textTables(doc: NormalizedDocument, format: DocumentFormat): { tables: { table: Table; notes: string[] }[]; used: Set<number> } {
-  const out: { table: Table; notes: string[] }[] = [];
+function textTables(doc: NormalizedDocument, format: DocumentFormat, scopes: Scope[]): { tables: { table: Table; notes: string[]; scope: Scope }[]; used: Set<number> } {
+  const out: { table: Table; notes: string[]; scope: Scope }[] = [];
   const used = new Set<number>();
   const lines = doc.lines;
   for (let i = 0; i < lines.length - 1; i++) {
@@ -650,7 +738,7 @@ function textTables(doc: NormalizedDocument, format: DocumentFormat): { tables: 
     }
     if (rows.length === 0) continue;
     used.add(i);
-    out.push({ table: { name: `Table at ${head.location}`, rows: [cols, ...rows] }, notes: lines.slice(j, j + 4).map((l) => l.text) });
+    out.push({ table: { name: `Table at ${head.location}`, rows: [cols, ...rows] }, notes: lines.slice(j, j + 4).map((l) => l.text), scope: scopes[i]! });
     i = j - 1;
   }
   return { tables: out, used };
@@ -659,12 +747,14 @@ function textTables(doc: NormalizedDocument, format: DocumentFormat): { tables: 
 /** Every candidate value in one document. Deterministic: no model is consulted. */
 export function extractCandidates(doc: NormalizedDocument): ExtractionResult {
   const result: ExtractionResult = { format: detectFormat(doc.fullText), candidates: [], other: [] };
-  const text = textTables(doc, result.format);
-  fromLines(doc, result, text.used);
-  for (const t of text.tables) fromTable(t.table, result, t.notes);
+  const scopes = lineScopes(doc, result.format);
+  const text = textTables(doc, result.format, scopes);
+  fromLines(doc, result, text.used, scopes);
+  for (const t of text.tables) fromTable(t.table, result, t.notes, t.scope);
   // A Word file's paragraphs may carry the note about a rent column ("Retail rents are ..."); there is no order between them and its tables.
   const notes = doc.kind === "docx" ? doc.lines.map((l) => l.text) : [];
-  for (const t of doc.tables) fromTable(t, result, notes);
+  // A Word table is under the heading above it: the scope in force after the lines that come before it.
+  for (const t of doc.tables) fromTable(t, result, notes, (t.at ? scopes[t.at - 1] : undefined) ?? "senior");
   // Within one document, the same field and value found twice is one candidate.
   const seen = new Set<string>();
   result.candidates = result.candidates.filter((c) => {

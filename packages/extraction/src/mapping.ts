@@ -20,6 +20,8 @@ const GENERIC = new Set([
   "of", "per", "unit", "all", "in", "place", "in-place", "asking", "effective", "current", "residential rental",
   // The heading of a letter or email, not a component.
   "subject", "objet", "re", "note", "notes", "purpose",
+  // Who the deal is with, not a component: "Borrower: Maple Court Inc. ... 10 units".
+  "borrower", "emprunteur", "projet", "sponsor", "promoteur", "address", "adresse", "lender", "preteur", "property", "propriete",
 ]);
 
 const ITEMIZED_ALIASES: Record<string, string[]> = {
@@ -29,6 +31,48 @@ const ITEMIZED_ALIASES: Record<string, string[]> = {
   rentable_area_sf: ["area", "rentable area", "leasable area", "gla", "nrsf", "square feet", "sf", "superficie locative", "superficie louable", "surface locative", "aire locative"],
   item_occupancy_pct: ["occupancy", "occupation", "taux d occupation"],
 };
+
+/** Which loan a document, a section or a label is about. A generic label ("Rate", "Loan amount") means the loan in scope. */
+export type Scope = "senior" | "mezzanine" | "refinance";
+
+const SCOPE_WORDS: Record<Scope, RegExp> = {
+  mezzanine: /\b(mezzanine|mezz|second mortgage|second[- ]ranking|subordinate loan|deuxieme rang|pret de second rang)\b/,
+  refinance: /\b(take-?out|take out|refinanc\w*|permanent loan|long[- ]term mortgage|pret permanent)\b/,
+  senior: /\b(senior|construction loan|first mortgage|premier rang|pret de construction)\b/,
+};
+const TERM_SHEET_RE = /\b(term sheet|feuille de modalites)\b/;
+const foldText = (t: string) => t.toLowerCase().normalize("NFD").replace(/[\u0300-\u036f]/g, "").replace(/[’']/g, " ");
+
+/** The one scope a title, heading or label names; null when it names none, or two or more. A term sheet that names no other is senior. */
+export function scopeIn(text: string): Scope | null {
+  const f = foldText(text);
+  const named = (Object.keys(SCOPE_WORDS) as Scope[]).filter((k) => SCOPE_WORDS[k].test(f));
+  if (named.length === 0 && TERM_SHEET_RE.test(f)) named.push("senior");
+  return named.length === 1 ? named[0]! : null;
+}
+
+// The scope's own field for each senior-loan field a generic label can reach. A field the scope's loan lacks has no entry.
+const SCOPE_FIELD: Record<Exclude<Scope, "senior">, Record<string, string>> = {
+  mezzanine: { senior_loan_amount: "mezz_loan_amount", senior_rate_pct: "mezz_rate_pct", senior_amort_years: "mezz_amort_years", senior_io_months: "mezz_io_months" },
+  refinance: { senior_loan_amount: "refinance_amount", senior_rate_pct: "refinance_rate_pct", senior_amort_years: "refinance_amort_years", senior_io_months: "refinance_io_months" },
+};
+const LTV_RE = /\b(loan to value|loan-to-value|ltv|ratio pret valeur|ratio pret-valeur|rpv)\b/;
+const BARE_AMOUNT_RE = /^(amount|montant|principal)$/;
+const REPAY_RE = /\b(repa\w+|refinanc\w*|take-?out|rembours\w+)\b/;
+const FUNDING_RE = /\b(fund\w*|repa\w+|clos\w*|advance\w*|draw\w*|financement|remboursement|prise de possession)\b/;
+const CAP_RE = /\b(cap rate|capitali[sz]ation rate|taux de capitalisation)\b/;
+const EXIT_RE = /\b(sell|sale|sold|exit|reversion|disposition|sortie|vente|vendre|vendrons|vendons|revente)\b/;
+const VALUE_RE = /\b(value|valeur)\b/;
+
+// Words too common to name a field alone. Each loses to any longer alias in the label, must stand at the end of the label
+// (or before "income"/"amount"), and never matches inside a longer word.
+const LOOSE_ALIASES = new Set(["loan", "pret", "mortgage", "rate", "taux", "construction", "location", "build", "travaux", "lot", "site", "contribute", "invest", "apport", "other", "autres", "parking", "laundry", "storage", "stationnement", "buanderie", "rangement"]);
+// These name a field only for a money figure of at least $1,000: "lot 7" is a lot number, "storage $75" may be one locker.
+const WEAK_MONEY = new Set(["lot", "site", "parking", "laundry", "storage", "stationnement", "buanderie", "rangement"]);
+// "Other" names a cost only in a budget table.
+const BUDGET_ONLY = new Set(["other", "autres"]);
+// A "rate" that is not a loan's.
+const NOT_A_LOAN_RATE = /\b(vacancy|growth|discount|tax|exchange|inflation|return|occupancy) rate\b|\b(taux de (croissance|vacance|actualisation|change|rendement|capitalisation|taxation)|taux d (inflation|imposition|occupation))\b|\brate of return\b/;
 
 /**
  * A money figure that names its currency records it after the unit it was read in:
@@ -119,6 +163,8 @@ function convert(def: FieldDef, t: NumberToken, label: string, labelUnit: LabelU
   switch (def.unit) {
     case "$":
       if (u === "$" || labelUnit === "$") return { value: v, unitSeen: "$" };
+      // A monthly figure for the whole of the other income is twelve months of it; one per stall or per unit is not stated as a total.
+      if (u === "$/mo" && def.key === "other_income_annual" && /\b(income|revenues?|revenus?)\b/.test(label)) return { value: v * 12, unitSeen: "$/mo" };
       // In prose a bare number is never money (a year, a count): tables and label/value lines keep the rule.
       if (u === null && !prose && Math.abs(v) >= 1000) return { value: v, unitSeen: "number" };
       return null;
@@ -126,6 +172,8 @@ function convert(def: FieldDef, t: NumberToken, label: string, labelUnit: LabelU
       if (u === "%" || (u === null && labelUnit === "%")) return { value: v, unitSeen: "%" };
       return null;
     case "months":
+      // "Refinance month: 26": the label says it is a month number.
+      if (def.key === "refinance_month" && u === null && /\b(month|mois)$/.test(label)) return { value: v, unitSeen: "months" };
       if (u === "months" || (u === null && labelUnit === "months")) return { value: v, unitSeen: "months" };
       if (u === "years" || (u === null && labelUnit === "years")) return { value: v * 12, unitSeen: "years" };
       return null;
@@ -154,36 +202,101 @@ function convert(def: FieldDef, t: NumberToken, label: string, labelUnit: LabelU
       return null;
     case "x":
       if (u === "x") return { value: v, unitSeen: "x" };
-      if (u === null && (labelUnit === "x" || hasPhrase(label, "dscr"))) return { value: v, unitSeen: "number" };
+      if (u === null && (labelUnit === "x" || /\b(dscr|dcr|debt service coverage|couverture du service de la dette|rcsd|rcd|ccd)\b/.test(label))) return { value: v, unitSeen: "number" };
       return null;
     default:
       return null;
   }
 }
 
+export type MapOptions = {
+  /** Prose: the alias nearest the number names it, and a bare number is never money. */
+  prose?: boolean;
+  /** The loan the document or section is about; a label that names its own loan overrides it. Default senior. */
+  scope?: Scope;
+  /** A budget table's row: "Other" names a cost here. */
+  budget?: boolean;
+  /** The sentence the label came from, for words about a sale that sit outside the label. */
+  context?: string;
+};
+
+// What may follow a loose alias before the number: "income", "amount", or a verb phrase ("is planned at", "should take", "est de").
+const FILLER = "is|are|was|were|will|be|been|should|shall|to|take|takes|taking|planned|scheduled|expected|estimated|set|budgeted|for|at|of|about|approximately|around|a|an|the|total|only|currently|now|income|revenue|revenues|revenu|revenus|amount|montant|est|sont|sera|seront|durera|prevu|prevue|prevus|de|du|d|environ|devrait|dure|au|aux|fixe|fixee|represente";
+const FILLER_RE = new RegExp(`^(\\s(${FILLER}))*$`);
+
+/** Where the loose alias stands in the label: at its end, or followed only by filler words. */
+function standsLast(label: string, at: [number, number]): boolean {
+  return FILLER_RE.test(label.slice(at[1]));
+}
+
 /** Map one labelled number onto a field. In prose the alias nearest the number names it, and a bare number is never money. */
-export function mapToken(rawLabel: string, t: NumberToken, prose = false): Mapped {
+export function mapToken(rawLabel: string, t: NumberToken, opts: MapOptions = {}): Mapped {
+  const prose = opts.prose ?? false;
   const { label, labelUnit, labelCode } = normalizeLabel(rawLabel);
   const output = OUTPUT_LIKE_PHRASES.find((p) => hasPhrase(label, p));
   if (output) return { kind: "ignored", reason: `"${rawLabel.trim()}" is an output figure, which is never taken as an input` };
   if (t.value === null) return { kind: "ignored", reason: t.refusal ?? "The number could not be read without guessing" };
+  const scope: Scope = scopeIn(label) ?? opts.scope ?? "senior";
+  const scoped = (key: string): FieldDef => FIELD_BY_KEY.get(scope === "senior" ? key : (SCOPE_FIELD[scope][key] ?? key))!;
+  const asField = (def: FieldDef): Mapped | null => {
+    const c = compatibleValue(def, t, label, labelUnit, labelCode, prose);
+    return c && { kind: "field", fieldKey: def.key, itemKey: null, value: c.value, unitSeen: c.unitSeen };
+  };
+
+  // A cap rate is the exit rate only when the sentence is about a sale; alone it may be the going-in rate.
+  if (CAP_RE.test(label) && !FIELD_BY_KEY.get("exit_cap_rate_pct")!.aliases.some((a) => hasPhrase(label, a))) {
+    const ctx = normalizeLabel(opts.context ?? rawLabel).label;
+    if (EXIT_RE.test(ctx) && VALUE_RE.test(ctx)) return { kind: "ignored", reason: "This sentence names a value as well as a cap rate; the figure is not taken as an input" };
+    if (EXIT_RE.test(ctx)) return asField(FIELD_BY_KEY.get("exit_cap_rate_pct")!) ?? { kind: "unmapped" };
+    return { kind: "ignored", reason: "A cap rate with no word about a sale or an exit may be the going-in rate; enter it by hand if it is the exit rate" };
+  }
+  // The month a loan is repaid or refinanced ("repaid at month 26"), whichever loan the section is about.
+  const ordinalMonth = t.unit === "months" && (/^\d+$/.test(t.raw) || /^\d+(e|er|eme)\s+mois/i.test(t.raw));
+  if (ordinalMonth && REPAY_RE.test(label)) return asField(FIELD_BY_KEY.get("refinance_month")!) ?? { kind: "unmapped" };
+  if (scope !== "senior") {
+    // Under the mezzanine or refinance loan: a loan-to-value, a bare amount or the month the loan funds are the scope's own.
+    if (LTV_RE.test(label)) {
+      if (scope === "refinance") return asField(FIELD_BY_KEY.get("refinance_ltv_pct")!) ?? { kind: "unmapped" };
+      return { kind: "ignored", reason: "The mezzanine loan has no loan-to-value field; the figure is not given to the senior loan" };
+    }
+    if (BARE_AMOUNT_RE.test(label)) return asField(scoped("senior_loan_amount")) ?? { kind: "unmapped" };
+    if (scope === "refinance" && ordinalMonth && FUNDING_RE.test(label)) return asField(FIELD_BY_KEY.get("refinance_month")!) ?? { kind: "unmapped" };
+  }
 
   // Scalars: longest alias found anywhere in the label, among compatible fields (in prose: the alias ending nearest the number).
-  let best: { def: FieldDef; alias: string; end: number; value: number; unitSeen: string } | null = null;
-  let aliasOnly: { def: FieldDef; alias: string } | null = null;
+  type Hit = { def: FieldDef; alias: string; at: [number, number]; c: { value: number; unitSeen: string } | null };
+  const hits: Hit[] = [];
   for (const def of FIELDS) {
     if (def.itemized || !def.extractable) continue;
     for (const alias of def.aliases) {
       const at = phraseAt(label, alias);
       if (!at || (prose && REFERENCE_RE.test(label.slice(0, at[0])))) continue;
-      const c = compatibleValue(def, t, label, labelUnit, labelCode, prose);
-      if (!c) {
-        if (!aliasOnly || alias.length > aliasOnly.alias.length) aliasOnly = { def, alias };
-        continue;
-      }
-      if (best && (prose ? at[1] < best.end || (at[1] === best.end && alias.length <= best.alias.length) : alias.length <= best.alias.length)) continue;
-      best = { def, alias, end: at[1], ...c };
+      if (BUDGET_ONLY.has(alias) && !opts.budget) continue;
+      let c = compatibleValue(def, t, label, labelUnit, labelCode, prose);
+      if (c && WEAK_MONEY.has(alias) && !((t.currency || t.unit === "$" || t.unit === "$/mo" || labelUnit === "$") && c.value >= 1000)) c = null;
+      hits.push({ def, alias, at, c });
     }
+  }
+  // A loose alias gives way to any other alias in the label that reads the figure ("Imprévus de construction" is the contingency).
+  const specific = hits.some((h) => !LOOSE_ALIASES.has(h.alias) && h.c);
+  const blocked = NOT_A_LOAN_RATE.test(label) || LTV_RE.test(label);
+  let best: { def: FieldDef; alias: string; end: number; value: number; unitSeen: string } | null = null;
+  let aliasOnly: { def: FieldDef; alias: string } | null = null;
+  for (const { def, alias, at, c } of hits) {
+    if (LOOSE_ALIASES.has(alias) && (blocked || specific || !standsLast(label, at))) continue;
+    if (!c) {
+      if (!aliasOnly || alias.length > aliasOnly.alias.length) aliasOnly = { def, alias };
+      continue;
+    }
+    if (best && (prose ? at[1] < best.end || (at[1] === best.end && alias.length <= best.alias.length) : alias.length <= best.alias.length)) continue;
+    best = { def, alias, end: at[1], ...c };
+  }
+  // A generic senior-loan label under another loan's scope is that loan's; a term it has no field for is shown, not given to the senior loan.
+  if (best && best.def.group === "senior" && scope !== "senior") {
+    const own = SCOPE_FIELD[scope][best.def.key];
+    if (!own) return { kind: "ignored", reason: `This is a senior-loan term, but the section is about the ${scope === "mezzanine" ? "mezzanine" : "refinance"} loan, which has no such field; it is not given to the senior loan` };
+    const def = FIELD_BY_KEY.get(own)!;
+    best = { ...best, def };
   }
   // Itemized: an alias at the end of the label, with a component name before it.
   let item: { def: FieldDef; alias: string; itemKey: string; value: number; unitSeen: string } | null = null;
@@ -210,7 +323,7 @@ export function mapToken(rawLabel: string, t: NumberToken, prose = false): Mappe
   // A component named by itself with a self-describing unit: "Retail: 9,000 SF".
   const name = itemName(label);
   // In prose the words before a number are a clause ("Pinegate, 12 suites"), not a name.
-  if (name && label.split(" ").length <= 3 && !prose) {
+  if (name && label.split(" ").length <= 3 && !prose && !aliasOnly) {
     const byUnit: Record<string, string> = {
       units: "unit_count",
       sf: "rentable_area_sf",
