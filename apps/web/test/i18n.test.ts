@@ -1,4 +1,8 @@
 import { describe, expect, it } from "vitest";
+import { FIELDS } from "@agir/contracts";
+import { SF_PER_M2 } from "@agir/numbers";
+import { reviewWaiting } from "../src/components/ui.tsx";
+import { enteredInUnit } from "../src/routes/review.tsx";
 import { build, checkText, translateMessage, verdictText, type Key } from "../src/i18n.tsx";
 
 describe("a run's source labels in French", () => {
@@ -58,5 +62,39 @@ describe("the plain-language layer", () => {
     const gates = [{ key: "g", label: "G", status: "failed" }];
     expect(verdictText(en, { code: "APPROVE_WITH_CONDITIONS", hardFailReasons: [], gates }, [], true).headline).toBe("1 gate fails. You set the conditions.");
     expect(verdictText(en, { code: "APPROVE_WITH_CONDITIONS", hardFailReasons: [], gates }, []).headline).toBe("1 gate fails. The committee sets conditions.");
+  });
+});
+
+describe("the quick start's gaps", () => {
+  const docs = (total: number, processing = 0) => ({ total, processing, failed: 0 });
+  const rev = (o: Partial<{ approved: number; needsReview: number; conflicting: number; awaitingSecond: number }> = {}) =>
+    ({ approved: 0, needsReview: 0, conflicting: 0, awaitingSecond: 0, missing: 0, impossible: 0, status: "blocked" as const, ...o });
+
+  it("waits for documents only when there are none and no values, or while reading", () => {
+    expect(reviewWaiting({ documents: docs(0), review: rev() })).toBe(true);
+    expect(reviewWaiting({ documents: docs(0), review: rev({ approved: 12 }) })).toBe(false);
+    expect(reviewWaiting({ documents: docs(0), review: rev({ awaitingSecond: 1 }) })).toBe(false);
+    expect(reviewWaiting({ documents: docs(2, 1), review: rev({ approved: 12 }) })).toBe(true);
+    expect(reviewWaiting({ documents: docs(2), review: rev() })).toBe(false);
+  });
+
+  it("has French for what every optional field means when it is not asked", () => {
+    const fr = build("fr", () => {});
+    for (const d of FIELDS.filter((x) => x.absentMeans)) {
+      expect(fr.L.absent(d.key), d.key).not.toBe(d.absentMeans);
+      expect(build("en", () => {}).L.absent(d.key)).toBe(d.absentMeans);
+    }
+    expect(fr.L.absent("rent_growth_pct")).toBe("loyers stables");
+  });
+
+  it("converts an area or a rent entered in square metres, and records it", () => {
+    const a = enteredInUnit("sf", true, 870, "from the plans", "en");
+    expect(a.value).toBeCloseTo(870 * SF_PER_M2, 9);
+    expect(a.reason).toBe("from the plans (entered as 870 m²)");
+    const r = enteredInUnit("$/sf/yr", true, 107.64, "broker letter", "fr");
+    expect(r.value).toBeCloseTo(107.64 / SF_PER_M2, 9);
+    expect(r.reason).toBe("broker letter (saisi en 107,64 $/m²/an)");
+    expect(enteredInUnit("sf", false, 870, "from the plans", "en")).toEqual({ value: 870, reason: "from the plans" });
+    expect(enteredInUnit("$", true, 5, "x".repeat(10), "en")).toEqual({ value: 5, reason: "x".repeat(10) });
   });
 });
