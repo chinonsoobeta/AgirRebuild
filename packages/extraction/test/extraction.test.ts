@@ -1178,5 +1178,25 @@ describe("reading safety: a figure that may be the wrong one is shown, never use
       expect(items(read("Units: 10"))).toEqual([["unit_count", "All units", 10]]);
       expect(items(read("Studio units: 4", "Monthly rent: $1,500"))).toEqual([["unit_count", "Studio", 4], ["unit_rent_monthly", "All units", 1_500]]);
     });
+    test("a place or heading before a colon is never an item name; the deal-wide count is read", () => {
+      expect(items(read("Nanaimo, British Columbia: nine apartments above a pharmacy"))).toEqual([["unit_count", "All units", 9]]);
+      expect(items(read("Gatineau (Québec) : huit logements au-dessus d'une boutique"))).toEqual([["unit_count", "All units", 8]]);
+      // negative: a rent or an area under a name that is no unit type is shown, not given to an item
+      const r = read("Retail: 9,000 SF");
+      expect(items(r)).toEqual([]);
+      expect(r.other.some((o) => o.value === 9_000 && o.note)).toBe(true);
+    });
+    test("a count and a rent in one colon clause pair to the unit type that clause names", () => {
+      expect(items(read("Units: 8 one-bedroom suites at $1,750 per month"))).toEqual([["unit_count", "1BR", 8], ["unit_rent_monthly", "1BR", 1_750]]);
+      expect(items(read("Logements : 6 4½ à 1 650 $ par mois"))).toEqual([["unit_count", "4½", 6], ["unit_rent_monthly", "4½", 1_650]]);
+      expect(items(read("Rimouski (Québec) : six logements, dont 4 studios à 900 $ par mois"))).toEqual([["unit_count", "Studio", 4], ["unit_rent_monthly", "Studio", 900]]);
+    });
+    test("negative: a unit-type label still names the item; a count with no type word stays deal-wide; stalls are no revenue item", () => {
+      expect(items(read("Studios: 4 at $1,450 per month"))).toEqual([["unit_count", "Studio", 4], ["unit_rent_monthly", "Studio", 1_450]]);
+      expect(items(read("Units: 8"))).toEqual([["unit_count", "All units", 8]]);
+      expect(items(read("Parking: 12 stalls at $60 a month"))).toEqual([]);
+      // a named item in the same document moves the deal-wide count aside
+      expect(items(read("Albany, Prince Edward Island: ten apartments, two studios at $1,000 a month"))).toEqual([["unit_count", "Studio", 2], ["unit_rent_monthly", "Studio", 1_000]]);
+    });
   });
 });
