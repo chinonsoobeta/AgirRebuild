@@ -1,7 +1,7 @@
 import { describe, expect, test } from "vitest";
 import fc from "fast-check";
-import { POLICY_V1, type EngineInput, type RunResult } from "@agir/contracts";
-import { allocate, buildLedger, canonicalJson, irrRoots, levelPayment, underwrite, EngineInputError } from "../src/index.ts";
+import { FIELDS, FIELD_BY_KEY, POLICY_V1, TEMPLATES, type AssumptionStatus, type EngineInput, type RunResult } from "@agir/contracts";
+import { allocate, assemble, buildLedger, canonicalJson, irrRoots, levelPayment, underwrite, EngineInputError } from "../src/index.ts";
 import { allEquityDeal, developmentDeal } from "./fixtures.ts";
 
 const metric = (r: RunResult, key: string, scenario = "base") =>
@@ -209,5 +209,57 @@ describe("stresses move returns the right way", () => {
       ),
       { numRuns: 60 },
     );
+  });
+});
+
+describe("quick-start templates", () => {
+  // A fourplex in Edmonton; every other answer is a plain, plausible number.
+  const answer: Record<string, number> = {
+    land_cost: 600_000, hard_cost: 1_400_000, soft_cost: 150_000, contingency: 70_000, other_cost: 20_000,
+    construction_months: 12, lease_up_months: 3, unit_count: 4, unit_rent_monthly: 2_100,
+    stabilized_occupancy_pct: 95, other_income_annual: 3_000, exit_cap_rate_pct: 5.25,
+    senior_loan_amount: 1_500_000, senior_rate_pct: 5.2, senior_amort_years: 30,
+  };
+  const rowsFor = (key: "multiplex" | "apartment", loan = 1_500_000) => {
+    const t = TEMPLATES.find((x) => x.key === key)!;
+    const rows: { fieldKey: string; itemKey: string | null; status: AssumptionStatus; valueNumeric: number | null }[] = [];
+    const add = (fieldKey: string, itemKey: string | null, v: number, status: AssumptionStatus = "approved") => rows.push({ fieldKey, itemKey, status, valueNumeric: v });
+    const skipped = new Set(loan === 0 ? t.questions.find((q) => q.skipsIfZero)!.skipsIfZero : []);
+    for (const q of t.questions) {
+      if (skipped.has(q.field)) continue;
+      if (q.repeatable) for (const item of ["1BR", "2BR"]) add(q.field, item, q.field === "unit_count" ? 3 : answer[q.field]!);
+      else add(q.field, q.item ?? null, q.field === "senior_loan_amount" ? loan : answer[q.field]!);
+    }
+    for (const d of t.defaults) add(d, null, FIELD_BY_KEY.get(d)!.default!, "default_accepted");
+    return rows;
+  };
+
+  test.each(TEMPLATES.map((t) => [t.key] as const))("%s asks only real fields and defaults exactly the fields that carry one", (key) => {
+    const t = TEMPLATES.find((x) => x.key === key)!;
+    for (const q of t.questions) {
+      const def = FIELD_BY_KEY.get(q.field);
+      expect(def, q.field).toBeDefined();
+      expect(Boolean(def!.itemized), q.field).toBe(Boolean(q.item || q.repeatable));
+    }
+    expect([...t.defaults].sort()).toEqual(FIELDS.filter((f) => f.default !== undefined).map((f) => f.key).sort());
+    const covered = new Set([...t.questions.map((q) => q.field), ...t.defaults]);
+    for (const f of FIELDS.filter((f) => f.required === true && !f.itemized)) expect(covered.has(f.key), f.key).toBe(true);
+    expect(t.minUnits).toBeLessThan(t.maxUnits);
+  });
+
+  test.each(TEMPLATES.map((t) => [t.key] as const))("%s answers leave nothing missing, with or without a loan", (key) => {
+    for (const loan of [1_500_000, 0]) {
+      const { readiness, input } = assemble(rowsFor(key, loan));
+      expect(readiness, `${key} loan ${loan}`).toMatchObject({ status: "ready", missing: [], conflicting: [], pending: [], impossible: [] });
+      expect(input).not.toBeNull();
+    }
+  });
+
+  test("a fourplex quick start runs to a verdict with no blocking check", () => {
+    const { input } = assemble(rowsFor("multiplex").map((r) => (r.fieldKey === "unit_count" ? { ...r, valueNumeric: 4 } : r)));
+    const r = underwrite(input!, POLICY_V1);
+    expect(r.verdict.code).toBeTruthy();
+    expect(r.checks.filter((c) => c.severity === "error")).toEqual([]);
+    expect(input!.revenue).toHaveLength(1);
   });
 });
