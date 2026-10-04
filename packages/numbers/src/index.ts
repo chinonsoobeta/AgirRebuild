@@ -74,10 +74,11 @@ const TOKEN_RE = new RegExp(
   "g",
 );
 
-// A currency mark written after the number: "1,200,000 USD", "1 250 000 $ US", "$ CA", "$ CAN".
-const SUFFIX_RE = /^\s?(USD|CAD|\$\s?US\b|\$\s?CAN?\b)/;
+// A currency mark written after the number: "1,200,000 USD", "1 250 000 $ US", "$ CA", "$ CAN", or a
+// bare "18,75 $" (French). A bare dollar sign before a digit starts the next figure ("$5 $10"): not a suffix.
+const SUFFIX_RE = /^\s?(USD|CAD|\$\s?US\b|\$\s?CAN?\b|\$(?!\s?\d))/;
 
-/** The currency a mark names: "US$", "USD", "$ US" are USD; "CA$", "C$", "CAD", "$ CA" are CAD; "A$" is AUD. */
+/** The currency a mark names: "US$", "USD", "$ US" are USD; "CA$", "C$", "CAD", "$ CA" are CAD; "A$" is AUD; a bare "$" names none. */
 function codeOf(mark: string | undefined): CurrencyCode | null {
   const m = (mark ?? "").replace(/[\s$]/g, "");
   if (m === "US" || m === "USD") return "USD";
@@ -190,16 +191,18 @@ const UNIT_RULES: { re: RegExp; unit: TokenUnit }[] = [
   { re: /^\s?(%|percent\b|pct\b)/i, unit: "%" },
   { re: /^\s?(bps|basis points)\b/i, unit: "bps" },
   { re: /^\s?(x|×)(?![a-z])/i, unit: "x" },
-  { re: /^\s?(\/\s?sf|psf|per\s+(sq\.?\s*ft|square\s+foot|sf))\b/i, unit: "$/sf" },
+  // "$/pi²", "$ par pi²" and "$ au pi²" are the French rent per square foot.
+  { re: /^\s?((?:\/\s?sf|psf|per\s+(?:sq\.?\s*ft|square\s+foot|sf))\b|(?:\/\s?|par\s+|au\s+)(?:pi²|pi2|pi\.?\s?ca\.?|pieds?\s+carrés?)(?![\p{L}\d]))/iu, unit: "$/sf" },
   { re: /^\s?(\/\s?(m²|m2|sq\.?\s?m\.?|sqm)|psm|per\s+(m²|m2|sq\.?\s?m\.?|sqm|square\s+met(re|er)))(?![\p{L}\d])/iu, unit: "$/m2" },
-  { re: /^\s?(\/\s?(unit\s?\/\s?)?mo(nth)?|(per\s+unit\s+)?per\s+month|(per\s+unit\s+)?monthly|per\s+unit\s+per\s+mo)\b/i, unit: "$/mo" },
+  { re: /^\s?(\/\s?(unit\s?\/\s?)?mo(nth|is)?|(per\s+unit\s+)?per\s+month|(per\s+unit\s+)?monthly|per\s+unit\s+per\s+mo|(par\s+logement\s+)?par\s+mois|mensuel(le)?)\b/i, unit: "$/mo" },
   { re: /^\s?(sf|sq\.?\s?ft\.?|square\s+feet|rsf|nrsf)\b/i, unit: "sf" },
   // pi², the French square foot ("pi ca", "pieds carrés"). Never "p.c.", which is French for percent.
   { re: /^\s?(pi²|pi2|pi\.?\s?ca\.?|pieds?\s+carrés?)(?![\p{L}\d])/iu, unit: "sf" },
   { re: /^\s?(m²|m2|sq\.?\s?m\.?|sqm|square\s+met(re|er)s?|mètres?\s+carrés?)(?![\p{L}\d])/iu, unit: "m2" },
   { re: /^\s?(units?|homes|suites|apartments|doors)\b/i, unit: "units" },
-  { re: /^[-\s]?(months?|mos?\.?)\b/i, unit: "months" },
-  { re: /^[-\s]?(years?|yrs?\.?)\b/i, unit: "years" },
+  { re: /^\s?(logements?|unités?|unites?|appartements?)(?![\p{L}\d])/iu, unit: "units" },
+  { re: /^[-\s]?(months?|mos?\.?|mois)\b/i, unit: "months" },
+  { re: /^[-\s]?(years?|yrs?\.?|ans?)\b/i, unit: "years" },
 ];
 
 function scaleOf(word: string): number {

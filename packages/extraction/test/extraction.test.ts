@@ -271,6 +271,6 @@ describe("a French Canadian pro forma (fr-CA: comma decimals, space groups, trai
     expect(one("Montant du prêt de refinancement : 9 000 000 $")).toBe("refinance_amount");
     expect(one("Taux d'intérêt du refinancement : 4,9 %")).toBe("refinance_rate_pct");
     expect(one("Amortissement du prêt mezzanine : 20 ans")).toBe("mezz_amort_years");
-    expect(one("Dépenses d'exploitation fixes : 310 000 $")).toBe("fixed_opex_annual");
+    expect(one("Dépenses d'exploitation fixes : 1 310 000 $")).toBe("fixed_opex_annual");
   });
 });

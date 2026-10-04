@@ -21,11 +21,11 @@ const GENERIC = new Set([
 ]);
 
 const ITEMIZED_ALIASES: Record<string, string[]> = {
-  unit_count: ["rental units", "units", "unit count", "homes", "suites", "apartments", "doors"],
-  unit_rent_monthly: ["rent", "monthly rent", "rent per unit", "market rent"],
-  rent_psf_annual: ["rent", "rent psf", "rent per sf", "base rent"],
-  rentable_area_sf: ["area", "rentable area", "leasable area", "gla", "nrsf", "square feet", "sf"],
-  item_occupancy_pct: ["occupancy"],
+  unit_count: ["rental units", "units", "unit count", "homes", "suites", "apartments", "doors", "logements", "unites", "appartements", "nombre de logements", "nombre d unites"],
+  unit_rent_monthly: ["rent", "monthly rent", "rent per unit", "market rent", "loyer", "loyer mensuel", "loyer par logement", "loyer du marche"],
+  rent_psf_annual: ["rent", "rent psf", "rent per sf", "base rent", "loyer", "loyer au pi2", "loyer par pi2"],
+  rentable_area_sf: ["area", "rentable area", "leasable area", "gla", "nrsf", "square feet", "sf", "superficie locative", "superficie louable", "surface locative", "aire locative"],
+  item_occupancy_pct: ["occupancy", "occupation", "taux d occupation"],
 };
 
 /**
@@ -48,8 +48,8 @@ export function normalizeLabel(raw: string): { label: string; labelUnit: LabelUn
     const inner = p.slice(1, -1).trim().toLowerCase();
     if (/^(\$|usd|cad|dollars)$/.test(inner)) labelUnit = "$";
     else if (/^(%|percent|pct)$/.test(inner)) labelUnit = "%";
-    else if (/^(months?|mos?)$/.test(inner)) labelUnit = "months";
-    else if (/^(years?|yrs?)$/.test(inner)) labelUnit = "years";
+    else if (/^(months?|mos?|mois)$/.test(inner)) labelUnit = "months";
+    else if (/^(years?|yrs?|ans?)$/.test(inner)) labelUnit = "years";
     else if (/^(sf|sq\.? ?ft|square feet|pi²|pi2|pi\.? ?ca\.?)$/.test(inner)) labelUnit = "sf";
     else if (/^(m²|m2|sq\.? ?m|sqm|square met(re|er)s)$/.test(inner)) labelUnit = "m2";
     else if (/^x$/.test(inner)) labelUnit = "x";
@@ -58,6 +58,9 @@ export function normalizeLabel(raw: string): { label: string; labelUnit: LabelUn
     .replace(/\([^)]*\)/g, " ")
     .replace(/²/g, "2")
     .toLowerCase()
+    // Fold accents ("coût" is "cout") rather than drop the letter.
+    .normalize("NFD")
+    .replace(/[\u0300-\u036f]/g, "")
     .replace(/[^a-z0-9/#$%&\s-]/g, " ")
     .replace(/\b(is|are|of|at|to|was|will be|approximately|approx|about)\s*$/g, " ")
     .replace(/\s+/g, " ")
@@ -123,7 +126,7 @@ function convert(def: FieldDef, t: NumberToken, label: string, labelUnit: LabelU
       return null;
     case "$/unit/mo":
       if (u === "$/mo") return { value: v, unitSeen: "$/mo" };
-      if (u === "$" && /\b(monthly|per month|per unit)\b/.test(label)) return { value: v, unitSeen: "$" };
+      if (u === "$" && /\b(monthly|per month|per unit|mensuel|mensuelle|par mois|par logement)\b/.test(label)) return { value: v, unitSeen: "$" };
       return null;
     case "$/sf/yr":
       if (u === "$/sf") return { value: v, unitSeen: "$/sf" };
