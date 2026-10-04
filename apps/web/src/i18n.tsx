@@ -204,7 +204,7 @@ const EN = {
   "qs.hiddenLine": (p) => `Not asked: ${p.label}, which means ${p.means}`,
   "qs.submit": "Save my answers",
   "qs.working": "Saving…",
-  "qs.errUnits": (p) => `A ${p.name} has ${p.min} to ${p.max} units in total.`,
+  "qs.errUnits": (p) => `This kind of project has ${p.min} to ${p.max} units in total.`,
   "qs.errName": "Name each unit type.",
   "qs.errPipe": "A unit type name cannot contain \"|\".",
   "qs.errDup": "Each unit type needs a different name.",
@@ -646,14 +646,14 @@ const FR: Record<Key, Entry> = {
   "qs.reason": "D'où viennent ces chiffres ? (consigné dans la piste d'audit)",
   "qs.reasonDefault": "Indiqué dans le démarrage rapide",
   "qs.defaultsTitle": "Hypothèses courantes",
-  "qs.defaultsBody": "Ces hypothèses courantes seront utilisées. Acceptez-les, ou modifiez-les plus tard à l'étape Révision.",
+  "qs.defaultsBody": "Ces hypothèses courantes seront utilisées. Acceptez-les, ou modifiez-les plus tard à l'étape Examen.",
   "qs.accept": "Accepter ces valeurs par défaut",
   "qs.defaultLine": (p) => `${p.label} : ${p.value}`,
   "qs.hidden": "Non demandé",
   "qs.hiddenLine": (p) => `Non demandé : ${p.label}, ce qui signifie ${p.means}`,
   "qs.submit": "Enregistrer mes réponses",
   "qs.working": "Enregistrement…",
-  "qs.errUnits": (p) => `Un ${p.name} compte de ${p.min} à ${p.max} logements au total.`,
+  "qs.errUnits": (p) => `Ce type de projet compte de ${p.min} à ${p.max} logements au total.`,
   "qs.errName": "Nommez chaque type de logement.",
   "qs.errPipe": "Le nom d'un type de logement ne peut pas contenir « | ».",
   "qs.errDup": "Chaque type de logement doit avoir un nom différent.",
@@ -662,7 +662,7 @@ const FR: Record<Key, Entry> = {
   "qs.errAccept": "Cochez la case pour accepter les hypothèses courantes.",
   "qs.errReason": "Indiquez d'où viennent les chiffres (au moins 10 caractères).",
   "qs.done": "Vos réponses sont enregistrées et les hypothèses courantes sont acceptées.",
-  "qs.next": "Passer à la révision, puis à l'analyse",
+  "qs.next": "Passer à l'examen, puis à l'analyse",
   "review.materialNote": "Champ déterminant : une seconde personne, différente, doit confirmer cette valeur avant qu'elle compte.",
   "review.saveValue": "Enregistrer la valeur",
   "review.missing": "Données manquantes",
@@ -803,7 +803,7 @@ const FR: Record<Key, Entry> = {
   "explore.working": "Calcul…",
 
   "glossary.title": "Ce que ces termes veulent dire",
-  "glossary.dcr": () => ["RCD (ratio de couverture de la dette), appelé RCSD par de nombreux prêteurs", "Le revenu net d'exploitation divisé par le paiement complet d'un prêt amorti, même pendant une période d'intérêts seulement, pour l'année la plus faible de la détention."],
+  "glossary.dcr": () => ["CCD (coefficient de couverture de la dette), appelé RCSD par de nombreux prêteurs", "Le revenu net d'exploitation divisé par le paiement complet d'un prêt amorti, même pendant une période d'intérêts seulement, pour l'année la plus faible de la détention."],
   "glossary.noi": () => ["Revenu net d'exploitation (RNE)", "Les loyers et autres revenus réellement encaissés, moins les charges d'exploitation, avant tout paiement de prêt."],
   "glossary.capRate": () => ["Taux de capitalisation (sortie)", "Le rendement qu'un acheteur est supposé exiger à la vente ; le RNE de la dernière année divisé par ce taux donne la valeur de vente."],
   "glossary.yieldOnCost": () => ["Rendement sur coût", "Le RNE stabilisé divisé par le coût total de développement du projet."],
@@ -888,13 +888,13 @@ const FR: Record<Key, Entry> = {
   "settings.r.owner": "Tout ce que fait un administrateur. A créé l'espace.",
   "settings.newWs": "Nouvel espace de travail",
   "settings.create": "Créer",
-  "settings.reviewMode": "Mode de révision",
-  "settings.mode.team": "Révision en équipe",
+  "settings.reviewMode": "Mode d'examen",
+  "settings.mode.team": "Examen en équipe",
   "settings.mode.teamBody": "Une valeur déterminante saisie à la main attend une seconde personne.",
-  "settings.mode.solo": "Révision individuelle",
+  "settings.mode.solo": "Examen individuel",
   "settings.mode.soloBody": "Les valeurs que vous saisissez sont utilisées tout de suite et marquées comme déclarées par vous jusqu'à ce qu'une autre personne les confirme.",
   "settings.review": "Demander une révision Agir",
-  "settings.reviewBody": "Donnez à une personne de la révision Agir un accès limité dans le temps pour confirmer les valeurs que vous avez déclarées. Elle peut consulter l'espace et confirmer des valeurs, rien d'autre.",
+  "settings.reviewBody": "Donnez à un réviseur Agir un accès limité dans le temps pour confirmer les valeurs que vous avez déclarées. Il peut consulter l'espace et confirmer des valeurs, rien d'autre.",
   "settings.reviewDays": "Jours d'accès",
   "settings.reviewBtn": "Demander la révision",
   "settings.expires": (p) => `jusqu'au ${p.date}`,
@@ -1119,10 +1119,10 @@ const FR_REASONS: [RegExp, string | ((m: RegExpMatchArray) => string)][] = [
   [/^Agir could not read this file: (.+)$/, (m) => `Agir n'a pas pu lire ce fichier : ${m[1]}`],
   // API errors.
   [/^Your role in this workspace does not allow this action$/, "Votre rôle dans cet espace ne permet pas cette action"],
-  [/^A reviewer is added by requesting Agir review$/, "Une personne réviseure est ajoutée en demandant une révision Agir"],
+  [/^A reviewer is added by requesting Agir review$/, "Un réviseur est ajouté en demandant une révision Agir"],
   [/^This person is an Agir reviewer; their access is changed by requesting Agir review$/, "Cette personne fait partie de la révision Agir ; son accès se modifie en demandant une révision Agir"],
   [/^Review access lasts between 1 and 90 days$/, "L'accès de révision dure de 1 à 90 jours"],
-  [/^This person is already a member of the workspace; a reviewer must be someone outside it$/, "Cette personne est déjà membre de l'espace ; une personne réviseure doit venir de l'extérieur"],
+  [/^This person is already a member of the workspace; a reviewer must be someone outside it$/, "Cette personne est déjà membre de l'espace ; un réviseur doit venir de l'extérieur de l'espace"],
   [/^Sign in to continue\.$/, "Connectez-vous pour continuer."],
   [/^That email and password do not match\.$/, "Ce courriel et ce mot de passe ne correspondent pas."],
   [/^An account with that email already exists\.$/, "Un compte existe déjà avec ce courriel."],
@@ -1149,8 +1149,8 @@ const FR_REASONS: [RegExp, string | ((m: RegExpMatchArray) => string)][] = [
   [/^(.+) (cannot be below|cannot be above|must be a whole number|needs a number)(.*)$/, (m) => `${m[1]} : ${m[2] === "cannot be below" ? "ne peut pas être inférieur à" : m[2] === "cannot be above" ? "ne peut pas être supérieur à" : m[2] === "must be a whole number" ? "doit être un nombre entier" : "exige un nombre"}${m[3]}`],
 ];
 
-/** CMHC's names for the debt coverage ratio, in place of the lenders' DSCR / RCSD. Whole words only. */
-const plainTerm = (lang: Lang, text: string) => (lang === "fr" ? text.replace(/\bRCSD\b/g, "RCD") : text.replace(/\bDSCR\b/g, "DCR"));
+/** CMHC's names for the debt coverage ratio (DCR; in French CCD, as in its multi-unit reference guide), in place of the lenders' DSCR / RCSD. Whole words only. */
+const plainTerm = (lang: Lang, text: string) => (lang === "fr" ? text.replace(/\bRCSD\b/g, "CCD") : text.replace(/\bDSCR\b/g, "DCR"));
 
 export function translateMessage(text: string | null | undefined): string {
   if (!text) return "";

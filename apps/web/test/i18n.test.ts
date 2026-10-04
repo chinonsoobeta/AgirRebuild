@@ -36,17 +36,17 @@ describe("the plain-language layer", () => {
     expect(verdictText(en, verdict, []).explanation).toBe("DCR is under the floor.");
   });
 
-  it("shows RCD for RCSD in French, as a whole word only", () => {
-    expect(fr.L.metric("sizing_dscr")).toBe("RCD de dimensionnement (pire année)");
-    expect(fr.L.gate("stressed_sizing_dscr", "x")).toBe("RCD de dimensionnement, stress combiné");
-    expect(fr.msg("Le RCSD baisse ; RCSDX reste")).toBe("Le RCD baisse ; RCSDX reste");
+  it("shows CCD for RCSD in French, as a whole word only", () => {
+    expect(fr.L.metric("sizing_dscr")).toBe("CCD de dimensionnement (pire année)");
+    expect(fr.L.gate("stressed_sizing_dscr", "x")).toBe("CCD de dimensionnement, stress combiné");
+    expect(fr.msg("Le RCSD baisse ; RCSDX reste")).toBe("Le CCD baisse ; RCSDX reste");
     const c = { key: "base_sizing_dscr", kind: "k", severity: "error", message: "", expected: 1.2, actual: 1.05 };
-    expect(checkText(fr, c)).toContain("Le RCD de dimensionnement");
+    expect(checkText(fr, c)).toContain("Le CCD de dimensionnement");
   });
 
   it("keeps the institutional term in the glossary", () => {
     expect(en.t("glossary.dcr")[0]).toBe("DCR (debt coverage ratio), called DSCR by many lenders");
-    expect(fr.t("glossary.dcr")[0]).toBe("RCD (ratio de couverture de la dette), appelé RCSD par de nombreux prêteurs");
+    expect(fr.t("glossary.dcr")[0]).toBe("CCD (coefficient de couverture de la dette), appelé RCSD par de nombreux prêteurs");
   });
 
   it("defines every term in both languages", () => {

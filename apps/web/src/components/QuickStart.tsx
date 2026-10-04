@@ -80,7 +80,7 @@ export function QuickStart({ dealId }: { dealId: string }) {
         if (q.skipsIfZero && v === 0) skip = q.skipsIfZero;
         entries.push({ fieldKey: q.field, itemKey: q.item ?? null, value: v });
       }
-      if (units < tpl.minUnits || units > tpl.maxUnits) throw new Error(t("qs.errUnits", { name: t(`qs.t.${key}`), min: tpl.minUnits, max: tpl.maxUnits }));
+      if (units < tpl.minUnits || units > tpl.maxUnits) throw new Error(t("qs.errUnits", { min: tpl.minUnits, max: tpl.maxUnits }));
       save.mutate({ entries, reason });
     } catch (err) {
       setFormError(err);
