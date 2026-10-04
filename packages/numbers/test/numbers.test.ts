@@ -170,3 +170,36 @@ describe("French documents: a dollar sign after the number", () => {
     expect(first("Rent: $2,850 per unit per month", US)).toMatchObject({ value: 2_850, unit: "$/mo", raw: "$2,850 per unit per month" });
   });
 });
+
+describe("number words, ordinal months and times (prose)", () => {
+  const read = (line: string, f: DocumentFormat = US) => tokenize(line, f).map((t) => [t.raw, t.value, t.unit]);
+  test("a number word is a number only when a unit word follows, including the hyphenated adjective", () => {
+    expect(read("the lease-up lasts eighteen months")).toEqual([["eighteen months", 18, "months"]]);
+    expect(read("followed by a three-month lease-up")).toEqual([["three-month", 3, "months"]]);
+    expect(read("a twenty-four month build")).toEqual([["twenty-four month", 24, "months"]]);
+    expect(read("la durée est de douze mois")).toEqual([["douze mois", 12, "months"]]);
+    expect(read("a hold of five years")).toEqual([["five years", 5, "years"]]);
+    expect(read("eight suites")).toEqual([["eight suites", 8, "units"]]);
+  });
+  test("negative: an item name, a bare number word and a compound number are not read", () => {
+    expect(read("three-bedroom suites and a four-storey wing")).toEqual([]);
+    expect(read("trois chambres")).toEqual([]);
+    expect(read("a three storey building, five of them")).toEqual([]);
+    expect(read("there are many months and years")).toEqual([]);
+  });
+  test("an ordinal month is a point in time in months", () => {
+    expect(read("refinance in month 46")).toEqual([["46", 46, "months"]]);
+    expect(read("au mois 26")).toEqual([["26", 26, "months"]]);
+    expect(read("au 26e mois")).toEqual([["26e mois", 26, "months"]]);
+    expect(read("12 months")).toEqual([["12 months", 12, "months"]]);
+  });
+  test("negative: a number after the plural, or after another word, is not an ordinal month", () => {
+    expect(read("months 26")).toEqual([["26", 26, null]]);
+    expect(read("in unit 26")).toEqual([["26", 26, null]]);
+  });
+  test("times and fois are a multiple", () => {
+    expect(read("1.20 times")).toEqual([["1.20 times", 1.2, "x"]]);
+    expect(read("1,15 fois", EU)).toEqual([["1,15 fois", 1.15, "x"]]);
+    expect(read("a sometimes 3 timeshare")).toEqual([["3", 3, null]]);
+  });
+});

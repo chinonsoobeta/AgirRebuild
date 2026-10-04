@@ -602,3 +602,101 @@ describe("tables written as lines of text, and what a table's rows mean", () => 
     expect(r.other.some((o) => o.rule === "table:budget")).toBe(false);
   });
 });
+
+describe("prose: sentences, labels and refusals", () => {
+  const doc = (...text: string[]): NormalizedDocument => ({
+    kind: "pdf",
+    lines: text.map((t, i) => ({ text: t, location: `page 1, line ${i + 1}` })),
+    tables: [],
+    pageCount: 1,
+    needsOcr: false,
+    fullText: text.join("\n"),
+  });
+  const read = (...text: string[]) => extractCandidates(doc(...text));
+  const pick = (r: ReturnType<typeof extractCandidates>) => r.candidates.map((c) => [c.fieldKey, c.value]);
+  const others = (r: ReturnType<typeof extractCandidates>) => r.other.map((o) => [o.value, o.note]);
+
+  test("a sentence wrapped across lines is read whole; its location is the line holding the number", () => {
+    const r = read("The land is being bought", "for $520,000. Hard costs are", "estimated at $1,450,000.");
+    expect(r.candidates.map((c) => [c.fieldKey, c.value, c.location])).toEqual([["land_cost", 520_000, "page 1, line 2"], ["hard_cost", 1_450_000, "page 1, line 3"]]);
+    expect(r.candidates[0]!.context).toBe("The land is being bought for $520,000.");
+  });
+  test("negative: a line that ends a sentence, or a next line that starts a new one, is not joined", () => {
+    expect(read("The land is a key item.", "for the lot we pay $500,000").candidates).toEqual([]);
+    expect(read("The loan amount is", "Senior terms follow $1,000,000").candidates).toEqual([]);
+  });
+  test("two sentences on one line keep their own labels", () => {
+    expect(pick(read("Hard costs: $1,450,000. We intend to hold for 5 years."))).toEqual([["hard_cost", 1_450_000], ["hold_years", 5]]);
+    expect(pick(read("Interest rate: 5.9%. Amortization of 30 years."))).toEqual([["senior_rate_pct", 5.9], ["senior_amort_years", 30]]);
+  });
+  test("negative: a decimal or an abbreviation does not end a sentence", () => {
+    expect(pick(read("Our land cost, per Ltd. Appraisal, is $410,000."))).toEqual([["land_cost", 410_000]]);
+    expect(pick(read("The interest rate is 5.25% and the exit cap rate is 6.1%."))).toEqual([["senior_rate_pct", 5.25], ["exit_cap_rate_pct", 6.1]]);
+  });
+  test("a label that follows its number is used when the words before it name nothing", () => {
+    expect(pick(read("We assume 95% stabilized occupancy and 6 months of lease-up."))).toEqual([["stabilized_occupancy_pct", 95], ["lease_up_months", 6]]);
+    expect(pick(read("The sponsor expects a three-month lease-up."))).toEqual([["lease_up_months", 3]]);
+  });
+  test("negative: a number whose own label maps does not also take the words after it", () => {
+    expect(pick(read("The hold period is 5 years with a lease-up"))).toEqual([["hold_years", 5]]);
+  });
+  test("an alias introduced by above or after is a reference; the alias nearest the number is the label", () => {
+    expect(pick(read("After the preferred return is paid, the general partner receives a promote of 20%."))).toEqual([["gp_promote_pct", 20]]);
+    expect(pick(read("Promote above the preferred return 20%"))).toEqual([["gp_promote_pct", 20]]);
+    expect(pick(read("Preferred return of 8% and promote of 20%"))).toEqual([["preferred_return_pct", 8], ["gp_promote_pct", 20]]);
+  });
+  test("number words and a three-month adjective are read, in English and French; an item name is not", () => {
+    expect(pick(read("The lease-up period is eighteen months."))).toEqual([["lease_up_months", 18]]);
+    expect(pick(read("La durée des travaux est de douze mois."))).toEqual([["construction_months", 12]]);
+    expect(read("We will build three-bedroom suites.").other).toEqual([]);
+  });
+  test("an ordinal month is read as months", () => {
+    expect(pick(read("We plan to refinance in month 30."))).toEqual([["refinance_month", 30]]);
+    expect(pick(read("Refinancement au mois 26."))).toEqual([["refinance_month", 26]]);
+  });
+  test("times and fois are a multiple; a multiple is not a cost", () => {
+    expect(pick(read("The lender requires a minimum DSCR of 1.25 times."))).toEqual([["min_dscr_covenant", 1.25]]);
+    expect(pick(read("Le RCD minimal est de 1,15 fois."))).toEqual([["min_dscr_covenant", 1.15]]);
+    expect(read("Hard costs are 3 times the land.").candidates).toEqual([]);
+  });
+  test("a year is never money in prose, but a bare number in a label/value line still is", () => {
+    const r = read("Equity was contributed in May 2026.");
+    expect(r.candidates).toEqual([]);
+    expect(r.other.map((o) => o.value)).toEqual([2_026]);
+    expect(read("We will invest equity of 720,000.").candidates).toEqual([]);
+    expect(pick(read("Equity: 720,000"))).toEqual([["equity_amount", 720_000]]);
+    expect(pick(read("Equity of $2,026,000 in May."))).toEqual([["equity_amount", 2_026_000]]);
+  });
+  test("a range is refused, in English and French", () => {
+    const en = read("Hard costs are between $1,400,000 and $1,500,000.");
+    expect(en.candidates).toEqual([]);
+    expect(others(en)).toEqual([[1_400_000, "A range is not a value; enter the figure to use"], [1_500_000, "A range is not a value; enter the figure to use"]]);
+    expect(read("Les frais de vente sont de 2 à 3 %.").candidates).toEqual([]);
+    expect(read("We assume a hold of 5 - 7 years.").candidates).toEqual([]);
+    expect(read("Construction takes from 12 to 14 months.").other.map((o) => o.value)).toEqual([12, 14]);
+  });
+  test("negative: two figures that are not a range are both read", () => {
+    expect(pick(read("The hold period is 5 years and the lease-up period is 6 months."))).toEqual([["hold_years", 5], ["lease_up_months", 6]]);
+    expect(pick(read("Hard costs are $1,450,000 - land is separate: $520,000."))).toEqual([["hard_cost", 1_450_000], ["land_cost", 520_000]]);
+  });
+  test("a hedged figure is refused with the reason; estimated and approximately are not hedges", () => {
+    const r = read("I'd guess the expense ratio is 30% or so.");
+    expect(r.candidates).toEqual([]);
+    expect(r.other[0]!.note).toContain("hedged");
+    expect(read("Selling costs are probably 3%.").candidates).toEqual([]);
+    expect(read("Le taux de capitalisation à la sortie est à confirmer: 5,5 %.").candidates).toEqual([]);
+    expect(pick(read("Selling costs are approximately 3%."))).toEqual([["selling_costs_pct", 3]]);
+    expect(pick(read("Hard costs are estimated at $1,450,000."))).toEqual([["hard_cost", 1_450_000]]);
+  });
+  test("a figure about another property is refused with the reason", () => {
+    const r = read("My other building had hard costs of $900,000.");
+    expect(r.candidates).toEqual([]);
+    expect(r.other[0]!.note).toContain("another property");
+    expect(read("The comps show rents near $1,900 per month.").candidates).toEqual([]);
+    expect(pick(read("Our hard costs are $1,450,000."))).toEqual([["hard_cost", 1_450_000]]);
+  });
+  test("a sentence that names an output gives no input for any number in it", () => {
+    expect(read("At a 5.0% exit cap rate the indicative value is $12,000,000.").candidates).toEqual([]);
+    expect(pick(read("The exit cap rate is 5.5%."))).toEqual([["exit_cap_rate_pct", 5.5]]);
+  });
+});
