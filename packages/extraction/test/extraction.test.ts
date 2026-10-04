@@ -1,6 +1,6 @@
 import { describe, expect, test } from "vitest";
 import { assemble, type AssumptionRow } from "@agir/engine";
-import { consolidate, extractCandidates, scoreExtraction, type NormalizedDocument, type SourcedCandidate, type Table } from "../src/index.ts";
+import { consolidate, extractCandidates, normalizeLabel, scoreExtraction, type NormalizedDocument, type SourcedCandidate, type Table } from "../src/index.ts";
 import { loadOracles, toNormalized } from "./oracle.ts";
 
 const key = (f: string, i: string | null) => (i ? `${f}|${i}` : f);
@@ -201,5 +201,76 @@ describe("a figure in another currency is never the value (decision 7)", () => {
     expect(r.candidates.map((c) => [c.fieldKey, c.value, c.unitSeen]).sort()).toEqual(
       [["land_cost", 1_000_000, "$"], ["land_cost", 50_000, "USD"]].sort(),
     );
+  });
+});
+
+describe("a French Canadian pro forma (fr-CA: comma decimals, space groups, trailing $)", () => {
+  const lines = [
+    "Coût du terrain : 1 250 000,00 $",
+    "Coûts de construction : 8 400 000 $",
+    "Honoraires professionnels : 620 000 $",
+    "Contingence : 420 000 $",
+    "Nombre de logements : 24",
+    "Loyer mensuel : 2 100 $/mois",
+    "Loyer : 18,75 $/pi²",
+    "Superficie locative : 9 400 pi²",
+    "Taux d'occupation : 95 %",
+    "Dépenses d'exploitation : 35 %",
+    "Autres revenus : 36 000 $",
+    "Taux de capitalisation à la sortie : 5,25 %",
+    "Montant du prêt : 6 500 000 $",
+    "Taux d'intérêt : 5,85 %",
+    "Période d'amortissement : 25 ans",
+    "Durée des travaux : 18 mois",
+    "Période de détention : 7 ans",
+  ];
+  const r = extractCandidates({
+    kind: "pdf",
+    lines: lines.map((text, i) => ({ text, location: `page 1, line ${i + 1}` })),
+    tables: [],
+    pageCount: 1,
+    needsOcr: false,
+    fullText: lines.join("\n"),
+  });
+  const got = r.candidates.map((c) => [c.fieldKey, c.itemKey, c.value, c.unitSeen]);
+
+  test("accents are folded, not dropped; English labels are unchanged", () => {
+    expect(normalizeLabel("Coût du terrain").label).toBe("cout du terrain");
+    expect(normalizeLabel("Période d'amortissement").label).toBe("periode d amortissement");
+    expect(normalizeLabel("Land cost (CAD)")).toEqual({ label: "land cost", labelUnit: "$" });
+    expect(normalizeLabel("Durée (mois)").labelUnit).toBe("months");
+  });
+  test("every line maps to its field, value and unit", () => {
+    expect(got).toEqual([
+      ["land_cost", null, 1_250_000, "$"],
+      ["hard_cost", null, 8_400_000, "$"],
+      ["soft_cost", null, 620_000, "$"],
+      ["contingency", null, 420_000, "$"],
+      ["unit_count", "All units", 24, "number"],
+      ["unit_rent_monthly", "All units", 2_100, "$/mo"],
+      ["rent_psf_annual", "All units", 18.75, "$/sf"],
+      ["rentable_area_sf", "All units", 9_400, "sf"],
+      ["stabilized_occupancy_pct", null, 95, "%"],
+      ["expense_ratio_pct", null, 35, "%"],
+      ["other_income_annual", null, 36_000, "$"],
+      ["exit_cap_rate_pct", null, 5.25, "%"],
+      ["senior_loan_amount", null, 6_500_000, "$"],
+      ["senior_rate_pct", null, 5.85, "%"],
+      ["senior_amort_years", null, 25, "years"],
+      ["construction_months", null, 18, "months"],
+      ["hold_years", null, 7, "years"],
+    ]);
+  });
+  test("nothing is left unmapped", () => {
+    expect(r.other).toEqual([]);
+  });
+  test("a French label never lets a mezzanine or refinance figure fall to the senior loan", () => {
+    const one = (text: string) => extractCandidates({ kind: "pdf", lines: [{ text, location: "l1" }], tables: [], pageCount: 1, needsOcr: false, fullText: text }).candidates[0]?.fieldKey;
+    expect(one("Montant du prêt mezzanine : 1 500 000 $")).toBe("mezz_loan_amount");
+    expect(one("Taux d'intérêt du prêt mezzanine : 11,5 %")).toBe("mezz_rate_pct");
+    expect(one("Montant du prêt de refinancement : 9 000 000 $")).toBe("refinance_amount");
+    expect(one("Taux d'intérêt du refinancement : 4,9 %")).toBe("refinance_rate_pct");
+    expect(one("Amortissement du prêt mezzanine : 20 ans")).toBe("mezz_amort_years");
+    expect(one("Dépenses d'exploitation fixes : 310 000 $")).toBe("fixed_opex_annual");
   });
 });

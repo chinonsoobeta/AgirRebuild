@@ -128,3 +128,35 @@ describe("the currency a figure names", () => {
     expect(code("Land cost: 1,200,000")).toBeNull();
   });
 });
+
+describe("French documents: a dollar sign after the number", () => {
+  const FR: DocumentFormat = { ...EU, spaceGroups: true };
+  test("a trailing dollar sign makes the figure money", () => {
+    expect(first("Loyer : 18,75 $", FR)).toMatchObject({ value: 18.75, currency: true, unit: "$", currencyCode: null, raw: "18,75 $" });
+    expect(first("Terrain : 1 250 000 $", FR)).toMatchObject({ value: 1_250_000, currency: true, unit: "$" });
+    expect(first("Terrain : 1 250 000,00 $", FR)).toMatchObject({ value: 1_250_000, currency: true, unit: "$" });
+  });
+  test("it carries its per-unit reading: monthly, per square foot, per square metre", () => {
+    expect(first("Loyer : 2 100 $/mois", FR)).toMatchObject({ value: 2_100, unit: "$/mo" });
+    expect(first("Loyer : 2 100 $ par mois", FR)).toMatchObject({ value: 2_100, unit: "$/mo" });
+    expect(first("Loyer : 18,75 $/pi²", FR)).toMatchObject({ value: 18.75, unit: "$/sf" });
+    expect(first("Loyer : 18,75 $ par pi²", FR)).toMatchObject({ value: 18.75, unit: "$/sf" });
+    expect(first("Loyer : 201,82 $/m²", FR)).toMatchObject({ value: 201.82, unit: "$/m2" });
+  });
+  test("French units for counts and durations", () => {
+    expect(first("Durée : 18 mois", FR)).toMatchObject({ value: 18, unit: "months" });
+    expect(first("Amortissement : 25 ans", FR)).toMatchObject({ value: 25, unit: "years" });
+    expect(first("Nombre de logements : 24 logements", FR)).toMatchObject({ value: 24, unit: "units" });
+  });
+  test("a space-grouped figure with one group is still refused unless the document groups with spaces", () => {
+    expect(first("Loyer : 2 100 $/mois", EU).value).toBeNull();
+  });
+  test("a French document is detected as comma-decimal", () => {
+    expect(detectFormat("Terrain : 1 250 000,00 $\nTaux : 5,25 %")).toMatchObject({ decimal: ",", spaceGroups: true });
+  });
+  test("English documents are unaffected: a dollar sign before the next figure is not a suffix", () => {
+    const t = tokenize("Land $5 $10", US);
+    expect(t.map((x) => [x.raw, x.value, x.currency])).toEqual([["$5", 5, true], ["$10", 10, true]]);
+    expect(first("Rent: $2,850 per unit per month", US)).toMatchObject({ value: 2_850, unit: "$/mo", raw: "$2,850 per unit per month" });
+  });
+});
