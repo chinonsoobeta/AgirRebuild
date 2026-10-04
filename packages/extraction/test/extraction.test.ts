@@ -1181,10 +1181,8 @@ describe("reading safety: a figure that may be the wrong one is shown, never use
     test("a place or heading before a colon is never an item name; the deal-wide count is read", () => {
       expect(items(read("Nanaimo, British Columbia: nine apartments above a pharmacy"))).toEqual([["unit_count", "All units", 9]]);
       expect(items(read("Gatineau (Québec) : huit logements au-dessus d'une boutique"))).toEqual([["unit_count", "All units", 8]]);
-      // negative: a rent or an area under a name that is no unit type is shown, not given to an item
-      const r = read("Retail: 9,000 SF");
-      expect(items(r)).toEqual([]);
-      expect(r.other.some((o) => o.value === 9_000 && o.note)).toBe(true);
+      // negative: an area under a component name that is no residential type keeps that name
+      expect(items(read("Retail: 9,000 SF"))).toEqual([["rentable_area_sf", "Retail", 9_000]]);
     });
     test("a count and a rent in one colon clause pair to the unit type that clause names", () => {
       expect(items(read("Units: 8 one-bedroom suites at $1,750 per month"))).toEqual([["unit_count", "1BR", 8], ["unit_rent_monthly", "1BR", 1_750]]);

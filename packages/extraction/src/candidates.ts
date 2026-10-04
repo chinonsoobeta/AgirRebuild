@@ -235,6 +235,9 @@ function rangeEnds(text: string, tokens: NumberToken[]): Set<number> {
   return out;
 }
 
+/** The itemized unit fields: an item for them is a unit type, never a place or a heading. */
+const UNIT_FIELDS = new Set(["unit_count", "unit_rent_monthly", "rentable_area_sf", "rent_psf_annual"]);
+
 /** The words right after a number and its unit, up to the next number, comma, semicolon, "and"/"et" or the end of the sentence. */
 function followingLabel(rest: string): string | null {
   if (!/^\s+\S/.test(rest)) return null;
@@ -257,10 +260,11 @@ function clauseOf(text: string, t: NumberToken): string {
 }
 
 /** A count or a monthly rent in prose, named by the one unit type its clause names ("two-bedroom", "studio", "4½"); none or several name nothing. */
-function clauseItem(text: string, t: NumberToken): Mapped | null {
+function clauseItem(text: string, t: NumberToken, lead: string | null = null): Mapped | null {
   const count = t.unit === "units";
   if (t.value === null || (!count && t.unit !== "$/mo")) return null;
   const types = unitTypesIn(clauseOf(text, t));
+  if (types.length === 0 && lead) types.push(lead);
   if (types.length !== 1) return null;
   return count
     ? { kind: "field", fieldKey: "unit_count", itemKey: types[0]!, value: t.value, unitSeen: "units" }
@@ -322,13 +326,25 @@ function readSentence(sentence: { text: string; start: number }, para: Paragraph
   }
   if (tokens.length === 0) return;
   let proseFrom = 0;
+  // The unit type a colon label is made of ("Studios: 4 at $1,450"); it names the items of the clause after the colon when that clause names none.
+  let lead: string | null = null;
+  // A unit count label ("Units: 8 one-bedroom suites ...") also reads a bare first number as that count.
+  let bareCount = false;
   if (colon > 0 && tokens[0]!.start > colon) {
     // Label-first: every number after the colon shares the label. The first
     // number compatible with a field wins; the rest are kept as "other".
     const label = text.slice(0, colon);
     // A label that names nothing for any number ("Financing: a loan of ...") is an introduction: what follows is prose.
     const scope = para.scope;
-    if (tokens.every((t) => mapToken(label, t, { scope }).kind === "unmapped")) proseFrom = colon + 1;
+    // A label for a unit field never names an item unless it is a unit type; the clause after the colon is then read as prose, its own unit types naming the items.
+    const first = tokens.map((t) => mapToken(label, t, { scope })).find((m) => m.kind === "field");
+    const unitField = first?.kind === "field" && first.itemKey !== null && UNIT_FIELDS.has(first.fieldKey);
+    const labelTypes = unitTypesIn(label);
+    if (unitField && labelTypes.length <= 1 && (labelTypes.length === 1 || unitTypesIn(text.slice(colon + 1)).length > 0)) {
+      proseFrom = colon + 1;
+      lead = labelTypes[0] ?? null;
+      bareCount = true;
+    } else if (tokens.every((t) => mapToken(label, t, { scope }).kind === "unmapped")) proseFrom = colon + 1;
     else {
       let used = false;
       const ranged = rangeEnds(text, tokens);
@@ -337,9 +353,11 @@ function readSentence(sentence: { text: string; start: number }, para: Paragraph
           other(t, "line:label-value", RANGE_NOTE);
           continue;
         }
-        const mapped = used ? { kind: "unmapped" as const } : mapToken(label, t, { scope });
+        let mapped = used ? { kind: "unmapped" as const } : mapToken(label, t, { scope });
+        // A place before the colon ("Kelowna, British Columbia", "Gatineau (Québec)") is not an item: that count is the deal-wide count. A single word is kept as a component name ("Residential: 160 units").
+        if (/[,(]/.test(label) && mapped.kind === "field" && mapped.fieldKey === "unit_count" && mapped.itemKey !== null && mapped.itemKey !== "All units" && unitTypesIn(mapped.itemKey).length === 0) mapped = { ...mapped, itemKey: "All units" };
         if (!used && mapped.kind === "field") {
-          push(result, label, t, locationOf(t.start), context, "line:label-value", { scope });
+          record(result, mapped, t, { raw: t.raw, location: locationOf(t.start), context: context.slice(0, 240), rule: "line:label-value" });
           used = true;
         } else if (!used || t.value !== null) {
           other(t, "line:label-value", mapped.kind === "ignored" ? mapped.reason : used ? "Another number on this line was used" : "No field matches this label");
@@ -370,10 +388,18 @@ function readSentence(sentence: { text: string; start: number }, para: Paragraph
         from = t.end + after.length;
       } else if (after !== null && viaAfter!.kind === "ignored" && mapped.kind === "unmapped") mapped = viaAfter!;
     }
-    if (mapped.kind === "unmapped" || (mapped.kind === "ignored" && mapped.reason.startsWith("Looks like"))) mapped = clauseItem(text, t) ?? mapped;
-    else if (mapped.kind === "field" && mapped.itemKey !== null && (mapped.fieldKey === "unit_count" || mapped.fieldKey === "unit_rent_monthly")) {
+    if (bareCount && i === 0 && t.unit === null && t.value !== null && Number.isInteger(t.value) && t.value > 0 && mapped.kind === "unmapped") {
+      const types = unitTypesIn(clauseOf(text, t));
+      if (types.length === 0 && lead) types.push(lead);
+      if (types.length === 1) mapped = { kind: "field", fieldKey: "unit_count", itemKey: types[0]!, value: t.value, unitSeen: "units" };
+    }
+    if (mapped.kind === "unmapped" || (mapped.kind === "ignored" && mapped.reason.startsWith("Looks like"))) mapped = clauseItem(text, t, lead) ?? mapped;
+    // A count whose clause names no unit type is the deal-wide count.
+    if (bareCount && mapped.kind === "unmapped" && t.unit === "units" && t.value !== null) mapped = { kind: "field", fieldKey: "unit_count", itemKey: "All units", value: t.value, unitSeen: "units" };
+    else if (mapped.kind === "field" && mapped.itemKey !== null && (UNIT_FIELDS.has(mapped.fieldKey) && (proseFrom > 0 || mapped.fieldKey === "unit_count" || mapped.fieldKey === "unit_rent_monthly"))) {
       // The clause's unit type names the item, not the words before the label ("Studios will rent at ...").
       const types = unitTypesIn(clauseOf(text, t));
+      if (types.length === 0 && lead) types.push(lead);
       if (types.length === 1) mapped = { ...mapped, itemKey: types[0]! };
     }
     record(result, mapped, t, { raw: t.raw, location: where, context, rule: "line:prose" });
