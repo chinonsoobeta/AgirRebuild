@@ -20,7 +20,7 @@ const ASSET_TYPES = ["Multifamily", "Mixed-use", "Industrial", "Office", "Retail
 export function Deals() {
   const i = useI18n();
   const { t, L, lang } = i;
-  const { workspaceId, role } = useSession();
+  const { workspaceId, role, solo } = useSession();
   const navigate = useNavigate();
   const qc = useQueryClient();
   const [filter, setFilter] = useState<(typeof FILTERS)[number]["key"]>("all");
@@ -65,7 +65,7 @@ export function Deals() {
       <div className="spread" style={{ alignItems: "flex-end" }}>
         <div className="stack" style={{ gap: 6 }}>
           <h1 className="h-title" style={{ fontSize: 44 }}>{t("deals.title")}</h1>
-          <p className="muted">{all.length === 0 ? t("deals.none") : t("deals.summary", { blocked, ready })}</p>
+          <p className="muted">{all.length === 0 ? t("deals.none") : t(solo ? "deals.summarySolo" : "deals.summary", { blocked, ready })}</p>
         </div>
         <div className="row">
           <label className="sr-only" htmlFor="deal-search">{t("deals.search")}</label>
@@ -91,7 +91,7 @@ export function Deals() {
           </thead>
           <tbody>
             {shown.map((d) => {
-              const st = dealStatus(i, d);
+              const st = dealStatus(i, d, solo);
               return (
                 <tr key={d.deal.id}>
                   <td>

@@ -7,7 +7,7 @@ import * as I from "./icons";
 
 // ---- Session and workspace -----------------------------------------------------------
 
-type Session = { me: Me; workspaceId: string; role: Me["workspaces"][number]["role"]; setWorkspace: (id: string) => void };
+type Session = { me: Me; workspaceId: string; role: Me["workspaces"][number]["role"]; solo: boolean; setWorkspace: (id: string) => void };
 const SessionCtx = createContext<Session | null>(null);
 export const useSession = () => {
   const s = useContext(SessionCtx);
@@ -43,7 +43,7 @@ export function SessionGate({ children }: { children: ReactNode }) {
       /* private window: the choice lasts for this tab only */
     }
   };
-  return <SessionCtx.Provider value={{ me: me.data, workspaceId: workspace.id, role: workspace.role, setWorkspace }}>{children}</SessionCtx.Provider>;
+  return <SessionCtx.Provider value={{ me: me.data, workspaceId: workspace.id, role: workspace.role, solo: workspace.review_mode === "solo", setWorkspace }}>{children}</SessionCtx.Provider>;
 }
 
 export const canEdit = (role: string) => role !== "viewer" && role !== "reviewer";
@@ -149,6 +149,23 @@ export function ErrorText({ error }: { error: unknown }) {
   return <p className="error-text" role="alert">{err(error)}</p>;
 }
 
+/** What the main figures mean, in a sentence each. Shown on the Run and Review pages. */
+const GLOSSARY = ["dcr", "noi", "capRate", "yieldOnCost", "loanToCost", "equityIrr", "equityMultiple", "breakEven"] as const;
+export function Glossary() {
+  const { t } = useI18n();
+  return (
+    <details>
+      <summary>{t("glossary.title")}</summary>
+      <dl className="stack" style={{ gap: 10, marginTop: 12 }}>
+        {GLOSSARY.map((k) => {
+          const [term, meaning] = t(`glossary.${k}`);
+          return <div key={k}><dt style={{ fontWeight: 600 }}>{term}</dt><dd className="muted">{meaning}</dd></div>;
+        })}
+      </dl>
+    </details>
+  );
+}
+
 // ---- Deal header and stepper ----------------------------------------------------------------
 
 const STEPS = ["documents", "review", "run", "decision", "reports"] as const;
@@ -156,7 +173,8 @@ const STEPS = ["documents", "review", "run", "decision", "reports"] as const;
 export function DealHeader({ o, active }: { o: DealOverview; active: string }) {
   const i = useI18n();
   const { t, L } = i;
-  const status = dealStatus(i, o);
+  const { solo } = useSession();
+  const status = dealStatus(i, o, solo);
   const order: string[] = [...STEPS];
   const state = (key: string): { text: string; tone: "done" | "stop" | "faint" | "normal" } => {
     const past = order.indexOf(key) < order.indexOf(o.step);

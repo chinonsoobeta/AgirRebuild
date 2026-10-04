@@ -11,7 +11,7 @@ const DECISIONS = ["approve", "approve_with_conditions", "reject", "return_to_un
 export function DecisionStep({ dealId }: { dealId: string }) {
   const i = useI18n();
   const { t, f, L } = i;
-  const { role } = useSession();
+  const { role, solo } = useSession();
   const qc = useQueryClient();
   const deal = useDeal(dealId);
   const run = useRun(deal.data?.run?.id);
@@ -31,16 +31,16 @@ export function DecisionStep({ dealId }: { dealId: string }) {
       <>
         <DealHeader o={o} active="decision" />
         <Banner tone="neutral" title={t("decision.noRun")}>
-          <span>{t("decision.noRunBody")} <Link to="/deals/$dealId/run" params={{ dealId }}>{t("decision.goRun")}</Link>.</span>
+          <span>{t(solo ? "decision.noRunBodySolo" : "decision.noRunBody")} <Link to="/deals/$dealId/run" params={{ dealId }}>{t("decision.goRun")}</Link>.</span>
         </Banner>
       </>
     );
   }
   const v = run.data;
   const verdict = v.result.verdict.code;
-  const vt = verdictText(i, v.result.verdict, v.result.checks);
+  const vt = verdictText(i, v.result.verdict, v.result.checks, solo);
   const against = (choice === "approve" || choice === "approve_with_conditions") && (verdict === "REJECT" || verdict === "NOT_EVALUATED");
-  const blockedReason = !v.fresh ? t("decision.stale") : !canDecide(role) ? t("decision.role") : null;
+  const blockedReason = !v.fresh ? t("decision.stale") : !canDecide(role) ? t(solo ? "decision.roleSolo" : "decision.role") : null;
   const submit = (e: FormEvent<HTMLFormElement>) => {
     e.preventDefault();
     const fd = new FormData(e.currentTarget);
@@ -77,7 +77,7 @@ export function DecisionStep({ dealId }: { dealId: string }) {
           ) : (
             <form id="decision-form" className="panel stack" style={{ gap: 18 }} onSubmit={submit}>
               <fieldset className="stack" style={{ border: 0, padding: 0, margin: 0, gap: 10 }}>
-                <legend className="h-section" style={{ marginBottom: 10 }}>{v.decisions.length ? t("decision.further") : t("decision.title")}</legend>
+                <legend className="h-section" style={{ marginBottom: 10 }}>{v.decisions.length ? t("decision.further") : t(solo ? "decision.titleSolo" : "decision.title")}</legend>
                 <div style={{ display: "grid", gridTemplateColumns: "repeat(2, minmax(0, 1fr))", gap: 10 }}>
                   {DECISIONS.map((k) => (
                     <label key={k} className="choice">
@@ -87,7 +87,7 @@ export function DecisionStep({ dealId }: { dealId: string }) {
                   ))}
                 </div>
               </fieldset>
-              <div className="field"><label htmlFor="rationale">{t("decision.reasoning")}</label><textarea className="textarea" id="rationale" name="rationale" minLength={10} required /></div>
+              <div className="field"><label htmlFor="rationale">{t(solo ? "decision.reasoningSolo" : "decision.reasoning")}</label><textarea className="textarea" id="rationale" name="rationale" minLength={10} required /></div>
               {choice === "approve_with_conditions" && (
                 <div className="field"><label htmlFor="conditions">{t("decision.conditionsLabel")}</label><textarea className="textarea" id="conditions" name="conditions" required /></div>
               )}

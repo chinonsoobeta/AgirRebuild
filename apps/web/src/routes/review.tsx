@@ -1,7 +1,7 @@
 import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
 import { useState, type FormEvent } from "react";
 import { api, type Assumption, type Review as ReviewData, type Source } from "../api";
-import { Banner, canEdit, DealHeader, ErrorText, StatusTag, useDeal, useSession } from "../components/ui";
+import { Banner, canEdit, DealHeader, ErrorText, Glossary, StatusTag, useDeal, useSession } from "../components/ui";
 import * as I from "../components/icons";
 import { useI18n } from "../i18n";
 
@@ -33,8 +33,7 @@ function ValueInput({ unit, id, defaultValue }: { unit: string; id: string; defa
 
 export function Review({ dealId }: { dealId: string }) {
   const { t, f, L, msg } = useI18n();
-  const { me, role, workspaceId } = useSession();
-  const solo = me.workspaces.find((w) => w.id === workspaceId)?.review_mode === "solo";
+  const { me, role, solo } = useSession();
   const qc = useQueryClient();
   const deal = useDeal(dealId);
   const review = useQuery({ queryKey: ["review", dealId], queryFn: () => api.get<ReviewData>(`/deals/${dealId}/review`) });
@@ -114,6 +113,7 @@ export function Review({ dealId }: { dealId: string }) {
     <>
       <DealHeader o={deal.data} active="review" />
       {docsBusy && <Banner tone="neutral" title={t("review.stillReading")}>{t("review.stillReadingBody")}</Banner>}
+      <Glossary />
       <div className="side">
         <div className="stack" style={{ gap: 24 }}>
           <div className="stack" style={{ gap: 12 }}>

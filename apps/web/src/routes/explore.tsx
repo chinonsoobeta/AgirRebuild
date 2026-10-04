@@ -2,7 +2,7 @@ import { Link } from "@tanstack/react-router";
 import { useQuery } from "@tanstack/react-query";
 import { useEffect, useMemo, useState } from "react";
 import { api, type Metric, type RunView } from "../api";
-import { Banner, DealHeader, ErrorText, MetricValue, useDeal, VerdictBadge } from "../components/ui";
+import { Banner, DealHeader, ErrorText, MetricValue, useDeal, useSession, VerdictBadge } from "../components/ui";
 import * as I from "../components/icons";
 import { useI18n, verdictText } from "../i18n";
 import { GateOutcome, useRun } from "./run";
@@ -28,6 +28,7 @@ function useDebounced<T>(value: T, ms: number): T {
 
 export function Explore({ dealId }: { dealId: string }) {
   const i = useI18n();
+  const { solo } = useSession();
   const { t, f, L } = i;
   const deal = useDeal(dealId);
   const runId = deal.data?.run?.id;
@@ -60,7 +61,7 @@ export function Explore({ dealId }: { dealId: string }) {
   const unitOf = (key: string) => metricOf(runData?.result.scenarios, key)?.unit ?? "x";
   const threshold = (key: string) => runData?.result.verdict.gates.find((x) => x.metricKey === key)?.threshold ?? null;
   const changed = Object.values(shock).some((v) => v !== 0);
-  const vt = explored.data ? verdictText(i, explored.data.verdict, explored.data.checks) : null;
+  const vt = explored.data ? verdictText(i, explored.data.verdict, explored.data.checks, solo) : null;
 
   const change = (a: Metric | undefined, b: Metric | undefined) => {
     if (!a || !b || a.value === null || b.value === null) return "—";

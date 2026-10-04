@@ -50,6 +50,7 @@ const EN = {
   "deals.title": "Deals",
   "deals.none": "No deals yet.",
   "deals.summary": (p) => `${p.blocked} ${s(p.blocked, "deal is", "deals are")} blocked. ${p.ready} ${s(p.ready, "is", "are")} ready for a committee decision.`,
+  "deals.summarySolo": (p) => `${p.blocked} ${s(p.blocked, "deal is", "deals are")} blocked. ${p.ready} ${s(p.ready, "is", "are")} ready for your decision.`,
   "deals.search": "Search deals",
   "deals.new": "New deal",
   "deals.filter": "Filter deals",
@@ -121,6 +122,7 @@ const EN = {
   "next.review": "Review the extracted values",
   "next.run": "Run underwriting",
   "next.decide": "Record the committee decision",
+  "next.decideSolo": "Record your decision",
   "next.share": "Share the reports",
   "next.memo": "Generate the IC memo",
 
@@ -348,8 +350,19 @@ const EN = {
   "explore.unchanged": "unchanged",
   "explore.working": "Working…",
 
+  "glossary.title": "What these terms mean",
+  "glossary.dcr": () => ["DCR (debt coverage ratio), called DSCR by many lenders", "Net operating income divided by the loan payments due, shown for the weakest year of the hold."],
+  "glossary.noi": () => ["Net operating income (NOI)", "The rent and other income actually collected, less operating costs, before any loan payments."],
+  "glossary.capRate": () => ["Cap rate (exit)", "The yield a buyer is assumed to require at sale; the final year's NOI divided by it gives the sale value."],
+  "glossary.yieldOnCost": () => ["Yield on cost", "Stabilized NOI divided by the total cost of developing the project."],
+  "glossary.loanToCost": () => ["Loan to cost (LTC)", "The share of the total development cost that is financed by loans."],
+  "glossary.equityIrr": () => ["Equity IRR", "The annual rate of return on the equity put in, taking into account when each payment in and out happens."],
+  "glossary.equityMultiple": () => ["Equity multiple", "All the cash paid back to equity divided by all the equity put in; 2.0x means twice what was invested."],
+  "glossary.breakEven": () => ["Break-even occupancy", "The share of the units that must be rented in year 1 for the rent to cover operating costs and loan payments."],
+
   "decision.noRun": "There is no run to decide on yet.",
   "decision.noRunBody": "A committee decision is always recorded against a specific run.",
+  "decision.noRunBodySolo": "Your decision is always recorded against a specific run.",
   "decision.goRun": "Go to Run",
   "decision.recorded": "Recorded decisions",
   "decision.conditions": (p) => `Conditions: ${p.c}`,
@@ -358,9 +371,12 @@ const EN = {
   "decision.cannot": "A decision cannot be recorded right now.",
   "decision.stale": "The inputs changed after this run. Run underwriting again first.",
   "decision.role": "Only a workspace admin or owner records committee decisions.",
+  "decision.roleSolo": "Only a workspace admin or owner records a decision.",
   "decision.further": "Record a further decision",
   "decision.title": "Committee decision",
+  "decision.titleSolo": "Your decision",
   "decision.reasoning": "The committee's reasoning",
+  "decision.reasoningSolo": "Your reasoning",
   "decision.conditionsLabel": "Conditions",
   "decision.overrideLabel": (p) => `Why approve against a ${p.v} verdict`,
   "decision.overrideHelp": "Required. It is recorded with the decision and shown in every report.",
@@ -475,6 +491,7 @@ const FR: Record<Key, Entry> = {
   "deals.title": "Projets",
   "deals.none": "Aucun projet pour l'instant.",
   "deals.summary": (p) => `${p.blocked} ${s(p.blocked, "projet est bloqué", "projets sont bloqués")}. ${p.ready} ${s(p.ready, "est prêt", "sont prêts")} pour une décision du comité.`,
+  "deals.summarySolo": (p) => `${p.blocked} ${s(p.blocked, "projet est bloqué", "projets sont bloqués")}. ${p.ready} ${s(p.ready, "est prêt", "sont prêts")} pour votre décision.`,
   "deals.search": "Rechercher un projet",
   "deals.new": "Nouveau projet",
   "deals.filter": "Filtrer les projets",
@@ -546,6 +563,7 @@ const FR: Record<Key, Entry> = {
   "next.review": "Examiner les valeurs extraites",
   "next.run": "Lancer l'analyse",
   "next.decide": "Consigner la décision du comité",
+  "next.decideSolo": "Consigner votre décision",
   "next.share": "Partager les rapports",
   "next.memo": "Générer le mémo du comité",
 
@@ -780,8 +798,19 @@ const FR: Record<Key, Entry> = {
   "explore.unchanged": "inchangé",
   "explore.working": "Calcul…",
 
+  "glossary.title": "Ce que ces termes veulent dire",
+  "glossary.dcr": () => ["RCD (ratio de couverture de la dette), appelé RCSD par de nombreux prêteurs", "Le revenu net d'exploitation divisé par les paiements de prêt à effectuer, pour l'année la plus faible de la détention."],
+  "glossary.noi": () => ["Revenu net d'exploitation (RNE)", "Les loyers et autres revenus réellement encaissés, moins les charges d'exploitation, avant tout paiement de prêt."],
+  "glossary.capRate": () => ["Taux de capitalisation (sortie)", "Le rendement qu'un acheteur est supposé exiger à la vente ; le RNE de la dernière année divisé par ce taux donne la valeur de vente."],
+  "glossary.yieldOnCost": () => ["Rendement sur coût", "Le RNE stabilisé divisé par le coût total de développement du projet."],
+  "glossary.loanToCost": () => ["Ratio prêt-coût", "La part du coût total de développement qui est financée par des prêts."],
+  "glossary.equityIrr": () => ["TRI des fonds propres", "Le taux de rendement annuel des fonds propres investis, selon le moment de chaque versement et de chaque distribution."],
+  "glossary.equityMultiple": () => ["Multiple des fonds propres", "Tout l'argent rendu aux fonds propres divisé par tous les fonds propres investis ; 2,0x veut dire le double de la mise."],
+  "glossary.breakEven": () => ["Occupation au seuil de rentabilité", "La part des logements qui doit être louée à l'année 1 pour que les loyers couvrent les charges d'exploitation et les paiements de prêt."],
+
   "decision.noRun": "Il n'y a pas encore d'analyse sur laquelle décider.",
   "decision.noRunBody": "Une décision du comité est toujours consignée pour une analyse précise.",
+  "decision.noRunBodySolo": "Votre décision est toujours consignée pour une analyse précise.",
   "decision.goRun": "Aller à l'analyse",
   "decision.recorded": "Décisions consignées",
   "decision.conditions": (p) => `Conditions : ${p.c}`,
@@ -790,9 +819,12 @@ const FR: Record<Key, Entry> = {
   "decision.cannot": "Aucune décision ne peut être consignée pour l'instant.",
   "decision.stale": "Les données ont changé après cette analyse. Relancez d'abord l'analyse.",
   "decision.role": "Seul un administrateur ou le propriétaire de l'espace consigne les décisions du comité.",
+  "decision.roleSolo": "Seul un administrateur ou le propriétaire de l'espace consigne une décision.",
   "decision.further": "Consigner une autre décision",
   "decision.title": "Décision du comité",
+  "decision.titleSolo": "Votre décision",
   "decision.reasoning": "Motifs du comité",
+  "decision.reasoningSolo": "Vos motifs",
   "decision.conditionsLabel": "Conditions",
   "decision.overrideLabel": (p) => `Pourquoi approuver malgré un verdict « ${p.v} »`,
   "decision.overrideHelp": "Obligatoire. Consigné avec la décision et affiché dans chaque rapport.",
@@ -1085,6 +1117,9 @@ const FR_REASONS: [RegExp, string | ((m: RegExpMatchArray) => string)][] = [
   [/^(.+) (cannot be below|cannot be above|must be a whole number|needs a number)(.*)$/, (m) => `${m[1]} : ${m[2] === "cannot be below" ? "ne peut pas être inférieur à" : m[2] === "cannot be above" ? "ne peut pas être supérieur à" : m[2] === "must be a whole number" ? "doit être un nombre entier" : "exige un nombre"}${m[3]}`],
 ];
 
+/** CMHC's names for the debt coverage ratio, in place of the lenders' DSCR / RCSD. Whole words only. */
+const plainTerm = (lang: Lang, text: string) => (lang === "fr" ? text.replace(/\bRCSD\b/g, "RCD") : text.replace(/\bDSCR\b/g, "DCR"));
+
 export function translateMessage(text: string | null | undefined): string {
   if (!text) return "";
   for (const [re, out] of FR_REASONS) {
@@ -1162,7 +1197,7 @@ function initialLang(): Lang {
   return typeof navigator !== "undefined" && navigator.language.toLowerCase().startsWith("fr") ? "fr" : "en";
 }
 
-function build(lang: Lang, setLang: (l: Lang) => void) {
+export function build(lang: Lang, setLang: (l: Lang) => void) {
   const dict = lang === "fr" ? FR : EN;
   const idx = lang === "fr" ? 1 : 0;
   const t = <K extends Key>(key: K, p: Record<string, any> = {}): any => {
@@ -1173,15 +1208,15 @@ function build(lang: Lang, setLang: (l: Lang) => void) {
   const L = {
     field: (key: string, item?: string | null) => {
       const base = lang === "fr" ? FR_FIELDS[key] ?? FIELD_BY_KEY.get(key)?.label ?? key : FIELD_BY_KEY.get(key)?.label ?? key;
-      return item ? `${base} (${item})` : base;
+      return plainTerm(lang, item ? `${base} (${item})` : base);
     },
-    ask: (key: string) => ASK[key]?.[idx] ?? [FIELD_BY_KEY.get(key)?.label ?? key],
-    help: (key: string, en: string | null) => (lang === "fr" ? FR_HELP[key] ?? en : en),
+    ask: (key: string) => (ASK[key]?.[idx] ?? [FIELD_BY_KEY.get(key)?.label ?? key]).map((x) => plainTerm(lang, x ?? "")),
+    help: (key: string, en: string | null) => { const h = lang === "fr" ? FR_HELP[key] ?? en : en; return h && plainTerm(lang, h); },
     group: (g: string) => GROUPS[g]?.[idx] ?? g,
-    metric: (key: string) => (lang === "fr" ? FR_METRICS[key]?.[0] : METRIC_BY_KEY.get(key)?.label) ?? key,
+    metric: (key: string) => plainTerm(lang, (lang === "fr" ? FR_METRICS[key]?.[0] : METRIC_BY_KEY.get(key)?.label) ?? key),
     formula: (key: string) => (lang === "fr" ? FR_METRICS[key]?.[1] : METRIC_BY_KEY.get(key)?.formula) ?? "",
-    stress: (key: string, en: string) => STRESS[key]?.[idx] ?? en,
-    gate: (key: string, en: string) => GATES[key]?.[idx] ?? en,
+    stress: (key: string, en: string) => plainTerm(lang, STRESS[key]?.[idx] ?? en),
+    gate: (key: string, en: string) => plainTerm(lang, GATES[key]?.[idx] ?? en),
     driver: (key: string) => DRIVERS_L[key]?.[idx] ?? key,
     verdict: (code: string) => VERDICT[code]?.[idx] ?? code,
     decision: (d: string) => DECISION[d]?.[idx] ?? d,
@@ -1194,7 +1229,7 @@ function build(lang: Lang, setLang: (l: Lang) => void) {
       return `${names[idx][0]!.toUpperCase()}${names[idx].slice(1)} (${c})`;
     },
   };
-  const msg = (text: string | null | undefined) => (lang === "fr" ? translateMessage(text) : text ?? "");
+  const msg = (text: string | null | undefined) => plainTerm(lang, lang === "fr" ? translateMessage(text) : text ?? "");
   const err = (e: unknown) => msg(e instanceof Error ? e.message : String(e ?? ""));
   return { lang, setLang, t, f, L, msg, err };
 }
@@ -1233,8 +1268,13 @@ export type VerdictLike = {
 };
 export type CheckLike = { key: string; kind: string; severity: string; message: string; expected?: number; actual?: number };
 
-/** The verdict's headline and explanation, in the chosen language, from the stored gates. */
-export function verdictText(i: I18n, v: VerdictLike, checks: CheckLike[]): { headline: string; explanation: string } {
+/** The verdict's headline and explanation, in the chosen language, from the stored gates. A solo owner sets their own conditions. */
+export function verdictText(i: I18n, v: VerdictLike, checks: CheckLike[], solo = false): { headline: string; explanation: string } {
+  const r = verdictTextRaw(i, v, checks, solo);
+  return { headline: plainTerm(i.lang, r.headline), explanation: plainTerm(i.lang, r.explanation) };
+}
+
+function verdictTextRaw(i: I18n, v: VerdictLike, checks: CheckLike[], solo: boolean): { headline: string; explanation: string } {
   if (i.lang === "en") {
     const failed = v.gates.filter((g) => g.status === "failed");
     const measured = v.gates.filter((g) => g.status !== "not_applicable").length;
@@ -1244,7 +1284,7 @@ export function verdictText(i: I18n, v: VerdictLike, checks: CheckLike[]): { hea
       case "APPROVE":
         return { headline: measured === v.gates.length ? "All five gates pass." : `All ${measured} applicable gates pass.`, explanation: "The deal clears every return hurdle and holds its coverage under combined stress." };
       case "APPROVE_WITH_CONDITIONS":
-        return { headline: `${failed.length} ${s(failed.length, "gate fails", "gates fail")}. The committee sets conditions.`, explanation: `Failing: ${failed.map((g) => g.label).join("; ")}.` };
+        return { headline: `${failed.length} ${s(failed.length, "gate fails", "gates fail")}. ${solo ? "You set the conditions." : "The committee sets conditions."}`, explanation: `Failing: ${failed.map((g) => g.label).join("; ")}.` };
       case "NOT_EVALUATED":
         return { headline: "Not evaluated. Nothing was decided.", explanation: `These gates could not be measured: ${ne.map((g) => g.label).join("; ")}.` };
       default:
@@ -1269,7 +1309,7 @@ export function verdictText(i: I18n, v: VerdictLike, checks: CheckLike[]): { hea
       };
     case "APPROVE_WITH_CONDITIONS":
       return {
-        headline: `${failed.length} ${s(failed.length, "seuil n'est pas respecté", "seuils ne sont pas respectés")}. Le comité fixe des conditions.`,
+        headline: `${failed.length} ${s(failed.length, "seuil n'est pas respecté", "seuils ne sont pas respectés")}. ${solo ? "Vous fixez les conditions." : "Le comité fixe des conditions."}`,
         explanation: `Non respectés : ${failed.join(" ; ")}.`,
       };
     case "NOT_EVALUATED":
@@ -1290,6 +1330,10 @@ export function verdictText(i: I18n, v: VerdictLike, checks: CheckLike[]): { hea
 
 /** A check's message in the chosen language, from its key and figures. */
 export function checkText(i: I18n, c: CheckLike, ltcCeiling = 85): string {
+  return plainTerm(i.lang, checkTextRaw(i, c, ltcCeiling));
+}
+
+function checkTextRaw(i: I18n, c: CheckLike, ltcCeiling: number): string {
   if (i.lang === "en") return c.message;
   const $ = (v?: number) => i.f.value(v ?? NaN, "$");
   const pct = (v?: number) => i.f.value(v ?? NaN, "%");
@@ -1342,7 +1386,7 @@ export type OverviewLike = {
 };
 
 /** A deal's status line and next action, from its evidence, in the chosen language. */
-export function dealStatus(i: I18n, o: OverviewLike): { tone: "pass" | "review" | "stop" | "neutral"; text: string; next: string; blockedParts: string[] } {
+export function dealStatus(i: I18n, o: OverviewLike, solo = false): { tone: "pass" | "review" | "stop" | "neutral"; text: string; next: string; blockedParts: string[] } {
   const { t, L } = i;
   const r = o.review;
   if (o.documents.total === 0) return { tone: "neutral", text: t("status.noDocs"), next: t("next.upload"), blockedParts: [] };
@@ -1374,7 +1418,7 @@ export function dealStatus(i: I18n, o: OverviewLike): { tone: "pass" | "review" 
   }
   if (!o.decision) {
     const v = o.run.verdict;
-    return { tone: v === "APPROVE" ? "pass" : v === "REJECT" ? "stop" : "review", text: t("status.verdict", { v: L.verdict(v) }), next: t("next.decide"), blockedParts: [] };
+    return { tone: v === "APPROVE" ? "pass" : v === "REJECT" ? "stop" : "review", text: t("status.verdict", { v: L.verdict(v) }), next: t(solo ? "next.decideSolo" : "next.decide"), blockedParts: [] };
   }
   return {
     tone: o.decision.decision.startsWith("approve") ? "pass" : "stop",

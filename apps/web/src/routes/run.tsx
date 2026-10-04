@@ -3,7 +3,7 @@ import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
 import { useState } from "react";
 import { FIELD_BY_KEY } from "@agir/contracts";
 import { api, type Metric, type RunView } from "../api";
-import { Banner, canEdit, DealHeader, ErrorText, MetricValue, StatusTag, useDeal, useSession, VerdictBadge } from "../components/ui";
+import { Banner, canEdit, DealHeader, ErrorText, Glossary, MetricValue, StatusTag, useDeal, useSession, VerdictBadge } from "../components/ui";
 import * as I from "../components/icons";
 import { checkText, dealStatus, useI18n, verdictText } from "../i18n";
 
@@ -32,7 +32,7 @@ export function GateOutcome({ status }: { status: string }) {
 export function Run({ dealId }: { dealId: string }) {
   const i = useI18n();
   const { t, f, L } = i;
-  const { role } = useSession();
+  const { role, solo } = useSession();
   const qc = useQueryClient();
   const deal = useDeal(dealId);
   const [selected, setSelected] = useState<string | null>(null);
@@ -50,7 +50,7 @@ export function Run({ dealId }: { dealId: string }) {
   if (!deal.data) return <p className="muted">{t("common.loading")}</p>;
   const o = deal.data;
   const blocked = o.review.status === "blocked";
-  const why = dealStatus(i, o).blockedParts.join(", ");
+  const why = dealStatus(i, o, solo).blockedParts.join(", ");
   const runButton = (label: string) => (
     <div className="stack" style={{ gap: 6, alignItems: "flex-start" }}>
       <button className="btn primary" type="button" disabled={blocked || start.isPending || !canEdit(role)} onClick={() => start.mutate()}>
@@ -78,7 +78,7 @@ export function Run({ dealId }: { dealId: string }) {
   const v = run.data;
   const base = v.result.scenarios[0]!;
   const metric = (k: string, s = base) => s.metrics.find((m) => m.key === k)!;
-  const vt = verdictText(i, v.result.verdict, v.result.checks);
+  const vt = verdictText(i, v.result.verdict, v.result.checks, solo);
   return (
     <>
       <DealHeader o={o} active="run" />
@@ -121,6 +121,8 @@ export function Run({ dealId }: { dealId: string }) {
             </table>
             <span className="small faint">{t("run.gatesNote")}</span>
           </div>
+
+          <Glossary />
 
           <div className="stack">
             <h2 className="h-section">{t("run.stresses")}</h2>
