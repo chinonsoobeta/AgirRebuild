@@ -351,14 +351,14 @@ const EN = {
   "explore.working": "Working…",
 
   "glossary.title": "What these terms mean",
-  "glossary.dcr": () => ["DCR (debt coverage ratio), called DSCR by many lenders", "Net operating income divided by the loan payments due, shown for the weakest year of the hold."],
+  "glossary.dcr": () => ["DCR (debt coverage ratio), called DSCR by many lenders", "Net operating income divided by the full amortizing loan payment, even during an interest-only period, for the weakest year of the hold."],
   "glossary.noi": () => ["Net operating income (NOI)", "The rent and other income actually collected, less operating costs, before any loan payments."],
   "glossary.capRate": () => ["Cap rate (exit)", "The yield a buyer is assumed to require at sale; the final year's NOI divided by it gives the sale value."],
   "glossary.yieldOnCost": () => ["Yield on cost", "Stabilized NOI divided by the total cost of developing the project."],
   "glossary.loanToCost": () => ["Loan to cost (LTC)", "The share of the total development cost that is financed by loans."],
   "glossary.equityIrr": () => ["Equity IRR", "The annual rate of return on the equity put in, taking into account when each payment in and out happens."],
   "glossary.equityMultiple": () => ["Equity multiple", "All the cash paid back to equity divided by all the equity put in; 2.0x means twice what was invested."],
-  "glossary.breakEven": () => ["Break-even occupancy", "The share of the units that must be rented in year 1 for the rent to cover operating costs and loan payments."],
+  "glossary.breakEven": () => ["Break-even occupancy", "The share of the potential rent that must be collected in year 1 to cover fixed operating costs, variable costs and loan payments."],
 
   "decision.noRun": "There is no run to decide on yet.",
   "decision.noRunBody": "A committee decision is always recorded against a specific run.",
@@ -799,14 +799,14 @@ const FR: Record<Key, Entry> = {
   "explore.working": "Calcul…",
 
   "glossary.title": "Ce que ces termes veulent dire",
-  "glossary.dcr": () => ["RCD (ratio de couverture de la dette), appelé RCSD par de nombreux prêteurs", "Le revenu net d'exploitation divisé par les paiements de prêt à effectuer, pour l'année la plus faible de la détention."],
+  "glossary.dcr": () => ["RCD (ratio de couverture de la dette), appelé RCSD par de nombreux prêteurs", "Le revenu net d'exploitation divisé par le paiement complet d'un prêt amorti, même pendant une période d'intérêts seulement, pour l'année la plus faible de la détention."],
   "glossary.noi": () => ["Revenu net d'exploitation (RNE)", "Les loyers et autres revenus réellement encaissés, moins les charges d'exploitation, avant tout paiement de prêt."],
   "glossary.capRate": () => ["Taux de capitalisation (sortie)", "Le rendement qu'un acheteur est supposé exiger à la vente ; le RNE de la dernière année divisé par ce taux donne la valeur de vente."],
   "glossary.yieldOnCost": () => ["Rendement sur coût", "Le RNE stabilisé divisé par le coût total de développement du projet."],
   "glossary.loanToCost": () => ["Ratio prêt-coût", "La part du coût total de développement qui est financée par des prêts."],
   "glossary.equityIrr": () => ["TRI des fonds propres", "Le taux de rendement annuel des fonds propres investis, selon le moment de chaque versement et de chaque distribution."],
   "glossary.equityMultiple": () => ["Multiple des fonds propres", "Tout l'argent rendu aux fonds propres divisé par tous les fonds propres investis ; 2,0x veut dire le double de la mise."],
-  "glossary.breakEven": () => ["Occupation au seuil de rentabilité", "La part des logements qui doit être louée à l'année 1 pour que les loyers couvrent les charges d'exploitation et les paiements de prêt."],
+  "glossary.breakEven": () => ["Occupation au seuil de rentabilité", "La part des loyers potentiels qui doit être encaissée à l'année 1 pour couvrir les charges fixes, les charges variables et les paiements de prêt."],
 
   "decision.noRun": "Il n'y a pas encore d'analyse sur laquelle décider.",
   "decision.noRunBody": "Une décision du comité est toujours consignée pour une analyse précise.",
