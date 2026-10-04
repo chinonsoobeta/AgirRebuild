@@ -39,6 +39,7 @@ later tasks build on earlier migrations. Review and merge them in order.
 | `task/08-plain-language` | 3 | The interface says "DCR" (French "RCD", CMHC's terms) wherever it showed "DSCR" ("RCSD"): one whole-word replacement in the label and message helpers in `apps/web/src/i18n.tsx`, applied at display time because gate labels and check messages are inside the hashed result. One "What these terms mean" disclosure (`Glossary`, `components/ui.tsx`) on Run and Review defines eight terms in English and French. A solo workspace reads "Record your decision" instead of "committee decision". Web only | Not required: display only, no API, engine, contract or migration change |
 | `task/09-foreign-currency` | 1 | A figure marked in another currency ("US$", "USD", "A$", or after the number "1 250 000 $ US") is never read as the deal's. Each token carries a `currencyCode`; the candidate records it at the end of `unit_seen` ("USD", "$/mo USD"), so no migration. When the deal's currency is known and differs, `consolidate` makes the field conflicting with the reason "A document states this in USD; this deal is in CAD. Enter the amount in CAD.", keeps the figure in sources, and offers only deal-currency figures in `conflict_values`, so `resolve` cannot pick it and the person uses "enter a different value". Review shows the reason and the foreign source. A bare "$" is still read as the deal's currency | Not required: no migration, engine or governance change. Advised, because it changes how documents are read |
 | `task/10-french-documents` | 1 | A French Canadian pro forma is read. `normalizeLabel` folds accents ("coût" is "cout") instead of dropping the letter. A trailing dollar sign ("18,75 $", "2 100 $/mois", "18,75 $/pi²") is money with the right per-unit reading, and "/mois", "par mois", "mois", "ans" and "logements" are units. French aliases sit in the existing `aliases` arrays in `packages/contracts/src/fields.ts` (and `ITEMIZED_ALIASES` for the itemized fields, which is what the matcher reads for them), including mezzanine and refinance forms so they cannot fall to the senior loan | Not required: no migration, engine or governance change. Advised, because it changes how documents are read |
+| `task/11-web-gaps` | 3 | The step bar no longer says "Waiting for documents" on a quick-start deal: Review waits only with no documents and no values, or while documents are read (`reviewWaiting`, `components/ui.tsx`). The quick start's "Not asked" list has French for every `absentMeans` (`FR_ABSENT`, `L.absent`). Review and manual entry offer sf / m² for an area and $/sf/yr / $/m²/yr for a rent: the value is converted with `SF_PER_M2` before posting (`enteredInUnit`, `routes/review.tsx`) and the reason records what was typed. `@agir/numbers` added as a web dependency | Not required: display and entry only; the value still goes through the governed functions |
 
 The plan for small Canadian developers is [plan-small-developers.md](plan-small-developers.md). Release 1 steps 0 to 3 are
 being built now. Steps 4 to 6 wait on the people-owned items listed below.
@@ -57,14 +58,8 @@ being built now. Steps 4 to 6 wait on the people-owned items listed below.
   fields with no French alias yet (interest-only periods, LTC, equity, waterfall, growth rates, selling
   costs), and word orders the aliases do not list. A figure with a single space group ("2 100 $") is still
   refused unless the document groups thousands with spaces elsewhere. There is no vacancy field.
-- **An area cannot be entered by hand in m².** Review and manual entry take square feet. An m² option
-  belongs with the quick-start questions (step 3).
-
-- **A quick-start deal's step bar still says "Waiting for documents"** under Review, though its values are entered
-  and the deal is ready to run. Seen in the browser check on 2026-10-03.
-- **Some French is unfinished or unreviewed.** The quick start's "Not asked" list prints each field's `absentMeans`
-  in English, which has no French source. The new French wording (solo review, Agir review, "réviseur", the
-  glossary) needs a qualified Canadian French reader.
+- **Some French is unfinished or unreviewed.** The new French wording (solo review, Agir review, "réviseur", the
+  glossary, the quick start's "Not asked" meanings in `FR_ABSENT`) needs a qualified Canadian French reader.
 
 ## Deviations from the plan
 

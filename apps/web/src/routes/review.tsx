@@ -1,9 +1,10 @@
 import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
 import { useState, type FormEvent } from "react";
+import { SF_PER_M2 } from "@agir/numbers";
 import { api, type Assumption, type Review as ReviewData, type Source } from "../api";
 import { Banner, canEdit, DealHeader, ErrorText, Glossary, StatusTag, useDeal, useSession } from "../components/ui";
 import * as I from "../components/icons";
-import { useI18n } from "../i18n";
+import { useI18n, type Lang } from "../i18n";
 
 // A source that says which currency it is in records it at the end of unit_seen ("USD", "$/mo USD").
 const currencyIn = (s: Source) => /(?:^|\s)(CAD|USD|AUD)$/.exec(s.unit_seen ?? "")?.[1];
@@ -22,21 +23,37 @@ function Quote({ s }: { s: Source }) {
   );
 }
 
+const metricUnit = (unit: string) => unit === "sf" || unit === "$/sf/yr";
+
+/** A value typed in square metres becomes square feet (rent per m² becomes rent per sf) before it is posted, and the reason records what was typed. */
+export function enteredInUnit(unit: string, metric: boolean, value: number, reason: string, lang: Lang): { value: number; reason: string } {
+  if (!metric || !metricUnit(unit)) return { value, reason };
+  const typed = lang === "fr" ? String(value).replace(".", ",") : String(value);
+  const label = unit === "sf" ? "m²" : lang === "fr" ? "$/m²/an" : "$/m²/yr";
+  return { value: unit === "sf" ? value * SF_PER_M2 : value / SF_PER_M2, reason: `${reason} (${lang === "fr" ? "saisi en" : "entered as"} ${typed} ${label})` };
+}
+
 function ValueInput({ unit, id, defaultValue }: { unit: string; id: string; defaultValue?: number | null }) {
   const { f, lang } = useI18n();
+  const [metric, setMetric] = useState(false);
   const suffix = f.suffix(unit);
-  const shown = defaultValue === null || defaultValue === undefined ? "" : lang === "fr" ? String(defaultValue).replace(".", ",") : String(defaultValue);
+  const shown = metric || defaultValue === null || defaultValue === undefined ? "" : lang === "fr" ? String(defaultValue).replace(".", ",") : String(defaultValue);
   return (
     <div className="input-affix" style={{ maxWidth: 320 }}>
       {unit === "$" && lang === "en" && <span>$</span>}
-      <input id={id} name="value" inputMode="decimal" defaultValue={shown} required autoComplete="off" />
-      {suffix && (unit !== "$" || lang === "fr") && <span>{suffix}</span>}
+      <input id={id} key={String(metric)} name="value" inputMode="decimal" defaultValue={shown} required autoComplete="off" />
+      {metricUnit(unit) ? (
+        <select name="unit" aria-label={lang === "fr" ? "Unité" : "Unit"} value={metric ? "m2" : "sf"} onChange={(e) => setMetric(e.target.value === "m2")}>
+          <option value="sf">{suffix}</option>
+          <option value="m2">{unit === "sf" ? "m²" : lang === "fr" ? "$/m²/an" : "$/m²/yr"}</option>
+        </select>
+      ) : suffix && (unit !== "$" || lang === "fr") && <span>{suffix}</span>}
     </div>
   );
 }
 
 export function Review({ dealId }: { dealId: string }) {
-  const { t, f, L, msg } = useI18n();
+  const { t, f, L, msg, lang } = useI18n();
   const { me, role, solo } = useSession();
   const qc = useQueryClient();
   const deal = useDeal(dealId);
@@ -92,7 +109,8 @@ export function Review({ dealId }: { dealId: string }) {
         setFormError(null);
         const fd = new FormData(e.currentTarget);
         try {
-          act.mutate({ id: a.id, action: "modify", value: f.parse(fd.get("value")), reason: String(fd.get("reason")), version: a.version });
+          const e = enteredInUnit(a.unit, fd.get("unit") === "m2", f.parse(fd.get("value")), String(fd.get("reason")), lang);
+          act.mutate({ id: a.id, action: "modify", ...e, version: a.version });
         } catch (err) {
           setFormError(err);
         }
@@ -219,7 +237,7 @@ export function Review({ dealId }: { dealId: string }) {
                       setFormError(null);
                       const fd = new FormData(e.currentTarget);
                       try {
-                        enter.mutate({ fieldKey: m.fieldKey, itemKey: m.itemKey ?? null, value: f.parse(fd.get("value")), reason: String(fd.get("reason")) });
+                        enter.mutate({ fieldKey: m.fieldKey, itemKey: m.itemKey ?? null, ...enteredInUnit(m.unit, fd.get("unit") === "m2", f.parse(fd.get("value")), String(fd.get("reason")), lang) });
                       } catch (err) {
                         setFormError(err);
                       }

@@ -10,7 +10,7 @@ type Entry = { fieldKey: string; itemKey: string | null; value: number };
 const KEPT = ["approved", "default_accepted", "awaiting_second_approval"];
 
 export function QuickStart({ dealId }: { dealId: string }) {
-  const { t, f, L, msg } = useI18n();
+  const { t, f, L } = useI18n();
   const qc = useQueryClient();
   const [key, setKey] = useState(TEMPLATES[0]!.key);
   const [types, setTypes] = useState([0]);
@@ -153,7 +153,7 @@ export function QuickStart({ dealId }: { dealId: string }) {
       </div>
       <details>
         <summary>{t("qs.hidden")}</summary>
-        <ul className="small muted" style={{ paddingLeft: 20 }}>{hidden.map((d) => <li key={d.key}>{t("qs.hiddenLine", { label: L.field(d.key), means: msg(d.absentMeans) })}</li>)}</ul>
+        <ul className="small muted" style={{ paddingLeft: 20 }}>{hidden.map((d) => <li key={d.key}>{t("qs.hiddenLine", { label: L.field(d.key), means: L.absent(d.key) })}</li>)}</ul>
       </details>
       <ErrorText error={formError ?? save.error} />
       <div><button className="btn primary" type="submit" disabled={save.isPending}>{save.isPending ? t("qs.working") : t("qs.submit")}</button></div>

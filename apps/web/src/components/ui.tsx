@@ -170,6 +170,13 @@ export function Glossary() {
 
 const STEPS = ["documents", "review", "run", "decision", "reports"] as const;
 
+/** Review waits on documents only when the deal has neither documents nor entered values, or documents are still being read. */
+export function reviewWaiting(o: Pick<DealOverview, "documents" | "review">): boolean {
+  const r = o.review;
+  const hasValues = r.approved + r.needsReview + r.conflicting + r.awaitingSecond > 0;
+  return o.documents.processing > 0 || (o.documents.total === 0 && !hasValues);
+}
+
 export function DealHeader({ o, active }: { o: DealOverview; active: string }) {
   const i = useI18n();
   const { t, L } = i;
@@ -184,7 +191,7 @@ export function DealHeader({ o, active }: { o: DealOverview; active: string }) {
         if (o.documents.processing) return { text: t("step.reading", { n: o.documents.processing }), tone: "normal" };
         return { text: t("step.read", { n: o.documents.total, failed: o.documents.failed }), tone: o.documents.failed ? "stop" : "done" };
       case "review":
-        if (o.documents.total === 0 || o.documents.processing) return { text: t("step.waitingDocs"), tone: "faint" };
+        if (reviewWaiting(o)) return { text: t("step.waitingDocs"), tone: "faint" };
         if (o.review.status === "ready") return { text: t("step.clear"), tone: "done" };
         return { text: status.text, tone: "stop" };
       case "run":
