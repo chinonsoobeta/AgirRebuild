@@ -1,6 +1,7 @@
 import { describe, expect, test } from "vitest";
+import { SF_PER_M2 } from "@agir/numbers";
 import { assemble, type AssumptionRow } from "@agir/engine";
-import { consolidate, extractCandidates, normalizeLabel, scoreExtraction, type NormalizedDocument, type SourcedCandidate, type Table } from "../src/index.ts";
+import { consolidate, extractCandidates, normalizeLabel, parseDocument, scoreExtraction, type Cell, type NormalizedDocument, type SourcedCandidate, type Table } from "../src/index.ts";
 import { loadOracles, toNormalized } from "./oracle.ts";
 
 const key = (f: string, i: string | null) => (i ? `${f}|${i}` : f);
@@ -181,9 +182,51 @@ describe("a figure in another currency is never the value (decision 7)", () => {
     for (const line of ["Land cost: CA$1,200,000", "Land cost: $1,200,000", "Land cost: 1,200,000 CAD"]) {
       expect(land(consolidate(from("a", [line]), "CAD"))).toMatchObject({ status: "needs_review", value: 1_200_000, reason: null });
     }
-    expect(land(consolidate(from("a", ["Land cost: US$1,200,000"]), null))).toMatchObject({ status: "needs_review", value: 1_200_000 });
-    expect(land(consolidate(from("a", ["Land cost: US$1,200,000"])))).toMatchObject({ status: "needs_review", value: 1_200_000 });
+    expect(land(consolidate(from("a", ["Land cost: $1,200,000"]), null))).toMatchObject({ status: "needs_review", value: 1_200_000 });
     expect(land(consolidate(from("a", ["Land cost: US$1,200,000"]), "USD"))).toMatchObject({ status: "needs_review", value: 1_200_000 });
+  });
+  test("a deal that states no currency cannot compare a named one: not usable, kept last, enter the amount", () => {
+    const reason = "A document states this in USD; this deal does not state its currency. Enter the amount.";
+    for (const cur of [null, undefined]) {
+      const p = land(consolidate([...from("Budget", ["Land cost: US$1,200,000"]), ...from("Appraisal", ["Land cost: $1,650,000"])], cur));
+      expect(p).toMatchObject({ status: "conflicting", value: null, reason });
+      expect(p.values.map((v) => v.value)).toEqual([1_650_000]);
+      expect(p.sources.map((s) => s.value)).toEqual([1_650_000, 1_200_000]);
+    }
+    expect(land(consolidate(from("a", ["Land cost: US$1,200,000", "Land cost: A$900,000"])))).toMatchObject({ value: null, reason: "A document states this in USD and AUD; this deal does not state its currency. Enter the amount." });
+    expect(land(consolidate(from("a", ["Land cost: $1,200,000"])))).toMatchObject({ status: "needs_review", value: 1_200_000, reason: null });
+  });
+  test("a currency named in the label applies to a figure with no mark of its own", () => {
+    expect(from("a", ["Land cost (USD): 1,200,000"])[0]).toMatchObject({ fieldKey: "land_cost", value: 1_200_000, unitSeen: "USD" });
+    expect(from("a", ["Land cost (USD): $1,200,000"])[0]).toMatchObject({ unitSeen: "USD" });
+    expect(from("a", ["Coût du terrain ($ US) : 1 200 000"])[0]).toMatchObject({ fieldKey: "land_cost", unitSeen: "USD" });
+    expect(from("a", ["Land cost (CAD): 1,200,000"])[0]).toMatchObject({ unitSeen: "CAD" });
+    expect(from("a", ["Land cost (dollars): 1,200,000"])[0]).toMatchObject({ unitSeen: "$" });
+    expect(from("a", ["Land cost (USD): CA$1,200,000"])[0]).toMatchObject({ unitSeen: "CAD" }); // the figure's own mark wins
+    expect(normalizeLabel("Land cost (USD)")).toEqual({ label: "land cost", labelUnit: "$", labelCode: "USD" });
+    expect(normalizeLabel("Land cost ($)").labelCode).toBeNull();
+    const p = land(consolidate(from("a", ["Land cost (USD): 1,200,000"]), "CAD"));
+    expect(p).toMatchObject({ status: "conflicting", value: null });
+  });
+  test("a budget table row whose label names the currency is read the same way", () => {
+    const table: Table = { name: "Budget", rows: [[{ text: "Line item", ref: "A1" }, { text: "Amount", ref: "B1" }], [{ text: "Land acquisition (USD)", ref: "A2" }, { text: "1,000,000", ref: "B2" }]] } as Table;
+    expect(extractCandidates({ ...doc([]), tables: [table] }).candidates[0]).toMatchObject({ fieldKey: "land_cost", unitSeen: "USD" });
+  });
+  test("an Excel cell whose number format names a currency is read as marked; a plain or locale-only dollar names none", () => {
+    const cell = (c: Cell) => extractCandidates({ ...doc([]), tables: [{ name: "Budget", rows: [[{ text: "Line item", ref: "A1" }, { text: "Amount", ref: "B1" }], [{ text: "Land acquisition", ref: "A2" }, c]] } as Table] }).candidates[0];
+    expect(cell({ text: "1000000", number: 1_000_000, unit: "$", currency: "USD", ref: "B2" })).toMatchObject({ unitSeen: "USD" });
+    expect(cell({ text: "1000000", number: 1_000_000, unit: "$", ref: "B2" })).toMatchObject({ unitSeen: "$" });
+  });
+  test("parsing a workbook: only an explicit currency in the number format is carried", async () => {
+    const ExcelJS = (await import("exceljs")).default;
+    const wb = new ExcelJS.Workbook();
+    const ws = wb.addWorksheet("Budget");
+    const formats = ['[$USD] #,##0', '"US$"#,##0', '"A$"#,##0', '[$CAD] #,##0', '"CA$"#,##0', '[$$-409]#,##0', '"$"#,##0', '$#,##0', '0%'];
+    formats.forEach((f, i) => { const c = ws.getCell(i + 1, 1); c.value = 1000; c.numFmt = f; });
+    const doc = await parseDocument(new Uint8Array(await wb.xlsx.writeBuffer()), "b.xlsx");
+    expect(doc.tables[0]!.rows.map((r) => [r[0]!.unit, r[0]!.currency])).toEqual([
+      ["$", "USD"], ["$", "USD"], ["$", "AUD"], ["$", "CAD"], ["$", "CAD"], ["$", undefined], ["$", undefined], ["$", undefined], ["%", undefined],
+    ]);
   });
   test("the same amount in two currencies in one document is two candidates, not one", () => {
     expect(from("a", ["Land cost: US$1,200,000", "Land cost: C$1,200,000"])).toHaveLength(2);
@@ -272,5 +315,75 @@ describe("a French Canadian pro forma (fr-CA: comma decimals, space groups, trai
     expect(one("Taux d'intérêt du refinancement : 4,9 %")).toBe("refinance_rate_pct");
     expect(one("Amortissement du prêt mezzanine : 20 ans")).toBe("mezz_amort_years");
     expect(one("Dépenses d'exploitation fixes : 1 310 000 $")).toBe("fixed_opex_annual");
+  });
+
+  const text = (...ls: string[]): NormalizedDocument => ({ kind: "pdf", lines: ls.map((t, n) => ({ text: t, location: `l${n + 1}` })), tables: [], pageCount: 1, needsOcr: false, fullText: ls.join("\n") });
+  const fieldOf = (line: string) => extractCandidates(text(line)).candidates[0]?.fieldKey ?? null;
+
+  test("the remaining French field aliases map, and none lets a mezzanine, refinance or going-in line fall to a senior or exit field", () => {
+    const cases: [string, string | null][] = [
+      ["Autres coûts : 150 000 $", "other_cost"],
+      ["Frais de gestion : 4 %", "variable_expense_pct"],
+      ["Croissance des loyers : 2,5 %", "rent_growth_pct"],
+      ["Croissance annuelle des loyers : 2,5 %", "rent_growth_pct"],
+      ["Croissance des dépenses : 3 %", "expense_growth_pct"],
+      ["Croissance des dépenses d'exploitation : 3 %", "expense_growth_pct"],
+      ["Frais de vente : 2 %", "selling_costs_pct"],
+      ["Frais de disposition : 2,5 %", "selling_costs_pct"],
+      ["Période d'intérêt seulement : 24 mois", "senior_io_months"],
+      ["Intérêts seulement : 18 mois", "senior_io_months"],
+      ["Période d'intérêt seulement du prêt mezzanine : 12 mois", "mezz_io_months"],
+      ["Période d'intérêts seulement mezzanine : 12 mois", "mezz_io_months"],
+      ["Intérêts seulement mezzanine : 12 mois", "mezz_io_months"],
+      ["Période d'intérêt seulement du refinancement : 12 mois", "refinance_io_months"],
+      ["Intérêts seulement du prêt de refinancement : 12 mois", "refinance_io_months"],
+      ["RCD minimal : 1,20 x", "min_dscr_covenant"],
+      ["CCD minimal : 1,20 x", "min_dscr_covenant"],
+      ["RCSD minimal : 1,20 x", "min_dscr_covenant"],
+      ["Ratio de couverture de la dette minimal : 1,20 x", "min_dscr_covenant"],
+      ["Coefficient de couverture de la dette minimal : 1,20 x", "min_dscr_covenant"],
+      ["Mois du refinancement : 36 mois", "refinance_month"],
+      ["Ratio prêt-valeur du refinancement : 65 %", "refinance_ltv_pct"],
+      ["Ratio prêt valeur du refinancement : 65 %", "refinance_ltv_pct"],
+      ["Fonds propres : 4 000 000 $", "equity_amount"],
+      ["Mise de fonds : 4 000 000 $", "equity_amount"],
+      ["Part des commanditaires : 90 %", "lp_share_pct"],
+      ["Rendement privilégié : 8 %", "preferred_return_pct"],
+      ["Prime de performance : 20 %", "gp_promote_pct"],
+      // The bare "taux de capitalisation" is ambiguous with the going-in rate, so it maps nowhere.
+      ["Taux de capitalisation : 5,25 %", null],
+      ["Taux de capitalisation initial : 4,5 %", null],
+      ["Taux de capitalisation à la sortie : 5,25 %", "exit_cap_rate_pct"],
+      ["Taux de capitalisation de sortie : 5,25 %", "exit_cap_rate_pct"],
+      // Existing risks that must stay where they were.
+      ["Taux d'intérêt du prêt mezzanine : 11,5 %", "mezz_rate_pct"],
+      ["Taux d'intérêt du refinancement : 4,9 %", "refinance_rate_pct"],
+    ];
+    for (const [line, key] of cases) expect([line, fieldOf(line)]).toEqual([line, key]);
+  });
+  test("a French output figure is never an input", () => {
+    for (const line of ["Revenu net d'exploitation : 2 100 000 $", "RNE projeté : 2 100 000 $", "TRI : 18 %", "Taux de rendement interne : 18 %",
+      "Multiple sur capitaux propres : 2,1 x", "Multiple sur fonds propres : 2,1 x", "Rendement sur coût : 6,5 %", "Valeur de sortie : 40 000 000 $", "Valeur à la revente : 40 000 000 $",
+      "Valeur marchande : 40 000 000 $", "Rendement en espèces : 9 %"]) {
+      const r = extractCandidates(text(line));
+      expect([line, r.candidates.length, r.other[0]?.note ?? ""]).toEqual([line, 0, expect.stringContaining("output figure")]);
+    }
+    expect(fieldOf("Rendement privilégié : 8 %")).toBe("preferred_return_pct");
+  });
+  test("French table headers: a rent roll and a budget", () => {
+    const h = (...t: string[]) => t.map((x, i) => ({ text: x, ref: `${"ABCDEF"[i]}1` }));
+    const rowOf = (n: number, ...v: (string | number)[]) => v.map((x, i) => (typeof x === "number" ? { text: String(x), number: x, ref: `${"ABCDEF"[i]}${n}` } : { text: x, ref: `${"ABCDEF"[i]}${n}` }));
+    const tab = (...rows: Cell[][]): NormalizedDocument => ({ ...text(), tables: [{ name: "Loyers", rows } as Table] });
+    const unitRoll = extractCandidates(tab(h("Type de logement", "Nombre d'unités", "Loyer mensuel", "Taux d'occupation"), rowOf(2, "1 chambre", 10, 1_850, 95))).candidates;
+    expect(unitRoll.map((c) => [c.fieldKey, c.itemKey, c.value])).toEqual([["unit_count", "1 chambre", 10], ["unit_rent_monthly", "1 chambre", 1_850], ["item_occupancy_pct", "1 chambre", 95]]);
+    const psfRoll = extractCandidates(tab(h("Logement", "Superficie (pi²)", "Loyer au pi²"), rowOf(2, "Commerce", 9_400, 31))).candidates;
+    expect(psfRoll.map((c) => [c.fieldKey, c.itemKey, c.value])).toEqual([["rent_psf_annual", "Commerce", 31], ["rentable_area_sf", "Commerce", 9_400]]);
+    const m2Roll = extractCandidates(tab(h("Unité", "Superficie (m²)", "Loyer au m²"), rowOf(2, "Commerce", 100, 350))).candidates;
+    expect(m2Roll.find((c) => c.fieldKey === "rentable_area_sf")).toMatchObject({ unitSeen: "m2" });
+    expect(m2Roll.find((c) => c.fieldKey === "rent_psf_annual")!.value).toBeCloseTo(350 / SF_PER_M2, 6);
+    const budget = extractCandidates(tab(h("Poste", "Montant ($)"), rowOf(2, "Coût du terrain", 1_250_000), rowOf(3, "Coûts de construction", 8_400_000), rowOf(4, "Sous-total", 9_650_000))).candidates;
+    expect(budget.map((c) => [c.fieldKey, c.value])).toEqual([["land_cost", 1_250_000], ["hard_cost", 8_400_000]]);
+    const budget2 = extractCandidates(tab(h("Description", "Coût total"), rowOf(2, "Honoraires professionnels", 620_000))).candidates;
+    expect(budget2.map((c) => [c.fieldKey, c.value])).toEqual([["soft_cost", 620_000]]);
   });
 });

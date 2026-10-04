@@ -148,8 +148,18 @@ describe("French documents: a dollar sign after the number", () => {
     expect(first("Amortissement : 25 ans", FR)).toMatchObject({ value: 25, unit: "years" });
     expect(first("Nombre de logements : 24 logements", FR)).toMatchObject({ value: 24, unit: "units" });
   });
-  test("a space-grouped figure with one group is still refused unless the document groups with spaces", () => {
-    expect(first("Loyer : 2 100 $/mois", EU).value).toBeNull();
+  test("a space-grouped figure with one group is refused unless the document groups with spaces or a trailing $ follows", () => {
+    expect(first("Loyer : 2 100 / mois", EU).value).toBeNull();
+    expect(first("Superficie : 2 100 pi²", EU).value).toBeNull();
+    expect(first("Loyer : 2 100", EU).value).toBeNull();
+    expect(first("Loyer : $2 100", EU).value).toBeNull();
+  });
+  test("a trailing dollar sign is itself fr-CA evidence for a single space group, with or without a per-unit suffix", () => {
+    expect(first("Loyer : 2 100 $/mois", EU)).toMatchObject({ value: 2_100, unit: "$/mo", currencyCode: null });
+    expect(first("Loyer : 2 100 $", EU)).toMatchObject({ value: 2_100, unit: "$" });
+    expect(first("Loyer : 18 750 $/pi²", EU)).toMatchObject({ value: 18_750, unit: "$/sf" });
+    expect(first("Terrain : 2 100 $ US", EU)).toMatchObject({ value: 2_100, currencyCode: "USD" });
+    expect(first("Loyer : 2 100 $/mois", UNKNOWN)).toMatchObject({ value: 2_100, unit: "$/mo" });
   });
   test("a French document is detected as comma-decimal", () => {
     expect(detectFormat("Terrain : 1 250 000,00 $\nTaux : 5,25 %")).toMatchObject({ decimal: ",", spaceGroups: true });

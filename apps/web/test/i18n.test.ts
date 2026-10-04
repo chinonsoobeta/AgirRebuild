@@ -2,7 +2,7 @@ import { describe, expect, it } from "vitest";
 import { FIELDS } from "@agir/contracts";
 import { SF_PER_M2 } from "@agir/numbers";
 import { reviewWaiting } from "../src/components/ui.tsx";
-import { enteredInUnit } from "../src/routes/review.tsx";
+import { enteredInUnit, foreignIn } from "../src/routes/review.tsx";
 import { build, checkText, translateMessage, verdictText, type Key } from "../src/i18n.tsx";
 
 describe("a run's source labels in French", () => {
@@ -16,6 +16,26 @@ describe("a run's source labels in French", () => {
       .toBe("plans.txt, ligne 2, converti de mètres carrés (« 1,000 m² »)");
     expect(translateMessage('rent-roll.xlsx, Rent roll!C5, converted from square metres ("84")'))
       .toBe("rent-roll.xlsx, Rent roll!C5, converti de mètres carrés (« 84 »)");
+  });
+});
+
+describe("a figure in another currency, on review", () => {
+  const src = (unit_seen: string | null) => ({ unit_seen }) as Parameters<typeof foreignIn>[0];
+  it("the note and the conflict card apply only when the code differs from the deal's currency, or the deal has none", () => {
+    expect(foreignIn(src("USD"), "CAD")).toBe("USD");
+    expect(foreignIn(src("$/mo USD"), "CAD")).toBe("USD");
+    expect(foreignIn(src("CAD"), "CAD")).toBeUndefined();
+    expect(foreignIn(src("$/mo CAD"), "CAD")).toBeUndefined();
+    expect(foreignIn(src("USD"), null)).toBe("USD");
+    expect(foreignIn(src("CAD"), null)).toBe("CAD");
+    expect(foreignIn(src("$"), null)).toBeUndefined();
+    expect(foreignIn(src(null), "CAD")).toBeUndefined();
+  });
+  it("the reason for a deal with no stated currency is translated, with one or two codes", () => {
+    expect(translateMessage("A document states this in USD; this deal does not state its currency. Enter the amount."))
+      .toBe("Un document l'indique en USD ; ce dossier n'indique pas sa devise. Saisissez le montant.");
+    expect(translateMessage("A document states this in USD and AUD; this deal does not state its currency. Enter the amount."))
+      .toBe("Un document l'indique en USD et AUD ; ce dossier n'indique pas sa devise. Saisissez le montant.");
   });
 });
 
