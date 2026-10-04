@@ -203,3 +203,28 @@ describe("number words, ordinal months and times (prose)", () => {
     expect(read("a sometimes 3 timeshare")).toEqual([["3", 3, null]]);
   });
 });
+
+describe("units after a figure: per-year qualifiers and unit types", () => {
+  const FR: DocumentFormat = { ...EU, spaceGroups: true };
+  test("a rent per square foot per year is one token, in French and English", () => {
+    expect(first("Loyer : 22,50 $/pi²/an", FR)).toMatchObject({ value: 22.5, unit: "$/sf", raw: "22,50 $/pi²/an" });
+    expect(first("Rent: $24.00/sf/yr", US)).toMatchObject({ value: 24, unit: "$/sf", raw: "$24.00/sf/yr" });
+    expect(first("Loyer : 1 200 $ par année", FR)).toMatchObject({ value: 1_200, unit: "$", raw: "1 200 $ par année" });
+    expect(first("Loyer : 1 200 $/an", FR)).toMatchObject({ value: 1_200, unit: "$", raw: "1 200 $/an" });
+  });
+  test("a monthly rent may be written a month, each month or par mois", () => {
+    expect(first("The rent is $1,640 a month", US)).toMatchObject({ value: 1_640, unit: "$/mo" });
+    expect(first("Rent of $1,640 each month", US)).toMatchObject({ unit: "$/mo" });
+    expect(first("Loyer de 1 880 $ par mois", FR)).toMatchObject({ value: 1_880, unit: "$/mo" });
+  });
+  test("a count before a unit-type word is a count, in words and in digits", () => {
+    expect(tokenize("four studios and seven one-bedroom suites", US).map((t) => [t.value, t.unit])).toEqual([[4, "units"], [7, "units"]]);
+    expect(tokenize("7 2-bed units", US).map((t) => [t.value, t.unit])).toEqual([[7, "units"]]);
+    expect(tokenize("trois 4½ à 1 880 $ par mois", FR).map((t) => [t.value, t.unit])).toEqual([[3, "units"], [1_880, "$/mo"]]);
+  });
+  test("negative: an item name is not a count, and 4½ is not the number 4", () => {
+    expect(tokenize("three-bedroom suites", US)).toEqual([]);
+    expect(tokenize("a two-bedroom suite", US)).toEqual([]);
+    expect(tokenize("Type 4½", FR)).toEqual([]);
+  });
+});
