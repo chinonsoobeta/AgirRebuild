@@ -94,7 +94,7 @@ export function sourceLabel(a: AssumptionDb): string {
   const s = a.sources[0];
   if (!s) return "Approved";
   // A figure the document gave in square metres was converted to square feet at entry: say so, with what it said.
-  const converted = s.unit_seen === "m2" || s.unit_seen === "$/m2" ? `, converted from square metres ("${s.raw}")` : "";
+  const converted = s.unit_seen?.startsWith("m2") || s.unit_seen?.startsWith("$/m2") ? `, converted from square metres ("${s.raw}")` : "";
   return `${s.document_name}, ${s.location}${converted}`;
 }
 

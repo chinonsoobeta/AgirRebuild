@@ -44,6 +44,8 @@ export type TokenUnit =
   | "$/mo"
   | null;
 
+export type CurrencyCode = "CAD" | "USD" | "AUD";
+
 export type NumberToken = {
   raw: string;
   start: number;
@@ -52,6 +54,8 @@ export type NumberToken = {
   value: number | null;
   refusal?: string;
   currency: boolean;
+  /** Which currency the mark names ("US$", "CAD", "$ US"); null for a bare "$" or no mark: unstated. */
+  currencyCode: CurrencyCode | null;
   unit: TokenUnit;
   /** A money scale word was applied (million, k, ...). */
   scaled: boolean;
@@ -69,6 +73,17 @@ const TOKEN_RE = new RegExp(
   String.raw`(\()?(?<![\w.,])([-−‒–])?\s?((?:US|CA|C|A)?\$|USD\s?|CAD\s?)?\s?(${NUMBER_CORE})(?![\d])(?![.,]\d)`,
   "g",
 );
+
+// A currency mark written after the number: "1,200,000 USD", "1 250 000 $ US", "$ CA", "$ CAN".
+const SUFFIX_RE = /^\s?(USD|CAD|\$\s?US\b|\$\s?CAN?\b)/;
+
+/** The currency a mark names: "US$", "USD", "$ US" are USD; "CA$", "C$", "CAD", "$ CA" are CAD; "A$" is AUD. */
+function codeOf(mark: string | undefined): CurrencyCode | null {
+  const m = (mark ?? "").replace(/[\s$]/g, "");
+  if (m === "US" || m === "USD") return "USD";
+  if (m === "CA" || m === "C" || m === "CAN" || m === "CAD") return "CAD";
+  return m === "A" ? "AUD" : null;
+}
 
 /** Replace typographic minus signs with ASCII so every later rule sees one sign. */
 export function normalizeText(text: string): string {
@@ -203,10 +218,12 @@ export function tokenize(line: string, format: DocumentFormat): NumberToken[] {
     const start = m.index!;
     let end = start + whole.length;
     const rest = text.slice(end);
-    const currency = Boolean(cur);
+    const scale = rest.match(SCALE_RE);
+    const suffix = (scale ? rest.slice(scale[0].length) : rest).match(SUFFIX_RE);
+    const currency = Boolean(cur) || Boolean(suffix);
+    let currencyCode = codeOf(cur?.trim());
     let scaled = false;
     let unit: TokenUnit = currency ? "$" : null;
-    const scale = rest.match(SCALE_RE);
     const upcoming = UNIT_RULES.find((r) => r.re.test(scale && currency ? rest.slice(scale[0].length) : rest))?.unit ?? null;
     const grouping = currency || upcoming === "units" || upcoming === "sf" || upcoming === "m2";
     const parsed = parseCore(core!, format, grouping);
@@ -216,6 +233,11 @@ export function tokenize(line: string, format: DocumentFormat): NumberToken[] {
       value *= scaleOf(scale[1]!);
       scaled = true;
       end += scale[0].length;
+    }
+    const mark = text.slice(end).match(SUFFIX_RE);
+    if (mark) {
+      currencyCode ??= codeOf(mark[1]);
+      end += mark[0].length;
     }
     const after = text.slice(end);
     for (const r of UNIT_RULES) {
@@ -236,6 +258,7 @@ export function tokenize(line: string, format: DocumentFormat): NumberToken[] {
       value,
       ...(parsed.refusal ? { refusal: parsed.refusal } : {}),
       currency,
+      currencyCode,
       unit,
       scaled,
     });

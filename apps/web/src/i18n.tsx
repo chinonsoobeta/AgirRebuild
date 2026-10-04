@@ -161,6 +161,7 @@ const EN = {
   "review.stillReading": "Documents are still being read.",
   "review.stillReadingBody": "Values will appear here as each one finishes.",
   "review.fromM2": "The document gives this in square metres. Agir works in square feet and converted it.",
+  "review.statedIn": (p) => `The document states this in ${p.code}. It is shown here but never used.`,
   "review.summary": (p) => [`${p.c} conflicting`, `${p.m} missing`, `${p.r} to review`, `${p.a} approved`],
   "review.blocked": "Underwriting is blocked.",
   "review.b.conflicts": (p) => `${p.n} ${s(p.n, "input has", "inputs have")} documents that disagree`,
@@ -603,6 +604,7 @@ const FR: Record<Key, Entry> = {
   "review.stillReading": "Des documents sont encore en lecture.",
   "review.stillReadingBody": "Les valeurs apparaîtront ici à mesure que chaque document est terminé.",
   "review.fromM2": "Le document l'indique en mètres carrés. Agir travaille en pieds carrés et l'a converti.",
+  "review.statedIn": (p) => `Le document l'indique en ${p.code}. Il est affiché ici, mais jamais utilisé.`,
   "review.summary": (p) => [
     `${p.c} en conflit`,
     `${p.m} ${s(p.m, "manquante", "manquantes")}`,
@@ -1073,6 +1075,7 @@ const FR_REASONS: [RegExp, string | ((m: RegExpMatchArray) => string)][] = [
   // A document source, as a run lists it: "name, page 1, line 2" or "name, Sheet!C5", with a note when it was given in m².
   [/^(.+), converted from square metres \("(.+)"\)$/, (m) => `${translateMessage(m[1])}, converti de mètres carrés (« ${m[2]} »)`],
   [/^(.+?), (page \d+, line \d+|line \d+|paragraph \d+)$/, (m) => `${m[1]}, ${translateMessage(m[2])}`],
+  [/^A document states this in (.+); this deal is in (CAD|USD|AUD)\. Enter the amount in \2\.$/, (m) => `Un document l'indique en ${m[1]!.replace(" and ", " et ")} ; ce dossier est en ${m[2]}. Saisissez le montant en ${m[2]}.`],
   [/^No field matches this label$/, "Aucun champ ne correspond à ce libellé"],
   [/^No budget line matches this label$/, "Aucune ligne de budget ne correspond à ce libellé"],
   [/^Another number on this line was used$/, "Un autre nombre de cette ligne a été retenu"],

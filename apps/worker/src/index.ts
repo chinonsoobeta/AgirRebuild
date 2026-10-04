@@ -123,7 +123,7 @@ type AssumptionRowDb = {
   status: string;
   value: number | null;
   source_kind: string;
-  sources: { value: number }[];
+  sources: { value: number; unit_seen?: string | null }[];
   version: number;
 };
 
@@ -132,7 +132,7 @@ const same = (a: number | null, b: number | null) => a !== null && b !== null &&
 /** Fold every live document's values into the review queue. Never approves anything. */
 export async function reconcileDeal(db: Db, dealId: string) {
   await db.transaction(async (tx) => {
-    const [deal] = await tx.query<{ workspace_id: string }>(`select workspace_id from deals where id = $1`, [dealId]);
+    const [deal] = await tx.query<{ workspace_id: string; currency: string | null }>(`select workspace_id, currency from deals where id = $1`, [dealId]);
     if (!deal) return;
     const rows = await tx.query<{
       id: string; document_id: string; document_name: string; field_key: string; item_key: string | null; value: number;
@@ -147,7 +147,7 @@ export async function reconcileDeal(db: Db, dealId: string) {
       fieldKey: r.field_key, itemKey: r.item_key, value: r.value, raw: r.raw, unitSeen: r.unit_seen, location: r.location,
       context: r.context, rule: r.rule, documentId: r.document_id, documentName: r.document_name,
     }));
-    const proposals = consolidate(sourced);
+    const proposals = consolidate(sourced, deal.currency);
     const existing = await tx.query<AssumptionRowDb>(
       `select id, field_key, item_key, status, value, source_kind, sources, version from assumptions where deal_id = $1 for update`,
       [dealId],
@@ -174,24 +174,32 @@ export async function reconcileDeal(db: Db, dealId: string) {
         unit_seen: s.unitSeen,
         context: s.context,
       }));
+      const reason = p.reason;
       const conflictFromDocs = p.values.map((v) => ({ value: v.value, documents: [...new Set(v.sources.map((s) => s.documentName))] }));
       const e = byKey.get(key);
       if (!e) {
         const [ins] = await tx.query<{ id: string }>(
-          `insert into assumptions (deal_id, workspace_id, field_key, item_key, status, value, source_kind, sources, conflict_values)
-           values ($1,$2,$3,$4,$5,$6,'document',$7,$8) returning id`,
-          [dealId, deal.workspace_id, p.fieldKey, p.itemKey ?? "", p.status, p.value, JSON.stringify(sources), p.status === "conflicting" ? JSON.stringify(conflictFromDocs) : null],
+          `insert into assumptions (deal_id, workspace_id, field_key, item_key, status, value, source_kind, sources, conflict_values, reason)
+           values ($1,$2,$3,$4,$5,$6,'document',$7,$8,$9) returning id`,
+          [dealId, deal.workspace_id, p.fieldKey, p.itemKey ?? "", p.status, p.value, JSON.stringify(sources), p.status === "conflicting" ? JSON.stringify(conflictFromDocs) : null, reason],
         );
-        await log(ins!.id, "extracted", null, p.status, null, p.value, p.status === "conflicting" ? "Documents disagree" : "Found in documents");
+        await log(ins!.id, "extracted", null, p.status, null, p.value, reason ?? (p.status === "conflicting" ? "Documents disagree" : "Found in documents"));
         changed++;
         continue;
       }
-      const agreesWithStanding = p.status === "needs_review" && same(p.value, e.value);
+      // A foreign figure the row's sources already hold was seen when the value was settled.
+      const foreignKnown = p.foreign.every((f) => (e.sources ?? []).some((x) => x.unit_seen === f.unitSeen && same(x.value, f.value)));
+      const agreesWithStanding =
+        (p.status === "needs_review" && same(p.value, e.value)) ||
+        (p.foreign.length > 0 && foreignKnown && p.values.length === 1 && same(p.values[0]!.value, e.value));
       if (e.status === "needs_review" || e.status === "conflicting") {
         if (e.source_kind === "document") {
+          // The currency reason is this function's own: set it while it holds, and clear it when it no longer does.
           await tx.query(
-            `update assumptions set status = $2, value = $3, sources = $4, conflict_values = $5, version = version + 1, updated_at = now() where id = $1`,
-            [e.id, p.status, p.value, JSON.stringify(sources), p.status === "conflicting" ? JSON.stringify(conflictFromDocs) : null],
+            `update assumptions set status = $2, value = $3, sources = $4, conflict_values = $5,
+               reason = case when $6::text is not null then $6 when reason like 'A document states this in %' then null else reason end,
+               version = version + 1, updated_at = now() where id = $1`,
+            [e.id, p.status, p.value, JSON.stringify(sources), p.status === "conflicting" ? JSON.stringify(conflictFromDocs) : null, reason],
           );
           if (e.status !== p.status || !same(e.value, p.value)) await log(e.id, "re-extracted", e.status, p.status, e.value, p.value, "Documents changed");
           changed++;
@@ -200,7 +208,7 @@ export async function reconcileDeal(db: Db, dealId: string) {
         // An analyst's override or an accepted default already answered the
         // documents it saw. Only a value it has not seen reopens it.
         const known = (e.sources ?? []).map((x) => x.value);
-        const nothingNew = e.source_kind !== "document" && p.values.every((v) => known.some((k) => same(k, v.value)));
+        const nothingNew = e.source_kind !== "document" && foreignKnown && p.values.every((v) => known.some((k) => same(k, v.value)));
         if (agreesWithStanding || nothingNew) {
           if (agreesWithStanding) await tx.query(`update assumptions set sources = $2, updated_at = now() where id = $1`, [e.id, JSON.stringify(sources)]);
         } else {
@@ -208,10 +216,10 @@ export async function reconcileDeal(db: Db, dealId: string) {
           const settled = { value: e.value, documents: [e.source_kind === "default" ? "Default accepted" : e.source_kind === "analyst" ? "Entered by an analyst" : "Approved earlier"] };
           const values = [settled, ...conflictFromDocs.filter((c) => !same(c.value, e.value))];
           await tx.query(
-            `update assumptions set status = 'conflicting', sources = $2, conflict_values = $3, version = version + 1, updated_at = now() where id = $1`,
-            [e.id, JSON.stringify(sources), JSON.stringify(values)],
+            `update assumptions set status = 'conflicting', sources = $2, conflict_values = $3, reason = coalesce($4, reason), version = version + 1, updated_at = now() where id = $1`,
+            [e.id, JSON.stringify(sources), JSON.stringify(values), reason],
           );
-          await log(e.id, "reopened", e.status, "conflicting", e.value, null, "A document states a different value");
+          await log(e.id, "reopened", e.status, "conflicting", e.value, null, reason ?? "A document states a different value");
           changed++;
         }
       } else if (e.status === "rejected") {

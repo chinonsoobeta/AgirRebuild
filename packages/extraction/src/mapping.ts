@@ -4,7 +4,7 @@
 // but it never becomes an input.
 
 import { FIELD_BY_KEY, FIELDS, OUTPUT_LIKE_PHRASES, type FieldDef } from "@agir/contracts";
-import { SF_PER_M2, type NumberToken } from "@agir/numbers";
+import { SF_PER_M2, type CurrencyCode, type NumberToken } from "@agir/numbers";
 
 export type LabelUnit = "$" | "%" | "months" | "years" | "sf" | "m2" | "x" | null;
 
@@ -27,6 +27,19 @@ const ITEMIZED_ALIASES: Record<string, string[]> = {
   rentable_area_sf: ["area", "rentable area", "leasable area", "gla", "nrsf", "square feet", "sf"],
   item_occupancy_pct: ["occupancy"],
 };
+
+/**
+ * A money figure that names its currency records it after the unit it was read in:
+ * "$" becomes "USD", "$/mo" becomes "$/mo USD". Reconcile reads it back with currencyOf.
+ */
+export function withCurrency(unitSeen: string, code: CurrencyCode | null): string {
+  if (!code || !unitSeen.startsWith("$")) return unitSeen;
+  return unitSeen === "$" ? code : `${unitSeen} ${code}`;
+}
+
+export function currencyOf(unitSeen: string | null | undefined): CurrencyCode | null {
+  return (/(?:^|\s)(CAD|USD|AUD)$/.exec(unitSeen ?? "")?.[1] as CurrencyCode | undefined) ?? null;
+}
 
 export function normalizeLabel(raw: string): { label: string; labelUnit: LabelUnit } {
   let labelUnit: LabelUnit = null;
@@ -75,6 +88,11 @@ function itemName(prefix: string): string {
  * unitSeen keeps the unit the document used (decision 7).
  */
 function compatibleValue(def: FieldDef, t: NumberToken, label: string, labelUnit: LabelUnit): { value: number; unitSeen: string } | null {
+  const c = convert(def, t, label, labelUnit);
+  return c && { ...c, unitSeen: withCurrency(c.unitSeen, t.currencyCode) };
+}
+
+function convert(def: FieldDef, t: NumberToken, label: string, labelUnit: LabelUnit): { value: number; unitSeen: string } | null {
   const v = t.value;
   if (v === null) return null;
   const u = t.unit;

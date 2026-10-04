@@ -5,6 +5,9 @@ import { Banner, canEdit, DealHeader, ErrorText, Glossary, StatusTag, useDeal, u
 import * as I from "../components/icons";
 import { useI18n } from "../i18n";
 
+// A source that says which currency it is in records it at the end of unit_seen ("USD", "$/mo USD").
+const currencyIn = (s: Source) => /(?:^|\s)(CAD|USD|AUD)$/.exec(s.unit_seen ?? "")?.[1];
+
 function Quote({ s }: { s: Source }) {
   const { t, msg } = useI18n();
   const i = s.context.indexOf(s.raw);
@@ -13,7 +16,8 @@ function Quote({ s }: { s: Source }) {
       <span className="row small" style={{ gap: 8, fontWeight: 600 }}><I.Doc />{s.document_name}</span>
       <div className="source-quote">{i >= 0 ? (<>{s.context.slice(0, i)}<mark>{s.raw}</mark>{s.context.slice(i + s.raw.length)}</>) : s.context}</div>
       <span className="small faint">{msg(s.location)}</span>
-      {(s.unit_seen === "m2" || s.unit_seen === "$/m2") && <span className="small faint">{t("review.fromM2")}</span>}
+      {(s.unit_seen?.startsWith("m2") || s.unit_seen?.startsWith("$/m2")) && <span className="small faint">{t("review.fromM2")}</span>}
+      {currencyIn(s) && <span className="small faint">{t("review.statedIn", { code: currencyIn(s) })}</span>}
     </div>
   );
 }
@@ -151,6 +155,13 @@ export function Review({ dealId }: { dealId: string }) {
                   <StatusTag tone="stop" glyph={I.Conflict}>{t("review.conflicting")}</StatusTag>
                   {a.material && <span className="chip"><I.Lock />{t("common.material")}</span>}
                 </div>
+                {a.sources.some(currencyIn) && a.reason && (
+                  // A figure in another currency is never a choice: say why, show it, and leave the amount to be entered.
+                  <div className="stack" style={{ gap: 8 }}>
+                    <p>{msg(a.reason)}</p>
+                    {a.sources.filter(currencyIn).map((s, i) => <Quote key={i} s={s} />)}
+                  </div>
+                )}
                 <div style={{ display: "grid", gridTemplateColumns: "repeat(auto-fit, minmax(220px, 1fr))", gap: 12 }}>
                   {(a.conflictValues ?? []).map((v) => {
                     const conservative = a.conservative && v.value === (a.conservative === "max" ? Math.max(...vals) : Math.min(...vals));
@@ -169,13 +180,13 @@ export function Review({ dealId }: { dealId: string }) {
                   modifyForm(a)
                 ) : (
                   <div className="spread">
-                    <span className="small faint">{t("review.choosingNote", { material: a.material })}</span>
+                    <span className="small faint">{vals.length > 0 ? t("review.choosingNote", { material: a.material }) : ""}</span>
                     {editable && (
                       <div className="row">
-                        <button className="btn quiet small" type="button" onClick={() => setEditing(a.id)}>{t("review.enterDifferent")}</button>
-                        <button className="btn primary small" type="button" disabled={choice === undefined || act.isPending} onClick={() => act.mutate({ id: a.id, action: "resolve", value: choice!, version: a.version })}>
+                        <button className={`btn small ${vals.length > 0 ? "quiet" : "primary"}`} type="button" onClick={() => setEditing(a.id)}>{t("review.enterDifferent")}</button>
+                        {vals.length > 0 && <button className="btn primary small" type="button" disabled={choice === undefined || act.isPending} onClick={() => act.mutate({ id: a.id, action: "resolve", value: choice!, version: a.version })}>
                           {choice === undefined ? t("review.choose") : t("review.resolveWith", { v: f.value(choice, a.unit) })}
-                        </button>
+                        </button>}
                       </div>
                     )}
                   </div>

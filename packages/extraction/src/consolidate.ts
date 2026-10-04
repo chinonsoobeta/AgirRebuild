@@ -1,4 +1,5 @@
 import type { Candidate } from "./candidates.ts";
+import { currencyOf } from "./mapping.ts";
 
 export type SourcedCandidate = Candidate & { documentId: string; documentName: string };
 
@@ -9,8 +10,12 @@ export type Proposal = {
   status: "needs_review" | "conflicting";
   value: number | null;
   sources: SourcedCandidate[];
-  /** Distinct documented values, for a conflict. */
+  /** Distinct documented values, for a conflict. Never includes a figure in another currency. */
   values: { value: number; sources: SourcedCandidate[] }[];
+  /** Figures stated in a currency other than the deal's. Kept in sources for provenance; never a value. */
+  foreign: SourcedCandidate[];
+  /** Why the field conflicts when a foreign figure is the cause. */
+  reason: string | null;
 };
 
 const same = (a: number, b: number) => Math.abs(a - b) <= 1e-9 * Math.max(1, Math.abs(a), Math.abs(b));
@@ -18,9 +23,15 @@ const same = (a: number, b: number) => Math.abs(a - b) <= 1e-9 * Math.max(1, Mat
 /**
  * Gather candidates from every live document into one proposal per field.
  * Agreement yields one value for review. Disagreement yields a conflict that
- * lists every documented value; Agir never picks between them.
+ * lists every documented value; Agir never picks between them. When the deal's
+ * currency is known, a figure marked in another currency is never a value: the
+ * field conflicts, and the person enters the amount in the deal's currency.
  */
-export function consolidate(candidates: readonly SourcedCandidate[]): Proposal[] {
+export function consolidate(candidates: readonly SourcedCandidate[], dealCurrency: string | null = null): Proposal[] {
+  const isForeign = (c: SourcedCandidate) => {
+    const code = currencyOf(c.unitSeen);
+    return dealCurrency !== null && code !== null && code !== dealCurrency;
+  };
   const groups = new Map<string, SourcedCandidate[]>();
   for (const c of candidates) {
     if (!c.fieldKey || c.value === null) continue;
@@ -33,7 +44,8 @@ export function consolidate(candidates: readonly SourcedCandidate[]): Proposal[]
   for (const [k, list] of groups) {
     const [fieldKey, item] = k.split("|") as [string, string];
     const values: Proposal["values"] = [];
-    for (const c of list) {
+    const foreign = list.filter(isForeign);
+    for (const c of list.filter((x) => !isForeign(x))) {
       const hit = values.find((v) => same(v.value, c.value!));
       if (hit) hit.sources.push(c);
       else values.push({ value: c.value!, sources: [c] });
@@ -42,10 +54,15 @@ export function consolidate(candidates: readonly SourcedCandidate[]): Proposal[]
     out.push({
       fieldKey,
       itemKey: item || null,
-      status: values.length > 1 ? "conflicting" : "needs_review",
-      value: values.length === 1 ? values[0]!.value : null,
-      sources: list,
+      status: values.length > 1 || foreign.length > 0 ? "conflicting" : "needs_review",
+      value: values.length === 1 && foreign.length === 0 ? values[0]!.value : null,
+      // Figures in the deal's currency first: a value settled from sources[0] is never a foreign one.
+      sources: [...list.filter((x) => !isForeign(x)), ...foreign],
       values,
+      foreign,
+      reason: foreign.length
+        ? `A document states this in ${[...new Set(foreign.map((c) => currencyOf(c.unitSeen)))].join(" and ")}; this deal is in ${dealCurrency}. Enter the amount in ${dealCurrency}.`
+        : null,
     });
   }
   return out.sort((a, b) => (a.fieldKey + (a.itemKey ?? "")).localeCompare(b.fieldKey + (b.itemKey ?? "")));

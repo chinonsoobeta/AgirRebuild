@@ -9,7 +9,7 @@ work it describes.
 | Command | Result | Verified |
 |---|---|---|
 | `npm install` | Node 22 (`engines` allows 22 to 24); `.npmrc` sets `legacy-peer-deps` | 2026-10-01 |
-| `npm run gate -- --tier=release` | Both typechecks, 163 tests in 9 files (119 on `main`), web build | 2026-10-03, `task/08-plain-language` (the stack 05, 07, 06, 08) |
+| `npm run gate -- --tier=release` | Both typechecks, 174 tests in 9 files (119 on `main`), web build | 2026-10-03, `task/09-foreign-currency` (the stack 05, 07, 06, 08, 09) |
 | `VITEST_MAX_WORKERS=2 npm run gate -- --tier=release` | The same gate with two test workers: peak memory about 1 GB, no swap | 2026-10-01 |
 | `AGIR_DATA_DIR=<empty folder> PORT=8791 npm start` | Builds the web app, applies `0001` to `0007`, seeds six deals, serves on that port. An empty data folder leaves `.data/` untouched | 2026-10-03, `task/08-plain-language` |
 
@@ -37,15 +37,16 @@ later tasks build on earlier migrations. Review and merge them in order.
 | `task/07-artifact-labels` | 2 | Every artifact says which inputs were stated by the sponsor and not confirmed. The lender package and IC memo carry a "Stated by the sponsor, not independently confirmed" block with the count and the inputs, right after the verdict. The inputs appendix and the model export's Inputs sheet label each input as sponsor-stated, confirmed by Agir review (with the date) or confirmed by a named person. Runs made before this label render as before | Advised: it changes what lenders read; no migration or engine change |
 | `task/06-quick-start` | 3 | A deal with no documents offers a quick start: a multiplex (2–4 units) or small apartment (5–30 units) template of about 13 plain questions, in English and French, in `TEMPLATES` in `packages/contracts/src/fields.ts`. Answers are entered through the existing manual-entry endpoint (`fn_enter_value`) and the three named defaults are accepted only when the owner ticks the box, through `fn_accept_defaults`. A retry after a partial failure resumes. A test checks that each template covers every required field | Not required: no migration, engine, auth or governance change; it uses the existing governed functions |
 | `task/08-plain-language` | 3 | The interface says "DCR" (French "RCD", CMHC's terms) wherever it showed "DSCR" ("RCSD"): one whole-word replacement in the label and message helpers in `apps/web/src/i18n.tsx`, applied at display time because gate labels and check messages are inside the hashed result. One "What these terms mean" disclosure (`Glossary`, `components/ui.tsx`) on Run and Review defines eight terms in English and French. A solo workspace reads "Record your decision" instead of "committee decision". Web only | Not required: display only, no API, engine, contract or migration change |
+| `task/09-foreign-currency` | 1 | A figure marked in another currency ("US$", "USD", "A$", or after the number "1 250 000 $ US") is never read as the deal's. Each token carries a `currencyCode`; the candidate records it at the end of `unit_seen` ("USD", "$/mo USD"), so no migration. When the deal's currency is known and differs, `consolidate` makes the field conflicting with the reason "A document states this in USD; this deal is in CAD. Enter the amount in CAD.", keeps the figure in sources, and offers only deal-currency figures in `conflict_values`, so `resolve` cannot pick it and the person uses "enter a different value". Review shows the reason and the foreign source. A bare "$" is still read as the deal's currency | Not required: no migration, engine or governance change. Advised, because it changes how documents are read |
 
 The plan for small Canadian developers is [plan-small-developers.md](plan-small-developers.md). Release 1 steps 0 to 3 are
 being built now. Steps 4 to 6 wait on the people-owned items listed below.
 
 ## Known gaps
 
-- **Foreign currency is not detected.** Decision 7 says a foreign currency raises a conflict. The tokenizer
-  records only that a token is money (`currency: boolean` in `packages/numbers/src/index.ts`), not which
-  currency, so a USD figure in a CAD deal is read as CAD. Bergendal's figures carry no currency mark at all.
+- **Foreign currency is detected only where a figure carries a mark.** A bare "$" is read as the deal's
+  currency, and Bergendal's figures carry no mark at all. A label such as "Land cost (USD)", an Excel cell
+  formatted as USD, and a deal with no stored currency (created before migration `0004`) are not checked.
 - **CI has never run.** `.github/workflows/gate.yml` is written but unexercised until the repo is pushed.
 - **French documents are barely read.** Labels are matched only against English aliases, `normalizeLabel`
   drops accented letters, and a trailing dollar sign ("18,75 $") is not read as money. A French line maps

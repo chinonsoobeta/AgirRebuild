@@ -1,7 +1,7 @@
 import { FIELD_BY_KEY } from "@agir/contracts";
 import { detectFormat, SF_PER_M2, tokenize, type DocumentFormat, type NumberToken } from "@agir/numbers";
 import type { Cell, NormalizedDocument, Table } from "./document.ts";
-import { mapToken, normalizeLabel } from "./mapping.ts";
+import { currencyOf, mapToken, normalizeLabel, withCurrency } from "./mapping.ts";
 
 /** One value found in one document, with where it came from and why it was (or was not) mapped. */
 export type Candidate = {
@@ -33,6 +33,7 @@ function cellToken(cell: Cell, format: DocumentFormat): NumberToken | null {
       end: cell.text.length,
       value: cell.number,
       currency: cell.unit === "$",
+      currencyCode: null,
       unit: cell.unit === "%" ? "%" : cell.unit === "$" ? "$" : null,
       scaled: false,
     };
@@ -168,7 +169,7 @@ function fromRentRoll(table: Table, headerRow: number, roles: Roles, result: Ext
       }
       const def = FIELD_BY_KEY.get(fieldKey)!;
       let value = t.value;
-      let unitSeen: string | null = t.unit;
+      let unitSeen: string | null = t.unit && withCurrency(t.unit, t.currencyCode);
       if (def.unit === "%" && t.unit !== "%" && value <= 1 && cell.number !== undefined) value = value * 100;
       // Square metres, stated by the cell or by its column, become square feet (decision 7).
       if (fieldKey === "rentable_area_sf" && (t.unit === "m2" || (t.unit === null && roles.areaM2))) {
@@ -177,7 +178,7 @@ function fromRentRoll(table: Table, headerRow: number, roles: Roles, result: Ext
       }
       if (fieldKey === "rent_psf_annual" && (t.unit === "$/m2" || ((t.unit === null || t.unit === "$") && perM2))) {
         value /= SF_PER_M2;
-        unitSeen = "$/m2";
+        unitSeen = withCurrency("$/m2", t.currencyCode);
       }
       result.candidates.push({ fieldKey, itemKey, value, raw: t.raw, unitSeen, location: cell.ref, context: `${table.name}: ${itemText}`, rule: "table:rent-roll" });
     };
@@ -191,7 +192,8 @@ function fromRentRoll(table: Table, headerRow: number, roles: Roles, result: Ext
 function fromBudget(table: Table, headerRow: number, roles: { label: number; amount: number }, result: ExtractionResult) {
   // Sum component lines per field; use a "Total X" row only when no component
   // line mapped to X, and raise both when they disagree.
-  const components = new Map<string, { sum: number; refs: string[]; labels: string[] }>();
+  // A line in another currency is never added to the deal's own: sums are kept per field and currency.
+  const components = new Map<string, { fieldKey: string; unitSeen: string; sum: number; refs: string[]; labels: string[] }>();
   const totals: Candidate[] = [];
   for (let r = headerRow + 1; r < table.rows.length; r++) {
     const row = table.rows[r]!;
@@ -223,7 +225,7 @@ function fromBudget(table: Table, headerRow: number, roles: { label: number; amo
       itemKey: null,
       value: mapped.value,
       raw: t.raw,
-      unitSeen: "$",
+      unitSeen: withCurrency("$", t.currencyCode),
       location: amountCell.ref,
       context: `${table.name}: ${labelCell.text}`,
       rule: isTotal ? "table:budget-total" : "table:budget",
@@ -232,26 +234,27 @@ function fromBudget(table: Table, headerRow: number, roles: { label: number; amo
       totals.push(cand);
       continue;
     }
-    const acc = components.get(mapped.fieldKey) ?? { sum: 0, refs: [], labels: [] };
+    const ck = `${mapped.fieldKey}|${cand.unitSeen}`;
+    const acc = components.get(ck) ?? { fieldKey: mapped.fieldKey, unitSeen: cand.unitSeen!, sum: 0, refs: [], labels: [] };
     acc.sum += mapped.value;
     acc.refs.push(amountCell.ref);
     acc.labels.push(labelCell.text);
-    components.set(mapped.fieldKey, acc);
+    components.set(ck, acc);
   }
-  for (const [fieldKey, acc] of components) {
+  for (const acc of components.values()) {
     result.candidates.push({
-      fieldKey,
+      fieldKey: acc.fieldKey,
       itemKey: null,
       value: acc.sum,
       raw: acc.sum.toString(),
-      unitSeen: "$",
+      unitSeen: acc.unitSeen,
       location: acc.refs.join(", "),
       context: `${table.name}: ${acc.labels.join(" + ")}`,
       rule: acc.refs.length > 1 ? "table:budget-sum" : "table:budget",
     });
   }
   for (const t of totals) {
-    const comp = components.get(t.fieldKey!);
+    const comp = components.get(`${t.fieldKey}|${t.unitSeen}`);
     if (!comp) result.candidates.push(t);
     else if (Math.abs(comp.sum - (t.value ?? 0)) > 0.5) {
       result.candidates.push({ ...t, note: `The subtotal disagrees with its lines (${comp.sum.toLocaleString("en-US")})` });
@@ -290,7 +293,7 @@ export function extractCandidates(doc: NormalizedDocument): ExtractionResult {
   // Within one document, the same field and value found twice is one candidate.
   const seen = new Set<string>();
   result.candidates = result.candidates.filter((c) => {
-    const k = `${c.fieldKey}|${c.itemKey}|${c.value}`;
+    const k = `${c.fieldKey}|${c.itemKey}|${c.value}|${currencyOf(c.unitSeen)}`;
     if (seen.has(k)) return false;
     seen.add(k);
     return true;
