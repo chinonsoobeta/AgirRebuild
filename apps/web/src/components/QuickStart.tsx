@@ -147,7 +147,7 @@ export function QuickStart({ dealId }: { dealId: string }) {
         <strong>{t("qs.defaultsTitle")}</strong>
         <p className="small muted">{t("qs.defaultsBody")}</p>
         <ul className="small" style={{ margin: 0, paddingLeft: 20 }}>
-          {tpl.defaults.map((d) => <li key={d}>{L.field(d)} : {f.value(FIELD_BY_KEY.get(d)!.default!, FIELD_BY_KEY.get(d)!.unit)}</li>)}
+          {tpl.defaults.map((d) => <li key={d}>{t("qs.defaultLine", { label: L.field(d), value: f.value(FIELD_BY_KEY.get(d)!.default!, FIELD_BY_KEY.get(d)!.unit) })}</li>)}
         </ul>
         <label className="row" style={{ gap: 8 }}><input type="checkbox" name="accept" />{t("qs.accept")}</label>
       </div>

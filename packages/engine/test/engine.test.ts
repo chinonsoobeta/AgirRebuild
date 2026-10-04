@@ -260,7 +260,8 @@ describe("quick-start templates", () => {
   test("a fourplex quick start runs to a verdict", () => {
     const { input } = assemble(rowsFor("multiplex"));
     const r = underwrite(input!, POLICY_V1);
-    expect(r.verdict.code).toBeTruthy();
+    expect(r.verdict.code).toBe("REJECT");
+    expect(r.checks.map((c) => c.key)).toContain("equity_wipeout");
     expect(input!.revenue).toHaveLength(1);
   });
 });
