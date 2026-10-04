@@ -34,7 +34,7 @@ function cellToken(cell: Cell, format: DocumentFormat): NumberToken | null {
       value: cell.number,
       currency: cell.unit === "$",
       currencyCode: cell.currency ?? null,
-      unit: cell.unit === "%" ? "%" : cell.unit === "$" ? "$" : null,
+      unit: cell.unit ?? null,
       scaled: false,
     };
   }

@@ -1,5 +1,5 @@
 import { codeOf } from "@agir/numbers";
-import { columnName, type Cell, type Line, type NormalizedDocument, type Table } from "./document.ts";
+import { columnName, type Cell, type CellUnit, type Line, type NormalizedDocument, type Table } from "./document.ts";
 
 export class UnsupportedDocumentError extends Error {}
 
@@ -91,6 +91,16 @@ async function parsePdf(bytes: Uint8Array): Promise<NormalizedDocument> {
   return { kind: "pdf", lines, tables: [], pageCount, needsOcr: chars < 16, fullText: lines.map((l) => l.text).join("\n") };
 }
 
+/** A unit written alone, as a quoted number-format literal or in the cell beside a value; anything longer is a note, not a unit. */
+function unitOfWord(w: string): CellUnit | null {
+  if (w === "%" || w === "$" || w === "x") return w;
+  if (/^(mois|mo|months?)$/.test(w)) return "months";
+  if (/^(ans?|years?|yrs?)$/.test(w)) return "years";
+  if (/^(sf|pi²|pi2)$/.test(w)) return "sf";
+  if (/^(m²|m2)$/.test(w)) return "m2";
+  return null;
+}
+
 async function parseXlsx(bytes: Uint8Array): Promise<NormalizedDocument> {
   const ExcelJS = (await import("exceljs")).default;
   const wb = new ExcelJS.Workbook();
@@ -112,18 +122,28 @@ async function parseXlsx(bytes: Uint8Array): Promise<NormalizedDocument> {
         }
         if (typeof v === "number" && Number.isFinite(v)) {
           const fmt = String(cell.numFmt ?? "");
-          const isPct = fmt.includes("%");
+          // Quoted strings and backslash-escaped characters are literal text, not format codes: only a bare "%" is Excel's percent.
+          const literals = [...fmt.matchAll(/"([^"]*)"|\\(.)/g)].map((m) => (m[1] ?? m[2]!).trim().toLowerCase());
+          const bare = fmt.replace(/"[^"]*"|\\./g, "");
+          const literalUnit = literals.map(unitOfWord).find((u) => u !== null) ?? null;
+          const isPct = bare.includes("%");
           // Only an explicit mark names a currency; "$" and "[$$-409]" name none.
           const code = codeOf(/(?<![A-Za-z])(?:US|CA|C|A)\$|\b(?:USD|CAD|AUD)\b/.exec(fmt)?.[0]);
-          const isMoney = fmt.includes("$") || code !== null;
-          const number = isPct ? v * 100 : v;
-          cells.push({ text: String(number), number, ...(isPct ? { unit: "%" as const } : isMoney ? { unit: "$" as const, ...(code ? { currency: code } : {}) } : {}), ref });
+          const unit: CellUnit | null = isPct ? "%" : bare.includes("$") || code !== null || literals.includes("$") ? "$" : literalUnit;
+          const number = isPct ? Number((v * 100).toPrecision(12)) : v;
+          cells.push({ text: String(number), number, ...(unit ? { unit } : {}), ...(unit === "$" && code ? { currency: code } : {}), ref });
         } else if (v === null || v === undefined) {
           cells.push({ text: "", ref });
         } else {
           cells.push({ text: String(v), ref });
         }
       }
+      // A value with no unit of its own, beside a cell holding only a unit word ("months", "%"), is written in that unit.
+      cells.forEach((c, i) => {
+        const next = cells[i + 1];
+        const unit = c.number !== undefined && !c.unit && next?.number === undefined ? unitOfWord(next?.text.trim().toLowerCase() ?? "") : null;
+        if (unit) c.unit = unit;
+      });
       rows.push(cells);
       texts.push(cells.map((c) => c.text).join("\n"));
     });
@@ -132,11 +152,75 @@ async function parseXlsx(bytes: Uint8Array): Promise<NormalizedDocument> {
   return { kind: "xlsx", lines: [], tables, pageCount: null, needsOcr: false, fullText: texts.join("\n") };
 }
 
+const ENTITIES: Record<string, string> = { amp: "&", lt: "<", gt: ">", quot: '"', apos: "'", nbsp: "\u00a0" };
+const decode = (s: string) =>
+  s.replace(/&(#x[0-9a-f]+|#\d+|[a-z]+);/gi, (m, e: string) => {
+    if (e[0] === "#") return String.fromCodePoint(e[1] === "x" || e[1] === "X" ? parseInt(e.slice(2), 16) : parseInt(e.slice(1), 10));
+    return ENTITIES[e.toLowerCase()] ?? m;
+  });
+const tidy = (s: string) => s.replace(/[ \t\r\n]+/g, " ").trim();
+
+/**
+ * Word files go through mammoth's HTML. Paragraphs, headings and list items outside tables are lines, located
+ * "paragraph N" (N counts the non-empty ones, from 1, in document order); every table is a Table ("Table 1", ...)
+ * whose cells keep their text and are located "Table 1 R2C3". A nested table is flattened into its cell's text.
+ */
 async function parseDocx(bytes: Uint8Array): Promise<NormalizedDocument> {
   const mammoth = (await import("mammoth")).default;
-  const { value } = await mammoth.extractRawText({ buffer: Buffer.from(bytes) });
-  const lines = linesFromText(value, "paragraph");
-  return { kind: "docx", lines, tables: [], pageCount: null, needsOcr: false, fullText: value };
+  const { value: html } = await mammoth.convertToHtml({ buffer: Buffer.from(bytes) });
+  const lines: Line[] = [];
+  const tables: Table[] = [];
+  const full: string[] = [];
+  let depth = 0;
+  let buf = "";
+  let table: Table | null = null;
+  let row: Cell[] | null = null;
+  let cell: string | null = null;
+  const flush = () => {
+    const t = tidy(buf);
+    buf = "";
+    if (t) {
+      lines.push({ text: t, location: `paragraph ${lines.length + 1}` });
+      full.push(t);
+    }
+  };
+  for (const m of html.matchAll(/<(\/?)([a-z0-9]+)[^>]*?(\/?)>|([^<]+)/gi)) {
+    if (m[4] !== undefined) {
+      const t = decode(m[4]);
+      if (cell !== null) cell += t;
+      else buf += t;
+      continue;
+    }
+    const closing = m[1] === "/";
+    const tag = m[2]!.toLowerCase();
+    if (tag === "table") {
+      if (!closing) {
+        if (depth++ === 0) {
+          flush();
+          table = { name: `Table ${tables.length + 1}`, rows: [] };
+        } else cell += " ";
+      } else if (--depth === 0 && table) {
+        tables.push(table);
+        table = null;
+      }
+    } else if (depth > 1) {
+      if (/^(p|h[1-6]|li|br|tr|td|th)$/.test(tag)) cell += " ";
+    } else if (depth === 1) {
+      if (tag === "tr" && !closing) row = [];
+      else if (tag === "tr" && row && table) {
+        table.rows.push(row);
+        row = null;
+      } else if ((tag === "td" || tag === "th") && !closing) cell = "";
+      else if ((tag === "td" || tag === "th") && row && table && cell !== null) {
+        const text = tidy(cell);
+        row.push({ text, ref: `${table.name} R${table.rows.length + 1}C${row.length + 1}` });
+        full.push(text);
+        cell = null;
+      } else if (cell !== null && /^(p|h[1-6]|li|br)$/.test(tag)) cell += " ";
+    } else if (/^(p|h[1-6]|li|ul|ol|br)$/.test(tag)) flush();
+  }
+  flush();
+  return { kind: "docx", lines, tables, pageCount: null, needsOcr: false, fullText: full.join("\n") };
 }
 
 /** Turn a file's bytes into lines and tables, each with its location. */

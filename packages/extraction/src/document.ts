@@ -6,11 +6,14 @@ import type { CurrencyCode } from "@agir/numbers";
 
 export type Line = { text: string; location: string };
 
+/** What a cell's number format (or the unit word beside it) says the number is written in. */
+export type CellUnit = "%" | "$" | "months" | "years" | "x" | "sf" | "m2";
+
 export type Cell = {
   text: string;
   /** A spreadsheet cell that holds a number is read as that number, with no parsing. */
   number?: number;
-  unit?: "%" | "$";
+  unit?: CellUnit;
   /** The currency the cell's number format names ("[$USD]", "US$"); absent for a plain or locale-only dollar. */
   currency?: CurrencyCode;
   ref: string;

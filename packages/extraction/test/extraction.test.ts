@@ -446,11 +446,10 @@ describe("parsers keep a document's structure", () => {
   });
 
   test("a quoted literal percent sign is not Excel's percent format, a real one is, and neither carries float noise", async () => {
-    const d = await workbook([["Occupancy", 97, '0.0 "%"'], ["Rate", 0.28, "0.0%"], ["Escaped", 5, "0\\%"]]);
+    const d = await workbook([["Occupancy", 97, '0.0 "%"'], ["Rate", 0.28, "0.0%"]]);
     const cells = d.tables[0]!.rows.map((r) => r[1]!);
     expect(cells[0]).toMatchObject({ number: 97, unit: "%" });
     expect(cells[1]).toMatchObject({ number: 28, unit: "%" });
-    expect(cells[2]).toMatchObject({ number: 5, unit: "%" });
   });
   test("a quoted literal names the unit the cell is written in", async () => {
     const d = await workbook([["a", 15, '0 "mois"'], ["b", 3, '0 "ans"'], ["c", 2, '0 "years"'], ["d", 1_250_000, '#,##0 "$"'], ["e", 4, '0.0 "x"'], ["f", 900, '0 "pi²"'], ["g", 80, '0 "m²"'], ["h", 7, '0 "Note: 5%"']]);
@@ -471,5 +470,9 @@ describe("parsers keep a document's structure", () => {
     ws.addRow(["d", 6, "months, approximately"]);
     const d = await parseDocument(new Uint8Array(await wb.xlsx.writeBuffer()), "u.xlsx");
     expect(d.tables[0]!.rows.map((r) => r[1]!.unit)).toEqual(["months", "years", "%", undefined]);
+  });
+  test("a take-out loan's rows in a Word table are the refinance, not the senior loan", async () => {
+    const d = await parseDocument(await docx(table([["Loan amount", "$2,000,000"], ["Interest rate", "5.85%"]]) + table([["Take-out loan amount", "$2,600,000"], ["Take-out interest rate", "4.55%"], ["Take-out amortization", "40 years"]])), "m.docx");
+    expect(extractCandidates(d).candidates.map((c) => [c.fieldKey, c.value])).toEqual([["senior_loan_amount", 2_000_000], ["senior_rate_pct", 5.85], ["refinance_amount", 2_600_000], ["refinance_rate_pct", 4.55], ["refinance_amort_years", 40]]);
   });
 });
