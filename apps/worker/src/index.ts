@@ -123,11 +123,24 @@ type AssumptionRowDb = {
   status: string;
   value: number | null;
   source_kind: string;
-  sources: { value: number; unit_seen?: string | null }[];
+  sources: { value: number; unit_seen?: string | null; document_id?: string; location?: string }[];
+  conflict_values: { value: number }[] | null;
+  reason: string | null;
   version: number;
 };
 
 const same = (a: number | null, b: number | null) => a !== null && b !== null && Math.abs(a - b) <= 1e-9 * Math.max(1, Math.abs(a), Math.abs(b));
+
+/** What a reviewer sees of a row's sources, in an order that does not matter. */
+const sourceForm = (s: { value: number | null; unit_seen?: string | null; document_id?: string; location?: string }[]) =>
+  (s ?? []).map((x) => JSON.stringify([x.document_id ?? null, x.location ?? null, x.value, x.unit_seen ?? null])).sort();
+const sameList = (a: unknown[], b: unknown[]) => a.length === b.length && a.every((x, i) => x === b[i]);
+const sameValues = (a: { value: number }[] | null, b: { value: number }[] | null) => {
+  if (!a || !b) return a === b;
+  const x = a.map((v) => v.value).sort((p, q) => p - q);
+  const y = b.map((v) => v.value).sort((p, q) => p - q);
+  return x.length === y.length && x.every((v, i) => v === y[i]);
+};
 
 /** Fold every live document's values into the review queue. Never approves anything. */
 export async function reconcileDeal(db: Db, dealId: string) {
@@ -149,7 +162,7 @@ export async function reconcileDeal(db: Db, dealId: string) {
     }));
     const proposals = consolidate(sourced, deal.currency);
     const existing = await tx.query<AssumptionRowDb>(
-      `select id, field_key, item_key, status, value, source_kind, sources, version from assumptions where deal_id = $1 for update`,
+      `select id, field_key, item_key, status, value, source_kind, sources, conflict_values, reason, version from assumptions where deal_id = $1 for update`,
       [dealId],
     );
     const byKey = new Map(existing.map((e) => [`${e.field_key}|${e.item_key}`, e]));
@@ -195,11 +208,16 @@ export async function reconcileDeal(db: Db, dealId: string) {
       if (e.status === "needs_review" || e.status === "conflicting") {
         if (e.source_kind === "document") {
           // The currency reason is this function's own: set it while it holds, and clear it when it no longer does.
+          const nextReason = reason ?? (e.reason?.startsWith("A document states this in ") ? null : e.reason);
+          const conflictNow = p.status === "conflicting" ? conflictFromDocs : null;
+          // Bump the version only when something a reviewer sees changed, or a person holding the old one is refused for nothing.
+          const unchanged =
+            e.status === p.status && (e.value === null ? p.value === null : same(e.value, p.value)) && nextReason === e.reason &&
+            sameValues(e.conflict_values, conflictNow) && sameList(sourceForm(e.sources), sourceForm(sources));
+          if (unchanged) continue;
           await tx.query(
-            `update assumptions set status = $2, value = $3, sources = $4, conflict_values = $5,
-               reason = case when $6::text is not null then $6 when reason like 'A document states this in %' then null else reason end,
-               version = version + 1, updated_at = now() where id = $1`,
-            [e.id, p.status, p.value, JSON.stringify(sources), p.status === "conflicting" ? JSON.stringify(conflictFromDocs) : null, reason],
+            `update assumptions set status = $2, value = $3, sources = $4, conflict_values = $5, reason = $6, version = version + 1, updated_at = now() where id = $1`,
+            [e.id, p.status, p.value, JSON.stringify(sources), conflictNow ? JSON.stringify(conflictNow) : null, nextReason],
           );
           if (e.status !== p.status || !same(e.value, p.value)) await log(e.id, "re-extracted", e.status, p.status, e.value, p.value, "Documents changed");
           changed++;
