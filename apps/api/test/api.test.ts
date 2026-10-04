@@ -224,6 +224,32 @@ describe("controls", () => {
   });
 });
 
+describe("a figure in another currency", () => {
+  test("is kept as a source, never the value, and is settled by entering the amount", async () => {
+    const d = (await call(alice, "POST", `/api/workspaces/${ws}/deals`, { name: "Cross-border Land", assetType: "Multifamily", location: "Windsor", province: "ON" })).json.id;
+    const review = async () => (await call(alice, "GET", `/api/deals/${d}/review`)).json.assumptions.find((a: any) => a.fieldKey === "land_cost");
+    await call(alice, "PUT", `/api/deals/${d}/documents?name=budget.txt`, undefined, new TextEncoder().encode("Budget\nLand cost: US$1,200,000\n"));
+    await work();
+    const land = await review();
+    expect(land).toMatchObject({
+      status: "conflicting",
+      value: null,
+      conflictValues: [],
+      reason: "A document states this in USD; this deal is in CAD. Enter the amount in CAD.",
+    });
+    expect(land.sources[0]).toMatchObject({ value: 1_200_000, raw: "US$1,200,000", unit_seen: "USD" });
+    // The foreign figure is not a documented value, so it cannot be chosen.
+    const pick = await call(alice, "POST", `/api/assumptions/${land.id}/review`, { action: "resolve", value: 1_200_000, version: land.version });
+    expect(pick.status).toBeGreaterThanOrEqual(400);
+    // Entering the amount in the deal's currency settles it, and a later reconcile leaves it settled.
+    const done = await call(alice, "POST", `/api/assumptions/${land.id}/review`, { action: "modify", value: 1_650_000, reason: "Converted at the closing rate", version: land.version });
+    expect(done.status).toBe(200);
+    await call(alice, "PUT", `/api/deals/${d}/documents?name=notes.txt`, undefined, new TextEncoder().encode("Notes\nParking stalls: 40\n"));
+    await work();
+    expect(await review()).toMatchObject({ status: "approved", value: 1_650_000 });
+  });
+});
+
 describe("a new run after a change", () => {
   const selling = async () => (await call(alice, "GET", `/api/deals/${deal}/review`)).json.assumptions.find((a: any) => a.fieldKey === "selling_costs_pct");
   const review = async (action: string) => {

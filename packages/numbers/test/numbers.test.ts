@@ -105,3 +105,26 @@ describe("square metres and pi² (decision 7)", () => {
     }
   });
 });
+
+describe("the currency a figure names", () => {
+  const code = (line: string, f = US) => first(line, f).currencyCode;
+  test("a prefix names its currency; a bare dollar sign names none", () => {
+    expect(["US$1,200", "USD 1,200", "CA$1,200", "C$1,200", "CAD 1,200", "A$1,200", "$1,200"].map((l) => code(l))).toEqual([
+      "USD", "USD", "CAD", "CAD", "CAD", "AUD", null,
+    ]);
+  });
+  test("a suffix names its currency too, including the French forms", () => {
+    expect(["1,200,000 USD", "1,200,000 CAD", "$1.2 million USD"].map((l) => code(l))).toEqual(["USD", "CAD", "USD"]);
+    expect(["1 250 000 $ US", "1 250 000 $ CA", "1 250 000 $ CAN"].map((l) => code(l, UNKNOWN))).toEqual(["USD", "CAD", "CAD"]);
+  });
+  test("a suffix makes the figure money, with its raw text and per-unit rule intact", () => {
+    const t = first("Land cost: 1 250 000 $ US", UNKNOWN);
+    expect(t).toMatchObject({ value: 1_250_000, currency: true, unit: "$", raw: "1 250 000 $ US" });
+    expect(first("Rent: 2,100 USD/mo", US)).toMatchObject({ value: 2_100, unit: "$/mo", currencyCode: "USD" });
+    expect(first("Land cost: US$1,200,000", US)).toMatchObject({ value: 1_200_000, currency: true, currencyCode: "USD" });
+  });
+  test("a figure with no mark names no currency", () => {
+    expect(first("Units: 12", US)).toMatchObject({ currency: false, currencyCode: null });
+    expect(code("Land cost: 1,200,000")).toBeNull();
+  });
+});

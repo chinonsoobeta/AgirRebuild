@@ -143,3 +143,63 @@ describe("square metres become square feet at entry (decision 7)", () => {
     expect(c).toMatchObject({ itemKey: "Commerce", value: 9_400, unitSeen: "sf" });
   });
 });
+
+describe("a figure in another currency is never the value (decision 7)", () => {
+  const doc = (lines: string[]): NormalizedDocument => ({
+    kind: "pdf",
+    lines: lines.map((text, i) => ({ text, location: `page 1, line ${i + 1}` })),
+    tables: [],
+    pageCount: 1,
+    needsOcr: false,
+    fullText: lines.join("\n"),
+  });
+  const from = (name: string, lines: string[]): SourcedCandidate[] =>
+    extractCandidates(doc(lines)).candidates.map((c) => ({ ...c, documentId: name, documentName: name }));
+  const land = (ps: ReturnType<typeof consolidate>) => ps.find((p) => p.fieldKey === "land_cost")!;
+
+  test("the candidate records the currency it was stated in", () => {
+    expect(from("a", ["Land cost: US$1,200,000"])[0]).toMatchObject({ fieldKey: "land_cost", value: 1_200_000, unitSeen: "USD" });
+    expect(from("a", ["Land cost: $1,200,000"])[0]).toMatchObject({ unitSeen: "$" });
+  });
+  test("a USD figure in a CAD deal conflicts, stays in sources, and offers no value to choose", () => {
+    const p = land(consolidate(from("Budget", ["Land cost: US$1,200,000"]), "CAD"));
+    expect(p).toMatchObject({
+      status: "conflicting",
+      value: null,
+      values: [],
+      reason: "A document states this in USD; this deal is in CAD. Enter the amount in CAD.",
+    });
+    expect(p.sources.map((s) => s.value)).toEqual([1_200_000]);
+  });
+  test("with a CAD figure beside it, only the CAD figure is offered", () => {
+    const p = land(consolidate([...from("Budget", ["Land cost: US$1,200,000"]), ...from("Appraisal", ["Land cost: $1,650,000"])], "CAD"));
+    expect(p.status).toBe("conflicting");
+    expect(p.values.map((v) => v.value)).toEqual([1_650_000]);
+    expect(p.sources.map((s) => s.value)).toEqual([1_650_000, 1_200_000]);
+  });
+  test("a CAD-marked or unmarked figure behaves as before, and so does an unknown deal currency", () => {
+    for (const line of ["Land cost: CA$1,200,000", "Land cost: $1,200,000", "Land cost: 1,200,000 CAD"]) {
+      expect(land(consolidate(from("a", [line]), "CAD"))).toMatchObject({ status: "needs_review", value: 1_200_000, reason: null });
+    }
+    expect(land(consolidate(from("a", ["Land cost: US$1,200,000"]), null))).toMatchObject({ status: "needs_review", value: 1_200_000 });
+    expect(land(consolidate(from("a", ["Land cost: US$1,200,000"])))).toMatchObject({ status: "needs_review", value: 1_200_000 });
+    expect(land(consolidate(from("a", ["Land cost: US$1,200,000"]), "USD"))).toMatchObject({ status: "needs_review", value: 1_200_000 });
+  });
+  test("the same amount in two currencies in one document is two candidates, not one", () => {
+    expect(from("a", ["Land cost: US$1,200,000", "Land cost: C$1,200,000"])).toHaveLength(2);
+  });
+  test("a budget table never adds a USD line to a CAD one", () => {
+    const table: Table = {
+      name: "Budget",
+      rows: [
+        [{ text: "Line item", ref: "A1" }, { text: "Amount", ref: "B1" }],
+        [{ text: "Land acquisition", ref: "A2" }, { text: "$1,000,000", ref: "B2" }],
+        [{ text: "Land survey and legal", ref: "A3" }, { text: "US$50,000", ref: "B3" }],
+      ],
+    } as Table;
+    const r = extractCandidates({ ...doc([]), tables: [table] });
+    expect(r.candidates.map((c) => [c.fieldKey, c.value, c.unitSeen]).sort()).toEqual(
+      [["land_cost", 1_000_000, "$"], ["land_cost", 50_000, "USD"]].sort(),
+    );
+  });
+});
