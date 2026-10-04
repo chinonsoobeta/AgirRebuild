@@ -9,7 +9,8 @@ work it describes.
 | Command | Result | Verified |
 |---|---|---|
 | `npm install` | Node 22 (`engines` allows 22 to 24); `.npmrc` sets `legacy-peer-deps` | 2026-10-01 |
-| `npm run gate -- --tier=release` | Both typechecks, 184 tests in 9 files (119 on `main`), web build | 2026-10-03, `task/10-french-documents` (the stack 05, 07, 06, 08, 09, 10) |
+| `npm run gate -- --tier=release` | Both typechecks, 198 tests in 9 files (119 on `main`), web build | 2026-10-03, `task/12-reading-gaps` (the stack 05, 07, 06, 08, 09, 10, 11, 12) |
+| CI replay: fresh `git clone`, `npm ci`, then `VITEST_MAX_WORKERS=2 npm run gate -- --tier=pr` and `--tier=release` | `npm ci` accepts the lockfile; both tiers pass, 198 tests; swap unchanged | 2026-10-03, `task/12-reading-gaps` |
 | `VITEST_MAX_WORKERS=2 npm run gate -- --tier=release` | The same gate with two test workers: peak memory about 1 GB, no swap | 2026-10-01 |
 | `AGIR_DATA_DIR=<empty folder> PORT=8791 npm start` | Builds the web app, applies `0001` to `0007`, seeds six deals, serves on that port. An empty data folder leaves `.data/` untouched | 2026-10-03, `task/08-plain-language` |
 
@@ -51,7 +52,9 @@ being built now. Steps 4 to 6 wait on the people-owned items listed below.
   (and Bergendal's figures carry no mark at all), including a "$" in an Excel format. A currency named in a
   table's column header ("Amount (USD)") or in a sheet title is not read; only the figure, its own label and
   the cell's number format are. Other currencies than CAD, USD and AUD are not recognised.
-- **CI has never run.** `.github/workflows/gate.yml` is written but unexercised until the repo is pushed.
+- **CI has not run on GitHub.** `.github/workflows/gate.yml`'s steps were replayed locally from a fresh clone
+  (see Verified commands), but the workflow itself, the Chromium install on the runner and the trigger rules
+  are unexercised until the repo is pushed.
 - **French documents are read only where a label matches an alias.** Aliases and table headers are fixed
   word orders; a phrasing no alias lists is not mapped, and a figure the label's parenthesis qualifies
   ("Intérêts seulement (mezzanine)") is read from the label without the parenthesis, so it can fall to the
