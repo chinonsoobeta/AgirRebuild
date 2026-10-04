@@ -3,6 +3,7 @@ import { useRef, useState } from "react";
 import { api, type DocumentRow } from "../api";
 import { canEdit, DealHeader, ErrorText, useDeal, useSession } from "../components/ui";
 import * as I from "../components/icons";
+import { QuickStart } from "../components/QuickStart";
 import { useI18n, type I18n } from "../i18n";
 
 const SEGMENTS: Record<string, [string, string, string]> = {
@@ -103,6 +104,7 @@ export function Documents({ dealId }: { dealId: string }) {
               <input ref={input} id="doc-upload" type="file" multiple accept=".pdf,.xlsx,.csv,.docx,.txt" className="sr-only" onChange={(e) => pick(e.target.files)} />
             </div>
           )}
+          {editable && docs.data?.length === 0 && <QuickStart dealId={dealId} />}
           <ErrorText error={upload.error ?? act.error} />
           {notes.map((n) => <p key={n} className="small muted">{n}</p>)}
           <table className="tbl">
