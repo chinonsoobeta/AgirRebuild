@@ -186,7 +186,7 @@ describe("every sentence the engine's checks can produce has a French rendering"
     ["loan rate", withLoan("senior", { ratePct: -1 })],
     ["loan amortization", withLoan("senior", { amortYears: 51 })],
     ["loan interest-only", withLoan("senior", { ioMonths: 601 })],
-    ["refinance month", (d) => { d.holdYears = 5; d.refinance = { month: 0, amount: 1, ratePct: 5, amortYears: 30, ioMonths: 0 }; }],
+    ["refinance month", (d) => { d.holdYears = 5; d.refinance = { month: 100, amount: 1, ratePct: 5, amortYears: 30, ioMonths: 0 }; }],
     ["refinance amount or LTV", (d) => { d.holdYears = 5; d.refinance = { month: 12, ratePct: 5, amortYears: 30, ioMonths: 0 }; }],
     ["LP share", (d) => { d.waterfall = { lpSharePct: 0, preferredReturnPct: 8, gpPromotePct: 20 }; }],
     ["preferred return", (d) => { d.waterfall = { lpSharePct: 90, preferredReturnPct: -1, gpPromotePct: 20 }; }],
@@ -228,8 +228,7 @@ describe("the review card in French", () => {
   const fr = build("fr", () => {});
   const en = build("en", () => {});
   const row = (fieldKey: string, itemKey: string | null, valueNumeric: number) => ({ fieldKey, itemKey, status: "approved" as const, valueNumeric });
-  // L.item arrives with the implementation.
-  const show = (i: ReturnType<typeof build>, item: ReadinessItem): string => (i.L as unknown as { item: (x: ReadinessItem) => string }).item(item);
+  const show = (i: ReturnType<typeof build>, item: ReadinessItem): string => i.L.item(item);
 
   it("shows a missing rent with the French field label and the item in parentheses", () => {
     const { readiness } = assemble([row("unit_count", "Studio", 4)]);

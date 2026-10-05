@@ -4,7 +4,7 @@
 // the language: 51,962,556 and 6.45% in English, 51 962 556 $ and 6,45 % in French.
 
 import { createContext, useContext, useMemo, useState, type ReactNode } from "react";
-import { CURRENCY_NAMES, FIELD_BY_KEY, METRIC_BY_KEY, placeLabel, type Currency } from "@agir/contracts";
+import { CURRENCY_NAMES, FIELD_BY_KEY, METRIC_BY_KEY, placeLabel, type Currency, type ReadinessItem } from "@agir/contracts";
 
 export type Lang = "en" | "fr";
 
@@ -1070,6 +1070,11 @@ const ASSETS: Record<string, string> = {
   Hospitality: "Hôtellerie", "Self storage": "Entreposage libre-service", Other: "Autre",
 };
 
+const BUDGET_LINES: Record<string, string> = { land: "terrain", hard: "coûts directs", soft: "coûts indirects", contingency: "provision pour imprévus", other: "autres coûts" };
+const LOANS: Record<string, string> = { "senior loan": "prêt principal", "mezzanine loan": "prêt mezzanine", "refinance loan": "prêt de refinancement" };
+const frNum = (x: string) => Number(x).toLocaleString("fr-CA");
+const frPct = (x: string) => `${frNum(x)}\u00a0%`;
+
 // ---- Messages produced by the engine and the API, in French ----------------------------------
 const FR_REASONS: [RegExp, string | ((m: RegExpMatchArray) => string)][] = [
   [/^The inputs do not give this a meaningful value\.$/, "Les données ne permettent pas d'en tirer une valeur significative."],
@@ -1157,6 +1162,36 @@ const FR_REASONS: [RegExp, string | ((m: RegExpMatchArray) => string)][] = [
   [/^Choose two different drivers\.$/, "Choisissez deux hypothèses différentes."],
   [/^The approved inputs changed while the run was being computed\. Run it again\.$/, "Les données approuvées ont changé pendant le calcul. Relancez l'analyse."],
   [/^Give the committee's reasoning/, "Indiquez les motifs du comité (au moins 10 caractères)"],
+  // The engine's own checks (validateInput and readiness). Numbers in the sentence are written the French way.
+  [/^budget (land|hard|soft|contingency|other) must be a number of at least 0$/, (m) => `Le budget (${BUDGET_LINES[m[1]!]}) doit être un nombre d'au moins 0`],
+  [/^at least one revenue component is required$/, "Au moins une composante de revenus est requise"],
+  [/^revenue component "(.+)" needs a unit count above 0$/, (m) => `La composante de revenus « ${m[1]} » exige un nombre de logements supérieur à 0`],
+  [/^revenue component "(.+)" needs a monthly rent$/, (m) => `La composante de revenus « ${m[1]} » exige un loyer mensuel`],
+  [/^revenue component "(.+)" needs a rentable area above 0$/, (m) => `La composante de revenus « ${m[1]} » exige une superficie locative supérieure à 0`],
+  [/^revenue component "(.+)" needs a rent per SF$/, (m) => `La composante de revenus « ${m[1]} » exige un loyer par pi²`],
+  [/^revenue component "(.+)" occupancy must be between (\d+) and (\d+)$/, (m) => `L'occupation de la composante de revenus « ${m[1]} » doit se situer entre ${frPct(m[2]!)} et ${frPct(m[3]!)}`],
+  [/^construction months must be a whole number from (\d+) to (\d+)$/, (m) => `La durée de construction doit être un nombre entier de mois, de ${frNum(m[1]!)} à ${frNum(m[2]!)}`],
+  [/^lease-up months must be a whole number from (\d+) to (\d+)$/, (m) => `La période de location doit être un nombre entier de mois, de ${frNum(m[1]!)} à ${frNum(m[2]!)}`],
+  [/^hold years must be a whole number from (\d+) to (\d+)$/, (m) => `La période de détention doit être un nombre entier d'années, de ${frNum(m[1]!)} à ${frNum(m[2]!)}`],
+  [/^stabilized occupancy must be between (\d+) and (\d+)$/, (m) => `L'occupation stabilisée doit se situer entre ${frPct(m[1]!)} et ${frPct(m[2]!)}`],
+  [/^an expense ratio or fixed operating costs are required$/, "Un ratio des charges d'exploitation ou des charges d'exploitation fixes est requis"],
+  [/^give either an expense ratio or fixed operating costs, not both$/, "Indiquez soit un ratio des charges d'exploitation, soit des charges d'exploitation fixes, pas les deux"],
+  [/^exit cap rate must be above (\d+)$/, (m) => `Le taux de capitalisation à la sortie doit être supérieur à ${frNum(m[1]!)}`],
+  [/^selling costs must be from (\d+) to under (\d+) percent$/, (m) => `Les frais de vente doivent être de ${frPct(m[1]!)} à moins de ${frPct(m[2]!)}`],
+  [/^(senior loan|mezzanine loan|refinance loan) amount must be at least (\d+)$/, (m) => `Le montant du ${LOANS[m[1]!]} doit être d'au moins ${frNum(m[2]!)}`],
+  [/^(senior loan|mezzanine loan|refinance loan) rate must be at least (\d+)$/, (m) => `Le taux du ${LOANS[m[1]!]} doit être d'au moins ${frPct(m[2]!)}`],
+  [/^(senior loan|mezzanine loan|refinance loan) amortization must be (\d+) to (\d+) years$/, (m) => `L'amortissement du ${LOANS[m[1]!]} doit être de ${frNum(m[2]!)} à ${frNum(m[3]!)} ans`],
+  [/^(senior loan|mezzanine loan|refinance loan) interest-only months must be (\d+) to (\d+)$/, (m) => `La période d'intérêts seulement du ${LOANS[m[1]!]} doit être de ${frNum(m[2]!)} à ${frNum(m[3]!)} mois`],
+  [/^refinance month must fall from stabilization \(month (-?\d+)\) to before the sale \(month (-?\d+)\)$/, (m) => `Le mois du refinancement doit tomber de la stabilisation (mois ${frNum(m[1]!)}) jusqu'avant la vente (mois ${frNum(m[2]!)})`],
+  [/^give the refinance either a loan amount or a loan-to-value, not both or neither$/, "Pour le refinancement, indiquez soit un montant de prêt, soit un ratio prêt-valeur\u00a0: l'un des deux, pas les deux ni aucun"],
+  [/^LP share must be above (\d+) and below (\d+)$/, (m) => `La part des commanditaires doit être supérieure à ${frPct(m[1]!)} et inférieure à ${frPct(m[2]!)}`],
+  [/^preferred return must be at least (\d+)$/, (m) => `Le rendement privilégié doit être d'au moins ${frPct(m[1]!)}`],
+  [/^GP promote must be from (\d+) to (\d+)$/, (m) => `L'intéressement du commandité doit être de ${frPct(m[1]!)} à ${frPct(m[2]!)}`],
+  // The reasons readiness gives for a value that cannot be used.
+  [/^not a number$/, "n'est pas un nombre"],
+  [/^below the minimum of (-?[\d.]+)$/, (m) => `inférieur au minimum de ${frNum(m[1]!)}`],
+  [/^above the maximum of (-?[\d.]+)$/, (m) => `supérieur au maximum de ${frNum(m[1]!)}`],
+  [/^must be a whole number$/, "doit être un nombre entier"],
   [/^(.+) (cannot be below|cannot be above|must be a whole number|needs a number)(.*)$/, (m) => `${m[1]} : ${m[2] === "cannot be below" ? "ne peut pas être inférieur à" : m[2] === "cannot be above" ? "ne peut pas être supérieur à" : m[2] === "must be a whole number" ? "doit être un nombre entier" : "exige un nombre"}${m[3]}`],
 ];
 
@@ -1256,6 +1291,14 @@ export function build(lang: Lang, setLang: (l: Lang) => void) {
     ask: (key: string) => (ASK[key]?.[idx] ?? [FIELD_BY_KEY.get(key)?.label ?? key]).map((x) => plainTerm(lang, x ?? "")),
     help: (key: string, en: string | null) => { const h = lang === "fr" ? FR_HELP[key] ?? en : en; return h && plainTerm(lang, h); },
     absent: (key: string) => { const en = FIELD_BY_KEY.get(key)?.absentMeans ?? ""; return plainTerm(lang, lang === "fr" ? FR_ABSENT[key] ?? en : en); },
+    /** One readiness item as a line of the review card: the field's name (with the item), then the reason when there is one; the engine's own sentence when it is about no single field. */
+    item: (i: ReadinessItem) => {
+      const sentence = (x: string) => { const o = msg(x); return o.charAt(0).toUpperCase() + o.slice(1); };
+      if (i.detail) return lang === "fr" ? `${L.field(i.fieldKey, i.itemKey)}\u00a0: ${msg(i.detail)}` : `${i.label}: ${i.detail}`;
+      if (lang === "en") return i.label.charAt(0).toUpperCase() + i.label.slice(1);
+      if (i.fieldKey === "unit_count" && !i.itemKey) return t("review.revenueProgram");
+      return translateMessage(i.label) !== i.label || i.fieldKey === "input" ? sentence(i.label) : L.field(i.fieldKey, i.itemKey);
+    },
     group: (g: string) => GROUPS[g]?.[idx] ?? g,
     metric: (key: string) => plainTerm(lang, (lang === "fr" ? FR_METRICS[key]?.[0] : METRIC_BY_KEY.get(key)?.label) ?? key),
     formula: (key: string) => (lang === "fr" ? FR_METRICS[key]?.[1] : METRIC_BY_KEY.get(key)?.formula) ?? "",

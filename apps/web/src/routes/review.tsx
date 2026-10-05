@@ -255,7 +255,7 @@ export function Review({ dealId }: { dealId: string }) {
               <div className="row"><span style={{ fontSize: 17, fontWeight: 600 }}>{t("review.impossible")}</span><StatusTag tone="stop" glyph={I.Conflict}>{t("review.b.impossible", { n: r.readiness.impossible.length })}</StatusTag></div>
               <ul className="stack" style={{ gap: 8, margin: 0, paddingLeft: 20 }}>
                 {r.readiness.impossible.map((i, k) => (
-                  <li key={`${i.fieldKey}-${i.itemKey ?? ""}-${k}`}>{i.detail ? `${i.label}: ${i.detail}` : i.label.charAt(0).toUpperCase() + i.label.slice(1)}</li>
+                  <li key={`${i.fieldKey}-${i.itemKey ?? ""}-${k}`}>{L.item(i)}</li>
                 ))}
               </ul>
             </div>
