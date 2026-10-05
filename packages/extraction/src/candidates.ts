@@ -1,7 +1,7 @@
 import { FIELD_BY_KEY, OUTPUT_LIKE_PHRASES } from "@agir/contracts";
 import { detectFormat, normalizeText, SF_PER_M2, tokenize, unitTypesIn, type DocumentFormat, type NumberToken } from "@agir/numbers";
 import type { Cell, NormalizedDocument, Table } from "./document.ts";
-import { canonicalItem, currencyOf, hasPhrase, mapToken, normalizeLabel, rankScope, scopeIn, withCurrency, type MapOptions, type Mapped, type Scope } from "./mapping.ts";
+import { canonicalItem, currencyOf, hasPhrase, loanNameOnly, mapToken, normalizeLabel, rankScope, scopeIn, withCurrency, type MapOptions, type Mapped, type Scope } from "./mapping.ts";
 
 /** One value found in one document, with where it came from and why it was (or was not) mapped. */
 export type Candidate = {
@@ -78,9 +78,30 @@ function floating(text: string, tokens: NumberToken[]): { spreads: NumberToken[]
 
 type Base = { raw: string; location: string; context: string; rule: string };
 
+/** The documents that are a builder's quote: there, a Total is the hard cost. */
+const quoteDocs = new WeakSet<ExtractionResult>();
+const QUOTE_WORD_RE = /\b(quote|quotation|estimate|tender|bid|soumission|devis)\b/;
+const BUILDER_WORD_RE = /\b(builders?|contractors?|contracting|entrepreneurs?|constructeurs?|constructions?|general contractor)\b/;
+
+/** A document whose title or first lines call it a quote, estimate, tender, bid, soumission or devis, and name a builder or contractor. */
+function isBuilderQuote(doc: NormalizedDocument): boolean {
+  const head = [...doc.lines.slice(0, 6).map((l) => l.text), ...doc.tables.flatMap((t) => [t.name, ...t.rows.slice(0, 2).flatMap((r) => r.map((c) => c.text))])].join(" ");
+  const f = fold(head);
+  return QUOTE_WORD_RE.test(f) && BUILDER_WORD_RE.test(f);
+}
+
+/** The revision a text names: "Rev B" is 2, "Rev. 3" is 3, "revised" or "révisée" alone is a half; 0 when it names none. */
+function revisionOf(text: string): number {
+  const f = fold(text);
+  const m = /\brev(?:ision)?\.?\s*([a-z]|\d{1,2})\b/.exec(f);
+  if (m) return /\d/.test(m[1]!) ? Number(m[1]) : m[1]!.charCodeAt(0) - 96;
+  return /\b(revised|revisee?|revise)\b/.test(f) ? 0.5 : 0;
+}
+const SUPERSEDED_NOTE = "Superseded by a later revision of this quote";
+
 function record(result: ExtractionResult, mapped: Mapped, token: NumberToken, base: Base) {
   if (mapped.kind === "field") {
-    result.candidates.push({ ...base, fieldKey: mapped.fieldKey, itemKey: mapped.itemKey, value: mapped.value, unitSeen: mapped.unitSeen });
+    result.candidates.push({ ...base, rule: mapped.quote ? base.rule.replace(/:[^:]*$/, ":quote-total") : base.rule, fieldKey: mapped.fieldKey, itemKey: mapped.itemKey, value: mapped.value, unitSeen: mapped.unitSeen });
   } else {
     result.other.push({
       ...base,
@@ -94,7 +115,7 @@ function record(result: ExtractionResult, mapped: Mapped, token: NumberToken, ba
 }
 
 function push(result: ExtractionResult, label: string, token: NumberToken, location: string, context: string, rule: string, opts: MapOptions = {}) {
-  record(result, mapToken(label, token, opts), token, { raw: token.raw, location, context: context.slice(0, 240), rule });
+  record(result, mapToken(label, token, quoteDocs.has(result) ? { quote: true, ...opts } : opts), token, { raw: token.raw, location, context: context.slice(0, 240), rule });
 }
 
 /** The [start, end) of every balanced "( ... )" in a line. */
@@ -197,7 +218,7 @@ function paragraphs(doc: NormalizedDocument, skip: Set<number>, scopes: Scope[])
   return out;
 }
 
-const ABBREVIATIONS = new Set(["ltd", "inc", "approx", "st", "ste", "no", "corp", "co", "cie", "ave", "dr", "mr", "mrs", "ms", "mme", "vs", "etc", "est", "apt", "blvd"]);
+const ABBREVIATIONS = new Set(["ltd", "inc", "approx", "st", "ste", "no", "corp", "co", "cie", "ave", "dr", "mr", "mrs", "ms", "mme", "vs", "etc", "est", "apt", "blvd", "rev", "rév"]);
 
 /** Split on . ! ? ; followed by a space and an upper-case letter or the end, never after a one-letter initial or an abbreviation. */
 function sentences(text: string): { text: string; start: number }[] {
@@ -386,8 +407,22 @@ function totalOf(text: string, t: NumberToken, tokens: NumberToken[]): NumberTok
 }
 
 /** One sentence: "Label: value" gives the label to the numbers after the colon; anything else is prose. */
+// A capitalised label (one to five words, title case or capitals) ending in a full stop and then a number, or a label and a run of three or more dots.
+const CAP_WORD = String.raw`\p{Lu}[\p{L}'’&/-]*`;
+const FULL_STOP_LABEL_RE = new RegExp(String.raw`^(${CAP_WORD}(?:\s+(?:${CAP_WORD}|of|and|de|du|des|et|la|le|les)){0,4})\.\s+(?=[-−(]?[$€£]?\s?\d)`, "u");
+const LEADER_RE = /^(.*?\p{L}[^.]*?)\s*(?:\.\s*){3,}(?=\S)/u;
+
+/** "Amount. $3,400,000" and "Reserve ..... $190,000" are written as "label: value", the same length so every position still holds. */
+function labelValueForm(text: string): string {
+  const stop = FULL_STOP_LABEL_RE.exec(text);
+  if (stop && stop[1]!.split(/\s+/).length <= 5 && !ABBREVIATIONS.has(/(\p{L}+)$/u.exec(stop[1]!)?.[1]?.toLowerCase() ?? "")) return stop[1]! + ":" + text.slice(stop[1]!.length + 1);
+  const leader = LEADER_RE.exec(text);
+  return leader ? leader[1]! + ":" + " ".repeat(leader[0].length - leader[1]!.length - 1) + text.slice(leader[0].length) : text;
+}
+
 function readSentence(sentence: { text: string; start: number }, para0: Paragraph, result: ExtractionResult) {
-  const text = normalizeText(sentence.text);
+  const text = labelValueForm(normalizeText(sentence.text));
+  const quote = quoteDocs.has(result);
   // A short label that names a loan ("Take-out: ...") scopes every number on its line, the prose after the colon too; the next line is back under the document's scope.
   const label = text.slice(0, Math.max(text.indexOf(":"), 0));
   const inline = label.split(/\s+/).length <= 8 ? scopeIn(label, false) : null;
@@ -479,14 +514,15 @@ function readSentence(sentence: { text: string; start: number }, para0: Paragrap
     // A label that names nothing for any number ("Financing: a loan of ...") is an introduction: what follows is prose.
     const scope = para.scope;
     // A label for a unit field never names an item unless it is a unit type; the clause after the colon is then read as prose, its own unit types naming the items.
-    const first = tokens.map((t) => mapToken(label, t, { scope })).find((m) => m.kind === "field");
+    const opt = (t: NumberToken): MapOptions => ({ scope, quote, after: text.slice(t.end), gap: text.slice(colon + 1, t.start) });
+    const first = tokens.map((t) => mapToken(label, t, opt(t))).find((m) => m.kind === "field");
     const unitField = first?.kind === "field" && first.itemKey !== null && UNIT_FIELDS.has(first.fieldKey);
     const labelTypes = unitTypesIn(label);
     if (unitField && labelTypes.length <= 1 && (labelTypes.length === 1 || unitTypesIn(text.slice(colon + 1)).length > 0)) {
       proseFrom = colon + 1;
       lead = labelTypes[0] ?? null;
       bareCount = true;
-    } else if (tokens.every((t) => mapToken(label, t, { scope }).kind === "unmapped")) proseFrom = colon + 1;
+    } else if (tokens.every((t) => mapToken(label, t, opt(t)).kind === "unmapped")) proseFrom = colon + 1;
     else {
       let used = false;
       let refusedPerUnit = false;
@@ -500,7 +536,7 @@ function readSentence(sentence: { text: string; start: number }, para0: Paragrap
         // A dollar figure after "X% of <field>" is a share of that field, never the field.
         // The base never labels it; the line's own label does, when that names a dollar field.
         if (isMoney(t) && shares.some(([, end]) => t.start >= end)) {
-          const own = used ? null : mapToken(label, t, { scope });
+          const own = used ? null : mapToken(label, t, opt(t));
           if (own?.kind === "field" && FIELD_BY_KEY.get(own.fieldKey)?.unit === "$") {
             record(result, own, t, { raw: t.raw, location: locationOf(t.start), context: context.slice(0, 240), rule: "line:label-value" });
             used = true;
@@ -511,7 +547,7 @@ function readSentence(sentence: { text: string; start: number }, para0: Paragrap
           other(t, "line:label-value", PER_UNIT_REFUSED_NOTE);
           continue;
         }
-        let mapped = used ? { kind: "unmapped" as const } : mapToken(label, t, { scope, ahead: text.slice(colon + 1, t.start) });
+        let mapped = used ? { kind: "unmapped" as const } : mapToken(label, t, { ...opt(t), ahead: text.slice(colon + 1, t.start) });
         if (mapped.kind === "field" && PER_UNIT_FIELDS.has(mapped.fieldKey) && perUnit(text, t)) {
           other(t, "line:label-value", PER_UNIT_NOTE);
           refusedPerUnit = true;
@@ -535,6 +571,9 @@ function readSentence(sentence: { text: string; start: number }, para0: Paragrap
   let from = proseFrom;
   // A per-unit price whose total the sentence states: the total is read with the price's label.
   const totalLabels = new Map<NumberToken, string>();
+  // The loan a figure's label named by itself ("mezz $650k"): a percentage right after it, with no loan of its own, is that loan's rate.
+  let carry: { scope: Scope; at: number } | null = null;
+  const RATE_WORD: Record<Scope, string> = { senior: "senior rate", mezzanine: "mezzanine rate", refinance: "take-out rate" };
   tokens.forEach((t, i) => {
     const where = locationOf(t.start);
     if (ranged.has(i)) {
@@ -545,8 +584,13 @@ function readSentence(sentence: { text: string; start: number }, para0: Paragrap
     // The base of a share ("of hard costs" after "4%") names nothing for the figures after it.
     const afterShare = isMoney(t) && shares.some(([, end]) => t.start >= end);
     const label = shares.reduce((l, [a, b]) => (b > from && a < t.start ? l.slice(0, Math.max(a - from, 0)) + " ".repeat(Math.min(b, t.start) - Math.max(a, from)) + l.slice(Math.min(b, t.start) - from) : l), text.slice(from, t.start));
-    const opts: MapOptions = { prose: true, scope: para.scope, context: text };
+    let opts: MapOptions = { prose: true, scope: para.scope, context: text, quote, after: text.slice(t.end) };
     let usedLabel = totalLabels.get(t) ?? label;
+    if (carry?.at === i - 1 && t.unit === "%" && !scopeIn(label, false)) {
+      opts = { ...opts, scope: carry.scope };
+      if (normalizeLabel(label).label.replace(/\b(at|a|au|aux|avec|with|de|du|of|for|pour|bearing|carrying|portant)\b/g, "").trim() === "") usedLabel = RATE_WORD[carry.scope];
+    }
+    const named = !totalLabels.has(t) ? loanNameOnly(label) : null;
     let mapped = mapToken(usedLabel, t, opts);
     from = t.end;
     if (afterShare && mapped.kind !== "field") {
@@ -582,6 +626,7 @@ function readSentence(sentence: { text: string; start: number }, para0: Paragrap
       if (total) totalLabels.set(total, usedLabel);
       return;
     }
+    carry = named && mapped.kind === "field" && isMoney(t) ? { scope: named, at: i } : null;
     record(result, mapped, t, { raw: t.raw, location: where, context, rule: "line:prose" });
   });
 }
@@ -860,7 +905,8 @@ function fromBudget(table: Table, headerRow: number, roles: { label: number; amo
     if (isTotal) segment = [];
     const labelText = isTotal ? labelCell.text.replace(TOTAL_RE, "").trim() || labelCell.text : labelCell.text;
     const moneyToken: NumberToken = { ...t, currency: true, unit: t.unit ?? "$" };
-    const mapped = mapToken(isTotal && /development|project/i.test(labelCell.text) ? labelCell.text : labelText, moneyToken, { scope, budget: true });
+    const quoted = quoteDocs.has(result) ? mapToken(labelCell.text, moneyToken, { scope, budget: true, quote: true }) : null;
+    const mapped = quoted?.kind === "field" && quoted.quote ? quoted : mapToken(isTotal && /development|project/i.test(labelCell.text) ? labelCell.text : labelText, moneyToken, { scope, budget: true });
     if (mapped.kind !== "field" || FIELD_BY_KEY.get(mapped.fieldKey)?.unit !== "$") {
       const shown: Candidate = {
         fieldKey: null,
@@ -885,7 +931,7 @@ function fromBudget(table: Table, headerRow: number, roles: { label: number; amo
       unitSeen: withCurrency("$", t.currencyCode ?? currencyOf(mapped.unitSeen)),
       location: amountCell.ref,
       context: `${table.name}: ${labelCell.text}`,
-      rule: isTotal ? "table:budget-total" : "table:budget",
+      rule: mapped.quote ? "table:quote-total" : isTotal ? "table:budget-total" : "table:budget",
     };
     const add = (value: number, unitSeen: string, ref: string, label: string) => {
       const ck = `${mapped.fieldKey}|${unitSeen}`;
@@ -1003,7 +1049,7 @@ function fromTable(table: Table, result: ExtractionResult, notes: string[] = [],
           const t = cellToken(cell, result.format);
           if (!t) continue;
           const base = { raw: t.raw, location: cell.ref, context: `${table.name}: ${labelCell.text} ${cell.text}`.slice(0, 240), rule: "table:label-value" };
-          const mapped = mapToken(labelCell.text, t, { scope: s.scope, ahead: cell.text.slice(0, t.start) });
+          const mapped = mapToken(labelCell.text, t, { scope: s.scope, ahead: cell.text.slice(0, t.start), after: cell.text.slice(t.end), quote: quoteDocs.has(result) });
           const label = fold(labelCell.text);
           // Under a rent roll, a row that restates the roll (a count, an area, a rent, an occupancy) is a summary, not an assumption.
           if (rollSeen && mapped.kind === "field" && ROLL_FIELDS.has(mapped.fieldKey) && !STABILIZED_LABEL_RE.test(label)) {
@@ -1138,6 +1184,7 @@ function textTables(doc: NormalizedDocument, format: DocumentFormat, scopes: Sco
 /** Every candidate value in one document. Deterministic: no model is consulted. */
 export function extractCandidates(doc: NormalizedDocument): ExtractionResult {
   const result: ExtractionResult = { format: detectFormat(doc.fullText), candidates: [], other: [], notes: [...(doc.notes ?? [])] };
+  if (isBuilderQuote(doc)) quoteDocs.add(result);
   const scopes = lineScopes(doc, result.format, rankIn(doc));
   const text = textTables(doc, result.format, scopes);
   fromLines(doc, result, text.used, scopes);
@@ -1146,8 +1193,23 @@ export function extractCandidates(doc: NormalizedDocument): ExtractionResult {
   const notes = doc.kind === "docx" ? doc.lines.map((l) => l.text) : [];
   // A Word table is under the heading above it: the scope in force after the lines that come before it.
   for (const t of doc.tables) fromTable(t, result, notes, (t.at ? scopes[t.at - 1] : undefined) ?? "senior");
-  // A per-suite roll gives way to a type summary in the same document.
   const aside = (c: Candidate, note: string) => result.other.push({ ...c, fieldKey: null, itemKey: null, note });
+  // A later revision of a builder's quote supersedes the earlier ones; a revision heading on its own line names the revision of the lines under it.
+  const heading = new Map<string, number>();
+  let rev = 0;
+  for (const line of doc.lines) {
+    const r = revisionOf(line.text);
+    if (r > 0 && !tokenize(line.text, result.format).some((t) => t.currency || t.unit === "%")) rev = r;
+    heading.set(line.location, rev);
+  }
+  const quotes = result.candidates.filter((c) => c.rule.endsWith(":quote-total"));
+  const rank = (c: Candidate) => revisionOf(c.context) || heading.get(c.location) || 0;
+  const latest = Math.max(0, ...quotes.map(rank));
+  if (quotes.length > 1 && latest > 0) {
+    for (const c of quotes.filter((q) => rank(q) < latest)) aside(c, SUPERSEDED_NOTE);
+    result.candidates = result.candidates.filter((c) => !c.rule.endsWith(":quote-total") || rank(c) >= latest);
+  }
+  // A per-suite roll gives way to a type summary in the same document.
   const typed = (c: Candidate) => c.itemKey !== null && c.itemKey !== "All units";
   if (result.candidates.some((c) => typed(c) && c.rule !== SUITE_RULE)) {
     result.candidates.filter((c) => c.rule === SUITE_RULE).forEach((c) => aside(c, "This document gives a summary by type; the per-suite roll is not read"));

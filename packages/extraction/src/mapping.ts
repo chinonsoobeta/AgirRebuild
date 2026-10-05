@@ -9,7 +9,7 @@ import { codeOf, SF_PER_M2, wholeUnitType, type CurrencyCode, type NumberToken }
 export type LabelUnit = "$" | "%" | "months" | "years" | "sf" | "m2" | "x" | null;
 
 export type Mapped =
-  | { kind: "field"; fieldKey: string; itemKey: string | null; value: number; unitSeen: string }
+  | { kind: "field"; fieldKey: string; itemKey: string | null; value: number; unitSeen: string; quote?: true }
   | { kind: "ignored"; reason: string }
   | { kind: "unmapped" };
 
@@ -86,9 +86,15 @@ const STABILIZED_RE = /\b(stabili[sz]ed|stabilisee?|projected|pro forma|projete\
 
 // Words too common to name a field alone. Each loses to any longer alias in the label, must stand at the end of the label
 // (or before "income"/"amount"), and never matches inside a longer word.
-const LOOSE_ALIASES = new Set(["loan", "pret", "mortgage", "rate", "taux", "construction", "location", "build", "travaux", "lot", "site", "contribute", "invest", "apport", "other", "autres", "parking", "laundry", "storage", "stationnement", "buanderie", "rangement"]);
+const LOOSE_ALIASES = new Set(["interest", "management", "gestion", "depenses", "limited partners", "lp", "lps", "commanditaires", "loan", "pret", "mortgage", "rate", "taux", "construction", "location", "build", "travaux", "lot", "site", "contribute", "invest", "apport", "other", "autres", "parking", "laundry", "storage", "stationnement", "buanderie", "rangement"]);
 // These name a field only for a money figure of at least $1,000: "lot 7" is a lot number, "storage $75" may be one locker.
 const WEAK_MONEY = new Set(["lot", "site", "parking", "laundry", "storage", "stationnement", "buanderie", "rangement"]);
+// These name a field only when the figure's own words say what it is a share of: "management 4% of EGI", never "management 1.5% of equity".
+const EGI_BASE_ALIASES = new Set(["management", "gestion", "depenses"]);
+const EGI_AFTER_RE = /^\s*(?:of|on|de|des|du|d)\s+(?:the\s+|les?\s+|la\s+)?(?:egi|effective gross|gross (?:revenue|income)|revenues?|revenus?)\b/;
+// The limited partners' own share needs no word before it but an article: "return to limited partners 8%" is the return.
+const LP_ALIASES = new Set(["limited partners", "lp", "lps", "commanditaires"]);
+const LP_LEAD_RE = /^(?:\s|the|our|le|la|les|notre|nos)*$/;
 // "Other" names a cost only in a budget table.
 const BUDGET_ONLY = new Set(["other", "autres"]);
 // A "rate" that is not a loan's.
@@ -314,6 +320,12 @@ export type MapOptions = {
   budget?: boolean;
   /** The sentence the label came from, for words about a sale that sit outside the label. */
   context?: string;
+  /** The words just after the number in its line, for what the figure is a share of ("4% of EGI") or what it measures ("24 months IO"). */
+  after?: string;
+  /** The words between a label and its figure, in a label/value line. */
+  gap?: string;
+  /** A builder's quote: its Total, and its contract price, is the hard cost. */
+  quote?: boolean;
   /** The words between a label and its number ("at least" in "Occupancy: at least 90%"), which may carry a limit. */
   ahead?: string;
 };
@@ -325,6 +337,28 @@ const FILLER_RE = new RegExp(`^(\\s(${FILLER}))*$`);
 /** Where the loose alias stands in the label: at its end, or followed only by filler words. */
 function standsLast(label: string, at: [number, number]): boolean {
   return FILLER_RE.test(label.slice(at[1]));
+}
+
+// A builder's quote total, once its revision words are taken out.
+const QUOTE_TOTAL_RE = /^(?:grand )?(?:total(?: price| quote| bid| tender| estimate| contract(?: price)?| amount)?|contract total|quote total|contract price|montant total|prix total|total de la soumission|total soumission|total du devis|prix du contrat)$/;
+const REVISION_WORDS_RE = /\b(?:revised|revisee?|revise|rev(?:ision)?\.? ?[a-z0-9]?|rev)\b/g;
+// A loan named as the whole label: its scope words, the words that say "loan", and filler are all there is.
+const LOAN_WORDS = /\b(loans?|debt|mortgage|facility|prets?|dette|hypotheque|hypothecaire)\b/g;
+const LOAN_FILLER = /\b(from|with|at|de|du|des|d|avec|chez|a|au|aux|by|the|le|la|les|l|of|for|pour|is|est|are|sont|and|et)\b/g;
+const IO_AFTER_RE = /^\s*(?:of\s+|d\s*)?(?:io\b|interest[- ]only|interets? seulement)/;
+const AMORT_AFTER_RE = /^\s*(?:d\s*)?amorti[sz]/;
+const BASIS_AFTER_RE = /^\s*(?:of|de|du|des|ltv|ltc|loan[- ]to|ratio|pret[- ]valeur|rpv|pret a)\b/;
+
+/** The scope of a label that is only a loan's name ("Senior", "from Valleyline, mezz", "prêt de second rang"); null when it holds anything more. A lender's name is a title-case word. */
+export function loanNameOnly(rawLabel: string): Scope | null {
+  const clause = (rawLabel.split(/[,;]/).pop() ?? "").replace(/\([^)]*\)/g, " ");
+  const scope = scopeIn(clause, false);
+  if (!scope) return null;
+  const names = new Set(clause.trim().split(/\s+/).slice(1).filter((w) => /^\p{Lu}/u.test(w)).map((w) => foldText(w).replace(/[^a-z0-9]/g, "")));
+  let rest = foldText(clause);
+  for (const r of Object.values(SCOPE_WORDS)) rest = rest.replace(new RegExp(r.source, "g"), " ");
+  rest = rest.replace(LOAN_WORDS, " ").replace(LOAN_FILLER, " ");
+  return rest.split(/[^a-z0-9]+/).filter(Boolean).every((w) => names.has(w)) ? scope : null;
 }
 
 /** Map one labelled number onto a field. In prose the alias nearest the number names it, and a bare number is never money. */
@@ -343,6 +377,27 @@ export function mapToken(rawLabel: string, t: NumberToken, opts: MapOptions = {}
     const c = compatibleValue(def, t, label, labelUnit, labelCode, prose);
     return c && { kind: "field", fieldKey: def.key, itemKey: null, value: c.value, unitSeen: c.unitSeen };
   };
+
+  // A builder's quote: its Total (or contract price), revision words aside, is the hard cost.
+  if (opts.quote && QUOTE_TOTAL_RE.test(label.replace(REVISION_WORDS_RE, " ").replace(/\s+/g, " ").trim())) {
+    const m = asField(FIELD_BY_KEY.get("hard_cost")!);
+    if (m?.kind === "field") return { ...m, quote: true };
+  }
+  // A label that is only a loan's name: money is that loan's amount, a percentage its rate, and a duration its interest-only period or amortization.
+  const named = loanNameOnly(rawLabel);
+  // Not when words come between the label and its figure ("Take-out: a credit union at 4.4%"): that line is a sentence.
+  if (named && foldText(opts.gap ?? "").replace(LOAN_FILLER, " ").replace(/[^a-z0-9]+/g, " ").trim() === "") {
+    const own = (key: string) => FIELD_BY_KEY.get(named === "senior" ? key : SCOPE_FIELD[named][key] ?? key)!;
+    const after = foldText(opts.after ?? "");
+    const field =
+      t.unit === "$" || t.currency || (!prose && t.unit === null && Math.abs(t.value) >= 1000) ? own("senior_loan_amount")
+      : t.unit === "%" && !BASIS_AFTER_RE.test(after) ? own("senior_rate_pct")
+      : (t.unit === "months" || t.unit === "years") && IO_AFTER_RE.test(after) ? own("senior_io_months")
+      : (t.unit === "months" || t.unit === "years") && AMORT_AFTER_RE.test(after) ? own("senior_amort_years")
+      : null;
+    const m = field && asField(field);
+    if (m) return m;
+  }
 
   // A cap rate is the exit rate only when the sentence is about a sale; alone it may be the going-in rate.
   if (CAP_RE.test(label) && !FIELD_BY_KEY.get("exit_cap_rate_pct")!.aliases.some((a) => hasPhrase(label, a))) {
@@ -373,6 +428,8 @@ export function mapToken(rawLabel: string, t: NumberToken, opts: MapOptions = {}
       const at = phraseAt(label, alias);
       if (!at || (prose && REFERENCE_RE.test(label.slice(0, at[0])))) continue;
       if (BUDGET_ONLY.has(alias) && !opts.budget) continue;
+      if (LP_ALIASES.has(alias) && !LP_LEAD_RE.test(label.slice(0, at[0]))) continue;
+      if (EGI_BASE_ALIASES.has(alias) && !(t.unit === "%" && EGI_AFTER_RE.test(foldText(opts.after ?? "")))) continue;
       let c = compatibleValue(def, t, label, labelUnit, labelCode, prose);
       if (c && WEAK_MONEY.has(alias) && !((t.currency || t.unit === "$" || t.unit === "$/mo" || labelUnit === "$") && c.value >= 1000)) c = null;
       hits.push({ def, alias, at, c });

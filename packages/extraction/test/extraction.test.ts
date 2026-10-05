@@ -1646,7 +1646,7 @@ describe("totals and their parts", () => {
       expect(pick(read("Hard Costs. 3,200,000"))).toEqual([["hard_cost", 3_200_000]]);
       expect(pick(read("Total project cost ........ $4,210,000", "Interest reserve .... $190,000"))).toEqual([["stated_total_cost", 4_210_000], ["stated_interest_reserve", 190_000]]);
       expect(pick(read("Coût total du projet ...... 4,2 M$"))).toEqual([["stated_total_cost", 4_200_000]]);
-      expect(pick(read("Land cost . . . . . 485,000"))).toEqual([["land_cost", 485_000]]);
+      expect(pick(read("Land cost . . . . . 1,485,000"))).toEqual([["land_cost", 1_485_000]]);
       expect(pick(read("MONTANT AUTORISÉ : 2 750 000 $", "TAUX D'INTÉRÊT. 6,10 %"))).toEqual([["senior_loan_amount", 2_750_000], ["senior_rate_pct", 6.1]]);
     });
     test("negative: a sentence that ends in a full stop is not a label", () => {
@@ -1665,7 +1665,7 @@ describe("totals and their parts", () => {
     });
     test("an interest reserve and a stated total, in each form", () => {
       expect(pick(read("Capitalized interest reserve: $190,000", "Réserve d'intérêts : 175 000 $"))).toEqual([["stated_interest_reserve", 190_000], ["stated_interest_reserve", 175_000]]);
-      expect(pick(read("All-in cost: $6,400,000", "Total project cost is $6,400,000"))).toEqual([["stated_total_cost", 6_400_000], ["stated_total_cost", 6_400_000]]);
+      expect(pick(read("All-in cost: $6,400,000", "Total project cost is $6,450,000"))).toEqual([["stated_total_cost", 6_400_000], ["stated_total_cost", 6_450_000]]);
       expect(pick(read("Interest reserve of $190,000 is held back."))).toEqual([["stated_interest_reserve", 190_000]]);
     });
     test("government charges and taxes are other costs, never the land", () => {
