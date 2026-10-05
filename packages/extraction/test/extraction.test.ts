@@ -1756,5 +1756,40 @@ describe("totals and their parts", () => {
       expect(pick(read("Senior: maximum $5,000,000", "Mezz: 24-month term"))).toEqual([]);
       expect(pick(read("Authorized amount fee: 1%"))).toEqual([]);
     });
+    test("interest alone is the rate only as the whole label of a label/value line", () => {
+      expect(pick(read("INTEREST. 6.25%", "Interest: 6.1%", "Intérêt : 5,9 %"))).toEqual([["senior_rate_pct", 6.25], ["senior_rate_pct", 6.1], ["senior_rate_pct", 5.9]]);
+      expect(pick(read("The General Partner receives a promoted interest of 20% of further distributions"))).toEqual([]);
+      expect(pick(read("Ownership interest: 20% of distributions"))).toEqual([]);
+      expect(pick(read("Une participation avec intérêt de 20 % des distributions"))).toEqual([]);
+      expect(pick(read("Carried interest of 20% above the preferred return"))).toEqual([["gp_promote_pct", 20]]);
+    });
+    test("a list of what a cost covers never labels it", () => {
+      expect(pick(read("Soft costs, covering design, permits, development charges and legal fees, are budgeted at $450,000."))).toEqual([["soft_cost", 450_000]]);
+      expect(pick(read("Hard costs, including site works and land transfer tax: $3,000,000"))).toEqual([["hard_cost", 3_000_000]]);
+      expect(pick(read("Coûts indirects, comprenant les frais de développement et les droits de mutation : 450 000 $"))).toEqual([["soft_cost", 450_000]]);
+      // Negative: without a budget field at its head the list is read as before.
+      expect(pick(read("Charges including development charges: $120,000"))).toEqual([["other_cost", 120_000]]);
+    });
+    test("a quote table with revision columns reads the latest column and shows the earlier", () => {
+      const NOTE = "Superseded by a later revision of this quote";
+      const a = withLines(QUOTE, grid(["Item", "Rev A ($)", "Rev B ($)"], ["Total", 2_150_000, 2_310_000]));
+      expect(pick(a)).toEqual([["hard_cost", 2_310_000]]);
+      expect(noteOf(a, 2_150_000)).toBe(NOTE);
+      const swapped = withLines(QUOTE, grid(["Item", "Rev B ($)", "Rev A ($)"], ["Total", 2_310_000, 2_150_000]));
+      expect(pick(swapped)).toEqual([["hard_cost", 2_310_000]]);
+      for (const [x, y] of [["Original", "Revised"], ["Previous", "Current"], ["Initial", "Révisé"], ["Révision 1", "Révision 2"]] as const) {
+        const r = extractCandidates(doc([], [grid(["Item", `Amount ${x}`, `Amount ${y}`], ["Land", 100_000, 120_000])]));
+        expect(pick(r), `${x}/${y}`).toEqual([["land_cost", 120_000]]);
+        expect(noteOf(r, 100_000), `${x}/${y}`).toBe(NOTE);
+      }
+    });
+    test("amount columns whose order the headers do not tell are read as none", () => {
+      const r = extractCandidates(doc([], [grid(["Item", "Amount (Option X)", "Amount (Option Y)"], ["Land", 100_000, 120_000])]));
+      expect(r.candidates).toEqual([]);
+      expect(noteOf(r, 100_000)).toBe("Several amount columns; choose one");
+      expect(noteOf(r, 120_000)).toBe("Several amount columns; choose one");
+      // Negative: one amount column is read as always.
+      expect(pick(extractCandidates(doc([], [grid(["Item", "Amount"], ["Land", 100_000])])))).toEqual([["land_cost", 100_000]]);
+    });
   });
 });
