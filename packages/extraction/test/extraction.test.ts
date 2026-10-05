@@ -775,6 +775,45 @@ describe("which loan a term belongs to, and the words small developers use", () 
       const r = extractCandidates(sheet(["SENIOR LOAN"], ["Loan amount", [5_200_000, "$"]], ["Rate", [5.9, "%"]], ["Prêt mezzanine"], ["Loan amount", [450_000, "$"]], ["Rate", [11.5, "%"]], ["Take-out loan"], ["Loan amount", [3_100_000, "$"]]));
       expect(pick(r)).toEqual([["senior_loan_amount", 5_200_000], ["senior_rate_pct", 5.9], ["mezz_loan_amount", 450_000], ["mezz_rate_pct", 11.5], ["refinance_amount", 3_100_000]]);
     });
+    test("the title may follow a banner line: any of the first three lines names the loan if it is short and has no number", () => {
+      expect(pick(read("CONFIDENTIEL - Ne pas diffuser", "Fonds Cèdre S.E.C. - Lettre d'offre, prêt de deuxième rang", "Taux : 11,5 %", "Intérêts seulement : 18 mois"))).toEqual([["mezz_rate_pct", 11.5], ["mezz_io_months", 18]]);
+      expect(pick(read("Private and confidential", "Harbour Capital Corp. - Offer letter for a second-position loan", "Rate: 11.5%", "Interest-only: 18 months"))).toEqual([["mezz_rate_pct", 11.5], ["mezz_io_months", 18]]);
+      // The fourth line is too late, and a title with a number is not a title.
+      expect(pick(read("Banner", "Another banner", "A third line", "Second mortgage offer", "Rate: 11.5%"))).toEqual([["senior_rate_pct", 11.5]]);
+      expect(pick(read("Second mortgage offer, 14 suites", "Rate: 11.5%"))).toEqual([["senior_rate_pct", 11.5]]);
+    });
+    test("a forwarded subject names the loan whatever its length or numbers", () => {
+      expect(pick(read("Objet : TR : RE : Projet Dupuis - 12 logements + 1 local - demande de prêt permanent", "Amortissement : 40 ans", "Taux : 4,6 %"))).toEqual([["refinance_amort_years", 40], ["refinance_rate_pct", 4.6]]);
+      expect(pick(read("Subject: FW: Re: Maple Court - 14 suites + 2 shops - request for take-out financing", "Amortization: 40 years", "Rate: 4.6%"))).toEqual([["refinance_amort_years", 40], ["refinance_rate_pct", 4.6]]);
+    });
+    test("a rank row names the loan for the whole table, even for rows above it, and for the document when nothing else names one", () => {
+      const lines = (t: string): NormalizedDocument => ({ ...sheet(), lines: [{ text: t, location: "l1" }] });
+      const en = { ...lines("Term Sheet"), tables: sheet(["Loan amount", [450_000, "$"]], ["Facility", "Second mortgage, postponed to the bank's first charge"], ["Rate", [11.5, "%"]], ["Interest-only", [12, "months"]]).tables };
+      expect(pick(extractCandidates(en))).toEqual([["mezz_loan_amount", 450_000], ["mezz_rate_pct", 11.5], ["mezz_io_months", 12]]);
+      const fr = { ...lines("Feuille de modalités"), tables: sheet(["Montant", [450_000, "$"]], ["Rang", "Hypothèque de deuxième rang, subordonnée au prêt de la caisse"], ["Taux", [11.5, "%"]]).tables };
+      expect(pick(extractCandidates(fr))).toEqual([["mezz_loan_amount", 450_000], ["mezz_rate_pct", 11.5]]);
+      // The same row as a line of text sets the scope of a document with no title.
+      expect(pick(read("Ranking: second charge", "Rate: 11.5%"))).toEqual([["mezz_rate_pct", 11.5]]);
+      // A section that names its own loan overrides the row.
+      expect(pick(read("Ranking: second charge", "Take-out loan", "Rate: 4.6%"))).toEqual([["refinance_rate_pct", 4.6]]);
+    });
+    test("a loan named at the start of a list item scopes every number on that item, and only that item", () => {
+      expect(pick(read("Financing", "1) Rate: 5.9%, amortization 30 years", "2) Take-out: a credit union at 4.4% on a 40-year amortization, funding month 30", "3) Equity: the sponsor contributes $900,000"))).toEqual([["senior_rate_pct", 5.9], ["senior_amort_years", 30], ["refinance_rate_pct", 4.4], ["refinance_amort_years", 40], ["refinance_month", 30]]);
+      expect(pick(read("Prêt permanent : une caisse à 4,4 % sur 40 ans d'amortissement", "Taux : 5,9 %"))).toEqual([["refinance_rate_pct", 4.4], ["refinance_amort_years", 40], ["senior_rate_pct", 5.9]]);
+    });
+    test("postponed or subordinate to another loan names the document's loan as second-ranking, not the other", () => {
+      expect(pick(read("Subject: loan subordinated to the senior lender's first mortgage", "Rate: 11%"))).toEqual([["mezz_rate_pct", 11]]);
+      expect(pick(read("Objet : hypothèque postposée au premier rang de la banque", "Taux : 11 %"))).toEqual([["mezz_rate_pct", 11]]);
+      expect(pick(read("Junior loan", "Rate: 11%"))).toEqual([["mezz_rate_pct", 11]]);
+      expect(pick(read("Deuxième hypothèque", "Taux : 11 %"))).toEqual([["mezz_rate_pct", 11]]);
+    });
+    test("lender type never sets the loan, a senior letter that permits subordinate debt stays senior, and sections keep their own scope", () => {
+      expect(pick(read("Mortgage Investment Corporation - Term Sheet", "Rank: first mortgage", "Rate: 9.5%"))).toEqual([["senior_rate_pct", 9.5]]);
+      expect(pick(read("Fonds hypothécaire (caisse populaire) - Feuille de modalités", "Taux : 7,5 %"))).toEqual([["senior_rate_pct", 7.5]]);
+      expect(pick(read("Private lender offer", "Rate: 9.5%"))).toEqual([["senior_rate_pct", 9.5]]);
+      expect(pick(read("Commitment letter - construction loan", "Rate: 5.9%", "Amortization: 30 years", "Subordinate financing behind this loan is permitted with our consent."))).toEqual([["senior_rate_pct", 5.9], ["senior_amort_years", 30]]);
+      expect(pick(read("Loan summary", "Construction loan", "Rate: 5.9%", "Mezzanine", "Rate: 11.5%"))).toEqual([["senior_rate_pct", 5.9], ["mezz_rate_pct", 11.5]]);
+    });
     test("a body sentence never changes the scope", () => {
       expect(pick(read("Subject: take-out mortgage", "This replaces the first mortgage after completion of the building.", "Rate: 4.65%"))).toEqual([["refinance_rate_pct", 4.65]]);
       expect(pick(read("Subject: take-out mortgage", "A short line about the senior lender.", "Rate: 4.65%"))).toEqual([["refinance_rate_pct", 4.65]]);
