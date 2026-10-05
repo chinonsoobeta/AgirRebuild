@@ -168,6 +168,8 @@ describe("every sentence the engine's checks can produce has a French rendering"
   // One entry per `p.push(` in validate.ts, in the order it is written.
   const SITES: [string, (d: EngineInput) => void][] = [
     ["budget", (d) => { d.budget.land = -1; }],
+    ["credit takes the total to 0", (d) => { d.budget = { land: 0, hard: 100, soft: 0, contingency: 0, other: -100 }; }],
+    ["credit exceeds the construction costs", (d) => { d.budget = { land: 1_000, hard: 100, soft: 0, contingency: 0, other: -200 }; }],
     ["no revenue", (d) => { d.revenue = []; }],
     ["unit count", rev({ units: 0 })],
     ["monthly rent", rev({ rentMonthly: -1 })],

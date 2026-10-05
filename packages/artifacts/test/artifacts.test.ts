@@ -44,6 +44,20 @@ describe("artifacts", () => {
     expect(report.orphans).toEqual([]);
     expect(report.pass).toBe(true);
   });
+  test("a credit in other costs is shown as Other costs (credit), with its amount", () => {
+    const x = mapleInput("ic_memo");
+    const rowsOf = (input: ArtifactInput) => {
+      const t = buildModel(input).blocks.find((b) => b.type === "table" && b.caption === "Sources and uses");
+      return t && t.type === "table" ? t.rows : [];
+    };
+    const plain = rowsOf(x).map((r) => r[0]);
+    expect(plain).not.toContain("Other costs (credit)");
+    const credit: ArtifactInput = { ...x, input: { ...x.input, budget: { ...x.input.budget, other: -20_000 } } };
+    const row = rowsOf(credit).find((r) => r[0] === "Other costs (credit)");
+    expect(row).toBeDefined();
+    expect(row![1]).toContain("20,000");
+    expect(rowsOf(credit).map((r) => r[0])).not.toContain("Other costs");
+  });
   test("an invented figure is caught", () => {
     const model = buildModel(mapleInput("ic_memo"));
     model.blocks.push({ type: "paragraph", text: "The broker expects a 21.4% IRR and $9,450,000 of NOI." });

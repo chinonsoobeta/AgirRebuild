@@ -1,7 +1,8 @@
 import { describe, expect, test } from "vitest";
 import fc from "fast-check";
 import { FIELDS, FIELD_BY_KEY, POLICY_V1, TEMPLATES, type AssumptionStatus, type EngineInput, type Readiness, type RunResult } from "@agir/contracts";
-import { allocate, assemble, buildLedger, canonicalJson, irrRoots, levelPayment, underwrite, EngineInputError } from "../src/index.ts";
+import { createHash } from "node:crypto";
+import { allocate, applyStress, assemble, buildLedger, canonicalJson, irrRoots, levelPayment, underwrite, validateInput, EngineInputError } from "../src/index.ts";
 import { allEquityDeal, developmentDeal } from "./fixtures.ts";
 
 const metric = (r: RunResult, key: string, scenario = "base") =>
@@ -157,6 +158,66 @@ describe("validation", () => {
   });
 });
 
+// Task 35: only a genuine credit may take other costs below zero.
+describe("a credit in other costs", () => {
+  const withOther = (other: number, fix: Partial<EngineInput["budget"]> = {}): EngineInput => {
+    const d = allEquityDeal();
+    d.constructionMonths = 12;
+    d.budget = { land: 1_000_000, hard: 500_000, soft: 100_000, contingency: 50_000, other, ...fix };
+    return d;
+  };
+  const problems = (d: EngineInput): string[] => {
+    try {
+      validateInput(d);
+      return [];
+    } catch (e) {
+      if (e instanceof EngineInputError) return e.problems;
+      throw e;
+    }
+  };
+  const sha = (x: unknown) => createHash("sha256").update(canonicalJson(x)).digest("hex");
+
+  test("a negative other cost is accepted while the total stays above 0", () => {
+    expect(problems(withOther(-20_000))).toEqual([]);
+    expect(() => underwrite(withOther(-20_000), POLICY_V1)).not.toThrow();
+  });
+  test("it is refused when the total would be 0 or less, or when it outweighs the construction costs", () => {
+    expect(problems(withOther(-650_000, { land: 0 })).join(";")).toMatch(/total/);
+    // The total is 950,000, but the credit is more than hard, soft and contingency together.
+    expect(problems(withOther(-700_000)).join(";")).toMatch(/credit/);
+    expect(problems(withOther(-650_000))).toEqual([]);
+  });
+  test("land, hard, soft and contingency still refuse a negative figure", () => {
+    for (const k of ["land", "hard", "soft", "contingency"] as const) {
+      expect(problems(withOther(-20_000, { [k]: -1 })).join(";"), k).toContain(`budget ${k} must be a number of at least 0`);
+    }
+  });
+  test("total cost is exactly the credit lower, and every other figure moves only through that", () => {
+    const base = underwrite(withOther(0), POLICY_V1);
+    const credit = underwrite(withOther(-20_000), POLICY_V1);
+    expect(metric(credit, "total_development_cost").value).toBeCloseTo(metric(base, "total_development_cost").value! - 20_000, 6);
+    expect(metric(credit, "development_profit").value).toBeCloseTo(metric(base, "development_profit").value! + 20_000, 6);
+    for (const k of ["gross_potential_rent", "stabilized_noi", "exit_value"]) expect(metric(credit, k).value, k).toBe(metric(base, k).value);
+    // Equity pays for a cheaper build, month by month: the credit is spread with the other construction costs.
+    const a = buildLedger(withOther(0));
+    const b = buildLedger(withOther(-20_000));
+    expect(b.costsBeforeFinancing).toBeCloseTo(a.costsBeforeFinancing - 20_000, 6);
+    expect(b.equityContributed).toBeCloseTo(a.equityContributed - 20_000, 6);
+  });
+  test("a cost stress does not enlarge a credit", () => {
+    const up = applyStress(withOther(-20_000), { key: "costs", label: "Costs", costPct: 10 });
+    expect(up.budget.other).toBe(-20_000);
+    expect(up.budget.hard).toBeCloseTo(550_000, 6);
+    expect(applyStress(withOther(20_000), { key: "costs", label: "Costs", costPct: 10 }).budget.other).toBeCloseTo(22_000, 6);
+  });
+  test("a deal with no credit computes byte for byte as before", () => {
+    const withOtherCost = developmentDeal();
+    withOtherCost.budget.other = 300_000;
+    expect(sha(underwrite(developmentDeal(), POLICY_V1))).toBe("61f6c980fbabf5faf49f1e6807e001106d3970479177e2a4ad08e32e3563b1a5");
+    expect(sha(underwrite(withOtherCost, POLICY_V1))).toBe("c346a2638ceca1a9345298bda5eb0a93b2b308f462896af3cf0f05c70c309039");
+  });
+});
+
 describe("determinism and money", () => {
   test("the same input gives the same result, byte for byte", () => {
     expect(canonicalJson(underwrite(developmentDeal(), POLICY_V1))).toBe(canonicalJson(underwrite(developmentDeal(), POLICY_V1)));
@@ -263,6 +324,14 @@ describe("quick-start templates", () => {
     expect(r.verdict.code).toBe("REJECT");
     expect(r.checks.map((c) => c.key)).toContain("equity_wipeout");
     expect(input!.revenue).toHaveLength(1);
+  });
+
+  // Task 35: an approved credit is not an impossible value.
+  test("an approved negative other cost is accepted by readiness", () => {
+    const rows = rowsFor("apartment").map((r) => (r.fieldKey === "other_cost" ? { ...r, valueNumeric: -20_000 } : r));
+    const { readiness, input } = assemble(rows);
+    expect(readiness.impossible).toEqual([]);
+    expect(input!.budget.other).toBe(-20_000);
   });
 
   // Task 33: an optional line with no value is disclosed as "not found"; it is never a number and never blocks.

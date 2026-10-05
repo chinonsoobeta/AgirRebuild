@@ -8,6 +8,17 @@ Implemented by `packages/engine/src/ledger.ts`; every metric is a projection of 
 **Costs.** Land at month 0. Hard, soft, contingency and other costs are spread over `[0, C)`,
 straight-line or S-curve (smoothstep), allocated to the cent.
 
+**Credits.** Other costs may be negative only when the figure is a genuine credit: its own label says
+so (credit, rebate, refund, remise, remboursement and the like), or a person entered it with a written
+reason. A negative figure that does not say it is a credit is refused, never read as one, and no sign
+is ever flipped. The credit is spread over `[0, C)` with the other construction costs, so it lowers
+cost in the months those costs are paid, never land at month 0. Land, hard, soft and contingency stay
+at least 0. A credit is refused when total cost (land + hard + soft + contingency + other) would not
+stay above 0, or when it exceeds hard + soft + contingency together, which would make a month's
+construction spend negative. A cost stress scales positive other costs; a credit is not scaled, so a
+cost overrun never enlarges it. A deal with no credit computes exactly as before. Artifacts show the
+line as "Other costs (credit)" with its amount.
+
 **Funding (decision 2).** Equity first, then mezzanine, then senior. Each tranche accrues interest
 on its opening balance every month before `S`, capitalized while commitment remains; any
 shortfall is paid by equity. Required equity is solved so the debt is exactly fully drawn at `S`.
