@@ -21,6 +21,8 @@ export type ExtractionResult = {
   candidates: Candidate[];
   /** Numbers found that map to nothing, or that were refused. Shown, never used. */
   other: Candidate[];
+  /** What the parser could not read from the document as a whole. */
+  notes: string[];
 };
 
 const TOTAL_RE = /^\s*(grand\s+)?(sub-?\s*|sous-?\s*)?total\b/i;
@@ -317,6 +319,33 @@ const SHARE_OF_RE = /^\s*(?:of|de|du|des)\s+((?:(?:the|les?|la)\s+)?[\p{L}][\p{L
 const SHARE_PROBE: NumberToken = { raw: "1", start: 0, end: 1, value: 1, currency: true, currencyCode: null, unit: "$", scaled: false };
 const isMoney = (t: NumberToken) => t.value !== null && (t.currency || t.unit === "$");
 
+const BUDGET_FIELDS = new Set(["land_cost", "hard_cost", "soft_cost", "contingency", "other_cost", "stated_interest_reserve"]);
+const SEVERAL_NOTE = "A total of several costs, not one of them";
+const NOT_SHOWN_NOTE = "Not shown to add up to the subtotal below it";
+const COVERS_RE = /^\s*(?:\(\s*(?:(?:including|incl\.?|covering|comprenant|incluant|soit)\s+)?|[,;]?\s*(?:including|incl\.?|covering|comprenant|incluant|soit)\s+)/i;
+const PART_CUE = String.raw`(?:included in|within|part of|already in|inclus dans|compris dans|fait partie de)`;
+const budgetFieldOf = (phrase: string): string | null => {
+  const m = mapToken(phrase, SHARE_PROBE, { prose: true, budget: true });
+  return m.kind === "field" && m.itemKey === null && BUDGET_FIELDS.has(m.fieldKey) ? m.fieldKey : null;
+};
+
+/** The note for a figure that is part of a budget field the words name ("included in soft costs"); `anchored`: the cue starts the text, as in the words right after a figure. */
+function partOfNote(text: string, anchored: boolean): string | null {
+  const re = new RegExp(String.raw`${anchored ? String.raw`^[\s,;)–—-]*\(?\s*` : String.raw`(?:^|[\s(,;])`}${PART_CUE}\s+(?:(?:the|les?|la|l['’]|du|des)\s+)?([^,;)]*)`);
+  const m = re.exec(fold(text));
+  const key = m ? budgetFieldOf(m[1]!.replace(/-/g, " ").split(/\s(?:and|et|but|mais|which|that|qui)\b/)[0]!) : null;
+  return key && `Already counted in ${FIELD_BY_KEY.get(key)!.label}`;
+}
+
+/** The budget fields a list after a figure names ("(land, construction and soft costs)"); the list is what the figure covers. */
+function coveredFields(after: string): number {
+  const m = COVERS_RE.exec(after);
+  if (!m) return 0;
+  const rest = after.slice(m[0].length);
+  const list = m[0].includes("(") ? rest.split(")")[0]! : rest.split(/[.!?](?:\s|$)/)[0]!;
+  return new Set(list.split(/\s*(?:[,;&+/]|\band\b|\bet\b)\s*/i).map(budgetFieldOf).filter((k) => k !== null)).size;
+}
+
 /** The base of each "X% of <field>" as [start, end): a field alias right after "of", "de", "du" or "des" following a percentage is what the share is of. */
 function shareBases(text: string, tokens: NumberToken[], scope: Scope): [number, number][] {
   const bases: [number, number][] = [];
@@ -397,6 +426,29 @@ function readSentence(sentence: { text: string; start: number }, para0: Paragrap
   for (const t of replaced) other(t, "line:prose", "A later figure in the same sentence replaces this one");
   tokens = tokens.filter((t) => !replaced.includes(t));
   const colon = text.indexOf(":");
+  // A figure said to be part of a budget field is shown, not added. A figure that lists two or more budget fields after it is a total of them: the stated total cost when its own label names a cost, total or budget, else shown only.
+  const parts = new Set<NumberToken>();
+  tokens.forEach((t, i) => {
+    if (!isMoney(t)) return;
+    const after = text.slice(t.end, tokens[i + 1]?.start ?? text.length);
+    const counted = partOfNote(after, true);
+    if (counted) {
+      other(t, "line:prose", counted);
+      parts.add(t);
+    } else if (coveredFields(after) >= 2) {
+      const prev = tokens[i - 1];
+      const lab = prev || colon < 0 || colon > t.start ? text.slice(prev?.end ?? 0, t.start) : text.slice(0, colon);
+      const m = mapToken(lab, t, { prose: true, scope: para.scope, context: text, budget: true });
+      const stated = m.kind === "field" ? m.fieldKey === "stated_total_cost" : m.kind === "unmapped" && /\b(budget|total|cost|costs|cout|couts)\b/.test(fold(lab));
+      if (m.kind === "field" ? stated || BUDGET_FIELDS.has(m.fieldKey) : m.kind === "unmapped") {
+        const total = stated ? mapToken("total cost", t, { prose: true }) : null;
+        if (total?.kind === "field") record(result, total, t, { raw: t.raw, location: locationOf(t.start), context: context.slice(0, 240), rule: "line:total-of-costs" });
+        else other(t, "line:prose", total?.kind === "ignored" ? total.reason : SEVERAL_NOTE);
+        parts.add(t);
+      }
+    }
+  });
+  tokens = tokens.filter((t) => !parts.has(t));
   const shares = shareBases(text, tokens, para.scope);
   // A floating rate's spread is not the rate. With an all-in figure in the sentence that figure is the rate; without one nothing is read.
   const float = floating(text, tokens);
@@ -780,7 +832,8 @@ function fromBudget(table: Table, headerRow: number, roles: { label: number; amo
   // A line in another currency is never added to the deal's own: sums are kept per field and currency.
   const components = new Map<string, { fieldKey: string; unitSeen: string; sum: number; refs: string[]; labels: string[] }>();
   const totals: Candidate[] = [];
-  let segment: { value: number; unitSeen: string; ref: string; label: string }[] = [];
+  let started = false;
+  let segment: { value: number; unitSeen: string; ref: string; label: string; shown: Candidate }[] = [];
   for (let r = headerRow + 1; r < table.rows.length; r++) {
     const row = table.rows[r]!;
     const labelCell = row[roles.label];
@@ -793,15 +846,23 @@ function fromBudget(table: Table, headerRow: number, roles: { label: number; amo
       push(result, labelCell.text, t, amountCell.ref, `${table.name}: ${labelCell.text} ${amountCell.text}`, "table:label-value", { scope });
       continue;
     }
+    // A figure the label says is part of another budget field adds nothing of its own.
+    const counted = partOfNote(labelCell.text, false);
+    if (counted) {
+      result.other.push({ fieldKey: null, itemKey: null, value: t.value, raw: t.raw, unitSeen: "$", location: amountCell.ref, context: `${table.name}: ${labelCell.text}`, rule: "table:budget", note: counted });
+      continue;
+    }
     const isTotal = TOTAL_RE.test(labelCell.text);
+    // Unread rows with nothing read or totalled above them are the whole table's breakdown of its first total.
+    const bare = !started;
+    if (isTotal) started = true;
     const lines = segment;
     if (isTotal) segment = [];
     const labelText = isTotal ? labelCell.text.replace(TOTAL_RE, "").trim() || labelCell.text : labelCell.text;
     const moneyToken: NumberToken = { ...t, currency: true, unit: t.unit ?? "$" };
     const mapped = mapToken(isTotal && /development|project/i.test(labelCell.text) ? labelCell.text : labelText, moneyToken, { scope, budget: true });
     if (mapped.kind !== "field" || FIELD_BY_KEY.get(mapped.fieldKey)?.unit !== "$") {
-      if (mapped.kind === "unmapped" && !isTotal && t.value !== null) segment.push({ value: t.value, unitSeen: withCurrency("$", t.currencyCode), ref: amountCell.ref, label: labelCell.text });
-      result.other.push({
+      const shown: Candidate = {
         fieldKey: null,
         itemKey: null,
         value: t.value,
@@ -811,7 +872,9 @@ function fromBudget(table: Table, headerRow: number, roles: { label: number; amo
         context: `${table.name}: ${labelCell.text}`,
         rule: "table:budget",
         note: mapped.kind === "ignored" ? mapped.reason : "No budget line matches this label",
-      });
+      };
+      if (mapped.kind === "unmapped" && !isTotal && t.value !== null) segment.push({ value: t.value, unitSeen: withCurrency("$", t.currencyCode), ref: amountCell.ref, label: labelCell.text, shown });
+      result.other.push(shown);
       continue;
     }
     const cand: Candidate = {
@@ -834,9 +897,15 @@ function fromBudget(table: Table, headerRow: number, roles: { label: number; amo
     };
     if (isTotal && mapped.fieldKey !== "stated_total_cost") {
       totals.push(cand);
-      for (const l of lines) if (l.unitSeen === cand.unitSeen) add(l.value, l.unitSeen, l.ref, l.label);
+      // The unread rows are the subtotal's parts only when they add up to it; otherwise the subtotal is read alone.
+      const parts = lines.filter((l) => l.unitSeen === cand.unitSeen);
+      if (parts.length > 0 && (bare || Math.abs(parts.reduce((n, l) => n + l.value, 0) - mapped.value) <= parts.length)) for (const l of parts) add(l.value, l.unitSeen, l.ref, l.label);
+      else for (const l of lines) l.shown.note = NOT_SHOWN_NOTE;
       continue;
     }
+    // A row that is read ends the run of unread rows.
+    segment = [];
+    started = true;
     add(mapped.value, cand.unitSeen!, amountCell.ref, labelCell.text);
   }
   for (const acc of components.values()) {
@@ -1058,7 +1127,7 @@ function textTables(doc: NormalizedDocument, format: DocumentFormat, scopes: Sco
 
 /** Every candidate value in one document. Deterministic: no model is consulted. */
 export function extractCandidates(doc: NormalizedDocument): ExtractionResult {
-  const result: ExtractionResult = { format: detectFormat(doc.fullText), candidates: [], other: [] };
+  const result: ExtractionResult = { format: detectFormat(doc.fullText), candidates: [], other: [], notes: [...(doc.notes ?? [])] };
   const scopes = lineScopes(doc, result.format, rankIn(doc));
   const text = textTables(doc, result.format, scopes);
   fromLines(doc, result, text.used, scopes);

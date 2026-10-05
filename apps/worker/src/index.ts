@@ -104,8 +104,8 @@ async function extractDocument(deps: WorkerDeps, documentId: string) {
       );
     }
     await tx.query(
-      `update documents set stage = 'extracted', stage_detail = null, candidate_count = $2, number_format = $3, updated_at = now() where id = $1`,
-      [d.id, result.candidates.length, format],
+      `update documents set stage = 'extracted', stage_detail = $4, candidate_count = $2, number_format = $3, updated_at = now() where id = $1`,
+      [d.id, result.candidates.length, format, result.notes.join(" ") || null],
     );
     await tx.query(`insert into jobs (kind, payload) values ('reconcile_deal', $1)`, [JSON.stringify({ deal_id: d.deal_id })]);
   });

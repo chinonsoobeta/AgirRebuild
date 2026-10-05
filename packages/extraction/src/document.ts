@@ -31,6 +31,8 @@ export type NormalizedDocument = {
   needsOcr: boolean;
   /** All readable text, for number-format detection. */
   fullText: string;
+  /** What the parser could not read from the file as a whole ("formulas with no saved results"); shown with the document, never read as values. */
+  notes?: string[];
 };
 
 export function columnName(index: number): string {

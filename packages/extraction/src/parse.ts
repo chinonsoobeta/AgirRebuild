@@ -107,6 +107,8 @@ async function parseXlsx(bytes: Uint8Array): Promise<NormalizedDocument> {
   await wb.xlsx.load(bytes.buffer.slice(bytes.byteOffset, bytes.byteOffset + bytes.byteLength) as ArrayBuffer);
   const tables: Table[] = [];
   const texts: string[] = [];
+  // A formula with no saved result (a workbook written by a script) has no value: nothing is computed from the formula.
+  const uncached: string[] = [];
   wb.eachSheet((ws) => {
     const rows: Cell[][] = [];
     ws.eachRow({ includeEmpty: false }, (row, r) => {
@@ -116,7 +118,10 @@ async function parseXlsx(bytes: Uint8Array): Promise<NormalizedDocument> {
         const cell = row.getCell(c);
         const ref = `${ws.name}!${columnName(c - 1)}${r}`;
         let v: unknown = cell.value;
-        if (v && typeof v === "object" && "result" in (v as object)) v = (v as { result: unknown }).result;
+        if (v && typeof v === "object" && ("result" in (v as object) || "formula" in (v as object) || "sharedFormula" in (v as object))) {
+          v = (v as { result?: unknown }).result;
+          if (v === undefined) uncached.push(wb.worksheets.length > 1 ? ref : ref.slice(ws.name.length + 1));
+        }
         if (v && typeof v === "object" && "richText" in (v as object)) {
           v = (v as { richText: { text: string }[] }).richText.map((t) => t.text).join("");
         }
@@ -149,7 +154,8 @@ async function parseXlsx(bytes: Uint8Array): Promise<NormalizedDocument> {
     });
     tables.push({ name: ws.name, rows });
   });
-  return { kind: "xlsx", lines: [], tables, pageCount: null, needsOcr: false, fullText: texts.join("\n") };
+  const notes = uncached.length > 0 ? [`This workbook has formulas with no saved results (${uncached.join(", ")}). Open and save it in Excel to include them.`] : [];
+  return { kind: "xlsx", lines: [], tables, pageCount: null, needsOcr: false, fullText: texts.join("\n"), notes };
 }
 
 const ENTITIES: Record<string, string> = { amp: "&", lt: "<", gt: ">", quot: '"', apos: "'", nbsp: "\u00a0" };
