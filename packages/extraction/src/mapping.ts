@@ -21,12 +21,12 @@ const GENERIC = new Set([
   // The heading of a letter or email, not a component.
   "subject", "objet", "re", "note", "notes", "purpose",
   // Who the deal is with, not a component: "Borrower: Maple Court Inc. ... 10 units".
-  "borrower", "emprunteur", "projet", "sponsor", "promoteur", "address", "adresse", "lender", "preteur", "property", "propriete",
+  "borrower", "emprunteur", "broker", "agent", "appraiser", "courtier", "evaluateur", "projet", "sponsor", "promoteur", "address", "adresse", "lender", "preteur", "property", "propriete",
 ]);
 
 const ITEMIZED_ALIASES: Record<string, string[]> = {
   unit_count: ["rental units", "units", "unit count", "homes", "suites", "apartments", "doors", "logements", "unites", "appartements", "nombre de logements", "nombre d unites"],
-  unit_rent_monthly: ["rent", "monthly rent", "rent per unit", "market rent", "loyer", "loyer mensuel", "loyer par logement", "loyer du marche"],
+  unit_rent_monthly: ["rent", "monthly rent", "rent per month", "rent per unit", "market rent", "loyer", "loyer mensuel", "loyer par mois", "loyer par logement", "loyer du marche"],
   rent_psf_annual: ["rent", "rent psf", "rent per sf", "base rent", "loyer", "loyer au pi2", "loyer par pi2"],
   rentable_area_sf: ["area", "rentable area", "leasable area", "gla", "nrsf", "square feet", "sf", "superficie locative", "superficie louable", "surface locative", "aire locative"],
   item_occupancy_pct: ["occupancy", "occupation", "taux d occupation"],
@@ -74,6 +74,10 @@ const FUNDING_RE = /\b(fund\w*|repa\w+|clos\w*|advance\w*|draw\w*|financement|re
 const CAP_RE = /\b(cap rate|capitali[sz]ation rate|taux de capitalisation)\b/;
 const EXIT_RE = /\b(sell|sale|sold|exit|reversion|disposition|sortie|vente|vendre|vendrons|vendons|revente)\b/;
 const VALUE_RE = /\b(value|valeur)\b/;
+
+const REVENUE_LABEL_RE = /\b(rents?|loyers?|revenues?|revenus?)\b/;
+const OPINION_RE = /\b(opinions?|possible|achievable|potentiel(?:le)?s?|potential|upside|avis|selon (?:le|l) \w+|(?:broker|agent|appraiser|courtier|evaluateur) s (?:view|opinion|estimate))\b/;
+const OPINION_NOTE = "An opinion of rent, not the deal's assumption";
 
 const AREA_WORD_RE = /\b(area|sf|sq ft|superficie|surface|gla|nrsf|rsf)\b/;
 // A lender's condition, or a figure true only today, is not the stabilized assumption.
@@ -400,6 +404,8 @@ export function mapToken(rawLabel: string, t: NumberToken, opts: MapOptions = {}
   if (t.value === null) return { kind: "ignored", reason: t.refusal ?? "The number could not be read without guessing" };
   const lender = lenderFigure(rawLabel, t, opts);
   if (lender) return { kind: "ignored", reason: lender };
+  // A broker's, agent's or appraiser's view of the rent, or a possible or potential one, is an opinion, not the sponsor's assumption.
+  if (REVENUE_LABEL_RE.test(foldText(rawLabel)) && OPINION_RE.test(foldText(rawLabel))) return { kind: "ignored", reason: OPINION_NOTE };
   const where = prose && opts.context ? normalizeLabel(opts.context).label : label;
   const scope: Scope = scopeIn(label) ?? opts.scope ?? "senior";
   const scoped = (key: string): FieldDef => FIELD_BY_KEY.get(scope === "senior" ? key : (SCOPE_FIELD[scope][key] ?? key))!;
