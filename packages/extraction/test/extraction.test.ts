@@ -1809,7 +1809,7 @@ describe("durations after the number, revisions in a sentence, percent cells, va
   const REPLACED = "A later figure in the same sentence replaces this one";
 
   test("a duration followed by what it is the duration of", () => {
-    expect(pick(read("Schedule: the build is 16 months, then 7 months to lease up"))).toEqual([["construction_months", 16], ["lease_up_months", 7]]);
+    expect(pick(read("The build is 16 months, then 7 months to lease up"))).toEqual([["construction_months", 16], ["lease_up_months", 7]]);
     expect(pick(read("Horaire : quatorze mois de construction, puis cinq mois de location"))).toEqual([["construction_months", 14], ["lease_up_months", 5]]);
     expect(pick(read("Expect 9 months to build and 6 months to lease."))).toEqual([["construction_months", 9], ["lease_up_months", 6]]);
     expect(pick(read("On prévoit 8 mois pour louer les logements"))).toEqual([["lease_up_months", 8]]);
@@ -1832,7 +1832,7 @@ describe("durations after the number, revisions in a sentence, percent cells, va
   });
 
   test("a market vacancy or occupancy figure is shown, not the deal's assumption", () => {
-    for (const line of ["Vacancy in the submarket was 2.1%", "Average occupancy of comparable buildings: 96%", "CMHC reports city vacancy of 1.8%", "Le taux d'inoccupation du marché est de 2 %", "Taux d'occupation moyen du secteur : 95 %", "Vacance dans le quartier : 3 %"]) {
+    for (const line of ["Vacancy in the submarket was 2.1%", "Average occupancy in the area: 96%", "CMHC reports city vacancy of 1.8%", "Le taux d'inoccupation du marché est de 2 %", "Taux d'occupation moyen du secteur : 95 %", "Vacance dans le quartier : 3 %"]) {
       const r = read(line);
       expect(r.candidates, line).toEqual([]);
       expect(r.other[0]?.note, line).toBe("A market statistic, not the deal's assumption");

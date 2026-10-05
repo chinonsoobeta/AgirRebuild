@@ -363,6 +363,12 @@ export function loanNameOnly(rawLabel: string): Scope | null {
 }
 
 const VACANCY_RE = /\b(vacancy(?! rate)|(?<!taux de )vacance|inoccupation)\b/;
+// A duration labelled by the words right after it: "16 months to build", "huit mois pour louer".
+const BUILD_AFTER_RE = /^\s*to build\b/;
+const LEASE_AFTER_RE = /^\s*(?:to lease(?: up)?|pour louer)\b/;
+// A figure about the market, not the deal.
+const MARKET_RE = /\b(market|submarket|sub-market|city|area|zone|neighbou?rhood|region|cmhc|average|avg|comparables?|comps?|marche|secteur|quartier|schl|moyenne|moyen)\b/;
+const MARKET_NOTE = "A market statistic, not the deal's assumption";
 const NOT_STABILIZED_RE = /\b(lease[- ]?up|opening|ouverture|absorption|mise en location|during|pendant|initial|current|currently|today|actual|actuel\w*|existing|as of|en date du)\b/;
 
 /** A "Yes"/"Oui"/"True" (1) or "No"/"Non"/"False" (0) answer, however many words follow, beside the label of a flag field; anything else reads no flag. */
@@ -423,9 +429,16 @@ export function mapToken(rawLabel: string, t: NumberToken, opts: MapOptions = {}
     if (m) return m;
   }
 
+  if (t.unit === "months" || t.unit === "years") {
+    const after = foldText((opts.after ?? "").split(/[,;.]/)[0] ?? "");
+    const key = BUILD_AFTER_RE.test(after) ? "construction_months" : LEASE_AFTER_RE.test(after) ? "lease_up_months" : null;
+    const m = key && asField(FIELD_BY_KEY.get(key)!);
+    if (m) return m;
+  }
   // A vacancy percentage states the stabilized occupancy as its complement; one tied to lease-up, opening or today is not the stabilized figure.
   if (VACANCY_RE.test(label) && (t.unit === "%" || (t.unit === null && labelUnit === "%")) && t.value >= 0 && t.value <= 100) {
     const clause = `${label} ${normalizeLabel((opts.after ?? "").split(/[,;.]/)[0] ?? "").label}`;
+    if (MARKET_RE.test(clause)) return { kind: "ignored", reason: MARKET_NOTE };
     if (NOT_STABILIZED_RE.test(clause)) return { kind: "ignored", reason: "A vacancy during lease-up, at opening or today is not the stabilized occupancy" };
     return { kind: "field", fieldKey: "stabilized_occupancy_pct", itemKey: null, value: Number((100 - t.value).toFixed(10)), unitSeen: "% vacancy" };
   }
@@ -508,6 +521,7 @@ export function mapToken(rawLabel: string, t: NumberToken, opts: MapOptions = {}
     // In prose only the clause the figure stands in counts, not a condition elsewhere in the sentence.
     const lead = foldText(rawLabel.split(/[,;]/).pop() ?? "").trim();
     const clauseText = prose && opts.context && lead ? (foldText(opts.context).split(/[,;]/).find((c) => c.includes(lead)) ?? where) : where;
+    if (MARKET_RE.test(`${where} ${normalizeLabel((opts.after ?? "").split(/[,;.]/)[0] ?? "").label}`)) return { kind: "ignored", reason: MARKET_NOTE };
     if (CONDITION_RE.test(normalizeLabel(clauseText).label)) return { kind: "ignored", reason: LENDER_CONDITION };
     return CURRENT_RE.test(where) && !STABILIZED_RE.test(label) ? { kind: "ignored", reason: "A current occupancy is not the stabilized assumption" } : null;
   };
