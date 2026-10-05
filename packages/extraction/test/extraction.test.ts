@@ -787,6 +787,31 @@ describe("which loan a term belongs to, and the words small developers use", () 
       expect(pick(read("Objet : TR : RE : Projet Dupuis - 12 logements + 1 local - demande de prêt permanent", "Amortissement : 40 ans", "Taux : 4,6 %"))).toEqual([["refinance_amort_years", 40], ["refinance_rate_pct", 4.6]]);
       expect(pick(read("Subject: FW: Re: Maple Court - 14 suites + 2 shops - request for take-out financing", "Amortization: 40 years", "Rate: 4.6%"))).toEqual([["refinance_amort_years", 40], ["refinance_rate_pct", 4.6]]);
     });
+    test("a take-out or exit section at the end of a lender's letter is the refinance, not the senior loan", () => {
+      const en = read("Construction loan", "Amortization: 30 years", "Interest-only: 24 months", "Take-out: Prairie Credit Union permanent loan", "Funding: month 30", "Loan amount: $3,100,000", "Amortization: 40 years", "Interest-only: 12 months", "Rate: 4.65%");
+      expect(pick(en)).toEqual([["senior_amort_years", 30], ["senior_io_months", 24], ["refinance_month", 30], ["refinance_amount", 3_100_000], ["refinance_amort_years", 40], ["refinance_io_months", 12], ["refinance_rate_pct", 4.65]]);
+      const fr = read("Prêt de construction", "Amortissement : 30 ans", "Intérêts seulement : 24 mois", "Sortie : prêt permanent de la Caisse populaire", "Montant du prêt : 3 100 000 $", "Amortissement : 40 ans", "Intérêts seulement : 12 mois", "Taux : 4,65 %");
+      expect(pick(fr)).toEqual([["senior_amort_years", 30], ["senior_io_months", 24], ["refinance_amount", 3_100_000], ["refinance_amort_years", 40], ["refinance_io_months", 12], ["refinance_rate_pct", 4.65]]);
+      const heading = read("Construction loan", "Rate: 6.1%", "Exit financing", "Rate: 4.65%", "Permanent financing", "Amortization: 40 years");
+      expect(pick(heading)).toEqual([["senior_rate_pct", 6.1], ["refinance_rate_pct", 4.65], ["refinance_amort_years", 40]]);
+      expect(pick(read("Prêt de construction", "Taux : 6,1 %", "Financement de sortie", "Taux : 4,65 %"))).toEqual([["senior_rate_pct", 6.1], ["refinance_rate_pct", 4.65]]);
+      // Beside a senior-only letter, nothing conflicts.
+      const all = consolidate([...en.candidates].map((c) => ({ ...c, documentId: "a", documentName: "a" })));
+      expect(all.filter((p) => p.status === "conflicting")).toEqual([]);
+    });
+    test("an illustrative take-out amount that is not committed is shown, not read", () => {
+      const r = read("Construction loan", "Rate: 6.1%", "Take-out: Prairie Credit Union permanent loan", "Illustrative amount, not committed: $1,800,000", "Rate: 4.65%");
+      expect(pick(r)).toEqual([["senior_rate_pct", 6.1], ["refinance_rate_pct", 4.65]]);
+      expect(r.other.some((o) => o.value === 1_800_000)).toBe(true);
+      const fr = read("Prêt de construction", "Taux : 6,1 %", "Sortie : prêt permanent", "Montant indicatif, non engagé : 1 800 000 $");
+      expect(pick(fr)).toEqual([["senior_rate_pct", 6.1]]);
+      expect(fr.other.some((o) => o.value === 1_800_000)).toBe(true);
+    });
+    test("negative: an exit cap rate, or a lender's own type, sets no refinance scope", () => {
+      expect(pick(read("Deal summary", "Exit cap rate: 5.25%", "Rate: 6.1%"))).toEqual([["exit_cap_rate_pct", 5.25], ["senior_rate_pct", 6.1]]);
+      expect(pick(read("Taux de capitalisation de sortie : 5,25 %", "Taux : 6,1 %"))).toEqual([["exit_cap_rate_pct", 5.25], ["senior_rate_pct", 6.1]]);
+      expect(pick(read("Construction loan", "Lender: Prairie Credit Union", "Rate: 6.1%"))).toEqual([["senior_rate_pct", 6.1]]);
+    });
     test("a rank row names the loan for the whole table, even for rows above it, and for the document when nothing else names one", () => {
       const lines = (t: string): NormalizedDocument => ({ ...sheet(), lines: [{ text: t, location: "l1" }] });
       const en = { ...lines("Term Sheet"), tables: sheet(["Loan amount", [450_000, "$"]], ["Facility", "Second mortgage, postponed to the bank's first charge"], ["Rate", [11.5, "%"]], ["Interest-only", [12, "months"]]).tables };
