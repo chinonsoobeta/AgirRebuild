@@ -1,7 +1,7 @@
 import { FIELD_BY_KEY, OUTPUT_LIKE_PHRASES } from "@agir/contracts";
 import { detectFormat, normalizeText, SF_PER_M2, tokenize, unitTypesIn, type DocumentFormat, type NumberToken } from "@agir/numbers";
 import type { Cell, NormalizedDocument, Table } from "./document.ts";
-import { canonicalItem, currencyOf, hasPhrase, loanNameOnly, mapToken, normalizeLabel, rankScope, scopeIn, withCurrency, type MapOptions, type Mapped, type Scope } from "./mapping.ts";
+import { canonicalItem, currencyOf, flagRead, hasPhrase, loanNameOnly, mapToken, normalizeLabel, rankScope, scopeIn, withCurrency, type MapOptions, type Mapped, type Scope } from "./mapping.ts";
 
 /** One value found in one document, with where it came from and why it was (or was not) mapped. */
 export type Candidate = {
@@ -30,7 +30,7 @@ const TOTAL_RE = /^\s*(grand\s+)?(sub-?\s*|sous-?\s*)?total\b/i;
 function cellToken(cell: Cell, format: DocumentFormat): NumberToken | null {
   if (cell.number !== undefined) {
     return {
-      raw: cell.text,
+      raw: cell.stored === undefined ? cell.text : `${cell.text} (cell value ${cell.stored})`,
       start: 0,
       end: cell.text.length,
       value: cell.number,
@@ -420,6 +420,8 @@ function labelValueForm(text: string): string {
   return leader ? leader[1]! + ":" + " ".repeat(leader[0].length - leader[1]!.length - 1) + text.slice(leader[0].length) : text;
 }
 
+const CHANGE_FROM_RE = /(?<![\p{L}])(?:moved|went|increased|decreased|revised|changed|rose|fell|passe|pass[ée]e?s?)\s+(?:from|de|d['’])\s*$/iu;
+
 function readSentence(sentence: { text: string; start: number }, para0: Paragraph, result: ExtractionResult) {
   const text = labelValueForm(normalizeText(sentence.text));
   const quote = quoteDocs.has(result);
@@ -428,6 +430,13 @@ function readSentence(sentence: { text: string; start: number }, para0: Paragrap
   const inline = label.split(/\s+/).length <= 8 ? scopeIn(label, false) : null;
   const para = inline ? { ...para0, scope: inline } : para0;
   const locationOf = (pos: number) => para.segs.reduce((loc, g) => (g.start <= sentence.start + pos ? g.location : loc), para.segs[0]!.location);
+  // A Yes/No answer after a flag's label is the flag.
+  const colonAt = text.indexOf(":");
+  const flag = colonAt > 0 ? flagRead(text.slice(0, colonAt), text.slice(colonAt + 1)) : null;
+  if (flag) {
+    result.candidates.push({ fieldKey: flag.fieldKey, itemKey: null, value: flag.value, raw: text.slice(colonAt + 1).trim(), unitSeen: "flag", location: locationOf(colonAt), context: sentence.text.slice(0, 240), rule: "line:flag" });
+    return;
+  }
   let tokens = tokenize(text, result.format);
   // A number that is part of a street address is not a value.
   const addresses = tokens.filter((t) => isAddress(text, t));
@@ -457,7 +466,14 @@ function readSentence(sentence: { text: string; start: number }, para0: Paragrap
   const folded = fold(text);
   const replacing = /\b(replaces?|replacing|supersedes?|remplace(?:nt)?)\b/.exec(folded);
   const replacedBy = /\b(replaced by|superseded by|remplacee? par)\b/.exec(folded);
-  const replaced = tokens.filter((t) => (replacing && t.start >= replacing.index + replacing[0].length) || (replacedBy && t.end <= replacedBy.index));
+  // "Passe de X à Y", "moved from X to Y" and "X → Y" say a figure was revised: Y is the current one. A bare "from X to Y" is a range.
+  const revised = tokens.filter((a, i) => {
+    const b = tokens[i + 1];
+    if (!b || a.value === null || b.value === null || !(a.unit === b.unit && a.currency === b.currency) && !(a.unit === null && !a.currency)) return false;
+    const between = text.slice(a.end, b.start);
+    return /^\s*(?:→|->)\s*$/.test(between) || (/^\s+(?:to|à)\s*$/i.test(between) && CHANGE_FROM_RE.test(text.slice(0, a.start)));
+  });
+  const replaced = tokens.filter((t) => revised.includes(t) || (replacing && t.start >= replacing.index + replacing[0].length) || (replacedBy && t.end <= replacedBy.index));
   for (const t of replaced) other(t, "line:prose", "A later figure in the same sentence replaces this one");
   tokens = tokens.filter((t) => !replaced.includes(t));
   const colon = text.indexOf(":");
@@ -1075,6 +1091,12 @@ function fromTable(table: Table, result: ExtractionResult, notes: string[] = [],
         const labelCell = row.find((c) => c.text && c.number === undefined && !/^[\d$(.,\s%-]+$/.test(c.text));
         if (!labelCell) return;
         const after = row.slice(row.indexOf(labelCell) + 1);
+        const answer = after.find((c) => c.text);
+        const flag = answer ? flagRead(labelCell.text, answer.text) : null;
+        if (answer && flag) {
+          result.candidates.push({ fieldKey: flag.fieldKey, itemKey: null, value: flag.value, raw: answer.text, unitSeen: "flag", location: answer.ref, context: `${table.name}: ${labelCell.text} ${answer.text}`.slice(0, 240), rule: "table:label-value" });
+          return;
+        }
         for (const cell of after) {
           const t = cellToken(cell, result.format);
           if (!t) continue;

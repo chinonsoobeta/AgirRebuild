@@ -362,6 +362,19 @@ export function loanNameOnly(rawLabel: string): Scope | null {
   return rest.split(/[^a-z0-9]+/).filter(Boolean).every((w) => names.has(w)) ? scope : null;
 }
 
+const VACANCY_RE = /\b(vacancy(?! rate)|(?<!taux de )vacance|inoccupation)\b/;
+const NOT_STABILIZED_RE = /\b(lease[- ]?up|opening|ouverture|absorption|mise en location|during|pendant|initial|current|currently|today|actual|actuel\w*|existing|as of|en date du)\b/;
+
+/** A "Yes"/"Oui"/"True" (1) or "No"/"Non"/"False" (0) answer, however many words follow, beside the label of a flag field; anything else reads no flag. */
+export function flagRead(rawLabel: string, answer: string): { fieldKey: string; value: 0 | 1 } | null {
+  const a = foldText(answer).trim();
+  const value = /^(yes|oui|true)\b/.test(a) ? 1 : /^(no|non|false)\b/.test(a) ? 0 : null;
+  if (value === null) return null;
+  const label = normalizeLabel(rawLabel).label;
+  const def = FIELDS.find((f) => f.unit === "flag" && f.aliases.some((al) => hasPhrase(label, al)));
+  return def ? { fieldKey: def.key, value } : null;
+}
+
 /** Map one labelled number onto a field. In prose the alias nearest the number names it, and a bare number is never money. */
 export function mapToken(rawLabel: string, t: NumberToken, opts: MapOptions = {}): Mapped {
   const prose = opts.prose ?? false;
@@ -408,6 +421,13 @@ export function mapToken(rawLabel: string, t: NumberToken, opts: MapOptions = {}
       : null;
     const m = field && asField(field);
     if (m) return m;
+  }
+
+  // A vacancy percentage states the stabilized occupancy as its complement; one tied to lease-up, opening or today is not the stabilized figure.
+  if (VACANCY_RE.test(label) && (t.unit === "%" || (t.unit === null && labelUnit === "%")) && t.value >= 0 && t.value <= 100) {
+    const clause = `${label} ${normalizeLabel((opts.after ?? "").split(/[,;.]/)[0] ?? "").label}`;
+    if (NOT_STABILIZED_RE.test(clause)) return { kind: "ignored", reason: "A vacancy during lease-up, at opening or today is not the stabilized occupancy" };
+    return { kind: "field", fieldKey: "stabilized_occupancy_pct", itemKey: null, value: Number((100 - t.value).toFixed(10)), unitSeen: "% vacancy" };
   }
 
   // A cap rate is the exit rate only when the sentence is about a sale; alone it may be the going-in rate.

@@ -14,6 +14,8 @@ export type Cell = {
   /** A spreadsheet cell that holds a number is read as that number, with no parsing. */
   number?: number;
   unit?: CellUnit;
+  /** A percent-formatted cell's own stored value (0.03 for "3%"), kept as provenance. */
+  stored?: number;
   /** The currency the cell's number format names ("[$USD]", "US$"); absent for a plain or locale-only dollar. */
   currency?: CurrencyCode;
   ref: string;

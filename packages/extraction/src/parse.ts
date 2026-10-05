@@ -138,7 +138,7 @@ async function parseXlsx(bytes: Uint8Array): Promise<NormalizedDocument> {
           const code = codeOf(/(?<![A-Za-z])(?:US|CA|C|A)\$|\b(?:USD|CAD|AUD)\b/.exec(fmt)?.[0]);
           const unit: CellUnit | null = isPct ? "%" : bare.includes("$") || code !== null || literals.includes("$") ? "$" : literalUnit;
           const number = isPct ? Number((v * 100).toPrecision(12)) : v;
-          cells.push({ text: String(number), number, ...(unit ? { unit } : {}), ...(unit === "$" && code ? { currency: code } : {}), ref });
+          cells.push({ text: isPct ? `${number}%` : String(number), number, ...(isPct ? { stored: v } : {}), ...(unit ? { unit } : {}), ...(unit === "$" && code ? { currency: code } : {}), ref });
         } else if (v === null || v === undefined) {
           cells.push({ text: "", ref });
         } else {

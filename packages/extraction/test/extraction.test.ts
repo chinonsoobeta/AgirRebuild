@@ -1896,6 +1896,6 @@ describe("durations after the number, revisions in a sentence, percent cells, va
     const tag = (r: ReturnType<typeof extractCandidates>, name: string) => r.candidates.map((c) => ({ ...c, documentId: name, documentName: name }));
     const p = consolidate([...tag(read("Prévoir huit mois pour louer"), "a"), ...tag(read("Lease-up: 10 months"), "b")]).find((x) => x.fieldKey === "lease_up_months")!;
     expect(p.status).toBe("conflicting");
-    expect(p.values.map((v) => v.value).sort()).toEqual([8, 10]);
+    expect(p.values.map((v) => v.value).sort((a, b) => a! - b!)).toEqual([8, 10]);
   });
 });
