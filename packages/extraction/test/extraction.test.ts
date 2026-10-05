@@ -1683,6 +1683,55 @@ describe("totals and their parts", () => {
       expect(JSON.stringify(a)).toBe(JSON.stringify(r));
       expect(JSON.stringify(a)).toContain("Contingency");
     });
+    test("a sheet written with a prefixed SpreadsheetML namespace parses to the same cells as the plain one", async () => {
+      const ExcelJS = (await import("exceljs")).default;
+      const wb = new ExcelJS.Workbook();
+      const ws = wb.addWorksheet("First");
+      ws.addRows([["Item", "Amount"], ["Land", 250_000]]);
+      ws.getCell("A3").value = "Vacancy";
+      ws.getCell("B3").value = 0.04;
+      ws.getCell("B3").numFmt = "0.0%";
+      wb.addWorksheet("Second").addRows([["Fees", 9_000]]);
+      const plain = new Uint8Array(await wb.xlsx.writeBuffer());
+      const JSZip = (await import("jszip")).default;
+      const zip = await JSZip.loadAsync(plain);
+      const main = "http://schemas.openxmlformats.org/spreadsheetml/2006/main";
+      const xml = await zip.file("xl/worksheets/sheet1.xml")!.async("string");
+      const prefixed = xml.replace(`xmlns="${main}"`, `xmlns:ns0="${main}"`).replace(/<(\/?)([A-Za-z]\w*)/g, "<$1ns0:$2");
+      expect(prefixed).toContain("<ns0:sheetData>");
+      zip.file("xl/worksheets/sheet1.xml", prefixed);
+      const a = await parseDocument(new Uint8Array(await zip.generateAsync({ type: "uint8array" })), "p.xlsx");
+      const r = await parseDocument(plain, "r.xlsx");
+      expect(JSON.stringify(a)).toBe(JSON.stringify(r));
+      expect(JSON.stringify(a)).toContain("Vacancy");
+    });
+    test("a part is rewritten only when it needs it: a different default namespace is kept, an external link target is never touched", async () => {
+      const JSZip = (await import("jszip")).default;
+      const pack = async (parts: Record<string, string>) => {
+        const zip = new JSZip();
+        for (const [n, t] of Object.entries(parts)) zip.file(n, t);
+        return new Uint8Array(await zip.generateAsync({ type: "uint8array" }));
+      };
+      const read = async (bytes: Uint8Array, name: string) => (await JSZip.loadAsync(bytes)).file(name)!.async("string");
+      const rels = `<Relationships xmlns="http://schemas.openxmlformats.org/package/2006/relationships"><Relationship Id="rId1" TargetMode="External" Type="t" Target="/shared/other.xlsx"/><Relationship Id="rId2" Type="t" Target="/xl/styles.xml" TargetMode="External"/><Relationship Id="rId3" Type="t" Target="/xl/styles.xml"/></Relationships>`;
+      const out = await relativeLinks(await pack({ "xl/_rels/workbook.xml.rels": rels }));
+      const text = await read(out, "xl/_rels/workbook.xml.rels");
+      expect(text).toContain('TargetMode="External" Type="t" Target="/shared/other.xlsx"');
+      expect(text).toContain('Target="/xl/styles.xml" TargetMode="External"');
+      expect(text).toContain('Id="rId3" Type="t" Target="styles.xml"');
+      const main = "http://schemas.openxmlformats.org/spreadsheetml/2006/main";
+      const other = `<q:sheetData xmlns:q="${main}" xmlns="urn:other"><q:row/></q:sheetData>`;
+      const kept = await relativeLinks(await pack({ "xl/worksheets/sheet1.xml": other, "xl/_rels/workbook.xml.rels": rels }));
+      expect(await read(kept, "xl/worksheets/sheet1.xml")).toBe(other);
+    });
+    test("a package with a part above the size cap is left exactly as it came", async () => {
+      const JSZip = (await import("jszip")).default;
+      const zip = new JSZip();
+      zip.file("xl/_rels/workbook.xml.rels", `<Relationships xmlns="http://schemas.openxmlformats.org/package/2006/relationships"><Relationship Id="rId1" Type="t" Target="/xl/styles.xml"/></Relationships>`);
+      zip.file("xl/extra.xml", "a".repeat(60 * 1024 * 1024), { compression: "DEFLATE" });
+      const bytes = new Uint8Array(await zip.generateAsync({ type: "uint8array", compression: "DEFLATE" }));
+      expect(relativeLinks(bytes)).toBe(bytes);
+    });
     test("a relative-target workbook is read as before", async () => {
       const d = await parseDocument(await twoSheetBytes(), "r.xlsx");
       expect(d.tables.map((t) => t.rows.length)).toEqual([3, 1]);
