@@ -644,7 +644,9 @@ function readSentence(sentence: { text: string; start: number }, para0: Paragrap
   let carry: { scope: Scope; at: number } | null = null;
   const RATE_WORD: Record<Scope, string> = { senior: "senior rate", mezzanine: "mezzanine rate", refinance: "take-out rate" };
   // A sentence that names a non-senior loan carries it: the loan a clause names holds until a clause names another.
-  const loanSentence = scopesIn(text).some((s) => s !== "senior");
+  // A loan named only inside a condition ("if the take-out does not fund, we amortize over 25 years") is not the loan the terms belong to.
+  const unconditioned = (x: string) => x.replace(/(?:^|[\s,;(])(?:if|unless|should|until|in case|si|sauf si|à moins qu\S*|a moins qu\S*)\s[^,;]*/giu, " ");
+  const loanSentence = scopesIn(unconditioned(text)).some((s) => s !== "senior");
   let sentenceLoan: Scope | null = null;
   tokens.forEach((t, i) => {
     const where = locationOf(t.start);
@@ -659,7 +661,7 @@ function readSentence(sentence: { text: string; start: number }, para0: Paragrap
     let opts: MapOptions = { prose: true, scope: para.scope, context: text, quote, after: text.slice(t.end) };
     let usedLabel = totalLabels.get(t) ?? label;
     if (loanSentence) {
-      const named = scopesIn(label);
+      const named = scopesIn(unconditioned(label));
       sentenceLoan = named.length === 1 ? named[0]! : named.length > 1 ? null : sentenceLoan;
       if (sentenceLoan) opts = { ...opts, scope: sentenceLoan };
     }

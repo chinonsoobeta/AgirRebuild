@@ -2579,6 +2579,10 @@ describe("one sentence may state several terms of one loan", () => {
     const r = read("Prêt de premier rang : 5 000 000 $", "Taux d'intérêt : 6,2 %", "Le prêteur de deuxième rang consent 300 000 $, au taux de 9 %, amorti sur 20 ans, intérêts seulement pendant 6 mois.");
     expect(pick(r)).toEqual([["senior_loan_amount", 5_000_000], ["senior_rate_pct", 6.2], ["mezz_loan_amount", 300_000], ["mezz_rate_pct", 9], ["mezz_amort_years", 20], ["mezz_io_months", 6]]);
   });
+  test("a loan named only in a condition does not take the sentence's terms (audit)", () => {
+    const r = read("Should the second mortgage fall away, the bank amortizes its loan over 28 years.", "Si le prêt de deuxième rang n'est pas accordé, nous amortissons sur 28 ans.");
+    expect(r.candidates.filter((c) => c.fieldKey?.startsWith("mezz_") || c.fieldKey?.startsWith("refinance_"))).toEqual([]);
+  });
   test("each sentence of a paragraph keeps its own loan", () => {
     const r = read("The first mortgage is $5,000,000 at an interest rate of 6.2%.", "The mezzanine lender will advance $800,000 at 12%, amortized over 10 years.");
     expect(pick(r)).toEqual([["senior_loan_amount", 5_000_000], ["senior_rate_pct", 6.2], ["mezz_loan_amount", 800_000], ["mezz_rate_pct", 12], ["mezz_amort_years", 10]]);
