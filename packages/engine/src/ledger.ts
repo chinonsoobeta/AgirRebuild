@@ -7,8 +7,11 @@
 // Funding   Equity first, then mezzanine, then senior. Interest on each
 //           tranche accrues on its opening balance every month before S and is
 //           capitalized into that tranche while it has commitment left; any
-//           shortfall is paid by equity. Required equity is solved so that the
-//           debt is exactly fully drawn at S (or is zero if debt alone suffices).
+//           senior shortfall is paid by equity, while mezzanine interest beyond
+//           its commitment accrues on the mezzanine balance (owner decision,
+//           2026-10-05). Required equity is solved so that the debt is exactly
+//           fully drawn at S (or is zero if debt alone suffices), and an equity
+//           overrun never coexists with unused commitment.
 // Revenue   Rent grows by hold year. Occupancy ramps linearly through lease-up
 //           only when the deal opts in; otherwise there is no income and no
 //           operating cost before S.
@@ -43,6 +46,7 @@ type ConstructionResult = {
   interestByTranche: Record<TrancheKey, number>;
   unusedCommitment: number;
   equityOverrun: number;
+  mezzAccruedBeyondCommitment: number;
 };
 
 export type Ledger = {
@@ -57,6 +61,8 @@ export type Ledger = {
   requiredEquity: number;
   equityContributed: number;
   converged: boolean;
+  /** Mezzanine interest before S above its commitment, added to the mezzanine balance. */
+  mezzAccruedBeyondCommitment: number;
   balancesAtS: Record<TrancheKey, number>;
   annual: AnnualRow[];
   year1: { gpr: number; egi: number; opex: number; fixedOpex: number; variableShare: number; noi: number };
@@ -125,6 +131,7 @@ function simulateConstruction(input: EngineInput, S: number, costByMonth: number
   for (const t of stack) remaining[t.key] = t.terms.amount;
   let equityLeft = equityBudget;
   let overrun = 0;
+  let mezzAccrued = 0;
   const equityDraw: number[] = [];
   const debtDraw: number[] = [];
   const capInt: number[] = [];
@@ -143,7 +150,12 @@ function simulateConstruction(input: EngineInput, S: number, costByMonth: number
       balances[t.key] += cap;
       capitalized += cap;
       const shortfall = interest - cap;
-      if (shortfall > 0) {
+      if (shortfall > 0 && t.key === "mezzanine") {
+        // Paid in kind: it grows the mezzanine balance, and is neither a draw nor an equity overrun.
+        balances.mezzanine += shortfall;
+        mezzAccrued += shortfall;
+        capitalized += shortfall;
+      } else if (shortfall > 0) {
         const fromBudget = Math.min(shortfall, equityLeft);
         equityLeft -= fromBudget;
         eq += fromBudget;
@@ -196,6 +208,7 @@ function simulateConstruction(input: EngineInput, S: number, costByMonth: number
     interestByTranche,
     unusedCommitment: remaining.mezzanine + remaining.senior,
     equityOverrun: overrun,
+    mezzAccruedBeyondCommitment: mezzAccrued,
   };
 }
 
@@ -222,7 +235,8 @@ export function buildLedger(input: EngineInput): Ledger {
   let converged = false;
   for (let i = 0; i < 200; i++) {
     const gap = sim.equityOverrun - sim.unusedCommitment;
-    if (Math.abs(gap) < 0.005) {
+    // An overrun and unused commitment must not both remain: that is a gap of zero reached the wrong way.
+    if (Math.abs(gap) < 0.005 && Math.min(sim.equityOverrun, sim.unusedCommitment) < 0.005) {
       converged = true;
       break;
     }
@@ -406,6 +420,7 @@ export function buildLedger(input: EngineInput): Ledger {
     requiredEquity: equityContributed,
     equityContributed,
     converged,
+    mezzAccruedBeyondCommitment: sim.mezzAccruedBeyondCommitment,
     balancesAtS: sim.balances,
     annual,
     year1: {

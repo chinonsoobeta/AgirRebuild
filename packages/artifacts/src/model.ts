@@ -105,6 +105,12 @@ function sourcesAndUses(f: Formatter, x: ArtifactInput): Block {
   return { type: "table", caption: "Sources and uses", columns: [{ label: "Line" }, { label: "Amount", numeric: true }], rows, strong: [usesEnd, rows.length - 1] };
 }
 
+/** Where the mezzanine loan is described: the run's own sentence, when its interest ran past the commitment. */
+function mezzAccrual(f: Formatter, r: RunResult): Block[] {
+  const c = r.checks.find((k) => k.key === "mezz_interest_accrued");
+  return c ? [{ type: "paragraph", text: f.text(c.message, `check.${c.key}`) }] : [];
+}
+
 function revenueProgram(f: Formatter, x: ArtifactInput): Block {
   const rows = x.input.revenue.map((c) => [
     f.ident(c.label, `revenue.${c.key}.label`),
@@ -278,7 +284,7 @@ export function buildModel(x: ArtifactInput): DocModel {
       blocks.push({ type: "paragraph", text: `${x.decision.decision.replace(/_/g, " ")}: ${f.ident(x.decision.rationale, "decision.rationale")}` });
       if (x.decision.conditions) blocks.push({ type: "paragraph", text: `Conditions: ${f.ident(x.decision.conditions, "decision.conditions")}` });
     }
-    blocks.push(sourcesAndUses(f, x), revenueProgram(f, x), operations(f), gates(f, r), stresses(f, r), annual(f, r, false));
+    blocks.push(sourcesAndUses(f, x), ...mezzAccrual(f, r), revenueProgram(f, x), operations(f), gates(f, r), stresses(f, r), annual(f, r, false));
     blocks.push({ type: "heading", text: "Checks" }, checks(f, r));
     blocks.push(...notFoundBlocks(x), inputsAppendix(f, x));
   } else {
@@ -294,7 +300,7 @@ export function buildModel(x: ArtifactInput): DocModel {
       );
     }
     if (i.mezzanine && i.mezzanine.amount > 0) {
-      debtRows.push(["Mezzanine loan", f.input(i.mezzanine.amount, "$", "mezz_loan_amount")], ["Mezzanine rate", f.input(i.mezzanine.ratePct, "%", "mezz_rate_pct")]);
+      debtRows.push(["Mezzanine loan", f.input(i.mezzanine.amount, "$", "mezz_loan_amount")], ["Mezzanine rate", f.input(i.mezzanine.ratePct, "%", "mezz_rate_pct")], ["Mezzanine interest accrued above commitment", f.metric("base", "mezz_interest_accrued")]);
     }
     debtRows.push(
       ["Loan to cost", f.metric("base", "loan_to_cost")],
@@ -304,7 +310,7 @@ export function buildModel(x: ArtifactInput): DocModel {
       ["Break-even occupancy", f.metric("base", "break_even_occupancy")],
     );
     blocks.push({ type: "table", caption: "Debt and coverage", columns: [{ label: "Term" }, { label: "Value", numeric: true }], rows: debtRows });
-    blocks.push(sourcesAndUses(f, x), operations(f), annual(f, r, true), stresses(f, r));
+    blocks.push(sourcesAndUses(f, x), ...mezzAccrual(f, r), operations(f), annual(f, r, true), stresses(f, r));
     blocks.push({ type: "heading", text: "Checks" }, checks(f, r));
     blocks.push(...notFoundBlocks(x), inputsAppendix(f, x));
   }

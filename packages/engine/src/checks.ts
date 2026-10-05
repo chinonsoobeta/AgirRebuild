@@ -65,6 +65,16 @@ export function runChecks(input: EngineInput, L: Ledger, policy: Policy, contrac
   if (!L.converged) {
     out.push({ key: "funding_not_converged", kind: "bound", severity: "error", message: "Required equity could not be solved; the funding plan is inconsistent." });
   }
+  if (input.mezzanine && input.mezzanine.amount > 0 && L.mezzAccruedBeyondCommitment > 0) {
+    out.push({
+      key: "mezz_interest_accrued",
+      kind: "bound",
+      severity: "warning",
+      message: `Mezzanine interest of ${money(L.mezzAccruedBeyondCommitment)} accrues on the mezzanine balance after its ${money(input.mezzanine.amount)} commitment is used; the mezzanine balance at stabilization is ${money(L.balancesAtS.mezzanine)}.`,
+      expected: input.mezzanine.amount,
+      actual: L.mezzAccruedBeyondCommitment,
+    });
+  }
 
   // ---- Sources and uses ---------------------------------------------------------
   const s = input.stated;

@@ -1003,6 +1003,7 @@ const FR_METRICS: Record<string, [string, string]> = {
   development_profit: ["Profit de développement", "produit net de la vente - coût total de développement"],
   profit_on_cost: ["Profit sur coût", "profit de développement / coût total de développement"],
   total_debt: ["Dette totale à la stabilisation", "soldes du prêt principal et mezzanine, intérêts capitalisés compris"],
+  mezz_interest_accrued: ["Intérêts de la mezzanine courus au-delà de l'engagement", "intérêts de la mezzanine avant la stabilisation, au-delà de son engagement, ajoutés au solde de la mezzanine"],
   loan_to_cost: ["Ratio prêt-coût", "engagements de dette / coût total de développement"],
   required_equity: ["Fonds propres requis", "coût total de développement - engagements de dette"],
   debt_yield: ["Rendement de la dette", "RNE stabilisé / dette totale à la stabilisation"],
@@ -1443,6 +1444,8 @@ function checkTextRaw(i: I18n, c: CheckLike, ltcCeiling: number): string {
       return `Le RNE stabilisé est de ${$(a)}. Un projet déficitaire à la stabilisation ne peut pas être évalué par capitalisation.`;
     case "equity_wipeout":
       return `Le produit net de la vente, ${$(a)}, ne rembourse pas les ${$(e)} de dette en cours. Les fonds propres sont anéantis à la sortie.`;
+    case "mezz_interest_accrued":
+      return `Des intérêts de ${$(a)} sur la mezzanine s'ajoutent à son solde une fois son engagement de ${$(e)} utilisé ; le solde de la mezzanine à la stabilisation est de ${$((e ?? NaN) + (a ?? NaN))}.`;
     case "funding_not_converged":
       return "Les fonds propres requis n'ont pas pu être déterminés ; le plan de financement est incohérent.";
     case "sources_cover_uses":

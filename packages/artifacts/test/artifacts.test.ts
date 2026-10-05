@@ -58,6 +58,19 @@ describe("artifacts", () => {
     expect(row![1]).toContain("20,000");
     expect(rowsOf(credit).map((r) => r[0])).not.toContain("Other costs");
   });
+  test("the memo and the lender package both say where mezzanine interest ran past its commitment", () => {
+    for (const kind of ["ic_memo", "lender_package"] as const) {
+      const x = mapleInput(kind);
+      const input = { ...x.input, mezzanine: { amount: 4_000_000, ratePct: 12, amortYears: 30, ioMonths: 60 } };
+      const result = underwrite(input, POLICY_V1);
+      const sentence = result.checks.find((c) => c.key === "mezz_interest_accrued")?.message;
+      expect(sentence, kind).toMatch(/^Mezzanine interest of \$[\d,]+ accrues on the mezzanine balance after its \$4,000,000 commitment is used; the mezzanine balance at stabilization is \$[\d,]+\.$/);
+      const model = buildModel({ ...x, input, result });
+      const text = visibleText(renderHtml(model));
+      expect(text.split(sentence!).length - 1, kind).toBeGreaterThanOrEqual(2);
+      expect(verifyProvenance(text, model.formatter.manifest).orphans, kind).toEqual([]);
+    }
+  });
   test("an invented figure is caught", () => {
     const model = buildModel(mapleInput("ic_memo"));
     model.blocks.push({ type: "paragraph", text: "The broker expects a 21.4% IRR and $9,450,000 of NOI." });

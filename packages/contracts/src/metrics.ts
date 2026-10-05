@@ -27,6 +27,7 @@ export const METRICS: readonly MetricDef[] = [
   { key: "development_profit", label: "Development profit", unit: "$", formula: "net sale proceeds - total development cost", headline: 7 },
   { key: "profit_on_cost", label: "Profit on cost", unit: "%", formula: "development profit / total development cost" },
   { key: "total_debt", label: "Total debt at stabilization", unit: "$", formula: "senior + mezzanine balances, including capitalized interest" },
+  { key: "mezz_interest_accrued", label: "Mezzanine interest accrued above commitment", unit: "$", formula: "mezzanine interest before stabilization beyond its commitment, added to the mezzanine balance" },
   { key: "loan_to_cost", label: "Loan to cost", unit: "%", formula: "debt commitments / total development cost", headline: 8 },
   { key: "required_equity", label: "Required equity", unit: "$", formula: "total development cost - debt commitments", headline: 9 },
   { key: "debt_yield", label: "Debt yield", unit: "%", formula: "stabilized NOI / total debt at stabilization", headline: 10 },

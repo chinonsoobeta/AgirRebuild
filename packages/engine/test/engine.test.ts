@@ -476,10 +476,14 @@ describe("mezzanine interest after its commitment (task 37)", () => {
     expect(L.requiredEquity + L.drawnDebtAtS).toBeCloseTo(L.tdc, 2);
     expect(metric(r, "loan_to_cost").value!).toBeCloseTo((32_000_000 / L.tdc) * 100, 6);
   });
-  test("equity falls by the old undrawn amount, within 3% of it", () => {
-    // Before the change this deal needed 14,387,603.39 of equity and left 1,100,000.00 of senior undrawn.
+  test("equity falls by the old undrawn amount, and by the interest it no longer pays, less the interest the extra draw carries", () => {
+    // Before the change this deal needed 14,387,603.39 of equity, carried 45,287,603.38 of cost and left 1,100,000.00 of
+    // senior undrawn. Equity is cost less debt at S, so its fall is the old undrawn amount, plus the mezzanine interest that
+    // now accrues instead of being paid by equity, less the interest that the extra senior draw adds to the cost. Within 0.05.
     const L = buildLedger(mezzDeal());
-    expect(Math.abs(14_387_603.39 - L.requiredEquity - 1_100_000)).toBeLessThan(0.03 * 1_100_000);
+    const drop = 14_387_603.39 - L.requiredEquity;
+    expect(drop).toBeGreaterThan(1_100_000);
+    expect(drop).toBeCloseTo(1_100_000 + L.mezzAccruedBeyondCommitment - (L.tdc - 45_287_603.38), 1);
   });
   test("the warning check says the amount, the commitment and the balance at stabilization", () => {
     const r = underwrite(mezzDeal(), POLICY_V1);
@@ -518,7 +522,8 @@ describe("mezzanine interest after its commitment (task 37)", () => {
   test("results that the change must not touch are byte for byte as pinned before it", () => {
     // Pinned on task/35-cost-credits (64925d2), before any engine change; only the new metric entry is left out.
     expect(shaWithoutMezzMetric(underwrite(developmentDeal(), POLICY_V1))).toBe("61f6c980fbabf5faf49f1e6807e001106d3970479177e2a4ad08e32e3563b1a5");
-    expect(shaWithoutMezzMetric(underwrite(mezzDeal({ ratePct: 0 }), POLICY_V1))).toBe("0bc5c04d9ab07917f5be7b1ba19473377b9385faef21f88b5a9ddb00026a76f7");
+    // The stresses are left out of the second: a +150 bps rate stress lifts a 0% mezzanine to 1.5%, and that one does accrue.
+    expect(shaWithoutMezzMetric(underwrite(mezzDeal({ ratePct: 0 }), { ...POLICY_V1, stresses: [] }))).toBe("ee62512d23ae33fb7db80a2cd7cb0f1f75ca1c0a7c1a105f405069ac8a607881");
   });
   test("overrun and unused commitment never coexist, over a grid of sizes, rates and lengths", () => {
     for (const amount of [500_000, 2_000_000, 5_000_000, 9_000_000]) {

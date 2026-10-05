@@ -57,6 +57,11 @@ export function computeMetrics(input: EngineInput, L: Ledger): ScenarioMetrics {
   out.push(poc === null ? nm("profit_on_cost", exitReason) : m("profit_on_cost", poc * 100));
 
   out.push(hasDebt ? m("total_debt", L.drawnDebtAtS) : na("total_debt", "The deal has no debt."));
+  out.push(
+    input.mezzanine && input.mezzanine.amount > 0
+      ? m("mezz_interest_accrued", L.mezzAccruedBeyondCommitment)
+      : na("mezz_interest_accrued", "The deal has no mezzanine loan."),
+  );
   const ltc = ratio(L.commitments, tdc);
   out.push(ltc === null ? nm("loan_to_cost", "Total development cost is zero.") : m("loan_to_cost", ltc * 100));
   out.push(m("required_equity", L.requiredEquity));
