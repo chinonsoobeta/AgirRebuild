@@ -476,6 +476,39 @@ describe("parsers keep a document's structure", () => {
     const d = await parseDocument(await docx(table([["Loan amount", "$2,000,000"], ["Interest rate", "5.85%"]]) + table([["Take-out loan amount", "$2,600,000"], ["Take-out interest rate", "4.55%"], ["Take-out amortization", "40 years"]])), "m.docx");
     expect(extractCandidates(d).candidates.map((c) => [c.fieldKey, c.value])).toEqual([["senior_loan_amount", 2_000_000], ["senior_rate_pct", 5.85], ["refinance_amount", 2_600_000], ["refinance_rate_pct", 4.55], ["refinance_amort_years", 40]]);
   });
+
+  // A run of text, struck through when `struck` is true.
+  const run = (t: string, struck = false) => `<w:r>${struck ? "<w:rPr><w:strike/></w:rPr>" : ""}<w:t xml:space="preserve">${esc(t)}</w:t></w:r>`;
+  const runs = (...r: string[]) => `<w:p>${r.join("")}</w:p>`;
+  const read = async (body: string) => extractCandidates(await parseDocument(await docx(body), "s.docx"));
+  test("a struck figure is kept as a range on the line, and the line's text is unchanged", async () => {
+    const d = await parseDocument(await docx(runs(run("Land was "), run("$900,000", true), run(" and is now $950,000."))), "s.docx");
+    expect(d.lines[0]!.text).toBe("Land was $900,000 and is now $950,000.");
+    expect(d.lines[0]!.struck).toEqual([[9, 17]]);
+  });
+  test("a struck figure followed by its replacement reads the replacement only", async () => {
+    const r = await read(runs(run("The land cost "), run("$900,000", true), run(" $950,000 after the final survey.")));
+    expect(r.candidates.map((c) => [c.fieldKey, c.value])).toEqual([["land_cost", 950_000]]);
+    expect(r.other.find((o) => o.value === 900_000)?.note).toMatch(/struck through/i);
+  });
+  test("a struck figure alone in its sentence gives no candidate", async () => {
+    const r = await read(runs(run("Land cost: "), run("$900,000", true)));
+    expect(r.candidates).toEqual([]);
+    expect(r.other.map((o) => [o.value, o.note])).toEqual([[900_000, expect.stringMatching(/struck through/i)]]);
+    const prose = await read(runs(run("We will pay "), run("$910,000", true), run(" to buy the lot.")));
+    expect(prose.candidates).toEqual([]);
+  });
+  test("a struck word that is not a number changes nothing", async () => {
+    const r = await read(runs(run("The "), run("firm", true), run(" land cost is $900,000.")));
+    expect(r.candidates.map((c) => [c.fieldKey, c.value])).toEqual([["land_cost", 900_000]]);
+  });
+  test("a struck figure in a Word table cell is shown, not read", async () => {
+    const cell = (...r: string[]) => `<w:tc>${runs(...r)}</w:tc>`;
+    const row = (...c: string[]) => `<w:tr>${c.join("")}</w:tr>`;
+    const r = await read(`<w:tbl>${row(cell(run("Land")), cell(run("$900,000", true)))}${row(cell(run("Hard costs")), cell(run("$4,100,000")))}</w:tbl>`);
+    expect(r.candidates.map((c) => [c.fieldKey, c.value])).toEqual([["hard_cost", 4_100_000]]);
+    expect(r.other.find((o) => o.value === 900_000)?.note).toMatch(/struck through/i);
+  });
 });
 
 describe("tables written as lines of text, and what a table's rows mean", () => {
@@ -2948,5 +2981,88 @@ describe("budget lines and operating figures written as sentences with verbs", (
     for (const s of ["Draws may follow an S-curve if the lender agrees.", "Draws do not follow an S-curve.", "Rent is not credited during lease-up.", "We discussed income during lease-up.", "Is rent credited during lease-up?", "The S-curve spreadsheet is attached.", "No income until stabilization is a lender request we may refuse."]) {
       expect(pick(s).filter((c) => String(c[0]).match(/ramp|s_curve/)), s).toEqual([]);
     }
+  });
+});
+
+
+describe("struck figures in a PDF, per-door shares of a cost, and deposits (task 45)", () => {
+  const prose = (...lines: string[]): NormalizedDocument => ({
+    kind: "pdf",
+    lines: lines.map((text, i) => ({ text, location: `page 1, line ${i + 1}` })),
+    tables: [],
+    pageCount: 1,
+    needsOcr: false,
+    fullText: lines.join("\n"),
+  });
+  const pick = (...lines: string[]) => extractCandidates(prose(...lines)).candidates.map((c) => [c.fieldKey, c.value]);
+  const PER_DOOR = /per-door share of a cost, not the line's total; enter the total/;
+
+  /** A one-page PDF whose content stream is `content`, in Helvetica 12 (xref written by hand). */
+  function pdf(content: string): Uint8Array {
+    const objs = [
+      "<< /Type /Catalog /Pages 2 0 R >>",
+      "<< /Type /Pages /Kids [3 0 R] /Count 1 >>",
+      "<< /Type /Page /Parent 2 0 R /MediaBox [0 0 612 792] /Contents 4 0 R /Resources << /Font << /F1 5 0 R >> >> >>",
+      `<< /Length ${content.length} >>\nstream\n${content}\nendstream`,
+      "<< /Type /Font /Subtype /Type1 /BaseFont /Helvetica >>",
+    ];
+    let out = "%PDF-1.4\n";
+    const at: number[] = [];
+    objs.forEach((o, i) => {
+      at.push(out.length);
+      out += `${i + 1} 0 obj\n${o}\nendobj\n`;
+    });
+    const xref = out.length;
+    out += `xref\n0 ${objs.length + 1}\n0000000000 65535 f \n${at.map((o) => `${String(o).padStart(10, "0")} 00000 n \n`).join("")}trailer\n<< /Size ${objs.length + 1} /Root 1 0 R >>\nstartxref\n${xref}\n%%EOF`;
+    return new TextEncoder().encode(out);
+  }
+  // "Land cost" at x 72, the struck figure at x 200 and the second figure at x 300, one text item each; a line is drawn at height `y`.
+  const struckPdf = (y: number) => pdf(`BT /F1 12 Tf 72 700 Td (Land cost) Tj ET\nBT /F1 12 Tf 200 700 Td ($900,000) Tj ET\nBT /F1 12 Tf 300 700 Td ($950,000) Tj ET\n0.6 w 196 ${y} m 252 ${y} l S`);
+
+  test("a PDF's strike-through line over a figure refuses that figure; an underline does not", async () => {
+    const struck = extractCandidates(await parseDocument(struckPdf(704), "s.pdf"));
+    expect(struck.candidates.map((c) => c.value)).not.toContain(900_000);
+    expect(struck.other.find((o) => o.value === 900_000)?.note).toMatch(/struck through/i);
+    const under = extractCandidates(await parseDocument(struckPdf(698), "u.pdf"));
+    expect(under.candidates.map((c) => c.value)).toContain(900_000);
+  });
+
+  test("per-door, per-lot and per-unit shares of a cost are refused, and a total in the same document still reads", () => {
+    const refused = (s: string) => {
+      const r = extractCandidates(prose(s));
+      expect(r.candidates, s).toEqual([]);
+      expect(r.other.some((o) => PER_DOOR.test(o.note ?? "")), s).toBe(true);
+    };
+    refused("Hard costs run about $260,000 a door.");
+    refused("Hard costs: $260,000 per door.");
+    refused("Hard cost per home: $260,000");
+    refused("Land is $41,000 per lot.");
+    refused("Land cost: $41,000 per lot");
+    refused("Soft costs are $18,000 per suite.");
+    refused("Soft costs: $18,000 per unit");
+    refused("Les coûts de construction sont de 260 000 $ par logement.");
+    refused("Coût du terrain : 41 000 $ par lot");
+    refused("Frais de conception : 18 000 $ par porte");
+    expect(pick("Hard costs run about $260,000 a door.", "Hard costs: $3,120,000")).toEqual([["hard_cost", 3_120_000]]);
+    expect(pick("Land is $41,000 per lot, $492,000 in total.")).toEqual([["land_cost", 492_000]]);
+  });
+  test("rent per unit, parking per stall and commercial rent per sf read as before", () => {
+    expect(pick("Retail rent is $24 per sf.")).toEqual([["rent_psf_annual", 24]]);
+    expect(pick("Monthly rent per unit: $1,450")).toEqual([["unit_rent_monthly", 1_450]]);
+    expect(pick("Parking: $150 per stall")).toEqual([]);
+  });
+  test("three lots at a price each reads nothing for land and is never multiplied", () => {
+    for (const s of ["Three lots at $300,000 each.", "Land: 3 lots at $300,000 each.", "The land is 3 lots at $300,000 each."]) {
+      const r = extractCandidates(prose(s));
+      expect(r.candidates.filter((c) => c.fieldKey === "land_cost"), s).toEqual([]);
+      expect(r.candidates.map((c) => c.value), s).not.toContain(900_000);
+    }
+  });
+  test("a deposit on the lot is not the land cost, and a full price in the same document is", () => {
+    for (const s of ["We put down $100,000 on the lot.", "We paid a deposit of $100,000 on the land.", "The $100,000 down payment on the lot is already paid.", "Nous avons versé un acompte de 100 000 $ pour le terrain."]) {
+      expect(pick(s).filter((c) => c[0] === "land_cost"), s).toEqual([]);
+    }
+    expect(pick("We put down $100,000 on the lot.", "The land costs $900,000.")).toEqual([["land_cost", 900_000]]);
+    expect(pick("We will pay $900,000 to buy the lot, of which $100,000 is a deposit.")).toEqual([["land_cost", 900_000]]);
   });
 });
