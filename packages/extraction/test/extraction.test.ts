@@ -1230,8 +1230,8 @@ describe("signs, explanatory parentheses and per-unit prices", () => {
     expect(pick(read("Rent growth: minus 2%"))).toEqual([]);
     expect(pick(read("Croissance des loyers : moins 2 %"))).toEqual([]);
     expect(read("Rent growth: minus 2%").other.some((o) => /sign written in words/.test(o.note ?? ""))).toBe(true);
-    // negative: "au moins" is at least, and reads as before
-    expect(pick(read("Taux d'occupation stabilisé : au moins 90 %"))).toEqual(pick(read("Taux d'occupation stabilisé : 90 %")));
+    // "au moins" is a lender's minimum (task 22), shown and not read
+    expect(pick(read("Taux d'occupation stabilisé : au moins 90 %"))).toEqual([]);
   });
   test("a percentage of a field names a share: the dollar aside is not that field, and the line's label reads it", () => {
     const r = read("Developer fee: 4% of hard costs ($96,000)");
@@ -1282,5 +1282,160 @@ describe("signs, explanatory parentheses and per-unit prices", () => {
     expect(pick(read("Monthly rent of $1,800 per unit"))).toEqual([["unit_rent_monthly", 1_800]]);
     expect(pick(read("Land cost: $480,000"))).toEqual([["land_cost", 480_000]]);
     expect(pick(read("Land cost: $480,000 for the three lots"))).toEqual([["land_cost", 480_000]]);
+  });
+});
+
+describe("a lender's limits, terms, fees and conditions are not inputs", () => {
+  const doc = (lines: string[], tables: Table[] = []): NormalizedDocument => ({
+    kind: tables.length ? "docx" : "pdf",
+    lines: lines.map((t, i) => ({ text: t, location: `page 1, line ${i + 1}` })),
+    tables,
+    pageCount: 1,
+    needsOcr: false,
+    fullText: lines.join("\n"),
+  });
+  const read = (...text: string[]) => extractCandidates(doc(text));
+  const pick = (r: ReturnType<typeof extractCandidates>) => r.candidates.map((c) => [c.fieldKey, c.value]);
+  const noteOf = (r: ReturnType<typeof extractCandidates>, value: number) => r.other.find((o) => o.value === value)?.note ?? "";
+  const letter = (...rows: string[][]): Table => ({ name: "Terms", rows: rows.map((r, i) => r.map((text, c): Cell => ({ text, ref: `Table 1 R${i + 1}C${c + 1}` }))) });
+  const LIMIT = "A lender's limit, not the deal's figure";
+  const TERM = "A loan's term, not the build period, hold or amortization";
+  const FEE = "A fee or premium, not an input";
+  const CONDITION = "A lender's condition, not the occupancy assumption";
+
+  describe("ceilings and minimums", () => {
+    test("a number qualified by a limit word is a limit, in a label or in prose, in both languages", () => {
+      for (const [line, value] of [
+        ["Maximum loan-to-cost: 70%", 70],
+        ["Max combined LTC 85%", 85],
+        ["Advances will not exceed 75% of total cost.", 75],
+        ["Prêt de second rang d'au plus 300 000 $", 300_000],
+        ["Ratio prêt-coût maximal de 70 %", 70],
+        ["Minimum cash equity of $2,400,000", 2_400_000],
+        ["Une mise de fonds d'au moins 900 000 $", 900_000],
+        ["Take-out of not less than $6,000,000", 6_000_000],
+      ] as const) {
+        const r = read(line);
+        expect(r.candidates, line).toEqual([]);
+        expect(noteOf(r, value), line).toBe(LIMIT);
+      }
+      expect(noteOf(read("The loan will not exceed 75% of total cost."), 75)).toBe(LIMIT);
+    });
+    test("a limit in a table row is a limit too", () => {
+      const r = extractCandidates(doc([], [letter(["Maximum loan-to-cost", "70%"], ["Mise de fonds minimale", "900 000 $"])]));
+      expect(r.candidates).toEqual([]);
+      expect(noteOf(r, 70)).toBe(LIMIT);
+      expect(noteOf(r, 900_000)).toBe(LIMIT);
+    });
+    test("negative: the minimum DSCR covenant is still read, and so are plain figures", () => {
+      expect(pick(read("Minimum DSCR 1.20x"))).toEqual([["min_dscr_covenant", 1.2]]);
+      expect(pick(read("The loan requires a minimum debt service coverage ratio of 1.25x."))).toEqual([["min_dscr_covenant", 1.25]]);
+      expect(pick(read("RCD minimal : 1,20x"))).toEqual([["min_dscr_covenant", 1.2]]);
+      expect(pick(read("Construction period: 16 months"))).toEqual([["construction_months", 16]]);
+      expect(pick(read("Hold: 7 years"))).toEqual([["hold_years", 7]]);
+      expect(pick(read("Stated LTC 68%"))).toEqual([["stated_ltc_pct", 68]]);
+    });
+  });
+
+  describe("a loan's term is not a period", () => {
+    test("a duration labelled as the term is shown, in a label, a table or prose", () => {
+      for (const [line, value] of [
+        ["Term: 30 months", 30],
+        ["Terme du prêt 24 mois (construction)", 24],
+        ["ÉCHÉANCE : 18 mois", 18],
+        ["Renewal term 3 years", 3],
+        ["The loan matures 30 months after closing.", 30],
+        ["A 5-year term on conversion to a permanent loan.", 5],
+        ["Un terme de 10 ans est prévu.", 10],
+      ] as const) {
+        const r = read(line);
+        expect(r.candidates, line).toEqual([]);
+        expect(noteOf(r, value), line).toBe(TERM);
+      }
+    });
+    test("a commitment letter laid out as a table keeps the amortization and sets the term aside", () => {
+      const r = extractCandidates(doc([], [letter(["Term", "36 months"], ["Amortization", "30 years"], ["Interest rate", "6.45%"])]));
+      expect(pick(r)).toEqual([["senior_amort_years", 30], ["senior_rate_pct", 6.45]]);
+      expect(noteOf(r, 36)).toBe(TERM);
+    });
+    test("a label that also says amortization keeps that field", () => {
+      const r = read("A 25-year amortization, 5-year term.");
+      expect(pick(r)).toEqual([["senior_amort_years", 25]]);
+      expect(noteOf(r, 5)).toBe(TERM);
+    });
+    test("negative: the build period and the hold are still read", () => {
+      expect(pick(read("Construction period 16 months"))).toEqual([["construction_months", 16]]);
+      expect(pick(read("Hold 7 years"))).toEqual([["hold_years", 7]]);
+      expect(pick(read("Durée de construction : 14 mois"))).toEqual([["construction_months", 14]]);
+    });
+  });
+
+  describe("fees and premiums are not rates or costs", () => {
+    test("a fee or premium is shown and never read as a rate, an amount or a cost", () => {
+      for (const [line, value] of [
+        ["Commitment fee: 0.75% of the loan", 0.75],
+        ["Frais d'engagement 1,00 %", 1],
+        ["FRAIS D'OUVERTURE : 6 500 $", 6_500],
+        ["The insurance premium of 3.10% is added to the loan.", 3.1],
+        ["Prime d'assurance : 3,10 %", 3.1],
+      ] as const) {
+        const r = read(line);
+        expect(r.candidates, line).toEqual([]);
+        expect(noteOf(r, value), line).toBe(FEE);
+      }
+      const both = read("Lender fee 0.5% ($18,000)");
+      expect(both.candidates).toEqual([]);
+      expect(noteOf(both, 18_000)).toBe(FEE);
+    });
+    test("negative: the interest rate beside a fee is still read", () => {
+      const r = extractCandidates(doc([], [letter(["Commitment fee", "0.75%"], ["Interest rate", "6.45%"])]));
+      expect(pick(r)).toEqual([["senior_rate_pct", 6.45]]);
+      expect(noteOf(r, 0.75)).toBe(FEE);
+      expect(pick(read("Management fee: 3% of revenue"))).toEqual([["variable_expense_pct", 3]]);
+    });
+  });
+
+  describe("a lender's condition is not the occupancy assumption", () => {
+    test("a leasing or occupancy share with a condition marker is shown, never used", () => {
+      for (const [line, value] of [
+        ["Minimum 85% of units leased before conversion", 85],
+        ["At least 90% occupied for 3 consecutive months", 90],
+        ["40% of the retail pre-leased before first advance", 40],
+        ["Taux d'occupation minimal de 90 %", 90],
+        ["Occupancy of 88% is needed prior to the conversion to the permanent loan.", 88],
+      ] as const) {
+        const r = read(line);
+        expect(r.candidates, line).toEqual([]);
+        expect(r.other.some((o) => o.value === value), line).toBe(true);
+      }
+    });
+    test("a table row is a condition when its label says so", () => {
+      const r = extractCandidates(doc([], [letter(["Occupancy required before conversion", "85%"], ["Stabilized occupancy", "96%"])]));
+      expect(pick(r)).toEqual([["stabilized_occupancy_pct", 96]]);
+      expect(noteOf(r, 85)).toMatch(/lender's/);
+    });
+    test("negative: the stabilized occupancy beside a funding condition is still read", () => {
+      expect(pick(read("Stabilized occupancy 96%", "Funding is conditional on 90% occupancy."))).toEqual([["stabilized_occupancy_pct", 96]]);
+      expect(noteOf(read("Funding is conditional on 90% occupancy."), 90)).toBe(CONDITION);
+    });
+  });
+
+  describe("an amount per investor is not equity", () => {
+    test("money per limited partner, or a minimum investment, is shown and not read", () => {
+      for (const [line, value] of [
+        ["Minimum investment $25,000 per limited partner", 25_000],
+        ["Each investor commits $50,000 per investor.", 50_000],
+        ["Souscription de 25 000 $ par commanditaire", 25_000],
+        ["Investissement minimal : 10 000 $ par investisseur", 10_000],
+      ] as const) {
+        const r = read(line);
+        expect(r.candidates, line).toEqual([]);
+        expect(r.other.some((o) => o.value === value), line).toBe(true);
+      }
+    });
+    test("negative: the sponsor's equity is still read", () => {
+      expect(pick(read("Sponsor equity: $2,400,000"))).toEqual([["equity_amount", 2_400_000]]);
+      expect(pick(read("Mise de fonds : 900 000 $"))).toEqual([["equity_amount", 900_000]]);
+    });
   });
 });
