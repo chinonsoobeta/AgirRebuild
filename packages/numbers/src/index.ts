@@ -73,6 +73,8 @@ export type NumberToken = {
   unit: TokenUnit;
   /** A money scale word was applied (million, k, ...). */
   scaled: boolean;
+  /** Written as N quarters (or trimestres): value and unit are already in months, three to the quarter. */
+  quarters?: true;
   /** Written in parentheses. Negative only as money; a mapper that reads it as another unit takes its absolute value. */
   paren?: true;
 };
@@ -232,8 +234,10 @@ export function wholeUnitType(text: string): string | null {
 const SCALE_RE = /^\s?(billions?|bn|millions?|mm|mn|m(?!²)|thousands?|k)\b/i;
 // In a table cell nothing around the figure says it is money, so only the spellings that cannot be a metre or a millimetre count: "85 m" and "5 mm" are not millions.
 const CELL_SCALE_RE = /^(?:[kK]|MM?|bn|[Bb]illions?|[Mm]illions?|[Tt]housands?)$/;
+// "three quarters of the units" and "three quarters complete" are fractions, not spans of time.
+const NOT_FRACTION = String.raw`(?!\s+(?:of|de|du|des|complete|completed|done|finished|built|leased|occupied|sold|full|achev[ée]s?|termin[ée]s?|lou[ée]s?)\b)`;
 // "²" is not a word character, so the rules that end in it close with a lookahead, not \b.
-const UNIT_RULES: { re: RegExp; unit: TokenUnit; money?: true }[] = [
+const UNIT_RULES: { re: RegExp; unit: TokenUnit; money?: true; quarters?: true }[] = [
   { re: /^\s?(%|percent\b|pct\b)/i, unit: "%" },
   { re: /^\s?(bps|basis points)\b/i, unit: "bps" },
   { re: /^\s?((x|×)(?![a-z])|(times|fois)\b)/i, unit: "x" },
@@ -251,6 +255,8 @@ const UNIT_RULES: { re: RegExp; unit: TokenUnit; money?: true }[] = [
   { re: new RegExp(String.raw`^\s?(?:${TYPE_PLURAL})(?![\p{L}\p{N}])`, "iu"), unit: "units" },
   // "au 26e mois": the ordinal's own "mois" is the unit.
   { re: /^(e|er|ème|eme)\s+mois\b/i, unit: "months" },
+  // "5 quarters" is fifteen months; "3 quarters of the units" is a fraction, not a span.
+  { re: new RegExp(String.raw`^\s?(?:quarters|trimestres)(?![\p{L}\p{N}'’])${NOT_FRACTION}`, "iu"), unit: "months", quarters: true },
   { re: /^[-\s]?(months?|mos?\.?|mois)\b/i, unit: "months" },
   { re: /^[-\s]?(years?|yrs?\.?|ans?)\b/i, unit: "years" },
 ];
@@ -264,8 +270,11 @@ const WORD_VALUES: Record<string, number> = {
 const TENS = "twenty|thirty|forty|fifty|sixty|vingt|trente|quarante|cinquante|soixante";
 const DIGIT_WORDS = "one|two|three|four|five|six|seven|eight|nine|un|deux|trois|quatre|cinq|six|sept|huit|neuf";
 // A number word, then (directly, or after a hyphen) a unit word. Compounds ("twenty-four") first, so they win over their first word.
+// "a" and "an" count only before a year ("a year"); "one and a half years" and "a year and a half" are 1.5 years; "five quarters" is fifteen months.
+const YEAR_NOUN = "years?|ans?|ann[ée]es?";
+const HALF = String.raw`(?:\s+(?:and\s+a\s+half|et\s+demie?)(?![\p{L}\p{N}]))?`;
 const WORD_RE = new RegExp(
-  String.raw`(?<![\p{L}\p{N}-])((?:${TENS})-(?:${DIGIT_WORDS})|dix-sept|dix-huit|dix-neuf|${Object.keys(WORD_VALUES).filter((w) => !w.includes("-")).join("|")})(?:-|\s+)(months?|mois|years?|ans?|${TYPE_BED}(?:[\s-]+(?:units?|suites?|homes?|apartments?|logements?|unités?))?|(?:units?|suites?|homes?|apartments?|logements?|unités?)|${TYPE_NAMED})(?![\p{L}\p{N}])`,
+  String.raw`(?<![\p{L}\p{N}-])((?:${TENS})-(?:${DIGIT_WORDS})|dix-sept|dix-huit|dix-neuf|${Object.keys(WORD_VALUES).filter((w) => !w.includes("-")).join("|")}|an?)(\s+and\s+a\s+half)?(?:-|\s+)(months?|mois|${YEAR_NOUN}|(?:quarters|trimestres)${NOT_FRACTION}(?!['’])|${TYPE_BED}(?:[\s-]+(?:units?|suites?|homes?|apartments?|logements?|unités?))?|(?:units?|suites?|homes?|apartments?|logements?|unités?)|${TYPE_NAMED})(?![\p{L}\p{N}])(${HALF})`,
   "giu",
 );
 const PRECEDING_NUMBER_WORD = /(?:(?:hundred|thousand|million|cents?|mille)\s+(?:and|et)|hundred|thousand|million|cents?|mille|(?<=[\p{L}\p{N}])-)\s*$/iu;
@@ -275,14 +284,22 @@ function wordTokens(text: string): NumberToken[] {
   const out: NumberToken[] = [];
   for (const m of text.matchAll(WORD_RE)) {
     const word = m[1]!.toLowerCase();
-    const noun = m[2]!.toLowerCase();
-    const unit: TokenUnit = /^(month|mois)/.test(noun) ? "months" : /^(years?|ans?)$/.test(noun) ? "years" : "units";
+    const noun = m[3]!.toLowerCase();
+    const quarters = /^(quarters|trimestres)$/.test(noun);
+    const unit: TokenUnit = /^(month|mois)/.test(noun) || quarters ? "months" : new RegExp(`^(${YEAR_NOUN})$`, "i").test(noun) ? "years" : "units";
     // "any one unit", "un logement": one of a thing is not a count.
-    if (unit === "units" && /^(one|un|une)$/.test(word)) continue;
-    if (PRECEDING_NUMBER_WORD.test(text.slice(0, m.index!))) continue;
+    if (unit === "units" && /^(one|un|une|an?)$/.test(word)) continue;
+    const before = text.slice(0, m.index!);
+    if (PRECEDING_NUMBER_WORD.test(before)) continue;
+    const half = Boolean(m[2] || m[4]);
+    // "a year": a duration, not "once a year", "$96,000 a year", "a year ago" or "a unit and a half".
+    if (/^an?$/.test(word) && (unit !== "years" || /(?:once|twice|times|per|each|every|[\d%$])\s*$/i.test(before) || /^(?:[-'’]|\s+(?:ago|old|earlier|later|before)\b)/i.test(text.slice(m.index! + m[0].length)))) continue;
+    if (half && unit !== "years") continue;
+    if (quarters && /^(one|un|une|an?)$/.test(word)) continue;
     const [a, b] = word.includes("-") ? word.split("-") : [word, null];
-    const value = b === null || a === "dix" ? WORD_VALUES[word]! : WORD_VALUES[a!]! + WORD_VALUES[b]!;
-    out.push({ raw: m[0], start: m.index!, end: m.index! + m[0].length, value, currency: false, currencyCode: null, unit, scaled: false });
+    const base = /^an?$/.test(word) ? 1 : b === null || a === "dix" ? WORD_VALUES[word]! : WORD_VALUES[a!]! + WORD_VALUES[b]!;
+    const value = quarters ? base * 3 : base + (half ? 0.5 : 0);
+    out.push({ raw: m[0], start: m.index!, end: m.index! + m[0].length, value, currency: false, currencyCode: null, unit, scaled: false, ...(quarters ? { quarters: true as const } : {}) });
   }
   return out;
 }
@@ -335,10 +352,15 @@ export function tokenize(line: string, format: DocumentFormat, cell = false): Nu
       end += mark[0].length;
     }
     const after = text.slice(end);
+    let quarters = false;
     for (const r of UNIT_RULES) {
       if (r.money && !currency) continue;
       const u = after.match(r.re);
       if (u) {
+        if (r.quarters && !currency && value !== null) {
+          value *= 3;
+          quarters = true;
+        }
         if (currency && (r.unit === "$/sf" || r.unit === "$/m2" || r.unit === "$/mo")) unit = r.unit;
         else if (!currency) unit = r.unit;
         if (unit === r.unit) end += u[0].length;
@@ -371,8 +393,11 @@ export function tokenize(line: string, format: DocumentFormat, cell = false): Nu
       currencyCode,
       unit,
       scaled,
+      ...(quarters ? { quarters: true as const } : {}),
       ...(parenthesised ? { paren: true as const } : {}),
     });
   }
-  return [...out, ...wordTokens(text)].sort((a, b) => a.start - b.start);
+  // A word token that sits inside a figure already read ("$96,000 a year") is not a second one.
+  const words = wordTokens(text).filter((w) => !out.some((t) => w.start < t.end && t.start < w.end));
+  return [...out, ...words].sort((a, b) => a.start - b.start);
 }

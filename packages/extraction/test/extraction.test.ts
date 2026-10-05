@@ -2671,7 +2671,7 @@ describe("durations: a unit given by the label, number words, quarters, phases",
   test("a year and a half, and quarters, in prose", () => {
     expect(pick(prose("Construction should take a year and a half."))).toEqual([["construction_months", 18]]);
     expect(pick(prose("La construction durera un an et demi."))).toEqual([["construction_months", 18]]);
-    const r = extractCandidates(prose("Construction will run five quarters."));
+    const r = extractCandidates(prose("Construction will take five quarters."));
     expect(r.candidates.map((c) => [c.fieldKey, c.value])).toEqual([["construction_months", 15]]);
     expect(r.candidates[0]!.unitSeen).toContain("quarters");
     expect(r.candidates[0]!.unitSeen).toContain("3");

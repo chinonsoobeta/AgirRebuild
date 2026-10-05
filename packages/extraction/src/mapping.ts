@@ -213,6 +213,11 @@ export function normalizeLabel(raw: string): { label: string; labelUnit: LabelUn
     .replace(/\b(is|are|of|at|to|was|will be|approximately|approx|about)\s*$/g, " ")
     .replace(/\s+/g, " ")
     .trim();
+  // A short label may end with its unit: "Build period, months", "Lease-up months", "Amortissement, ans".
+  if (!labelUnit && label.split(" ").length <= 6 && !/\d/.test(label)) {
+    const w = /(?:^|[\s,])(months?|mos?|mois|years?|yrs?|ans?|annees?)$/.exec(label)?.[1];
+    if (w) labelUnit = /^(m|mo)/.test(w) ? "months" : "years";
+  }
   return { label, labelUnit, labelCode };
 }
 
@@ -268,6 +273,9 @@ function compatibleValue(def: FieldDef, t: NumberToken, label: string, labelUnit
   return c && { ...c, unitSeen: withCurrency(c.unitSeen, t.currencyCode ?? labelCode) };
 }
 
+/** What a months figure was written as: a count of quarters says so, so the conversion shows. */
+const monthsSeen = (t: NumberToken) => (t.quarters ? "months (stated in quarters; × 3)" : "months");
+
 function convert(def: FieldDef, t: NumberToken, label: string, labelUnit: LabelUnit, prose: boolean): { value: number; unitSeen: string } | null {
   if (t.value === null) return null;
   // A parenthesised figure is negative only as money: "(16 months)" is 16.
@@ -287,12 +295,12 @@ function convert(def: FieldDef, t: NumberToken, label: string, labelUnit: LabelU
     case "months":
       // "Refinance month: 26": the label says it is a month number.
       if (def.key === "refinance_month" && u === null && /\b(month|mois)$/.test(label)) return { value: v, unitSeen: "months" };
-      if (u === "months" || (u === null && labelUnit === "months")) return { value: v, unitSeen: "months" };
+      if (u === "months" || (u === null && labelUnit === "months")) return { value: v, unitSeen: monthsSeen(t) };
       if (u === "years" || (u === null && labelUnit === "years")) return { value: v * 12, unitSeen: "years" };
       return null;
     case "years":
       if (u === "years" || (u === null && labelUnit === "years")) return { value: v, unitSeen: "years" };
-      if (u === "months" && Number.isInteger(v / 12)) return { value: v / 12, unitSeen: "months" };
+      if (u === "months" && Number.isInteger(v / 12)) return { value: v / 12, unitSeen: monthsSeen(t) };
       return null;
     case "units":
       if (u === "units") return { value: v, unitSeen: "units" };
