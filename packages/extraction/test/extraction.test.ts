@@ -1438,4 +1438,27 @@ describe("a lender's limits, terms, fees and conditions are not inputs", () => {
       expect(pick(read("Mise de fonds : 900 000 $"))).toEqual([["equity_amount", 900_000]]);
     });
   });
+  describe("the rules stay narrow", () => {
+    test("a clause that names interest-only keeps its duration for that field", () => {
+      expect(pick(read("Interest-only for the full 31-month term."))).toEqual([["senior_io_months", 31]]);
+      expect(pick(read("Intérêts seulement pendant toute la durée du terme de 24 mois."))).toEqual([["senior_io_months", 24]]);
+      // negative: a bare term is still a loan term
+      const r = read("Term: 30 months");
+      expect(r.candidates).toEqual([]);
+      expect(noteOf(r, 30)).toBe(TERM);
+    });
+    test("a condition marker elsewhere in the sentence does not set aside a figure that is not about occupancy", () => {
+      const r = read("Conditions: 50% of the retail pre-leased before first advance; min DSCR 1.25x at conversion; max loan-to-cost 65% - you're at 65.0% so no room");
+      expect(r.candidates.map((c) => [c.fieldKey, c.value])).toContainEqual(["stated_ltc_pct", 65]);
+      expect(noteOf(r, 50)).toBe(CONDITION);
+      expect(r.other.some((o) => o.value === 65 && o.note === LIMIT)).toBe(true);
+      expect(pick(read("Stabilized occupancy is 96%, and funding requires 90% occupancy."))).toEqual([["stabilized_occupancy_pct", 96]]);
+    });
+    test("a fee listed as a part does not make a cost line a fee", () => {
+      expect(pick(read("Soft costs including permits, design, legal and your fees come to $295,000."))).toEqual([["soft_cost", 295_000]]);
+      expect(pick(read("Les coûts indirects comprenant les permis, la conception et vos honoraires totalisent 295 000 $."))).toEqual([["soft_cost", 295_000]]);
+      // negative: a bare fee line is still a fee
+      expect(noteOf(read("Your fees come to $18,000."), 18_000)).toBe(FEE);
+    });
+  });
 });
