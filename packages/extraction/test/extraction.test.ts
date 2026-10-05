@@ -2151,7 +2151,7 @@ describe("rows, lines and sections marked as not part of the deal", () => {
   test("a heading ends the excluded section, in prose and in a table", () => {
     const d = linesDoc(["Illustrative case", "Land: $90,000", "This project", "Land: $310,000"]);
     expect(vals(d)).toEqual([["land_cost", 310_000]]);
-    const t = tableDoc([["Land", "$310,000"], ["Exemple seulement - ne fait pas partie du projet"], ["Land", "$90,000"]]);
+    const t = tableDoc([["Land", "$310,000"], ["Exemple seulement - non retenu"], ["Land", "$90,000"]]);
     expect(vals(t)).toEqual([["land_cost", 310_000]]);
     expect(noted(t)).toEqual([90_000]);
   });

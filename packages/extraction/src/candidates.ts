@@ -132,7 +132,7 @@ function parenSpans(text: string): [number, number][] {
   return spans;
 }
 
-type Paragraph = { text: string; segs: { start: number; location: string }[]; scope: Scope };
+type Paragraph = { text: string; segs: { start: number; location: string }[]; scope: Scope; excluded: boolean };
 
 const SUBJECT_RE = /^(subject|re|objet|object)\s*:/i;
 const REPLY_PREFIX_RE = /^\s*(subject|re|objet|object|fwd?|tr|réf|ref)\s*:\s*/i;
@@ -196,7 +196,7 @@ function continues(prev: string, next: string): boolean {
 }
 
 /** The lines the table reader did not consume, with a sentence wrapped across lines made one paragraph. */
-function paragraphs(doc: NormalizedDocument, skip: Set<number>, scopes: Scope[]): Paragraph[] {
+function paragraphs(doc: NormalizedDocument, skip: Set<number>, scopes: Scope[], excluded: boolean[]): Paragraph[] {
   const out: Paragraph[] = [];
   let cur: Paragraph | null = null;
   let prev = "";
@@ -210,7 +210,7 @@ function paragraphs(doc: NormalizedDocument, skip: Set<number>, scopes: Scope[])
       cur.segs.push({ start: cur.text.length + 1, location: line.location });
       cur.text += " " + text;
     } else {
-      cur = { text, segs: [{ start: 0, location: line.location }], scope: scopes[li]! };
+      cur = { text, segs: [{ start: 0, location: line.location }], scope: scopes[li]!, excluded: excluded[li]! };
       out.push(cur);
     }
     prev = text;
@@ -240,6 +240,49 @@ function sentences(text: string): { text: string; start: number }[] {
 }
 
 const fold = (t: string) => t.toLowerCase().normalize("NFD").replace(/[̀-ͯ]/g, "");
+const NOT_PART_NOTE = "Marked as not part of this deal";
+// "taxes excluded" and "excluded: HST" describe an amount's basis, not the row.
+const TAX_WORDS = String.raw`(?:taxes?|hst|gst|pst|qst|tps|tvq|tva|vat|sales tax)`;
+const EXCLUDED_WORD = String.raw`exclu(?:ded|e?s?)`;
+const TAX_BASIS_RE = new RegExp(String.raw`\b${TAX_WORDS}\s+(?:(?:is|are|est|sont)\s+)?${EXCLUDED_WORD}\b|\b${EXCLUDED_WORD}\s*(?:de\s+|of\s+|:\s*)?(?:les\s+)?${TAX_WORDS}\b`, "g");
+const NOT_PART_RE = new RegExp(
+  [
+    String.raw`\b${EXCLUDED_WORD}\b`,
+    String.raw`\billustrati(?:ve|fs?|ves)\b`,
+    String.raw`\b(?:for|pour) illustrat\w*`,
+    String.raw`\b(?:for (?:reference|comparison)|(?:reference|comparison) only|pour (?:reference|comparaison)|(?:reference|comparaison) seulement)\b`,
+    String.raw`\ba titre (?:indicatif|illustratif|d['’]exemple|de reference|de comparaison)\b`,
+    String.raw`\bnot (?:a )?part of\b`,
+    String.raw`\bnot included in (?:the |this |our |that )?(?:project|deal|transaction|budget|scope)\b`,
+    String.raw`\bne (?:fait|font) pas partie\b`,
+    String.raw`\bnon retenu(?:e|s|es)?\b`,
+    String.raw`\bnon inclus(?:e|es)? (?:dans|au) (?:le |ce |la |cette )?(?:projet|budget|transaction)\b`,
+    String.raw`\bhypothe(?:tical|tiques?)\b`,
+  ].join("|"),
+);
+const EXAMPLE_RE = /\b(?:examples?|exemples?)\b/g;
+// An address ("Example Street", "rue de l'Exemple"), a company name ("Example Corp"), "for example" and "par exemple" are no marker.
+const EXAMPLE_BEFORE = /(?:\bfor|\bpar|\b(?:rue|avenue|av|boulevard|boul|chemin|route|place|rang)(?:\s+(?:de l['’]|de la |du |des |d['’]))?)\s*$/;
+const EXAMPLE_AFTER = /^\s+(?:street|st|ave|avenue|road|rd|drive|dr|way|blvd|boulevard|lane|ln|crescent|court|place|plaza|park|square|building|tower|inc|corp|ltd|llc|group|holdings|properties|developments|capital|realty|homes)\b/;
+
+/** Whether a row, line or heading says, in English or French, that its figures are an example, for reference, or not part of the deal. */
+function markedNotPart(text: string): boolean {
+  const f = fold(text).replace(TAX_BASIS_RE, " ");
+  if (NOT_PART_RE.test(f)) return true;
+  return [...f.matchAll(EXAMPLE_RE)].some((m) => !EXAMPLE_BEFORE.test(f.slice(0, m.index)) && !EXAMPLE_AFTER.test(f.slice(m.index! + m[0].length)));
+}
+
+/** Per line: it falls under a heading (a short line with no number or sentence end) that marks its section as not part of the deal; the next heading ends the section. */
+function excludedLines(doc: NormalizedDocument, format: DocumentFormat): boolean[] {
+  let on = false;
+  return doc.lines.map((line) => {
+    const text = line.text.trim().replace(/^#+\s*/, "");
+    const heading = text !== "" && text.split(/\s+/).length <= 10 && !endsSentence(text) && !/:\s*\S/.test(text) && tokenize(text, format).length === 0;
+    if (heading) on = markedNotPart(text);
+    return on;
+  });
+}
+
 const HEDGE_RE = /\b(i.?d guess|i guess|or so|probably|maybe|perhaps|roughly|ballpark|not confirmed|unconfirmed|to be confirmed|tbc|a confirmer|je pense|peut-etre|somewhere|around about|give or take|or thereabouts|quelque part|environ [^.;]*ou plus)\b|(?:\d|-)ish\b/;
 const BORROWED_RE = /\b(my other (?:building|property)s?|another (?:property|building)|comparables?|comps|autres? immeubles?)\b/;
 const YEAR_BEFORE = /\b(the|for|pour|fiscal|fy|budget|jan(?:uary)?|feb(?:ruary)?|mar(?:ch)?|apr(?:il)?|may|jun(?:e)?|jul(?:y)?|aug(?:ust)?|sep(?:t(?:ember)?)?|oct(?:ober)?|nov(?:ember)?|dec(?:ember)?|janvier|fevrier|mars|avril|mai|juin|juillet|aout|septembre|octobre|novembre|decembre|in|en|since|depuis)\.?[,\s]*$/;
@@ -453,7 +496,7 @@ function readSentence(sentence: { text: string; start: number }, para0: Paragrap
   const other = (t: NumberToken, rule: string, note: string) =>
     result.other.push({ fieldKey: null, itemKey: null, value: shown(t, note), raw: t.raw, unitSeen: t.unit, location: locationOf(t.start), context, rule, note });
   for (const t of addresses) other(t, "line:prose", ADDRESS_NOTE);
-  const refusal = sentenceRefusal(text);
+  const refusal = para0.excluded || markedNotPart(text) ? NOT_PART_NOTE : sentenceRefusal(text);
   if (refusal) {
     for (const t of tokens) other(t, "line:prose", refusal);
     return;
@@ -651,8 +694,8 @@ function readSentence(sentence: { text: string; start: number }, para0: Paragrap
 }
 
 /** Prose: sentences of text, each read on its own. Lines in `skip` were read as table rows. */
-function fromLines(doc: NormalizedDocument, result: ExtractionResult, skip: Set<number>, scopes: Scope[]) {
-  for (const para of paragraphs(doc, skip, scopes)) for (const s of sentences(para.text)) readSentence(s, para, result);
+function fromLines(doc: NormalizedDocument, result: ExtractionResult, skip: Set<number>, scopes: Scope[], excluded: boolean[]) {
+  for (const para of paragraphs(doc, skip, scopes, excluded)) for (const s of sentences(para.text)) readSentence(s, para, result);
 }
 
 type RentBasis = "monthly" | "annual" | "psf";
@@ -912,7 +955,7 @@ function fromRentRoll(table: Table, headerRow: number, roles: Roles, result: Ext
   }
 }
 
-function fromBudget(table: Table, headerRow: number, roles: BudgetRoles, result: ExtractionResult, scope: Scope) {
+function fromBudget(table: Table, headerRow: number, roles: BudgetRoles, result: ExtractionResult, scope: Scope, excluded = false) {
   // Sum component lines per field; use a "Total X" row only when no component
   // line mapped to X, and raise both when they disagree. A line that maps to no
   // field, between the header (or the previous total) and a total row for X, is a component of X.
@@ -935,6 +978,11 @@ function fromBudget(table: Table, headerRow: number, roles: BudgetRoles, result:
     if (roles.ambiguous) continue;
     const t = cellToken(amountCell, result.format);
     if (!t) continue;
+    // A row whose own label or note says it is not part of the deal, or one under such a heading, is shown and never read, summed or totalled.
+    if (excluded || row.some((c) => markedNotPart(c.text))) {
+      result.other.push({ fieldKey: null, itemKey: null, value: t.value, raw: t.raw, unitSeen: t.unit, location: amountCell.ref, context: `${table.name}: ${labelCell.text}`, rule: "table:budget", note: NOT_PART_NOTE });
+      continue;
+    }
     // A row in a budget sheet that is not money ("Loan-to-cost | 70%") is a label and value.
     if (t.unit !== null && t.unit !== "$") {
       push(result, labelCell.text, t, amountCell.ref, `${table.name}: ${labelCell.text} ${amountCell.text}`, "table:label-value", { scope });
@@ -1042,7 +1090,7 @@ function sectionLabel(row: Cell[]): string | null {
   return c.text;
 }
 
-type Section = { rows: Cell[][]; scope: Scope; rent?: Roles; budget?: BudgetRoles };
+type Section = { rows: Cell[][]; scope: Scope; excluded: boolean; rent?: Roles; budget?: BudgetRoles };
 
 /**
  * A sheet may stack sections. A row that is itself a header (a rent roll's or a budget's) ends the section before it and starts
@@ -1053,8 +1101,10 @@ function fromTable(table: Table, result: ExtractionResult, notes: string[] = [],
   // A rank row names the loan for the whole table, the rows above it too; a section label below still overrides it.
   let scope = tableRank(table) ?? scope0;
   let labelled = false;
+  // A sheet name or a section label that marks what follows as not part of the deal.
+  let excluded = markedNotPart(table.name);
   const sections: Section[] = [];
-  let cur: Section = { rows: [], scope };
+  let cur: Section = { rows: [], scope, excluded };
   const close = () => {
     if (cur.rows.length > 0) sections.push(cur);
   };
@@ -1065,7 +1115,7 @@ function fromTable(table: Table, result: ExtractionResult, notes: string[] = [],
     if (rent || budget) {
       if (!cur.rent && !cur.budget && sections.length === 0 && !labelled) cur.rows = [];
       close();
-      cur = { rows: [row], scope, ...(rent ? { rent } : { budget: budget! }) };
+      cur = { rows: [row], scope, excluded, ...(rent ? { rent } : { budget: budget! }) };
       return;
     }
     const label = sectionLabel(row);
@@ -1073,7 +1123,8 @@ function fromTable(table: Table, result: ExtractionResult, notes: string[] = [],
       close();
       scope = scopeIn(label) ?? scope;
       labelled = true;
-      cur = { rows: [], scope };
+      excluded = markedNotPart(label);
+      cur = { rows: [], scope, excluded };
       return;
     }
     cur.rows.push(row);
@@ -1086,7 +1137,7 @@ function fromTable(table: Table, result: ExtractionResult, notes: string[] = [],
       fromRentRoll(part, 0, s.rent, result, notes);
       rollSeen = true;
     }
-    else if (s.budget) fromBudget(part, 0, s.budget, result, s.scope);
+    else if (s.budget) fromBudget(part, 0, s.budget, result, s.scope, s.excluded);
     else {
       // A plain two-column sheet: each row is "label: value". Money rows that name nothing are the lines of the next total or subtotal row.
       let lines: { value: number; ref: string; label: string }[] = [];
@@ -1094,6 +1145,14 @@ function fromTable(table: Table, result: ExtractionResult, notes: string[] = [],
         const labelCell = row.find((c) => c.text && c.number === undefined && !/^[\d$(.,\s%-]+$/.test(c.text));
         if (!labelCell) return;
         const after = row.slice(row.indexOf(labelCell) + 1);
+        // A row that says it is not part of the deal, or one under such a heading, is shown and never read.
+        if (s.excluded || row.some((c) => markedNotPart(c.text))) {
+          for (const cell of after) {
+            const t = cellToken(cell, result.format);
+            if (t) result.other.push({ fieldKey: null, itemKey: null, value: t.value, raw: t.raw, unitSeen: t.unit, location: cell.ref, context: `${table.name}: ${labelCell.text} ${cell.text}`.slice(0, 240), rule: "table:label-value", note: NOT_PART_NOTE });
+          }
+          return;
+        }
         const answer = after.find((c) => c.text);
         const flag = answer ? flagRead(labelCell.text, answer.text) : null;
         if (answer && flag) {
@@ -1169,14 +1228,14 @@ function headerColumns(text: string, roleOf: (h: string) => string | null, ref: 
  * Each table is rebuilt as a Table, so the same finders read it as read a spreadsheet's. Returns the table with
  * the lines after it (where a note may say what the rent column is per), and the lines it consumed.
  */
-function textTables(doc: NormalizedDocument, format: DocumentFormat, scopes: Scope[]): { tables: { table: Table; notes: string[]; scope: Scope }[]; used: Set<number> } {
+function textTables(doc: NormalizedDocument, format: DocumentFormat, scopes: Scope[], excluded: boolean[]): { tables: { table: Table; notes: string[]; scope: Scope }[]; used: Set<number> } {
   const out: { table: Table; notes: string[]; scope: Scope }[] = [];
   const used = new Set<number>();
   const lines = doc.lines;
   for (let i = 0; i < lines.length - 1; i++) {
     const head = lines[i]!;
     const words = head.text.match(/\S+/g) ?? [];
-    if (words.length < 2 || words.length > 10 || /[.:;]$/.test(head.text) || words.some((w) => SENTENCE_WORDS.test(w)) || tokenize(head.text, format).length > 0) continue;
+    if (excluded[i] || words.length < 2 || words.length > 10 || /[.:;]$/.test(head.text) || words.some((w) => SENTENCE_WORDS.test(w)) || tokenize(head.text, format).length > 0) continue;
     // A rent roll's columns, else a budget's.
     let cols = headerColumns(head.text, (h) => rentRole(h), head.location);
     let kind: "rent" | "budget" = "rent";
@@ -1200,6 +1259,8 @@ function textTables(doc: NormalizedDocument, format: DocumentFormat, scopes: Sco
     let j = i + 1;
     for (; j < lines.length; j++) {
       const line = lines[j]!;
+      // A line under a heading that marks its section as not part of the deal is left to the prose reader, which shows it.
+      if (excluded[j]) break;
       // "3 480" in an English document is two numbers, not one with a space group: split what the tokenizer refused.
       const tokens = tokenize(line.text, format).flatMap((t) =>
         t.value === null && /\s/.test(t.raw)
@@ -1241,8 +1302,9 @@ export function extractCandidates(doc: NormalizedDocument): ExtractionResult {
   const result: ExtractionResult = { format: detectFormat(doc.fullText), candidates: [], other: [], notes: [...(doc.notes ?? [])] };
   if (isBuilderQuote(doc)) quoteDocs.add(result);
   const scopes = lineScopes(doc, result.format, rankIn(doc));
-  const text = textTables(doc, result.format, scopes);
-  fromLines(doc, result, text.used, scopes);
+  const excluded = excludedLines(doc, result.format);
+  const text = textTables(doc, result.format, scopes, excluded);
+  fromLines(doc, result, text.used, scopes, excluded);
   for (const t of text.tables) fromTable(t.table, result, t.notes, t.scope);
   // A Word file's paragraphs may carry the note about a rent column ("Retail rents are ..."); there is no order between them and its tables.
   const notes = doc.kind === "docx" ? doc.lines.map((l) => l.text) : [];
