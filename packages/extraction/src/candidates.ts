@@ -403,8 +403,13 @@ function readSentence(sentence: { text: string; start: number }, para: Paragraph
           continue;
         }
         // A dollar figure after "X% of <field>" is a share of that field, never the field.
+        // The base never labels it; the line's own label does, when that names a dollar field.
         if (isMoney(t) && shares.some(([, end]) => t.start >= end)) {
-          other(t, "line:label-value", SHARE_NOTE);
+          const own = used ? null : mapToken(label, t, { scope });
+          if (own?.kind === "field" && FIELD_BY_KEY.get(own.fieldKey)?.unit === "$") {
+            record(result, own, t, { raw: t.raw, location: locationOf(t.start), context: context.slice(0, 240), rule: "line:label-value" });
+            used = true;
+          } else other(t, "line:label-value", SHARE_NOTE);
           continue;
         }
         if (refusedPerUnit && t !== total) {

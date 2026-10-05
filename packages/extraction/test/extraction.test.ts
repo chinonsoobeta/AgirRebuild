@@ -1221,18 +1221,29 @@ describe("signs, explanatory parentheses and per-unit prices", () => {
   test("negative: a figure attached to its sign stays negative, in words too", () => {
     expect(pick(read("Other costs: -$12,500"))).toEqual([["other_cost", -12_500]]);
     expect(pick(read("Other costs: (25,000)", "Selling costs: 2.5%"))).toEqual([["other_cost", -25_000], ["selling_costs_pct", 2.5]]);
-    expect(pick(read("Rent growth: moins 2 %"))).toEqual([["rent_growth_pct", -2]]);
+    expect(pick(read("Rent growth: -2%"))).toEqual([["rent_growth_pct", -2]]);
     const budget = extractCandidates(doc([], [textGrid(["Line item", "Amount"], ["Land acquisition", "1,000,000"], ["Other costs", "($25,000)"])]));
     expect(budget.candidates.map((c) => [c.fieldKey, c.value])).toEqual([["land_cost", 1_000_000], ["other_cost", -25_000]]);
   });
 
-  test("a percentage of a field names a share: the dollar aside is not that field", () => {
+  test("a sign written in words reads nothing", () => {
+    expect(pick(read("Rent growth: minus 2%"))).toEqual([]);
+    expect(pick(read("Croissance des loyers : moins 2 %"))).toEqual([]);
+    expect(read("Rent growth: minus 2%").other.some((o) => /sign written in words/.test(o.note ?? ""))).toBe(true);
+    // negative: "au moins" is at least, and reads as before
+    expect(pick(read("Taux d'occupation stabilisé : au moins 90 %"))).toEqual(pick(read("Taux d'occupation stabilisé : 90 %")));
+  });
+  test("a percentage of a field names a share: the dollar aside is not that field, and the line's label reads it", () => {
     const r = read("Developer fee: 4% of hard costs ($96,000)");
-    expect(r.candidates.some((c) => c.fieldKey === "hard_cost")).toBe(false);
-    expect(r.other.find((o) => o.value === 96_000)?.note).toBe("A share of another figure, not that figure");
+    expect(pick(r)).toEqual([["other_cost", 96_000]]);
     const fr = read("Honoraires du promoteur : 3 % des coûts directs (96 000 $)");
-    expect(fr.candidates.some((c) => c.fieldKey === "hard_cost")).toBe(false);
-    expect(noteOf(fr, 96_000)).toBe("A share of another figure, not that figure");
+    expect(pick(fr)).toEqual([["other_cost", 96_000]]);
+    expect(pick(read("Contingency: 5% of hard costs ($107,400)"))).toEqual([["contingency", 107_400]]);
+    expect(pick(read("Construction loan: 75% of total cost ($6,300,000)"))).toEqual([["senior_loan_amount", 6_300_000]]);
+    // a label that names no field leaves the aside in other, with the share note
+    const none = read("Cushion: 5% of hard costs ($107,400)");
+    expect(none.candidates).toEqual([]);
+    expect(noteOf(none, 107_400)).toBe("A share of another figure, not that figure");
     const prose = read("The fee is 4% of hard costs, which is $96,000.");
     expect(prose.candidates.some((c) => c.fieldKey === "hard_cost")).toBe(false);
     expect(noteOf(prose, 96_000)).toBe("A share of another figure, not that figure");

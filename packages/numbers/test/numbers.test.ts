@@ -242,8 +242,7 @@ describe("a dash is a minus sign only when it is attached to the number", () => 
   test("negative: a number that really is negative keeps its sign", () => {
     expect(value("Variance -$12,500")).toBe(-12_500);
     expect(value("Change −3.5%")).toBe(-3.5);
-    expect(value("minus 2% on rents")).toBe(-2);
-    expect(value("moins 2 % sur les loyers")).toBe(-2);
+    expect(value("Change -2% on rents")).toBe(-2);
     expect(value("Credits (25,000)")).toBe(-25_000);
     expect(value("(12,500)")).toBe(-12_500);
   });
@@ -252,5 +251,21 @@ describe("a dash is a minus sign only when it is attached to the number", () => 
     expect(tokenize("Trois lots à 160 000 $ chacun (480 000 $)", EU).map((t) => t.value)).toEqual([160_000, 480_000]);
     // negative: the same parentheses with no figure before them are a negative
     expect(tokenize("Other costs ($96,000)", US).map((t) => t.value)).toEqual([-96_000]);
+  });
+});
+
+describe("a sign written in words is refused, never read either way", () => {
+  test("minus and moins before a number leave it unread", () => {
+    for (const line of ["revenue minus 2% vacancy", "rent growth: minus 2%", "moins 2 % sur les loyers", "Croissance : moins 2 %"]) {
+      const t = first(line, US);
+      expect(t.value, line).toBeNull();
+      expect(t.refusal).toBe("A sign written in words; enter the figure by hand");
+    }
+  });
+  test("negative: at least, give or take and an attached sign are as before", () => {
+    expect(first("au moins 90 % occupé", US).value).toBe(90);
+    expect(first("plus ou moins 2 %", US).value).toBe(2);
+    expect(first("plus or minus 2%", US).value).toBe(2);
+    expect(first("minus -2%", US).value).toBe(-2);
   });
 });

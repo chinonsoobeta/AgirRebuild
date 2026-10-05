@@ -9,8 +9,9 @@
 //  3. A token that contradicts the document's separator yields no number.
 //  4. Both edges of a number are guarded, so the tail of "31 200 000" can
 //     never be read as "31" or "200".
-//  5. Unicode minus signs and dashes attached to a number are a minus sign, and so are "minus" and
-//     "moins" before it. A dash set apart from the number by a space ("- 18 months", "– 96%") is a
+//  5. Unicode minus signs and dashes attached to a number are a minus sign. "minus" and "moins"
+//     before a number is a sign in words, which is ambiguous ("revenue minus 2% vacancy" is
+//     +2%): that number is refused, neither negative nor positive. A dash set apart from the number by a space ("- 18 months", "– 96%") is a
 //     list marker, never a sign. "(2,150,000)" is negative, but only money or a bare number is
 //     ("(16 months)" is 16), and only when no number stands before it in its clause: the
 //     "($96,000)" of "4% of hard costs ($96,000)" is an aside, positive.
@@ -317,6 +318,7 @@ export function tokenize(line: string, format: DocumentFormat): NumberToken[] {
     const grouping = currency || upcoming === "units" || upcoming === "sf" || upcoming === "m2";
     const parsed = parseCore(core!, format, grouping, Boolean(suffix?.[1]?.startsWith("$")));
     let value = parsed.value;
+    let refusal = parsed.refusal;
     // A scale word counts only in a money context: "18 M" alone is not $18,000,000.
     if (scale && currency && value !== null) {
       value *= scaleOf(scale[1]!);
@@ -348,14 +350,19 @@ export function tokenize(line: string, format: DocumentFormat): NumberToken[] {
     const parenthesised = Boolean(paren) && text[end] === ")";
     const clause = text.slice(0, start);
     const aside = /\d/.test(clause.slice(clause.lastIndexOf(":") + 1));
-    const negative = Boolean(sign) || MINUS_WORD_RE.test(clause) || (parenthesised && !aside && (currency || unit === null));
+    const signWord = !sign && MINUS_WORD_RE.test(clause);
+    const negative = Boolean(sign) || (parenthesised && !aside && (currency || unit === null));
     if (value !== null && negative) value = -value;
+    if (signWord && value !== null) {
+      value = null;
+      refusal = "A sign written in words; enter the figure by hand";
+    }
     out.push({
       raw: text.slice(start, end).trim(),
       start,
       end,
       value,
-      ...(parsed.refusal ? { refusal: parsed.refusal } : {}),
+      ...(refusal ? { refusal } : {}),
       currency,
       currencyCode,
       unit,
