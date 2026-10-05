@@ -1,7 +1,7 @@
 import { FIELD_BY_KEY, OUTPUT_LIKE_PHRASES } from "@agir/contracts";
 import { detectFormat, normalizeText, SF_PER_M2, tokenize, unitTypesIn, type DocumentFormat, type NumberToken } from "@agir/numbers";
 import type { Cell, NormalizedDocument, Table } from "./document.ts";
-import { CREDIT_NOTE, canonicalItem, currencyOf, flagRead, hasPhrase, loanNameOnly, loanTerm, mapToken, normalizeLabel, rankScope, scopeIn, scopesIn, withCurrency, type MapOptions, type Mapped, type Scope } from "./mapping.ts";
+import { CREDIT_NOTE, LTV_BASIS, canonicalItem, currencyOf, flagRead, hasPhrase, loanNameOnly, loanTerm, mapToken, normalizeLabel, rankScope, scopeIn, scopesIn, withCurrency, type MapOptions, type Mapped, type Scope } from "./mapping.ts";
 
 /** One value found in one document, with where it came from and why it was (or was not) mapped. */
 export type Candidate = {
@@ -308,7 +308,9 @@ const RANGE_NOTE = "A range is not a value; enter the figure to use";
 /** Why a sentence's numbers are no inputs, when it says so: a hedge, another property or an output figure. */
 function sentenceRefusal(text: string): string | null {
   // An output figure comes first: it is the oldest reason, and the one the review screen explains.
-  const label = normalizeLabel(text).label;
+  // "65% of the lender's valuation" names what a loan-to-value is taken of, not a valuation; one with an amount after it still does.
+  const basis = new RegExp(String.raw`(?<=\d\s?%\s+)${LTV_BASIS}(?![a-z0-9]|\s+(?:of|at|is|was|de|a)?\s*[$\d])`, "g");
+  const label = normalizeLabel(fold(text).replace(basis, " ")).label;
   const output = OUTPUT_LIKE_PHRASES.find((p) => hasPhrase(label, p));
   if (output) return `This sentence names an output figure ("${output}"), which is never taken as an input`;
   const f = fold(text);

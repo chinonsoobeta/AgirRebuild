@@ -37,7 +37,7 @@ export type Scope = "senior" | "mezzanine" | "refinance";
 
 const SCOPE_WORDS: Record<Scope, RegExp> = {
   mezzanine: /\b(mezzanine|mezz|second mortgage|2nd mortgage|second charge|second[- ]ranking|second[- ]position|junior|subordinate loan|deuxieme rang|deuxieme hypotheque|pret de second rang|second rang)\b/,
-  refinance: /\b(take-?out|take out|refinanc\w*|permanent loan|permanent financing|exit financing|long[- ]term mortgage|pret permanent|financement permanent|financement de sortie)\b/,
+  refinance: /\b(take-?out|take out|refinanc\w*|permanent loan|permanent financing|exit financing|long[- ]term mortgage|pret permanent|financement permanent|financement de sortie|reprise(?!\s+(?:des?\s+|du\s+|de la\s+)?(?:travaux|chantier|construction|possession|bail|baux|terrain)))\b/,
   senior: /\b(senior|construction loan|first mortgage|premier rang|pret de construction)\b/,
 };
 const TERM_SHEET_RE = /\b(term sheet|feuille de modalites)\b/;
@@ -67,6 +67,9 @@ const SCOPE_FIELD: Record<Exclude<Scope, "senior">, Record<string, string>> = {
   mezzanine: { senior_loan_amount: "mezz_loan_amount", senior_rate_pct: "mezz_rate_pct", senior_amort_years: "mezz_amort_years", senior_io_months: "mezz_io_months" },
   refinance: { senior_loan_amount: "refinance_amount", senior_rate_pct: "refinance_rate_pct", senior_amort_years: "refinance_amort_years", senior_io_months: "refinance_io_months" },
 };
+// What a loan-to-value is taken of: "of the lender's valuation", "of appraised value", "de la valeur établie par le prêteur".
+export const LTV_BASIS = String.raw`(?:of|de|du)\s+(?:the\s+|la\s+|l['’\s]+)?(?:(?:lender|bank|preteur|banque)['’\s]+s?\s*)?(?:valuation|appraised value|appraisal|valeur\s+(?:etablie|determinee|fixee|evaluee)\s+par\s+(?:le\s+)?(?:preteur|banque)|valeur\s+d['’\s]+evaluation|valeur\s+evaluee)`;
+const LTV_BASIS_AFTER_RE = new RegExp(String.raw`^\s*${LTV_BASIS}(?![a-z0-9]|\s+(?:of|at|is|was|de|a)?\s*[$\d])`);
 const LTV_RE = /\b(loan to value|loan-to-value|ltv|ratio pret valeur|ratio pret-valeur|rpv)\b/;
 const BARE_AMOUNT_RE = /^(amount|montant|principal)$/;
 const REPAY_RE = /\b(repa\w+|refinanc\w*|take-?out|rembours\w+)\b/;
@@ -105,16 +108,19 @@ const WEAK_MONEY = new Set(["lot", "site", "parking", "laundry", "storage", "sta
 const EGI_BASE_ALIASES = new Set(["management", "gestion", "depenses"]);
 const EGI_AFTER_RE = /^\s*(?:of|on|de|des|du|d)\s+(?:the\s+|les?\s+|la\s+)?(?:egi|effective gross|gross (?:revenue|income)|revenues?|revenus?)\b/;
 // The limited partners' own share needs no word before it but an article: "return to limited partners 8%" is the return.
-const LP_ALIASES = new Set(["limited partners", "lp", "lps", "commanditaires"]);
+const LP_ALIASES = new Set(["limited partners", "lp", "lps", "commanditaires", ...FIELD_BY_KEY.get("lp_share_pct")!.aliases.filter((a) => /^(?:lps?|limited partners|commanditaires) (?:supply|supplies|provides?|funds?|contributes?|apportent|fournissent|financent)$/.test(a))]);
 const LP_LEAD_RE = /^(?:\s|the|our|le|la|les|notre|nos)*$/;
 // "Other" names a cost only in a budget table.
 const BUDGET_ONLY = new Set(["other", "autres"]);
+// The expense ratio written as a share: "variable" in the label makes it the variable-expense share, as before.
+const EXPENSE_SHARE_ALIASES = new Set(FIELD_BY_KEY.get("expense_ratio_pct")!.aliases.filter((a) => /\bshare\b|\bas a (?:percentage|%)|\bratio des charges|(?:charges|depenses) en (?:%|pourcentage)/.test(a)));
+const VARIABLE_RE = /\bvariables?\b/;
 // A "rate" that is not a loan's.
 const NOT_A_LOAN_RATE = /\b(vacancy|growth|discount|tax|exchange|inflation|return|occupancy) rate\b|\b(taux de (croissance|vacance|actualisation|change|rendement|capitalisation|taxation)|taux d (inflation|imposition|occupation))\b|\brate of return\b/;
 
 // What a lender writes that looks like an input but is not. Words that are part of a field alias ("minimum DSCR", "construction term",
 // "management fee") stay valid: each alias holding one is taken out of the label before the words are looked for.
-const LIMIT_RE = /\b(maximum|max|not to exceed|not exceed|not more than|at most|up to|ceiling|cap of|minimum|min|at least|not less than|no less than|au plus|d au plus|maximale?|plafond|au moins|d au moins|minimale?|pas moins de)\b/;
+const LIMIT_RE = /\b(maximum|max|capped|not to exceed|not exceed|not more than|at most|up to|ceiling|cap of|minimum|min|at least|not less than|no less than|au plus|d au plus|maximale?|plafond|au moins|d au moins|minimale?|pas moins de)\b/;
 const COVERAGE_RE = /\b(dscr|dcr|debt service coverage|couverture|rcsd|rcd|ccd)\b/;
 const TERM_RE = /\b(term|terme|maturity|matures?|echeance|duree du pret)\b/;
 const TERM_AFTER_RE = /^\s*(loan |initial |renewal |fixed |conversion )?(term|terme)\b/;
@@ -215,7 +221,8 @@ export function normalizeLabel(raw: string): { label: string; labelUnit: LabelUn
     .trim();
   // A short label may end with its unit: "Build period, months", "Lease-up months", "Amortissement, ans".
   if (!labelUnit && label.split(" ").length <= 6 && !/\d/.test(label)) {
-    const w = /(?:^|[\s,])(months?|mos?|mois|years?|yrs?|ans?|annees?)$/.exec(label)?.[1];
+    // ... or begin with it: "Months allowed for leasing".
+    const w = /(?:^|[\s,])(months?|mos?|mois|years?|yrs?|ans?|annees?)$/.exec(label)?.[1] ?? /^(months|mois|years)\s/.exec(label)?.[1];
     if (w) labelUnit = /^(m|mo)/.test(w) ? "months" : "years";
   }
   return { label, labelUnit, labelCode };
@@ -357,7 +364,7 @@ const FILLER = "is|are|was|were|will|be|been|should|shall|to|take|takes|taking|p
 const FILLER_RE = new RegExp(`^(\\s(${FILLER}))*$`);
 
 // A sequencing word after a duration noun ("of lease-up afterwards", "de location ensuite") does not stop the noun labelling the number.
-const SEQUENCE_TAIL_RE = /(\s(then|afterwards?|after that|after (completion|delivery)|ensuite|puis|apres (la )?(livraison|completion)))+$/;
+const SEQUENCE_TAIL_RE = /(\s(then|afterwards?|after that|after (completion|delivery|handover)|ensuite|puis|apres (la )?(livraison|completion)))+$/;
 
 /** Where the loose alias stands in the label: at its end, or followed only by filler words and a sequencing word. */
 function standsLast(label: string, at: [number, number]): boolean {
@@ -453,7 +460,7 @@ export const CREDIT_NOTE = "A credit: reduces total cost";
 export const NEGATIVE_NOTE = "A negative figure that does not say it is a credit";
 
 // A label that says the figure is a credit. Folded (no accents, lower case) text.
-const CREDIT_WORD_RE = /(?:^|[^a-z])(?:credits?|credited|rebates?|refunds?|refunded|reimbursements?|reimbursed|remises?|remboursements?|rembourse|ristournes?|subvention deduite|grant applied)(?![a-z])/;
+const CREDIT_WORD_RE = /(?:^|[^a-z])(?:credits?|credited|rebates?|refunds?|refunded|reimbursements?|reimbursed|remises?|remboursements?|rembourse|ristournes?|subvention deduite|subventions? (?:nette )?(?:deduite|qui reduit les couts)|aide financiere (?:deduite|qui reduit les couts)|grant applied)(?![a-z])/;
 // Credit words that are not a credit against the cost: a loan line, a rating, a loss allowance, a tax credit, a restoration.
 const NOT_CREDIT_RE = /(?:line|lines|letter|letters|facility|facilities|marge|ligne|lettre|facilite|carte|card|tax|taxe|impot|impots)\s+(?:of\s+|de\s+|d\s+)?credits?(?![a-z])|credits?\s+(?:facility|facilities|union|rating|check|checks|score|loss|losses|risk|agreement|committee|card|bureau|enhancement|insurance|line|lines|support|policy|quality|worthiness|de risque|d impot)|cooperative de credit|remises?\s+(?:en etat|a neuf|en forme|des cles|de cles|des plans|de prix)/;
 // The budget lines a credit may be written against: it is read as the other costs, never as a reduction of one of these.
@@ -507,6 +514,11 @@ function mapLabel(rawLabel: string, t: NumberToken, opts: MapOptions = {}): Mapp
     return c && { kind: "field", fieldKey: def.key, itemKey: null, value: c.value, unitSeen: c.unitSeen };
   };
 
+  // A percentage "of the lender's valuation" is a loan-to-value, the refinance loan's when that is the loan in scope; the valuation itself is not an input.
+  if (t.unit === "%" && LTV_BASIS_AFTER_RE.test(foldText(opts.after ?? ""))) {
+    if (scope === "refinance") return asField(FIELD_BY_KEY.get("refinance_ltv_pct")!) ?? { kind: "unmapped" };
+    return { kind: "ignored", reason: `A loan-to-value on the lender's valuation, but the ${scope === "mezzanine" ? "mezzanine" : "senior"} loan has no loan-to-value field; the figure is not an input` };
+  }
   // "Interest" is the rate only as the whole label of a label/value line: "promoted interest of 20%" is not.
   if (!prose && /^(interest|interet)$/.test(label)) {
     const m = asField(scoped("senior_rate_pct"));
@@ -576,6 +588,7 @@ function mapLabel(rawLabel: string, t: NumberToken, opts: MapOptions = {}): Mapp
       const at = phraseAt(label, alias);
       if (!at || (prose && REFERENCE_RE.test(label.slice(0, at[0])))) continue;
       if (BUDGET_ONLY.has(alias) && !opts.budget) continue;
+      if (EXPENSE_SHARE_ALIASES.has(alias) && VARIABLE_RE.test(label)) continue;
       if (LP_ALIASES.has(alias) && !LP_LEAD_RE.test(label.slice(0, at[0]))) continue;
       if (EGI_BASE_ALIASES.has(alias) && !(t.unit === "%" && EGI_AFTER_RE.test(foldText(opts.after ?? "")))) continue;
       let c = compatibleValue(def, t, label, labelUnit, labelCode, prose);

@@ -2774,7 +2774,7 @@ describe("label families: the same meaning in several wordings, English and Qué
   });
 
   test("6. the lease-up period", () => {
-    same([["Location initiale (mois)", "8"], ["Période de mise en location", "9 mois"], ["Months allowed for leasing", "9"], ["Time to lease up", "9 months"], ["Time to lease", "9 months"]], ["lease_up_months", 9]);
+    same([["Période de mise en location", "9 mois"], ["Months allowed for leasing", "9"], ["Time to lease up", "9 months"], ["Time to lease", "9 months"]], ["lease_up_months", 9]);
     expect(lv("Location initiale (mois)", "8")).toEqual([["lease_up_months", 8]]);
     same([["Leasing after completion", "6 months"], ["Leasing after handover", "6 months"]], ["lease_up_months", 6]);
   });
@@ -2803,6 +2803,7 @@ describe("label families: the same meaning in several wordings, English and Qué
   });
   test("9. negative: a limit or a dollar increase is not a growth rate", () => {
     none([["Maximum rent increases", "3%"], ["Rent increase", "$50"], ["Hausse maximale des loyers", "3 %"]]);
+    expect(pick(prose("Rent increases are capped at 3% by the province."))).toEqual([]);
   });
 
   test("10. selling costs", () => {
