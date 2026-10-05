@@ -222,6 +222,9 @@ export function normalizeLabel(raw: string): { label: string; labelUnit: LabelUn
     .replace(/[\u0300-\u036f]/g, "")
     .replace(/[^a-z0-9/#$%&\s-]/g, " ")
     .replace(/\b(is|are|of|at|to|was|will be|approximately|approx|about)\s*$/g, " ")
+    // "Coach house / count": a type, a slash and the field it holds name the item and the field, as "Coach house count" does.
+    .replace(/(\S) \/ (?:count|number|nombre)\b/g, "$1 unit count")
+    .replace(/(\S) \/ (?=(?:monthly rent|rent|area|occupancy|loyer|superficie|occupation)\b)/g, "$1 ")
     .replace(/\s+/g, " ")
     .trim();
   // A short label may end with its unit: "Build period, months", "Lease-up months", "Amortissement, ans".
@@ -267,6 +270,8 @@ function parenType(raw: string): string | null {
 export function canonicalItem(name: string): string {
   return wholeUnitType(name) ?? parenType(name) ?? name;
 }
+
+const HEADING_NAME_RE = /^(summary|sommaire|totals?|subtotal|type|types|average|overall)\b/;
 
 function itemName(prefix: string): string {
   const words = prefix.split(" ").filter((w) => w && !GENERIC.has(w));
@@ -669,7 +674,8 @@ function mapLabel(rawLabel: string, t: NumberToken, opts: MapOptions = {}): Mapp
   // A component named by itself with a self-describing unit: "Retail: 9,000 SF".
   const name = itemName(label);
   // In prose the words before a number are a clause ("Pinegate, 12 suites"), not a name.
-  if (name && label.split(" ").length <= 3 && !prose && !aliasOnly) {
+  // A heading word ("Summary", "Total", "Type") names no item.
+  if (name && label.split(" ").length <= 3 && !prose && !aliasOnly && !HEADING_NAME_RE.test(label)) {
     const byUnit: Record<string, string> = {
       units: "unit_count",
       sf: "rentable_area_sf",

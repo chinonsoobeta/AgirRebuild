@@ -1,5 +1,5 @@
 import { FIELD_BY_KEY, OUTPUT_LIKE_PHRASES } from "@agir/contracts";
-import { detectFormat, normalizeText, SF_PER_M2, tokenize, unitTypesIn, type DocumentFormat, type NumberToken } from "@agir/numbers";
+import { detectFormat, normalizeText, SF_PER_M2, tokenize, unitTypesIn, wholeUnitType, type DocumentFormat, type NumberToken } from "@agir/numbers";
 import type { Cell, NormalizedDocument, Table } from "./document.ts";
 import { CREDIT_NOTE, DEPOSIT_RE, LTV_BASIS, canonicalItem, costSentence, currencyOf, flagRead, flagSentence, hasPhrase, loanNameOnly, loanTerm, mapToken, normalizeLabel, rankScope, scopeIn, scopesIn, withCurrency, type MapOptions, type Mapped, type Scope } from "./mapping.ts";
 
@@ -658,6 +658,10 @@ function readSentence(sentence: { text: string; start: number }, para0: Paragrap
         }
         // A place before the colon ("Kelowna, British Columbia", "Gatineau (Québec)") is not an item: that count is the deal-wide count. A single word is kept as a component name ("Residential: 160 units").
         if (/[,(]/.test(label) && mapped.kind === "field" && mapped.fieldKey === "unit_count" && mapped.itemKey !== null && mapped.itemKey !== "All units" && unitTypesIn(mapped.itemKey).length === 0) mapped = { ...mapped, itemKey: "All units" };
+        if (mapped.kind === "field" && UNIT_FIELDS.has(mapped.fieldKey) && asIs(`${label} ${text.slice(t.end, tokens[i + 1]?.start ?? text.length)}`)) {
+          other(t, "line:label-value", AS_IS_NOTE);
+          continue;
+        }
         if (!used && mapped.kind === "field") {
           record(result, mapped, t, { raw: t.raw, location: locationOf(t.start), context: context.slice(0, 240), rule: "line:label-value" });
           used = true;
@@ -749,6 +753,10 @@ function readSentence(sentence: { text: string; start: number }, para0: Paragrap
       other(t, "line:prose", PER_UNIT_NOTE);
       const total = totalOf(text, t, tokens);
       if (total) totalLabels.set(total, usedLabel);
+      return;
+    }
+    if ((mapped.kind === "field" ? UNIT_FIELDS.has(mapped.fieldKey) : mapped.kind === "unmapped" && AREA_RENT_UNITS.has(t.unit ?? "")) && asIs(`${usedLabel} ${text.slice(t.end, tokens[i + 1]?.start ?? text.length).split(/[;.]/)[0]}`)) {
+      other(t, "line:prose", AS_IS_NOTE);
       return;
     }
     carry = named && mapped.kind === "field" && isMoney(t) ? { scope: named, at: i } : null;
@@ -939,6 +947,21 @@ function fromRentRoll(table: Table, headerRow: number, roles: Roles, result: Ext
       if (cell && t) result.other.push({ fieldKey: null, itemKey: null, value: t.value, raw: t.raw, unitSeen: t.unit, location: cell.ref, context: `${table.name}: ${itemText}`, rule: "table:rent-roll", note: ROLL_SUMMARY_NOTE });
       continue;
     }
+    // A row of the unit table that names an income line is read by its own label, never as a unit type.
+    const firstCell = row.find((c, i) => !roles.item.includes(i) && cellToken(c, result.format));
+    const firstTok = firstCell && cellToken(firstCell, result.format);
+    if (firstCell && firstTok && unitTypesIn(itemText).length === 0 && NON_UNIT_ROW_RE.test(fold(itemText))) {
+      record(result, mapToken(itemText, firstTok, {}), firstTok, { raw: firstTok.raw, location: firstCell.ref, context: `${table.name}: ${itemText}`, rule: "table:label-value" });
+      continue;
+    }
+    // A row for the building as it stands today is not the new rental programme.
+    if (asIs(itemText)) {
+      for (const [i, cell] of row.entries()) {
+        const t = roles.item.includes(i) ? null : cellToken(cell, result.format);
+        if (t) result.other.push({ fieldKey: null, itemKey: null, value: t.value, raw: t.raw, unitSeen: t.unit, location: cell.ref, context: `${table.name}: ${itemText}`, rule: "table:rent-roll", note: AS_IS_NOTE });
+      }
+      continue;
+    }
     const found = typeOf(row);
     const suite = found.suite || (roles.units === undefined && (repeats.get(found.type) ?? 0) > 1);
     const itemKey = found.type;
@@ -1016,6 +1039,128 @@ function fromRentRoll(table: Table, headerRow: number, roles: Roles, result: Ext
       else for (const c of list) result.other.push({ ...c, fieldKey: null, itemKey: null, note: DIFFERENT_RENTS_NOTE });
     }
   }
+}
+
+// A rent, area or count that is the building as it stands today, not the new rental programme.
+const AS_IS_RE = /\b(as[- ]is|existing|current(?:ly)?|present|in[- ]place|former(?:ly)?|actuel(?:le)?s?|existant(?:e)?s?|en place|ancien(?:ne)?)\b/;
+const AS_IS_NOTE = "The existing building as it is today, not the new rental programme";
+const asIs = (text: string) => AS_IS_RE.test(fold(text));
+
+// A row of a unit table that names an income line, not a unit type.
+const NON_UNIT_ROW_RE = /\b(parking|storage|laundry|lockers?|vending|income|revenues?|revenus?|stationnement|rangement|buanderie|vacancy|vacance|fees?|frais|expenses?|deposits?)\b/;
+
+const DWELLING = String.raw`(?:homes?|units?|suites?|doors?|apartments?|logements?)`;
+const PER_HOME_MONTH_RE = new RegExp(String.raw`^\s*\$?\s*(?:/|per|par)\s*${DWELLING}\s*(?:/|per|par)\s*(?:month|mo|mois)(?![\p{L}])`, "iu");
+const COUNT_NOUN_RE = new RegExp(String.raw`^\s*${DWELLING}(?![\p{L}])`, "iu");
+const NAME_STOP_RE = /^(the|a|an|is|are|was|were|be|will|has|have|had|and|or|for|to|with|of|in|at|on|we|our|it|there|that|this|these|those|includes?|including|contains?|type|le|la|les|un|une|est|sont|et|ou|pour|avec|nous|notre|il|y|des|du|de)$/i;
+const titled = (name: string) => canonicalItem(name.split(/\s+/).map((w) => (/^\d/.test(w) ? w.toUpperCase() : w[0]!.toUpperCase() + w.slice(1))).join(" "));
+
+/** A short name for a type that a line or row starts with: no field alias, heading word, suite or civic number. */
+function typeName(raw: string, probe: NumberToken): string | null {
+  const name = raw.replace(/[\s:|–—,@-]+$/, "").trim();
+  const words = name.split(/\s+/);
+  if (words.length > 4 || !/^\p{L}/u.test(name) || words.some((w) => NAME_STOP_RE.test(w))) return null;
+  if (/\d/.test(name) && unitTypesIn(name).length === 0) return null;
+  const f = fold(name);
+  if (REFERENCE_RE.test(f) || NOT_HEADING_RE.test(f)) return null;
+  const m = mapToken(name, probe, {});
+  return m.kind === "ignored" || (m.kind === "field" && (m.itemKey === null || m.itemKey === "All units")) ? null : titled(name);
+}
+
+/**
+ * A line or row that is a name, then a count with a dwelling noun and a per-home monthly rent, or an area and a rent per area:
+ * the name is an item with both figures. One with only one of the two, or with other figures, is not read here. `bare`: the row is
+ * delimited, so a bare integer beside a per-home rent is the count. True when the text was this layout, read or refused as as-is.
+ */
+function namedType(nameText: string, rest: string, bare: boolean, location: string, context: string, rule: string, result: ExtractionResult): boolean {
+  const tokens = tokenize(rest, result.format).filter((t) => t.value !== null);
+  if (tokens.length !== 2) return false;
+  const perHome = (t: NumberToken) => (t.unit === "$" && PER_HOME_MONTH_RE.test(rest.slice(t.end))) || (t.unit === "$/mo" && new RegExp(DWELLING, "i").test(t.raw));
+  const perArea = (t: NumberToken) => (t.unit === "$/sf" || t.unit === "$/m2") && !/^\s*(?:per|par|\/)\s*(?:month|mois|mo)\b/i.test(rest.slice(t.end));
+  const counted = (t: NumberToken) => Number.isInteger(t.value) && t.value! > 0 && (t.unit === "units" || (t.unit === null && (COUNT_NOUN_RE.test(rest.slice(t.end)) || bare)));
+  const rent = tokens.find(perHome);
+  const count = tokens.find((t) => t !== rent && counted(t));
+  const areaRent = tokens.find(perArea);
+  const area = tokens.find((t) => t.unit === "sf" || t.unit === "m2");
+  const by = rent && count ? ([[count, "unit_count", "units"], [rent, "unit_rent_monthly", withCurrency("$/mo", rent.currencyCode)]] as const) : areaRent && area ? ([[area, "rentable_area_sf", area.unit!], [areaRent, "rent_psf_annual", withCurrency(areaRent.unit!, areaRent.currencyCode)]] as const) : null;
+  const name = by ? typeName(nameText, by[0][0]) : null;
+  if (!by || !name) return false;
+  const asis = asIs(`${nameText} ${rest}`);
+  for (const [t, fieldKey, unitSeen] of by) {
+    const base = { raw: t.raw, location, context: context.slice(0, 240), rule };
+    // Square metres are square feet, and a rent per m², a rent per sf, by the same conversions as everywhere.
+    const value = fieldKey === "rentable_area_sf" && t.unit === "m2" ? t.value! * SF_PER_M2 : fieldKey === "rent_psf_annual" && t.unit === "$/m2" ? t.value! / SF_PER_M2 : t.value!;
+    if (asis) result.other.push({ ...base, fieldKey: null, itemKey: null, value: t.value, unitSeen: t.unit, note: AS_IS_NOTE });
+    else result.candidates.push({ ...base, fieldKey, itemKey: name, value, unitSeen });
+  }
+  return true;
+}
+
+/** A line read as a named type: "Name | 3 homes | $2,300 per home per month", "Name: 3 homes at ...", "Name 1,800 sf at $34 per sf". */
+function namedLine(text: string, location: string, result: ExtractionResult): boolean {
+  if (text.includes("|")) {
+    const [head, ...parts] = text.split("|");
+    return namedType(head!, parts.join(" | "), true, location, text, "line:named-type", result);
+  }
+  const first = tokenize(text, result.format)[0];
+  if (!first) return false;
+  const colon = text.indexOf(":");
+  const at = colon > 0 && colon < first.start ? colon : first.start;
+  return namedType(text.slice(0, at), text.slice(at + (text[at] === ":" ? 1 : 0)), false, location, text, "line:named-type", result);
+}
+
+/** A table row of a name and two or more cells, read as a named type. */
+function namedRow(row: Cell[], table: Table, result: ExtractionResult): boolean {
+  const cells = row.filter((c) => c.text);
+  const head = cells[0];
+  if (!head || cells.length < 3 || head.number !== undefined) return false;
+  return namedType(head.text, cells.slice(1).map((c) => c.text).join(" | "), true, head.ref, `${table.name}: ${cells.map((c) => c.text).join(" | ")}`, "table:named-type", result);
+}
+
+const COUNT_ROW_RE = /^(?:(?:number|nombre|nb|no\.?)\s+(?:of|de|d')\s*)?(?:homes?|units?|suites?|doors?|apartments?|logements?|unites?|appartements?|count)$/;
+const PER_UNIT_LABEL_RE = /\b(per|par)\s+(home|unit|suite|door|apartment|logement|unite|appartement)\b/;
+
+/**
+ * A table whose header row (one of the first two) holds two or more unit types, and whose first column labels a count and a rent,
+ * is read column by column: each column is one item. A yearly rent per home is a monthly one by twelve.
+ */
+function fromTypeColumns(table: Table, result: ExtractionResult): boolean {
+  for (let h = 0; h < Math.min(2, table.rows.length); h++) {
+    const types = table.rows[h]!.map((c, i) => (i > 0 ? wholeUnitType(c.text) : null));
+    if (new Set(types.filter(Boolean)).size < 2) continue;
+    const body = table.rows.slice(h + 1).map((row) => ({ row, label: headerOf(row[0] ?? { text: "", ref: "" }).trim() }));
+    const isRent = (l: string) => /\b(rent|loyer)\b/.test(l) && !/\b(psf|sf|pi2|m2)\b/.test(l);
+    if (!body.some((b) => COUNT_ROW_RE.test(b.label)) || !body.some((b) => isRent(b.label))) continue;
+    for (const { row, label } of body) {
+      types.forEach((type, i) => {
+        const cell = row[i];
+        const t = type && cell?.text ? cellToken(cell, result.format) : null;
+        if (!type || !cell || !t) return;
+        const base = { raw: t.raw, location: cell.ref, context: `${table.name}: ${row[0]!.text} ${cell.text}`.slice(0, 240), rule: "table:type-columns" };
+        const aside = (note: string) => result.other.push({ ...base, fieldKey: null, itemKey: null, value: t.value, unitSeen: t.unit, note });
+        if (COUNT_ROW_RE.test(label)) {
+          if (t.value !== null && Number.isInteger(t.value) && t.value > 0 && (t.unit === null || t.unit === "units")) result.candidates.push({ ...base, fieldKey: "unit_count", itemKey: type, value: t.value, unitSeen: "units" });
+          else aside(t.refusal ?? "Not a unit count");
+        } else if (isRent(label) && t.value !== null && (t.unit === null || t.unit === "$" || t.unit === "$/mo")) {
+          if (MONTHLY_RE.test(label)) result.candidates.push({ ...base, fieldKey: "unit_rent_monthly", itemKey: type, value: t.value, unitSeen: withCurrency("$/mo", t.currencyCode) });
+          else if (ANNUAL_RE.test(label) && PER_UNIT_LABEL_RE.test(label)) result.candidates.push({ ...base, fieldKey: "unit_rent_monthly", itemKey: type, value: t.value / 12, unitSeen: withCurrency("$/yr", t.currencyCode), note: "The table gives a yearly rent per unit; shown as a monthly rent (÷ 12)" });
+          else aside(BASIS_UNSTATED);
+        } else aside("No field matches this label");
+      });
+    }
+    return true;
+  }
+  return false;
+}
+
+// A suite-by-suite roll: a suite-number column and a status column, with no count column. It is never read row by row.
+const SUITE_HEAD_RE = /^(suite|unit|apt|apartment|no\.?|#|logement|app\.?)(\s*(no\.?|number|#))?$/;
+const STATUS_HEAD_RE = /^(status|statut|occupancy|occupation|lease status|occupied)$/;
+const SUITE_ROLL_NOTE = "A suite-by-suite roll without a summary by type; enter the unit mix";
+const suiteRolls = new WeakSet<ExtractionResult>();
+function suiteHeader(row: Cell[]): boolean {
+  const h = row.map((c) => headerOf(c).trim());
+  return row.every((c) => c.number === undefined) && h.some((x) => SUITE_HEAD_RE.test(x)) && h.some((x) => STATUS_HEAD_RE.test(x)) && !h.some((x) => rentRole(x) === "units");
 }
 
 function fromBudget(table: Table, headerRow: number, roles: BudgetRoles, result: ExtractionResult, scope: Scope, excluded = false) {
@@ -1157,6 +1302,9 @@ function sectionLabel(row: Cell[]): string | null {
 }
 
 // A heading of an item block is no field, section, total or sentence; the rows under it that name these fields belong to it.
+const REVENUE_FIELDS = UNIT_FIELDS;
+// A figure in one of these units is a count, an area or a rent even when its label names nothing.
+const AREA_RENT_UNITS = new Set(["$/sf", "$/m2", "sf", "m2", "units", "$/mo"]);
 const BLOCK_FIELDS = new Set(["unit_count", "unit_rent_monthly", "rentable_area_sf", "rent_psf_annual", "item_occupancy_pct"]);
 // A label inside a block that names the block by "this" or "of this type" rather than by name.
 const BLOCK_RELATIVE_RE = /\s*\b((of|for) this (type|component|unit|space)|this (type|component|unit|space)|(de|pour) ce (type|local)|ce local|(de|pour) cette composante|cette composante)\s*$/i;
@@ -1215,7 +1363,7 @@ function isValueFirstSection(rows: Cell[][], format: DocumentFormat): boolean {
   return first >= 2 && first > last;
 }
 
-type Section = { rows: Cell[][]; scope: Scope; excluded: boolean; rent?: Roles; budget?: BudgetRoles; item?: string };
+type Section = { rows: Cell[][]; scope: Scope; excluded: boolean; rent?: Roles; budget?: BudgetRoles; item?: string; suites?: true };
 
 /**
  * A sheet may stack sections. A row that is itself a header (a rent roll's or a budget's) ends the section before it and starts
@@ -1229,12 +1377,19 @@ function fromTable(table: Table, result: ExtractionResult, notes: string[] = [],
   // A sheet name or a section label that marks what follows as not part of the deal.
   let excluded = markedNotPart(table.name);
   const sections: Section[] = [];
+  if (fromTypeColumns(table, result)) return;
   let cur: Section = { rows: [], scope, excluded };
   const close = () => {
     if (cur.rows.length > 0) sections.push(cur);
   };
   table.rows.forEach((row, at) => {
     const numeric = row.some((c) => c.number !== undefined);
+    if (suiteHeader(row)) {
+      close();
+      cur = { rows: [], scope, excluded, suites: true };
+      suiteRolls.add(result);
+      return;
+    }
     const rent = numeric ? null : rentRollRoles(row);
     const budget = numeric || rent ? null : budgetRoles(row);
     if (rent || budget) {
@@ -1266,6 +1421,7 @@ function fromTable(table: Table, result: ExtractionResult, notes: string[] = [],
   let rollSeen = false;
   for (const s of sections) {
     const part = { ...table, rows: s.rows };
+    if (s.suites) continue;
     if (s.rent) {
       fromRentRoll(part, 0, s.rent, result, notes);
       rollSeen = true;
@@ -1278,6 +1434,7 @@ function fromTable(table: Table, result: ExtractionResult, notes: string[] = [],
       let block = s.item;
       const valueFirstSection = isValueFirstSection(s.rows, result.format);
       s.rows.forEach((row) => {
+        if (!s.excluded && namedRow(row, table, result)) return;
         const vf = valueFirstSection ? valueFirst(row, result.format) : null;
         const labelCell = vf?.label ?? labelOf(row, result.format);
         const relative = block && labelCell ? BLOCK_RELATIVE_RE.test(labelCell.text) : false;
@@ -1309,6 +1466,10 @@ function fromTable(table: Table, result: ExtractionResult, notes: string[] = [],
           // Under a rent roll, a row that restates the roll (a count, an area, a rent, an occupancy) is a summary, not an assumption.
           if (rollSeen && mapped.kind === "field" && ROLL_FIELDS.has(mapped.fieldKey) && !STABILIZED_LABEL_RE.test(label)) {
             result.other.push({ ...base, fieldKey: null, itemKey: null, value: t.value, unitSeen: t.unit, note: ROLL_SUMMARY_NOTE });
+            break;
+          }
+          if (mapped.kind === "field" && REVENUE_FIELDS.has(mapped.fieldKey) && asIs(labelCell.text)) {
+            result.other.push({ ...base, fieldKey: null, itemKey: null, value: t.value, unitSeen: t.unit, note: AS_IS_NOTE });
             break;
           }
           record(result, mapped, t, base);
@@ -1469,6 +1630,9 @@ export function extractCandidates(doc0: NormalizedDocument): ExtractionResult {
   const scopes = lineScopes(doc, result.format, rankIn(doc));
   const excluded = excludedLines(doc, result.format);
   const text = textTables(doc, result.format, scopes, excluded);
+  doc.lines.forEach((l, i) => {
+    if (!excluded[i] && !text.used.has(i) && namedLine(l.text, l.location, result)) text.used.add(i);
+  });
   fromLines(doc, result, text.used, scopes, excluded);
   for (const t of text.tables) fromTable(t.table, result, t.notes, t.scope);
   // A Word file's paragraphs may carry the note about a rent column ("Retail rents are ..."); there is no order between them and its tables.
@@ -1497,6 +1661,7 @@ export function extractCandidates(doc0: NormalizedDocument): ExtractionResult {
     result.candidates.filter((c) => c.rule === SUITE_RULE).forEach((c) => aside(c, "This document gives a summary by type; the per-suite roll is not read"));
     result.candidates = result.candidates.filter((c) => c.rule !== SUITE_RULE);
   }
+  if (suiteRolls.has(result) && !result.candidates.some(typed)) result.notes.push(SUITE_ROLL_NOTE);
   // A deal-wide figure beside named items for the same field is only shown.
   const named = new Set(result.candidates.filter(typed).map((c) => c.fieldKey));
   result.candidates.filter((c) => c.itemKey === "All units" && named.has(c.fieldKey)).forEach((c) => aside(c, "This document names items for this field; a deal-wide figure is not read beside them"));

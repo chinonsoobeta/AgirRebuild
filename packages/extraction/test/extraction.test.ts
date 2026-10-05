@@ -3088,7 +3088,7 @@ describe("revenue layouts: income rows, unit types as columns, named types, suit
   const withTables = (text: string[], ...tables: Table[]): NormalizedDocument => ({ ...lines(...text), kind: "docx", tables });
   /** Every revenue figure read, as "item|field" -> value. */
   const REVENUE = new Set(["unit_count", "unit_rent_monthly", "rentable_area_sf", "rent_psf_annual"]);
-  const items = (doc: NormalizedDocument) => Object.fromEntries(extractCandidates(doc).candidates.filter((c) => c.itemKey && REVENUE.has(c.fieldKey)).map((c) => [`${c.itemKey}|${c.fieldKey}`, c.value]));
+  const items = (doc: NormalizedDocument) => Object.fromEntries(extractCandidates(doc).candidates.filter((c) => c.itemKey && REVENUE.has(c.fieldKey ?? "")).map((c) => [`${c.itemKey}|${c.fieldKey}`, c.value]));
   const itemKeys = (doc: NormalizedDocument) => [...new Set(extractCandidates(doc).candidates.filter((c) => c.itemKey).map((c) => c.itemKey))];
   const AS_IS = /existing building as it is today, not the new rental programme/;
 
@@ -3096,7 +3096,8 @@ describe("revenue layouts: income rows, unit types as columns, named types, suit
   test("an income row in a unit table is the income field, never a unit type, and the real types still read", () => {
     const r = extractCandidates(withTables([], grid(["Type", "Units", "Monthly rent"], ["1-bed", "6", "$1,900"], ["Yearly storage income", "$3,600", ""], ["Parking", "12", "75"], ["Laundry income", "1", "400"], ["Total", "6", ""])));
     expect(r.candidates.filter((c) => c.itemKey).map((c) => [c.itemKey, c.fieldKey, c.value])).toEqual([["1BR", "unit_count", 6], ["1BR", "unit_rent_monthly", 1_900]]);
-    expect(r.candidates.map((c) => c.value)).not.toContain(3_600);
+    // The storage row is the income field by its own label, not an item.
+    expect(r.candidates.filter((c) => !c.itemKey).map((c) => [c.fieldKey, c.value])).toEqual([["other_income_annual", 3_600]]);
     expect(r.candidates.filter((c) => c.fieldKey === "unit_count").map((c) => c.value)).toEqual([6]);
   });
   test("a unit table's own types, including a commercial tenant row, are still items", () => {
@@ -3106,7 +3107,7 @@ describe("revenue layouts: income rows, unit types as columns, named types, suit
   // Rule 2
   test("unit types as columns: English and French, a yearly rent per home is divided by 12, and the type words are the existing vocabulary", () => {
     const en = extractCandidates(withTables([], grid(["Measure", "1-bed", "2-bed"], ["Homes", "6", "4"], ["Yearly rent per home", "$24,000", "$30,000"])));
-    expect(en.candidates.filter((c) => c.itemKey).map((c) => [c.itemKey, c.fieldKey, c.value])).toEqual([["1BR", "unit_count", 6], ["1BR", "unit_rent_monthly", 2_000], ["2BR", "unit_count", 4], ["2BR", "unit_rent_monthly", 2_500]]);
+    expect(items(withTables([], grid(["Measure", "1-bed", "2-bed"], ["Homes", "6", "4"], ["Yearly rent per home", "$24,000", "$30,000"])))).toEqual({ "1BR|unit_count": 6, "1BR|unit_rent_monthly": 2_000, "2BR|unit_count": 4, "2BR|unit_rent_monthly": 2_500 });
     expect(en.candidates.find((c) => c.fieldKey === "unit_rent_monthly")?.note).toMatch(/÷ 12/);
     const fr = items(withTables([], grid(["Mesure", "3½", "4½"], ["Logements", "10", "6"], ["Loyer mensuel par logement", "1 450 $", "1 900 $"])));
     expect(fr).toEqual({ "3½|unit_count": 10, "3½|unit_rent_monthly": 1_450, "4½|unit_count": 6, "4½|unit_rent_monthly": 1_900 });
@@ -3115,8 +3116,7 @@ describe("revenue layouts: income rows, unit types as columns, named types, suit
   });
   test("negative: a one-column table is unchanged, and a header of years is not unit types", () => {
     expect(Object.keys(items(withTables([], grid(["Measure", "1-bed"], ["Homes", "6"], ["Monthly rent per home", "$1,900"]))))).not.toContain("1BR|unit_count");
-    expect(itemKeys(withTables([], grid(["Measure", "2027", "2028"], ["Homes", "6", "4"], ["Yearly rent per home", "$24,000", "$30,000"])))).not.toContain("2027");
-    expect(Object.keys(items(withTables([], grid(["Measure", "2027", "2028"], ["Homes", "6", "4"], ["Yearly rent per home", "$24,000", "$30,000"]))))).not.toContain("unit_rent_monthly");
+    expect(itemKeys(withTables([], grid(["Measure", "2027", "2028"], ["Homes", "6", "4"], ["Yearly rent per home", "$24,000", "$30,000"]))).filter((k) => k !== "All units")).toEqual([]);
   });
 
   // Rule 3
