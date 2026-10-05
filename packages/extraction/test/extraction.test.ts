@@ -1939,6 +1939,24 @@ describe("durations after the number, revisions in a sentence, percent cells, va
     expect(pick(read("- 16 mois pour louer, 4 mois de construction"))).toEqual([["lease_up_months", 16], ["construction_months", 4]]);
   });
 
+  test("a number word after a bullet is read, and a semicolon ends the clause a label reaches", () => {
+    expect(pick(read("- twenty months to build; four months of lease-up once it is done."))).toEqual([["construction_months", 20], ["lease_up_months", 4]]);
+    expect(pick(read("• seize mois de construction ; trois mois de location."))).toEqual([["construction_months", 16], ["lease_up_months", 3]]);
+    expect(pick(read("* – six months of construction; two months of lease-up"))).toEqual([["construction_months", 6], ["lease_up_months", 2]]);
+  });
+  test("a label stays in its own clause", () => {
+    expect(pick(read("Rate: 6.1%; amortization 30 years"))).toEqual([["senior_rate_pct", 6.1], ["senior_amort_years", 30]]);
+    expect(pick(read("Twelve months to build; 5 months"))).toEqual([["construction_months", 12]]);
+    expect(pick(read("Construction period: 14 months; 6 months"))).toEqual([["construction_months", 14]]);
+  });
+  test("negative: a bare duration under a heading keeps today's reading, and a hyphen inside a number is not a bullet", () => {
+    const bare = read("Construction period", "- 18 months");
+    expect(pick(bare)).toEqual([]);
+    expect(noteOf(bare, 18)).toBe("No field matches this label");
+    expect(pick(read("a twenty-four month build"))).toEqual([["construction_months", 24]]);
+    expect(pick(read("one hundred-twenty units"))).toEqual([]);
+  });
+
   test("a market vacancy or occupancy figure is shown, not the deal's assumption", () => {
     for (const line of ["Vacancy in the submarket was 2.1%", "Average occupancy in the area: 96%", "CMHC reports city vacancy of 1.8%", "Le taux d'inoccupation du marché est de 2 %", "Taux d'occupation moyen du secteur : 95 %", "Vacance dans le quartier : 3 %"]) {
       const r = read(line);
