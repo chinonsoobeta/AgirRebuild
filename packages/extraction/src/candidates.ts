@@ -705,18 +705,41 @@ const BUDGET_LABEL_RE = /\b(line\s*item|description|category|item|cost\s*item|us
 const BUDGET_WEAK_LABEL_RE = /\b(line|division)\b/;
 const BUDGET_AMOUNT_RE = /\b(amount|cost|budget|total|montant|couts?|\$)\b/;
 
-function budgetRoles(header: Cell[]): { label: number; amount: number } | null {
+/** `others`: amount columns of other revisions, shown and never read; `ambiguous`: the headers do not say which revision is latest, so none is read. */
+type BudgetRoles = { label: number; amount: number; others?: number[]; ambiguous?: boolean };
+// A column headed by a revision, a version or a quote option.
+const REVISION_COL_RE = /\b(rev(?:ision)?\.?\s*[a-z0-9]|revised|revisee?|revise|original|initial|previous|precedent\w*|current|actuel\w*|courant|option|version|quote|bid|soumission|devis|alt\w*)\b/;
+/** Where a revision column stands: later is higher; null when the header does not say. */
+function columnRank(h: string): number | null {
+  if (/\b(original|initial|previous|precedent\w*)\b/.test(h)) return -1;
+  if (/\b(current|actuel\w*|courant)\b/.test(h)) return 100;
+  return revisionOf(h) || null;
+}
+
+function budgetRoles(header: Cell[]): BudgetRoles | null {
   let label = -1;
   let weak = -1;
   let amount = -1;
+  const revisions: number[] = [];
   header.forEach((c, i) => {
     const h = headerOf(c);
     if (label < 0 && BUDGET_LABEL_RE.test(h)) label = i;
     else if (weak < 0 && BUDGET_WEAK_LABEL_RE.test(h)) weak = i;
-    else if (amount < 0 && BUDGET_AMOUNT_RE.test(h)) amount = i;
+    else {
+      if (REVISION_COL_RE.test(h) && (BUDGET_AMOUNT_RE.test(h) || /^\s*[^a-z]*(rev|original|initial|previous|precedent|current|actuel|courant|revis)/.test(h))) revisions.push(i);
+      if (amount < 0 && BUDGET_AMOUNT_RE.test(h)) amount = i;
+    }
   });
   if (label < 0) label = weak;
-  return label >= 0 && amount >= 0 ? { label, amount } : null;
+  if (label < 0) return null;
+  if (revisions.length >= 2) {
+    const ranks = revisions.map((i) => columnRank(headerOf(header[i]!)));
+    const clear = ranks.every((r) => r !== null) && new Set(ranks).size === ranks.length;
+    const top = clear ? revisions[ranks.indexOf(Math.max(...(ranks as number[])))]! : revisions[0]!;
+    return { label, amount: top, others: revisions.filter((i) => i !== top), ambiguous: !clear };
+  }
+  const only = amount >= 0 ? amount : revisions[0] ?? -1;
+  return only >= 0 ? { label, amount: only } : null;
 }
 
 /** A rent column's basis from a note's words ("annual rent per apartment", "net annual per square foot", "monthly"), or null. */
@@ -870,7 +893,7 @@ function fromRentRoll(table: Table, headerRow: number, roles: Roles, result: Ext
   }
 }
 
-function fromBudget(table: Table, headerRow: number, roles: { label: number; amount: number }, result: ExtractionResult, scope: Scope) {
+function fromBudget(table: Table, headerRow: number, roles: BudgetRoles, result: ExtractionResult, scope: Scope) {
   // Sum component lines per field; use a "Total X" row only when no component
   // line mapped to X, and raise both when they disagree. A line that maps to no
   // field, between the header (or the previous total) and a total row for X, is a component of X.
@@ -884,6 +907,13 @@ function fromBudget(table: Table, headerRow: number, roles: { label: number; amo
     const labelCell = row[roles.label];
     const amountCell = row[roles.amount];
     if (!labelCell?.text || !amountCell) continue;
+    // The amounts of other revisions, or of columns whose order is not told, are shown and never read.
+    for (const c of [...(roles.others ?? []), ...(roles.ambiguous ? [roles.amount] : [])]) {
+      const cell = row[c];
+      const o = cell && cellToken(cell, result.format);
+      if (cell && o) result.other.push({ fieldKey: null, itemKey: null, value: o.value, raw: o.raw, unitSeen: o.unit, location: cell.ref, context: `${table.name}: ${labelCell.text}`, rule: "table:budget", note: roles.ambiguous ? "Several amount columns; choose one" : SUPERSEDED_NOTE });
+    }
+    if (roles.ambiguous) continue;
     const t = cellToken(amountCell, result.format);
     if (!t) continue;
     // A row in a budget sheet that is not money ("Loan-to-cost | 70%") is a label and value.
@@ -993,7 +1023,7 @@ function sectionLabel(row: Cell[]): string | null {
   return c.text;
 }
 
-type Section = { rows: Cell[][]; scope: Scope; rent?: Roles; budget?: { label: number; amount: number } };
+type Section = { rows: Cell[][]; scope: Scope; rent?: Roles; budget?: BudgetRoles };
 
 /**
  * A sheet may stack sections. A row that is itself a header (a rent roll's or a budget's) ends the section before it and starts

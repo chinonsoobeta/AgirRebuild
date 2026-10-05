@@ -86,7 +86,7 @@ const STABILIZED_RE = /\b(stabili[sz]ed|stabilisee?|projected|pro forma|projete\
 
 // Words too common to name a field alone. Each loses to any longer alias in the label, must stand at the end of the label
 // (or before "income"/"amount"), and never matches inside a longer word.
-const LOOSE_ALIASES = new Set(["interest", "management", "gestion", "depenses", "limited partners", "lp", "lps", "commanditaires", "loan", "pret", "mortgage", "rate", "taux", "construction", "location", "build", "travaux", "lot", "site", "contribute", "invest", "apport", "other", "autres", "parking", "laundry", "storage", "stationnement", "buanderie", "rangement"]);
+const LOOSE_ALIASES = new Set(["management", "gestion", "depenses", "limited partners", "lp", "lps", "commanditaires", "loan", "pret", "mortgage", "rate", "taux", "construction", "location", "build", "travaux", "lot", "site", "contribute", "invest", "apport", "other", "autres", "parking", "laundry", "storage", "stationnement", "buanderie", "rangement"]);
 // These name a field only for a money figure of at least $1,000: "lot 7" is a lot number, "storage $75" may be one locker.
 const WEAK_MONEY = new Set(["lot", "site", "parking", "laundry", "storage", "stationnement", "buanderie", "rangement"]);
 // These name a field only when the figure's own words say what it is a share of: "management 4% of EGI", never "management 1.5% of equity".
@@ -341,6 +341,7 @@ function standsLast(label: string, at: [number, number]): boolean {
 
 // A builder's quote total, once its revision words are taken out.
 const QUOTE_TOTAL_RE = /^(?:grand )?(?:total(?: price| quote| bid| tender| estimate| contract(?: price)?| amount)?|contract total|quote total|contract price|montant total|prix total|total de la soumission|total soumission|total du devis|prix du contrat)$/;
+const COVER_LIST_RE = /[\s,](?:covering|including|incl|comprising|such as|comprenant|incluant|dont)\b/;
 const REVISION_WORDS_RE = /\b(?:revised|revisee?|revise|rev(?:ision)?\.? ?[a-z0-9]?|rev)\b/g;
 // A loan named as the whole label: its scope words, the words that say "loan", and filler are all there is.
 const LOAN_WORDS = /\b(loans?|debt|mortgage|facility|prets?|dette|hypotheque|hypothecaire)\b/g;
@@ -364,7 +365,12 @@ export function loanNameOnly(rawLabel: string): Scope | null {
 /** Map one labelled number onto a field. In prose the alias nearest the number names it, and a bare number is never money. */
 export function mapToken(rawLabel: string, t: NumberToken, opts: MapOptions = {}): Mapped {
   const prose = opts.prose ?? false;
-  const { label, labelUnit, labelCode } = normalizeLabel(rawLabel);
+  const norm = normalizeLabel(rawLabel);
+  const { labelUnit, labelCode } = norm;
+  let label = norm.label;
+  // A budget field at the head of a label and a list of what it covers: the head names the figure, the list never does.
+  const cover = COVER_LIST_RE.exec(label);
+  if (cover && cover.index > 0 && BUDGET_NAME_RE.test(label.slice(0, cover.index))) label = label.slice(0, cover.index).trim();
   const output = OUTPUT_LIKE_PHRASES.find((p) => hasPhrase(label, p));
   if (output) return { kind: "ignored", reason: `"${rawLabel.trim()}" is an output figure, which is never taken as an input` };
   if (t.value === null) return { kind: "ignored", reason: t.refusal ?? "The number could not be read without guessing" };
@@ -378,6 +384,11 @@ export function mapToken(rawLabel: string, t: NumberToken, opts: MapOptions = {}
     return c && { kind: "field", fieldKey: def.key, itemKey: null, value: c.value, unitSeen: c.unitSeen };
   };
 
+  // "Interest" is the rate only as the whole label of a label/value line: "promoted interest of 20%" is not.
+  if (!prose && /^(interest|interet)$/.test(label)) {
+    const m = asField(scoped("senior_rate_pct"));
+    if (m) return m;
+  }
   // A builder's quote: its Total (or contract price), revision words aside, is the hard cost.
   if (opts.quote && QUOTE_TOTAL_RE.test(label.replace(REVISION_WORDS_RE, " ").replace(/\s+/g, " ").trim())) {
     const m = asField(FIELD_BY_KEY.get("hard_cost")!);

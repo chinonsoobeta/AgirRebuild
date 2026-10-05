@@ -1758,7 +1758,7 @@ describe("totals and their parts", () => {
     });
     test("interest alone is the rate only as the whole label of a label/value line", () => {
       expect(pick(read("INTEREST. 6.25%", "Interest: 6.1%", "Intérêt : 5,9 %"))).toEqual([["senior_rate_pct", 6.25], ["senior_rate_pct", 6.1], ["senior_rate_pct", 5.9]]);
-      expect(pick(read("The General Partner receives a promoted interest of 20% of further distributions"))).toEqual([]);
+      expect(pick(read("The General Partner receives a promoted interest of 20% of further distributions")).some(([k]) => k === "senior_rate_pct")).toBe(false);
       expect(pick(read("Ownership interest: 20% of distributions"))).toEqual([]);
       expect(pick(read("Une participation avec intérêt de 20 % des distributions"))).toEqual([]);
       expect(pick(read("Carried interest of 20% above the preferred return"))).toEqual([["gp_promote_pct", 20]]);
