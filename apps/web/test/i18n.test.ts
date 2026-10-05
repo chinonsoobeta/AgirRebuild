@@ -1,4 +1,8 @@
 import { describe, expect, it } from "vitest";
+import type { EngineInput, ReadinessItem } from "@agir/contracts";
+import { assemble, validateInput, EngineInputError } from "../../../packages/engine/src/index.ts";
+import validateSource from "../../../packages/engine/src/validate.ts?raw";
+import { allEquityDeal } from "../../../packages/engine/test/fixtures.ts";
 import { FIELDS } from "@agir/contracts";
 import { SF_PER_M2 } from "@agir/numbers";
 import { reviewWaiting } from "../src/components/ui.tsx";
@@ -131,5 +135,122 @@ describe("the quick start's gaps", () => {
     expect(r.reason).toBe("broker letter (saisi en 107,64 $/m²/an)");
     expect(enteredInUnit("sf", false, 870, "from the plans", "en")).toEqual({ value: 870, reason: "from the plans" });
     expect(enteredInUnit("$", true, 5, "x".repeat(10), "en")).toEqual({ value: 5, reason: "x".repeat(10) });
+  });
+});
+
+// ---- The validator's and readiness's sentences, in French ---------------------------------------
+describe("every sentence the engine's checks can produce has a French rendering", () => {
+  const problems = (change: (d: EngineInput) => void): string[] => {
+    const d = allEquityDeal();
+    change(d);
+    try {
+      validateInput(d);
+    } catch (e) {
+      if (e instanceof EngineInputError) return e.problems;
+      throw e;
+    }
+    return [];
+  };
+  const loanDeal = (): EngineInput => {
+    const d = allEquityDeal();
+    d.senior = { amount: 500_000, ratePct: 5, amortYears: 30, ioMonths: 0 };
+    return d;
+  };
+  const withLoan = (which: "senior" | "mezzanine" | "refinance", bad: Record<string, number>) => (d: EngineInput) => {
+    const l = { amount: 500_000, ratePct: 5, amortYears: 30, ioMonths: 0, ...bad };
+    if (which === "senior") d.senior = l;
+    else if (which === "mezzanine") d.mezzanine = l;
+    else { d.holdYears = 5; d.refinance = { month: 12, amount: l.amount, ratePct: l.ratePct, amortYears: l.amortYears, ioMonths: l.ioMonths }; }
+  };
+  const rev = (c: Partial<EngineInput["revenue"][number]>) => (d: EngineInput) => { d.revenue = [{ ...d.revenue[0]!, ...c }]; };
+  const perSf = { basis: "per_sf" as const, areaSf: 1000, rentPsfAnnual: 30 };
+
+  // One entry per `p.push(` in validate.ts, in the order it is written.
+  const SITES: [string, (d: EngineInput) => void][] = [
+    ["budget", (d) => { d.budget.land = -1; }],
+    ["no revenue", (d) => { d.revenue = []; }],
+    ["unit count", rev({ units: 0 })],
+    ["monthly rent", rev({ rentMonthly: -1 })],
+    ["area", rev({ ...perSf, areaSf: 0 })],
+    ["rent per SF", rev({ ...perSf, rentPsfAnnual: -1 })],
+    ["component occupancy", rev({ occupancyPct: 101 })],
+    ["construction months", (d) => { d.constructionMonths = 121; }],
+    ["lease-up months", (d) => { d.leaseUpMonths = 1.5; }],
+    ["hold years", (d) => { d.holdYears = 0; }],
+    ["stabilized occupancy", (d) => { d.stabilizedOccupancyPct = 120; }],
+    ["no expense basis", (d) => { delete d.expenseRatioPct; }],
+    ["both expense bases", (d) => { d.fixedOpexAnnual = 1; }],
+    ["exit cap", (d) => { d.exitCapPct = 0; }],
+    ["selling costs", (d) => { d.sellingCostsPct = 100; }],
+    ["loan amount", withLoan("senior", { amount: -1 })],
+    ["loan rate", withLoan("senior", { ratePct: -1 })],
+    ["loan amortization", withLoan("senior", { amortYears: 51 })],
+    ["loan interest-only", withLoan("senior", { ioMonths: 601 })],
+    ["refinance month", (d) => { d.holdYears = 5; d.refinance = { month: 0, amount: 1, ratePct: 5, amortYears: 30, ioMonths: 0 }; }],
+    ["refinance amount or LTV", (d) => { d.holdYears = 5; d.refinance = { month: 12, ratePct: 5, amortYears: 30, ioMonths: 0 }; }],
+    ["LP share", (d) => { d.waterfall = { lpSharePct: 0, preferredReturnPct: 8, gpPromotePct: 20 }; }],
+    ["preferred return", (d) => { d.waterfall = { lpSharePct: 90, preferredReturnPct: -1, gpPromotePct: 20 }; }],
+    ["GP promote", (d) => { d.waterfall = { lpSharePct: 90, preferredReturnPct: 8, gpPromotePct: 101 }; }],
+  ];
+  const EXTRA: [string, (d: EngineInput) => void][] = [
+    ["mezzanine loan", withLoan("mezzanine", { amount: -1 })],
+    ["mezzanine rate", withLoan("mezzanine", { ratePct: -1 })],
+    ["refinance loan", withLoan("refinance", { amortYears: 51 })],
+    ["refinance loan IO", withLoan("refinance", { ioMonths: 601 })],
+    ["component named by key", (d) => { d.revenue = [{ ...d.revenue[0]!, label: "", key: "2BR", units: 0 }]; }],
+  ];
+
+  it("the table has a case for every p.push in validate.ts", () => {
+    expect(SITES.length).toBe((validateSource.match(/\bp\.push\(/g) ?? []).length);
+  });
+
+  it.each([...SITES, ...EXTRA])("%s: each sentence is rendered in French", (_name, change) => {
+    const found = problems(change);
+    expect(found.length).toBeGreaterThan(0);
+    for (const sentence of found) {
+      const fr = translateMessage(sentence);
+      expect(fr, sentence).not.toBe(sentence);
+      expect(fr, sentence).not.toMatch(/\b(must|needs|give|the|and|between|required|from|to|least|above|under|months|years)\b/);
+    }
+  });
+
+  it("carries the numbers and names over, with French typography", () => {
+    expect(translateMessage("refinance month must fall from stabilization (month 32) to before the sale (month 91)"))
+      .toBe("Le mois du refinancement doit tomber de la stabilisation (mois 32) jusqu'avant la vente (mois 91)");
+    expect(translateMessage('revenue component "Studio" needs a monthly rent')).toBe("La composante de revenus « Studio » exige un loyer mensuel");
+    expect(translateMessage("stabilized occupancy must be between 0 and 100")).toBe("L'occupation stabilisée doit se situer entre 0\u00a0% et 100\u00a0%");
+    expect(translateMessage("senior loan amortization must be 1 to 50 years")).toBe("L'amortissement du prêt principal doit être de 1 à 50 ans");
+    expect(translateMessage("below the minimum of 0.5")).toBe("inférieur au minimum de 0,5");
+  });
+});
+
+describe("the review card in French", () => {
+  const fr = build("fr", () => {});
+  const en = build("en", () => {});
+  const row = (fieldKey: string, itemKey: string | null, valueNumeric: number) => ({ fieldKey, itemKey, status: "approved" as const, valueNumeric });
+  // L.item arrives with the implementation.
+  const show = (i: ReturnType<typeof build>, item: ReadinessItem): string => (i.L as unknown as { item: (x: ReadinessItem) => string }).item(item);
+
+  it("shows a missing rent with the French field label and the item in parentheses", () => {
+    const { readiness } = assemble([row("unit_count", "Studio", 4)]);
+    const rent = readiness.missing.find((m) => m.fieldKey === "unit_rent_monthly")!;
+    expect(show(fr, rent)).toBe("Loyer par logement par mois (Studio)");
+    expect(show(en, rent)).toBe("Rent (Studio)");
+  });
+
+  it("shows an impossible value with the French field label and the reason", () => {
+    const { readiness } = assemble([row("hard_cost", null, -5), row("construction_months", null, 1.5)]);
+    const hard = readiness.impossible.find((m) => m.fieldKey === "hard_cost")!;
+    expect(show(fr, hard)).toBe("Coûts directs\u00a0: inférieur au minimum de 0");
+    expect(show(en, hard)).toBe(`${hard.label}: ${hard.detail}`);
+    const months = readiness.impossible.find((m) => m.fieldKey === "construction_months")!;
+    expect(show(fr, months)).toBe("Durée de construction\u00a0: doit être un nombre entier");
+  });
+
+  it("shows a refinance-timing problem in French, and the same sentence in English as before", () => {
+    const sentence = "refinance month must fall from stabilization (month 32) to before the sale (month 91)";
+    const item: ReadinessItem = { fieldKey: "refinance_month", label: sentence };
+    expect(show(fr, item)).toBe("Le mois du refinancement doit tomber de la stabilisation (mois 32) jusqu'avant la vente (mois 91)");
+    expect(show(en, item)).toBe("Refinance month must fall from stabilization (month 32) to before the sale (month 91)");
   });
 });
