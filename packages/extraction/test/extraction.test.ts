@@ -2604,3 +2604,94 @@ describe("one sentence may state several terms of one loan", () => {
     expect(pick(read("The first mortgage will advance $5,000,000 at 6.2%, amortized over 30 years."))).toEqual([]);
   });
 });
+
+describe("durations: a unit given by the label, number words, quarters, phases", () => {
+  const cell = (text: string, ref: string): Cell => ({ text, ref });
+  const table = (rows: string[][]): NormalizedDocument => ({
+    kind: "docx",
+    lines: [],
+    tables: [{ name: "Table 1", rows: rows.map((r, i) => r.map((t, c) => cell(t, `${"ABC"[c]}${i + 1}`))) }],
+    pageCount: null,
+    needsOcr: false,
+    fullText: rows.map((r) => r.join(" ")).join("\n"),
+  });
+  const prose = (...lines: string[]): NormalizedDocument => ({
+    kind: "pdf",
+    lines: lines.map((text, i) => ({ text, location: `page 1, line ${i + 1}` })),
+    tables: [],
+    pageCount: 1,
+    needsOcr: false,
+    fullText: lines.join("\n"),
+  });
+  const pick = (d: NormalizedDocument) => extractCandidates(d).candidates.map((c) => [c.fieldKey, c.value]);
+  const sheet = async (rows: [string | number, string][], valueFirst: boolean): Promise<NormalizedDocument> => {
+    const ExcelJS = (await import("exceljs")).default;
+    const ws = new ExcelJS.Workbook().addWorksheet("Inputs");
+    rows.forEach(([v, l], i) => {
+      ws.getCell(i + 1, valueFirst ? 1 : 2).value = v;
+      ws.getCell(i + 1, valueFirst ? 2 : 1).value = l;
+    });
+    const wb = ws.workbook;
+    return parseDocument(new Uint8Array(await wb.xlsx.writeBuffer()), "inputs.xlsx");
+  };
+  const ROWS: [number, string][] = [
+    [20, "Build period, months"],
+    [30, "Amortization (yrs)"],
+    [7, "Lease-up months"],
+    [14, "Durée des travaux (mois)"],
+    [25, "Amortissement, ans"],
+  ];
+
+  test("the label names the unit and the cell holds a bare count (label/value sheet and value-first sheet)", async () => {
+    const want = [["construction_months", 20], ["senior_amort_years", 30], ["lease_up_months", 7], ["construction_months", 14], ["senior_amort_years", 25]];
+    // the same field twice would conflict in a real deal; here each row is read on its own
+    for (const valueFirst of [false, true]) {
+      const got = pick(await sheet(ROWS, valueFirst));
+      expect(got).toEqual(want);
+    }
+  });
+  test("a Word table and an English 'in months' label read the same way", () => {
+    expect(pick(table([["Construction period, mo", "18"], ["Amortization period in years", "35"]]))).toEqual([["construction_months", 18], ["senior_amort_years", 35]]);
+  });
+  test("negative: a label with a unit word does not turn a count or a percentage into a duration", () => {
+    expect(pick(table([["Units (count)", "12"]]))).toEqual([["unit_count", 12]]);
+    const r = extractCandidates(table([["Amortization (yrs)", "4.5%"]]));
+    expect(r.candidates).toEqual([]);
+    expect(r.other.map((o) => o.value)).toEqual([4.5]);
+    expect(pick(table([["Land cost, years", "480000"]]))).toEqual([["land_cost", 480_000]]);
+  });
+
+  test("number words and quarters in a cell", () => {
+    expect(pick(table([["Construction period", "nineteen months"]]))).toEqual([["construction_months", 19]]);
+    expect(pick(table([["Construction period", "dix-neuf mois"]]))).toEqual([["construction_months", 19]]);
+    expect(pick(table([["Lease-up period", "two quarters"]]))).toEqual([["lease_up_months", 6]]);
+    expect(pick(table([["Période de location", "deux trimestres"]]))).toEqual([["lease_up_months", 6]]);
+    expect(pick(table([["Amortization", "a year"]]))).toEqual([["senior_amort_years", 1]]);
+  });
+  test("a year and a half, and quarters, in prose", () => {
+    expect(pick(prose("Construction should take a year and a half."))).toEqual([["construction_months", 18]]);
+    expect(pick(prose("La construction durera un an et demi."))).toEqual([["construction_months", 18]]);
+    const r = extractCandidates(prose("Construction will run five quarters."));
+    expect(r.candidates.map((c) => [c.fieldKey, c.value])).toEqual([["construction_months", 15]]);
+    expect(r.candidates[0]!.unitSeen).toContain("quarters");
+    expect(r.candidates[0]!.unitSeen).toContain("3");
+    expect(r.candidates[0]!.raw).toContain("five quarters");
+    expect(pick(prose("Lease-up: 3 quarters"))).toEqual([["lease_up_months", 9]]);
+  });
+  test("negative: a fraction, dates and a vague span are never a duration", () => {
+    expect(pick(prose("Construction is three quarters complete."))).toEqual([]);
+    expect(pick(prose("Construction start March 2026, finish June 2027."))).toEqual([]);
+    expect(pick(table([["Construction start", "March 2026"], ["Construction finish", "June 2027"]]))).toEqual([]);
+    expect(pick(prose("Rent is collected once a year."))).toEqual([]);
+  });
+
+  test("the interest-only period named by the phase it covers, with a months figure", () => {
+    expect(pick(prose("Interest only while we build and lease: 20 months."))).toEqual([["senior_io_months", 20]]);
+    expect(pick(prose("Intérêts seulement pendant les travaux : 14 mois"))).toEqual([["senior_io_months", 14]]);
+    expect(pick(table([["Interest only during construction and lease-up", "22 months"]]))).toEqual([["senior_io_months", 22]]);
+  });
+  test("negative: no months figure, no interest-only period, and none derived from the build period", () => {
+    expect(pick(prose("Construction: 16 months", "Interest only while we build."))).toEqual([["construction_months", 16]]);
+    expect(pick(prose("Construction: 16 months", "Intérêts seulement pendant les travaux."))).toEqual([["construction_months", 16]]);
+  });
+});

@@ -269,3 +269,31 @@ describe("a sign written in words is refused, never read either way", () => {
     expect(first("minus -2%", US).value).toBe(-2);
   });
 });
+
+describe("durations written as phrases", () => {
+  const dur = (line: string, f: DocumentFormat = US) => tokenize(line, f).map((t) => [t.value, t.unit]);
+  test("quarters and trimestres are three months each", () => {
+    expect(dur("about five quarters")).toEqual([[15, "months"]]);
+    expect(dur("deux trimestres", EU)).toEqual([[6, "months"]]);
+    expect(dur("4 quarters")).toEqual([[12, "months"]]);
+  });
+  test("a year and a half, in both languages", () => {
+    expect(dur("a year and a half")).toEqual([[1.5, "years"]]);
+    expect(dur("one and a half years")).toEqual([[1.5, "years"]]);
+    expect(dur("un an et demi", EU)).toEqual([[1.5, "years"]]);
+    expect(dur("deux ans et demi", EU)).toEqual([[2.5, "years"]]);
+    expect(dur("une année et demie", EU)).toEqual([[1.5, "years"]]);
+  });
+  test("a bare 'a year' is one year", () => {
+    expect(dur("for a year")).toEqual([[1, "years"]]);
+    expect(dur("un an", EU)).toEqual([[1, "years"]]);
+  });
+  test("negative: fractions, rates per year and 'once a year' are not durations", () => {
+    expect(dur("three quarters of the units")).toEqual([]);
+    expect(dur("trois quarts des logements", EU)).toEqual([]);
+    expect(dur("rent is paid once a year")).toEqual([]);
+    expect(dur("$96,000 a year")).toEqual([[96_000, "$"]]);
+    expect(dur("a year ago")).toEqual([]);
+    expect(dur("a unit and a half")).toEqual([]);
+  });
+});
