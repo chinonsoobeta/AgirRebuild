@@ -228,3 +228,29 @@ describe("units after a figure: per-year qualifiers and unit types", () => {
     expect(tokenize("Type 4½", FR)).toEqual([]);
   });
 });
+
+describe("a dash is a minus sign only when it is attached to the number", () => {
+  const value = (line: string) => first(line, US).value;
+  test("a dash that stands apart from the number, or opens a list item, is no sign", () => {
+    expect(value("- 1.5 years to build")).toBe(1.5);
+    expect(value("– 96% occupied at stabilization")).toBe(96);
+    expect(value("• – 96% occupied")).toBe(96);
+    expect(value("-- 18 months")).toBe(18);
+    expect(value("Fee: – $450,000")).toBe(450_000);
+    expect(value("  * - 12 months")).toBe(12);
+  });
+  test("negative: a number that really is negative keeps its sign", () => {
+    expect(value("Variance -$12,500")).toBe(-12_500);
+    expect(value("Change −3.5%")).toBe(-3.5);
+    expect(value("minus 2% on rents")).toBe(-2);
+    expect(value("moins 2 % sur les loyers")).toBe(-2);
+    expect(value("Credits (25,000)")).toBe(-25_000);
+    expect(value("(12,500)")).toBe(-12_500);
+  });
+  test("a parenthesised figure after text and a number is an aside, never a negative", () => {
+    expect(tokenize("Fee: 4% of costs ($96,000)", US).map((t) => t.value)).toEqual([4, 96_000]);
+    expect(tokenize("Trois lots à 160 000 $ chacun (480 000 $)", EU).map((t) => t.value)).toEqual([3, 160_000, 480_000]);
+    // negative: the same parentheses with no figure before them are a negative
+    expect(tokenize("Other costs ($96,000)", US).map((t) => t.value)).toEqual([-96_000]);
+  });
+});

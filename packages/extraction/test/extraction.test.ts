@@ -1198,3 +1198,78 @@ describe("reading safety: a figure that may be the wrong one is shown, never use
     });
   });
 });
+
+describe("signs, explanatory parentheses and per-unit prices", () => {
+  const doc = (lines: string[], tables: Table[] = []): NormalizedDocument => ({
+    kind: tables.length ? "xlsx" : "pdf",
+    lines: lines.map((t, i) => ({ text: t, location: `page 1, line ${i + 1}` })),
+    tables,
+    pageCount: 1,
+    needsOcr: false,
+    fullText: lines.join("\n"),
+  });
+  const read = (...text: string[]) => extractCandidates(doc(text));
+  const pick = (r: ReturnType<typeof extractCandidates>) => r.candidates.map((c) => [c.fieldKey, c.value]);
+  const noteOf = (r: ReturnType<typeof extractCandidates>, value: number) => r.other.find((o) => o.value === value)?.note ?? "";
+  const textGrid = (...rows: string[][]): Table => ({ name: "Budget", rows: rows.map((r, i) => r.map((text, c): Cell => ({ text, ref: `Budget!${"AB"[c]}${i + 1}` }))) });
+
+  test("list markers in a bulleted email are not minus signs", () => {
+    const r = read("Notes from the call:", "- 1.5 years to build", "– 96% occupied at stabilization", "• - $4,100,000 for hard costs", "-- 2% selling costs");
+    expect(pick(r)).toEqual([["construction_months", 18], ["stabilized_occupancy_pct", 96], ["hard_cost", 4_100_000], ["selling_costs_pct", 2]]);
+    expect(pick(read("- Taux d'occupation stabilisé : – 96 %", "– 1,5 an pour la construction"))).toEqual([["stabilized_occupancy_pct", 96], ["construction_months", 18]]);
+  });
+  test("negative: a figure attached to its sign stays negative, in words too", () => {
+    expect(pick(read("Other costs: -$12,500"))).toEqual([["other_cost", -12_500]]);
+    expect(pick(read("Other costs: (25,000)", "Selling costs: 2.5%"))).toEqual([["other_cost", -25_000], ["selling_costs_pct", 2.5]]);
+    expect(pick(read("Rent growth: moins 2 %"))).toEqual([["rent_growth_pct", -2]]);
+    const budget = extractCandidates(doc([], [textGrid(["Line item", "Amount"], ["Land acquisition", "1,000,000"], ["Other costs", "(25,000)"])]));
+    expect(budget.candidates.map((c) => [c.fieldKey, c.value])).toEqual([["land_cost", 1_000_000], ["other_cost", -25_000]]);
+  });
+
+  test("a percentage of a field names a share: the dollar aside is not that field", () => {
+    const r = read("Developer fee: 4% of hard costs ($96,000)");
+    expect(r.candidates.some((c) => c.fieldKey === "hard_cost")).toBe(false);
+    expect(r.other.find((o) => o.value === 96_000)?.note).toBe("A share of another figure, not that figure");
+    const fr = read("Honoraires du promoteur : 3 % des coûts directs (96 000 $)");
+    expect(fr.candidates.some((c) => c.fieldKey === "hard_cost")).toBe(false);
+    expect(noteOf(fr, 96_000)).toBe("A share of another figure, not that figure");
+    const prose = read("The fee is 4% of hard costs, which is $96,000.");
+    expect(prose.candidates.some((c) => c.fieldKey === "hard_cost")).toBe(false);
+    expect(noteOf(prose, 96_000)).toBe("A share of another figure, not that figure");
+  });
+  test("negative: a percentage elsewhere, or after the figure, leaves the figure alone", () => {
+    expect(pick(read("Hard costs: $4,100,000, including a 5% contingency"))).toEqual([["hard_cost", 4_100_000]]);
+    expect(pick(read("Land cost: $520,000 (12% of the budget)"))).toEqual([["land_cost", 520_000]]);
+    expect(pick(read("Contingency: 5% of hard costs")).some(([k]) => k === "hard_cost")).toBe(false);
+    expect(pick(read("A 4% fee on the work; hard costs are $4,100,000."))).toEqual([["hard_cost", 4_100_000]]);
+  });
+
+  test("a price each is not the total; the total in parentheses is read", () => {
+    const r = read("The land is three lots at $160,000 each ($480,000).");
+    expect(pick(r)).toEqual([["land_cost", 480_000]]);
+    expect(noteOf(r, 160_000)).toBe("A price per unit, not the total");
+    expect(pick(read("Land: $160,000 per lot, $480,000 total"))).toEqual([["land_cost", 480_000]]);
+    expect(pick(read("Land cost: $160,000 per lot, for a total of $480,000"))).toEqual([["land_cost", 480_000]]);
+  });
+  test("a price each with no total reads nothing for land", () => {
+    const r = read("The land is three lots at $160,000 each.");
+    expect(pick(r)).toEqual([]);
+    expect(noteOf(r, 160_000)).toBe("A price per unit, not the total");
+    expect(pick(read("Land cost: $160,000 per lot; the deposit is $20,000"))).toEqual([]);
+    expect(noteOf(read("Hard costs: $95,000 per door"), 95_000)).toBe("A price per unit, not the total");
+  });
+  test("chacun, chacune and par lot, par porte, par unité in French", () => {
+    const r = read("Le terrain compte trois lots à 160 000 $ chacun (480 000 $).");
+    expect(pick(r)).toEqual([["land_cost", 480_000]]);
+    expect(noteOf(r, 160_000)).toBe("A price per unit, not the total");
+    expect(pick(read("Coût du terrain : 160 000 $ par lot"))).toEqual([]);
+    expect(pick(read("Coûts de construction : 95 000 $ par porte, soit 760 000 $"))).toEqual([["hard_cost", 760_000]]);
+    expect(pick(read("Coûts de construction : 95 000 $ par unité"))).toEqual([]);
+    expect(pick(read("Les lots valent 160 000 $ chacune"))).toEqual([]);
+  });
+  test("negative: a rent per unit is still a rent, and a plain amount is still read", () => {
+    expect(pick(read("Monthly rent of $1,800 per unit"))).toEqual([["unit_rent_monthly", 1_800]]);
+    expect(pick(read("Land cost: $480,000"))).toEqual([["land_cost", 480_000]]);
+    expect(pick(read("Land cost: $480,000 for the three lots"))).toEqual([["land_cost", 480_000]]);
+  });
+});
