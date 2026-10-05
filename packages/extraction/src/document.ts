@@ -4,7 +4,8 @@ import type { CurrencyCode } from "@agir/numbers";
 // Every line and cell keeps the location it came from, so each extracted value
 // can name its page and line, or its sheet and cell.
 
-export type Line = { text: string; location: string };
+/** `struck`: the [start, end) character ranges of `text` the document shows struck through (a Word run, a PDF line over the text); the text itself is unchanged. */
+export type Line = { text: string; location: string; struck?: [number, number][] };
 
 /** What a cell's number format (or the unit word beside it) says the number is written in. */
 export type CellUnit = "%" | "$" | "months" | "years" | "x" | "sf" | "m2";
@@ -19,6 +20,8 @@ export type Cell = {
   /** The currency the cell's number format names ("[$USD]", "US$"); absent for a plain or locale-only dollar. */
   currency?: CurrencyCode;
   ref: string;
+  /** The [start, end) ranges of `text` shown struck through. */
+  struck?: [number, number][];
 };
 
 /** `at`: how many of the document's lines come before the table, so a heading above it can be found (Word files). */

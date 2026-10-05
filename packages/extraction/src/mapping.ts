@@ -704,7 +704,8 @@ function mapLabel(rawLabel: string, t: NumberToken, opts: MapOptions = {}): Mapp
 // ---- Budget lines written as sentences with verbs ---------------------------------------------------
 // A verb gives a field only together with its object noun: "pay ... to buy the lot", "the contractor will do the work for", "set aside ... for other costs".
 const OTHER_PROJECT_RE = /\b(?:another|other|previous|prior|last|earlier|comparable|similar)\s+(?:project|job|building|property|development|contract|site|deal)s?\b(?!\s+(?:costs?|expenses?|couts?|frais))|\bautres?\s+(?:projets?|immeubles?|proprietes?)\b/;
-const DEPOSIT_RE = /\b(?:deposits?|down payment|acomptes?|depots?|already paid|deja paye)\b/;
+// A deposit, a down payment or an amount already paid: not a budget line. Text is folded (lower case, no accents).
+export const DEPOSIT_RE = /\b(?:deposits?|down payments?|acomptes?|depots?|already (?:paid|put down|deposited)|put down|paid down|paid\b[^.;]*\balready|deja (?:paye|verse)e?s?)\b/;
 const LAND_RE = /\b(?:pay|pays|paying|paid|purchase\w*|acquir\w*|buy\w*|bought|paie\w*|payer|payons|acquer\w*|achet\w+|acquis\w*)\b.*?\b(?:(?:the|our|this|that|a|le|la|l|notre|ce|cet|cette|un|une)\s+)(?:[a-z]+\s+){0,2}(?:lot|land|site|building|property|terrain|immeuble|propriete|batiment)\b(?:\s+(?:at|on|in|from|du|de|au|a|sur)\s+(?:[a-z0-9]+\s+){0,4}?)?(?:\s+(?:for|pour))?\s*(?:#|$)/;
 const WHO_HARD = /\b(?:contractor|builder|gc|general contractor|entrepreneur(?: general)?|constructeur)\b/;
 const VERB_HARD = /\b(?:do|does|doing|carry out|carries out|build|builds|execute|executes|perform|performs|deliver|delivers|realis\w+|realiz\w+|execut\w+|effectu\w+)\b/;

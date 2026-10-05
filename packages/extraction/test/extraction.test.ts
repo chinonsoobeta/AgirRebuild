@@ -1410,21 +1410,21 @@ describe("signs, explanatory parentheses and per-unit prices", () => {
   test("a price each is not the total; the total in parentheses is read", () => {
     const r = read("The land is three lots at $160,000 each ($480,000).");
     expect(pick(r)).toEqual([["land_cost", 480_000]]);
-    expect(noteOf(r, 160_000)).toBe("A price per unit, not the total");
+    expect(noteOf(r, 160_000)).toBe("A per-door share of a cost, not the line's total; enter the total");
     expect(pick(read("Land: $160,000 per lot, $480,000 total"))).toEqual([["land_cost", 480_000]]);
     expect(pick(read("Land cost: $160,000 per lot, for a total of $480,000"))).toEqual([["land_cost", 480_000]]);
   });
   test("a price each with no total reads nothing for land", () => {
     const r = read("The land is three lots at $160,000 each.");
     expect(pick(r)).toEqual([]);
-    expect(noteOf(r, 160_000)).toBe("A price per unit, not the total");
+    expect(noteOf(r, 160_000)).toBe("A per-door share of a cost, not the line's total; enter the total");
     expect(pick(read("Land cost: $160,000 per lot; the deposit is $20,000"))).toEqual([]);
-    expect(noteOf(read("Hard costs: $95,000 per door"), 95_000)).toBe("A price per unit, not the total");
+    expect(noteOf(read("Hard costs: $95,000 per door"), 95_000)).toBe("A per-door share of a cost, not the line's total; enter the total");
   });
   test("chacun, chacune and par lot, par porte, par unité in French", () => {
     const r = read("Le terrain compte trois lots à 160 000 $ chacun (480 000 $).");
     expect(pick(r)).toEqual([["land_cost", 480_000]]);
-    expect(noteOf(r, 160_000)).toBe("A price per unit, not the total");
+    expect(noteOf(r, 160_000)).toBe("A per-door share of a cost, not the line's total; enter the total");
     expect(pick(read("Coût du terrain : 160 000 $ par lot"))).toEqual([]);
     expect(pick(read("Coûts de construction : 95 000 $ par porte, soit 760 000 $"))).toEqual([["hard_cost", 760_000]]);
     expect(pick(read("Coûts de construction : 95 000 $ par unité"))).toEqual([]);
@@ -3025,6 +3025,9 @@ describe("struck figures in a PDF, per-door shares of a cost, and deposits (task
     expect(struck.other.find((o) => o.value === 900_000)?.note).toMatch(/struck through/i);
     const under = extractCandidates(await parseDocument(struckPdf(698), "u.pdf"));
     expect(under.candidates.map((c) => c.value)).toContain(900_000);
+    // A line over only part of the figure hides nothing.
+    const part = extractCandidates(await parseDocument(pdf(`BT /F1 12 Tf 72 700 Td (Land cost) Tj ET\nBT /F1 12 Tf 200 700 Td ($900,000) Tj ET\n0.6 w 196 704 m 215 704 l S`), "p.pdf"));
+    expect(part.candidates.map((c) => c.value)).toContain(900_000);
   });
 
   test("per-door, per-lot and per-unit shares of a cost are refused, and a total in the same document still reads", () => {
@@ -3042,7 +3045,7 @@ describe("struck figures in a PDF, per-door shares of a cost, and deposits (task
     refused("Soft costs: $18,000 per unit");
     refused("Les coûts de construction sont de 260 000 $ par logement.");
     refused("Coût du terrain : 41 000 $ par lot");
-    refused("Frais de conception : 18 000 $ par porte");
+    refused("Honoraires professionnels : 18 000 $ par porte");
     expect(pick("Hard costs run about $260,000 a door.", "Hard costs: $3,120,000")).toEqual([["hard_cost", 3_120_000]]);
     expect(pick("Land is $41,000 per lot, $492,000 in total.")).toEqual([["land_cost", 492_000]]);
   });

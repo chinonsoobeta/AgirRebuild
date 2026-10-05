@@ -1,7 +1,7 @@
 import { FIELD_BY_KEY, OUTPUT_LIKE_PHRASES } from "@agir/contracts";
 import { detectFormat, normalizeText, SF_PER_M2, tokenize, unitTypesIn, type DocumentFormat, type NumberToken } from "@agir/numbers";
 import type { Cell, NormalizedDocument, Table } from "./document.ts";
-import { CREDIT_NOTE, LTV_BASIS, canonicalItem, costSentence, currencyOf, flagRead, flagSentence, hasPhrase, loanNameOnly, loanTerm, mapToken, normalizeLabel, rankScope, scopeIn, scopesIn, withCurrency, type MapOptions, type Mapped, type Scope } from "./mapping.ts";
+import { CREDIT_NOTE, DEPOSIT_RE, LTV_BASIS, canonicalItem, costSentence, currencyOf, flagRead, flagSentence, hasPhrase, loanNameOnly, loanTerm, mapToken, normalizeLabel, rankScope, scopeIn, scopesIn, withCurrency, type MapOptions, type Mapped, type Scope } from "./mapping.ts";
 
 /** One value found in one document, with where it came from and why it was (or was not) mapped. */
 export type Candidate = {
@@ -389,7 +389,9 @@ function clauseItem(text: string, t: NumberToken, lead: string | null = null): M
 }
 
 const SHARE_NOTE = "A share of another figure, not that figure";
-const PER_UNIT_NOTE = "A price per unit, not the total";
+const PER_UNIT_NOTE = "A per-door share of a cost, not the line's total; enter the total";
+const DEPOSIT_NOTE = "A deposit or an amount already paid, not a budget line";
+const STRUCK_NOTE = "Struck through in the document; the figure written in its place replaces it";
 const PER_UNIT_REFUSED_NOTE = "The line's first figure is a price per unit; this number is not stated as its total";
 const SHARE_OF_RE = /^\s*(?:of|de|du|des)\s+((?:(?:the|les?|la)\s+)?[\p{L}][\p{L}'’&/-]*(?:\s+[\p{L}'’&/-]+)*)/iu;
 const SHARE_PROBE: NumberToken = { raw: "1", start: 0, end: 1, value: 1, currency: true, currencyCode: null, unit: "$", scaled: false };
@@ -441,16 +443,32 @@ function shareBases(text: string, tokens: NumberToken[], scope: Scope): [number,
 }
 
 // Money followed by one of these is a price for one lot, door or unit.
-const EACH_RE = /^\s*(?:each|apiece|per\s+(?:lot|door|unit|suite)|chacune?|par\s+(?:lot|porte|unit[ée]|logement))(?![\p{L}])/iu;
+const PER_DOOR_WORD = String.raw`(?:lot|door|unit|suite|home|house|porte|logement|unit[ée]|terrain)`;
+const EACH_RE = new RegExp(String.raw`^\s*(?:each|apiece|chacune?|(?:per|par|an?|\/)[\s-]*(?!lot\s+of\b)${PER_DOOR_WORD})(?![\p{L}])`, "iu");
+// A label that says the figure is per door ("Hard cost per door", "Coût par logement").
+const PER_DOOR_LABEL_RE = new RegExp(String.raw`(?:per|par|each|chaque)[\s-]*${PER_DOOR_WORD}(?![\p{L}])`, "iu");
+const BUDGET_LINES = new Set(["land_cost", "hard_cost", "soft_cost", "contingency", "other_cost"]);
 const PER_UNIT_FIELDS = new Set(["land_cost", "hard_cost", "soft_cost", "contingency", "other_cost", "senior_loan_amount", "mezz_loan_amount", "refinance_amount", "equity_amount"]);
 const TOTAL_WORD = String.raw`(?:for(?:\s+a)?(?:\s+total)?(?:\s+of)?|pour(?:\s+un\s+total\s+de)?|soit|totall?ing|in\s+total|total(?:\s+of)?|=)`;
 const TOTAL_BETWEEN = [/^\s*\(\s*(?:total|soit|=)?\s*:?\s*$/i, new RegExp(String.raw`^\s*[,;]?\s*${TOTAL_WORD}\s*:?\s*\(?\s*$`, "i")];
 const TOTAL_AFTER_RE = /^\s*(?:in\s+|au\s+)?total\b/i;
 
 /** A money figure priced for one lot, door or unit: "$160,000 each", "95 000 $ par porte". */
-function perUnit(text: string, t: NumberToken): boolean {
-  return t.unit === "$" && t.value !== null && EACH_RE.test(text.slice(t.end));
+function perUnit(text: string, t: NumberToken, label = ""): boolean {
+  return t.unit === "$" && t.value !== null && (EACH_RE.test(text.slice(t.end)) || PER_DOOR_LABEL_RE.test(label));
 }
+
+/** The clause a figure is in: from the last comma, semicolon, parenthesis or "and" before it to the first one after it. */
+function clauseAround(text: string, t: NumberToken): string {
+  const edge = /[,;()]|\b(?:and|et|but|mais)\b/giu;
+  const before = [...text.slice(0, t.start).matchAll(edge)].at(-1);
+  edge.lastIndex = 0;
+  const after = edge.exec(text.slice(t.end));
+  return text.slice(before ? before.index! + before[0].length : 0, after ? t.end + after.index : text.length);
+}
+
+/** A budget-line figure whose own clause says it is a deposit or an amount already paid. */
+const isDeposit = (text: string, t: NumberToken) => isMoney(t) && t.value !== null && t.value > 0 && DEPOSIT_RE.test(fold(clauseAround(text, t)));
 
 /** The total a per-unit price states for itself: the next money figure when it sits in parentheses after the price, follows "total", "for", "soit" or "pour un total de", or is followed by "total". */
 function totalOf(text: string, t: NumberToken, tokens: NumberToken[]): NumberToken | null {
@@ -622,7 +640,11 @@ function readSentence(sentence: { text: string; start: number }, para0: Paragrap
           continue;
         }
         let mapped = used ? { kind: "unmapped" as const } : mapToken(label, t, { ...opt(t), ahead: text.slice(colon + 1, t.start) });
-        if (mapped.kind === "field" && PER_UNIT_FIELDS.has(mapped.fieldKey) && perUnit(text, t)) {
+        if (mapped.kind === "field" && BUDGET_LINES.has(mapped.fieldKey) && isDeposit(text, t)) {
+          other(t, "line:label-value", DEPOSIT_NOTE);
+          continue;
+        }
+        if (mapped.kind === "field" && PER_UNIT_FIELDS.has(mapped.fieldKey) && perUnit(text, t, BUDGET_LINES.has(mapped.fieldKey) ? label : "")) {
           other(t, "line:label-value", PER_UNIT_NOTE);
           refusedPerUnit = true;
           total = totalOf(text, t, tokens);
@@ -713,7 +735,11 @@ function readSentence(sentence: { text: string; start: number }, para0: Paragrap
       if (types.length === 0 && lead) types.push(lead);
       if (types.length === 1) mapped = { ...mapped, itemKey: types[0]! };
     }
-    if (mapped.kind === "field" && PER_UNIT_FIELDS.has(mapped.fieldKey) && perUnit(text, t)) {
+    if (mapped.kind === "field" && BUDGET_LINES.has(mapped.fieldKey) && isDeposit(text, t)) {
+      other(t, "line:prose", DEPOSIT_NOTE);
+      return;
+    }
+    if (mapped.kind === "field" && PER_UNIT_FIELDS.has(mapped.fieldKey) && perUnit(text, t, BUDGET_LINES.has(mapped.fieldKey) ? usedLabel : "")) {
       other(t, "line:prose", PER_UNIT_NOTE);
       const total = totalOf(text, t, tokens);
       if (total) totalLabels.set(total, usedLabel);
@@ -1406,9 +1432,33 @@ function textTables(doc: NormalizedDocument, format: DocumentFormat, scopes: Sco
   return { tables: out, used };
 }
 
+/** A text with every figure that lies wholly inside a struck range taken out; each is shown with `other`, never read. */
+function withoutStruck(text: string, struck: [number, number][] | undefined, location: string, result: ExtractionResult): string {
+  if (!struck?.length) return text;
+  let out = "";
+  let at = 0;
+  for (const t of tokenize(text, result.format)) {
+    const digits = [...text.slice(t.start, t.end).matchAll(/\d/g)];
+    if (digits.length === 0 || t.start < at) continue;
+    const from = t.start + digits[0]!.index!;
+    const to = t.start + digits.at(-1)!.index! + 1;
+    if (!struck.some(([a, b]) => a <= from && to <= b)) continue;
+    result.other.push({ fieldKey: null, itemKey: null, value: t.value, raw: t.raw.trim(), unitSeen: t.unit, location, context: text.slice(0, 240), rule: "line:struck", note: STRUCK_NOTE });
+    out += text.slice(at, t.start);
+    at = t.end;
+  }
+  return out + text.slice(at);
+}
+
 /** Every candidate value in one document. Deterministic: no model is consulted. */
-export function extractCandidates(doc: NormalizedDocument): ExtractionResult {
-  const result: ExtractionResult = { format: detectFormat(doc.fullText), candidates: [], other: [], notes: [...(doc.notes ?? [])] };
+export function extractCandidates(doc0: NormalizedDocument): ExtractionResult {
+  const result: ExtractionResult = { format: detectFormat(doc0.fullText), candidates: [], other: [], notes: [...(doc0.notes ?? [])] };
+  // The document's own text is untouched; the copy read from has its struck figures taken out.
+  const doc: NormalizedDocument = {
+    ...doc0,
+    lines: doc0.lines.map((l) => (l.struck ? { text: withoutStruck(l.text, l.struck, l.location, result), location: l.location } : l)),
+    tables: doc0.tables.map((t) => ({ ...t, rows: t.rows.map((r) => r.map((c) => (c.struck ? { ...c, text: withoutStruck(c.text, c.struck, c.ref, result), struck: undefined } : c))) })),
+  };
   if (isBuilderQuote(doc)) quoteDocs.add(result);
   const scopes = lineScopes(doc, result.format, rankIn(doc));
   const excluded = excludedLines(doc, result.format);

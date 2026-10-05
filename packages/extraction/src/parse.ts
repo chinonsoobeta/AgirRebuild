@@ -1,5 +1,6 @@
 import { deflateRawSync, inflateRawSync, crc32 } from "node:zlib";
 import { codeOf } from "@agir/numbers";
+import type { PDFPageProxy } from "pdfjs-dist/legacy/build/pdf.mjs";
 import { columnName, type Cell, type CellUnit, type Line, type NormalizedDocument, type Table } from "./document.ts";
 
 export class UnsupportedDocumentError extends Error {}
@@ -54,6 +55,39 @@ export function parseCsv(text: string): string[][] {
   return rows;
 }
 
+/** The thin horizontal strokes and fills a page draws, as [x0, x1, y] in page space. Only plain scaling and translation are followed; a rotated or skewed drawing is left out. */
+async function horizontalRules(pdfjs: typeof import("pdfjs-dist/legacy/build/pdf.mjs"), page: PDFPageProxy): Promise<[number, number, number][]> {
+  const { OPS } = pdfjs;
+  const paints = new Set<number>([OPS.stroke, OPS.closeStroke, OPS.fill, OPS.eoFill, OPS.fillStroke, OPS.eoFillStroke, OPS.closeFillStroke, OPS.closeEOFillStroke]);
+  const list = await page.getOperatorList();
+  type M = [number, number, number, number, number, number];
+  const mul = (a: M, b: M): M => [a[0] * b[0] + a[1] * b[2], a[0] * b[1] + a[1] * b[3], a[2] * b[0] + a[3] * b[2], a[2] * b[1] + a[3] * b[3], a[4] * b[0] + a[5] * b[2] + b[4], a[4] * b[1] + a[5] * b[3] + b[5]];
+  let ctm: M = [1, 0, 0, 1, 0, 0];
+  const saved: M[] = [];
+  const rules: [number, number, number][] = [];
+  list.fnArray.forEach((fn, i) => {
+    const args = list.argsArray[i] as unknown[];
+    if (fn === OPS.save || fn === OPS.paintFormXObjectBegin) {
+      saved.push(ctm);
+      if (fn === OPS.paintFormXObjectBegin && Array.isArray(args?.[0])) ctm = mul(args[0] as M, ctm);
+    } else if (fn === OPS.restore || fn === OPS.paintFormXObjectEnd) ctm = saved.pop() ?? ctm;
+    else if (fn === OPS.transform) ctm = mul(args as unknown as M, ctm);
+    else if (fn === OPS.constructPath && paints.has(args[0] as number)) {
+      const box = args[2] as Record<number, number> | undefined;
+      if (!box || ctm[1] !== 0 || ctm[2] !== 0) return;
+      const [x0, x1] = [box[0]! * ctm[0] + ctm[4], box[2]! * ctm[0] + ctm[4]].sort((a, b) => a - b);
+      const [y0, y1] = [box[1]! * ctm[3] + ctm[5], box[3]! * ctm[3] + ctm[5]].sort((a, b) => a - b);
+      // A rule is at most 1.5 points thick (a stroked line has no thickness of its own: its width is a separate setting, so a zero-height box is a line).
+      if (y1! - y0! <= 1.5 && x1! - x0! > 0) rules.push([x0!, x1!, (y0! + y1!) / 2]);
+    }
+  });
+  return rules;
+}
+
+// Struck text is wrapped in these private-use marks while a line or cell is put together; `unmark` takes them out and returns the ranges.
+const STRIKE_ON = "\ue000";
+const STRIKE_OFF = "\ue001";
+
 async function parsePdf(bytes: Uint8Array): Promise<NormalizedDocument> {
   const pdfjs = await import("pdfjs-dist/legacy/build/pdf.mjs");
   const task = pdfjs.getDocument({ data: new Uint8Array(bytes), useSystemFonts: true });
@@ -63,27 +97,36 @@ async function parsePdf(bytes: Uint8Array): Promise<NormalizedDocument> {
   for (let p = 1; p <= doc.numPages; p++) {
     const page = await doc.getPage(p);
     const content = await page.getTextContent();
+    // A page drawn rotated is not checked for strike-through lines.
+    const rules = page.rotate === 0 ? await horizontalRules(pdfjs, page) : [];
     // Group text items into lines by their baseline.
     const rows = new Map<number, { x: number; s: string }[]>();
-    for (const item of content.items as { str?: string; transform?: number[] }[]) {
+    for (const item of content.items as { str?: string; transform?: number[]; width?: number; height?: number }[]) {
       if (!item.str || !item.transform) continue;
-      const y = Math.round(item.transform[5]!);
+      const [a, b, , d, x, base] = item.transform as [number, number, number, number, number, number];
+      const size = Math.abs(item.height || d);
+      const width = item.width ?? 0;
+      // Struck: an upright text item whose width a thin line covers almost entirely, at the middle of its letters. A line at or below the baseline is an underline.
+      const covered = (r: [number, number, number]) => Math.max(0, Math.min(r[1], x + width) - Math.max(r[0], x)) >= 0.9 * width;
+      const struck = b === 0 && a > 0 && width > 0 && item.str.trim() !== "" && rules.some((r) => r[2] >= base + 0.2 * size && r[2] <= base + 0.6 * size && covered(r));
+      const y = Math.round(base);
       const key = [...rows.keys()].find((k) => Math.abs(k - y) <= 2) ?? y;
       const list = rows.get(key) ?? [];
-      list.push({ x: item.transform[4]!, s: item.str });
+      list.push({ x, s: struck ? STRIKE_ON + item.str + STRIKE_OFF : item.str });
       rows.set(key, list);
     }
     const ordered = [...rows.entries()].sort((a, b) => b[0] - a[0]);
     ordered.forEach(([, parts], i) => {
-      const text = parts
-        .sort((a, b) => a.x - b.x)
-        .map((x) => x.s)
-        .join(" ")
-        .replace(/\s+/g, " ")
-        .trim();
+      const { text, struck } = unmark(
+        parts
+          .sort((a, b) => a.x - b.x)
+          .map((x) => x.s)
+          .join(" ")
+          .replace(/\s+/g, " "),
+      );
       if (text) {
         chars += text.replace(/\s/g, "").length;
-        lines.push({ text, location: `page ${p}, line ${i + 1}` });
+        lines.push({ text, location: `page ${p}, line ${i + 1}`, ...(struck.length > 0 ? { struck } : {}) });
       }
     });
   }
@@ -286,6 +329,21 @@ const decode = (s: string) =>
     return ENTITIES[e.toLowerCase()] ?? m;
   });
 const tidy = (s: string) => s.replace(/[ \t\r\n]+/g, " ").trim();
+function unmark(marked: string): { text: string; struck: [number, number][] } {
+  let text = "";
+  let from = -1;
+  const ranges: [number, number][] = [];
+  for (const ch of marked) {
+    if (ch === STRIKE_ON) from = text.length;
+    else if (ch === STRIKE_OFF) {
+      if (from >= 0 && text.length > from) ranges.push(ranges.length > 0 && ranges.at(-1)![1] === from ? [ranges.pop()![0], text.length] : [from, text.length]);
+      from = -1;
+    } else text += ch;
+  }
+  const lead = text.length - text.trimStart().length;
+  text = text.trim();
+  return { text, struck: ranges.map(([a, b]): [number, number] => [Math.max(a - lead, 0), Math.min(b - lead, text.length)]).filter(([a, b]) => b > a) };
+}
 
 /**
  * Word files go through mammoth's HTML. Paragraphs, headings and list items outside tables are lines, located
@@ -303,23 +361,29 @@ async function parseDocx(bytes: Uint8Array): Promise<NormalizedDocument> {
   let table: Table | null = null;
   let row: Cell[] | null = null;
   let cell: string | null = null;
+  let struck = 0;
   const flush = () => {
-    const t = tidy(buf);
+    const { text: t, struck: ranges } = unmark(tidy(buf));
     buf = "";
     if (t) {
-      lines.push({ text: t, location: `paragraph ${lines.length + 1}` });
+      lines.push({ text: t, location: `paragraph ${lines.length + 1}`, ...(ranges.length > 0 ? { struck: ranges } : {}) });
       full.push(t);
     }
   };
   for (const m of html.matchAll(/<(\/?)([a-z0-9]+)[^>]*?(\/?)>|([^<]+)/gi)) {
     if (m[4] !== undefined) {
-      const t = decode(m[4]);
+      const t = struck > 0 && m[4].trim() ? STRIKE_ON + decode(m[4]) + STRIKE_OFF : decode(m[4]);
       if (cell !== null) cell += t;
       else buf += t;
       continue;
     }
     const closing = m[1] === "/";
     const tag = m[2]!.toLowerCase();
+    // mammoth writes Word's strike-through as <s>.
+    if (tag === "s" || tag === "strike" || tag === "del") {
+      struck = Math.max(struck + (closing ? -1 : 1), 0);
+      continue;
+    }
     if (tag === "table") {
       if (!closing) {
         if (depth++ === 0) {
@@ -339,8 +403,8 @@ async function parseDocx(bytes: Uint8Array): Promise<NormalizedDocument> {
         row = null;
       } else if ((tag === "td" || tag === "th") && !closing) cell = "";
       else if ((tag === "td" || tag === "th") && row && table && cell !== null) {
-        const text = tidy(cell);
-        row.push({ text, ref: `${table.name} R${table.rows.length + 1}C${row.length + 1}` });
+        const { text, struck: ranges } = unmark(tidy(cell));
+        row.push({ text, ref: `${table.name} R${table.rows.length + 1}C${row.length + 1}`, ...(ranges.length > 0 ? { struck: ranges } : {}) });
         full.push(text);
         cell = null;
       } else if (cell !== null && /^(p|h[1-6]|li|br)$/.test(tag)) cell += " ";
