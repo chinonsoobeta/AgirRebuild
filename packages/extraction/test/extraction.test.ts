@@ -2896,6 +2896,21 @@ describe("label families: the same meaning in several wordings, English and Qué
 });
 
 describe("budget lines and operating figures written as sentences with verbs", () => {
+  test("words that run on into the next figure name that figure, not the one before (v8 audit)", () => {
+    expect(pick("The planner expects lease-up done at 95% with the opex share 32% of EGI.")).not.toContainEqual(["expense_ratio_pct", 95]);
+    expect(pick("Partner split: LP share 85% / pref. return 7% / promote 25%.")).not.toContainEqual(["preferred_return_pct", 85]);
+    expect(pick("Exit loan: amortization 30 / exit loan IO months 6.")).not.toContainEqual(["refinance_io_months", 30]);
+    expect(pick("We assume a sale after a seven-year hold at a 5.00% capitalization rate.")).toContainEqual(["hold_years", 7]);
+  });
+  test("a sheet or banner for a scenario other than the base case is not read (v8 audit)", () => {
+    const rows = (name: string, banner: string) => ({ name, rows: [[{ text: banner, ref: "A1" }], [{ text: "Stabilized occupancy", ref: "A2" }, { text: "88%", ref: "B2", number: 88, unit: "%" }]] });
+    for (const [name, banner] of [["Bank case", "Shown for the bank"], ["Summary", "NOT THE BASE CASE"], ["Scénario du prêteur", "Hypothèses"], ["Occupancy", "occupancy illustration"]] as const) {
+      const r = extractCandidates({ kind: "xlsx", lines: [], tables: [rows(name, banner)], pageCount: null, needsOcr: false, fullText: "" } as never);
+      expect(r.candidates.filter((c) => c.fieldKey === "stabilized_occupancy_pct"), `${name} / ${banner}`).toEqual([]);
+    }
+    const base = extractCandidates({ kind: "xlsx", lines: [], tables: [rows("Base case", "Our base case")], pageCount: null, needsOcr: false, fullText: "" } as never);
+    expect(base.candidates.filter((c) => c.fieldKey === "stabilized_occupancy_pct").map((c) => c.value)).toEqual([88]);
+  });
   test("unit types as columns under two title rows (audit)", () => {
     const table = { name: "Mix", rows: [
       [{ text: "Illustrative only", ref: "A1" }],

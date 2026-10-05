@@ -256,7 +256,12 @@ const TAX_BASIS_RE = new RegExp(String.raw`\b${TAX_WORDS}\s+(?:(?:is|are|est|son
 const NOT_PART_RE = new RegExp(
   [
     String.raw`\b${EXCLUDED_WORD}\b`,
-    String.raw`\billustrati(?:ve|fs?|ves)\b`,
+    String.raw`\billustrati(?:ve|fs?|ves|ons?)\b`,
+    // A scenario other than the base case: "not the base case", a lender's, downside or alternate case, a sensitivity.
+    String.raw`\bnot (?:the |our |a )?base(?: |-)?case\b`,
+    String.raw`\b(?:lender|bank|downside|upside|alternate|alternative|stress(?:ed)?|sensitivity|worst|best)(?: |-)(?:case|scenario)s?\b`,
+    String.raw`\b(?:pas le|hors du?|autre que le) (?:cas|scenario) de base\b`,
+    String.raw`\b(?:cas|scenario) (?:du preteur|de la banque|pessimiste|optimiste|alternatif|de rechange|de sensibilite)\b`,
     String.raw`\b(?:for|pour) illustrat\w*`,
     String.raw`\b(?:for (?:reference|comparison)|(?:reference|comparison) only|pour (?:reference|comparaison)|(?:reference|comparaison) seulement)\b`,
     String.raw`\ba titre (?:indicatif|illustratif|d['’]exemple|de reference|de comparaison)\b`,
@@ -355,14 +360,18 @@ function rangeEnds(text: string, tokens: NumberToken[]): Set<number> {
 /** The itemized unit fields: an item for them is a unit type, never a place or a heading. */
 const UNIT_FIELDS = new Set(["unit_count", "unit_rent_monthly", "rentable_area_sf", "rent_psf_annual"]);
 
-/** The words right after a number and its unit, up to the next number, comma, semicolon, "and"/"et" or the end of the sentence. */
-function followingLabel(rest: string): string | null {
+/**
+ * The words right after a number and its unit, up to a comma, semicolon, slash, bar, "and"/"et" or the end of the sentence.
+ * With `nextFollows`, words that run on into the next number with no such break give none.
+ */
+function followingLabel(rest: string, nextFollows = false): string | null {
   if (!/^\s+\S/.test(rest)) return null;
   let cut = rest.length;
-  for (const re of [/[,;:]/, /\s(?:and|et)\s/i, /[.!?](?:\s|$)/]) {
+  for (const re of [/[,;:]/, /\s[/|]\s|\s[/|]$|[/|]\s/, /\s(?:and|et)\s/i, /[.!?](?:\s|$)/]) {
     const m = re.exec(rest);
     if (m && m.index < cut) cut = m.index;
   }
+  if (nextFollows && cut === rest.length) return null;
   return rest.slice(0, cut).trim() ? rest.slice(0, cut) : null;
 }
 
@@ -721,7 +730,10 @@ function readSentence(sentence: { text: string; start: number }, para0: Paragrap
       return;
     }
     if (!afterShare && !totalLabels.has(t) && (mapped.kind === "unmapped" || (mapped.kind === "ignored" && mapped.reason.startsWith("Looks like")))) {
-      const after = followingLabel(text.slice(t.end, tokens[i + 1]?.start ?? text.length));
+      const next = tokens[i + 1];
+      let after = followingLabel(text.slice(t.end, next?.start ?? text.length));
+      // Words that run on into the next figure and name a field for it are that figure's label ("96% with opex load 30%").
+      if (after !== null && next && followingLabel(text.slice(t.end, next.start), true) === null && mapToken(after, next, opts).kind === "field") after = null;
       const viaAfter = after === null ? null : mapToken(after, t, opts);
       if (after !== null && viaAfter!.kind === "field") {
         mapped = viaAfter!;
@@ -1379,7 +1391,9 @@ function fromTable(table: Table, result: ExtractionResult, notes: string[] = [],
   let scope = tableRank(table) ?? scope0;
   let labelled = false;
   // A sheet name or a section label that marks what follows as not part of the deal.
-  let excluded = markedNotPart(table.name);
+  // A sheet named as not part of the deal stays so throughout; a section label inside it cannot undo it.
+  const sheetExcluded = markedNotPart(table.name);
+  let excluded = sheetExcluded;
   const sections: Section[] = [];
   if (fromTypeColumns(table, result)) return;
   let cur: Section = { rows: [], scope, excluded };
@@ -1406,7 +1420,7 @@ function fromTable(table: Table, result: ExtractionResult, notes: string[] = [],
     if (item !== null) {
       close();
       labelled = true;
-      excluded = markedNotPart(item);
+      excluded = sheetExcluded || markedNotPart(item);
       cur = { rows: [], scope, excluded, item };
       return;
     }
@@ -1415,7 +1429,7 @@ function fromTable(table: Table, result: ExtractionResult, notes: string[] = [],
       close();
       scope = scopeIn(label) ?? scope;
       labelled = true;
-      excluded = markedNotPart(label);
+      excluded = sheetExcluded || markedNotPart(label);
       cur = { rows: [], scope, excluded };
       return;
     }
