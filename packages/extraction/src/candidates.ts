@@ -1102,13 +1102,15 @@ function sectionLabel(row: Cell[]): string | null {
 
 // A heading of an item block is no field, section, total or sentence; the rows under it that name these fields belong to it.
 const BLOCK_FIELDS = new Set(["unit_count", "unit_rent_monthly", "rentable_area_sf", "rent_psf_annual", "item_occupancy_pct"]);
+// A label inside a block that names the block by "this" or "of this type" rather than by name.
+const BLOCK_RELATIVE_RE = /\s*\b(of this (type|component|unit|space)|this (type|component|unit|space)|de ce (type|local)|ce local|cette composante)\s*$/i;
 const NOT_HEADING_RE = /^(number of|nombre de|total|average|avg|monthly|annual|rent|loyer|area|superficie|occupancy|occupation|unit count)\b|\b(revenues?|revenus?|leasing|location|budget|budgets|notes?|capital|assumptions?|hypotheses|financing|financement|loan|pret|costs?|couts?|summary|sommaire|schedule|totals?)\b/;
 
 /** The item a row names when it is a short text with no number and the next row is a label and value row for an item field ("Garden suite" over "Number of units | 2"). */
 function blockHeading(row: Cell[], next: Cell[] | undefined, scope: Scope, format: DocumentFormat): string | null {
   const filled = row.filter((c) => c.text || c.number !== undefined);
   const c = filled[0];
-  if (filled.length !== 1 || !c || c.number !== undefined || !/^\p{L}/u.test(c.text) || /[.!?:]$/.test(c.text) || c.text.trim().split(/\s+/).length > 8 || scopeIn(c.text) || NOT_HEADING_RE.test(fold(c.text))) return null;
+  if (filled.length !== 1 || !c || c.number !== undefined || !(/\d/.test(c.text) ? unitTypesIn(c.text).length > 0 : /^\p{L}/u.test(c.text)) || /[.!?:]$/.test(c.text) || c.text.trim().split(/\s+/).length > 8 || scopeIn(c.text) || NOT_HEADING_RE.test(fold(c.text))) return null;
   const label = next?.find((x) => x.text && x.number === undefined);
   const cell = label && next!.slice(next!.indexOf(label) + 1).find((x) => cellToken(x, format));
   const t = cell && cellToken(cell, format);
@@ -1179,7 +1181,8 @@ function fromTable(table: Table, result: ExtractionResult, notes: string[] = [],
       let block = s.item;
       s.rows.forEach((row) => {
         const labelCell = row.find((c) => c.text && c.number === undefined && !/^[\d$(.,\s%-]+$/.test(c.text));
-        if (!row.some((c) => c.text || c.number !== undefined) || (labelCell && TOTAL_RE.test(labelCell.text))) block = undefined;
+        const relative = block && labelCell ? BLOCK_RELATIVE_RE.test(labelCell.text) : false;
+        if (!row.some((c) => c.text || c.number !== undefined) || (labelCell && !relative && TOTAL_RE.test(labelCell.text))) block = undefined;
         if (!labelCell) return;
         const after = row.slice(row.indexOf(labelCell) + 1);
         // A row that says it is not part of the deal, or one under such a heading, is shown and never read.
@@ -1200,8 +1203,9 @@ function fromTable(table: Table, result: ExtractionResult, notes: string[] = [],
           const t = cellToken(cell, result.format);
           if (!t) continue;
           const base = { raw: t.raw, location: cell.ref, context: `${table.name}: ${labelCell.text} ${cell.text}`.slice(0, 240), rule: "table:label-value" };
-          let mapped = mapToken(labelCell.text, t, { scope: s.scope, ahead: cell.text.slice(0, t.start), after: cell.text.slice(t.end), quote: quoteDocs.has(result) });
+          let mapped = mapToken(relative ? labelCell.text.replace(BLOCK_RELATIVE_RE, "") : labelCell.text, t, { scope: s.scope, ahead: cell.text.slice(0, t.start), after: cell.text.slice(t.end), quote: quoteDocs.has(result) });
           if (block && mapped.kind === "field" && BLOCK_FIELDS.has(mapped.fieldKey) && !(mapped.itemKey && unitTypesIn(mapped.itemKey).length > 0)) mapped = { ...mapped, itemKey: block };
+          if (relative && mapped.kind === "field" && mapped.fieldKey === "stabilized_occupancy_pct") mapped = { ...mapped, fieldKey: "item_occupancy_pct", itemKey: block! };
           const label = fold(labelCell.text);
           // Under a rent roll, a row that restates the roll (a count, an area, a rent, an occupancy) is a summary, not an assumption.
           if (rollSeen && mapped.kind === "field" && ROLL_FIELDS.has(mapped.fieldKey) && !STABILIZED_LABEL_RE.test(label)) {

@@ -21,13 +21,13 @@ const GENERIC = new Set([
   // The heading of a letter or email, not a component.
   "subject", "objet", "re", "note", "notes", "purpose",
   // Who the deal is with, not a component: "Borrower: Maple Court Inc. ... 10 units".
-  "borrower", "emprunteur", "broker", "agent", "appraiser", "courtier", "evaluateur", "projet", "sponsor", "promoteur", "address", "adresse", "lender", "preteur", "property", "propriete",
+  "borrower", "emprunteur", "yearly", "annuel", "annuelle", "annually", "broker", "agent", "appraiser", "courtier", "evaluateur", "projet", "sponsor", "promoteur", "address", "adresse", "lender", "preteur", "property", "propriete",
 ]);
 
 const ITEMIZED_ALIASES: Record<string, string[]> = {
-  unit_count: ["rental units", "units", "unit count", "homes", "suites", "apartments", "doors", "logements", "unites", "appartements", "nombre de logements", "nombre d unites"],
-  unit_rent_monthly: ["rent", "monthly rent", "rent per month", "rent per unit", "market rent", "loyer", "loyer mensuel", "loyer par mois", "loyer par logement", "loyer du marche"],
-  rent_psf_annual: ["rent", "rent psf", "rent per sf", "base rent", "loyer", "loyer au pi2", "loyer par pi2"],
+  unit_count: ["rental units", "units", "unit count", "homes", "suites", "apartments", "doors", "logements", "unites", "appartements", "nombre de logements", "nombre d unites", "nombre de locaux", "locaux"],
+  unit_rent_monthly: ["rent", "monthly rent", "rent per month", "rent per unit", "rent per suite", "rent per door", "rent per home", "loyer par unite", "loyer par local", "loyer annuel par logement", "loyer annuel par unite", "loyer annuel par local", "market rent", "loyer", "loyer mensuel", "loyer par mois", "loyer par logement", "loyer du marche"],
+  rent_psf_annual: ["rent", "rent psf", "rent per sf", "rent per sq ft", "rent per square foot", "rent per square metre", "rent per square meter", "rent per m2", "base rent", "loyer", "loyer au pi2", "loyer par pi2", "loyer au pied carre", "loyer par pied carre", "loyer au metre carre", "loyer par metre carre", "loyer annuel au pi2", "loyer annuel par pi2", "loyer annuel au pied carre", "loyer annuel au metre carre", "loyer annuel par metre carre"],
   rentable_area_sf: ["area", "rentable area", "leasable area", "gla", "nrsf", "square feet", "sf", "superficie locative", "superficie louable", "surface locative", "aire locative"],
   item_occupancy_pct: ["occupancy", "occupation", "taux d occupation"],
 };
@@ -75,6 +75,14 @@ const CAP_RE = /\b(cap rate|capitali[sz]ation rate|taux de capitalisation)\b/;
 const EXIT_RE = /\b(sell|sale|sold|exit|reversion|disposition|sortie|vente|vendre|vendrons|vendons|revente)\b/;
 const VALUE_RE = /\b(value|valeur)\b/;
 
+// A yearly rent, a per-unit or per-area label, and the rent figures they refuse.
+const ANNUAL_RE = /\b(annual|annually|yearly|per year|a year|each year|annuel|annuelle|par an|par annee)\b|\/\s?(yr|year|an|annee)\b/;
+const PER_UNIT_RE = /\b(per (unit|suite|door|home)|each|par (logement|unite|local))\b/;
+const PER_AREA_RE = /\b(sf|psf|sq ft|square f\w+|pi2|pied carre|m2|psm|sqm|metre carre|square met(re|er))\b/;
+const MONTHLY_RE = /\b(monthly|per month|mensuel|mensuelle|par mois)\b|\/\s?(mo|month|mois)\b/;
+const RENT_WORD_RE = /\b(rents?|loyers?)\b/;
+const ANNUAL_TOTAL_NOTE = "An annual rent total, not a rent per unit";
+const MONTHLY_AREA_NOTE = "A monthly rent per area is not an annual rate; it is not multiplied";
 const REVENUE_LABEL_RE = /\b(rents?|loyers?|revenues?|revenus?)\b/;
 const OPINION_RE = /\b(opinions?|possible|achievable|potentiel(?:le)?s?|potential|upside|avis|selon (?:le|l) \w+|(?:broker|agent|appraiser|courtier|evaluateur) s (?:view|opinion|estimate))\b/;
 const OPINION_NOTE = "An opinion of rent, not the deal's assumption";
@@ -297,14 +305,16 @@ function convert(def: FieldDef, t: NumberToken, label: string, labelUnit: LabelU
       if (u === null && labelUnit === null && hasPhrase(label, "area") && v >= 100) return { value: v, unitSeen: "number" };
       return null;
     case "$/unit/mo":
+      // A yearly rent is a monthly one only per unit, and only as one twelfth of it.
+      if (u === "$" && ANNUAL_RE.test(`${label} ${foldText(t.raw)}`)) return PER_UNIT_RE.test(label) ? { value: Math.round((v / 12) * 100) / 100, unitSeen: "$ (stated as an annual rent per unit; divided by 12)" } : null;
       if (u === "$/mo") return { value: v, unitSeen: "$/mo" };
       if (u === "$" && /\b(monthly|per month|per unit|mensuel|mensuelle|par mois|par logement)\b/.test(label)) return { value: v, unitSeen: "$" };
       return null;
     case "$/sf/yr":
       if (u === "$/sf") return { value: v, unitSeen: "$/sf" };
-      if (u === "$/m2") return { value: v / SF_PER_M2, unitSeen: "$/m2" };
-      if ((u === "$" || u === null) && /\b(psf|per sf|\/sf|per square foot)\b/.test(label)) return { value: v, unitSeen: "$" };
-      if ((u === "$" || u === null) && /\b(psm|per m2|\/m2|per sq m|per square met(re|er))\b/.test(label)) return { value: v / SF_PER_M2, unitSeen: "$/m2" };
+      if (u === "$/m2") return { value: Math.round((v / SF_PER_M2) * 100) / 100, unitSeen: "$/m2" };
+      if ((u === "$" || u === null) && /\b(psf|per sf|\/sf|per sq ft|per square foot|au pied carre|par pied carre)\b/.test(label)) return { value: v, unitSeen: "$" };
+      if ((u === "$" || u === null) && /\b(psm|per m2|\/m2|per sq m|per square met(re|er)|au m2|par m2|au metre carre|par metre carre)\b/.test(label)) return { value: Math.round((v / SF_PER_M2) * 100) / 100, unitSeen: "$/m2" };
       return null;
     case "x":
       if (u === "x") return { value: v, unitSeen: "x" };
@@ -406,6 +416,12 @@ export function mapToken(rawLabel: string, t: NumberToken, opts: MapOptions = {}
   if (lender) return { kind: "ignored", reason: lender };
   // A broker's, agent's or appraiser's view of the rent, or a possible or potential one, is an opinion, not the sponsor's assumption.
   if (REVENUE_LABEL_RE.test(foldText(rawLabel)) && OPINION_RE.test(foldText(rawLabel))) return { kind: "ignored", reason: OPINION_NOTE };
+  // A rent per area is yearly; a monthly one is refused. A yearly rent with no per-unit word is a total.
+  if (RENT_WORD_RE.test(label) && (t.currency || t.unit === "$" || t.unit === "$/sf" || t.unit === "$/m2")) {
+    const area = t.unit === "$/sf" || t.unit === "$/m2" || PER_AREA_RE.test(label);
+    if (area && (MONTHLY_RE.test(label) || /^\s*(\/\s?(mo|month|mois)\b|per month|par mois|monthly|mensuel)/i.test(opts.after ?? ""))) return { kind: "ignored", reason: MONTHLY_AREA_NOTE };
+    if (!area && ANNUAL_RE.test(`${label} ${foldText(t.raw)}`) && !PER_UNIT_RE.test(label)) return { kind: "ignored", reason: ANNUAL_TOTAL_NOTE };
+  }
   const where = prose && opts.context ? normalizeLabel(opts.context).label : label;
   const scope: Scope = scopeIn(label) ?? opts.scope ?? "senior";
   const scoped = (key: string): FieldDef => FIELD_BY_KEY.get(scope === "senior" ? key : (SCOPE_FIELD[scope][key] ?? key))!;

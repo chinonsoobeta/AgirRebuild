@@ -204,7 +204,7 @@ export function parseCore(
 
 // Unit types a count or a rent is named by: "one-bedroom", "2-bed", "3½", "studio", "loft", "townhome", "maison de ville".
 const TYPE_BED = String.raw`(?:one|two|three|un|une|deux|trois|[123])[-\s]?(?:bed(?:room)?s?|br|chambres?)`;
-const TYPE_NAMED = String.raw`\d½|studios?|bachelors?|lofts?|town-?homes?|townhouses?|maisons?\s+de\s+ville`;
+const TYPE_NAMED = String.raw`\d\s?½|studios?|bachelors?|lofts?|town-?homes?|townhouses?|maisons?\s+de\s+ville`;
 // A digit count takes only a plural type ("4 studios"): "Suite 12 Bachelor" is a name and a number.
 const TYPE_PLURAL = String.raw`studios|bachelors|lofts|town-?homes|townhouses|maisons\s+de\s+ville`;
 const BED_NAMES: Record<string, string> = { one: "1BR", un: "1BR", une: "1BR", "1": "1BR", two: "2BR", deux: "2BR", "2": "2BR", three: "3BR", trois: "3BR", "3": "3BR" };
@@ -214,7 +214,7 @@ export function unitTypesIn(text: string): string[] {
   const found: { at: number; name: string }[] = [];
   for (const m of text.matchAll(new RegExp(String.raw`(?<![\p{L}\p{N}])(?:(${TYPE_BED})|(${TYPE_NAMED})|((?:one|two|three|un|deux|trois|[123])-)(?=\s+(?:and|or|et|ou)\s))(?![\p{L}\p{N}])`, "giu"))) {
     const w = m[0].toLowerCase();
-    const name = m[1] || m[3] ? BED_NAMES[/^(?:one|two|three|une?|deux|trois|[123])/.exec(w)![0]]! : /^\d/.test(w) ? w : /^studio/.test(w) ? "Studio" : /^bachelor/.test(w) ? "Bachelor" : /^loft/.test(w) ? "Loft" : /^maison/.test(w) ? "Maison de ville" : "Townhome";
+    const name = m[1] || m[3] ? BED_NAMES[/^(?:one|two|three|une?|deux|trois|[123])/.exec(w)![0]]! : /^\d/.test(w) ? w.replace(/\s/g, "") : /^studio/.test(w) ? "Studio" : /^bachelor/.test(w) ? "Bachelor" : /^loft/.test(w) ? "Loft" : /^maison/.test(w) ? "Maison de ville" : "Townhome";
     found.push({ at: m.index!, name });
   }
   return [...new Set(found.sort((a, b) => a.at - b.at).map((f) => f.name))];

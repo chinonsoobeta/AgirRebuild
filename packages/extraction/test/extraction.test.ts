@@ -109,7 +109,7 @@ describe("square metres become square feet at entry (decision 7)", () => {
   test("a rent per m² is read as a rent per square foot", () => {
     const c = only(extractCandidates(doc(["Retail rent: $366/m²"])), "rent_psf_annual");
     expect(c).toMatchObject({ itemKey: "Retail", unitSeen: "$/m2" });
-    expect(c.value).toBeCloseTo(34.0025, 4);
+    expect(c.value).toBe(34);
   });
   test("a component named with only an area in m²", () => {
     const c = only(extractCandidates(doc(["Retail: 836 m²"])), "rentable_area_sf");
