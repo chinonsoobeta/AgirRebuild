@@ -1638,6 +1638,59 @@ describe("totals and their parts", () => {
     })()), "p.xlsx"));
     expect(r.notes).toEqual([]);
   });
+  describe("workbook packages with absolute internal links", () => {
+    async function twoSheetBytes(): Promise<Uint8Array> {
+      const ExcelJS = (await import("exceljs")).default;
+      const wb = new ExcelJS.Workbook();
+      const a = wb.addWorksheet("Budget");
+      a.addRows([["Item", "Amount"], ["Land", 100_000]]);
+      a.getCell("A3").value = "Contingency";
+      a.getCell("B3").value = 0.05;
+      a.getCell("B3").numFmt = "0.0%";
+      const b = wb.addWorksheet("Notes");
+      b.addRows([["Label", 7]]);
+      // A cell note gives the sheet its own relationship part, whose target is not under the sheet's folder.
+      b.getCell("A1").note = "checked";
+      return new Uint8Array(await wb.xlsx.writeBuffer());
+    }
+    async function withAbsoluteTargets(bytes: Uint8Array): Promise<Uint8Array> {
+      const JSZip = (await import("jszip")).default;
+      const zip = await JSZip.loadAsync(bytes);
+      let changed = 0;
+      for (const name of Object.keys(zip.files).filter((n) => n.endsWith(".rels"))) {
+        const xml = await zip.file(name)!.async("string");
+        // A relationship's target is relative to the folder that holds the part it describes.
+        const folder = name.replace(/_rels\/[^/]*$/, "");
+        const out = xml.replace(/Target="(?!\/|https?:)([^"]*)"/g, (_m, t: string) => {
+          changed++;
+          const path: string[] = [];
+          for (const p of `${folder}${t}`.split("/")) if (p === "..") path.pop(); else path.push(p);
+          return `Target="/${path.join("/")}"`;
+        });
+        zip.file(name, out);
+      }
+      expect(changed).toBeGreaterThan(0);
+      return new Uint8Array(await zip.generateAsync({ type: "uint8array" }));
+    }
+    test("a workbook whose sheet links are absolute parses to the same cells as the relative one", async () => {
+      const relative = await twoSheetBytes();
+      const absolute = await withAbsoluteTargets(relative);
+      const JSZip = (await import("jszip")).default;
+      expect(await (await JSZip.loadAsync(absolute)).file("xl/_rels/workbook.xml.rels")!.async("string")).toContain('Target="/xl/worksheets/sheet1.xml"');
+      const a = await parseDocument(absolute, "a.xlsx");
+      const r = await parseDocument(relative, "r.xlsx");
+      expect(a.tables.length).toBe(2);
+      expect(JSON.stringify(a)).toBe(JSON.stringify(r));
+      expect(JSON.stringify(a)).toContain("Contingency");
+    });
+    test("a relative-target workbook is read as before", async () => {
+      const d = await parseDocument(await twoSheetBytes(), "r.xlsx");
+      expect(d.tables.map((t) => t.rows.length)).toEqual([3, 1]);
+    });
+    test("a corrupt file still fails to read", async () => {
+      await expect(parseDocument(new Uint8Array([80, 75, 3, 4, 1, 2, 3, 4, 5]), "c.xlsx")).rejects.toThrow();
+    });
+  });
   describe("more label forms and vocabulary", () => {
     const withLines = (lines: string[], ...tables: Table[]) => extractCandidates(doc(lines, tables));
     test("a capitalised label ending in a full stop, or a run of dots, is a label and its value", () => {
