@@ -466,12 +466,17 @@ const NOT_CREDIT_RE = /(?:line|lines|letter|letters|facility|facilities|marge|li
 // The budget lines a credit may be written against: it is read as the other costs, never as a reduction of one of these.
 const CREDITABLE = new Set(["land_cost", "hard_cost", "soft_cost", "contingency", "other_cost"]);
 
+const OLD_LABEL_RE = /(?:^|[^a-z])(?:ancien(?:ne)?s?|old|superseded|previous(?:ly)?|precedent\w*|former(?:ly)?|original(?:ly)?|earlier)\s+(?:[a-z]+\s+){0,2}?(?:total|price|priced|prix|quote|quoted|cost|costs|couts?|budget|montant|travaux|land|terrain|contract|soumission|estimate|estimated)(?![a-z])/;
+const SUPERSEDED_LABEL_NOTE = "An earlier figure, named old or original by its own label; a later figure for the line replaces it";
+
 /**
  * A negative other cost is read only when its own label says it is a credit (then it is the other costs, with a note);
  * a negative figure that does not say so is refused. Nothing is inferred from a sign, and no sign is flipped.
  */
 export function mapToken(rawLabel: string, t: NumberToken, opts: MapOptions = {}): Mapped {
   const m = mapLabel(rawLabel, t, opts);
+  // A budget line whose own label calls the figure the old, original or earlier one is shown: a later figure for the line replaces it.
+  if (m.kind === "field" && m.itemKey === null && CREDITABLE.has(m.fieldKey) && OLD_LABEL_RE.test(normalizeLabel(rawLabel).label)) return { kind: "ignored", reason: SUPERSEDED_LABEL_NOTE };
   if (t.value === null || t.value >= 0 || m.kind === "ignored") return m;
   const { label, labelUnit, labelCode } = normalizeLabel(rawLabel);
   const credit = CREDIT_WORD_RE.test(label) && !NOT_CREDIT_RE.test(label);
@@ -688,4 +693,78 @@ function mapLabel(rawLabel: string, t: NumberToken, opts: MapOptions = {}): Mapp
     };
   }
   return { kind: "unmapped" };
+}
+
+
+// ---- Budget lines written as sentences with verbs ---------------------------------------------------
+// A verb gives a field only together with its object noun: "pay ... to buy the lot", "the contractor will do the work for", "set aside ... for other costs".
+const OTHER_PROJECT_RE = /\b(?:another|other|previous|prior|last|earlier|comparable|similar)\s+(?:project|job|building|property|development|contract|site|deal)s?\b(?!\s+(?:costs?|expenses?|couts?|frais))|\bautres?\s+(?:projets?|immeubles?|proprietes?)\b/;
+const DEPOSIT_RE = /\b(?:deposits?|down payment|acomptes?|depots?|already paid|deja paye)\b/;
+const LAND_RE = /\b(?:pay|pays|paying|paid|purchase\w*|acquir\w*|buy\w*|bought|paie\w*|payer|payons|acquer\w*|achet\w+|acquis\w*)\b.*?\b(?:(?:the|our|this|that|a|le|la|l|notre|ce|cet|cette|un|une)\s+)(?:[a-z]+\s+){0,2}(?:lot|land|site|building|property|terrain|immeuble|propriete|batiment)\b(?:\s+(?:at|on|in|from|du|de|au|a|sur)\s+(?:[a-z0-9]+\s+){0,4}?)?(?:\s+(?:for|pour))?\s*(?:#|$)/;
+const WHO_HARD = /\b(?:contractor|builder|gc|general contractor|entrepreneur(?: general)?|constructeur)\b/;
+const VERB_HARD = /\b(?:do|does|doing|carry out|carries out|build|builds|execute|executes|perform|performs|deliver|delivers|realis\w+|realiz\w+|execut\w+|effectu\w+)\b/;
+const NOUN_HARD = /\b(?:work|works|construction|conversion|renovations?|travaux)\b/;
+const WHO_SOFT = /\b(?:design team|designers?|advis[eo]rs?|consultants?|professionals?|architects?|engineers?|conseillers?|professionnels?|architectes?|ingenieurs?)\b/;
+const SERVICES_AFTER = /^(?:for|pour)\s+(?:(?:its|their|his|her|our|the|ses|leurs?|des|les)\s+)?(?:professional\s+)?(?:services?|fees?|honoraires)\b/;
+const HOLD_VERB = /\b(?:hold back|holds back|keep|keeps|retain|retains|set aside|sets aside|put aside|reserve|reserves|earmark\w*|garder|gardons|conserver|reserver|reservons|retenir|retenons|met de cote|mettons de cote|mettre de cote|prevoit|prevoyons|prevoir)\b/;
+const CONTINGENCY_AFTER = /^(?:for|pour)\s+(?:the\s+|les?\s+|la\s+)?(?:contingenc\w+|unforeseen|imprevus?|inattendus?)\b/;
+const OTHER_AFTER = /^(?:for|pour)\s+(?:the\s+|les\s+|des\s+)?(?:other|miscellaneous|autres?|divers)\s+(?:(?:project|development|du projet|de projet)\s+)?(?:costs?|expenses?|couts?|frais)\b/;
+const FIXED_AFTER = /^(?:for|pour)\s+(?:the\s+|its\s+|our\s+|les\s+|ses\s+)?(?:fixed\s+(?:operating\s+)?(?:costs?|expenses?|operations?|opex)|(?:charges|frais|couts|depenses)\s+fixes)\b/;
+const YEARLY_RE = /(?:a year|annually|per year|par an|par annee|annuellement|\/\s?(?:yr|year|an))\s*$/i;
+
+/**
+ * A money figure in a sentence with a verb ("We will pay $910,000 to buy the lot", "The design team needs $380,000 for its services"),
+ * read when its own clause holds the verb and the noun the field is named by; a verb alone, another project and a deposit read nothing.
+ * `before`: the words since the previous figure; `after`: the words up to the next one.
+ */
+export function costSentence(sentence: string, before: string, after: string, t: NumberToken): Mapped | null {
+  if (t.value === null || t.value <= 0 || !(t.unit === "$" || t.currency)) return null;
+  const f = (x: string) => foldText(x).replace(/[^a-z0-9\s]/g, " ").replace(/\s+/g, " ").trim();
+  const clause = (x: string, last: boolean) => {
+    const parts = x.split(/[,;]|\band\b|\bet\b/i);
+    return parts[last ? parts.length - 1 : 0] ?? "";
+  };
+  const b = f(clause(before, true));
+  const a = f(clause(after, false));
+  const whole = f(sentence);
+  if (OTHER_PROJECT_RE.test(whole) || DEPOSIT_RE.test(whole)) return null;
+  const holds = HOLD_VERB.test(b);
+  const label =
+    LAND_RE.test(`${b} # ${a}`) ? "land cost"
+    : WHO_HARD.test(b) && VERB_HARD.test(b) && NOUN_HARD.test(b) && /\b(?:for|pour|at)(?: (?:a|un) (?:total|prix|montant)(?: of| de)?)?$/.test(b) ? "hard costs"
+    : WHO_SOFT.test(b) && SERVICES_AFTER.test(a) ? "soft costs"
+    : holds && CONTINGENCY_AFTER.test(a) ? "contingency"
+    : (holds || /\b(?:provide|provides|allow|allows|include|includes)\b/.test(b)) && OTHER_AFTER.test(a) ? "other costs"
+    : FIXED_AFTER.test(a) && YEARLY_RE.test(t.raw) ? "fixed operating costs"
+    : null;
+  if (!label) return null;
+  const m = mapToken(label, t, { prose: true });
+  return m.kind === "field" ? m : null;
+}
+
+// ---- Flags stated in a sentence ------------------------------------------------------------------
+const FLAG_NEGATION_RE = /\b(?:not|never|neither|nor|if|unless|may|might|could|should|whether|pas|jamais|si|sauf)\b|\bn t\b|\?/;
+const FLAG_RULES: { fieldKey: string; value: 0 | 1; re: RegExp; negatable?: true }[] = [
+  { fieldKey: "lease_up_ramp", value: 1, re: /\b(?:rents?|income|revenues?)\s+(?:is|are|will be)\s+(?:credited|counted|recognized|recognised|included|earned)\s+(?:during|throughout|while|in)\s+(?:the\s+)?(?:lease[- ]?up|leasing)\b/ },
+  { fieldKey: "lease_up_ramp", value: 1, re: /\bwe\s+(?:count|credit|include|recognize|recognise)\s+(?:rental\s+)?(?:income|rents?|revenues?)\s+(?:during|while|throughout)\s+(?:the\s+)?(?:lease[- ]?up|leasing)\b/ },
+  { fieldKey: "lease_up_ramp", value: 1, re: /\b(?:loyers|revenus)\s+(?:sont|seront)\s+(?:comptes|comptabilises|credites)\s+pendant\s+(?:la\s+)?(?:mise en location|periode de location|location)\b/ },
+  { fieldKey: "lease_up_ramp", value: 0, re: /^no\s+(?:rental\s+)?(?:income|rents?|revenues?)\s+(?:until|before|prior to)\s+(?:the\s+)?(?:stabili[sz]ation|stabili[sz]ed)\s*$/, negatable: true },
+  { fieldKey: "lease_up_ramp", value: 0, re: /^(?:aucun|pas de)\s+(?:revenus?|loyers?)\s+avant\s+(?:la\s+)?stabilisation\s*$/, negatable: true },
+  { fieldKey: "s_curve_draws", value: 1, re: /\b(?:construction\s+)?(?:draws?|drawdowns?)\s+(?:will\s+)?follows?\s+(?:an?\s+)?s[- ]?curve\b/ },
+  { fieldKey: "s_curve_draws", value: 1, re: /^(?:les\s+)?tirages(?:\s+de\s+construction)?\s+(?:en|suivent\s+une)\s+courbe\s+en\s+s\s*$/ },
+  { fieldKey: "s_curve_draws", value: 0, re: /^(?:construction\s+)?(?:draws?\s+(?:are|will be)\s+)?straight[- ]line(?:\s+(?:construction\s+)?draws?)?\s*$/ },
+  { fieldKey: "s_curve_draws", value: 0, re: /^(?:les\s+)?tirages(?:\s+de\s+construction)?\s+(?:sont|seront)\s+lineaires\s*$/ },
+];
+
+/**
+ * A flag a whole sentence states outright: "Rent is credited during lease-up", "No income until stabilization", "Draws follow an S-curve",
+ * "Straight-line draws". A hedge, a negation or a question reads no flag, and nothing is inferred from a passing mention.
+ */
+export function flagSentence(sentence: string): { fieldKey: string; value: 0 | 1; raw: string } | null {
+  const f = foldText(sentence).replace(/[^a-z0-9\s?-]/g, " ").replace(/\s+/g, " ").trim();
+  for (const r of FLAG_RULES) {
+    const m = r.re.exec(f);
+    if (m && (r.negatable || !FLAG_NEGATION_RE.test(f))) return { fieldKey: r.fieldKey, value: r.value, raw: sentence.trim().slice(0, 120) };
+  }
+  return null;
 }

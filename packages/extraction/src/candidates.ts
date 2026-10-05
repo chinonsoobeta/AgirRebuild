@@ -1,7 +1,7 @@
 import { FIELD_BY_KEY, OUTPUT_LIKE_PHRASES } from "@agir/contracts";
 import { detectFormat, normalizeText, SF_PER_M2, tokenize, unitTypesIn, type DocumentFormat, type NumberToken } from "@agir/numbers";
 import type { Cell, NormalizedDocument, Table } from "./document.ts";
-import { CREDIT_NOTE, LTV_BASIS, canonicalItem, currencyOf, flagRead, hasPhrase, loanNameOnly, loanTerm, mapToken, normalizeLabel, rankScope, scopeIn, scopesIn, withCurrency, type MapOptions, type Mapped, type Scope } from "./mapping.ts";
+import { CREDIT_NOTE, LTV_BASIS, canonicalItem, costSentence, currencyOf, flagRead, flagSentence, hasPhrase, loanNameOnly, loanTerm, mapToken, normalizeLabel, rankScope, scopeIn, scopesIn, withCurrency, type MapOptions, type Mapped, type Scope } from "./mapping.ts";
 
 /** One value found in one document, with where it came from and why it was (or was not) mapped. */
 export type Candidate = {
@@ -492,6 +492,9 @@ function readSentence(sentence: { text: string; start: number }, para0: Paragrap
     result.candidates.push({ fieldKey: flag.fieldKey, itemKey: null, value: flag.value, raw: text.slice(colonAt + 1).trim(), unitSeen: "flag", location: locationOf(colonAt), context: sentence.text.slice(0, 240), rule: "line:flag" });
     return;
   }
+  // A whole sentence that states a flag outright ("Draws follow an S-curve") is the flag; numbers in it are read as usual.
+  const stated = para0.excluded || markedNotPart(text) ? null : flagSentence(text);
+  if (stated) result.candidates.push({ fieldKey: stated.fieldKey, itemKey: null, value: stated.value, raw: stated.raw, unitSeen: "flag", location: locationOf(0), context: sentence.text.slice(0, 240), rule: "line:flag" });
   let tokens = tokenize(text, result.format);
   // A number that is part of a street address is not a value.
   const addresses = tokens.filter((t) => isAddress(text, t));
@@ -694,6 +697,8 @@ function readSentence(sentence: { text: string; start: number }, para0: Paragrap
         from = t.end + after.length;
       } else if (after !== null && viaAfter!.kind === "ignored" && mapped.kind === "unmapped") mapped = viaAfter!;
     }
+    // A budget line or an operating figure written with a verb ("Our contractor will do the work for $3,400,000").
+    if ((mapped.kind === "unmapped" || (mapped.kind === "ignored" && mapped.reason.startsWith("A fee or premium"))) && !afterShare && !totalLabels.has(t)) mapped = costSentence(text, label, text.slice(t.end, tokens[i + 1]?.start ?? text.length), t) ?? mapped;
     if (bareCount && i === 0 && t.unit === null && t.value !== null && Number.isInteger(t.value) && t.value > 0 && mapped.kind === "unmapped") {
       const types = unitTypesIn(clauseOf(text, t));
       if (types.length === 0 && lead) types.push(lead);

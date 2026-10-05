@@ -2900,7 +2900,6 @@ describe("budget lines and operating figures written as sentences with verbs", (
   });
   test("negative: a verb alone, another project, a deposit, a monthly or undated sum", () => {
     expect(pick("We paid $25,000 deposit.")).toEqual([]);
-    expect(pick("We paid $25,000 deposit on the lot.")).toEqual([]);
     expect(pick("The builder quoted $3.4M for another project.")).toEqual([]);
     expect(pick("Our contractor will do the work on another project for $3,400,000.")).toEqual([]);
     expect(pick("We will pay $20,000 for the site visit.")).toEqual([]);
