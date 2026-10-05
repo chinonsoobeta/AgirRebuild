@@ -2255,3 +2255,92 @@ describe("rows, lines and sections marked as not part of the deal", () => {
     expect(vals(linesDoc(["Note: figures below are for reference elsewhere only in the appendix.", "Hard costs: $2,100,000"]))).toEqual([["hard_cost", 2_100_000]]);
   });
 });
+
+describe("unit types written as blocks, and rent opinions", () => {
+  const OPINION = "An opinion of rent, not the deal's assumption";
+  const BLOCK = [
+    ["Unit type", "Figure"],
+    ["Two-bedroom flat", ""],
+    ["Number of units", "6"],
+    ["Rent per month", "$2,300"],
+    ["Garden suite", ""],
+    ["Number of units", "2"],
+    ["Rent per month", "$1,650"],
+  ];
+  const cell = (text: string, ref: string): Cell => ({ text, ref });
+  const tableDoc = (rows: string[][]): NormalizedDocument => ({
+    kind: "docx",
+    lines: [],
+    tables: [{ name: "Table 1", rows: rows.map((r, i) => r.map((t, c) => cell(t, `${"AB"[c]}${i + 1}`))) }],
+    pageCount: null,
+    needsOcr: false,
+    fullText: rows.map((r) => r.join(" ")).join("\n"),
+  });
+  const linesDoc = (lines: string[]): NormalizedDocument => ({
+    kind: "docx",
+    lines: lines.map((text, i) => ({ text, location: `L${i + 1}` })),
+    tables: [],
+    pageCount: null,
+    needsOcr: false,
+    fullText: lines.join("\n"),
+  });
+  const pick = (d: NormalizedDocument) => extractCandidates(d).candidates.map((c) => [c.fieldKey, c.itemKey, c.value]);
+  const BLOCK_READ = [
+    ["unit_count", "Two-bedroom flat", 6], ["unit_rent_monthly", "Two-bedroom flat", 2_300],
+    ["unit_count", "Garden suite", 2], ["unit_rent_monthly", "Garden suite", 1_650],
+  ];
+
+  test("an xlsx block table gives each heading its own units and rent", async () => {
+    const ExcelJS = (await import("exceljs")).default;
+    const wb = new ExcelJS.Workbook();
+    const ws = wb.addWorksheet("Mix");
+    BLOCK.forEach((r, i) => r.forEach((v, c) => {
+      if (v === "") return;
+      ws.getCell(i + 1, c + 1).value = c === 1 && /^\d+$/.test(v) ? Number(v) : v;
+    }));
+    const d = await parseDocument(new Uint8Array(await wb.xlsx.writeBuffer()), "mix.xlsx");
+    expect(pick(d)).toEqual(BLOCK_READ);
+  });
+  test("a docx block table is read the same way", async () => {
+    const JSZip = (await import("jszip")).default;
+    const zip = new JSZip();
+    const p = (s: string) => `<w:p><w:r><w:t>${s}</w:t></w:r></w:p>`;
+    const body = `<w:tbl>${BLOCK.map((r) => `<w:tr>${r.map((c) => `<w:tc>${p(c)}</w:tc>`).join("")}</w:tr>`).join("")}</w:tbl>`;
+    zip.file("[Content_Types].xml", `<?xml version="1.0" encoding="UTF-8"?><Types xmlns="http://schemas.openxmlformats.org/package/2006/content-types"><Default Extension="rels" ContentType="application/vnd.openxmlformats-package.relationships+xml"/><Default Extension="xml" ContentType="application/xml"/><Override PartName="/word/document.xml" ContentType="application/vnd.openxmlformats-officedocument.wordprocessingml.document.main+xml"/></Types>`);
+    zip.file("_rels/.rels", `<?xml version="1.0" encoding="UTF-8"?><Relationships xmlns="http://schemas.openxmlformats.org/package/2006/relationships"><Relationship Id="rId1" Type="http://schemas.openxmlformats.org/officeDocument/2006/relationships/officeDocument" Target="word/document.xml"/></Relationships>`);
+    zip.file("word/document.xml", `<?xml version="1.0" encoding="UTF-8"?><w:document xmlns:w="http://schemas.openxmlformats.org/wordprocessingml/2006/main"><w:body>${body}</w:body></w:document>`);
+    const d = await parseDocument(new Uint8Array(await zip.generateAsync({ type: "uint8array" })), "mix.docx");
+    expect(pick(d)).toEqual(BLOCK_READ);
+  });
+  test("a French block is read, and a total row ends the block", () => {
+    expect(pick(tableDoc([
+      ["Type", "Valeur"],
+      ["Logement 4½", ""],
+      ["Nombre de logements", "10"],
+      ["Loyer mensuel", "1 450 $"],
+    ]))).toEqual([["unit_count", "Logement 4½", 10], ["unit_rent_monthly", "Logement 4½", 1_450]]);
+    const r = extractCandidates(tableDoc([
+      ["Studio", ""],
+      ["Number of units", "5"],
+      ["Rent per month", "$1,200"],
+      ["Total", ""],
+      ["Number of units", "9"],
+    ]));
+    expect(r.candidates.filter((c) => c.itemKey === "Studio").map((c) => [c.fieldKey, c.value])).toEqual([["unit_count", 5], ["unit_rent_monthly", 1_200]]);
+  });
+  test("a rent called an opinion is shown with a note and creates no item", () => {
+    for (const d of [
+      tableDoc([["Agent's view, achievable monthly rent", "$2,400"]]),
+      linesDoc(["Possible rent per broker: $2,500"]),
+      tableDoc([["Loyer potentiel selon le courtier", "2 600 $"]]),
+    ]) {
+      const r = extractCandidates(d);
+      expect(r.candidates).toEqual([]);
+      expect(r.other.map((o) => o.note)).toEqual([OPINION]);
+    }
+  });
+  test("negative: a section heading is no item, and a row-per-type roll is unchanged", () => {
+    expect(pick(tableDoc([["Leasing assumptions", ""], ["Stabilized occupancy", "95%"]]))).toEqual([["stabilized_occupancy_pct", null, 95]]);
+    expect(pick(tableDoc([["Unit type", "Units", "Monthly rent"], ["Studio", "4", "$1,450"]]))).toEqual([["unit_count", "Studio", 4], ["unit_rent_monthly", "Studio", 1_450]]);
+  });
+});
