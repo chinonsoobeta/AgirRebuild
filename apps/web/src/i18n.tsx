@@ -1253,7 +1253,8 @@ function makeFormat(lang: Lang) {
       case "years": return fr ? `${nMax2.format(v)} ${v === 1 ? "an" : "ans"}` : `${nMax2.format(v)} yr`;
       case "units": case "count": return n0.format(v);
       case "sf": return fr ? `${n0.format(Math.round(v))} pi²` : `${n0.format(Math.round(v))} SF`;
-      case "$/unit/mo": case "$/mo": return fr ? `${nMax2.format(v)} $/mois` : `$${nMax2.format(v)}/mo`;
+      // Whole dollars stay whole; a rent with cents shows both digits ($3,095.20, not $3,095.2).
+      case "$/unit/mo": case "$/mo": { const n = Number.isInteger(v) ? n0 : n2; return fr ? `${n.format(v)} $/mois` : `$${n.format(v)}/mo`; }
       case "$/sf/yr": case "$/sf": return fr ? `${n2.format(v)} $/pi²/an` : `$${n2.format(v)}/SF/yr`;
       case "flag": return v === 1 ? (fr ? "Oui" : "Yes") : fr ? "Non" : "No";
       case "pts": return fr ? `${nMax2.format(v)} pts` : `${nMax2.format(v)} pts`;
@@ -1334,7 +1335,7 @@ export function build(lang: Lang, setLang: (l: Lang) => void) {
       const unit = BE_UNIT[r.driver] ?? "%";
       const mag = (v: number) => f.delta(Math.abs(v), unit).slice(1);
       if (r.state === "out_of_range") return lang === "fr" ? `Pas dans les limites de ${f.delta(r.limit, unit)}` : `Not within ${f.delta(r.limit, unit)}`;
-      if (r.state === "no_effect") return lang === "fr" ? "Cette hypothèse ne change pas le chiffre de ce critère." : "This input does not change this gate's figure.";
+      if (r.state === "no_effect") return lang === "fr" ? `Dans les limites de ${f.delta(r.limit, unit)}, cette hypothèse ne change pas le chiffre de ce critère.` : `Within ${f.delta(r.limit, unit)}, this input does not change this gate's figure.`;
       if (r.state === "not_monotonic") return lang === "fr" ? "Le critère ne varie pas de façon régulière avec cette hypothèse\u00a0; utilisez la grille." : "The gate does not move steadily with this input; use the grid.";
       const fr = lang === "fr";
       const to = r.to.map((e) => {

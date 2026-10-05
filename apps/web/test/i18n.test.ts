@@ -298,6 +298,13 @@ describe("breakeven rows in both languages (task 38)", () => {
     expect(b).toContain("15,00\u00a0%");
     expect(b).toContain("pour que profit sur coût atteigne");
   });
+  it("a computed rent shows its cents, and 'no effect' names the range searched (audit)", () => {
+    const row = { ...rowOf("rentPct", "value"), to: [{ ...echo.rentPct, to: 3095.2 }] };
+    expect(en.L.breakeven(row as any, gate)).toContain("(1BR: $3,095.20/mo)");
+    expect(fr.L.breakeven(row as any, gate)).toContain("3\u00a0095,20\u00a0$/mois");
+    expect(en.L.breakeven(rowOf("costPct", "no_effect") as any, gate)).toMatch(/^Within -50.*does not change/);
+    expect(fr.L.breakeven(rowOf("costPct", "no_effect") as any, gate)).toMatch(/^Dans les limites de -50/);
+  });
   it("a gate name keeps its acronym and only loses a leading capital", () => {
     const dcr = { key: "stressed_sizing_dscr", label: "Sizing DSCR, combined stress", threshold: 1.2, unit: "x" };
     expect(en.L.breakeven(rowOf("rentPct", "value") as any, dcr)).toContain("for sizing DCR, combined stress to reach 1.20x");

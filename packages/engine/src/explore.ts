@@ -233,6 +233,8 @@ function gateMetric(input: EngineInput, policy: Policy, spec: GateSpec): Metric 
   const stress = policy.stresses.find((s) => s.key === spec.scenario);
   if (spec.scenario !== "base" && !stress) return undefined;
   try {
+    // A move the engine would refuse (validateInput throws) never counts as passing.
+    validateInput(input);
     return baseMetrics(stress ? applyStress(input, stress) : input).find((m) => m.key === spec.metricKey);
   } catch {
     return undefined;
@@ -282,7 +284,7 @@ export function breakeven(input: EngineInput, policy: Policy, specs: GateSpec[] 
       } else {
         row.reason =
           r.state === "out_of_range" ? `Not within ${limit > 0 ? "+" : "-"}${Math.abs(limit)}${UNIT_SUFFIX[d.unit as keyof typeof UNIT_SUFFIX]}`
-          : r.state === "no_effect" ? "This input does not change the gate's figure."
+          : r.state === "no_effect" ? `Within ${limit > 0 ? "+" : "-"}${Math.abs(limit)}${UNIT_SUFFIX[d.unit as keyof typeof UNIT_SUFFIX]}, this input does not change the gate's figure.`
           : NOT_STEADY;
       }
       rows.push(row);
