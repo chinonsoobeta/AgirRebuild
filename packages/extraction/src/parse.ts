@@ -102,16 +102,50 @@ function unitOfWord(w: string): CellUnit | null {
   return null;
 }
 
+const MAX_PART = 50 * 1024 * 1024;
+const MAX_PACKAGE = 200 * 1024 * 1024;
+const SPREADSHEET_MAIN = "http://schemas.openxmlformats.org/spreadsheetml/2006/main";
+
+/** Internal absolute targets become relative to the folder holding the described part; an external target is never touched. */
+function relativeTargets(xml: string, name: string): string {
+  // "xl/_rels/a.rels" describes parts in "xl/".
+  const dirs = name.replace(/(^|\/)_rels\/[^/]*$/, "$1").split("/").filter(Boolean);
+  return xml.replace(/<Relationship\b[^>]*>/g, (tag) => {
+    if (/\bTargetMode\s*=\s*["']External["']/.test(tag)) return tag;
+    return tag.replace(/(\bTarget\s*=\s*)(["'])\/([^"']*)\2/, (_m, pre: string, q: string, target: string) => {
+      const shared = target.split("/");
+      let k = 0;
+      while (k < dirs.length && k < shared.length - 1 && dirs[k] === shared[k]) k++;
+      return `${pre}${q}${[...dirs.slice(k).map(() => ".."), ...shared.slice(k)].join("/")}${q}`;
+    });
+  });
+}
+
+/** A root element prefixed with the SpreadsheetML namespace is rewritten to the default namespace; any other default namespace leaves the part as it is. */
+function defaultNamespace(xml: string): string {
+  const root = /^\s*<([A-Za-z_][\w.-]*):[\w.-]+(\s[^>]*)?>/.exec(xml.replace(/<\?[\s\S]*?\?>|<!--[\s\S]*?-->/g, (m) => " ".repeat(m.length)));
+  if (!root) return xml;
+  const prefix = root[1]!;
+  const attrs = root[2] ?? "";
+  if (/\sxmlns\s*=/.test(attrs) || !new RegExp(`\\sxmlns:${prefix}\\s*=\\s*"${SPREADSHEET_MAIN}"`).test(attrs)) return xml;
+  return xml
+    .replace(new RegExp(`(\\sxmlns):${prefix}(\\s*=\\s*"${SPREADSHEET_MAIN}")`), "$1$2")
+    .replace(new RegExp(`<(/?)${prefix}:`, "g"), "<$1");
+}
+
 /**
  * Excel writes relative link targets inside the package ("worksheets/sheet1.xml"); other tools write absolute ones ("/xl/worksheets/sheet1.xml"),
- * which are just as valid but which exceljs does not follow for a sheet's comments or tables. Only the link targets in `.rels` parts are
- * made relative; every other part is carried over byte for byte. A package this cannot read is returned as it came, so the reader's own
+ * which are just as valid but which exceljs does not follow for a sheet's comments or tables. A script that rewrites a part can also leave
+ * the SpreadsheetML namespace on a prefix ("ns0:worksheet"), which exceljs's parser does not match. Only the link targets in `.rels` parts and
+ * that prefix in `xl/` parts are changed; every other part is carried over byte for byte. Uploads are untrusted: a part above 50 MB, or a
+ * package above 200 MB, is returned as it came. A package this cannot read is returned as it came, so the reader's own
  * failure message stands. (No zip library is a direct dependency here, so the few zip structures needed are read with node:zlib.)
  */
-function relativeLinks(bytes: Uint8Array): Uint8Array {
+export function relativeLinks(bytes: Uint8Array): Uint8Array {
   const b = Buffer.from(bytes.buffer, bytes.byteOffset, bytes.byteLength);
   const entries: { name: string; method: number; time: number; date: number; crc: number; size: number; data: Buffer }[] = [];
   let changed = false;
+  let total = 0;
   try {
     let eocd = b.length - 22;
     while (eocd >= 0 && b.readUInt32LE(eocd) !== 0x06054b50) eocd--;
@@ -131,18 +165,11 @@ function relativeLinks(bytes: Uint8Array): Uint8Array {
       const name = b.toString("utf8", at + 46, at + 46 + nameLen);
       const start = local + 30 + b.readUInt16LE(local + 26) + b.readUInt16LE(local + 28);
       let entry = { name, method, time: b.readUInt16LE(at + 12), date: b.readUInt16LE(at + 14), crc: b.readUInt32LE(at + 16), size: b.readUInt32LE(at + 24), data: b.subarray(start, start + csize) };
-      if (name.endsWith(".rels")) {
-        const xml = (method === 8 ? inflateRawSync(entry.data) : entry.data).toString("utf8");
-        // A target is relative to the folder holding the part the links describe: "xl/_rels/a.rels" describes parts in "xl/".
-        const folder = name.replace(/(^|\/)_rels\/[^/]*$/, "$1");
-        const rewritten = xml.replace(/(<Relationship\b[^>]*?\bTarget=")\/([^"]*)(")(?![^>]*TargetMode="External")/g, (_m, pre: string, target: string, post: string) => {
-          const up = folder.split("/").filter(Boolean).map(() => "..");
-          const shared = target.split("/");
-          const dirs = folder.split("/").filter(Boolean);
-          let k = 0;
-          while (k < dirs.length && k < shared.length - 1 && dirs[k] === shared[k]) k++;
-          return `${pre}${[...up.slice(k), ...shared.slice(k)].join("/")}${post}`;
-        });
+      total += Number(b.readUInt32LE(at + 24));
+      if (b.readUInt32LE(at + 24) > MAX_PART || total > MAX_PACKAGE) return bytes;
+      if (name.endsWith(".rels") || (name.startsWith("xl/") && name.endsWith(".xml"))) {
+        const xml = (method === 8 ? inflateRawSync(entry.data, { maxOutputLength: MAX_PART }) : entry.data).toString("utf8");
+        const rewritten = name.endsWith(".rels") ? relativeTargets(xml, name) : defaultNamespace(xml);
         if (rewritten !== xml) {
           const raw = Buffer.from(rewritten, "utf8");
           entry = { ...entry, method: 8, crc: crc32(raw), size: raw.length, data: deflateRawSync(raw) };
