@@ -9,7 +9,7 @@ work it describes.
 | Command | Result | Verified |
 |---|---|---|
 | `npm install` | Node 22 (`engines` allows 22 to 24); `.npmrc` sets `legacy-peer-deps` | 2026-10-01 |
-| `npm run gate -- --tier=pr` | Both typechecks and 423 in 9 files | 2026-10-04, `task/30-excluded-rows` |
+| `npm run gate -- --tier=pr` | Both typechecks and 423 tests in 9 files | 2026-10-04, `task/30-excluded-rows` |
 | `npm run gate -- --tier=release` | Both typechecks, 198 tests in 9 files (119 on `main`), web build | 2026-10-03, `task/12-reading-gaps` (the stack 05, 07, 06, 08, 09, 10, 11, 12) |
 | CI replay: fresh `git clone`, `npm ci`, then `VITEST_MAX_WORKERS=2 npm run gate -- --tier=pr` and `--tier=release` | `npm ci` accepts the lockfile; both tiers pass, 198 tests; swap unchanged | 2026-10-03, `task/12-reading-gaps` |
 | `VITEST_MAX_WORKERS=2 npm run gate -- --tier=release` | The same gate with two test workers: peak memory about 1 GB, no swap | 2026-10-01 |
