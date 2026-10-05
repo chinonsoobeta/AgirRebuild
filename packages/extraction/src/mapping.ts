@@ -381,6 +381,46 @@ export function loanNameOnly(rawLabel: string): Scope | null {
   return rest.split(/[^a-z0-9]+/).filter(Boolean).every((w) => names.has(w)) ? scope : null;
 }
 
+/** Every loan a text names by a scope word. */
+export function scopesIn(text: string): Scope[] {
+  const f = foldText(text);
+  return (Object.keys(SCOPE_WORDS) as Scope[]).filter((k) => SCOPE_WORDS[k].test(f));
+}
+
+// Inside a sentence that names a loan: the words that put a money figure first as the loan's amount, and the filler a clause may hold around a bare term.
+const AMOUNT_WORD_RE = /\b(?:advances?|advancing|principal|will lend|lends?|lending|commits?|committing|commitment of|facility of|avance|avancera|avancent|prete|pretera|pretent|consent|consentira)\s*(?:(?:de|of|d|an?|un|une|up to|jusqu a|to)\s+)*$/;
+const TERM_FILLER = /\b(?:at|a|au|aux|taux|de|du|d|of|rate|interest|interet|coupon|fixed|fixe|bearing|carrying|portant|with|avec|the|le|la|an|un|une|per annum|annual|annually|stays?|remains?|is|are|will|be|while|whereas|and|but|reste|demeure|est|sera|alors que|tandis que|lenders?|preteurs?)\b/g;
+const RATE_NOT_RE = /\b(?:fees?|frais|ltv|ltc|loan to|ratio|prime|spread|premium|prix|price|of|de|du|des)\b/;
+const IO_BEFORE_RE = /(?:interest[- ]only|\bio\b|interets? seulement)\s*(?:(?:for|pour|of|de|d|during|pendant|the|first|initial|les?|premiers?|premieres?)\s+)*$/;
+const AMORT_BEFORE_RE = /amorti(?:[sz]\w*)?\s*(?:(?:over|sur|of|de|d|on)\s+)*$/;
+
+function withoutLoanNames(text: string): string {
+  let rest = text;
+  for (const r of Object.values(SCOPE_WORDS)) rest = rest.replace(new RegExp(r.source, "g"), " ");
+  return rest.replace(LOAN_WORDS, " ");
+}
+
+/**
+ * A figure in a sentence that names a loan, whose own clause holds nothing but a term of it ("will advance $240,000", "at 11.5% fixed",
+ * "amortized over 15 years", "6 months IO"): the loan's amount, rate, amortization or interest-only period, read as that label would be.
+ * `tail` is the words of the figure's clause before it; `after` the words after it up to the clause's end. A fee, a term and a loan-to-value are none of these.
+ */
+export function loanTerm(tail: string, after: string, t: NumberToken, scope: Scope): Mapped | null {
+  const before = foldText(tail).replace(/[^a-z0-9\s-]/g, " ").replace(/\s+/g, " ").trim();
+  const next = foldText(after).replace(/[^a-z0-9\s-]/g, " ").replace(/\s+/g, " ").trim();
+  const duration = t.unit === "months" || t.unit === "years";
+  const term =
+    t.value === null ? null
+    : (t.unit === "$" || t.currency) && AMOUNT_WORD_RE.test(`${before} `) ? "loan amount"
+    : t.unit === "%" && withoutLoanNames(before).replace(TERM_FILLER, " ").trim() === "" && !RATE_NOT_RE.test(next) && !LTV_RE.test(`${before} ${next}`) ? "interest rate"
+    : duration && (IO_BEFORE_RE.test(`${before} `) || IO_AFTER_RE.test(` ${next}`)) ? "interest-only period"
+    : duration && (AMORT_BEFORE_RE.test(`${before} `) || AMORT_AFTER_RE.test(` ${next}`)) ? "amortization"
+    : null;
+  if (!term) return null;
+  const m = mapToken(`${scope === "refinance" ? "take-out" : scope} ${term}`, t, { prose: true, scope });
+  return m.kind === "field" ? m : null;
+}
+
 const VACANCY_RE = /\b(vacancy(?! rate)|(?<!taux de )vacance|inoccupation)\b/;
 // A duration labelled by the words right after it: "16 months to build", "huit mois pour louer".
 const BUILD_AFTER_RE = /^\s*to build\b/;

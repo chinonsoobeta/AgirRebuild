@@ -1,7 +1,7 @@
 import { FIELD_BY_KEY, OUTPUT_LIKE_PHRASES } from "@agir/contracts";
 import { detectFormat, normalizeText, SF_PER_M2, tokenize, unitTypesIn, type DocumentFormat, type NumberToken } from "@agir/numbers";
 import type { Cell, NormalizedDocument, Table } from "./document.ts";
-import { CREDIT_NOTE, canonicalItem, currencyOf, flagRead, hasPhrase, loanNameOnly, mapToken, normalizeLabel, rankScope, scopeIn, withCurrency, type MapOptions, type Mapped, type Scope } from "./mapping.ts";
+import { CREDIT_NOTE, canonicalItem, currencyOf, flagRead, hasPhrase, loanNameOnly, loanTerm, mapToken, normalizeLabel, rankScope, scopeIn, scopesIn, withCurrency, type MapOptions, type Mapped, type Scope } from "./mapping.ts";
 
 /** One value found in one document, with where it came from and why it was (or was not) mapped. */
 export type Candidate = {
@@ -643,6 +643,9 @@ function readSentence(sentence: { text: string; start: number }, para0: Paragrap
   // The loan a figure's label named by itself ("mezz $650k"): a percentage right after it, with no loan of its own, is that loan's rate.
   let carry: { scope: Scope; at: number } | null = null;
   const RATE_WORD: Record<Scope, string> = { senior: "senior rate", mezzanine: "mezzanine rate", refinance: "take-out rate" };
+  // A sentence that names a non-senior loan carries it: the loan a clause names holds until a clause names another.
+  const loanSentence = scopesIn(text).some((s) => s !== "senior");
+  let sentenceLoan: Scope | null = null;
   tokens.forEach((t, i) => {
     const where = locationOf(t.start);
     if (ranged.has(i)) {
@@ -655,12 +658,21 @@ function readSentence(sentence: { text: string; start: number }, para0: Paragrap
     const label = shares.reduce((l, [a, b]) => (b > from && a < t.start ? l.slice(0, Math.max(a - from, 0)) + " ".repeat(Math.min(b, t.start) - Math.max(a, from)) + l.slice(Math.min(b, t.start) - from) : l), text.slice(from, t.start));
     let opts: MapOptions = { prose: true, scope: para.scope, context: text, quote, after: text.slice(t.end) };
     let usedLabel = totalLabels.get(t) ?? label;
+    if (loanSentence) {
+      const named = scopesIn(label);
+      sentenceLoan = named.length === 1 ? named[0]! : named.length > 1 ? null : sentenceLoan;
+      if (sentenceLoan) opts = { ...opts, scope: sentenceLoan };
+    }
     if (carry?.at === i - 1 && t.unit === "%" && !scopeIn(label, false)) {
       opts = { ...opts, scope: carry.scope };
       if (normalizeLabel(label).label.replace(/\b(at|a|au|aux|avec|with|de|du|of|for|pour|bearing|carrying|portant)\b/g, "").trim() === "") usedLabel = RATE_WORD[carry.scope];
     }
     const named = !totalLabels.has(t) ? loanNameOnly(label) : null;
     let mapped = mapToken(usedLabel, t, opts);
+    if (mapped.kind === "unmapped" && sentenceLoan && !totalLabels.has(t)) {
+      const clause = (label.split(/[,;]/).pop() ?? "");
+      mapped = loanTerm(clause, text.slice(t.end).split(/[,;.]/)[0] ?? "", t, sentenceLoan) ?? mapped;
+    }
     from = t.end;
     // "to build", "to lease (up)" and "pour louer" right after a duration belong to it alone.
     const attached = mapped.kind === "field" && (t.unit === "months" || t.unit === "years") ? /^\s*(?:to build|to lease(?: up)?|pour louer)\b/i.exec(text.slice(t.end)) : null;
