@@ -291,11 +291,17 @@ describe("breakeven rows in both languages (task 38)", () => {
   });
   it("the rent sentence says how much, in the deal's own terms, and that other inputs are held", () => {
     const a = en.L.breakeven(rowOf("rentPct", "value") as any, gate);
-    expect(a).toBe("Rents would need to be 18.4% higher (1BR: $2,605/mo) for Profit on cost to reach 15.00%. Other inputs are held; moves together interact.");
+    expect(a).toBe("Rents would need to be 18.4% higher (1BR: $2,605/mo) for profit on cost to reach 15.00%. Other inputs are held; moves together interact.");
     const b = fr.L.breakeven(rowOf("rentPct", "value") as any, gate);
-    expect(b).toContain("18,4 %");
+    expect(b).toContain("18,4\u00a0%");
     expect(b).toContain("2\u00a0605");
-    expect(b).toContain("15,00 %");
+    expect(b).toContain("15,00\u00a0%");
+    expect(b).toContain("pour que profit sur coût atteigne");
+  });
+  it("a gate name keeps its acronym and only loses a leading capital", () => {
+    const dcr = { key: "stressed_sizing_dscr", label: "Sizing DSCR, combined stress", threshold: 1.2, unit: "x" };
+    expect(en.L.breakeven(rowOf("rentPct", "value") as any, dcr)).toContain("for sizing DCR, combined stress to reach 1.20x");
+    expect(fr.L.breakeven(rowOf("rentPct", "value") as any, dcr)).toContain("pour que CCD de dimensionnement");
   });
   it("a state with no number says why, and out of range names the limit", () => {
     expect(en.L.breakeven(rowOf("rentPct", "out_of_range") as any, gate)).toBe("Not within +100%");

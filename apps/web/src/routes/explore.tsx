@@ -4,12 +4,14 @@ import { useEffect, useMemo, useState } from "react";
 import { api, type Metric, type RunView } from "../api";
 import { Banner, DealHeader, ErrorText, MetricValue, useDeal, useSession, VerdictBadge } from "../components/ui";
 import * as I from "../components/icons";
-import { useI18n, verdictText } from "../i18n";
+import { checkText, useI18n, verdictText } from "../i18n";
 import { GateOutcome, useRun } from "./run";
 
 type Driver = { key: string; label: string; unit: "bps" | "%" | "pts" | "months"; min: number; max: number; step: number; swing: number; direction: 1 | -1 };
 type Exploration = { scenarios: RunView["result"]["scenarios"]; verdict: RunView["result"]["verdict"]; checks: RunView["result"]["checks"] };
 type Tornado = { base: number | null; rows: { driver: string; low: number | null; high: number | null; lowShock: number; highShock: number }[] };
+type BreakevenRow = { gate: string; driver: string; state: string; shock: number | null; limit: number; actual: number | null; to: { key: string; item?: string; to: number; unit: string }[] };
+type Breakeven = { rows: BreakevenRow[]; hardFails: string[] };
 type Grid = { x: string; y: string; xs: number[]; ys: number[]; cells: (number | null)[][] };
 
 const COMPARE = ["yield_on_cost", "development_spread", "profit_on_cost", "equity_multiple", "equity_irr", "sizing_dscr", "contractual_dscr", "total_development_cost", "required_equity", "exit_value"];
@@ -44,6 +46,7 @@ export function Explore({ dealId }: { dealId: string }) {
   });
   const [tMetric, setTMetric] = useState("equity_multiple");
   const tornado = useQuery({ queryKey: ["tornado", runId, tMetric], queryFn: () => api.post<Tornado>(`/runs/${runId}/tornado`, { metric: tMetric }), enabled: Boolean(runId) });
+  const breakeven = useQuery({ queryKey: ["breakeven", runId], queryFn: () => api.post<Breakeven>(`/runs/${runId}/breakeven`, {}), enabled: Boolean(runId) });
   const [g, setG] = useState({ metric: "sizing_dscr", x: "rateBps", y: "rentPct" });
   const grid = useQuery({ queryKey: ["grid", runId, g], queryFn: () => api.post<Grid>(`/runs/${runId}/grid`, { ...g, steps: 5 }), enabled: Boolean(runId) && g.x !== g.y, placeholderData: (prev) => prev });
 
@@ -169,6 +172,8 @@ export function Explore({ dealId }: { dealId: string }) {
         error={tornado.error}
       />
 
+      <BreakevenTables data={breakeven.data} gates={runData?.result.verdict.gates ?? []} checks={runData?.result.checks ?? []} error={breakeven.error} />
+
       <section className="stack" style={{ gap: 12 }} aria-labelledby="grid-h">
         <h2 id="grid-h" className="h-section">{t("explore.grid")}</h2>
         <div className="row" style={{ alignItems: "flex-end" }}>
@@ -191,6 +196,42 @@ export function Explore({ dealId }: { dealId: string }) {
         <ErrorText error={grid.error} />
       </section>
     </>
+  );
+}
+
+function BreakevenTables({ data, gates, checks, error }: { data?: Breakeven; gates: RunView["result"]["verdict"]["gates"]; checks: RunView["result"]["checks"]; error: unknown }) {
+  const i = useI18n();
+  const { t, f, L } = i;
+  const failing = gates.filter((x) => x.status === "failed");
+  return (
+    <section className="stack" style={{ gap: 12 }} aria-labelledby="be-h">
+      <div className="stack" style={{ gap: 4 }}>
+        <h2 id="be-h" className="h-section">{t("explore.be.title")}</h2>
+        <p className="small muted" style={{ maxWidth: 720 }}>{t("explore.be.body")}</p>
+      </div>
+      <ErrorText error={error} />
+      {data && data.hardFails.length > 0 && (
+        <Banner tone="stop" title={t("explore.be.hardFail")}>{checks.filter((c) => c.severity === "error").map((c) => checkText(i, c)).join(" ")}</Banner>
+      )}
+      {data && failing.length === 0 && <p className="small muted">{t("explore.be.none")}</p>}
+      {data && failing.map((gate) => (
+        <table key={gate.key} className="tbl">
+          <caption className="small muted" style={{ captionSide: "top", textAlign: "left", paddingBottom: 6 }}>
+            <strong>{L.gate(gate.key, gate.label)}</strong>. {t("explore.be.gateNow", { v: gate.actual === null ? f.value(null, gate.unit) : f.value(gate.actual, gate.unit), t: f.value(gate.threshold, gate.unit) })}
+          </caption>
+          <thead><tr><th>{t("explore.be.col.input")}</th><th>{t("explore.be.col.needs")}</th><th className="r">{t("explore.be.col.gate")}</th></tr></thead>
+          <tbody>
+            {data.rows.filter((r) => r.gate === gate.key).map((r) => (
+              <tr key={r.driver}>
+                <th scope="row">{L.driver(r.driver)}</th>
+                <td>{L.breakeven(r, gate)}</td>
+                <td className="r num">{r.actual === null ? "—" : f.value(r.actual, gate.unit)}</td>
+              </tr>
+            ))}
+          </tbody>
+        </table>
+      ))}
+    </section>
   );
 }
 

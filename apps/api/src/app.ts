@@ -3,7 +3,7 @@ import { getCookie, setCookie, deleteCookie } from "hono/cookie";
 import { z } from "zod";
 import { COUNTRIES, CURRENCIES, FIELDS, FIELD_GROUP_LABELS, METRICS, POLICY_V1, PROVINCE_CODES, REVIEW_MODES, type EngineInput } from "@agir/contracts";
 import { asUser, type BlobStore, type Db } from "@agir/db";
-import { DRIVERS, EngineInputError, explore, grid, tornado, type DriverKey, type Shock } from "@agir/engine";
+import { breakeven, DRIVERS, EngineInputError, explore, grid, tornado, type DriverKey, type Shock } from "@agir/engine";
 import { kindOf } from "@agir/extraction";
 import { MAX_UPLOAD_BYTES } from "@agir/worker";
 import { checkPassword, createSession, endSession, hashPassword, rateLimiter, SESSION_DAYS, userForSession } from "./auth.ts";
@@ -355,6 +355,7 @@ export function createApp({ db, store, secureCookies, demoSignIn = false }: AppD
     const { metric } = z.object({ metric: metricKey }).parse(await c.req.json());
     return c.json({ scratch: true, metric, ...tornado(await runInput(c), metric) });
   });
+  app.post("/api/runs/:id/breakeven", async (c) => c.json({ scratch: true, ...breakeven(await runInput(c), POLICY_V1) }));
   app.post("/api/runs/:id/grid", async (c) => {
     const b = z.object({ metric: metricKey, x: driverKey, y: driverKey, steps: z.number().int().min(3).max(9).default(5) }).parse(await c.req.json());
     if (b.x === b.y) throw new HttpError(422, "Choose two different drivers.");

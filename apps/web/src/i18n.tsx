@@ -356,6 +356,14 @@ const EN = {
   "explore.table": "Show as a table",
   "explore.unchanged": "unchanged",
   "explore.working": "Working…",
+  "explore.be.title": "What would make each failing gate pass",
+  "explore.be.body": "One input at a time: each row moves a single assumption as far as the gate needs, with every other input held at the run's values. Moves together interact, so use the grid to try a mix.",
+  "explore.be.hardFail": "This run fails a check that no gate can offset. Passing the gates alone would not change the verdict while it stands.",
+  "explore.be.none": "No gate fails in this run.",
+  "explore.be.gateNow": (p) => `Run value ${p.v}; the gate needs ${p.t}.`,
+  "explore.be.col.input": "Input",
+  "explore.be.col.needs": "What it would take",
+  "explore.be.col.gate": "Gate figure there",
 
   "glossary.title": "What these terms mean",
   "glossary.dcr": () => ["DCR (debt coverage ratio), called DSCR by many lenders", "Net operating income divided by the full amortizing loan payment, even during an interest-only period, for the weakest year of the hold."],
@@ -811,6 +819,14 @@ const FR: Record<Key, Entry> = {
   "explore.table": "Afficher sous forme de tableau",
   "explore.unchanged": "inchangé",
   "explore.working": "Calcul…",
+  "explore.be.title": "Ce qui ferait réussir chaque critère non atteint",
+  "explore.be.body": "Une hypothèse à la fois : chaque ligne déplace une seule hypothèse aussi loin que le critère l'exige, toutes les autres restant aux valeurs de l'analyse. Les changements combinés interagissent ; utilisez la grille pour essayer un mélange.",
+  "explore.be.hardFail": "Cette analyse échoue à une vérification qu'aucun critère ne peut compenser. Réussir les critères seuls ne changerait pas le verdict tant qu'elle subsiste.",
+  "explore.be.none": "Aucun critère n'est en échec dans cette analyse.",
+  "explore.be.gateNow": (p) => `Valeur de l'analyse ${p.v} ; le critère exige ${p.t}.`,
+  "explore.be.col.input": "Hypothèse",
+  "explore.be.col.needs": "Ce qu'il faudrait",
+  "explore.be.col.gate": "Chiffre du critère à ce point",
 
   "glossary.title": "Ce que ces termes veulent dire",
   "glossary.dcr": () => ["CCD (coefficient de couverture de la dette), appelé RCSD par de nombreux prêteurs", "Le revenu net d'exploitation divisé par le paiement complet d'un prêt amorti, même pendant une période d'intérêts seulement, pour l'année la plus faible de la détention."],
@@ -1052,6 +1068,8 @@ const DRIVERS_L: Record<string, [string, string]> = {
   constructionMonths: ["Construction period", "Durée de construction"],
   leaseUpMonths: ["Lease-up period", "Période de location"],
 };
+const BE_UNIT: Record<string, string> = { rentPct: "%", costPct: "%", exitCapBps: "bps", rateBps: "bps", occupancyPts: "pts" };
+type BreakevenText = { driver: string; state: string; shock: number | null; limit: number; to: { key: string; item?: string; to: number; unit: string }[] };
 const VERDICT: Record<string, [string, string]> = {
   APPROVE: ["Approve", "Approuver"],
   APPROVE_WITH_CONDITIONS: ["Approve with conditions", "Approuver sous conditions"],
@@ -1311,6 +1329,37 @@ export function build(lang: Lang, setLang: (l: Lang) => void) {
     stress: (key: string, en: string) => plainTerm(lang, STRESS[key]?.[idx] ?? en),
     gate: (key: string, en: string) => plainTerm(lang, GATES[key]?.[idx] ?? en),
     driver: (key: string) => DRIVERS_L[key]?.[idx] ?? key,
+    /** One breakeven row as text: the sentence for a value, the reason for any other state. Every figure is the engine's. */
+    breakeven: (r: BreakevenText, gate: { key: string; label: string; threshold: number; unit: string }) => {
+      const unit = BE_UNIT[r.driver] ?? "%";
+      const mag = (v: number) => f.delta(Math.abs(v), unit).slice(1);
+      if (r.state === "out_of_range") return lang === "fr" ? `Pas dans les limites de ${f.delta(r.limit, unit)}` : `Not within ${f.delta(r.limit, unit)}`;
+      if (r.state === "no_effect") return lang === "fr" ? "Cette hypothèse ne change pas le chiffre de ce critère." : "This input does not change this gate's figure.";
+      if (r.state === "not_monotonic") return lang === "fr" ? "Le critère ne varie pas de façon régulière avec cette hypothèse\u00a0; utilisez la grille." : "The gate does not move steadily with this input; use the grid.";
+      const fr = lang === "fr";
+      const to = r.to.map((e) => {
+        const v = f.value(e.to, e.unit);
+        switch (e.key) {
+          case "rent": return `${e.item}: ${v}`;
+          case "cost": return fr ? `coût total ${v}` : `total cost ${v}`;
+          case "exit_cap": return fr ? `taux de sortie ${v}` : `exit cap ${v}`;
+          case "occupancy": return fr ? `occupation ${v}` : `occupancy ${v}`;
+          case "senior_rate": return fr ? `prêt senior ${v}` : `senior ${v}`;
+          case "mezzanine_rate": return `mezzanine ${v}`;
+          default: return fr ? `refinancement ${v}` : `refinance ${v}`;
+        }
+      }).join("; ");
+      const m = mag(r.shock!);
+      const text = (fr
+        ? { rentPct: `Les loyers devraient être ${m} plus élevés`, costPct: `Les coûts de développement devraient être ${m} plus bas`, exitCapBps: `Le taux de sortie devrait être ${m} plus bas`, rateBps: `Les taux d'intérêt devraient être ${m} plus bas`, occupancyPts: `L'occupation devrait être ${m} plus élevée` }
+        : { rentPct: `Rents would need to be ${m} higher`, costPct: `Development costs would need to be ${m} lower`, exitCapBps: `The exit cap rate would need to be ${m} lower`, rateBps: `Interest rates would need to be ${m} lower`, occupancyPts: `Occupancy would need to be ${m} higher` }
+      )[r.driver as "rentPct"];
+      const g = L.gate(gate.key, gate.label).replace(/^\p{Lu}(?=\p{Ll})/u, (c) => c.toLowerCase());
+      const thr = f.value(gate.threshold, gate.unit);
+      return fr
+        ? `${text}${to ? ` (${to})` : ""} pour que ${g} atteigne ${thr}. Les autres hypothèses sont fixes\u00a0; les changements combinés interagissent.`
+        : `${text}${to ? ` (${to})` : ""} for ${g} to reach ${thr}. Other inputs are held; moves together interact.`;
+    },
     verdict: (code: string) => VERDICT[code]?.[idx] ?? code,
     decision: (d: string) => DECISION[d]?.[idx] ?? d,
     role: (r: string) => ROLES[r]?.[idx] ?? r,

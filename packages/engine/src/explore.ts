@@ -4,10 +4,13 @@
 // the API returns it to the screen and forgets it.
 
 import type { EngineInput, Metric, Policy, RunResult } from "@agir/contracts";
+import { runChecks } from "./checks.ts";
 import { buildLedger } from "./ledger.ts";
 import { computeMetrics } from "./metrics.ts";
 import { applyStress } from "./stress.ts";
 import { underwrite } from "./underwrite.ts";
+import { validateInput } from "./validate.ts";
+import { gateSpecs, gateStatusOf, type GateSpec } from "./verdict.ts";
 
 export type Shock = {
   exitCapBps?: number;
@@ -52,13 +55,18 @@ const clamp = (x: number, lo: number, hi: number) => Math.min(hi, Math.max(lo, x
 
 /** The stored input with the shock applied. Out-of-range shocks are clamped to each driver's range. */
 export function shockInput(input: EngineInput, shock: Shock): EngineInput {
+  return shockWithin(input, shock, {});
+}
+
+/** `shockInput` with its own clamps for some drivers (breakeven searches wider than the charts do). */
+function shockWithin(input: EngineInput, shock: Shock, limits: Partial<Record<DriverKey, [number, number]>>): EngineInput {
   const s: Required<Shock> = {
     exitCapBps: 0, rentPct: 0, occupancyPts: 0, costPct: 0, expensePts: 0, rateBps: 0, constructionMonths: 0, leaseUpMonths: 0,
   };
   for (const [k, v] of Object.entries(shock) as [DriverKey, number | undefined][]) {
     const d = DRIVER_BY_KEY.get(k);
     if (!d || v === undefined || !Number.isFinite(v)) continue;
-    s[k] = clamp(v, d.min, d.max);
+    s[k] = clamp(v, ...(limits[k] ?? [d.min, d.max]));
   }
   const out = applyStress(input, {
     key: "explore",
@@ -139,4 +147,146 @@ export function grid(input: EngineInput, metricKey: string, x: DriverKey, y: Dri
     }),
   );
   return { x, y, xs, ys, cells };
+}
+
+// ---- Breakeven ------------------------------------------------------------------------------
+// For each gate that fails, the smallest move in one driver's good direction that makes it pass,
+// everything else held. Scratch mode like the rest: real reruns on a shocked copy, nothing kept.
+
+export type BreakevenState = "value" | "out_of_range" | "no_effect" | "not_monotonic";
+export type BreakevenEcho = { key: "rent" | "cost" | "exit_cap" | "senior_rate" | "mezzanine_rate" | "refinance_rate" | "occupancy"; item?: string; from: number; to: number; unit: "$/unit/mo" | "$/sf/yr" | "$" | "%" };
+export type BreakevenRow = {
+  gate: string;
+  driver: DriverKey;
+  state: BreakevenState;
+  /** The signed move, in the driver's unit: a number only for `value`. */
+  shock: number | null;
+  /** The furthest signed move searched. */
+  limit: number;
+  /** The gate's own figure at the move: a number only for `value`. */
+  actual: number | null;
+  /** The shocked inputs in the deal's own terms. Empty unless `value`. */
+  to: BreakevenEcho[];
+  /** Why there is no number, for every state but `value`. */
+  reason?: string;
+};
+
+const BREAKEVEN_DRIVERS = ["rentPct", "exitCapBps", "costPct", "rateBps", "occupancyPts"] as const;
+const BREAKEVEN_STEP: Record<(typeof BREAKEVEN_DRIVERS)[number], number> = { rentPct: 0.1, exitCapBps: 1, costPct: 0.1, rateBps: 1, occupancyPts: 0.1 };
+const UNIT_SUFFIX = { "%": "%", bps: " bps", pts: " pts" } as const;
+const NOT_STEADY = "The gate does not move steadily with this input; use the grid.";
+
+type Probe = (n: number) => { pass: boolean; value: number | null };
+
+/**
+ * Find the first step `n` in 1..N where `probe` passes. Samples eighths of the range to look for a gate
+ * that does not move steadily, bisects between the last failing and first passing sample, then checks the
+ * answer: it passes, and one step short of it fails.
+ */
+export function solveBreakeven(probe: Probe, N: number): { state: BreakevenState; n?: number } {
+  if (N < 1) return { state: "no_effect" };
+  const ns = [...new Set(Array.from({ length: 9 }, (_, k) => Math.round((N * k) / 8)))];
+  const at = ns.map((n) => ({ n, ...probe(n) }));
+  const first = at.findIndex((a) => a.pass);
+  if (first === 0) return { state: "not_monotonic" };
+  if (first < 0) return at.every((a) => a.value === at[0]!.value) ? { state: "no_effect" } : { state: "out_of_range" };
+  if (at.slice(first).some((a) => !a.pass)) return { state: "not_monotonic" };
+  let lo = at[first - 1]!.n;
+  let hi = at[first]!.n;
+  while (hi - lo > 1) {
+    const mid = Math.floor((lo + hi) / 2);
+    if (probe(mid).pass) hi = mid;
+    else lo = mid;
+  }
+  return probe(hi).pass && !probe(hi - 1).pass ? { state: "value", n: hi } : { state: "not_monotonic" };
+}
+
+function echoes(driver: DriverKey, before: EngineInput, after: EngineInput): BreakevenEcho[] {
+  const cost = (i: EngineInput) => i.budget.land + i.budget.hard + i.budget.soft + i.budget.contingency + i.budget.other;
+  switch (driver) {
+    case "rentPct":
+      return after.revenue.flatMap((c, k): BreakevenEcho[] => {
+        const b = before.revenue[k]!;
+        return c.rentMonthly !== undefined
+          ? [{ key: "rent" as const, item: c.label, from: b.rentMonthly!, to: c.rentMonthly, unit: "$/unit/mo" as const }]
+          : c.rentPsfAnnual !== undefined
+            ? [{ key: "rent" as const, item: c.label, from: b.rentPsfAnnual!, to: c.rentPsfAnnual, unit: "$/sf/yr" as const }]
+            : [];
+      });
+    case "costPct":
+      return [{ key: "cost", from: cost(before), to: cost(after), unit: "$" }];
+    case "exitCapBps":
+      return [{ key: "exit_cap", from: before.exitCapPct, to: after.exitCapPct, unit: "%" }];
+    case "occupancyPts":
+      return [{ key: "occupancy", from: before.stabilizedOccupancyPct, to: after.stabilizedOccupancyPct, unit: "%" }];
+    default:
+      return [
+        ...(before.senior.amount > 0 ? [{ key: "senior_rate" as const, from: before.senior.ratePct, to: after.senior.ratePct, unit: "%" as const }] : []),
+        ...(before.mezzanine ? [{ key: "mezzanine_rate" as const, from: before.mezzanine.ratePct, to: after.mezzanine!.ratePct, unit: "%" as const }] : []),
+        ...(before.refinance ? [{ key: "refinance_rate" as const, from: before.refinance.ratePct, to: after.refinance!.ratePct, unit: "%" as const }] : []),
+      ];
+  }
+}
+
+/** One gate's metric on the input, in the scenario the gate reads, and nothing else. */
+function gateMetric(input: EngineInput, policy: Policy, spec: GateSpec): Metric | undefined {
+  const stress = policy.stresses.find((s) => s.key === spec.scenario);
+  if (spec.scenario !== "base" && !stress) return undefined;
+  try {
+    return baseMetrics(stress ? applyStress(input, stress) : input).find((m) => m.key === spec.metricKey);
+  } catch {
+    return undefined;
+  }
+}
+
+/** Rows for every failing gate and each of five drivers, and the error-severity checks that no gate can offset. */
+export function breakeven(input: EngineInput, policy: Policy, specs: GateSpec[] = gateSpecs(policy)): { rows: BreakevenRow[]; hardFails: string[] } {
+  validateInput(input);
+  const base = buildLedger(input);
+  const contractual = computeMetrics(input, base).metrics.find((m) => m.key === "contractual_dscr");
+  const hardFails = runChecks(input, base, policy, contractual?.status === "VALID" ? contractual.value : null)
+    .filter((c) => c.severity === "error")
+    .map((c) => c.message);
+  const loanRates = [input.senior.amount > 0 ? input.senior.ratePct : 0, input.mezzanine?.ratePct ?? 0, input.refinance?.ratePct ?? 0];
+  // The furthest each driver may move in its good direction, in steps.
+  const reach: Record<(typeof BREAKEVEN_DRIVERS)[number], number> = {
+    rentPct: 100,
+    exitCapBps: Math.max(0, Math.min(300, Math.floor((input.exitCapPct - 0.25) * 100 + 1e-9))),
+    costPct: 50,
+    rateBps: Math.round(Math.max(...loanRates) * 100),
+    occupancyPts: Math.ceil((100 - input.stabilizedOccupancyPct) * 10 - 1e-9) / 10,
+  };
+  const rows: BreakevenRow[] = [];
+  for (const spec of specs) {
+    if (gateStatusOf(gateMetric(input, policy, spec), spec.threshold) !== "failed") continue;
+    for (const key of BREAKEVEN_DRIVERS) {
+      const d = DRIVER_BY_KEY.get(key)!;
+      const step = BREAKEVEN_STEP[key];
+      const N = Math.round(reach[key] / step);
+      const sign = d.direction;
+      const move = (n: number) => Math.round(sign * n * step * 1000) / 1000;
+      const limit = move(N);
+      const limits = { [key]: [Math.min(0, limit), Math.max(0, limit)] as [number, number] };
+      const shocked = (n: number) => shockWithin(input, { [key]: move(n) }, limits);
+      const metricAt = (n: number) => gateMetric(shocked(n), policy, spec);
+      const probe: Probe = (n) => {
+        const m = metricAt(n);
+        return { pass: gateStatusOf(m, spec.threshold) === "passed", value: m?.status === "VALID" ? m.value : null };
+      };
+      const r = solveBreakeven(probe, N);
+      const row: BreakevenRow = { gate: spec.key, driver: key, state: r.state, shock: null, limit, actual: null, to: [] };
+      if (r.state === "value") {
+        row.shock = move(r.n!);
+        row.actual = probe(r.n!).value;
+        row.to = echoes(key, input, shocked(r.n!));
+      } else {
+        row.reason =
+          r.state === "out_of_range" ? `Not within ${limit > 0 ? "+" : "-"}${Math.abs(limit)}${UNIT_SUFFIX[d.unit as keyof typeof UNIT_SUFFIX]}`
+          : r.state === "no_effect" ? "This input does not change the gate's figure."
+          : NOT_STEADY;
+      }
+      rows.push(row);
+    }
+  }
+  return { rows, hardFails };
 }
