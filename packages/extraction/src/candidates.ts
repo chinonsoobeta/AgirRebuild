@@ -221,7 +221,7 @@ function rangeEnds(text: string, tokens: NumberToken[]): Set<number> {
     const same = a.unit === b.unit && a.currency === b.currency;
     const open = same || (a.unit === null && !a.currency);
     // "5 - 7": the tokenizer read the dash as the second number's minus sign.
-    const spaced = /^\s*[-–—]\s+$/.test(between) || (/^[-−]/.test(b.raw) && /^\s+$/.test(between));
+    const spaced = /^\s+[-–—]\s*$/.test(between) || (/^[-−]/.test(b.raw) && /^\s+$/.test(between));
     const isRange =
       (/^[-–—]$/.test(between) && open) ||
       (spaced && open) ||
@@ -271,6 +271,52 @@ function clauseItem(text: string, t: NumberToken, lead: string | null = null): M
     : { kind: "field", fieldKey: "unit_rent_monthly", itemKey: types[0]!, value: t.value, unitSeen: withCurrency("$/mo", t.currencyCode) };
 }
 
+const SHARE_NOTE = "A share of another figure, not that figure";
+const PER_UNIT_NOTE = "A price per unit, not the total";
+const PER_UNIT_REFUSED_NOTE = "The line's first figure is a price per unit; this number is not stated as its total";
+const SHARE_OF_RE = /^\s*(?:of|de|du|des)\s+((?:(?:the|les?|la)\s+)?[\p{L}][\p{L}'’&/-]*(?:\s+[\p{L}'’&/-]+)*)/iu;
+const SHARE_PROBE: NumberToken = { raw: "1", start: 0, end: 1, value: 1, currency: true, currencyCode: null, unit: "$", scaled: false };
+const isMoney = (t: NumberToken) => t.value !== null && (t.currency || t.unit === "$");
+
+/** The base of each "X% of <field>" as [start, end): a field alias right after "of", "de", "du" or "des" following a percentage is what the share is of. */
+function shareBases(text: string, tokens: NumberToken[], scope: Scope): [number, number][] {
+  const bases: [number, number][] = [];
+  for (const t of tokens) {
+    if (t.unit !== "%") continue;
+    const rest = text.slice(t.end);
+    const m = SHARE_OF_RE.exec(rest);
+    if (!m) continue;
+    const phrase = m[1]!.split(/\s(?:and|et|but|mais|which|that|qui)\b/i)[0]!;
+    const mapped = mapToken(phrase, SHARE_PROBE, { prose: true, scope });
+    if (mapped.kind === "field" && mapped.itemKey === null && FIELD_BY_KEY.get(mapped.fieldKey)?.unit === "$") {
+      const start = t.end + m[0].length - m[1]!.length;
+      bases.push([start, start + phrase.length]);
+    }
+  }
+  return bases;
+}
+
+// Money followed by one of these is a price for one lot, door or unit.
+const EACH_RE = /^\s*(?:each|apiece|per\s+(?:lot|door|unit|suite)|chacune?|par\s+(?:lot|porte|unit[ée]|logement))(?![\p{L}])/iu;
+const PER_UNIT_FIELDS = new Set(["land_cost", "hard_cost", "soft_cost", "contingency", "other_cost", "senior_loan_amount", "mezz_loan_amount", "refinance_amount", "equity_amount"]);
+const TOTAL_WORD = String.raw`(?:for(?:\s+a)?(?:\s+total)?(?:\s+of)?|pour(?:\s+un\s+total\s+de)?|soit|totall?ing|in\s+total|total(?:\s+of)?|=)`;
+const TOTAL_BETWEEN = [/^\s*\(\s*(?:total|soit|=)?\s*:?\s*$/i, new RegExp(String.raw`^\s*[,;]?\s*${TOTAL_WORD}\s*:?\s*\(?\s*$`, "i")];
+const TOTAL_AFTER_RE = /^\s*(?:in\s+|au\s+)?total\b/i;
+
+/** A money figure priced for one lot, door or unit: "$160,000 each", "95 000 $ par porte". */
+function perUnit(text: string, t: NumberToken): boolean {
+  return t.unit === "$" && t.value !== null && EACH_RE.test(text.slice(t.end));
+}
+
+/** The total a per-unit price states for itself: the next money figure when it sits in parentheses after the price, follows "total", "for", "soit" or "pour un total de", or is followed by "total". */
+function totalOf(text: string, t: NumberToken, tokens: NumberToken[]): NumberToken | null {
+  const next = tokens.find((x) => x.start >= t.end && isMoney(x));
+  if (!next) return null;
+  // A parenthesised token's own text starts at its "(".
+  const between = (text.slice(t.end, next.start) + (next.raw.startsWith("(") ? "(" : "")).replace(EACH_RE, "");
+  return TOTAL_BETWEEN.some((re) => re.test(between)) || (/^\s*[,;]?\s*$/.test(between) && TOTAL_AFTER_RE.test(text.slice(next.end))) ? next : null;
+}
+
 /** One sentence: "Label: value" gives the label to the numbers after the colon; anything else is prose. */
 function readSentence(sentence: { text: string; start: number }, para: Paragraph, result: ExtractionResult) {
   const text = normalizeText(sentence.text);
@@ -308,6 +354,7 @@ function readSentence(sentence: { text: string; start: number }, para: Paragraph
   for (const t of replaced) other(t, "line:prose", "A later figure in the same sentence replaces this one");
   tokens = tokens.filter((t) => !replaced.includes(t));
   const colon = text.indexOf(":");
+  const shares = shareBases(text, tokens, para.scope);
   // A floating rate's spread is not the rate. With an all-in figure in the sentence that figure is the rate; without one nothing is read.
   const float = floating(text, tokens);
   if (float) {
@@ -347,13 +394,30 @@ function readSentence(sentence: { text: string; start: number }, para: Paragraph
     } else if (tokens.every((t) => mapToken(label, t, { scope }).kind === "unmapped")) proseFrom = colon + 1;
     else {
       let used = false;
+      let refusedPerUnit = false;
+      let total: NumberToken | null = null;
       const ranged = rangeEnds(text, tokens);
       for (const [i, t] of tokens.entries()) {
         if (ranged.has(i)) {
           other(t, "line:label-value", RANGE_NOTE);
           continue;
         }
+        // A dollar figure after "X% of <field>" is a share of that field, never the field.
+        if (isMoney(t) && shares.some(([, end]) => t.start >= end)) {
+          other(t, "line:label-value", SHARE_NOTE);
+          continue;
+        }
+        if (refusedPerUnit && t !== total) {
+          other(t, "line:label-value", PER_UNIT_REFUSED_NOTE);
+          continue;
+        }
         let mapped = used ? { kind: "unmapped" as const } : mapToken(label, t, { scope });
+        if (mapped.kind === "field" && PER_UNIT_FIELDS.has(mapped.fieldKey) && perUnit(text, t)) {
+          other(t, "line:label-value", PER_UNIT_NOTE);
+          refusedPerUnit = true;
+          total = totalOf(text, t, tokens);
+          continue;
+        }
         // A place before the colon ("Kelowna, British Columbia", "Gatineau (Québec)") is not an item: that count is the deal-wide count. A single word is kept as a component name ("Residential: 160 units").
         if (/[,(]/.test(label) && mapped.kind === "field" && mapped.fieldKey === "unit_count" && mapped.itemKey !== null && mapped.itemKey !== "All units" && unitTypesIn(mapped.itemKey).length === 0) mapped = { ...mapped, itemKey: "All units" };
         if (!used && mapped.kind === "field") {
@@ -369,6 +433,8 @@ function readSentence(sentence: { text: string; start: number }, para: Paragraph
   // Prose: each number's label is the text since the previous number or the sentence start; when that names nothing, the words right after it.
   const ranged = rangeEnds(text, tokens);
   let from = proseFrom;
+  // A per-unit price whose total the sentence states: the total is read with the price's label.
+  const totalLabels = new Map<NumberToken, string>();
   tokens.forEach((t, i) => {
     const where = locationOf(t.start);
     if (ranged.has(i)) {
@@ -376,15 +442,23 @@ function readSentence(sentence: { text: string; start: number }, para: Paragraph
       from = t.end;
       return;
     }
-    const label = text.slice(from, t.start);
+    // The base of a share ("of hard costs" after "4%") names nothing for the figures after it.
+    const afterShare = isMoney(t) && shares.some(([, end]) => t.start >= end);
+    const label = shares.reduce((l, [a, b]) => (b > from && a < t.start ? l.slice(0, Math.max(a - from, 0)) + " ".repeat(Math.min(b, t.start) - Math.max(a, from)) + l.slice(Math.min(b, t.start) - from) : l), text.slice(from, t.start));
     const opts: MapOptions = { prose: true, scope: para.scope, context: text };
-    let mapped = mapToken(label, t, opts);
+    let usedLabel = totalLabels.get(t) ?? label;
+    let mapped = mapToken(usedLabel, t, opts);
     from = t.end;
-    if (mapped.kind === "unmapped" || (mapped.kind === "ignored" && mapped.reason.startsWith("Looks like"))) {
+    if (afterShare && mapped.kind !== "field") {
+      other(t, "line:prose", SHARE_NOTE);
+      return;
+    }
+    if (!afterShare && !totalLabels.has(t) && (mapped.kind === "unmapped" || (mapped.kind === "ignored" && mapped.reason.startsWith("Looks like")))) {
       const after = followingLabel(text.slice(t.end, tokens[i + 1]?.start ?? text.length));
       const viaAfter = after === null ? null : mapToken(after, t, opts);
       if (after !== null && viaAfter!.kind === "field") {
         mapped = viaAfter!;
+        usedLabel = after;
         from = t.end + after.length;
       } else if (after !== null && viaAfter!.kind === "ignored" && mapped.kind === "unmapped") mapped = viaAfter!;
     }
@@ -401,6 +475,12 @@ function readSentence(sentence: { text: string; start: number }, para: Paragraph
       const types = unitTypesIn(clauseOf(text, t));
       if (types.length === 0 && lead) types.push(lead);
       if (types.length === 1) mapped = { ...mapped, itemKey: types[0]! };
+    }
+    if (mapped.kind === "field" && PER_UNIT_FIELDS.has(mapped.fieldKey) && perUnit(text, t)) {
+      other(t, "line:prose", PER_UNIT_NOTE);
+      const total = totalOf(text, t, tokens);
+      if (total) totalLabels.set(total, usedLabel);
+      return;
     }
     record(result, mapped, t, { raw: t.raw, location: where, context, rule: "line:prose" });
   });

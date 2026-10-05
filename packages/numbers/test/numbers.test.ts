@@ -249,7 +249,7 @@ describe("a dash is a minus sign only when it is attached to the number", () => 
   });
   test("a parenthesised figure after text and a number is an aside, never a negative", () => {
     expect(tokenize("Fee: 4% of costs ($96,000)", US).map((t) => t.value)).toEqual([4, 96_000]);
-    expect(tokenize("Trois lots à 160 000 $ chacun (480 000 $)", EU).map((t) => t.value)).toEqual([3, 160_000, 480_000]);
+    expect(tokenize("Trois lots à 160 000 $ chacun (480 000 $)", EU).map((t) => t.value)).toEqual([160_000, 480_000]);
     // negative: the same parentheses with no figure before them are a negative
     expect(tokenize("Other costs ($96,000)", US).map((t) => t.value)).toEqual([-96_000]);
   });

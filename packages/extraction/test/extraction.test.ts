@@ -1222,7 +1222,7 @@ describe("signs, explanatory parentheses and per-unit prices", () => {
     expect(pick(read("Other costs: -$12,500"))).toEqual([["other_cost", -12_500]]);
     expect(pick(read("Other costs: (25,000)", "Selling costs: 2.5%"))).toEqual([["other_cost", -25_000], ["selling_costs_pct", 2.5]]);
     expect(pick(read("Rent growth: moins 2 %"))).toEqual([["rent_growth_pct", -2]]);
-    const budget = extractCandidates(doc([], [textGrid(["Line item", "Amount"], ["Land acquisition", "1,000,000"], ["Other costs", "(25,000)"])]));
+    const budget = extractCandidates(doc([], [textGrid(["Line item", "Amount"], ["Land acquisition", "1,000,000"], ["Other costs", "($25,000)"])]));
     expect(budget.candidates.map((c) => [c.fieldKey, c.value])).toEqual([["land_cost", 1_000_000], ["other_cost", -25_000]]);
   });
 

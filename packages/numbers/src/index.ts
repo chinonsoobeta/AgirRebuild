@@ -9,8 +9,11 @@
 //  3. A token that contradicts the document's separator yields no number.
 //  4. Both edges of a number are guarded, so the tail of "31 200 000" can
 //     never be read as "31" or "200".
-//  5. Unicode minus signs and dashes before a number are a minus sign;
-//     "(2,150,000)" is negative, but only money or a bare number is: "(16 months)" is 16.
+//  5. Unicode minus signs and dashes attached to a number are a minus sign, and so are "minus" and
+//     "moins" before it. A dash set apart from the number by a space ("- 18 months", "– 96%") is a
+//     list marker, never a sign. "(2,150,000)" is negative, but only money or a bare number is
+//     ("(16 months)" is 16), and only when no number stands before it in its clause: the
+//     "($96,000)" of "4% of hard costs ($96,000)" is an aside, positive.
 //  6. Words are never numbers: "one hundred" yields nothing.
 //  6b. A small count or duration written as a word ("eighteen months", "a
 //     three-month lease-up", "douze mois") is a number, but only when a unit
@@ -82,7 +85,7 @@ const SPACE_CLASS = "    ";
 // as 9 or 400.
 const NUMBER_CORE = String.raw`\d{1,3}(?:[,.\u00A0\u202F\u2009]\d{3})+(?:[.,]\d+)?|\d{1,3}(?: \d{3})+(?:[.,]\d+)?|\d+(?:[.,]\d+)?`;
 const TOKEN_RE = new RegExp(
-  String.raw`(\()?(?<![\w.,])([-−‒–])?\s?((?:US|CA|C|A)?\$|USD\s?|CAD\s?)?\s?(${NUMBER_CORE})(?![\d])(?![.,]\d)(?!½)`,
+  String.raw`(\()?(?<![\w.,])(?:([-−‒–])(?!\s))?\s?((?:US|CA|C|A)?\$|USD\s?|CAD\s?)?\s?(${NUMBER_CORE})(?![\d])(?![.,]\d)(?!½)`,
   "g",
 );
 
@@ -288,6 +291,8 @@ function scaleOf(word: string): number {
   return 1e3;
 }
 
+// "minus 2%", "moins 2 %"; not "au moins 2 %" (at least) or "plus ou moins" (give or take).
+const MINUS_WORD_RE = /(?:^|[^\p{L}])(?<!\b(?:au|du|ou|or|plus|at|de|à|a|par|et)\s+)(?:minus|moins)\s+$/iu;
 const ANNUAL_RE = /^\s?(?:\/\s?(?:an|yr|year|ann[ée]e)\b|par\s+(?:an|ann[ée]e)\b|per\s+(?:year|annum)\b|annually\b|a\s+year\b)/iu;
 
 /** Every number in one line of text, with its unit and whether it was refused. */
@@ -339,9 +344,11 @@ export function tokenize(line: string, format: DocumentFormat): NumberToken[] {
     // "month 26", "au mois 26": an ordinal point in time.
     if (unit === null && /\b(month|mois)\s+$/i.test(text.slice(0, start))) unit = "months";
     reached = end;
-    // "(2,150,000)" is negative; "(16 months)", "(95%)" and "(3x)" are not.
+    // "(2,150,000)" is negative; "(16 months)", "(95%)" and "(3x)" are not, and neither is an aside after a number.
     const parenthesised = Boolean(paren) && text[end] === ")";
-    const negative = Boolean(sign) || (parenthesised && (currency || unit === null));
+    const clause = text.slice(0, start);
+    const aside = /\d/.test(clause.slice(clause.lastIndexOf(":") + 1));
+    const negative = Boolean(sign) || MINUS_WORD_RE.test(clause) || (parenthesised && !aside && (currency || unit === null));
     if (value !== null && negative) value = -value;
     out.push({
       raw: text.slice(start, end).trim(),
