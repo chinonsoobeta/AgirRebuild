@@ -1044,7 +1044,9 @@ function fromRentRoll(table: Table, headerRow: number, roles: Roles, result: Ext
 // A rent, area or count that is the building as it stands today, not the new rental programme.
 const AS_IS_RE = /\b(as[- ]is|existing|current(?:ly)?|present|in[- ]place|former(?:ly)?|actuel(?:le)?s?|existant(?:e)?s?|en place|ancien(?:ne)?)\b/;
 const AS_IS_NOTE = "The existing building as it is today, not the new rental programme";
-const asIs = (text: string) => AS_IS_RE.test(fold(text));
+// Today's market is the basis new rents are stated on, not the existing building: "at current market", "loyer du marché actuel".
+const MARKET_NOW_RE = /\b(?:current|present|today s)\s+(?:market|markets|rates?|pricing|prices|dollars|survey|conditions)\b|\b(?:marche|prix|taux|conditions?|dollars)\s+actuel(?:le)?s?\b|\b(?:du|au)\s+marche\s+actuel\b/g;
+const asIs = (text: string) => AS_IS_RE.test(fold(text).replace(/['’]/g, " ").replace(MARKET_NOW_RE, " "));
 
 // A row of a unit table that names an income line, not a unit type.
 const NON_UNIT_ROW_RE = /\b(parking|storage|laundry|lockers?|vending|income|revenues?|revenus?|stationnement|rangement|buanderie|vacancy|vacance|fees?|frais|expenses?|deposits?)\b/;
@@ -1121,11 +1123,13 @@ const COUNT_ROW_RE = /^(?:(?:number|nombre|nb|no\.?)\s+(?:of|de|d')\s*)?(?:homes
 const PER_UNIT_LABEL_RE = /\b(per|par)\s+(home|unit|suite|door|apartment|logement|unite|appartement)\b/;
 
 /**
- * A table whose header row (one of the first two) holds two or more unit types, and whose first column labels a count and a rent,
+ * A table whose header row (one of the first four, below title rows only) holds two or more unit types, and whose first column labels a count and a rent,
  * is read column by column: each column is one item. A yearly rent per home is a monthly one by twelve.
  */
 function fromTypeColumns(table: Table, result: ExtractionResult): boolean {
-  for (let h = 0; h < Math.min(2, table.rows.length); h++) {
+  // The header may sit under title rows ("Rental programme", a merged banner), so long as nothing above it holds a figure.
+  for (let h = 0; h < Math.min(4, table.rows.length); h++) {
+    if (h > 0 && table.rows[h - 1]!.some((c) => c.number !== undefined || /\d/.test(c.text.replace(/\d+\s*[½¼¾]/g, "")))) break;
     const types = table.rows[h]!.map((c, i) => (i > 0 ? wholeUnitType(c.text) : null));
     if (new Set(types.filter(Boolean)).size < 2) continue;
     const body = table.rows.slice(h + 1).map((row) => ({ row, label: headerOf(row[0] ?? { text: "", ref: "" }).trim() }));

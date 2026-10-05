@@ -2896,6 +2896,23 @@ describe("label families: the same meaning in several wordings, English and Qué
 });
 
 describe("budget lines and operating figures written as sentences with verbs", () => {
+  test("unit types as columns under two title rows (audit)", () => {
+    const table = { name: "Mix", rows: [
+      [{ text: "Illustrative only", ref: "A1" }],
+      [{ text: "Programme", ref: "A2" }, { text: "Programme", ref: "B2" }, { text: "Programme", ref: "C2" }],
+      [{ text: "Measure", ref: "A3" }, { text: "1-bed", ref: "B3" }, { text: "2-bed", ref: "C3" }],
+      [{ text: "Homes", ref: "A4" }, { text: "6", ref: "B4", number: 6 }, { text: "4", ref: "C4", number: 4 }],
+      [{ text: "Monthly rent per home", ref: "A5" }, { text: "1900", ref: "B5", number: 1900 }, { text: "2300", ref: "C5", number: 2300 }],
+    ] };
+    const r = extractCandidates({ kind: "xlsx", lines: [], tables: [table], pageCount: null, needsOcr: false, fullText: "" } as never);
+    expect(r.candidates.filter((c) => c.fieldKey === "unit_count").map((c) => [c.itemKey, c.value])).toEqual([["1BR", 6], ["2BR", 4]]);
+    expect(r.candidates.filter((c) => c.fieldKey === "unit_rent_monthly").map((c) => [c.itemKey, c.value])).toEqual([["1BR", 1900], ["2BR", 2300]]);
+  });
+  test("a rent at today's market is not the existing building (audit)", () => {
+    expect(pick("2-bed rent: $2,100 per month at current market.")).toContainEqual(["unit_rent_monthly", 2_100]);
+    expect(pick("Loyer 4½ : 1 650 $ par mois, selon le marché actuel")).toContainEqual(["unit_rent_monthly", 1_650]);
+    expect(pick("Present rent on the house: $1,500 per month")).not.toContainEqual(["unit_rent_monthly", 1_500]);
+  });
   test("a total that includes the deposit is the total (audit)", () => {
     expect(pick("Land cost $900,000 including deposit")).toEqual([["land_cost", 900_000]]);
     expect(pick("Prix du terrain 900 000 $ y compris l'acompte")).toEqual([["land_cost", 900_000]]);
