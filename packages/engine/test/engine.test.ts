@@ -265,6 +265,65 @@ describe("quick-start templates", () => {
     expect(input!.revenue).toHaveLength(1);
   });
 
+  // Task 33: an optional line with no value is disclosed as "not found"; it is never a number and never blocks.
+  describe("optional lines that were not found", () => {
+    type Item = { fieldKey: string; itemKey?: string; label: string; detail?: string };
+    const notFoundOf = (r: unknown) => (r as { notFound: Item[] }).notFound;
+    const keys = (r: unknown) => notFoundOf(r).map((i) => i.fieldKey);
+    const minimal = () => rowsFor("multiplex").filter((r) => !["other_cost", "other_income_annual"].includes(r.fieldKey));
+    const add = (fieldKey: string, status: AssumptionStatus, valueNumeric: number | null) => ({ fieldKey, itemKey: null, status, valueNumeric });
+
+    test("a minimal deal lists other costs, other income and growth, with what each is treated as", () => {
+      const { readiness } = assemble(minimal());
+      const by = new Map(notFoundOf(readiness).map((i) => [i.fieldKey, i]));
+      expect(by.get("other_cost")).toMatchObject({ label: "Other costs", detail: "no other costs" });
+      expect(by.get("other_income_annual")).toMatchObject({ label: "Other income", detail: "no other income" });
+      expect(by.get("rent_growth_pct")).toMatchObject({ detail: "flat rents" });
+      expect(by.get("expense_growth_pct")).toMatchObject({ detail: "flat expenses" });
+      expect(by.get("refinance_month")).toMatchObject({ detail: "no refinance" });
+    });
+
+    test("a field whose parent is absent, or that only stands in for a present one, is left out", () => {
+      const { readiness } = assemble(minimal());
+      const listed = keys(readiness);
+      for (const k of ["refinance_rate_pct", "refinance_amount", "refinance_ltv_pct", "refinance_io_months", "mezz_io_months", "fixed_opex_annual"]) expect(listed, k).not.toContain(k);
+      expect(listed).toContain("mezz_loan_amount");
+      expect(listed).toContain("senior_io_months");
+      // No senior amount: no senior interest-only line either.
+      expect(keys(assemble(rowsFor("multiplex", 0)).readiness)).not.toContain("senior_io_months");
+      // A refinance month lists what depends on it, except the alternative to a present sizing.
+      const refi = assemble([...minimal(), add("refinance_month", "approved", 24), add("refinance_ltv_pct", "approved", 65), add("refinance_rate_pct", "approved", 5), add("refinance_amort_years", "approved", 30)]).readiness;
+      expect(keys(refi)).toContain("refinance_io_months");
+      expect(keys(refi)).not.toContain("refinance_amount");
+      expect(keys(refi)).not.toContain("refinance_month");
+    });
+
+    test("a field with a value, a conflict or a pending value is not listed", () => {
+      const base = minimal();
+      expect(keys(assemble([...base, add("other_income_annual", "approved", 3000)]).readiness)).not.toContain("other_income_annual");
+      expect(keys(assemble([...base, add("other_income_annual", "conflicting", null)]).readiness)).not.toContain("other_income_annual");
+      expect(keys(assemble([...base, add("other_income_annual", "needs_review", 3000)]).readiness)).not.toContain("other_income_annual");
+      expect(keys(assemble([...base, add("rent_growth_pct", "approved", 99)]).readiness)).not.toContain("rent_growth_pct");
+    });
+
+    test("it never blocks a run and never changes a number: the input is the one an explicit zero would give", () => {
+      const withZeros = [...minimal(), add("other_cost", "approved", 0), add("other_income_annual", "approved", 0), add("rent_growth_pct", "approved", 0), add("expense_growth_pct", "approved", 0)];
+      const a = assemble(minimal());
+      const b = assemble(withZeros);
+      expect(a.readiness.status).toBe("ready");
+      expect(a.input).not.toBeNull();
+      expect(notFoundOf(a.readiness).length).toBeGreaterThan(notFoundOf(b.readiness).length);
+      expect(canonicalJson(a.input)).toBe(canonicalJson(b.input));
+      expect(canonicalJson(underwrite(a.input!, POLICY_V1))).toBe(canonicalJson(underwrite(b.input!, POLICY_V1)));
+    });
+
+    test("a blocked deal still lists what was not found", () => {
+      const { readiness, input } = assemble([add("land_cost", "approved", 100)]);
+      expect(input).toBeNull();
+      expect(keys(readiness)).toContain("other_income_annual");
+    });
+  });
+
   // Readiness runs the engine's own cross-field rules, so "ready" means the engine will accept the input.
   describe("a refinance the engine would refuse", () => {
     const withRefi = (fields: Record<string, number>) => [

@@ -107,6 +107,21 @@ describe("the quick start's gaps", () => {
     expect(fr.L.absent("rent_growth_pct")).toBe("loyers stables");
   });
 
+  it("says a line was not found, in a sentence with no number, in both languages", () => {
+    const line = (lang: "en" | "fr", key: string) => {
+      const i = build(lang, () => {});
+      return (i.t as unknown as (k: string, p: object) => string)("review.notFoundLine", { field: i.L.field(key), meaning: i.L.absent(key) });
+    };
+    expect(line("en", "other_income_annual")).toBe("Other income \u2014 not found. The run treats this as: no other income.");
+    expect(line("fr", "other_income_annual")).toContain("introuvable");
+    expect(line("fr", "other_income_annual")).toContain("aucun autre revenu");
+    for (const lang of ["en", "fr"] as const) {
+      for (const d of FIELDS.filter((x) => x.absentMeans)) expect(line(lang, d.key), d.key).not.toMatch(/\d/);
+    }
+    expect((build("en", () => {}).t as unknown as (k: string) => string)("review.notFound")).toBe("Not found in the documents");
+    expect((build("fr", () => {}).t as unknown as (k: string) => string)("review.notFound")).toBe("Introuvable dans les documents");
+  });
+
   it("converts an area or a rent entered in square metres, and records it", () => {
     const a = enteredInUnit("sf", true, 870, "from the plans", "en");
     expect(a.value).toBeCloseTo(870 * SF_PER_M2, 9);

@@ -6,7 +6,8 @@ import { fileStore, migrate, openPglite, type Db } from "@agir/db";
 import { drain } from "@agir/worker";
 import { documentBytes, loadOracle } from "@agir/testkit";
 import { createApp } from "../src/app.ts";
-import { sourceLabel } from "../src/services.ts";
+import { canonicalJson } from "@agir/engine";
+import { sha256, sourceLabel } from "../src/services.ts";
 
 let db: Db;
 let app: ReturnType<typeof createApp>;
@@ -127,6 +128,21 @@ describe("the whole workflow, from documents to an audit package", () => {
     const pkg = (await call(alice, "GET", `/api/runs/${run}/audit-package`)).json;
     expect(pkg.validation.status).toBe("passed");
     expect(pkg.validation.checks.map((c: any) => c.name)).toEqual(["input_hash", "result_hash", "signature", "replay", "decisions_bound", "audit_chain"]);
+  });
+});
+
+describe("not found lines on a stored run", () => {
+  test("the run keeps its list beside the input, and the hashes and replay are unchanged by it", async () => {
+    const [{ snap }] = (await db.query<{ snap: { input: unknown; notFound: { fieldKey: string; detail: string }[] } }>(`select input_snapshot as snap from runs where id = $1`, [run])) as [{ snap: { input: unknown; notFound: { fieldKey: string; detail: string }[] } }];
+    expect(Array.isArray(snap.notFound)).toBe(true);
+    for (const i of snap.notFound) expect(typeof i.detail).toBe("string");
+    const [{ input_hash }] = (await db.query<{ input_hash: string }>(`select input_hash from runs where id = $1`, [run])) as [{ input_hash: string }];
+    expect(sha256(canonicalJson(snap.input))).toBe(input_hash);
+    const pkg = (await call(alice, "GET", `/api/runs/${run}/audit-package`)).json;
+    expect(pkg.validation.status).toBe("passed");
+    const review = (await call(alice, "GET", `/api/deals/${deal}/review`)).json;
+    expect(Array.isArray(review.readiness.notFound)).toBe(true);
+    expect(review.notFound.map((i: any) => i.fieldKey)).toEqual(review.readiness.notFound.map((i: any) => i.fieldKey));
   });
 });
 

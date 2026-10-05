@@ -67,6 +67,30 @@ describe("artifacts", () => {
     expect(pdf.provenance.pass).toBe(true);
     expect(new TextDecoder().decode(pdf.bytes.slice(0, 5))).toBe("%PDF-");
   }, 60_000);
+  test("what the documents did not state is listed, from a template, and the provenance scan passes", async () => {
+    const notFound = [
+      { fieldKey: "other_income_annual", label: "Other income", detail: "no other income" },
+      { fieldKey: "refinance_month", label: "Refinance month", detail: "no refinance" },
+    ];
+    for (const kind of ["ic_memo", "lender_package"] as const) {
+      const x = { ...mapleInput(kind), notFound } as ArtifactInput;
+      const model = buildModel(x);
+      const text = visibleText(renderHtml(model));
+      expect(text).toContain("Not found in the documents");
+      expect(text).toContain("Other income \u2014 not found. The run treats this as: no other income.");
+      expect(text).toContain("Refinance month \u2014 not found. The run treats this as: no refinance.");
+      expect(verifyProvenance(text, model.formatter.manifest).pass).toBe(true);
+      // A run with nothing unread, or one made before this list existed, has no such section.
+      expect(visibleText(renderHtml(buildModel(mapleInput(kind))))).not.toContain("Not found in the documents");
+    }
+    const xlsx = await renderArtifact({ ...mapleInput("model_export"), notFound } as ArtifactInput, "xlsx");
+    const ExcelJS = (await import("exceljs")).default;
+    const wb = new ExcelJS.Workbook();
+    await wb.xlsx.load(Buffer.from(xlsx.bytes) as never);
+    const rows: unknown[][] = [];
+    wb.getWorksheet("Not found")!.eachRow((row) => rows.push((row.values as unknown[]).slice(1)));
+    expect(rows.flat()).toContain("Other income \u2014 not found. The run treats this as: no other income.");
+  });
   test("every report says once which dollar its figures are in", () => {
     for (const kind of ["ic_memo", "lender_package"] as const) {
       const model = buildModel(mapleInput(kind));
