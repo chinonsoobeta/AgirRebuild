@@ -216,7 +216,7 @@ describe("every sentence the engine's checks can produce has a French rendering"
 
   it("carries the numbers and names over, with French typography", () => {
     expect(translateMessage("refinance month must fall from stabilization (month 32) to before the sale (month 91)"))
-      .toBe("Le mois du refinancement doit tomber de la stabilisation (mois 32) jusqu'avant la vente (mois 91)");
+      .toBe("Le mois du refinancement doit se situer entre la stabilisation (mois 32) et la vente (mois 91), avant celle-ci");
     expect(translateMessage('revenue component "Studio" needs a monthly rent')).toBe("La composante de revenus « Studio » exige un loyer mensuel");
     expect(translateMessage("stabilized occupancy must be between 0 and 100")).toBe("L'occupation stabilisée doit se situer entre 0\u00a0% et 100\u00a0%");
     expect(translateMessage("senior loan amortization must be 1 to 50 years")).toBe("L'amortissement du prêt principal doit être de 1 à 50 ans");
@@ -249,7 +249,7 @@ describe("the review card in French", () => {
   it("shows a refinance-timing problem in French, and the same sentence in English as before", () => {
     const sentence = "refinance month must fall from stabilization (month 32) to before the sale (month 91)";
     const item: ReadinessItem = { fieldKey: "refinance_month", label: sentence };
-    expect(show(fr, item)).toBe("Le mois du refinancement doit tomber de la stabilisation (mois 32) jusqu'avant la vente (mois 91)");
+    expect(show(fr, item)).toBe("Le mois du refinancement doit se situer entre la stabilisation (mois 32) et la vente (mois 91), avant celle-ci");
     expect(show(en, item)).toBe("Refinance month must fall from stabilization (month 32) to before the sale (month 91)");
   });
 });
