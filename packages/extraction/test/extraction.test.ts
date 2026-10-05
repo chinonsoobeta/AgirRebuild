@@ -811,6 +811,8 @@ describe("which loan a term belongs to, and the words small developers use", () 
       expect(pick(read("Deal summary", "Exit cap rate: 5.25%", "Rate: 6.1%"))).toEqual([["exit_cap_rate_pct", 5.25], ["senior_rate_pct", 6.1]]);
       expect(pick(read("Taux de capitalisation de sortie : 5,25 %", "Taux : 6,1 %"))).toEqual([["exit_cap_rate_pct", 5.25], ["senior_rate_pct", 6.1]]);
       expect(pick(read("Construction loan", "Lender: Prairie Credit Union", "Rate: 6.1%"))).toEqual([["senior_rate_pct", 6.1]]);
+      // A term sheet's indicative rate is the rate on offer, not a figure set aside.
+      expect(read("Prêt de construction", "Taux indicatif : 6,25 %").other.some((o) => o.note === "Marked as not part of this deal")).toBe(false);
     });
     test("a rank row names the loan for the whole table, even for rows above it, and for the document when nothing else names one", () => {
       const lines = (t: string): NormalizedDocument => ({ ...sheet(), lines: [{ text: t, location: "l1" }] });

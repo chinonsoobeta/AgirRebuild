@@ -268,7 +268,6 @@ const NOT_PART_RE = new RegExp(
     String.raw`\bhypothe(?:tical|tiques?)\b`,
     String.raw`\bnot (?:yet )?committed\b`,
     String.raw`\bnon engage(?:e|s|es)?\b`,
-    String.raw`\bindicatifs?\b`,
   ].join("|"),
 );
 const EXAMPLE_RE = /\b(?:examples?|exemples?)\b/g;
