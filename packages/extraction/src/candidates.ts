@@ -1123,6 +1123,45 @@ function blockHeading(row: Cell[], next: Cell[] | undefined, scope: Scope, forma
   return m?.kind === "field" && BLOCK_FIELDS.has(m.fieldKey) && !(m.itemKey && unitTypesIn(m.itemKey).length > 0) ? c.text.trim() : null;
 }
 
+/** A text cell that is one complete number and nothing else: "7.25%", "900k", "(4,000)", "$1.2M", "1,2 M$". */
+function isValueText(cell: Cell, format: DocumentFormat): boolean {
+  if (cell.number !== undefined || !cell.text) return false;
+  const t = cellToken(cell, format);
+  return !!t && !cell.text.slice(0, t.start).trim() && /^[\s)]*$/.test(cell.text.slice(t.end));
+}
+
+/** The label of a plain label/value row: its first text cell that is not itself a value. */
+function labelOf(row: Cell[], format: DocumentFormat): Cell | undefined {
+  return row.find((c) => c.text && c.number === undefined && !/^[\d$(.,\s%-]+$/.test(c.text) && !isValueText(c, format));
+}
+
+/**
+ * A row that writes its value before its label ("7.25% | Construction loan rate"): the value is the cell nearest before the label, and no cell
+ * after the label holds a figure. A year or a suite or file reference in the value's place is no value; such a row reads as it always did (nothing).
+ */
+function valueFirst(row: Cell[], format: DocumentFormat): { label: Cell; value: Cell } | null {
+  const label = labelOf(row, format);
+  if (!label) return null;
+  const at = row.indexOf(label);
+  const value = row.slice(0, at).filter((c) => c.number !== undefined || isValueText(c, format)).pop();
+  if (!value || REFERENCE_RE.test(fold(value.text)) || row.slice(at + 1).some((c) => cellToken(c, format))) return null;
+  return { label, value };
+}
+
+/** A plain section is value-first when more than half of its rows that hold both a label and a value (and at least two) have the value first. */
+function isValueFirstSection(rows: Cell[][], format: DocumentFormat): boolean {
+  let first = 0;
+  let last = 0;
+  for (const row of rows) {
+    const label = labelOf(row, format);
+    if (!label) continue;
+    const vf = valueFirst(row, format);
+    if (vf) first++;
+    else if (row.slice(row.indexOf(label) + 1).some((c) => cellToken(c, format))) last++;
+  }
+  return first >= 2 && first > last;
+}
+
 type Section = { rows: Cell[][]; scope: Scope; excluded: boolean; rent?: Roles; budget?: BudgetRoles; item?: string };
 
 /**
@@ -1184,12 +1223,14 @@ function fromTable(table: Table, result: ExtractionResult, notes: string[] = [],
       let lines: { value: number; ref: string; label: string }[] = [];
       // The item a block heading named, until a blank row or a total row.
       let block = s.item;
+      const valueFirstSection = isValueFirstSection(s.rows, result.format);
       s.rows.forEach((row) => {
-        const labelCell = row.find((c) => c.text && c.number === undefined && !/^[\d$(.,\s%-]+$/.test(c.text));
+        const vf = valueFirstSection ? valueFirst(row, result.format) : null;
+        const labelCell = vf?.label ?? labelOf(row, result.format);
         const relative = block && labelCell ? BLOCK_RELATIVE_RE.test(labelCell.text) : false;
         if (!row.some((c) => c.text || c.number !== undefined) || (labelCell && !relative && TOTAL_RE.test(labelCell.text))) block = undefined;
         if (!labelCell) return;
-        const after = row.slice(row.indexOf(labelCell) + 1);
+        const after = vf ? [vf.value] : row.slice(row.indexOf(labelCell) + 1);
         // A row that says it is not part of the deal, or one under such a heading, is shown and never read.
         if (s.excluded || row.some((c) => markedNotPart(c.text))) {
           for (const cell of after) {
