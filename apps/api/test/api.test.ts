@@ -162,6 +162,24 @@ describe("sensitivity", () => {
     expect(g.json.cells.length).toBe(5);
     expect(await count()).toBe(before);
   });
+  test("breakeven returns one input at a time for each failing gate, and leaves the run exactly as it was", async () => {
+    const stored = async () => canonicalJson(await db.query(`select r.*, (select count(*) from audit_events) as audit, (select count(*) from run_metrics) as metrics, (select count(*) from runs) as runs from runs r where r.id = $1`, [run]));
+    const before = await stored();
+    const b = await call(alice, "POST", `/api/runs/${run}/breakeven`, {});
+    expect(b.status).toBe(200);
+    expect(b.json.scratch).toBe(true);
+    expect(Array.isArray(b.json.hardFails)).toBe(true);
+    const failing = (await call(alice, "GET", `/api/runs/${run}`)).json.result.verdict.gates.filter((g: any) => g.status === "failed").map((g: any) => g.key);
+    expect([...new Set(b.json.rows.map((r: any) => r.gate))].sort()).toEqual([...failing].sort());
+    expect(b.json.rows.length).toBe(failing.length * 5);
+    for (const r of b.json.rows) {
+      expect(["value", "out_of_range", "no_effect", "not_monotonic"]).toContain(r.state);
+      if (r.state !== "value") expect(r.shock).toBeNull();
+    }
+    expect(await stored()).toBe(before);
+    const eve = await signup("eve2@example.com", "Eve Again");
+    expect((await call(eve, "POST", `/api/runs/${run}/breakeven`, {})).status).toBe(404);
+  });
   test("an input the engine refuses is a 422 with the reason, never a 500", async () => {
     // Runs are append-only; lift that for one statement to put an invalid input where readiness should have stopped it, then restore it.
     const [{ snap }] = (await db.query<{ snap: unknown }>(`select input_snapshot as snap from runs where id = $1`, [run])) as [{ snap: unknown }];

@@ -265,3 +265,45 @@ describe("the review card in French", () => {
     expect(show(en, item)).toBe("Refinance month must fall from stabilization (month 32) to before the sale (month 91)");
   });
 });
+
+describe("breakeven rows in both languages (task 38)", () => {
+  const gate = { key: "profit_on_cost", label: "Profit on cost", threshold: 15, unit: "%" };
+  const echo = { rentPct: { key: "rent", item: "1BR", from: 2200, to: 2605, unit: "$/unit/mo" }, costPct: { key: "cost", from: 42_000_000, to: 38_000_000, unit: "$" }, exitCapBps: { key: "exit_cap", from: 5, to: 4.2, unit: "%" }, rateBps: { key: "senior_rate", from: 6, to: 4.5, unit: "%" }, occupancyPts: { key: "occupancy", from: 95, to: 99, unit: "%" } } as const;
+  const shock = { rentPct: 18.4, costPct: -9.5, exitCapBps: -80, rateBps: -150, occupancyPts: 4 } as const;
+  const limit = { rentPct: 100, costPct: -50, exitCapBps: -300, rateBps: -600, occupancyPts: 5 } as const;
+  const rowOf = (driver: keyof typeof shock, state: string) => ({
+    gate: gate.key, driver, state, shock: state === "value" ? shock[driver] : null, limit: limit[driver], actual: state === "value" ? 15.2 : null, to: state === "value" ? [echo[driver]] : [], reason: state === "value" ? undefined : "x",
+  });
+  const en = build("en", () => {});
+  const fr = build("fr", () => {});
+
+  it("every driver and every state has a sentence, in English and in French", () => {
+    for (const d of Object.keys(shock) as (keyof typeof shock)[]) {
+      for (const state of ["value", "out_of_range", "no_effect", "not_monotonic"]) {
+        const a = en.L.breakeven(rowOf(d, state) as any, gate);
+        const b = fr.L.breakeven(rowOf(d, state) as any, gate);
+        expect(a, `${d} ${state}`).toBeTruthy();
+        expect(b, `${d} ${state}`).toBeTruthy();
+        expect(b, `${d} ${state}`).not.toBe(a);
+        expect(b, `${d} ${state}`).not.toMatch(/\b(would need|Not within|does not|Other inputs|Rents|Interest rates|Occupancy|Development costs|exit cap)\b/);
+      }
+    }
+  });
+  it("the rent sentence says how much, in the deal's own terms, and that other inputs are held", () => {
+    const a = en.L.breakeven(rowOf("rentPct", "value") as any, gate);
+    expect(a).toBe("Rents would need to be 18.4% higher (1BR: $2,605/mo) for Profit on cost to reach 15.00%. Other inputs are held; moves together interact.");
+    const b = fr.L.breakeven(rowOf("rentPct", "value") as any, gate);
+    expect(b).toContain("18,4 %");
+    expect(b).toContain("2\u00a0605");
+    expect(b).toContain("15,00 %");
+  });
+  it("a state with no number says why, and out of range names the limit", () => {
+    expect(en.L.breakeven(rowOf("rentPct", "out_of_range") as any, gate)).toBe("Not within +100%");
+    expect(en.L.breakeven(rowOf("rentPct", "not_monotonic") as any, gate)).toBe("The gate does not move steadily with this input; use the grid.");
+    expect(fr.L.breakeven(rowOf("rentPct", "out_of_range") as any, gate)).toContain("+100\u00a0%");
+  });
+  it("the hard-fail notice says the gates alone would not change the verdict", () => {
+    expect(en.t("explore.be.hardFail")).toMatch(/passing the gates alone would not change the verdict/i);
+    expect(fr.t("explore.be.hardFail")).toMatch(/ne changerait pas le verdict/i);
+  });
+});
