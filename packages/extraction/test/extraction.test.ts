@@ -2471,3 +2471,82 @@ describe("unit types written as blocks, and rent opinions", () => {
     }
   });
 });
+
+describe("a row may write its value before its label", () => {
+  const cell = (text: string, ref: string): Cell => ({ text, ref });
+  const wordDoc = (rows: string[][]): NormalizedDocument => ({
+    kind: "docx",
+    lines: [],
+    tables: [{ name: "Table 1", rows: rows.map((r, i) => r.map((t, c) => cell(t, `${"AB"[c]}${i + 1}`))) }],
+    pageCount: null,
+    needsOcr: false,
+    fullText: rows.map((r) => r.join(" ")).join("\n"),
+  });
+  const sheet = async (rows: [number | string, string, string?][], valueFirst = true): Promise<NormalizedDocument> => {
+    const ExcelJS = (await import("exceljs")).default;
+    const wb = new ExcelJS.Workbook();
+    const ws = wb.addWorksheet("Inputs");
+    rows.forEach(([value, label, fmt], i) => {
+      const v = ws.getCell(i + 1, valueFirst ? 1 : 2);
+      v.value = value;
+      if (fmt) v.numFmt = fmt;
+      ws.getCell(i + 1, valueFirst ? 2 : 1).value = label;
+    });
+    return parseDocument(new Uint8Array(await wb.xlsx.writeBuffer()), "inputs.xlsx");
+  };
+  const pick = (d: NormalizedDocument) => extractCandidates(d).candidates.map((c) => [c.fieldKey, c.value]);
+  const ROWS: [number | string, string, string?][] = [
+    [480_000, "Land cost"],
+    [0.0725, "Senior loan interest rate", "0.00%"],
+    ["850k", "Senior loan amount"],
+    [18, "Construction period, months"],
+    [30, "Amortization, years"],
+    ["93%", "Stabilized occupancy"],
+    ["5.5%", "Exit cap rate"],
+    [3_100_000, "Hard costs"],
+  ];
+  const READ = [
+    ["land_cost", 480_000],
+    ["senior_rate_pct", 7.25],
+    ["senior_loan_amount", 850_000],
+    ["construction_months", 18],
+    ["senior_amort_years", 30],
+    ["stabilized_occupancy_pct", 93],
+    ["exit_cap_rate_pct", 5.5],
+    ["hard_cost", 3_100_000],
+  ];
+
+  test("an xlsx sheet with the value first reads every row, as the label-first sheet does", async () => {
+    expect(pick(await sheet(ROWS))).toEqual(READ);
+    expect(pick(await sheet(ROWS, false))).toEqual(READ);
+  });
+  test("a Word table reads a value-first row, in English and in French", () => {
+    expect(pick(wordDoc(ROWS.map(([v, l]) => [typeof v === "number" && v < 1 ? "7.25%" : String(v), l])))).toEqual(READ);
+    expect(pick(wordDoc([["1,2 M$", "Prêt de premier rang"], ["5,4 %", "Taux d'intérêt"], ["480 000 $", "Coût du terrain"]]))).toEqual([
+      ["senior_loan_amount", 1_200_000],
+      ["senior_rate_pct", 5.4],
+      ["land_cost", 480_000],
+    ]);
+  });
+  test("negative: two value-first rows in a label-first sheet are not a value-first section", () => {
+    const odd = wordDoc([["Land cost", "480000"], ["Hard costs", "3100000"], ["Senior loan interest rate", "7.25%"], ["850k", "Senior loan amount"], ["93%", "Stabilized occupancy"]]);
+    expect(pick(odd)).toEqual([["land_cost", 480_000], ["hard_cost", 3_100_000], ["senior_rate_pct", 7.25]]);
+  });
+  test("negative: a year in the value column reads nothing", () => {
+    const d = wordDoc([["2026", "Budget year"], ["480000", "Land cost"], ["7.25%", "Senior loan interest rate"]]);
+    expect(pick(d)).toEqual([["land_cost", 480_000], ["senior_rate_pct", 7.25]]);
+    const r = extractCandidates(d);
+    expect(r.other.some((o) => o.value === 2026 || o.raw.includes("2026"))).toBe(false);
+  });
+  test("negative: a bracketed amount that is not a credit is treated as it is label-first", () => {
+    const first = extractCandidates(wordDoc([["480000", "Land cost"], ["7.25%", "Senior loan interest rate"], ["(4,000)", "Deposit already paid"]]));
+    const last = extractCandidates(wordDoc([["Land cost", "480000"], ["Senior loan interest rate", "7.25%"], ["Deposit already paid", "(4,000)"]]));
+    expect(first.candidates.map((c) => c.fieldKey)).toEqual(["land_cost", "senior_rate_pct"]);
+    expect(last.other.length).toBe(1);
+    expect(first.other.map((o) => [o.value, o.fieldKey, o.note])).toEqual(last.other.map((o) => [o.value, o.fieldKey, o.note]));
+  });
+  test("a value written as text is never the label, in a label-first row too", () => {
+    expect(pick(wordDoc([["Senior loan amount", "850k"], ["Land cost", "480000"]]))).toEqual([["senior_loan_amount", 850_000], ["land_cost", 480_000]]);
+    expect(pick(wordDoc([["850k", "7.25%"]]))).toEqual([]);
+  });
+});
