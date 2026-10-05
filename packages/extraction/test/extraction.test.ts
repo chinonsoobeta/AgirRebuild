@@ -1502,3 +1502,120 @@ describe("a lender's limits, terms, fees and conditions are not inputs", () => {
     });
   });
 });
+
+describe("totals and their parts", () => {
+  const doc = (lines: string[], tables: Table[] = []): NormalizedDocument => ({
+    kind: "pdf",
+    lines: lines.map((t, i) => ({ text: t, location: `page 1, line ${i + 1}` })),
+    tables,
+    pageCount: 1,
+    needsOcr: false,
+    fullText: lines.join("\n"),
+  });
+  const read = (...text: string[]) => extractCandidates(doc(text));
+  const pick = (r: ReturnType<typeof extractCandidates>) => r.candidates.map((c) => [c.fieldKey, c.value]);
+  const noteOf = (r: ReturnType<typeof extractCandidates>, value: number) => r.other.find((o) => o.value === value)?.note ?? "";
+  const grid = (...rows: (string | number)[][]): Table => ({
+    name: "Budget",
+    rows: rows.map((r, i) => r.map((x, c) => (typeof x === "number" ? { text: String(x), number: x, ref: `${"ABC"[c]}${i + 1}` } : { text: x, ref: `${"ABC"[c]}${i + 1}` }))),
+  });
+  const budget = (header: [string, string], ...rows: (string | number)[][]) => extractCandidates(doc([], [grid(header, ...rows)]));
+  const SEVERAL = "A total of several costs, not one of them";
+  const NOT_SHOWN = "Not shown to add up to the subtotal below it";
+
+  test("a figure followed by what it covers is a total of them, never one of them", () => {
+    expect(pick(read("Budget: $4,210,000 (land, construction, soft costs and contingency)"))).toEqual([["stated_total_cost", 4_210_000]]);
+    expect(pick(read("The project cost is $6,500,000, including land, hard costs and soft costs."))).toEqual([["stated_total_cost", 6_500_000]]);
+    expect(pick(read("Coût du projet : 4 210 000 $ (comprenant terrain, construction, frais indirects et imprévus)"))).toEqual([["stated_total_cost", 4_210_000]]);
+    expect(pick(read("Coût total : 3 800 000 $, incluant le terrain, les coûts de construction et les honoraires professionnels."))).toEqual([["stated_total_cost", 3_800_000]]);
+  });
+  test("a component list after a label that names no cost goes to other costs shown, not read", () => {
+    const r = read("Summary: $3,000,000 (land, hard costs and soft costs)");
+    expect(r.candidates).toEqual([]);
+    expect(noteOf(r, 3_000_000)).toBe(SEVERAL);
+    const fr = read("Résumé : 3 000 000 $ (soit terrain, construction et frais indirects)");
+    expect(fr.candidates).toEqual([]);
+    expect(noteOf(fr, 3_000_000)).toBe(SEVERAL);
+  });
+  test("negative: a note after a figure that names fewer than two budget fields changes nothing", () => {
+    expect(pick(read("Land: $485,000 (closed in March)"))).toEqual([["land_cost", 485_000]]);
+    expect(pick(read("Terrain : 485 000 $ (acquis en mars)"))).toEqual([["land_cost", 485_000]]);
+    expect(pick(read("Hard costs: $2,000,000 (including contingency)"))).toEqual([["hard_cost", 2_000_000]]);
+  });
+
+  test("a subtotal that its unread rows do not add up to is read alone; the rows stay shown", () => {
+    const r = budget(["Poste", "Montant ($)"], ["Terrain", 485_000], ["Entrepreneur général", 3_100_000], ["Architecture", 120_000], ["Ingénierie", 180_000], ["Assurances", 155_000], ["Total des coûts indirects", 455_000]);
+    expect(pick(r)).toEqual([["land_cost", 485_000], ["soft_cost", 455_000]]);
+    for (const v of [3_100_000, 120_000, 180_000, 155_000]) expect(noteOf(r, v)).toBe(NOT_SHOWN);
+    const en = budget(["Item", "Amount"], ["Land", 100_000], ["General contractor lump sum", 900_000], ["Architecture", 50_000], ["Engineering", 30_000], ["Total soft costs", 80_000]);
+    expect(pick(en)).toEqual([["land_cost", 100_000], ["soft_cost", 80_000]]);
+    expect(noteOf(en, 900_000)).toBe(NOT_SHOWN);
+  });
+  test("a table of only unread rows under one total is that total's breakdown: a difference is raised, as before", () => {
+    const r = budget(["Item", "Amount"], ["Framing", 400_000], ["Mechanical", 200_000], ["Total hard cost", 650_000]);
+    expect(r.candidates.filter((c) => c.fieldKey === "hard_cost").map((c) => c.value)).toEqual([600_000, 650_000]);
+    expect(r.other.some((o) => o.note === NOT_SHOWN)).toBe(false);
+  });
+  test("a row that was read ends the run of parts", () => {
+    const r = budget(["Item", "Amount"], ["Mechanical", 700_000], ["Land", 100_000], ["Architecture", 50_000], ["Engineering", 30_000], ["Total soft costs", 80_000]);
+    expect(pick(r)).toEqual([["land_cost", 100_000], ["soft_cost", 80_000]]);
+    expect(noteOf(r, 700_000)).not.toBe(NOT_SHOWN);
+  });
+  test("unread rows that do add up to the subtotal are read as before", () => {
+    const r = budget(["Item", "Amount"], ["Land", 100_000], ["Architecture", 50_000], ["Engineering", 30_000], ["Insurance", 20_000], ["Total soft costs", 100_000]);
+    expect(pick(r)).toEqual([["land_cost", 100_000], ["soft_cost", 100_000]]);
+    expect(r.other.some((o) => o.note === NOT_SHOWN)).toBe(false);
+    // Rows read as the subtotal's own field still sum and conflict with it.
+    const off = budget(["Item", "Amount"], ["Hard costs, building", 400_000], ["Hard cost, site works", 200_000], ["Total hard cost", 650_000]);
+    expect(off.candidates.filter((c) => c.fieldKey === "hard_cost").map((c) => c.value)).toEqual([600_000, 650_000]);
+  });
+
+  test("a figure said to be included in another is shown, not added as a cost", () => {
+    const r = read("Developer fee 3% ($118,500), included in soft costs");
+    expect(r.candidates.filter((c) => c.fieldKey === "other_cost")).toEqual([]);
+    expect(noteOf(r, 118_500)).toBe("Already counted in Soft costs");
+    const paren = read("Permits ($61,000, already in the soft-cost line)");
+    expect(paren.candidates).toEqual([]);
+    expect(noteOf(paren, 61_000)).toBe("Already counted in Soft costs");
+    const fr = read("Frais du promoteur : 61 000 $, compris dans les coûts indirects");
+    expect(fr.candidates).toEqual([]);
+    expect(noteOf(fr, 61_000)).toBe("Already counted in Soft costs");
+  });
+  test("a table row whose label says it is included in a field adds nothing", () => {
+    const r = budget(["Item", "Amount"], ["Land", 100_000], ["Soft costs", 455_000], ["Developer fee (included in soft costs)", 61_000], ["Other costs", 20_000]);
+    expect(pick(r)).toEqual([["land_cost", 100_000], ["soft_cost", 455_000], ["other_cost", 20_000]]);
+    expect(noteOf(r, 61_000)).toBe("Already counted in Soft costs");
+  });
+  test("negative: a figure within or part of something that is no budget field is still read", () => {
+    expect(pick(read("Hard costs: $2,000,000, within 10% of the estimate"))).toEqual([["hard_cost", 2_000_000]]);
+    expect(pick(read("Land: $485,000, part of the first phase"))).toEqual([["land_cost", 485_000]]);
+  });
+
+  async function formulaBook(): Promise<NormalizedDocument> {
+    const ExcelJS = (await import("exceljs")).default;
+    const wb = new ExcelJS.Workbook();
+    const ws = wb.addWorksheet("Budget");
+    ws.addRows([["Item", "Amount"], ["Land", 100_000], ["Hard costs", 200_000]]);
+    ws.getCell("A4").value = "Soft costs";
+    ws.getCell("B4").value = { formula: "SUM(B2:B3)" } as never;
+    ws.getCell("A5").value = "Contingency";
+    ws.getCell("B5").value = { formula: "B3*0.05", result: 10_000 } as never;
+    return parseDocument(new Uint8Array(await wb.xlsx.writeBuffer()), "f.xlsx");
+  }
+  test("a formula with no saved result gives no value and a document note; one with a result is read", async () => {
+    const parsed = await formulaBook();
+    const r = extractCandidates(parsed);
+    expect(JSON.stringify([r.candidates, r.other, parsed.tables])).not.toContain("[object Object]");
+    expect(pick(r)).toEqual([["land_cost", 100_000], ["hard_cost", 200_000], ["contingency", 10_000]]);
+    expect(r.notes).toEqual(["This workbook has formulas with no saved results (B4). Open and save it in Excel to include them."]);
+  });
+  test("negative: a workbook of plain values has no document note", async () => {
+    const r = extractCandidates(await parseDocument(new Uint8Array(await (async () => {
+      const ExcelJS = (await import("exceljs")).default;
+      const wb = new ExcelJS.Workbook();
+      wb.addWorksheet("Budget").addRows([["Item", "Amount"], ["Land", 100_000]]);
+      return wb.xlsx.writeBuffer();
+    })()), "p.xlsx"));
+    expect(r.notes).toEqual([]);
+  });
+});
