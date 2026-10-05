@@ -2896,6 +2896,11 @@ describe("label families: the same meaning in several wordings, English and Qué
 });
 
 describe("budget lines and operating figures written as sentences with verbs", () => {
+  test("a total that includes the deposit is the total (audit)", () => {
+    expect(pick("Land cost $900,000 including deposit")).toEqual([["land_cost", 900_000]]);
+    expect(pick("Prix du terrain 900 000 $ y compris l'acompte")).toEqual([["land_cost", 900_000]]);
+    expect(pick("We put down $50,000 on the lot.")).toEqual([]);
+  });
   const prose = (...lines: string[]): NormalizedDocument => ({
     kind: "pdf",
     lines: lines.map((text, i) => ({ text, location: `page 1, line ${i + 1}` })),

@@ -468,7 +468,13 @@ function clauseAround(text: string, t: NumberToken): string {
 }
 
 /** A budget-line figure whose own clause says it is a deposit or an amount already paid. */
-const isDeposit = (text: string, t: NumberToken) => isMoney(t) && t.value !== null && t.value > 0 && DEPOSIT_RE.test(fold(clauseAround(text, t)));
+// A total that says it includes the deposit ("$900,000 including the deposit") is the total, not the deposit.
+const INCLUDES_DEPOSIT_RE = /\b(?:including|includes|included|incl|inclusive of|with|y compris|incluant|comprenant|inclus)\b(?:\s+(?:the|our|a|le|la|notre|un|une)|\s+l\s*['’])?\s*(?:deposits?|down payments?|acomptes?|depots?)\b/;
+const isDeposit = (text: string, t: NumberToken) => {
+  if (!isMoney(t) || t.value === null || t.value <= 0) return false;
+  const clause = fold(clauseAround(text, t));
+  return DEPOSIT_RE.test(clause) && !INCLUDES_DEPOSIT_RE.test(clause);
+};
 
 /** The total a per-unit price states for itself: the next money figure when it sits in parentheses after the price, follows "total", "for", "soit" or "pour un total de", or is followed by "total". */
 function totalOf(text: string, t: NumberToken, tokens: NumberToken[]): NumberToken | null {
