@@ -95,7 +95,9 @@ describe("the whole workflow, from documents to an audit package", () => {
     expect(r.status).toBe(200);
     run = r.json.id;
     const view = (await call(alice, "GET", `/api/runs/${run}`)).json;
-    expect(view.result.verdict.code).toBe("APPROVE_WITH_CONDITIONS");
+    // Oracle update (task 39, owner sign-off 2026-10-05): lease-up carrying costs leave the stated sources short, so the run rejects.
+    expect(view.result.verdict.code).toBe("REJECT");
+    expect(view.result.checks.find((c: any) => c.key === "sources_cover_uses")?.severity).toBe("error");
     expect(view.fresh).toBe(true);
     const overview = (await call(alice, "GET", `/api/deals/${deal}`)).json;
     expect(overview.step).toBe("decision");
@@ -109,7 +111,9 @@ describe("the whole workflow, from documents to an audit package", () => {
     await call(alice, "POST", `/api/workspaces/${ws}/members`, { email: "carol@example.com", role: "viewer" });
     const noConditions = await call(bob, "POST", `/api/runs/${run}/decision`, { decision: "approve_with_conditions", rationale: "Strong location and sponsor" });
     expect(noConditions.status).toBe(422);
-    const ok = await call(bob, "POST", `/api/runs/${run}/decision`, { decision: "approve_with_conditions", rationale: "Strong location and sponsor", conditions: "Lender to confirm a 25-year amortization before close" });
+    const noReason = await call(bob, "POST", `/api/runs/${run}/decision`, { decision: "approve_with_conditions", rationale: "Strong location and sponsor", conditions: "Lender to confirm a 25-year amortization before close" });
+    expect(noReason.status).toBe(422);
+    const ok = await call(bob, "POST", `/api/runs/${run}/decision`, { decision: "approve_with_conditions", rationale: "Strong location and sponsor", conditions: "Sponsor to fund a lease-up reserve before close", overrideReason: "The shortfall is the lease-up carry; a funded reserve closes it" });
     expect(ok.status).toBe(200);
   });
 
