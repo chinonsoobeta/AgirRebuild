@@ -2550,3 +2550,53 @@ describe("a row may write its value before its label", () => {
     expect(pick(wordDoc([["850k", "7.25%"]]))).toEqual([]);
   });
 });
+
+describe("one sentence may state several terms of one loan", () => {
+  const doc = (lines: string[]): NormalizedDocument => ({
+    kind: "docx",
+    lines: lines.map((text, i) => ({ text, location: `L${i + 1}` })),
+    tables: [],
+    pageCount: null,
+    needsOcr: false,
+    fullText: lines.join("\n"),
+  });
+  const read = (...lines: string[]) => extractCandidates(doc(lines));
+  const pick = (r: ReturnType<typeof extractCandidates>) => r.candidates.map((c) => [c.fieldKey, c.value]);
+  const SENIOR = ["Senior loan amount: $5,000,000", "Senior interest rate: 6.2%", "Amortization: 30 years"];
+  const SENIOR_READ = [["senior_loan_amount", 5_000_000], ["senior_rate_pct", 6.2], ["senior_amort_years", 30]];
+
+  test("a mezzanine sentence gives its amount, rate, amortization and interest-only months to the mezzanine loan", () => {
+    const r = read(...SENIOR, "A junior lender will advance $240,000 at 11.5% fixed, amortized over 15 years, interest-only for the first 12 months.");
+    expect(pick(r)).toEqual([...SENIOR_READ, ["mezz_loan_amount", 240_000], ["mezz_rate_pct", 11.5], ["mezz_amort_years", 15], ["mezz_io_months", 12]]);
+  });
+  test("a take-out sentence reads the same way, with no senior field and no conflict with the senior loan", () => {
+    const r = read(...SENIOR, "The refinance lender commits $2,100,000 with a coupon of 5.1%, 30-year amortization and 6 months IO.");
+    expect(pick(r)).toEqual([...SENIOR_READ, ["refinance_amount", 2_100_000], ["refinance_rate_pct", 5.1], ["refinance_amort_years", 30], ["refinance_io_months", 6]]);
+    const senior = r.candidates.filter((c) => c.fieldKey!.startsWith("senior_"));
+    expect(new Set(senior.map((c) => c.fieldKey)).size).toBe(senior.length);
+  });
+  test("a French sentence names the loan once and carries it", () => {
+    const r = read("Prêt de premier rang : 5 000 000 $", "Taux d'intérêt : 6,2 %", "Le prêteur de deuxième rang consent 300 000 $, au taux de 9 %, amorti sur 20 ans, intérêts seulement pendant 6 mois.");
+    expect(pick(r)).toEqual([["senior_loan_amount", 5_000_000], ["senior_rate_pct", 6.2], ["mezz_loan_amount", 300_000], ["mezz_rate_pct", 9], ["mezz_amort_years", 20], ["mezz_io_months", 6]]);
+  });
+  test("each sentence of a paragraph keeps its own loan", () => {
+    const r = read("The first mortgage is $5,000,000 at an interest rate of 6.2%.", "The mezzanine lender will advance $800,000 at 12%, amortized over 10 years.");
+    expect(pick(r)).toEqual([["senior_loan_amount", 5_000_000], ["senior_rate_pct", 6.2], ["mezz_loan_amount", 800_000], ["mezz_rate_pct", 12], ["mezz_amort_years", 10]]);
+  });
+  test("a clause that names another loan ends the carry", () => {
+    const r = read("The mezzanine lender will advance $240,000 at 11.5%, while the first mortgage stays at 6.2%.");
+    expect(pick(r)).toEqual([["mezz_loan_amount", 240_000], ["mezz_rate_pct", 11.5], ["senior_rate_pct", 6.2]]);
+  });
+  test("negative: a fee and a term in a scoped sentence are still refused", () => {
+    const r = read("The mezzanine lender will advance $240,000 at 11.5%, with a 1% arrangement fee and a 24-month term.");
+    expect(pick(r)).toEqual([["mezz_loan_amount", 240_000], ["mezz_rate_pct", 11.5]]);
+    expect(r.other.map((o) => o.value).sort()).toEqual([1, 24]);
+    const ltv = read("The mezzanine lender will advance $240,000 at 11.5%, to a maximum of 75% LTV.");
+    expect(pick(ltv)).toEqual([["mezz_loan_amount", 240_000], ["mezz_rate_pct", 11.5]]);
+    expect(ltv.other.map((o) => o.value)).toEqual([75]);
+  });
+  test("negative: a sentence that names no loan reads as it did", () => {
+    expect(pick(read("The lender will advance $240,000 at 11.5% fixed, amortized over 15 years."))).toEqual([]);
+    expect(pick(read("The first mortgage will advance $5,000,000 at 6.2%, amortized over 30 years."))).toEqual([]);
+  });
+});
