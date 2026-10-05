@@ -2358,6 +2358,20 @@ describe("unit types written as blocks, and rent opinions", () => {
     const proposals = consolidate(extractCandidates(fr).candidates.map((c) => ({ ...c, documentId: "f", documentName: "f" })));
     expect(proposals.filter((p) => p.status === "conflicting")).toEqual([]);
   });
+  test("a named item with a number starts its own block, after a unit-type block", () => {
+    const d = tableDoc([["2-bed", ""], ["Unit count", "3"], ["Monthly rent per unit", "$2,050"], ["Shop 2", ""], ["Unit count", "1"], ["Total rentable area for this type", "900 sf"], ["Annual rent per square foot", "$19/sf/year"]]);
+    expect(pick(d)).toEqual([["unit_count", "2-bed", 3], ["unit_rent_monthly", "2-bed", 2_050], ["unit_count", "Shop 2", 1], ["rentable_area_sf", "Shop 2", 900], ["rent_psf_annual", "Shop 2", 19]]);
+  });
+  test("a French monthly rent per dwelling is read in a block", () => {
+    const d = tableDoc([["5½", ""], ["Nombre de logements", "2"], ["Loyer mensuel par logement", "1 950 $"]]);
+    expect(pick(d).map((r) => [r[0], r[2]])).toEqual([["unit_count", 2], ["unit_rent_monthly", 1_950]]);
+  });
+  test("negative: a file or room reference over a count row is no heading", () => {
+    for (const head of ["File 2026-14", "Room 12"]) {
+      const items = pick(tableDoc([[head, ""], ["Number of units", "3"]])).map((r) => r[1]);
+      expect(items).not.toContain(head);
+    }
+  });
   test("negative: a suite number or a year over a count row is no heading", () => {
     for (const head of ["Suite 204", "2026"]) {
       const items = pick(tableDoc([[head, ""], ["Number of units", "3"]])).map((r) => r[1]);

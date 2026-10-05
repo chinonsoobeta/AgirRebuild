@@ -1103,14 +1103,16 @@ function sectionLabel(row: Cell[]): string | null {
 // A heading of an item block is no field, section, total or sentence; the rows under it that name these fields belong to it.
 const BLOCK_FIELDS = new Set(["unit_count", "unit_rent_monthly", "rentable_area_sf", "rent_psf_annual", "item_occupancy_pct"]);
 // A label inside a block that names the block by "this" or "of this type" rather than by name.
-const BLOCK_RELATIVE_RE = /\s*\b(of this (type|component|unit|space)|this (type|component|unit|space)|de ce (type|local)|ce local|cette composante)\s*$/i;
+const BLOCK_RELATIVE_RE = /\s*\b((of|for) this (type|component|unit|space)|this (type|component|unit|space)|(de|pour) ce (type|local)|ce local|(de|pour) cette composante|cette composante)\s*$/i;
+// A suite, unit or file number, or a year, is a reference, not an item: "Suite 204", "File 2026". A name with a number is an item: "Shop 2".
+const REFERENCE_RE = /\b(suite|unit|apt|apartment|appartement|logement|no|num|number|numero|room|bureau|file|dossier|ref|reference|version|edition)\s*#?\s*\d|\b(19|20)\d\d\b|#\s*\d/;
 const NOT_HEADING_RE = /^(number of|nombre de|total|average|avg|monthly|annual|rent|loyer|area|superficie|occupancy|occupation|unit count)\b|\b(revenues?|revenus?|leasing|location|budget|budgets|notes?|capital|assumptions?|hypotheses|financing|financement|loan|pret|costs?|couts?|summary|sommaire|schedule|totals?)\b/;
 
 /** The item a row names when it is a short text with no number and the next row is a label and value row for an item field ("Garden suite" over "Number of units | 2"). */
 function blockHeading(row: Cell[], next: Cell[] | undefined, scope: Scope, format: DocumentFormat): string | null {
   const filled = row.filter((c) => c.text || c.number !== undefined);
   const c = filled[0];
-  if (filled.length !== 1 || !c || c.number !== undefined || !(/\d/.test(c.text) ? unitTypesIn(c.text).length > 0 : /^\p{L}/u.test(c.text)) || /[.!?:]$/.test(c.text) || c.text.trim().split(/\s+/).length > 8 || scopeIn(c.text) || NOT_HEADING_RE.test(fold(c.text))) return null;
+  if (filled.length !== 1 || !c || c.number !== undefined || !(unitTypesIn(c.text).length > 0 || (/^\p{L}/u.test(c.text) && !REFERENCE_RE.test(fold(c.text)))) || /[.!?:]$/.test(c.text) || c.text.trim().split(/\s+/).length > 8 || scopeIn(c.text) || NOT_HEADING_RE.test(fold(c.text))) return null;
   const label = next?.find((x) => x.text && x.number === undefined);
   const cell = label && next!.slice(next!.indexOf(label) + 1).find((x) => cellToken(x, format));
   const t = cell && cellToken(cell, format);
