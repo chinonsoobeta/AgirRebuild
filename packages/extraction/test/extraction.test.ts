@@ -1591,6 +1591,23 @@ describe("totals and their parts", () => {
     expect(pick(read("Land: $485,000, part of the first phase"))).toEqual([["land_cost", 485_000]]);
   });
 
+  test("a total's own cost words do not make a construction or works total the project total", () => {
+    expect(pick(read("Coût total des travaux : 3 200 000 $"))).toEqual([]);
+    expect(pick(read("Total construction cost: $3,200,000"))).toEqual([["hard_cost", 3_200_000]]);
+    expect(pick(read("Coût total du projet : 6 000 000 $"))).toEqual([["stated_total_cost", 6_000_000]]);
+    expect(pick(read("Coût total reconnu : 6 000 000 $"))).toEqual([["stated_total_cost", 6_000_000]]);
+  });
+  test("a subtotal over read and unread rows: they are its parts when they add up, else it is read alone, never a conflict", () => {
+    const head: [string, string] = ["Poste", "Montant ($)"];
+    const fits = budget(head, ["Terrain", 100_000], ["Entrepreneur général", 900_000], ["Honoraires professionnels", 50_000], ["Architecture", 30_000], ["Ingénierie", 20_000], ["Total des coûts indirects", 100_000]);
+    expect(pick(fits)).toEqual([["land_cost", 100_000], ["soft_cost", 100_000]]);
+    const off = budget(head, ["Terrain", 100_000], ["Entrepreneur général", 900_000], ["Honoraires professionnels", 50_000], ["Architecture", 30_000], ["Ingénierie", 20_000], ["Total des coûts indirects", 130_000]);
+    expect(pick(off)).toEqual([["land_cost", 100_000], ["soft_cost", 130_000]]);
+    for (const v of [50_000, 30_000, 20_000]) expect(noteOf(off, v)).toBe(NOT_SHOWN);
+    // Negative: when every row of the run was read, a difference is still a conflict.
+    const all = budget(head, ["Honoraires professionnels", 50_000], ["Frais indirects divers", 30_000], ["Total des coûts indirects", 100_000]);
+    expect(all.candidates.filter((c) => c.fieldKey === "soft_cost").map((c) => c.value)).toEqual([80_000, 100_000]);
+  });
   async function formulaBook(): Promise<NormalizedDocument> {
     const ExcelJS = (await import("exceljs")).default;
     const wb = new ExcelJS.Workbook();
@@ -1598,6 +1615,8 @@ describe("totals and their parts", () => {
     ws.addRows([["Item", "Amount"], ["Land", 100_000], ["Hard costs", 200_000]]);
     ws.getCell("A4").value = "Soft costs";
     ws.getCell("B4").value = { formula: "SUM(B2:B3)" } as never;
+    ws.getCell("A6").value = "Other costs";
+    ws.getCell("B6").value = { formula: "B2/0", result: { error: "#DIV/0!" } } as never;
     ws.getCell("A5").value = "Contingency";
     ws.getCell("B5").value = { formula: "B3*0.05", result: 10_000 } as never;
     return parseDocument(new Uint8Array(await wb.xlsx.writeBuffer()), "f.xlsx");
@@ -1607,6 +1626,7 @@ describe("totals and their parts", () => {
     const r = extractCandidates(parsed);
     expect(JSON.stringify([r.candidates, r.other, parsed.tables])).not.toContain("[object Object]");
     expect(pick(r)).toEqual([["land_cost", 100_000], ["hard_cost", 200_000], ["contingency", 10_000]]);
+    expect(JSON.stringify(parsed.tables)).not.toContain("#REF");
     expect(r.notes).toEqual(["This workbook has formulas with no saved results (B4). Open and save it in Excel to include them."]);
   });
   test("negative: a workbook of plain values has no document note", async () => {

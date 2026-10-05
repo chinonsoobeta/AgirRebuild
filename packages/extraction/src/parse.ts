@@ -122,6 +122,8 @@ async function parseXlsx(bytes: Uint8Array): Promise<NormalizedDocument> {
           v = (v as { result?: unknown }).result;
           if (v === undefined) uncached.push(wb.worksheets.length > 1 ? ref : ref.slice(ws.name.length + 1));
         }
+        // An error result ("#REF!") is no value either.
+        if (v && typeof v === "object" && "error" in (v as object)) v = null;
         if (v && typeof v === "object" && "richText" in (v as object)) {
           v = (v as { richText: { text: string }[] }).richText.map((t) => t.text).join("");
         }

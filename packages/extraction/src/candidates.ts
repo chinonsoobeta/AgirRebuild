@@ -830,7 +830,7 @@ function fromBudget(table: Table, headerRow: number, roles: { label: number; amo
   // line mapped to X, and raise both when they disagree. A line that maps to no
   // field, between the header (or the previous total) and a total row for X, is a component of X.
   // A line in another currency is never added to the deal's own: sums are kept per field and currency.
-  const components = new Map<string, { fieldKey: string; unitSeen: string; sum: number; refs: string[]; labels: string[] }>();
+  const components = new Map<string, { fieldKey: string; unitSeen: string; sum: number; refs: string[]; labels: string[]; rows: { value: number; ref: string; label: string }[] }>();
   const totals: Candidate[] = [];
   let started = false;
   let segment: { value: number; unitSeen: string; ref: string; label: string; shown: Candidate }[] = [];
@@ -889,18 +889,28 @@ function fromBudget(table: Table, headerRow: number, roles: { label: number; amo
     };
     const add = (value: number, unitSeen: string, ref: string, label: string) => {
       const ck = `${mapped.fieldKey}|${unitSeen}`;
-      const acc = components.get(ck) ?? { fieldKey: mapped.fieldKey, unitSeen, sum: 0, refs: [], labels: [] };
+      const acc = components.get(ck) ?? { fieldKey: mapped.fieldKey, unitSeen, sum: 0, refs: [], labels: [], rows: [] };
       acc.sum += value;
       acc.refs.push(ref);
       acc.labels.push(label);
+      acc.rows.push({ value, ref, label });
       components.set(ck, acc);
     };
     if (isTotal && mapped.fieldKey !== "stated_total_cost") {
       totals.push(cand);
-      // The unread rows are the subtotal's parts only when they add up to it; otherwise the subtotal is read alone.
+      // The unread rows are the subtotal's parts only when they add up to it, with the rows already read as its field (those are then not the whole of it); otherwise the subtotal is read alone.
       const parts = lines.filter((l) => l.unitSeen === cand.unitSeen);
-      if (parts.length > 0 && (bare || Math.abs(parts.reduce((n, l) => n + l.value, 0) - mapped.value) <= parts.length)) for (const l of parts) add(l.value, l.unitSeen, l.ref, l.label);
-      else for (const l of lines) l.shown.note = NOT_SHOWN_NOTE;
+      const key = `${mapped.fieldKey}|${cand.unitSeen}`;
+      const read = parts.length > 0 ? components.get(key) : undefined;
+      const sum = parts.reduce((n, l) => n + l.value, 0) + (read?.sum ?? 0);
+      if (parts.length > 0 && (bare || Math.abs(sum - mapped.value) <= parts.length + (read?.rows.length ?? 0))) for (const l of parts) add(l.value, l.unitSeen, l.ref, l.label);
+      else {
+        for (const l of lines) l.shown.note = NOT_SHOWN_NOTE;
+        if (read) {
+          components.delete(key);
+          for (const r of read.rows) result.other.push({ fieldKey: null, itemKey: null, value: r.value, raw: String(r.value), unitSeen: "$", location: r.ref, context: `${table.name}: ${r.label}`, rule: "table:budget", note: NOT_SHOWN_NOTE });
+        }
+      }
       continue;
     }
     // A row that is read ends the run of unread rows.
