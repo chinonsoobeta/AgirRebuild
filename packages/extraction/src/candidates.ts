@@ -220,7 +220,7 @@ function paragraphs(doc: NormalizedDocument, skip: Set<number>, scopes: Scope[])
 
 const ABBREVIATIONS = new Set(["ltd", "inc", "approx", "st", "ste", "no", "corp", "co", "cie", "ave", "dr", "mr", "mrs", "ms", "mme", "vs", "etc", "est", "apt", "blvd", "rev", "rév"]);
 
-/** Split on . ! ? ; followed by a space and an upper-case letter or the end, never after a one-letter initial or an abbreviation. */
+/** Split on . ! ? followed by a space and an upper-case letter or the end, never after a one-letter initial or an abbreviation; a ";" always ends a clause, so a label in one clause never labels a number in another. */
 function sentences(text: string): { text: string; start: number }[] {
   const out: { text: string; start: number }[] = [];
   let from = 0;
@@ -230,7 +230,7 @@ function sentences(text: string): { text: string; start: number }[] {
     if (raw.trim()) out.push({ text: raw.trim(), start: from + lead });
     from = to;
   };
-  for (const m of text.matchAll(/[.!?;](?=\s+\p{Lu}|\s*$)/gu)) {
+  for (const m of text.matchAll(/[.!?](?=\s+\p{Lu}|\s*$)|;/gu)) {
     const word = /(\p{L}+)$/u.exec(text.slice(0, m.index!))?.[1] ?? "";
     if (m[0] === "." && (word.length === 1 || ABBREVIATIONS.has(word.toLowerCase()))) continue;
     add(m.index! + 1);
