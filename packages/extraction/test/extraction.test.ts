@@ -1322,6 +1322,8 @@ describe("signs, explanatory parentheses and per-unit prices", () => {
     expect(only.candidates[1]!.note).toBe(CREDIT_NOTE);
   });
   test("a negative figure that does not say it is a credit is refused, never read as one", () => {
+    // "Less" alone does not make a credit: a deposit already paid is not a cost reduction.
+    expect(costs(lines("Less: deposit paid -$100,000"))).toEqual([]);
     for (const line of ["Other costs: (12,500)", "Other costs (12,500)", "Other costs: -$12,500", "Autres coûts : -12 500 $"]) {
       const r = lines(line);
       expect(costs(r), line).toEqual([]);

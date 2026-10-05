@@ -405,7 +405,7 @@ export const CREDIT_NOTE = "A credit: reduces total cost";
 export const NEGATIVE_NOTE = "A negative figure that does not say it is a credit";
 
 // A label that says the figure is a credit. Folded (no accents, lower case) text.
-const CREDIT_WORD_RE = /^\s*less(?![a-z])|(?:^|[^a-z])(?:credits?|credited|rebates?|refunds?|refunded|reimbursements?|reimbursed|remises?|remboursements?|rembourse|ristournes?|subvention deduite|grant applied)(?![a-z])/;
+const CREDIT_WORD_RE = /(?:^|[^a-z])(?:credits?|credited|rebates?|refunds?|refunded|reimbursements?|reimbursed|remises?|remboursements?|rembourse|ristournes?|subvention deduite|grant applied)(?![a-z])/;
 // Credit words that are not a credit against the cost: a loan line, a rating, a loss allowance, a tax credit, a restoration.
 const NOT_CREDIT_RE = /(?:line|lines|letter|letters|facility|facilities|marge|ligne|lettre|facilite|carte|card|tax|taxe|impot|impots)\s+(?:of\s+|de\s+|d\s+)?credits?(?![a-z])|credits?\s+(?:facility|facilities|union|rating|check|checks|score|loss|losses|risk|agreement|committee|card|bureau|enhancement|insurance|line|lines|support|policy|quality|worthiness|de risque|d impot)|cooperative de credit|remises?\s+(?:en etat|a neuf|en forme|des cles|de cles|des plans|de prix)/;
 // The budget lines a credit may be written against: it is read as the other costs, never as a reduction of one of these.

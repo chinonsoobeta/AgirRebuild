@@ -209,6 +209,10 @@ describe("a credit in other costs", () => {
     expect(up.budget.other).toBe(-20_000);
     expect(up.budget.hard).toBeCloseTo(550_000, 6);
     expect(applyStress(withOther(20_000), { key: "costs", label: "Costs", costPct: 10 }).budget.other).toBeCloseTo(22_000, 6);
+    // Costs that fall take the credit down with them, so the stressed budget stays valid.
+    const down = applyStress(withOther(-20_000), { key: "costs", label: "Costs", costPct: -10 });
+    expect(down.budget.other).toBeCloseTo(-18_000, 6);
+    expect(() => validateInput(down)).not.toThrow();
   });
   test("a deal with no credit computes byte for byte as before", () => {
     const withOtherCost = developmentDeal();

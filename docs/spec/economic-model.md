@@ -15,8 +15,8 @@ is ever flipped. The credit is spread over `[0, C)` with the other construction 
 cost in the months those costs are paid, never land at month 0. Land, hard, soft and contingency stay
 at least 0. A credit is refused when total cost (land + hard + soft + contingency + other) would not
 stay above 0, or when it exceeds hard + soft + contingency together, which would make a month's
-construction spend negative. A cost stress scales positive other costs; a credit is not scaled, so a
-cost overrun never enlarges it. A deal with no credit computes exactly as before. Artifacts show the
+construction spend negative. A cost stress scales positive other costs; a credit shrinks when costs fall
+and is never enlarged by a cost overrun. A deal with no credit computes exactly as before. Artifacts show the
 line as "Other costs (credit)" with its amount.
 
 **Funding (decision 2).** Equity first, then mezzanine, then senior. Each tranche accrues interest
