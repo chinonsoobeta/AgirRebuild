@@ -178,7 +178,15 @@ function lineScopes(doc: NormalizedDocument, format: DocumentFormat, rank: Scope
     if (subject) while (REPLY_PREFIX_RE.test(body)) body = body.replace(REPLY_PREFIX_RE, "");
     const words = body.split(/\s+/).length;
     const plain = !endsSentence(text) && !/:\s*\S/.test(body) && tokenize(text, format).length === 0;
-    return subject ? (!endsSentence(text) ? body : null) : (near && words <= 14 && plain) || (words <= 8 && plain) ? body : null;
+    // "Take-out: Prairie Credit Union permanent loan": a short label that names the refinance, with words but no number, opens that section.
+    const label = /^([^:]{1,40})\s*:\s*(\S.*)$/.exec(text);
+    if (!subject && label && label[1]!.trim().split(/\s+/).length <= 4 && !endsSentence(text) && tokenize(label[2]!, format).length === 0) {
+      const name = fold(label[1]!).trim();
+      if (name === "sortie" || scopeIn(name, false) === "refinance") return "take-out";
+    }
+    const h = subject ? (!endsSentence(text) ? body : null) : (near && words <= 14 && plain) || (words <= 8 && plain) ? body : null;
+    // "Sortie" on its own line is the take-out; "exit" alone is not (an exit cap rate is not a loan).
+    return h !== null && fold(h).trim() === "sortie" ? "take-out" : h;
   });
   const named = headings.some((h) => h !== null && scopeIn(h, false) !== null);
   let scope: Scope = named ? "senior" : (rank ?? "senior");
@@ -258,6 +266,9 @@ const NOT_PART_RE = new RegExp(
     String.raw`\bnon retenu(?:e|s|es)?\b`,
     String.raw`\bnon inclus(?:e|es)? (?:dans|au) (?:le |ce |la |cette )?(?:projet|budget|transaction)\b`,
     String.raw`\bhypothe(?:tical|tiques?)\b`,
+    String.raw`\bnot (?:yet )?committed\b`,
+    String.raw`\bnon engage(?:e|s|es)?\b`,
+    String.raw`\bindicatifs?\b`,
   ].join("|"),
 );
 const EXAMPLE_RE = /\b(?:examples?|exemples?)\b/g;

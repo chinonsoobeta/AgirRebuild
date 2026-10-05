@@ -37,7 +37,7 @@ export type Scope = "senior" | "mezzanine" | "refinance";
 
 const SCOPE_WORDS: Record<Scope, RegExp> = {
   mezzanine: /\b(mezzanine|mezz|second mortgage|2nd mortgage|second charge|second[- ]ranking|second[- ]position|junior|subordinate loan|deuxieme rang|deuxieme hypotheque|pret de second rang|second rang)\b/,
-  refinance: /\b(take-?out|take out|refinanc\w*|permanent loan|long[- ]term mortgage|pret permanent)\b/,
+  refinance: /\b(take-?out|take out|refinanc\w*|permanent loan|permanent financing|exit financing|long[- ]term mortgage|pret permanent|financement permanent|financement de sortie)\b/,
   senior: /\b(senior|construction loan|first mortgage|premier rang|pret de construction)\b/,
 };
 const TERM_SHEET_RE = /\b(term sheet|feuille de modalites)\b/;
