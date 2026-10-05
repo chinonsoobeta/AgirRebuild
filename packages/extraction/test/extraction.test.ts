@@ -2915,6 +2915,11 @@ describe("budget lines and operating figures written as sentences with verbs", (
     expect(r.other.find((o) => o.value === 3_400_000)?.note).toMatch(/earlier|superseded|replaced/i);
     expect(pick("The contractor originally priced the work at $3,400,000.", "The revised signed price is $3,650,000.")).toEqual([["hard_cost", 3_650_000]]);
   });
+  test("a former building's cost is not an old figure, and a cost capped by its contract is the cost (audit)", () => {
+    expect(pick("Former church acquisition cost: $1,200,000")).toEqual([["land_cost", 1_200_000]]);
+    expect(pick("Hard costs are capped at $3,200,000 under the fixed-price contract.")).toEqual([["hard_cost", 3_200_000]]);
+    expect(pick("The construction loan is capped at $5,000,000.")).toEqual([]);
+  });
   test("a French revision pair: the old total is superseded and a dollar amount, never a duration", () => {
     const r = extractCandidates(prose("Ancien total travaux : 1 850 000 $", "Nouveau total travaux : 1 950 000 $"));
     expect(r.candidates.map((c) => [c.fieldKey, c.value])).toEqual([["hard_cost", 1_950_000]]);

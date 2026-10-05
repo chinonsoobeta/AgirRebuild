@@ -120,7 +120,11 @@ const NOT_A_LOAN_RATE = /\b(vacancy|growth|discount|tax|exchange|inflation|retur
 
 // What a lender writes that looks like an input but is not. Words that are part of a field alias ("minimum DSCR", "construction term",
 // "management fee") stay valid: each alias holding one is taken out of the label before the words are looked for.
-const LIMIT_RE = /\b(maximum|max|capped|not to exceed|not exceed|not more than|at most|up to|ceiling|cap of|minimum|min|at least|not less than|no less than|au plus|d au plus|maximale?|plafond|au moins|d au moins|minimale?|pas moins de)\b/;
+const LIMIT_RE = /\b(maximum|max|not to exceed|not exceed|not more than|at most|up to|ceiling|cap of|minimum|min|at least|not less than|no less than|au plus|d au plus|maximale?|plafond|au moins|d au moins|minimale?|pas moins de)\b/;
+// "Capped" limits a rate or a loan; a cost line capped at its fixed price ("hard costs are capped at $X under the contract") is that line's figure.
+const CAPPED_RE = /\bcapped\b/;
+const CAPPED_COST_RE = /\b(hard costs?|construction costs?|building costs?|contract|fixed price|price|budget|couts? de construction|travaux|prix)\b/;
+const LOAN_WORD_RE = /\b(loan|loans|mortgage|financing|advance|pret|hypotheque|financement)\b/;
 const COVERAGE_RE = /\b(dscr|dcr|debt service coverage|couverture|rcsd|rcd|ccd)\b/;
 const TERM_RE = /\b(term|terme|maturity|matures?|echeance|duree du pret)\b/;
 const TERM_AFTER_RE = /^\s*(loan |initial |renewal |fixed |conversion )?(term|terme)\b/;
@@ -165,7 +169,8 @@ function lenderFigure(rawLabel: string, t: NumberToken, opts: MapOptions): strin
   if (money && (PER_INVESTOR_RE.test(plain) || PER_INVESTOR_AFTER_RE.test(tail))) return "A per-investor amount, not the deal's equity";
   const words = plain.split(" ");
   const near = (prose || opts.ahead ? [...words, ...words_(opts.ahead ?? "").split(" ")].filter(Boolean).slice(-4) : words).join(" ");
-  if (LIMIT_RE.test(without(near, LIMIT_RE)) && !COVERAGE_RE.test(plain)) return "A lender's limit, not the deal's figure";
+  const capped = CAPPED_RE.test(near) && !(money && CAPPED_COST_RE.test(plain) && !LOAN_WORD_RE.test(plain));
+  if ((LIMIT_RE.test(without(near, LIMIT_RE)) || capped) && !COVERAGE_RE.test(plain)) return "A lender's limit, not the deal's figure";
   if ((t.unit === "months" || t.unit === "years") && ((TERM_RE.test(without(plain, TERM_RE)) && !AMORT_RE.test(plain)) || TERM_AFTER_RE.test(tail)) && !IO_RE.test(plain) && !IO_RE.test(tail.split(/[,;.]/)[0] ?? "")) return "A loan's term, not the build period, hold or amortization";
   // A fee named after a budget field or inside an "including" list is a part of that cost, not the figure's label.
   const full = without(words_(rawLabel), FEE_RE);
@@ -466,7 +471,7 @@ const NOT_CREDIT_RE = /(?:line|lines|letter|letters|facility|facilities|marge|li
 // The budget lines a credit may be written against: it is read as the other costs, never as a reduction of one of these.
 const CREDITABLE = new Set(["land_cost", "hard_cost", "soft_cost", "contingency", "other_cost"]);
 
-const OLD_LABEL_RE = /(?:^|[^a-z])(?:ancien(?:ne)?s?|old|superseded|previous(?:ly)?|precedent\w*|former(?:ly)?|original(?:ly)?|earlier)\s+(?:[a-z]+\s+){0,2}?(?:total|price|priced|prix|quote|quoted|cost|costs|couts?|budget|montant|travaux|land|terrain|contract|soumission|estimate|estimated)(?![a-z])/;
+const OLD_LABEL_RE = /(?:^|[^a-z])(?:ancien(?:ne)?s?|old|superseded|previous(?:ly)?|precedent\w*|formerly|original(?:ly)?|earlier)\s+(?:[a-z]+\s+){0,2}?(?:total|price|priced|prix|quote|quoted|cost|costs|couts?|budget|montant|travaux|land|terrain|contract|soumission|estimate|estimated)(?![a-z])/;
 const SUPERSEDED_LABEL_NOTE = "An earlier figure, named old or original by its own label; a later figure for the line replaces it";
 
 /**
