@@ -1,3 +1,4 @@
+import { deflateRawSync, inflateRawSync, crc32 } from "node:zlib";
 import { codeOf } from "@agir/numbers";
 import { columnName, type Cell, type CellUnit, type Line, type NormalizedDocument, type Table } from "./document.ts";
 
@@ -101,10 +102,101 @@ function unitOfWord(w: string): CellUnit | null {
   return null;
 }
 
+/**
+ * Excel writes relative link targets inside the package ("worksheets/sheet1.xml"); other tools write absolute ones ("/xl/worksheets/sheet1.xml"),
+ * which are just as valid but which exceljs does not follow for a sheet's comments or tables. Only the link targets in `.rels` parts are
+ * made relative; every other part is carried over byte for byte. A package this cannot read is returned as it came, so the reader's own
+ * failure message stands. (No zip library is a direct dependency here, so the few zip structures needed are read with node:zlib.)
+ */
+function relativeLinks(bytes: Uint8Array): Uint8Array {
+  const b = Buffer.from(bytes.buffer, bytes.byteOffset, bytes.byteLength);
+  const entries: { name: string; method: number; time: number; date: number; crc: number; size: number; data: Buffer }[] = [];
+  let changed = false;
+  try {
+    let eocd = b.length - 22;
+    while (eocd >= 0 && b.readUInt32LE(eocd) !== 0x06054b50) eocd--;
+    if (eocd < 0) return bytes;
+    const count = b.readUInt16LE(eocd + 10);
+    let at = b.readUInt32LE(eocd + 16);
+    if (count === 0xffff || at === 0xffffffff) return bytes; // zip64
+    for (let i = 0; i < count; i++) {
+      if (b.readUInt32LE(at) !== 0x02014b50) return bytes;
+      const flags = b.readUInt16LE(at + 8);
+      const method = b.readUInt16LE(at + 10);
+      const csize = b.readUInt32LE(at + 20);
+      const nameLen = b.readUInt16LE(at + 28);
+      const next = at + 46 + nameLen + b.readUInt16LE(at + 30) + b.readUInt16LE(at + 32);
+      const local = b.readUInt32LE(at + 42);
+      if (flags & 1 || csize === 0xffffffff || local === 0xffffffff || (method !== 0 && method !== 8)) return bytes;
+      const name = b.toString("utf8", at + 46, at + 46 + nameLen);
+      const start = local + 30 + b.readUInt16LE(local + 26) + b.readUInt16LE(local + 28);
+      let entry = { name, method, time: b.readUInt16LE(at + 12), date: b.readUInt16LE(at + 14), crc: b.readUInt32LE(at + 16), size: b.readUInt32LE(at + 24), data: b.subarray(start, start + csize) };
+      if (name.endsWith(".rels")) {
+        const xml = (method === 8 ? inflateRawSync(entry.data) : entry.data).toString("utf8");
+        // A target is relative to the folder holding the part the links describe: "xl/_rels/a.rels" describes parts in "xl/".
+        const folder = name.replace(/(^|\/)_rels\/[^/]*$/, "$1");
+        const rewritten = xml.replace(/(<Relationship\b[^>]*?\bTarget=")\/([^"]*)(")(?![^>]*TargetMode="External")/g, (_m, pre: string, target: string, post: string) => {
+          const up = folder.split("/").filter(Boolean).map(() => "..");
+          const shared = target.split("/");
+          const dirs = folder.split("/").filter(Boolean);
+          let k = 0;
+          while (k < dirs.length && k < shared.length - 1 && dirs[k] === shared[k]) k++;
+          return `${pre}${[...up.slice(k), ...shared.slice(k)].join("/")}${post}`;
+        });
+        if (rewritten !== xml) {
+          const raw = Buffer.from(rewritten, "utf8");
+          entry = { ...entry, method: 8, crc: crc32(raw), size: raw.length, data: deflateRawSync(raw) };
+          changed = true;
+        }
+      }
+      entries.push(entry);
+      at = next;
+    }
+    if (!changed) return bytes;
+    const parts: Buffer[] = [];
+    const central: Buffer[] = [];
+    let offset = 0;
+    for (const e of entries) {
+      const name = Buffer.from(e.name, "utf8");
+      const local = Buffer.alloc(30);
+      local.writeUInt32LE(0x04034b50, 0);
+      local.writeUInt16LE(20, 4);
+      local.writeUInt16LE(0x0800, 6);
+      local.writeUInt16LE(e.method, 8);
+      local.writeUInt16LE(e.time, 10);
+      local.writeUInt16LE(e.date, 12);
+      local.writeUInt32LE(e.crc, 14);
+      local.writeUInt32LE(e.data.length, 18);
+      local.writeUInt32LE(e.size, 22);
+      local.writeUInt16LE(name.length, 26);
+      const head = Buffer.alloc(46);
+      head.writeUInt32LE(0x02014b50, 0);
+      head.writeUInt16LE(20, 4);
+      local.copy(head, 6, 4, 30);
+      head.writeUInt16LE(name.length, 28);
+      head.writeUInt32LE(offset, 42);
+      central.push(head, name);
+      parts.push(local, name, e.data);
+      offset += 30 + name.length + e.data.length;
+    }
+    const centralBytes = Buffer.concat(central);
+    const end = Buffer.alloc(22);
+    end.writeUInt32LE(0x06054b50, 0);
+    end.writeUInt16LE(entries.length, 8);
+    end.writeUInt16LE(entries.length, 10);
+    end.writeUInt32LE(centralBytes.length, 12);
+    end.writeUInt32LE(offset, 16);
+    return new Uint8Array(Buffer.concat([...parts, centralBytes, end]));
+  } catch {
+    return bytes;
+  }
+}
+
 async function parseXlsx(bytes: Uint8Array): Promise<NormalizedDocument> {
   const ExcelJS = (await import("exceljs")).default;
   const wb = new ExcelJS.Workbook();
-  await wb.xlsx.load(bytes.buffer.slice(bytes.byteOffset, bytes.byteOffset + bytes.byteLength) as ArrayBuffer);
+  const linked = relativeLinks(bytes);
+  await wb.xlsx.load(linked.buffer.slice(linked.byteOffset, linked.byteOffset + linked.byteLength) as ArrayBuffer);
   const tables: Table[] = [];
   const texts: string[] = [];
   // A formula with no saved result (a workbook written by a script) has no value: nothing is computed from the formula.
