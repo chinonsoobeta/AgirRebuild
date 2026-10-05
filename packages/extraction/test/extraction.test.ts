@@ -1825,6 +1825,21 @@ describe("durations after the number, revisions in a sentence, percent cells, va
     expect(pick(read("We met for 3 months"))).toEqual([]);
   });
 
+  test("negative: to build or to lease label a duration only right after it, never a later number", () => {
+    expect(pick(read("We plan to build in 2027 and expect 18 months of lease-up"))).toEqual([["lease_up_months", 18]]);
+    expect(pick(read("Nous voulons pour louer vite et prévoyons 14 mois de construction"))).toEqual([["construction_months", 14]]);
+    expect(pick(read("Les travaux, 14 mois pour louer ensuite 5 mois de location"))).toEqual([["lease_up_months", 14], ["lease_up_months", 5]]);
+  });
+
+  test("a market vacancy or occupancy figure is shown, not the deal's assumption", () => {
+    for (const line of ["Vacancy in the submarket was 2.1%", "Average occupancy of comparable buildings: 96%", "CMHC reports city vacancy of 1.8%", "Le taux d'inoccupation du marché est de 2 %", "Taux d'occupation moyen du secteur : 95 %", "Vacance dans le quartier : 3 %"]) {
+      const r = read(line);
+      expect(r.candidates, line).toEqual([]);
+      expect(r.other[0]?.note, line).toBe("A market statistic, not the deal's assumption");
+    }
+    expect(pick(read("Vacancy allowance 3%"))).toEqual([["stabilized_occupancy_pct", 97]]);
+  });
+
   test("goes from X to Y is a revision: Y is read and X is shown as replaced", () => {
     const en = read("Hard cost moved from $2,900,000 to $3,050,000");
     expect(pick(en)).toEqual([["hard_cost", 3_050_000]]);
