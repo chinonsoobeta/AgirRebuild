@@ -69,6 +69,14 @@ describe("artifacts", () => {
       const text = visibleText(renderHtml(model));
       expect(text.split(sentence!).length - 1, kind).toBeGreaterThanOrEqual(2);
       expect(verifyProvenance(text, model.formatter.manifest).orphans, kind).toEqual([]);
+      // The sources still add up to total cost: the accrued interest is a source of its own.
+      const t = model.blocks.find((b) => b.type === "table" && b.caption === "Sources and uses");
+      const rows = t && t.type === "table" ? t.rows : [];
+      const amount = (label: string) => Number(rows.find((r) => r[0] === label)![1]!.replace(/[^\d.]/g, ""));
+      const base = (k: string) => result.scenarios.find((s) => s.key === "base")!.metrics.find((m) => m.key === k)!;
+      expect(amount("Mezzanine interest accrued (paid in kind)"), kind).toBeCloseTo(Math.round((base("mezz_interest_accrued") as { value: number }).value), 0);
+      const sources = ["Senior loan", "Mezzanine loan", "Mezzanine interest accrued (paid in kind)", "Equity"].map(amount).reduce((a, b) => a + b, 0);
+      expect(Math.abs(sources - amount("Total sources")), kind).toBeLessThanOrEqual(2);
     }
   });
   test("an invented figure is caught", () => {

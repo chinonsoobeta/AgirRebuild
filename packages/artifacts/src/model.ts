@@ -100,6 +100,7 @@ function sourcesAndUses(f: Formatter, x: ArtifactInput): Block {
   const usesEnd = rows.length - 1;
   if (i.senior.amount > 0) rows.push(["Senior loan", f.input(i.senior.amount, "$", "senior_loan_amount")]);
   if (i.mezzanine && i.mezzanine.amount > 0) rows.push(["Mezzanine loan", f.input(i.mezzanine.amount, "$", "mezz_loan_amount")]);
+  if (x.result.checks.some((c) => c.key === "mezz_interest_accrued")) rows.push(["Mezzanine interest accrued (paid in kind)", f.metric("base", "mezz_interest_accrued")]);
   rows.push(["Equity", f.metric("base", "required_equity")]);
   rows.push(["Total sources", f.metric("base", "total_development_cost")]);
   return { type: "table", caption: "Sources and uses", columns: [{ label: "Line" }, { label: "Amount", numeric: true }], rows, strong: [usesEnd, rows.length - 1] };

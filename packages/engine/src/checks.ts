@@ -85,7 +85,7 @@ export function runChecks(input: EngineInput, L: Ledger, policy: Policy, contrac
         key: "sources_cover_uses",
         kind: "agreement",
         severity: "error",
-        message: `Stated equity of ${money(s.equity)} plus debt of ${money(L.commitments)} falls ${money(gap)} short of the ${money(L.tdc)} total cost.`,
+        message: `Stated equity of ${money(s.equity)} plus debt of ${money(L.commitments + L.mezzAccruedBeyondCommitment)} falls ${money(gap)} short of the ${money(L.tdc)} total cost.`,
         expected: L.requiredEquity,
         actual: s.equity,
       });
