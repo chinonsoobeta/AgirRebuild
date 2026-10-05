@@ -1793,3 +1793,109 @@ describe("totals and their parts", () => {
     });
   });
 });
+
+describe("durations after the number, revisions in a sentence, percent cells, vacancy and flags", () => {
+  const doc = (lines: string[], tables: Table[] = []): NormalizedDocument => ({
+    kind: tables.length ? "xlsx" : "pdf",
+    lines: lines.map((t, i) => ({ text: t, location: `page 1, line ${i + 1}` })),
+    tables,
+    pageCount: 1,
+    needsOcr: false,
+    fullText: lines.join("\n"),
+  });
+  const read = (...text: string[]) => extractCandidates(doc(text));
+  const pick = (r: ReturnType<typeof extractCandidates>) => r.candidates.map((c) => [c.fieldKey, c.value]);
+  const noteOf = (r: ReturnType<typeof extractCandidates>, value: number) => r.other.find((o) => o.value === value)?.note ?? "";
+  const REPLACED = "A later figure in the same sentence replaces this one";
+
+  test("a duration followed by what it is the duration of", () => {
+    expect(pick(read("Schedule: the build is 16 months, then 7 months to lease up"))).toEqual([["construction_months", 16], ["lease_up_months", 7]]);
+    expect(pick(read("Horaire : quatorze mois de construction, puis cinq mois de location"))).toEqual([["construction_months", 14], ["lease_up_months", 5]]);
+    expect(pick(read("Expect 9 months to build and 6 months to lease."))).toEqual([["construction_months", 9], ["lease_up_months", 6]]);
+    expect(pick(read("On prévoit 8 mois pour louer les logements"))).toEqual([["lease_up_months", 8]]);
+  });
+  test("a duration after an interest-only label is that loan's interest-only period", () => {
+    expect(pick(read("Interest only: first 18 months from first advance"))).toEqual([["senior_io_months", 18]]);
+    expect(pick(read("Mezzanine commitment letter", "IO: 12 months"))).toEqual([["mezz_io_months", 12]]);
+    expect(pick(read("Intérêts seulement : 20 mois"))).toEqual([["senior_io_months", 20]]);
+  });
+  test("negative: a loan's term is not construction, and a bare duration names nothing", () => {
+    expect(pick(read("The loan has a 24-month term"))).toEqual([]);
+    expect(pick(read("A 24 month term, 12 months of construction"))).toEqual([["construction_months", 12]]);
+    expect(pick(read("We met for 3 months"))).toEqual([]);
+  });
+
+  test("goes from X to Y is a revision: Y is read and X is shown as replaced", () => {
+    const en = read("Hard cost moved from $2,900,000 to $3,050,000");
+    expect(pick(en)).toEqual([["hard_cost", 3_050_000]]);
+    expect(noteOf(en, 2_900_000)).toBe(REPLACED);
+    const fr = read("Le coût de construction passe de 3 410 000 $ à 3 495 000 $");
+    expect(pick(fr)).toEqual([["hard_cost", 3_495_000]]);
+    expect(noteOf(fr, 3_410_000)).toBe(REPLACED);
+    expect(pick(read("Les coûts indirects sont passés de 410 000 $ à 450 000 $"))).toEqual([["soft_cost", 450_000]]);
+    expect(pick(read("Land cost went from $1,000,000 → $1,100,000"))).toEqual([["land_cost", 1_100_000]]);
+    expect(pick(read("Construction period increased from 12 to 15 months"))).toEqual([["construction_months", 15]]);
+  });
+  test("negative: from X to Y with no change verb stays a range", () => {
+    const r = read("Hard cost from $2,900,000 to $3,050,000");
+    expect(r.candidates).toEqual([]);
+    expect(noteOf(r, 3_050_000)).toMatch(/range/i);
+    expect(read("Le coût va de 2 900 000 $ à 3 050 000 $").candidates).toEqual([]);
+  });
+
+  async function workbook(rows: [string, number | string, string?][]): Promise<NormalizedDocument> {
+    const ExcelJS = (await import("exceljs")).default;
+    const wb = new ExcelJS.Workbook();
+    const ws = wb.addWorksheet("Inputs");
+    rows.forEach(([label, value, fmt], i) => {
+      ws.getCell(i + 1, 1).value = label;
+      const c = ws.getCell(i + 1, 2);
+      c.value = value;
+      if (fmt) c.numFmt = fmt;
+    });
+    return parseDocument(new Uint8Array(await wb.xlsx.writeBuffer()), "inputs.xlsx");
+  }
+  test("a percent-formatted cell reads as its percentage, with a percent sign, and keeps its stored value", async () => {
+    const d = await workbook([["Stabilized occupancy", 0.975, "0.0%"], ["Operating expenses (% of EGI)", 0.38, "0%"], ["Exit cap rate", 0.055, "0.00%"], ["Vacancy allowance", 0.03, "0.0%"]]);
+    expect(d.tables[0]!.rows.map((r) => r[1]!.text)).toEqual(["97.5%", "38%", "5.5%", "3%"]);
+    const r = extractCandidates(d);
+    expect(pick(r)).toEqual([["stabilized_occupancy_pct", 97.5], ["expense_ratio_pct", 38], ["exit_cap_rate_pct", 5.5], ["stabilized_occupancy_pct", 97]]);
+    expect(r.candidates[0]!.raw).toContain("0.975");
+  });
+  test("negative: a cell that is not percent-formatted is unchanged", async () => {
+    const d = await workbook([["Stabilized occupancy", 95], ["Construction", 14, "0"], ["Hard cost", 0.5, '0.0" %"']]);
+    expect(d.tables[0]!.rows.map((r) => r[1]!.text)).toEqual(["95", "14", "0.5"]);
+  });
+
+  test("a vacancy percentage is the stabilized occupancy's complement, and says so", () => {
+    for (const [line, occ] of [["Vacancy allowance 3%", 97], ["Vacancy and credit loss: 5%", 95], ["Taux d'inoccupation 2,5 %", 97.5], ["Vacance : 4 %", 96]] as const) {
+      const r = read(line);
+      expect(pick(r), line).toEqual([["stabilized_occupancy_pct", occ]]);
+      expect(r.candidates[0]!.unitSeen, line).toMatch(/vacan|inoccup/i);
+    }
+  });
+  test("negative: vacancy during lease-up, at opening or today is not the stabilized figure", () => {
+    for (const line of ["Vacancy during lease-up: 30%", "Vacancy at opening 40%", "Taux d'inoccupation à l'ouverture : 35 %", "Current vacancy: 6%"]) {
+      expect(read(line).candidates, line).toEqual([]);
+    }
+  });
+
+  const flags = (...lines: string[]) => read(...lines).candidates.map((c) => [c.fieldKey, c.value]);
+  test("a Yes or No answer beside a flag's label is the flag", () => {
+    expect(flags("Lease-up ramp: Yes - straight-line as units lease", "S-curve draws: No")).toEqual([["lease_up_ramp", 1], ["s_curve_draws", 0]]);
+    expect(flags("Rampe de location : Oui", "Tirages en courbe en S : Non, linéaires")).toEqual([["lease_up_ramp", 1], ["s_curve_draws", 0]]);
+  });
+  test("a flag cell in a table or workbook is read the same way", async () => {
+    expect(pick(extractCandidates(await workbook([["Lease-up ramp", "Yes - straight-line"], ["S-curve draws", "no"]])))).toEqual([["lease_up_ramp", 1], ["s_curve_draws", 0]]);
+  });
+  test("negative: anything but yes or no is no flag, and a yes beside another label is no flag", () => {
+    expect(flags("Lease-up ramp: maybe", "S-curve draws: 1", "Lease-up ramp: Yesterday it was agreed", "Parking: Yes")).toEqual([]);
+  });
+
+  test("a figure stated in the new forms by one document disagrees with another's, and is named as a conflict", () => {
+    const tag = (r: ReturnType<typeof extractCandidates>, name: string) => r.candidates.map((c) => ({ ...c, documentId: name, documentName: name }));
+    const p = consolidate([...tag(read("Prévoir huit mois pour louer"), "a"), ...tag(read("Lease-up: 10 months"), "b")]).find((x) => x.fieldKey === "lease_up_months")!;
+    expect(p.status).toBe("conflicting");
+    expect(p.values.map((v) => v.value).sort()).toEqual([8, 10]);
+  });
+});
