@@ -1,6 +1,6 @@
 import { describe, expect, test } from "vitest";
 import fc from "fast-check";
-import { FIELDS, FIELD_BY_KEY, POLICY_V1, TEMPLATES, type AssumptionStatus, type EngineInput, type RunResult } from "@agir/contracts";
+import { FIELDS, FIELD_BY_KEY, POLICY_V1, TEMPLATES, type AssumptionStatus, type EngineInput, type Readiness, type RunResult } from "@agir/contracts";
 import { allocate, assemble, buildLedger, canonicalJson, irrRoots, levelPayment, underwrite, EngineInputError } from "../src/index.ts";
 import { allEquityDeal, developmentDeal } from "./fixtures.ts";
 
@@ -267,9 +267,8 @@ describe("quick-start templates", () => {
 
   // Task 33: an optional line with no value is disclosed as "not found"; it is never a number and never blocks.
   describe("optional lines that were not found", () => {
-    type Item = { fieldKey: string; itemKey?: string; label: string; detail?: string };
-    const notFoundOf = (r: unknown) => (r as { notFound: Item[] }).notFound;
-    const keys = (r: unknown) => notFoundOf(r).map((i) => i.fieldKey);
+    const notFoundOf = (r: Readiness) => r.notFound;
+    const keys = (r: Readiness) => notFoundOf(r).map((i) => i.fieldKey);
     const minimal = () => rowsFor("multiplex").filter((r) => !["other_cost", "other_income_annual"].includes(r.fieldKey));
     const add = (fieldKey: string, status: AssumptionStatus, valueNumeric: number | null) => ({ fieldKey, itemKey: null, status, valueNumeric });
 

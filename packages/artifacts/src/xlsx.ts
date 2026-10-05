@@ -1,5 +1,5 @@
 import { FIELD_BY_KEY, placeLabel } from "@agir/contracts";
-import { confirmationLabel, type ArtifactInput } from "./model.ts";
+import { confirmationLabel, notFoundSentence, type ArtifactInput } from "./model.ts";
 
 /**
  * The model export: every number of the run as a number, never as text, so an
@@ -84,6 +84,13 @@ export async function renderXlsx(x: ArtifactInput): Promise<Uint8Array> {
     inputs.addRow([FIELD_BY_KEY.get(a.fieldKey)?.label ?? a.fieldKey, a.itemKey ?? "", a.value, a.unit, a.source, confirmationLabel(a)]);
   }
   inputs.columns.forEach((c, i) => (c.width = i === 4 ? 60 : 22));
+
+  if (x.notFound?.length) {
+    const nf = wb.addWorksheet("Not found");
+    head(nf, ["Not found in the documents"]);
+    for (const n of x.notFound) nf.addRow([notFoundSentence(n)]);
+    nf.getColumn(1).width = 100;
+  }
 
   const checks = wb.addWorksheet("Checks");
   head(checks, ["Check", "Kind", "Severity", "Message"]);

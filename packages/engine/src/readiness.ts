@@ -147,9 +147,26 @@ export function assemble(rows: readonly AssumptionRow[]): { readiness: Readiness
     }
   }
 
+  // ---- Not found: an optional line no document gave. Shown, never counted as a value ----
+  const positive = (key: string) => (values.get(key) ?? 0) > 0;
+  const parentAbsent: Record<string, boolean> = {
+    refinance_amount: !has("refinance_month"),
+    refinance_ltv_pct: !has("refinance_month"),
+    refinance_io_months: !has("refinance_month"),
+    mezz_io_months: !positive("mezz_loan_amount"),
+    senior_io_months: !positive("senior_loan_amount"),
+    // Stand-ins for a present alternative.
+    fixed_opex_annual: has("expense_ratio_pct"),
+  };
+  if (has("refinance_ltv_pct")) parentAbsent.refinance_amount = true;
+  if (has("refinance_amount")) parentAbsent.refinance_ltv_pct = true;
+  const notFound: ReadinessItem[] = FIELDS.filter(
+    (d) => !d.itemized && d.extractable && d.required === false && d.absentMeans && !has(d.key) && !isBlockedKey(d.key) && !parentAbsent[d.key],
+  ).map((d) => ({ fieldKey: d.key, label: d.label, detail: d.absentMeans! }));
+
   const defaultable = missing.map((m) => m.fieldKey).filter((k) => FIELD_BY_KEY.get(k)?.default !== undefined);
   const blocked = missing.length + conflicting.length + pending.length + impossible.length > 0;
-  const readiness: Readiness = { status: blocked ? "blocked" : "ready", missing, conflicting, pending, impossible, defaultable };
+  const readiness: Readiness = { status: blocked ? "blocked" : "ready", missing, conflicting, pending, impossible, notFound, defaultable };
   if (blocked) return { readiness, input: null };
 
   const v = (k: string) => values.get(k);

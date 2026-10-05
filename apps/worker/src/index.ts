@@ -281,7 +281,7 @@ async function renderJob(deps: WorkerDeps, artifactId: string) {
   if (!a) return;
   const [run] = await db.query<{
     id: string; run_number: number; created_at: string | Date; engine_version: string; policy_version: string; policy_hash: string;
-    input_hash: string; result_hash: string; result: RunResult; input_snapshot: { input: EngineInput; assumptions: ArtifactInput["assumptions"] };
+    input_hash: string; result_hash: string; result: RunResult; input_snapshot: { input: EngineInput; assumptions: ArtifactInput["assumptions"]; notFound?: ArtifactInput["notFound"] };
   }>(`select * from runs where id = $1`, [a.run_id]);
   const [deal] = await db.query<{ name: string; asset_type: string; location: string; currency: Currency | null; province: string | null }>(
     `select name, asset_type, location, currency, province from deals where id = $1`,
@@ -308,6 +308,7 @@ async function renderJob(deps: WorkerDeps, artifactId: string) {
     result: run.result,
     input: run.input_snapshot.input,
     assumptions: run.input_snapshot.assumptions.map((x) => ({ ...x, unit: (FIELD_BY_KEY.get(x.fieldKey)?.unit ?? "$") as FieldUnit })),
+    notFound: run.input_snapshot.notFound ?? [],
     decision: decision
       ? { decision: decision.decision, rationale: decision.rationale, conditions: decision.conditions, decidedBy: decision.name, createdAt: new Date(decision.created_at).toISOString() }
       : null,

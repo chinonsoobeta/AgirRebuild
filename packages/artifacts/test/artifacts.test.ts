@@ -73,7 +73,7 @@ describe("artifacts", () => {
       { fieldKey: "refinance_month", label: "Refinance month", detail: "no refinance" },
     ];
     for (const kind of ["ic_memo", "lender_package"] as const) {
-      const x = { ...mapleInput(kind), notFound } as ArtifactInput;
+      const x = { ...mapleInput(kind), notFound };
       const model = buildModel(x);
       const text = visibleText(renderHtml(model));
       expect(text).toContain("Not found in the documents");
@@ -83,7 +83,7 @@ describe("artifacts", () => {
       // A run with nothing unread, or one made before this list existed, has no such section.
       expect(visibleText(renderHtml(buildModel(mapleInput(kind))))).not.toContain("Not found in the documents");
     }
-    const xlsx = await renderArtifact({ ...mapleInput("model_export"), notFound } as ArtifactInput, "xlsx");
+    const xlsx = await renderArtifact({ ...mapleInput("model_export"), notFound }, "xlsx");
     const ExcelJS = (await import("exceljs")).default;
     const wb = new ExcelJS.Workbook();
     await wb.xlsx.load(Buffer.from(xlsx.bytes) as never);

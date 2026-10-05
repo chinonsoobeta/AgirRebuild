@@ -37,6 +37,8 @@ export type ArtifactInput = {
     confirmedByReview?: boolean;
     confirmedAt?: string | null;
   }[];
+  /** Optional lines no document gave, as the run recorded them; absent on runs made before the list existed. */
+  notFound?: { fieldKey: string; itemKey?: string; label: string; detail?: string }[];
   decision: { decision: string; rationale: string; conditions: string | null; decidedBy: string; createdAt: string } | null;
 };
 
@@ -235,6 +237,15 @@ function sponsorStatedBlocks(f: Formatter, x: ArtifactInput): Block[] {
   ];
 }
 
+/** The one sentence for a line no document gave: a template, with no number. */
+export const notFoundSentence = (n: { label: string; detail?: string }) => `${n.label} \u2014 not found. The run treats this as: ${n.detail ?? "nothing"}.`;
+
+function notFoundBlocks(x: ArtifactInput): Block[] {
+  const list = x.notFound ?? [];
+  if (list.length === 0) return [];
+  return [{ type: "heading", text: "Not found in the documents" }, ...list.map((n): Block => ({ type: "paragraph", text: notFoundSentence(n) }))];
+}
+
 export function buildModel(x: ArtifactInput): DocModel {
   const f = new Formatter(x.result);
   const r = x.result;
@@ -268,7 +279,7 @@ export function buildModel(x: ArtifactInput): DocModel {
     }
     blocks.push(sourcesAndUses(f, x), revenueProgram(f, x), operations(f), gates(f, r), stresses(f, r), annual(f, r, false));
     blocks.push({ type: "heading", text: "Checks" }, checks(f, r));
-    blocks.push(inputsAppendix(f, x));
+    blocks.push(...notFoundBlocks(x), inputsAppendix(f, x));
   } else {
     blocks.push(verdict, ...sponsorStatedBlocks(f, x));
     const i = x.input;
@@ -294,7 +305,7 @@ export function buildModel(x: ArtifactInput): DocModel {
     blocks.push({ type: "table", caption: "Debt and coverage", columns: [{ label: "Term" }, { label: "Value", numeric: true }], rows: debtRows });
     blocks.push(sourcesAndUses(f, x), operations(f), annual(f, r, true), stresses(f, r));
     blocks.push({ type: "heading", text: "Checks" }, checks(f, r));
-    blocks.push(inputsAppendix(f, x));
+    blocks.push(...notFoundBlocks(x), inputsAppendix(f, x));
   }
   const footer =
     `Every figure traces to an approved input or to ${runLabel} of this deal. ` +

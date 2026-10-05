@@ -1,5 +1,5 @@
 import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
-import { useState, type FormEvent } from "react";
+import { useState, type FormEvent, type ReactNode } from "react";
 import { SF_PER_M2 } from "@agir/numbers";
 import { api, type Assumption, type Review as ReviewData, type Source } from "../api";
 import { Banner, canEdit, DealHeader, ErrorText, Glossary, StatusTag, useDeal, useSession } from "../components/ui";
@@ -65,6 +65,7 @@ export function Review({ dealId }: { dealId: string }) {
   const review = useQuery({ queryKey: ["review", dealId], queryFn: () => api.get<ReviewData>(`/deals/${dealId}/review`) });
   const [focus, setFocus] = useState<string | null>(null);
   const [editing, setEditing] = useState<string | null>(null);
+  const [entering, setEntering] = useState<string | null>(null);
   const [picked, setPicked] = useState<Record<string, number>>({});
   const [formError, setFormError] = useState<unknown>(null);
   const refresh = () => Promise.all([qc.invalidateQueries({ queryKey: ["review", dealId] }), qc.invalidateQueries({ queryKey: ["deal", dealId] })]);
@@ -77,7 +78,10 @@ export function Review({ dealId }: { dealId: string }) {
   });
   const enter = useMutation({
     mutationFn: (b: { fieldKey: string; itemKey?: string | null; value: number; reason: string }) => api.post(`/deals/${dealId}/values`, b),
-    onSuccess: () => refresh(),
+    onSuccess: () => {
+      setEntering(null);
+      return refresh();
+    },
   });
   const defaults = useMutation({ mutationFn: (fields: string[]) => api.post(`/deals/${dealId}/defaults`, { fields }), onSuccess: () => refresh() });
   const bulk = useMutation({
@@ -126,6 +130,34 @@ export function Review({ dealId }: { dealId: string }) {
       {a.material && <p className="help row" style={{ gap: 6 }}><I.Lock />{t(solo ? "review.materialNoteSolo" : "review.materialNote")}</p>}
       <ErrorText error={formError ?? act.error} />
       <div className="row"><button className="btn primary small" type="submit">{t("review.saveValue")}</button><button className="btn quiet small" type="button" onClick={() => setEditing(null)}>{t("common.cancel")}</button></div>
+    </form>
+  );
+
+  // The form that enters a value for a field no document gave: a missing input, or a line that was not found.
+  const entryForm = (m: ReviewData["missing"][number], id: string, head: ReactNode) => (
+    <form
+      key={id}
+      className="stack"
+      style={{ gap: 8, paddingTop: 12, borderTop: "1px solid var(--sunken)" }}
+      onSubmit={(e) => {
+        e.preventDefault();
+        setFormError(null);
+        const fd = new FormData(e.currentTarget);
+        try {
+          enter.mutate({ fieldKey: m.fieldKey, itemKey: m.itemKey ?? null, ...enteredInUnit(m.unit, fd.get("unit") === "m2", f.parse(fd.get("value")), String(fd.get("reason")), lang) });
+        } catch (err) {
+          setFormError(err);
+        }
+      }}
+    >
+      {head}
+      {editable && (
+        <div className="row" style={{ alignItems: "flex-start" }}>
+          <ValueInput unit={m.unit} id={id} />
+          <input className="input grow" name="reason" aria-label={t("review.sourceFor", { label: name(m) })} placeholder={t("review.sourceHint")} minLength={10} required style={{ minWidth: 220, flexBasis: 240 }} />
+          <button className="btn small" type="submit" style={{ height: 44 }}>{t("common.save")}</button>
+        </div>
+      )}
     </form>
   );
 
@@ -243,35 +275,33 @@ export function Review({ dealId }: { dealId: string }) {
               <ErrorText error={enter.error ?? defaults.error ?? formError} />
               {r.missing.map((m) => {
                 const id = `m-${m.fieldKey}-${m.itemKey ?? ""}`;
-                return (
-                  <form
-                    key={id}
-                    className="stack"
-                    style={{ gap: 8, paddingTop: 12, borderTop: "1px solid var(--sunken)" }}
-                    onSubmit={(e) => {
-                      e.preventDefault();
-                      setFormError(null);
-                      const fd = new FormData(e.currentTarget);
-                      try {
-                        enter.mutate({ fieldKey: m.fieldKey, itemKey: m.itemKey ?? null, ...enteredInUnit(m.unit, fd.get("unit") === "m2", f.parse(fd.get("value")), String(fd.get("reason")), lang) });
-                      } catch (err) {
-                        setFormError(err);
-                      }
-                    }}
-                  >
+                return entryForm(m, id,
+                  <>
                     <div className="spread">
                       <label htmlFor={id} style={{ fontWeight: 600 }}>{name(m)}</label>
                       <span className="small faint">{L.group(m.groupLabel ? groupKey(m.groupLabel) : "")}{m.default !== null ? t("review.default", { v: f.value(m.default, m.unit) }) : ""}{m.material ? t("review.materialTag") : ""}</span>
                     </div>
                     {L.help(m.fieldKey, m.help) && <span className="help">{L.help(m.fieldKey, m.help)}</span>}
-                    {editable && (
-                      <div className="row" style={{ alignItems: "flex-start" }}>
-                        <ValueInput unit={m.unit} id={id} />
-                        <input className="input grow" name="reason" aria-label={t("review.sourceFor", { label: name(m) })} placeholder={t("review.sourceHint")} minLength={10} required style={{ minWidth: 220, flexBasis: 240 }} />
-                        <button className="btn small" type="submit" style={{ height: 44 }}>{t("common.save")}</button>
-                      </div>
-                    )}
-                  </form>
+                  </>,
+                );
+              })}
+            </div>
+          )}
+
+          {r.notFound.length > 0 && (
+            <div className="card">
+              <div className="row"><span style={{ fontSize: 17, fontWeight: 600 }}>{t("review.notFound")}</span></div>
+              <p className="small muted">{t("review.notFoundBody")}</p>
+              {r.notFound.map((m) => {
+                const id = `n-${m.fieldKey}`;
+                return (
+                  <div key={id} className="stack" style={{ gap: 8, paddingTop: 12, borderTop: "1px solid var(--sunken)" }}>
+                    <div className="spread">
+                      <span>{t("review.notFoundLine", { field: name(m), meaning: L.absent(m.fieldKey) })}</span>
+                      {editable && entering !== id && <button className="btn quiet small" type="button" onClick={() => setEntering(id)}>{t("review.notFoundEnter")}</button>}
+                    </div>
+                    {entering === id && entryForm(m, id, <label htmlFor={id} className="sr-only">{name(m)}</label>)}
+                  </div>
                 );
               })}
             </div>

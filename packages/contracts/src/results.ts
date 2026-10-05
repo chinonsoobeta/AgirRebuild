@@ -165,6 +165,8 @@ export type Readiness = {
   conflicting: ReadinessItem[];
   pending: ReadinessItem[];
   impossible: ReadinessItem[];
+  /** Optional lines no document gave; `detail` is what the run treats each as. A disclosure with no number: it never blocks. */
+  notFound: ReadinessItem[];
   /** Missing fields that have a static default the analyst may accept. */
   defaultable: string[];
 };

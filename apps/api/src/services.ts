@@ -232,6 +232,10 @@ export async function reviewView(tx: Db, dealId: string) {
       const def = FIELD_BY_KEY.get(m.fieldKey)!;
       return { ...m, unit: def.unit, material: def.material, default: def.default ?? null, help: def.help ?? null, groupLabel: FIELD_GROUP_LABELS[def.group] };
     }),
+    notFound: readiness.notFound.map((m) => {
+      const def = FIELD_BY_KEY.get(m.fieldKey)!;
+      return { ...m, unit: def.unit, material: def.material, default: def.default ?? null, help: def.help ?? null, groupLabel: FIELD_GROUP_LABELS[def.group] };
+    }),
     other,
   };
 }
@@ -270,7 +274,7 @@ export async function createRun(tx: Db, dealId: string) {
     engine_version: ENGINE_VERSION,
     policy_version: POLICY_V1.version,
     policy_hash: POLICY_HASH,
-    input_snapshot: { input, assumptions: used },
+    input_snapshot: { input, assumptions: used, notFound: readiness.notFound },
     input_hash: inputHash,
     assumptions_hash: h,
     result,
