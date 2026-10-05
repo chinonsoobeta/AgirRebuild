@@ -90,6 +90,9 @@ const COVERAGE_RE = /\b(dscr|dcr|debt service coverage|couverture|rcsd|rcd|ccd)\
 const TERM_RE = /\b(term|terme|maturity|matures?|echeance|duree du pret)\b/;
 const TERM_AFTER_RE = /^\s*(loan |initial |renewal |fixed |conversion )?(term|terme)\b/;
 const AMORT_RE = /\bamorti[sz]\w*/;
+const IO_RE = /\b(interest[- ]only|io|interets? seulement)\b/;
+const INCLUDING_RE = /\b(including|incl|includes|comprenant|incluant|inclut)\b/;
+const BUDGET_NAME_RE = new RegExp(`\\b(${FIELDS.filter((f) => f.group === "budget").flatMap((f) => f.aliases).map((a) => a.replace(/[.*+?^${}()|[\]\\/]/g, "\\$&")).join("|")})\\b`);
 const FEE_RE = /\b(fees?|frais|honoraires|premiums?|prime d assurance)\b/;
 const FEE_AFTER_RE = /^\s*(de |d )?(commitment |lender |standby |structuring |broker |insurance |engagement |ouverture |dossier )?(fees?|premium|frais|honoraires|prime d assurance)\b/;
 const PER_INVESTOR_RE = /\b(minimum investment|min investment|minimum subscription|investissement minimal|investissement minimum|souscription minimale|souscription minimum|per limited partner|per investor|par commanditaire|par investisseur)\b/;
@@ -128,8 +131,15 @@ function lenderFigure(rawLabel: string, t: NumberToken, opts: MapOptions): strin
   const words = plain.split(" ");
   const near = (prose || opts.ahead ? [...words, ...words_(opts.ahead ?? "").split(" ")].filter(Boolean).slice(-4) : words).join(" ");
   if (LIMIT_RE.test(without(near, LIMIT_RE)) && !COVERAGE_RE.test(plain)) return "A lender's limit, not the deal's figure";
-  if ((t.unit === "months" || t.unit === "years") && ((TERM_RE.test(without(plain, TERM_RE)) && !AMORT_RE.test(plain)) || TERM_AFTER_RE.test(tail))) return "A loan's term, not the build period, hold or amortization";
-  if (!opts.budget && (FEE_RE.test(without(plain, FEE_RE)) || FEE_AFTER_RE.test(tail))) return "A fee or premium, not an input";
+  if ((t.unit === "months" || t.unit === "years") && ((TERM_RE.test(without(plain, TERM_RE)) && !AMORT_RE.test(plain)) || TERM_AFTER_RE.test(tail)) && !IO_RE.test(plain) && !IO_RE.test(tail.split(/[,;.]/)[0] ?? "")) return "A loan's term, not the build period, hold or amortization";
+  // A fee named after a budget field or inside an "including" list is a part of that cost, not the figure's label.
+  const full = without(words_(rawLabel), FEE_RE);
+  const before = full.slice(0, Math.max(full.search(FEE_RE), 0));
+  const listed = INCLUDING_RE.test(before) || BUDGET_NAME_RE.test(before);
+  if (!opts.budget && ((FEE_RE.test(without(plain, FEE_RE)) && !listed) || FEE_AFTER_RE.test(tail))) return "A fee or premium, not an input";
+  // A leased or occupied share (in its own label or right after it) with a condition marker in its clause is the lender's condition.
+  const after = prose && at >= 0 ? (ctx.slice(at + raw.length).split(/[,;.]/)[0] ?? "") : "";
+  if (t.unit === "%" && (LEASED_RE.test(plain) || LEASED_RE.test(after.split(" ").slice(0, 6).join(" "))) && CONDITION_RE.test(`${plain} ${after}`)) return LENDER_CONDITION;
   return null;
 }
 
@@ -316,7 +326,6 @@ export function mapToken(rawLabel: string, t: NumberToken, opts: MapOptions = {}
   const lender = lenderFigure(rawLabel, t, opts);
   if (lender) return { kind: "ignored", reason: lender };
   const where = prose && opts.context ? normalizeLabel(opts.context).label : label;
-  if (t.unit === "%" && LEASED_RE.test(where) && CONDITION_RE.test(where)) return { kind: "ignored", reason: LENDER_CONDITION };
   const scope: Scope = scopeIn(label) ?? opts.scope ?? "senior";
   const scoped = (key: string): FieldDef => FIELD_BY_KEY.get(scope === "senior" ? key : (SCOPE_FIELD[scope][key] ?? key))!;
   const asField = (def: FieldDef): Mapped | null => {
@@ -397,7 +406,10 @@ export function mapToken(rawLabel: string, t: NumberToken, opts: MapOptions = {}
   // An occupancy that is a lender's condition, or true only today, is not the stabilized assumption.
   const notAssumed = (key: string): Mapped | null => {
     if (key !== "stabilized_occupancy_pct" && key !== "item_occupancy_pct") return null;
-    if (CONDITION_RE.test(where)) return { kind: "ignored", reason: LENDER_CONDITION };
+    // In prose only the clause the figure stands in counts, not a condition elsewhere in the sentence.
+    const lead = foldText(rawLabel.split(/[,;]/).pop() ?? "").trim();
+    const clauseText = prose && opts.context && lead ? (foldText(opts.context).split(/[,;]/).find((c) => c.includes(lead)) ?? where) : where;
+    if (CONDITION_RE.test(normalizeLabel(clauseText).label)) return { kind: "ignored", reason: LENDER_CONDITION };
     return CURRENT_RE.test(where) && !STABILIZED_RE.test(label) ? { kind: "ignored", reason: "A current occupancy is not the stabilized assumption" } : null;
   };
   // A unit type in parentheses ("End units (3 bed)") names the item.

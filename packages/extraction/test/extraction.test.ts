@@ -1449,9 +1449,10 @@ describe("a lender's limits, terms, fees and conditions are not inputs", () => {
     });
     test("a condition marker elsewhere in the sentence does not set aside a figure that is not about occupancy", () => {
       const r = read("Conditions: 50% of the retail pre-leased before first advance; min DSCR 1.25x at conversion; max loan-to-cost 65% - you're at 65.0% so no room");
-      expect(r.candidates.map((c) => [c.fieldKey, c.value])).toContainEqual(["stated_ltc_pct", 65]);
       expect(noteOf(r, 50)).toBe(CONDITION);
-      expect(r.other.some((o) => o.value === 65 && o.note === LIMIT)).toBe(true);
+      expect(r.other.filter((o) => o.value === 65).map((o) => o.note)).toEqual([LIMIT, "No field matches this label"]);
+      // negative: a deal's own loan-to-cost beside a condition is still read
+      expect(pick(read("Stated LTC 65%; 50% of the retail pre-leased before first advance."))).toEqual([["stated_ltc_pct", 65]]);
       expect(pick(read("Stabilized occupancy is 96%, and funding requires 90% occupancy."))).toEqual([["stabilized_occupancy_pct", 96]]);
     });
     test("a fee listed as a part does not make a cost line a fee", () => {
