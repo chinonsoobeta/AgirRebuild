@@ -64,7 +64,8 @@ describe("breakeven: what would make each failing gate pass (scratch mode)", () 
   test("only failing gates get rows", () => {
     const run = underwrite(deal(), POLICY_V1);
     const failing = run.verdict.gates.filter((g) => g.status === "failed").map((g) => g.key);
-    expect(failing).not.toContain("equity_multiple");
+    // Task 39: with the lease-up months now carrying fixed costs this deal also misses the base equity multiple, so every failing gate gets rows.
+    expect(failing).toContain("equity_multiple");
     const { rows } = breakeven(deal(), POLICY_V1);
     expect([...new Set(rows.map((r) => r.gate))].sort()).toEqual([...failing].sort());
     expect(rows.length).toBe(failing.length * 5);

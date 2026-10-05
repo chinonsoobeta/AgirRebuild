@@ -95,6 +95,9 @@ function sourcesAndUses(f: Formatter, x: ArtifactInput): Block {
   ];
   if (i.budget.other > 0) rows.push(["Other costs", f.input(i.budget.other, "$", "other_cost")]);
   else if (i.budget.other < 0) rows.push(["Other costs (credit)", f.input(i.budget.other, "$", "other_cost")]);
+  if (x.result.scenarios[0]?.metrics.find((m) => m.key === "leaseup_operating_cost")?.status === "VALID") {
+    rows.push(["Operating costs during lease-up", f.metric("base", "leaseup_operating_cost")]);
+  }
   rows.push(["Capitalized interest", f.metric("base", "capitalized_interest")]);
   rows.push(["Total uses", f.metric("base", "total_development_cost")]);
   const usesEnd = rows.length - 1;
@@ -308,6 +311,8 @@ export function buildModel(x: ArtifactInput): DocModel {
       ["Debt yield", f.metric("base", "debt_yield")],
       ["Sizing DSCR (weakest year)", f.metric("base", "sizing_dscr")],
       ["Contractual DSCR (weakest year)", f.metric("base", "contractual_dscr")],
+      ["Interest-only DSCR (year 1)", f.metric("base", "io_dscr_year1")],
+      ["Cumulative cash shortfall after stabilization", f.metric("base", "cumulative_cash_shortfall")],
       ["Break-even occupancy", f.metric("base", "break_even_occupancy")],
     );
     blocks.push({ type: "table", caption: "Debt and coverage", columns: [{ label: "Term" }, { label: "Value", numeric: true }], rows: debtRows });

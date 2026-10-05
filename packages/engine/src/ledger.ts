@@ -13,8 +13,10 @@
 //           fully drawn at S (or is zero if debt alone suffices), and an equity
 //           overrun never coexists with unused commitment.
 // Revenue   Rent grows by hold year. Occupancy ramps linearly through lease-up
-//           only when the deal opts in; otherwise there is no income and no
-//           operating cost before S.
+//           only when the deal opts in; otherwise there is no income before S.
+//           With the ramp off the fixed operating costs are still paid every
+//           month of lease-up, as a cost funded like any other and part of TDC;
+//           with the ramp on they are netted against the lease-up income.
 // Expenses  Decision 8: the fixed part grows at expense growth; the variable
 //           part is a share of that month's EGI. A single ratio is fixed
 //           dollars equal to that share of year-1 stabilized EGI.
@@ -56,6 +58,8 @@ export type Ledger = {
   costsBeforeFinancing: number;
   capitalizedInterest: number;
   tdc: number;
+  /** Fixed operating cost paid in the lease-up months with the ramp off, inside tdc (0 when there is none). */
+  leaseupOperatingCost: number;
   commitments: number;
   drawnDebtAtS: number;
   requiredEquity: number;
@@ -64,6 +68,10 @@ export type Ledger = {
   /** Mezzanine interest before S above its commitment, added to the mezzanine balance. */
   mezzAccruedBeyondCommitment: number;
   balancesAtS: Record<TrancheKey, number>;
+  /** Year-1 interest on the balances in force at S, at their own rates. */
+  ioDebtServiceAtS: number;
+  /** Sum over the hold of the negative monthly cash flow after debt service, as a positive amount. */
+  cumulativeCashShortfall: number;
   annual: AnnualRow[];
   year1: { gpr: number; egi: number; opex: number; fixedOpex: number; variableShare: number; noi: number };
   finalYearNoi: number;
@@ -221,16 +229,24 @@ export function buildLedger(input: EngineInput): Ledger {
 
   // ---- Cost placement ------------------------------------------------------
   const b = input.budget;
+  const y1Egi = stabilizedYear1Egi(input);
+  const fixedBase = input.fixedOpexAnnual ?? ((input.expenseRatioPct ?? 0) / 100) * y1Egi;
+  const variableShare = (input.variableExpensePct ?? 0) / 100;
   const costsBeforeFinancing = b.land + b.hard + b.soft + b.contingency + b.other;
   const spread = allocate(b.hard + b.soft + b.contingency + b.other, drawShares(C, input.sCurveDraws));
   const costByMonth: number[] = new Array(Math.max(S, 1)).fill(0);
   costByMonth[0] = (costByMonth[0] ?? 0) + b.land;
   spread.forEach((amt, i) => (costByMonth[i] = (costByMonth[i] ?? 0) + amt));
+  // Fixed operating costs at year-1 levels in every lease-up month. With the ramp on they are already netted
+  // against lease-up income (operationsAt), so they are charged here only when the ramp is off.
+  const leaseupMonthly = !input.leaseUpRamp && input.leaseUpMonths > 0 ? fixedBase / 12 : 0;
+  for (let m = C; m < S && leaseupMonthly > 0; m++) costByMonth[m] = (costByMonth[m] ?? 0) + leaseupMonthly;
+  const leaseupOperatingCost = leaseupMonthly * (leaseupMonthly > 0 ? input.leaseUpMonths : 0);
 
   // ---- Solve required equity so the debt is exactly fully drawn at S --------
   const stack = tranches(input);
   const commitments = sum(stack.map((t) => t.terms.amount));
-  let equityBudget = Math.max(0, costsBeforeFinancing - commitments);
+  let equityBudget = Math.max(0, costsBeforeFinancing + leaseupOperatingCost - commitments);
   let sim = simulateConstruction(input, Math.max(S, 1), costByMonth, equityBudget);
   let converged = false;
   for (let i = 0; i < 200; i++) {
@@ -249,14 +265,11 @@ export function buildLedger(input: EngineInput): Ledger {
     sim = simulateConstruction(input, Math.max(S, 1), costByMonth, equityBudget);
   }
   const capitalizedInterest = sum(sim.capitalizedInterest) + sum(sim.interestPaidByEquity);
-  const tdc = costsBeforeFinancing + capitalizedInterest;
+  const tdc = costsBeforeFinancing + leaseupOperatingCost + capitalizedInterest;
   const equityContributed = sum(sim.equityDraw);
   const drawnDebtAtS = sim.balances.mezzanine + sim.balances.senior;
 
   // ---- Operations ------------------------------------------------------------
-  const y1Egi = stabilizedYear1Egi(input);
-  const fixedBase = input.fixedOpexAnnual ?? ((input.expenseRatioPct ?? 0) / 100) * y1Egi;
-  const variableShare = (input.variableExpensePct ?? 0) / 100;
 
   // ---- Debt after stabilization ---------------------------------------------
   type Live = {
@@ -288,6 +301,7 @@ export function buildLedger(input: EngineInput): Ledger {
   for (let y = 0; y <= H; y++) {
     annual.push({ year: y, gpr: 0, egi: 0, opex: 0, noi: 0, debtService: 0, sizingDebtService: 0, cashFlow: 0 });
   }
+  let cumulativeCashShortfall = 0;
   const seniorSizingMonths: number[] = [];
   const mezzSizingMonths: number[] = [];
 
@@ -353,6 +367,7 @@ export function buildLedger(input: EngineInput): Ledger {
     a.debtService += debtService;
     a.sizingDebtService += sizing;
     a.cashFlow += noi - debtService;
+    if (m >= S && noi - debtService < 0) cumulativeCashShortfall += debtService - noi;
     rows.push({
       month: m,
       phase,
@@ -415,6 +430,7 @@ export function buildLedger(input: EngineInput): Ledger {
     costsBeforeFinancing,
     capitalizedInterest,
     tdc,
+    leaseupOperatingCost,
     commitments,
     drawnDebtAtS,
     requiredEquity: equityContributed,
@@ -422,6 +438,8 @@ export function buildLedger(input: EngineInput): Ledger {
     converged,
     mezzAccruedBeyondCommitment: sim.mezzAccruedBeyondCommitment,
     balancesAtS: sim.balances,
+    ioDebtServiceAtS: stack.reduce((acc, t) => acc + (sim.balances[t.key] * t.terms.ratePct) / 100, 0),
+    cumulativeCashShortfall,
     annual,
     year1: {
       gpr: y1.gpr,

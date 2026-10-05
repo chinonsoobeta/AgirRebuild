@@ -15,6 +15,7 @@ export type MetricDef = {
 export const METRICS: readonly MetricDef[] = [
   { key: "total_development_cost", label: "Total development cost", unit: "$", formula: "land + hard + soft + contingency + other + capitalized interest", headline: 1 },
   { key: "capitalized_interest", label: "Capitalized interest", unit: "$", formula: "interest accrued on drawn debt before stabilization" },
+  { key: "leaseup_operating_cost", label: "Operating costs during lease-up", unit: "$", formula: "fixed operating costs at year-1 levels for each lease-up month, charged to total development cost when lease-up income is not credited" },
   { key: "hard_and_soft_cost", label: "Costs before financing", unit: "$", formula: "land + hard + soft + contingency + other" },
   { key: "gross_potential_rent", label: "Gross potential rent (year 1)", unit: "$", formula: "sum of component rent over the first stabilized year" },
   { key: "effective_gross_income", label: "Effective gross income (year 1)", unit: "$", formula: "rent x occupancy + other income, first stabilized year" },
@@ -36,8 +37,10 @@ export const METRICS: readonly MetricDef[] = [
   { key: "contractual_dscr", label: "Contractual DSCR (weakest year)", unit: "x", formula: "min over hold years of NOI / debt service actually due", headline: 12 },
   { key: "senior_dscr_year1", label: "Senior DSCR (year 1)", unit: "x", formula: "year-1 NOI / senior amortizing debt service" },
   { key: "mezz_dscr_year1", label: "All-in DSCR with mezzanine (year 1)", unit: "x", formula: "year-1 NOI / senior + mezzanine amortizing debt service" },
+  { key: "io_dscr_year1", label: "Interest-only DSCR (year 1)", unit: "x", formula: "year-1 NOI / interest-only debt service on the senior and mezzanine balances at stabilization" },
   { key: "break_even_occupancy", label: "Break-even occupancy (year 1)", unit: "%", formula: "(fixed costs + debt service) / (rent x (1 - variable share))" },
   { key: "cash_on_cash_year1", label: "Cash-on-cash (year 1)", unit: "%", formula: "year-1 cash flow after debt service / required equity" },
+  { key: "cumulative_cash_shortfall", label: "Cumulative cash shortfall after stabilization", unit: "$", formula: "sum over the hold of the negative monthly cash flow after debt service, as a positive amount" },
   { key: "equity_multiple", label: "Equity multiple", unit: "x", formula: "total distributions / total contributions", headline: 13 },
   { key: "equity_irr", label: "Equity IRR", unit: "%", formula: "rate that sets the dated equity cash flows' NPV to zero", headline: 14 },
   { key: "peak_equity", label: "Peak equity outstanding", unit: "$", formula: "largest cumulative net contribution" },

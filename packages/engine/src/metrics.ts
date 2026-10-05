@@ -34,6 +34,13 @@ export function computeMetrics(input: EngineInput, L: Ledger): ScenarioMetrics {
 
   out.push(m("total_development_cost", tdc));
   out.push(m("capitalized_interest", L.capitalizedInterest));
+  out.push(
+    input.leaseUpMonths === 0
+      ? na("leaseup_operating_cost", "The deal has no lease-up period.")
+      : input.leaseUpRamp
+        ? na("leaseup_operating_cost", "Lease-up income is credited, so fixed costs are netted against it, not added to total development cost.")
+        : m("leaseup_operating_cost", L.leaseupOperatingCost),
+  );
   out.push(m("hard_and_soft_cost", L.costsBeforeFinancing));
   out.push(m("gross_potential_rent", y1.gpr));
   out.push(m("effective_gross_income", y1.egi));
@@ -89,6 +96,11 @@ export function computeMetrics(input: EngineInput, L: Ledger): ScenarioMetrics {
         : na("senior_dscr_year1", "No senior loan is in force in year 1."),
     );
   }
+  if (!hasDebt) out.push(na("io_dscr_year1", "The deal has no debt."));
+  else {
+    const io = ratio(noi, L.ioDebtServiceAtS);
+    out.push(io === null ? nm("io_dscr_year1", "No interest is due on the debt at stabilization.") : m("io_dscr_year1", io));
+  }
   out.push(
     L.mezzSizingYear1 > 0
       ? m("mezz_dscr_year1", ratio(noi, L.seniorSizingYear1 + L.mezzSizingYear1))
@@ -101,6 +113,8 @@ export function computeMetrics(input: EngineInput, L: Ledger): ScenarioMetrics {
   out.push(beo === null ? nm("break_even_occupancy", "No rent to cover costs with.") : m("break_even_occupancy", beo * 100));
   const coc = ratio(y1Row.cashFlow, L.requiredEquity);
   out.push(coc === null ? nm("cash_on_cash_year1", "No equity is contributed.") : m("cash_on_cash_year1", coc * 100));
+
+  out.push(m("cumulative_cash_shortfall", L.cumulativeCashShortfall));
 
   const contributions = -sum(L.equityFlows.filter((f) => f.amount < 0).map((f) => f.amount));
   const distributions = sum(L.equityFlows.filter((f) => f.amount > 0).map((f) => f.amount));
