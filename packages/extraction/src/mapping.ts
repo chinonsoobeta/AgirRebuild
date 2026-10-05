@@ -36,19 +36,30 @@ const ITEMIZED_ALIASES: Record<string, string[]> = {
 export type Scope = "senior" | "mezzanine" | "refinance";
 
 const SCOPE_WORDS: Record<Scope, RegExp> = {
-  mezzanine: /\b(mezzanine|mezz|second mortgage|second[- ]ranking|subordinate loan|deuxieme rang|pret de second rang)\b/,
+  mezzanine: /\b(mezzanine|mezz|second mortgage|2nd mortgage|second charge|second[- ]ranking|second[- ]position|junior|subordinate loan|deuxieme rang|deuxieme hypotheque|pret de second rang|second rang)\b/,
   refinance: /\b(take-?out|take out|refinanc\w*|permanent loan|long[- ]term mortgage|pret permanent)\b/,
   senior: /\b(senior|construction loan|first mortgage|premier rang|pret de construction)\b/,
 };
 const TERM_SHEET_RE = /\b(term sheet|feuille de modalites)\b/;
 const foldText = (t: string) => t.toLowerCase().normalize("NFD").replace(/[\u0300-\u036f]/g, "").replace(/[’']/g, " ");
 
-/** The one scope a title, heading or label names; null when it names none, or two or more. A term sheet that names no other is senior. */
-export function scopeIn(text: string): Scope | null {
-  const f = foldText(text);
+// "Postponed to X" / "subordinate to X": the document's loan is the second-ranking one; X, whatever follows, is not named.
+const SUBORDINATE_RE = /\b(subordinate[ds]?|postponed|subordonnee?s?|postposee?s?)\s+(to|a|au|aux)\b/;
+
+/** The one scope a title, heading or label names; null when it names none, or two or more. A term sheet that names no other is senior unless `generic` is false. */
+export function scopeIn(text: string, generic = true): Scope | null {
+  let f = foldText(text);
+  const sub = SUBORDINATE_RE.exec(f);
+  if (sub) f = f.slice(0, sub.index) + " mezzanine";
   const named = (Object.keys(SCOPE_WORDS) as Scope[]).filter((k) => SCOPE_WORDS[k].test(f));
-  if (named.length === 0 && TERM_SHEET_RE.test(f)) named.push("senior");
+  if (generic && named.length === 0 && TERM_SHEET_RE.test(f)) named.push("senior");
   return named.length === 1 ? named[0]! : null;
+}
+
+// A table row or line whose label states the loan's rank or facility; its value then names the loan the document or table is about.
+const RANK_LABEL_RE = /^(facility|loan type|rank|ranking|priority|position|charge|security|mortgage position|rang|type de pret|nature du pret|priorite|hypotheque)$/;
+export function rankScope(label: string, value: string): Scope | null {
+  return RANK_LABEL_RE.test(foldText(label).replace(/[^a-z ]/g, " ").trim().replace(/\s+/g, " ")) ? scopeIn(value, false) : null;
 }
 
 // The scope's own field for each senior-loan field a generic label can reach. A field the scope's loan lacks has no entry.

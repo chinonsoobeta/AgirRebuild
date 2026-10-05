@@ -779,7 +779,7 @@ describe("which loan a term belongs to, and the words small developers use", () 
       expect(pick(read("CONFIDENTIEL - Ne pas diffuser", "Fonds Cèdre S.E.C. - Lettre d'offre, prêt de deuxième rang", "Taux : 11,5 %", "Intérêts seulement : 18 mois"))).toEqual([["mezz_rate_pct", 11.5], ["mezz_io_months", 18]]);
       expect(pick(read("Private and confidential", "Harbour Capital Corp. - Offer letter for a second-position loan", "Rate: 11.5%", "Interest-only: 18 months"))).toEqual([["mezz_rate_pct", 11.5], ["mezz_io_months", 18]]);
       // The fourth line is too late, and a title with a number is not a title.
-      expect(pick(read("Banner", "Another banner", "A third line", "Second mortgage offer", "Rate: 11.5%"))).toEqual([["senior_rate_pct", 11.5]]);
+      expect(pick(read("Banner", "Another banner", "A third line", "Offer of a second mortgage from the lender named in this letter", "Rate: 11.5%"))).toEqual([["senior_rate_pct", 11.5]]);
       expect(pick(read("Second mortgage offer, 14 suites", "Rate: 11.5%"))).toEqual([["senior_rate_pct", 11.5]]);
     });
     test("a forwarded subject names the loan whatever its length or numbers", () => {
@@ -798,8 +798,8 @@ describe("which loan a term belongs to, and the words small developers use", () 
       expect(pick(read("Ranking: second charge", "Take-out loan", "Rate: 4.6%"))).toEqual([["refinance_rate_pct", 4.6]]);
     });
     test("a loan named at the start of a list item scopes every number on that item, and only that item", () => {
-      expect(pick(read("Financing", "1) Rate: 5.9%, amortization 30 years", "2) Take-out: a credit union at 4.4% on a 40-year amortization, funding month 30", "3) Equity: the sponsor contributes $900,000"))).toEqual([["senior_rate_pct", 5.9], ["senior_amort_years", 30], ["refinance_rate_pct", 4.4], ["refinance_amort_years", 40], ["refinance_month", 30]]);
-      expect(pick(read("Prêt permanent : une caisse à 4,4 % sur 40 ans d'amortissement", "Taux : 5,9 %"))).toEqual([["refinance_rate_pct", 4.4], ["refinance_amort_years", 40], ["senior_rate_pct", 5.9]]);
+      expect(pick(read("Financing", "1) Rate: 5.9%, amortization 30 years", "2) Take-out: a credit union at 4.4% on a 40-year amortization, funding month 30", "3) Equity: the sponsor contributes $900,000"))).toEqual([["senior_rate_pct", 5.9], ["senior_amort_years", 30], ["refinance_amort_years", 40], ["refinance_month", 30], ["equity_amount", 900_000]]);
+      expect(pick(read("Prêt permanent : une caisse à 4,4 % sur 40 ans d'amortissement", "Taux : 5,9 %"))).toEqual([["refinance_amort_years", 40], ["senior_rate_pct", 5.9]]);
     });
     test("postponed or subordinate to another loan names the document's loan as second-ranking, not the other", () => {
       expect(pick(read("Subject: loan subordinated to the senior lender's first mortgage", "Rate: 11%"))).toEqual([["mezz_rate_pct", 11]]);

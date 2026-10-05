@@ -1,7 +1,7 @@
 import { FIELD_BY_KEY, OUTPUT_LIKE_PHRASES } from "@agir/contracts";
 import { detectFormat, normalizeText, SF_PER_M2, tokenize, unitTypesIn, type DocumentFormat, type NumberToken } from "@agir/numbers";
 import type { Cell, NormalizedDocument, Table } from "./document.ts";
-import { canonicalItem, currencyOf, hasPhrase, mapToken, normalizeLabel, scopeIn, withCurrency, type MapOptions, type Mapped, type Scope } from "./mapping.ts";
+import { canonicalItem, currencyOf, hasPhrase, mapToken, normalizeLabel, rankScope, scopeIn, withCurrency, type MapOptions, type Mapped, type Scope } from "./mapping.ts";
 
 /** One value found in one document, with where it came from and why it was (or was not) mapped. */
 export type Candidate = {
@@ -111,25 +111,64 @@ function parenSpans(text: string): [number, number][] {
 
 type Paragraph = { text: string; segs: { start: number; location: string }[]; scope: Scope };
 
+const SUBJECT_RE = /^(subject|re|objet|object)\s*:/i;
+const REPLY_PREFIX_RE = /^\s*(subject|re|objet|object|fwd?|tr|réf|ref)\s*:\s*/i;
+/** A line ends a sentence unless its last word is an abbreviation ("S.E.C.", "Corp.", "Ltd."). */
+const endsSentence = (text: string) => /[.!?]$/.test(text) && !/(\b\p{L}(\.\p{L})+\.|\b(corp|inc|ltd|co|cie|s\.a)\.)$/iu.test(text);
+
+/** The first rank row among label/value lines or table rows: the loan the document is about when nothing else names one. */
+function rankIn(doc: NormalizedDocument): Scope | null {
+  for (const line of doc.lines) {
+    const m = /^([^:|\t]{1,40})[:|\t]\s*(.+)$/.exec(line.text.trim());
+    const r = m ? rankScope(m[1]!, m[2]!) : null;
+    if (r) return r;
+  }
+  for (const t of doc.tables) {
+    const r = tableRank(t);
+    if (r) return r;
+  }
+  return null;
+}
+const tableRank = (t: Table): Scope | null => {
+  for (const row of t.rows) {
+    const cells = row.filter((c) => c.text);
+    const r = cells.length >= 2 ? rankScope(cells[0]!.text, cells.slice(1).map((c) => c.text).join(" ")) : null;
+    if (r) return r;
+  }
+  return null;
+};
+
 /**
- * The loan each line is about, set only by a title or heading: the first line, a "Subject:" / "Re:" / "Objet :" line,
- * or a short line with no number and no sentence end. A body sentence never changes it, and a heading that names two loans sets none.
+ * The loan each line is about, set only by a title or heading: one of the first three lines or a "Subject:" / "Re:" / "Objet :" line
+ * (forward and reply prefixes stripped, any length, numbers allowed), or a short line with no number and no sentence end.
+ * A body sentence never changes it, and a heading that names two loans sets none. A document whose headings name no loan
+ * is about the loan its rank row names, else the senior loan.
  */
-function lineScopes(doc: NormalizedDocument, format: DocumentFormat): Scope[] {
-  let scope: Scope = "senior";
-  return doc.lines.map((line, i) => {
+function lineScopes(doc: NormalizedDocument, format: DocumentFormat, rank: Scope | null): Scope[] {
+  let first = 0;
+  const headings = doc.lines.map((line) => {
     const text = line.text.trim();
-    const words = text.split(/\s+/).length;
-    const title = i === 0 || /^(subject|re|objet|object)\s*:/i.test(text);
-    const heading = !/[.!?]$/.test(text) && (title ? words <= 14 : words <= 8 && !/:\s*\S/.test(text) && tokenize(text, format).length === 0);
-    if (heading) scope = scopeIn(text) ?? scope;
+    if (!text) return null;
+    const near = first++ < 3;
+    const subject = SUBJECT_RE.test(text);
+    let body = text;
+    if (subject) while (REPLY_PREFIX_RE.test(body)) body = body.replace(REPLY_PREFIX_RE, "");
+    const words = body.split(/\s+/).length;
+    const plain = !endsSentence(text) && !/:\s*\S/.test(body) && tokenize(text, format).length === 0;
+    return subject ? (!endsSentence(text) ? body : null) : (near && words <= 14 && plain) || (words <= 8 && plain) ? body : null;
+  });
+  const named = headings.some((h) => h !== null && scopeIn(h, false) !== null);
+  let scope: Scope = named ? "senior" : (rank ?? "senior");
+  return headings.map((h) => {
+    if (h !== null) scope = scopeIn(h, !rank || named) ?? scope;
     return scope;
   });
 }
 
 /** A line joins the next when it does not end a sentence and the next continues it (lower case, a number or a currency sign). */
 function continues(prev: string, next: string): boolean {
-  if (/[.!?:]\s*$/.test(prev) || !/^(\p{Ll}|\d|[$€£])/u.test(next)) return false;
+  // A list item ("2) ...", "- ...") starts its own paragraph.
+  if (/[.!?:]\s*$/.test(prev) || !/^(\p{Ll}|\d|[$€£])/u.test(next) || /^(\d{1,2}[.)]|[-•*])\s/.test(next)) return false;
   return !(/[\d%]\s*$/.test(prev) && /^[\d$€£]/.test(next));
 }
 
@@ -318,8 +357,12 @@ function totalOf(text: string, t: NumberToken, tokens: NumberToken[]): NumberTok
 }
 
 /** One sentence: "Label: value" gives the label to the numbers after the colon; anything else is prose. */
-function readSentence(sentence: { text: string; start: number }, para: Paragraph, result: ExtractionResult) {
+function readSentence(sentence: { text: string; start: number }, para0: Paragraph, result: ExtractionResult) {
   const text = normalizeText(sentence.text);
+  // A short label that names a loan ("Take-out: ...") scopes every number on its line, the prose after the colon too; the next line is back under the document's scope.
+  const label = text.slice(0, Math.max(text.indexOf(":"), 0));
+  const inline = label.split(/\s+/).length <= 8 ? scopeIn(label, false) : null;
+  const para = inline ? { ...para0, scope: inline } : para0;
   const locationOf = (pos: number) => para.segs.reduce((loc, g) => (g.start <= sentence.start + pos ? g.location : loc), para.segs[0]!.location);
   let tokens = tokenize(text, result.format);
   // A number that is part of a street address is not a value.
@@ -833,7 +876,8 @@ type Section = { rows: Cell[][]; scope: Scope; rent?: Roles; budget?: { label: n
  * are label and value rows. Rows above the first header, when there is one and no label came first, are a title and read as nothing.
  */
 function fromTable(table: Table, result: ExtractionResult, notes: string[] = [], scope0: Scope = "senior") {
-  let scope = scope0;
+  // A rank row names the loan for the whole table, the rows above it too; a section label below still overrides it.
+  let scope = tableRank(table) ?? scope0;
   let labelled = false;
   const sections: Section[] = [];
   let cur: Section = { rows: [], scope };
@@ -1015,7 +1059,7 @@ function textTables(doc: NormalizedDocument, format: DocumentFormat, scopes: Sco
 /** Every candidate value in one document. Deterministic: no model is consulted. */
 export function extractCandidates(doc: NormalizedDocument): ExtractionResult {
   const result: ExtractionResult = { format: detectFormat(doc.fullText), candidates: [], other: [] };
-  const scopes = lineScopes(doc, result.format);
+  const scopes = lineScopes(doc, result.format, rankIn(doc));
   const text = textTables(doc, result.format, scopes);
   fromLines(doc, result, text.used, scopes);
   for (const t of text.tables) fromTable(t.table, result, t.notes, t.scope);
