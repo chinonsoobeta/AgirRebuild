@@ -1831,6 +1831,11 @@ describe("durations after the number, revisions in a sentence, percent cells, va
     expect(pick(read("Les travaux, 14 mois pour louer ensuite 5 mois de location"))).toEqual([["lease_up_months", 14], ["lease_up_months", 5]]);
   });
 
+  test("an after-number phrase labels the duration before it only, not the next number", () => {
+    expect(pick(read("- 1.5 years to build, 5 months lease-up"))).toEqual([["construction_months", 18], ["lease_up_months", 5]]);
+    expect(pick(read("- 16 mois pour louer, 4 mois de construction"))).toEqual([["lease_up_months", 16], ["construction_months", 4]]);
+  });
+
   test("a market vacancy or occupancy figure is shown, not the deal's assumption", () => {
     for (const line of ["Vacancy in the submarket was 2.1%", "Average occupancy in the area: 96%", "CMHC reports city vacancy of 1.8%", "Le taux d'inoccupation du marché est de 2 %", "Taux d'occupation moyen du secteur : 95 %", "Vacance dans le quartier : 3 %"]) {
       const r = read(line);
