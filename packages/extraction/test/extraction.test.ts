@@ -2861,3 +2861,88 @@ describe("label families: the same meaning in several wordings, English and Qué
     none([["Remise en état", "-50 000 $"]]);
   });
 });
+
+describe("budget lines and operating figures written as sentences with verbs", () => {
+  const prose = (...lines: string[]): NormalizedDocument => ({
+    kind: "pdf",
+    lines: lines.map((text, i) => ({ text, location: `page 1, line ${i + 1}` })),
+    tables: [],
+    pageCount: 1,
+    needsOcr: false,
+    fullText: lines.join("\n"),
+  });
+  const pick = (...lines: string[]) => extractCandidates(prose(...lines)).candidates.map((c) => [c.fieldKey, c.value]);
+  const same = (rows: string[], want: [string, number]) => {
+    for (const s of rows) expect(pick(s), s).toEqual([want]);
+  };
+
+  test("land: a verb of buying and the land, building or site it buys", () => {
+    same(["We will pay $910,000 to buy the lot.", "We will pay $910,000 to acquire the property."], ["land_cost", 910_000]);
+    expect(pick("The partnership will purchase the site for $910,000.")).toEqual([["land_cost", 910_000]]);
+    expect(pick("We will pay $4,200,000 to acquire the building.")).toEqual([["land_cost", 4_200_000]]);
+    expect(pick("Le propriétaire paiera 700 000 $ pour acquérir le terrain.")).toEqual([["land_cost", 700_000]]);
+    expect(pick("La société achètera l'immeuble pour 4 200 000 $.")).toEqual([["land_cost", 4_200_000]]);
+  });
+  test("hard: the contractor does the work for a sum", () => {
+    same(["Our contractor will do the work for $3,400,000.", "The builder will carry out the construction for $3,400,000.", "L'entrepreneur réalisera les travaux pour 3 400 000 $."], ["hard_cost", 3_400_000]);
+  });
+  test("soft: the design team, advisers or consultants for their services", () => {
+    same(["The design team needs $380,000 for its services.", "The consultants charge $380,000 for their fees.", "Les conseillers demandent 380 000 $ pour leurs services."], ["soft_cost", 380_000]);
+  });
+  test("contingency and other costs, two lines in one sentence", () => {
+    expect(pick("We hold back $150,000 for contingency and set aside $90,000 for other costs.")).toEqual([["contingency", 150_000], ["other_cost", 90_000]]);
+    expect(pick("We keep $150,000 for contingency.")).toEqual([["contingency", 150_000]]);
+    expect(pick("We set aside $90,000 for other project costs.")).toEqual([["other_cost", 90_000]]);
+    expect(pick("On met de côté 90 000 $ pour les autres coûts du projet.")).toEqual([["other_cost", 90_000]]);
+  });
+  test("fixed operating costs: a yearly sum for the fixed costs", () => {
+    same(["Property management needs $96,000 a year for fixed costs.", "We budget $96,000 annually for fixed operations."], ["fixed_opex_annual", 96_000]);
+  });
+  test("negative: a verb alone, another project, a deposit, a monthly or undated sum", () => {
+    expect(pick("We paid $25,000 deposit.")).toEqual([]);
+    expect(pick("We paid $25,000 deposit on the lot.")).toEqual([]);
+    expect(pick("The builder quoted $3.4M for another project.")).toEqual([]);
+    expect(pick("Our contractor will do the work on another project for $3,400,000.")).toEqual([]);
+    expect(pick("We will pay $20,000 for the site visit.")).toEqual([]);
+    expect(pick("The design team needs $380,000 for another property.")).toEqual([]);
+    expect(pick("Property management needs $8,000 a month for fixed costs.")).toEqual([]);
+    expect(pick("Property management needs $96,000 for fixed costs.")).toEqual([]);
+    expect(pick("The contractor will do the work for 18 months.")).not.toContainEqual(["hard_cost", 18]);
+  });
+
+  test("a revised price supersedes the original, in a sentence", () => {
+    const r = extractCandidates(prose("The original contract price was $3,400,000.", "The revised signed price is $3,650,000."));
+    expect(r.candidates.map((c) => [c.fieldKey, c.value])).toEqual([["hard_cost", 3_650_000]]);
+    expect(r.other.find((o) => o.value === 3_400_000)?.note).toMatch(/earlier|superseded|replaced/i);
+    expect(pick("The contractor originally priced the work at $3,400,000.", "The revised signed price is $3,650,000.")).toEqual([["hard_cost", 3_650_000]]);
+  });
+  test("a French revision pair: the old total is superseded and a dollar amount, never a duration", () => {
+    const r = extractCandidates(prose("Ancien total travaux : 1 850 000 $", "Nouveau total travaux : 1 950 000 $"));
+    expect(r.candidates.map((c) => [c.fieldKey, c.value])).toEqual([["hard_cost", 1_950_000]]);
+    const old = r.other.find((o) => o.value === 1_850_000)!;
+    expect(old.note).not.toMatch(/period|months/i);
+    expect(old.note).toMatch(/earlier|superseded|replaced|old/i);
+    expect(extractCandidates(prose("Ancien total travaux : 1 850 000 $")).candidates).toEqual([]);
+  });
+  test("negative: a figure with no revision word in its label is read as before", () => {
+    expect(pick("The contract price is $3,400,000.")).toEqual([["hard_cost", 3_400_000]]);
+    expect(pick("The oldest building is a loft.", "Land cost: $900,000")).toEqual([["land_cost", 900_000]]);
+  });
+
+  test("prose flags, in both directions, only when stated outright", () => {
+    const flag = (s: string) => pick(s).filter((c) => String(c[0]).match(/ramp|s_curve/));
+    expect(flag("Rent is credited during lease-up.")).toEqual([["lease_up_ramp", 1]]);
+    expect(flag("We count income while leasing.")).toEqual([["lease_up_ramp", 1]]);
+    expect(flag("No income until stabilization.")).toEqual([["lease_up_ramp", 0]]);
+    expect(flag("Aucun revenu avant la stabilisation.")).toEqual([["lease_up_ramp", 0]]);
+    expect(flag("Draws follow an S-curve.")).toEqual([["s_curve_draws", 1]]);
+    expect(flag("Tirages en courbe en S.")).toEqual([["s_curve_draws", 1]]);
+    expect(flag("Straight-line draws.")).toEqual([["s_curve_draws", 0]]);
+    expect(flag("Les tirages sont linéaires.")).toEqual([["s_curve_draws", 0]]);
+  });
+  test("negative: a hedge, a negation or a passing mention is no flag", () => {
+    for (const s of ["Draws may follow an S-curve if the lender agrees.", "Draws do not follow an S-curve.", "Rent is not credited during lease-up.", "We discussed income during lease-up.", "Is rent credited during lease-up?", "The S-curve spreadsheet is attached.", "No income until stabilization is a lender request we may refuse."]) {
+      expect(pick(s).filter((c) => String(c[0]).match(/ramp|s_curve/)), s).toEqual([]);
+    }
+  });
+});
