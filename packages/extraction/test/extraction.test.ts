@@ -2695,3 +2695,168 @@ describe("durations: a unit given by the label, number words, quarters, phases",
     expect(pick(prose("Construction: 16 months", "Intérêts seulement pendant les travaux."))).toEqual([["construction_months", 16]]);
   });
 });
+
+describe("label families: the same meaning in several wordings, English and Québec French", () => {
+  const cell = (text: string, ref: string): Cell => ({ text, ref });
+  const table = (rows: string[][]): NormalizedDocument => ({
+    kind: "docx",
+    lines: [],
+    tables: [{ name: "Table 1", rows: rows.map((r, i) => r.map((t, c) => cell(t, `${"ABC"[c]}${i + 1}`))) }],
+    pageCount: null,
+    needsOcr: false,
+    fullText: rows.map((r) => r.join(" ")).join("\n"),
+  });
+  const prose = (...lines: string[]): NormalizedDocument => ({
+    kind: "pdf",
+    lines: lines.map((text, i) => ({ text, location: `page 1, line ${i + 1}` })),
+    tables: [],
+    pageCount: 1,
+    needsOcr: false,
+    fullText: lines.join("\n"),
+  });
+  const pick = (d: NormalizedDocument) => extractCandidates(d).candidates.map((c) => [c.fieldKey, c.value]);
+  // One label/value row on its own: what the label means.
+  const lv = (label: string, value: string) => pick(table([[label, value]]));
+  const same = (rows: [string, string][], want: [string, number]) => {
+    for (const [label, value] of rows) expect(lv(label, value), label).toEqual([want]);
+  };
+  const none = (rows: [string, string][]) => {
+    for (const [label, value] of rows) expect(lv(label, value), label).toEqual([]);
+  };
+  const budget = (...rows: [string, string][]) => pick(table([["Item", "Amount"], ...rows]));
+
+  test("1. the operating expense ratio, written as a share", () => {
+    same([["Operating expense share of EGI", "38%"], ["Operating expenses share of revenue", "38%"], ["Expenses as a share of income", "38%"], ["Ratio des charges", "38 %"], ["Charges en % des revenus", "38 %"]], ["expense_ratio_pct", 38]);
+  });
+  test("1. negative: variable expenses keep the variable-expense field", () => {
+    same([["Variable expenses as a share of EGI", "4%"], ["Charges variables en % des revenus", "4 %"]], ["variable_expense_pct", 4]);
+  });
+
+  test("2. the senior amount, named by adjectives", () => {
+    same(
+      [["Senior amount", "$5,000,000"], ["Committed senior funding", "$5,000,000"], ["First-ranking committed", "$5,000,000"], ["Premier rang engagé", "5 000 000 $"], ["Financement de premier rang", "5 000 000 $"], ["Sponsor-reported senior amount", "$5,000,000"], ["Senior amount as reported by the owner", "$5,000,000"]],
+      ["senior_loan_amount", 5_000_000],
+    );
+  });
+  test("2. negative: a ceiling or a fee on the senior funding is not the amount", () => {
+    none([["Maximum senior amount", "$5,000,000"], ["Senior funding fee", "$50,000"], ["Frais de financement de premier rang", "50 000 $"]]);
+  });
+
+  test("3. a Québec 'reprise' is the take-out", () => {
+    same([["Prêt de reprise", "2 000 000 $"]], ["refinance_amount", 2_000_000]);
+    same([["Reprise : mois", "30"]], ["refinance_month", 30]);
+    same([["Taux de reprise", "5,2 %"]], ["refinance_rate_pct", 5.2]);
+    same([["Amortissement de reprise", "30 ans"]], ["refinance_amort_years", 30]);
+  });
+  test("3. negative: 'reprise des travaux' is work resuming, not a loan", () => {
+    same([["Reprise des travaux", "30 mois"]], ["construction_months", 30]);
+    expect(pick(prose("La reprise des travaux est prévue dans 6 mois."))).not.toContainEqual(["refinance_month", 6]);
+  });
+
+  test("4. professional and consultant fees in a cost budget are soft costs", () => {
+    expect(budget(["Land", "$900,000"], ["Consultant fees", "$120,000"])).toEqual([["land_cost", 900_000], ["soft_cost", 120_000]]);
+    expect(budget(["Land", "900 000 $"], ["Honoraires du projet", "50 000 $"])).toEqual([["land_cost", 900_000], ["soft_cost", 50_000]]);
+    expect(budget(["Land", "900 000 $"], ["Honoraires professionnels", "80 000 $"])).toEqual([["land_cost", 900_000], ["soft_cost", 80_000]]);
+  });
+  test("4. negative: a lender's fee keeps the fee refusal, in a budget and in loan terms", () => {
+    expect(budget(["Land", "900 000 $"], ["Honoraires de dossier", "25 000 $"])).toEqual([["land_cost", 900_000]]);
+    none([["Honoraires de dossier", "25 000 $"], ["Commitment fee", "$50,000"], ["Frais de prêt", "25 000 $"]]);
+  });
+
+  test("5. a French credit that says it reduces cost is a negative other cost", () => {
+    const r = extractCandidates(table([["Subvention nette qui réduit les coûts", "-90 000 $"]]));
+    expect(r.candidates.map((c) => [c.fieldKey, c.value])).toEqual([["other_cost", -90_000]]);
+    expect(r.candidates[0]!.note).toContain("credit");
+    same([["Aide financière déduite", "-90 000 $"], ["Crédit appliqué aux coûts", "-90 000 $"]], ["other_cost", -90_000]);
+  });
+  test("5. negative: a grant or aid with no word about reducing cost is not a credit", () => {
+    none([["Subvention", "-90 000 $"], ["Aide financière", "-90 000 $"], ["Aide financière déduite", "90 000 $"]]);
+  });
+
+  test("6. the lease-up period", () => {
+    same([["Location initiale (mois)", "8"], ["Période de mise en location", "9 mois"], ["Months allowed for leasing", "9"], ["Time to lease up", "9 months"], ["Time to lease", "9 months"]], ["lease_up_months", 9]);
+    expect(lv("Location initiale (mois)", "8")).toEqual([["lease_up_months", 8]]);
+    same([["Leasing after completion", "6 months"], ["Leasing after handover", "6 months"]], ["lease_up_months", 6]);
+  });
+  test("6. negative: a money figure or an unrelated 'location' is not the lease-up", () => {
+    none([["Location initiale", "7 000 $"], ["Location du terrain", "9 mois"]]);
+  });
+
+  test("7. fixed operating costs", () => {
+    same([["Charges annuelles fixes", "96 000 $"], ["Fixed annual operating costs", "$96,000"], ["Fixed annual operating cost", "$96,000"], ["Fixed operations", "$96,000"], ["Frais fixes d'exploitation", "96 000 $"]], ["fixed_opex_annual", 96_000]);
+  });
+  test("7. negative: a fixed price is the contract, and variable charges are the share", () => {
+    same([["Fixed price contract", "$3,400,000"]], ["hard_cost", 3_400_000]);
+    same([["Charges variables", "4 %"]], ["variable_expense_pct", 4]);
+  });
+
+  test("8. the exit capitalization rate", () => {
+    same([["Taux de capitalisation de sortie", "5,5 %"], ["Capitalisation de sortie", "5,5 %"], ["For exit capitalization", "5.5%"], ["Exit capitalization rate", "5.5%"], ["Exit capitalization assumption", "5.5%"], ["Cap at sale", "5.5%"]], ["exit_cap_rate_pct", 5.5]);
+  });
+  test("8. negative: a going-in cap rate is not the exit rate", () => {
+    none([["Going-in capitalization rate", "5.5%"], ["Taux de capitalisation", "5,5 %"], ["Cap rate at closing", "5.5%"]]);
+  });
+
+  test("9. rent and expense growth", () => {
+    same([["Rent escalation", "3%"], ["Rent increases (per year)", "3%"], ["Annual rent increase", "3%"], ["Croissance annuelle des loyers", "3 %"], ["Indexation des loyers", "3 %"]], ["rent_growth_pct", 3]);
+    same([["Expense escalation", "2.5%"], ["Cost inflation on opex", "2.5%"], ["Croissance annuelle des charges", "2,5 %"], ["Croissance des charges d'exploitation", "2,5 %"]], ["expense_growth_pct", 2.5]);
+  });
+  test("9. negative: a limit or a dollar increase is not a growth rate", () => {
+    none([["Maximum rent increases", "3%"], ["Rent increase", "$50"], ["Hausse maximale des loyers", "3 %"]]);
+  });
+
+  test("10. selling costs", () => {
+    same([["Selling cost assumption", "3%"], ["Selling cost allowance", "3%"], ["Disposition costs", "3%"], ["Frais de vente", "3 %"], ["Frais de disposition", "3 %"]], ["selling_costs_pct", 3]);
+  });
+  test("10. negative: a selling price is not a cost", () => {
+    none([["Selling price", "$9,000,000"], ["Prix de vente", "9 000 000 $"]]);
+  });
+
+  test("11. other income", () => {
+    same([["Parking income", "$24,000"], ["Parking and storage income", "$24,000"], ["Parking and locker income", "$24,000"], ["Ancillary income", "$24,000"], ["Revenus accessoires", "24 000 $"], ["Revenus de stationnement", "24 000 $"]], ["other_income_annual", 24_000]);
+  });
+  test("11. negative: a count of stalls is not income", () => {
+    none([["Parking stalls", "12"], ["Places de stationnement", "12"]]);
+  });
+
+  test("12. the land", () => {
+    same([["Acquisition total", "$900,000"], ["Land and acquisition", "$900,000"], ["Coût d'acquisition du terrain", "900 000 $"], ["Coût d'acquisition", "900 000 $"]], ["land_cost", 900_000]);
+  });
+  test("12. negative: an acquisition fee is not the land", () => {
+    none([["Acquisition fee", "$25,000"], ["Frais d'acquisition", "25 000 $"]]);
+  });
+
+  test("13. the LPs' share, written as a verb", () => {
+    for (const s of ["The LP supplies 90% of the equity.", "LP provides 90% of equity.", "The LPs fund 90% of the equity.", "Limited partners supply 90% of the equity.", "Les commanditaires apportent 90 % des fonds propres."]) {
+      expect(pick(prose(s)), s).toEqual([["lp_share_pct", 90]]);
+    }
+  });
+  test("13. negative: a dollar amount, or the sponsor's share, is not the LP share", () => {
+    expect(pick(prose("The LP funds $2,000,000 of the equity."))).not.toContainEqual(["lp_share_pct", 2_000_000]);
+    expect(pick(prose("The LP funds 90% of the equity."))).not.toContainEqual(["equity_amount", 90]);
+    expect(pick(prose("The sponsor funds 10% of the equity."))).toEqual([]);
+  });
+
+  test("14. the singular 'other cost', in either case", () => {
+    expect(budget(["Land", "$900,000"], ["Other cost", "$90,000"])).toEqual([["land_cost", 900_000], ["other_cost", 90_000]]);
+    same([["Other cost", "$90,000"], ["other cost", "$90,000"], ["Autre coût", "90 000 $"]], ["other_cost", 90_000]);
+  });
+  test("14. negative: 'other' alone is not a cost outside a budget", () => {
+    none([["Other", "$90,000"]]);
+  });
+
+  test("15. a loan sized on the lender's valuation is the refinance loan-to-value, not an output", () => {
+    expect(pick(prose("Take-out loan terms", "The loan is sized at 65% of the lender's valuation."))).toEqual([["refinance_ltv_pct", 65]]);
+    expect(pick(prose("Prêt de reprise", "Dimensionné à 65 % de la valeur établie par le prêteur."))).toEqual([["refinance_ltv_pct", 65]]);
+    expect(pick(prose("Refinance terms", "Sized at 65% of appraised value."))).toEqual([["refinance_ltv_pct", 65]]);
+  });
+  test("15. negative: a stated valuation, and a senior loan, are not read", () => {
+    expect(pick(prose("Take-out loan terms", "The lender's valuation is $9,000,000."))).toEqual([]);
+    expect(pick(prose("Take-out loan terms", "The property is valued at $9,000,000 by the lender."))).toEqual([]);
+    expect(pick(prose("Take-out loan terms", "Sized at 65% of the lender's valuation of $9,000,000."))).toEqual([]);
+    expect(pick(prose("Senior loan terms", "Sized at 65% of the lender's valuation."))).toEqual([]);
+  });
+  test("negative: a 'remise en état' is not a credit", () => {
+    none([["Remise en état", "-50 000 $"]]);
+  });
+});
