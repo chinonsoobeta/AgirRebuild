@@ -125,7 +125,7 @@ function relativeTargets(xml: string, name: string): string {
 function defaultNamespace(xml: string): string {
   const root = /^\s*<([A-Za-z_][\w.-]*):[\w.-]+(\s[^>]*)?>/.exec(xml.replace(/<\?[\s\S]*?\?>|<!--[\s\S]*?-->/g, (m) => " ".repeat(m.length)));
   if (!root) return xml;
-  const prefix = root[1]!;
+  const prefix = root[1]!.replace(/[.-]/g, "\\$&");
   const attrs = root[2] ?? "";
   if (/\sxmlns\s*=/.test(attrs) || !new RegExp(`\\sxmlns:${prefix}\\s*=\\s*"${SPREADSHEET_MAIN}"`).test(attrs)) return xml;
   return xml
