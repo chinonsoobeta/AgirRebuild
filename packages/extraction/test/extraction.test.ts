@@ -2070,7 +2070,7 @@ describe("durations after the number, revisions in a sentence, percent cells, va
   test("a committed first-mortgage or senior principal is the loan amount, and under a mezzanine title the mezzanine amount", () => {
     expect(pick(read("Committed first-mortgage principal: $2,450,000"))).toEqual([["senior_loan_amount", 2_450_000]]);
     expect(pick(read("The committed senior principal is $1,900,000."))).toEqual([["senior_loan_amount", 1_900_000]]);
-    expect(pick(read("Mezzanine commitment letter", "Committed senior principal: $600,000"))).toEqual([["mezz_loan_amount", 600_000]]);
+    expect(pick(read("Mezzanine commitment letter", "Committed first-mortgage principal: $600,000"))).toEqual([["mezz_loan_amount", 600_000]]);
   });
   test("negative: a principal with no loan word is not the loan amount", () => {
     expect(pick(read("Principal: $2,450,000"))).toEqual([]);

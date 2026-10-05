@@ -86,7 +86,7 @@ const STABILIZED_RE = /\b(stabili[sz]ed|stabilisee?|projected|pro forma|projete\
 
 // Words too common to name a field alone. Each loses to any longer alias in the label, must stand at the end of the label
 // (or before "income"/"amount"), and never matches inside a longer word.
-const LOOSE_ALIASES = new Set(["management", "gestion", "depenses", "limited partners", "lp", "lps", "commanditaires", "loan", "pret", "mortgage", "rate", "taux", "construction", "location", "build", "travaux", "lot", "site", "contribute", "invest", "apport", "other", "autres", "parking", "laundry", "storage", "stationnement", "buanderie", "rangement"]);
+const LOOSE_ALIASES = new Set(["management", "gestion", "depenses", "limited partners", "lp", "lps", "commanditaires", "loan", "pret", "mortgage", "rate", "taux", "construction", "location", "build", "travaux", "leasing", "lot", "site", "contribute", "invest", "apport", "other", "autres", "parking", "laundry", "storage", "stationnement", "buanderie", "rangement"]);
 // These name a field only for a money figure of at least $1,000: "lot 7" is a lot number, "storage $75" may be one locker.
 const WEAK_MONEY = new Set(["lot", "site", "parking", "laundry", "storage", "stationnement", "buanderie", "rangement"]);
 // These name a field only when the figure's own words say what it is a share of: "management 4% of EGI", never "management 1.5% of equity".
@@ -334,10 +334,15 @@ export type MapOptions = {
 const FILLER = "is|are|was|were|will|be|been|should|shall|to|take|takes|taking|planned|scheduled|expected|estimated|set|budgeted|for|at|of|about|approximately|around|a|an|the|total|only|currently|now|income|revenue|revenues|revenu|revenus|amount|montant|est|sont|sera|seront|durera|prevu|prevue|prevus|de|du|d|environ|devrait|dure|au|aux|fixe|fixee|represente";
 const FILLER_RE = new RegExp(`^(\\s(${FILLER}))*$`);
 
-/** Where the loose alias stands in the label: at its end, or followed only by filler words. */
+// A sequencing word after a duration noun ("of lease-up afterwards", "de location ensuite") does not stop the noun labelling the number.
+const SEQUENCE_TAIL_RE = /(\s(then|afterwards?|after that|after (completion|delivery)|ensuite|puis|apres (la )?(livraison|completion)))+$/;
+
+/** Where the loose alias stands in the label: at its end, or followed only by filler words and a sequencing word. */
 function standsLast(label: string, at: [number, number]): boolean {
-  return FILLER_RE.test(label.slice(at[1]));
+  return FILLER_RE.test(label.slice(at[1]).replace(SEQUENCE_TAIL_RE, ""));
 }
+
+const HEAD_CONNECTOR_RE = /\b(above|over|after|beyond|au[- ]dela|au[- ]dessus)\b/;
 
 // A builder's quote total, once its revision words are taken out.
 const QUOTE_TOTAL_RE = /^(?:grand )?(?:total(?: price| quote| bid| tender| estimate| contract(?: price)?| amount)?|contract total|quote total|contract price|montant total|prix total|total de la soumission|total soumission|total du devis|prix du contrat)$/;
@@ -478,6 +483,11 @@ export function mapToken(rawLabel: string, t: NumberToken, opts: MapOptions = {}
       if (c && WEAK_MONEY.has(alias) && !((t.currency || t.unit === "$" || t.unit === "$/mo" || labelUnit === "$") && c.value >= 1000)) c = null;
       hits.push({ def, alias, at, c });
     }
+  }
+  // A field named inside another field's label: the one at the head, before "above"/"over"/..., names the figure; the one after only qualifies it.
+  const connector = HEAD_CONNECTOR_RE.exec(label);
+  if (connector && hits.some((h) => h.c && h.at[1] <= connector.index)) {
+    for (let i = hits.length - 1; i >= 0; i--) if (hits[i]!.at[0] >= connector.index + connector[0].length) hits.splice(i, 1);
   }
   // A loose alias gives way to any other alias in the label that reads the figure ("Imprévus de construction" is the contingency).
   const specific = hits.some((h) => !LOOSE_ALIASES.has(h.alias) && h.c);
