@@ -2,6 +2,7 @@ import { describe, expect, test } from "vitest";
 import { SF_PER_M2 } from "@agir/numbers";
 import { assemble, type AssumptionRow } from "@agir/engine";
 import { consolidate, extractCandidates, normalizeLabel, parseDocument, scoreExtraction, type Cell, type NormalizedDocument, type SourcedCandidate, type Table } from "../src/index.ts";
+import { relativeLinks } from "../src/parse.ts";
 import { loadOracles, toNormalized } from "./oracle.ts";
 
 const key = (f: string, i: string | null) => (i ? `${f}|${i}` : f);
