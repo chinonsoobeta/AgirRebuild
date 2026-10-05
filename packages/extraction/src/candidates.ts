@@ -609,6 +609,9 @@ function readSentence(sentence: { text: string; start: number }, para0: Paragrap
     const named = !totalLabels.has(t) ? loanNameOnly(label) : null;
     let mapped = mapToken(usedLabel, t, opts);
     from = t.end;
+    // "to build", "to lease (up)" and "pour louer" right after a duration belong to it alone.
+    const attached = mapped.kind === "field" && (t.unit === "months" || t.unit === "years") ? /^\s*(?:to build|to lease(?: up)?|pour louer)\b/i.exec(text.slice(t.end)) : null;
+    if (attached) from = t.end + attached[0].length;
     if (afterShare && mapped.kind !== "field") {
       other(t, "line:prose", SHARE_NOTE);
       return;
