@@ -2081,3 +2081,94 @@ describe("short-form multipliers in table cells", () => {
     expect(read([["Land cost", "85 m"]])).not.toContainEqual(["land_cost", 85]);
   });
 });
+
+describe("rows, lines and sections marked as not part of the deal", () => {
+  const NOTE = "Marked as not part of this deal";
+  const cell = (text: string, ref: string): Cell => ({ text, ref });
+  const tableDoc = (rows: string[][]): NormalizedDocument => ({
+    kind: "docx",
+    lines: [],
+    tables: [{ name: "Table 1", rows: rows.map((r, i) => r.map((t, c) => cell(t, `${"ABC"[c]}${i + 1}`))) }],
+    pageCount: null,
+    needsOcr: false,
+    fullText: rows.map((r) => r.join(" ")).join("\n"),
+  });
+  const linesDoc = (lines: string[]): NormalizedDocument => ({
+    kind: "docx",
+    lines: lines.map((text, i) => ({ text, location: `L${i + 1}` })),
+    tables: [],
+    pageCount: null,
+    needsOcr: false,
+    fullText: lines.join("\n"),
+  });
+  const vals = (d: NormalizedDocument) => extractCandidates(d).candidates.map((c) => [c.fieldKey, c.value]);
+  const noted = (d: NormalizedDocument) => extractCandidates(d).other.filter((o) => o.note === NOTE).map((o) => o.value);
+
+  test("a budget row that says it is for reference is shown, not added to land", () => {
+    const d = tableDoc([
+      ["Item", "Amount", "Note"],
+      ["Land - main lot", "$310,000", ""],
+      ["Not part of this project: neighbouring lot (for reference)", "$88,000", "for comparison only"],
+    ]);
+    expect(vals(d)).toEqual([["land_cost", 310_000]]);
+    expect(noted(d)).toEqual([88_000]);
+  });
+  test("a French note column or a bilingual label marks the row on either half", () => {
+    const d = tableDoc([
+      ["Poste", "Montant", "Remarque"],
+      ["Terrain", "310 000 $", ""],
+      ["Terrain voisin", "88 000 $", "à titre indicatif"],
+    ]);
+    expect(vals(d)).toEqual([["land_cost", 310_000]]);
+    expect(noted(d)).toEqual([88_000]);
+    const b = tableDoc([
+      ["Item / Poste", "Amount / Montant"],
+      ["Land / terrain", "$310,000"],
+      ["Excluded parcel / Parcelle exclue", "$88,000"],
+    ]);
+    expect(vals(b)).toEqual([["land_cost", 310_000]]);
+    const c = tableDoc([
+      ["Item", "Amount"],
+      ["Land", "$310,000"],
+      ["Second lot / Lot voisin (non retenu)", "$88,000"],
+    ]);
+    expect(vals(c)).toEqual([["land_cost", 310_000]]);
+  });
+  test("an excluded row joins no sum and no conflict", () => {
+    const d = tableDoc([
+      ["Item", "Amount"],
+      ["Land - lot A", "$200,000"],
+      ["Land - lot B", "$110,000"],
+      ["Land - lot C (hypothetical)", "$88,000"],
+    ]);
+    expect(vals(d)).toEqual([["land_cost", 310_000]]);
+  });
+  test("a section headed as an example gives its lines to other", () => {
+    const d = linesDoc(["Land: $310,000", "Example only - not this project", "Land: $90,000", "Hard costs: $1,000,000", "Soft costs: $400,000"]);
+    expect(vals(d)).toEqual([["land_cost", 310_000]]);
+    expect(noted(d)).toEqual([90_000, 1_000_000, 400_000]);
+  });
+  test("a heading ends the excluded section, in prose and in a table", () => {
+    const d = linesDoc(["Illustrative case", "Land: $90,000", "This project", "Land: $310,000"]);
+    expect(vals(d)).toEqual([["land_cost", 310_000]]);
+    const t = tableDoc([["Land", "$310,000"], ["Exemple seulement - ne fait pas partie du projet"], ["Land", "$90,000"]]);
+    expect(vals(t)).toEqual([["land_cost", 310_000]]);
+    expect(noted(t)).toEqual([90_000]);
+  });
+  test("a prose sentence that is for reference only is shown", () => {
+    const d = linesDoc(["Land is $310,000.", "The neighbouring lot, $88,000, is for reference only."]);
+    expect(vals(d)).toEqual([["land_cost", 310_000]]);
+    expect(noted(d)).toEqual([88_000]);
+    expect(vals(linesDoc(["Terrain: 310 000 $", "Le lot voisin à 88 000 $ est exclu."]))).toEqual([["land_cost", 310_000]]);
+  });
+  test("negative: a tax basis is not an exclusion, and a word elsewhere excludes nothing", () => {
+    expect(vals(linesDoc(["Hard costs (excluding HST) $2,100,000"]))).toEqual([["hard_cost", 2_100_000]]);
+    expect(vals(linesDoc(["Hard costs: $2,100,000 (excl. taxes)"]))).toEqual([["hard_cost", 2_100_000]]);
+    expect(vals(linesDoc(["Coûts directs (hors taxes) : 2 100 000 $"]))).toEqual([["hard_cost", 2_100_000]]);
+    expect(vals(linesDoc(["Coûts directs (taxes exclues) : 2 100 000 $"]))).toEqual([["hard_cost", 2_100_000]]);
+    expect(vals(tableDoc([["Item", "Amount"], ["Hard costs (excluding HST)", "$2,100,000"]]))).toEqual([["hard_cost", 2_100_000]]);
+    expect(vals(linesDoc(["Site: 12 Example Street", "Land: $310,000"]))).toEqual([["land_cost", 310_000]]);
+    expect(vals(linesDoc(["Terrain situé rue de l'Exemple", "Land: $310,000"]))).toEqual([["land_cost", 310_000]]);
+    expect(vals(linesDoc(["Note: figures below are for reference elsewhere only in the appendix.", "Hard costs: $2,100,000"]))).toEqual([["hard_cost", 2_100_000]]);
+  });
+});
