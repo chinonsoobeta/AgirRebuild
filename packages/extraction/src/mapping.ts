@@ -305,8 +305,8 @@ function convert(def: FieldDef, t: NumberToken, label: string, labelUnit: LabelU
       if (u === null && labelUnit === null && hasPhrase(label, "area") && v >= 100) return { value: v, unitSeen: "number" };
       return null;
     case "$/unit/mo":
-      // A yearly rent is a monthly one only per unit, and only as one twelfth of it.
-      if (u === "$" && ANNUAL_RE.test(`${label} ${foldText(t.raw)}`)) return PER_UNIT_RE.test(label) ? { value: Math.round((v / 12) * 100) / 100, unitSeen: "$ (stated as an annual rent per unit; divided by 12)" } : null;
+      // A yearly rent is a monthly one only per unit, and only as one twelfth of it. A label naming both periods is not read.
+      if (u === "$" && ANNUAL_RE.test(`${label} ${foldText(t.raw)}`)) return MONTHLY_RE.test(`${label} ${foldText(t.raw)}`) ? null : PER_UNIT_RE.test(label) ? { value: Math.round((v / 12) * 100) / 100, unitSeen: "$ (stated as an annual rent per unit; divided by 12)" } : null;
       if (u === "$/mo") return { value: v, unitSeen: "$/mo" };
       if (u === "$" && /\b(monthly|per month|per unit|mensuel|mensuelle|par mois|par logement)\b/.test(label)) return { value: v, unitSeen: "$" };
       return null;
@@ -420,7 +420,7 @@ export function mapToken(rawLabel: string, t: NumberToken, opts: MapOptions = {}
   if (RENT_WORD_RE.test(label) && (t.currency || t.unit === "$" || t.unit === "$/sf" || t.unit === "$/m2")) {
     const area = t.unit === "$/sf" || t.unit === "$/m2" || PER_AREA_RE.test(label);
     if (area && (MONTHLY_RE.test(label) || /^\s*(\/\s?(mo|month|mois)\b|per month|par mois|monthly|mensuel)/i.test(opts.after ?? ""))) return { kind: "ignored", reason: MONTHLY_AREA_NOTE };
-    if (!area && ANNUAL_RE.test(`${label} ${foldText(t.raw)}`) && !PER_UNIT_RE.test(label)) return { kind: "ignored", reason: ANNUAL_TOTAL_NOTE };
+    if (!area && ANNUAL_RE.test(`${label} ${foldText(t.raw)}`) && !MONTHLY_RE.test(`${label} ${foldText(t.raw)}`) && !PER_UNIT_RE.test(label)) return { kind: "ignored", reason: ANNUAL_TOTAL_NOTE };
   }
   const where = prose && opts.context ? normalizeLabel(opts.context).label : label;
   const scope: Scope = scopeIn(label) ?? opts.scope ?? "senior";

@@ -2381,6 +2381,9 @@ describe("unit types written as blocks, and rent opinions", () => {
     }
     // Negative: a monthly rent per unit is unchanged.
     expect(rent(tableDoc([["Monthly rent per suite", "$2,200"]])).map((c) => c.value)).toEqual([2_200]);
+    // A label naming both periods is never divided: it is not read as a unit rent.
+    expect(rent(tableDoc([["Monthly rent per suite, annual escalation", "$2,200"]])).map((c) => c.value)).toEqual([]);
+    expect(rent(linesDoc(["Loyer mensuel par logement, hausse annuelle : 1 900 $"])).map((c) => c.value)).toEqual([]);
   });
   test("a commercial block reads area and rent per square foot under its heading", () => {
     const d = tableDoc([["Shop A", ""], ["Number of units", "1"], ["Total rentable area of this type", "1,200 sf"], ["Annual rent per square foot", "$24/sf/year"], ["Occupancy of this component", "95%"]]);
