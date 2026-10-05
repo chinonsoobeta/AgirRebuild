@@ -78,6 +78,15 @@ describe("the plain-language layer", () => {
     expect(text).toContain(fr.f.value(5_250_000, "$"));
   });
 
+  it("has French text for the lease-up cost, the cash shortfall and the interest-only coverage", () => {
+    for (const k of ["leaseup_operating_cost", "cumulative_cash_shortfall", "io_dscr_year1"]) {
+      expect(fr.L.metric(k), k).not.toBe(k);
+      expect(fr.L.metric(k), k).not.toBe(en.L.metric(k));
+      expect(fr.L.formula(k).length, k).toBeGreaterThan(10);
+      expect(fr.L.formula(k), k).not.toBe(en.L.formula(k));
+    }
+  });
+
   it("keeps the institutional term in the glossary", () => {
     expect(en.t("glossary.dcr")[0]).toBe("DCR (debt coverage ratio), called DSCR by many lenders");
     expect(fr.t("glossary.dcr")[0]).toBe("CCD (coefficient de couverture de la dette), appelé RCSD par de nombreux prêteurs");

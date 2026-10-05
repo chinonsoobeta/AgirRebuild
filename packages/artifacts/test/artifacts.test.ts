@@ -79,6 +79,25 @@ describe("artifacts", () => {
       expect(Math.abs(sources - amount("Total sources")), kind).toBeLessThanOrEqual(2);
     }
   });
+  test("sources and uses has a row for the operating costs during lease-up, and still adds up; the lender package shows coverage and shortfall", () => {
+    for (const kind of ["ic_memo", "lender_package"] as const) {
+      const x = mapleInput(kind);
+      const model = buildModel(x);
+      const base = (k: string) => x.result.scenarios.find((s) => s.key === "base")!.metrics.find((m) => m.key === k)!;
+      const t = model.blocks.find((b) => b.type === "table" && b.caption === "Sources and uses");
+      const rows = t && t.type === "table" ? t.rows : [];
+      const amount = (label: string) => Number(rows.find((r) => r[0] === label)![1]!.replace(/[^\d.]/g, ""));
+      expect(base("leaseup_operating_cost").value!, kind).toBeGreaterThan(0);
+      expect(amount("Operating costs during lease-up"), kind).toBeCloseTo(Math.round(base("leaseup_operating_cost").value!), 0);
+      const uses = ["Land", "Hard costs", "Soft costs", "Contingency", "Capitalized interest", "Operating costs during lease-up"].map(amount).reduce((a, b) => a + b, 0);
+      expect(Math.abs(uses - amount("Total uses")), kind).toBeLessThanOrEqual(3);
+      expect(verifyProvenance(visibleText(renderHtml(model)), model.formatter.manifest).orphans, kind).toEqual([]);
+    }
+    const debt = buildModel(mapleInput("lender_package")).blocks.find((b) => b.type === "table" && b.caption === "Debt and coverage");
+    const labels = debt && debt.type === "table" ? debt.rows.map((r) => r[0]) : [];
+    expect(labels).toContain("Interest-only DSCR (year 1)");
+    expect(labels).toContain("Cumulative cash shortfall after stabilization");
+  });
   test("an invented figure is caught", () => {
     const model = buildModel(mapleInput("ic_memo"));
     model.blocks.push({ type: "paragraph", text: "The broker expects a 21.4% IRR and $9,450,000 of NOI." });

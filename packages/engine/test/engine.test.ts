@@ -549,3 +549,135 @@ describe("mezzanine interest after its commitment (task 37)", () => {
     for (const f of files) expect(readFileSync(join(dir, f), "utf8"), f).not.toMatch(/mezz/i);
   });
 });
+
+describe("fixed operating costs during lease-up, shortfall and interest-only coverage (cards 39 and 40)", () => {
+  const NEW_METRICS = ["leaseup_operating_cost", "cumulative_cash_shortfall", "io_dscr_year1"];
+  /** The hash of a result as the engine produced it before task 39: its three new metric entries are left out. */
+  const shaWithoutTask39Metrics = (r: RunResult) => {
+    const plain = { ...r, scenarios: r.scenarios.map((s) => ({ ...s, metrics: s.metrics.filter((m) => !NEW_METRICS.includes(m.key)) })) };
+    return createHash("sha256").update(canonicalJson(plain)).digest("hex");
+  };
+  const fixedDeal = (over: Partial<EngineInput> = {}): EngineInput => {
+    const { expenseRatioPct: _ratio, ...rest } = developmentDeal();
+    return { ...rest, leaseUpMonths: 6, fixedOpexAnnual: 120_000, ...over };
+  };
+  // Before task 39, measured on 524ed85 for the same deals with 6 months of lease-up and the ramp off.
+  const OLD = { tdc: 43_517_532.19226421, capitalizedInterest: 1_617_532.1922642032, noi: 3_291_600 };
+
+  test("ramp off, 6 months, $120,000 a year of fixed cost: half a year is charged before stabilization", () => {
+    const r = underwrite(fixedDeal(), POLICY_V1);
+    const L = buildLedger(fixedDeal());
+    expect(metric(r, "leaseup_operating_cost").status).toBe("VALID");
+    expect(metric(r, "leaseup_operating_cost").unit).toBe("$");
+    expect(metric(r, "leaseup_operating_cost").value!).toBeCloseTo(60_000, 2);
+    // Identity: TDC = costs before financing + capitalized interest + lease-up operating cost. It rises by the 60,000 plus the
+    // extra capitalized interest that the 60,000 carries (and the NOI is untouched).
+    const capInt = metric(r, "capitalized_interest").value!;
+    expect(metric(r, "hard_and_soft_cost").value!).toBeCloseTo(41_900_000, 2);
+    expect(metric(r, "total_development_cost").value!).toBeCloseTo(41_900_000 + capInt + 60_000, 2);
+    expect(metric(r, "total_development_cost").value! - OLD.tdc).toBeCloseTo(60_000 + (capInt - OLD.capitalizedInterest), 2);
+    expect(capInt).toBeGreaterThan(OLD.capitalizedInterest);
+    expect(metric(r, "stabilized_noi").value!).toBeCloseTo(OLD.noi, 6);
+    // The months before stabilization carry it as a cost, and the hold-year cash flows never see it.
+    const leaseUp = L.rows.filter((x) => x.phase === "lease_up");
+    expect(leaseUp).toHaveLength(6);
+    for (const x of leaseUp) expect(x.costDraw).toBeCloseTo(10_000, 2);
+    expect(L.annual[0]!.opex).toBe(0);
+    expect(L.annual[1]!.opex).toBeCloseTo(120_000, 6);
+    // Sources equal uses.
+    expect(L.requiredEquity + L.drawnDebtAtS).toBeCloseTo(L.tdc, 2);
+  });
+  test("the expense-ratio form charges the fixed dollars of decision 8, at year-1 levels", () => {
+    // 35% of year-1 stabilized EGI: (60 x 2,200 + 50 x 2,600 + 10 x 3,200) x 12 x 95% + 60,000 = 3,411,600; x 35% = 1,194,060.
+    const deal = { ...developmentDeal(), leaseUpMonths: 6 };
+    const r = underwrite(deal, POLICY_V1);
+    const L = buildLedger(deal);
+    expect(metric(r, "leaseup_operating_cost").value!).toBeCloseTo(1_194_060 / 2, 2);
+    expect(metric(r, "total_development_cost").value! - OLD.tdc).toBeCloseTo(597_030 + (metric(r, "capitalized_interest").value! - OLD.capitalizedInterest), 2);
+    expect(metric(r, "stabilized_noi").value!).toBeCloseTo(2_217_540, 6);
+    expect(L.requiredEquity + L.drawnDebtAtS).toBeCloseTo(L.tdc, 2);
+  });
+  test("variable costs follow income, so with the ramp off there are none before stabilization", () => {
+    const withVariable = fixedDeal({ variableExpensePct: 8 });
+    expect(metric(underwrite(withVariable, POLICY_V1), "leaseup_operating_cost").value!).toBeCloseTo(60_000, 2);
+  });
+  test("ramp on is byte for byte as before: the fixed costs were already netted against lease-up income", () => {
+    // Pinned on 524ed85 (task/38-breakeven); only the three new metric entries are left out.
+    const ratio = { ...developmentDeal(), leaseUpRamp: true };
+    expect(shaWithoutTask39Metrics(underwrite(ratio, POLICY_V1))).toBe("d061c6a84d41bd531ba5f5957a865e330449ef066699f30e07d6af561b77f211");
+    const fixedVar = { ...fixedDeal({ variableExpensePct: 5, fixedOpexAnnual: 900_000, leaseUpMonths: 12 }), leaseUpRamp: true };
+    expect(shaWithoutTask39Metrics(underwrite(fixedVar, POLICY_V1))).toBe("1317131338a1b7742402a0c2d3772a719ad1bbf976997b44fa2e36c86273c802");
+  });
+  test("lease-up of 0 months is byte for byte as before, and the metric is not applicable", () => {
+    const zero = { ...developmentDeal(), leaseUpMonths: 0 };
+    const r = underwrite(zero, POLICY_V1);
+    expect(shaWithoutTask39Metrics(r)).toBe("180479630a80ebf566e9ddaeadf45defdc2f0f08e7de51c68d8c887d78a5d4e5");
+    expect(shaWithoutTask39Metrics(underwrite(allEquityDeal(), POLICY_V1))).toBe("4b1aa853505ea0ed888f41c3cd57d61f87072f61a70ce399d8782e3724f33938");
+    expect(metric(r, "leaseup_operating_cost").status).toBe("NOT_APPLICABLE");
+    expect(metric(r, "leaseup_operating_cost").value).toBeNull();
+    expect(metric(r, "leaseup_operating_cost").reason).toMatch(/lease-up/i);
+  });
+  test("zero fixed costs give a real 0, not an unknown", () => {
+    const r = underwrite({ ...developmentDeal(), expenseRatioPct: 0 }, POLICY_V1);
+    expect(metric(r, "leaseup_operating_cost").status).toBe("VALID");
+    expect(metric(r, "leaseup_operating_cost").value).toBe(0);
+  });
+
+  // 800,000 of senior debt at 24%, interest-only for the 12 months of year 1, on 1,000,000 of land: debt service is 16,000 a
+  // month against 10,000 of rent in year 1; rent doubles in year 2 (20,000 a month), when the level payment is still under it.
+  const strained = (): EngineInput => ({
+    ...allEquityDeal(),
+    holdYears: 2,
+    rentGrowthPct: 100,
+    senior: { amount: 800_000, ratePct: 24, amortYears: 30, ioMonths: 12 },
+  });
+  test("cumulative cash shortfall is the sum of the negative monthly cash flows after debt service, as a positive amount", () => {
+    const r = underwrite(strained(), POLICY_V1);
+    expect(metric(r, "cumulative_cash_shortfall").status).toBe("VALID");
+    expect(metric(r, "cumulative_cash_shortfall").unit).toBe("$");
+    expect(metric(r, "cumulative_cash_shortfall").value!).toBeCloseTo(12 * (16_000 - 10_000), 2);
+    // The ledger agrees, month by month.
+    const L = buildLedger(strained());
+    const deficits = L.rows.filter((x) => x.month >= L.S && x.noi - x.debtService < 0).map((x) => x.debtService - x.noi);
+    expect(deficits).toHaveLength(12);
+    expect(total(deficits)).toBeCloseTo(72_000, 2);
+  });
+  test("a healthy deal has a shortfall of exactly 0, which is a real value", () => {
+    for (const deal of [allEquityDeal(), developmentDeal()]) {
+      const r = underwrite(deal, POLICY_V1);
+      expect(metric(r, "cumulative_cash_shortfall").status).toBe("VALID");
+      expect(metric(r, "cumulative_cash_shortfall").value).toBe(0);
+    }
+  });
+  test("months before stabilization never count toward the shortfall", () => {
+    // Ramp on, 12 months of lease-up with income far below the fixed costs: the lease-up deficit is not a shortfall.
+    const deal = { ...developmentDeal(), leaseUpRamp: true, fixedOpexAnnual: 3_000_000, expenseRatioPct: undefined } as EngineInput;
+    expect(buildLedger(deal).annual[0]!.noi).toBeLessThan(0);
+    expect(metric(underwrite(deal, POLICY_V1), "cumulative_cash_shortfall").value).toBe(0);
+  });
+  test("interest-only DSCR is year-1 NOI over interest at the rates on the balances in force at stabilization", () => {
+    // 120,000 / (800,000 x 24%) = 0.625.
+    const r = underwrite(strained(), POLICY_V1);
+    expect(metric(r, "io_dscr_year1").unit).toBe("x");
+    expect(metric(r, "io_dscr_year1").value!).toBeCloseTo(0.625, 9);
+    // With a mezzanine loan: balances at stabilization at their own rates.
+    const mezz: EngineInput = { ...developmentDeal(), mezzanine: { amount: 5_000_000, ratePct: 11, amortYears: 30, ioMonths: 60 } };
+    const L = buildLedger(mezz);
+    const rm = underwrite(mezz, POLICY_V1);
+    const interest = (L.balancesAtS.senior * 6) / 100 + (L.balancesAtS.mezzanine * 11) / 100;
+    expect(metric(rm, "io_dscr_year1").value!).toBeCloseTo(L.year1.noi / interest, 9);
+  });
+  test("interest-only DSCR is not applicable with no debt, with a reason", () => {
+    const r = underwrite(allEquityDeal(), POLICY_V1);
+    expect(metric(r, "io_dscr_year1").status).toBe("NOT_APPLICABLE");
+    expect(metric(r, "io_dscr_year1").value).toBeNull();
+    expect(metric(r, "io_dscr_year1").reason).toMatch(/no debt/i);
+  });
+  test("the new metrics carry a formula", () => {
+    for (const k of NEW_METRICS) expect(metric(underwrite(developmentDeal(), POLICY_V1), k).formula.length).toBeGreaterThan(10);
+  });
+});
+
+function total(xs: number[]): number {
+  return xs.reduce((a, b) => a + b, 0);
+}

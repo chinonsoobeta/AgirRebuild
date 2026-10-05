@@ -33,12 +33,35 @@ sale; loan to cost stays on commitments. The invariant: at `S`, unused commitmen
 zero, and an equity overrun and unused commitment never coexist. The solve reports `converged` only when
 `|overrun - unused| < 0.005` and `min(overrun, unused) < 0.005`, or equity is zero; otherwise
 `funding_not_converged` is raised.
-Total development cost = costs + interest before stabilization. A stated interest reserve is a
-check, never an input.
+Total development cost = costs + operating costs during lease-up + interest before stabilization.
+A stated interest reserve is a check, never an input.
 
 **Revenue.** Per-unit: units x monthly rent x 12. Per-SF: area x annual rent per SF. Rents grow by
 hold year. Component occupancy falls back to stabilized occupancy. Lease-up income only when the
 deal opts in, ramping `(k + 0.5) / L`; fixed costs are due in full from the first operating month.
+
+**Operating costs during lease-up (cards 39 and 40, owner approval 2026-10-05).** From the first month
+after construction ends until `S`, the deal pays its fixed operating costs every month, whether or not the
+ramp is on. Fixed costs are `fixed_opex_annual`, or the fixed-dollar expense-ratio amount of decision 8,
+exactly as year 1 computes them, at year-1 levels, divided by 12. Variable costs follow income, so with the
+ramp off there are none before `S`. With the ramp off, these months are a cost before `S`: they are funded
+like any other cost (equity first, then mezzanine, then senior), they are part of total development cost, and
+they are shown as their own line, "Operating costs during lease-up", in sources and uses. With the ramp on,
+nothing changes: the fixed costs were already netted against lease-up income, and that net is paid at `S`
+(the `lease-up income` flow), so ramp-on deals compute byte for byte as before. Costs before `S` never appear
+in hold-year cash flows, and year-1 operations and the hold years are unchanged. The metric
+`leaseup_operating_cost` is the amount charged to total development cost this way; it is `NOT_APPLICABLE`
+when lease-up is 0 months or when the ramp is on (the costs are then netted in the lease-up flow, not added to
+total development cost), and 0 is a real value only when fixed costs are 0. The `total_development_cost` and
+`hard_and_soft_cost` formula texts are unchanged: hard and soft cost is still land, hard, soft, contingency and
+other costs, and the lease-up cost is its own line beside capitalized interest.
+
+**Cash shortfall and interest-only coverage.** `cumulative_cash_shortfall` is the sum, over the hold, of the
+negative monthly cash flow after debt service (NOI less debt service), as a positive amount. It is the cash a
+developer must find while the deal runs at a deficit after `S`; months before `S` are excluded because they are
+funded in total development cost. 0 is a real value when there is never a deficit. `io_dscr_year1` is year-1
+NOI divided by the interest-only debt service on the debt in force at `S` (senior plus mezzanine balances times
+their rates); it is `NOT_APPLICABLE` with no debt and is a secondary metric, not a gate.
 
 **Expenses (decision 8).** Fixed part grows at expense growth; variable part is a share of that
 month's EGI. A single expense ratio is fixed dollars equal to that share of year-1 stabilized EGI.
