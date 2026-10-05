@@ -2040,3 +2040,44 @@ describe("durations after the number, revisions in a sentence, percent cells, va
     expect(p.values.map((v) => v.value).sort((a, b) => a! - b!)).toEqual([8, 10]);
   });
 });
+
+describe("short-form multipliers in table cells", () => {
+  const cell = (text: string, ref: string): Cell => ({ text, ref });
+  const tableDoc = (rows: string[][]): NormalizedDocument => ({
+    kind: "docx",
+    lines: [],
+    tables: [{ name: "Table 1", rows: rows.map((r, i) => r.map((t, c) => cell(t, `${"AB"[c]}${i + 1}`))) }],
+    pageCount: null,
+    needsOcr: false,
+    fullText: rows.map((r) => r.join(" ")).join("\n"),
+  });
+  const read = (rows: string[][]) => extractCandidates(tableDoc(rows)).candidates.map((c) => [c.fieldKey, c.value]);
+  test("a k, M, k$ or M$ beside a label scales the cell the way prose does", () => {
+    expect(read([["Land cost", "185k"]])).toEqual([["land_cost", 185_000]]);
+    expect(read([["Land cost", "1.2M"]])).toEqual([["land_cost", 1_200_000]]);
+    expect(read([["Coût du terrain", "1,2 M$"]])).toEqual([["land_cost", 1_200_000]]);
+    expect(read([["Coût du terrain", "450 k$"]])).toEqual([["land_cost", 450_000]]);
+    expect(read([["Land cost", "1,2 millions $"]])).toEqual([["land_cost", 1_200_000]]);
+  });
+  test("a CSV text cell is scaled too", async () => {
+    const d = await parseDocument(new TextEncoder().encode("Land cost,185k\nHard costs,2.5M\n"), "b.csv");
+    expect(extractCandidates(d).candidates.map((c) => [c.fieldKey, c.value])).toEqual([["land_cost", 185_000], ["hard_cost", 2_500_000]]);
+  });
+  test("an xlsx text cell is scaled too", async () => {
+    const ExcelJS = (await import("exceljs")).default;
+    const wb = new ExcelJS.Workbook();
+    const ws = wb.addWorksheet("Budget");
+    ws.getCell(1, 1).value = "Land cost";
+    ws.getCell(1, 2).value = "185k";
+    const d = await parseDocument(new Uint8Array(await wb.xlsx.writeBuffer()), "b.xlsx");
+    expect(extractCandidates(d).candidates.map((c) => [c.fieldKey, c.value])).toEqual([["land_cost", 185_000]]);
+  });
+  test("negative: a bare number is unchanged, a unit count is not scaled, and a lowercase m is not a million", () => {
+    expect(read([["Land cost", "185"]])).toEqual([]);
+    expect(read([["Land cost", "$185,000"]])).toEqual([["land_cost", 185_000]]);
+    const roll = extractCandidates(tableDoc([["Unit type", "Units", "Monthly rent"], ["Studio", "12", "$1,450"]]));
+    expect(roll.candidates.find((c) => c.fieldKey === "unit_count")?.value).toBe(12);
+    expect(read([["Land cost", "85 m"]])).not.toContainEqual(["land_cost", 85_000_000]);
+    expect(read([["Land cost", "85 m"]])).not.toContainEqual(["land_cost", 85]);
+  });
+});
