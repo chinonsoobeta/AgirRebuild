@@ -2343,4 +2343,62 @@ describe("unit types written as blocks, and rent opinions", () => {
     expect(pick(tableDoc([["Leasing assumptions", ""], ["Stabilized occupancy", "95%"]]))).toEqual([["stabilized_occupancy_pct", null, 95]]);
     expect(pick(tableDoc([["Unit type", "Units", "Monthly rent"], ["Studio", "4", "$1,450"]]))).toEqual([["unit_count", "Studio", 4], ["unit_rent_monthly", "Studio", 1_450]]);
   });
+
+  test("digit headings that are unit types start blocks, in xlsx and in French", async () => {
+    const ExcelJS = (await import("exceljs")).default;
+    const wb = new ExcelJS.Workbook();
+    const ws = wb.addWorksheet("Mix");
+    [["1-bed", ""], ["Number of units", 8], ["Rent per month", "$1,750"], ["2-bed", ""], ["Number of units", 4], ["Rent per month", "$2,250"]].forEach((r, i) => r.forEach((v, c) => {
+      if (v !== "") ws.getCell(i + 1, c + 1).value = v;
+    }));
+    const d = await parseDocument(new Uint8Array(await wb.xlsx.writeBuffer()), "mix.xlsx");
+    expect(pick(d)).toEqual([["unit_count", "1-bed", 8], ["unit_rent_monthly", "1-bed", 1_750], ["unit_count", "2-bed", 4], ["unit_rent_monthly", "2-bed", 2_250]]);
+    const fr = tableDoc([["3½", ""], ["Nombre de logements", "6"], ["Loyer mensuel", "1 300 $"], ["4 ½", ""], ["Nombre de logements", "2"], ["Loyer mensuel", "1 600 $"]]);
+    expect(pick(fr)).toEqual([["unit_count", "3½", 6], ["unit_rent_monthly", "3½", 1_300], ["unit_count", "4 ½", 2], ["unit_rent_monthly", "4 ½", 1_600]]);
+    const proposals = consolidate(extractCandidates(fr).candidates.map((c) => ({ ...c, documentId: "f", documentName: "f" })));
+    expect(proposals.filter((p) => p.status === "conflicting")).toEqual([]);
+  });
+  test("negative: a suite number or a year over a count row is no heading", () => {
+    for (const head of ["Suite 204", "2026"]) {
+      const items = pick(tableDoc([[head, ""], ["Number of units", "3"]])).map((r) => r[1]);
+      expect(items).not.toContain(head);
+    }
+  });
+  test("an annual rent per unit is divided by twelve and says so; an annual total is no unit rent", () => {
+    const rent = (d: NormalizedDocument) => extractCandidates(d).candidates.filter((c) => c.fieldKey === "unit_rent_monthly");
+    for (const d of [tableDoc([["Yearly rent per suite", "$26,400 per year"]]), linesDoc(["Yearly rent per suite: $26,400 per year"])]) {
+      expect(rent(d).map((c) => c.value)).toEqual([2_200]);
+      expect(rent(d)[0]!.unitSeen).toContain("divided by 12");
+      expect(rent(d)[0]!.raw).toContain("26,400");
+    }
+    for (const d of [tableDoc([["Loyer annuel par logement", "21 600 $ par année"]]), linesDoc(["Loyer annuel par logement : 21 600 $ par année"])]) {
+      expect(rent(d).map((c) => c.value)).toEqual([1_800]);
+    }
+    for (const d of [tableDoc([["Annual rent", "$310,000"]]), linesDoc(["Annual rent: $310,000"])]) {
+      const r = extractCandidates(d);
+      expect(r.candidates).toEqual([]);
+      expect(r.other.map((o) => o.note)).toEqual(["An annual rent total, not a rent per unit"]);
+    }
+    // Negative: a monthly rent per unit is unchanged.
+    expect(rent(tableDoc([["Monthly rent per suite", "$2,200"]])).map((c) => c.value)).toEqual([2_200]);
+  });
+  test("a commercial block reads area and rent per square foot under its heading", () => {
+    const d = tableDoc([["Shop A", ""], ["Number of units", "1"], ["Total rentable area of this type", "1,200 sf"], ["Annual rent per square foot", "$24/sf/year"], ["Occupancy of this component", "95%"]]);
+    expect(pick(d)).toEqual([["unit_count", "Shop A", 1], ["rentable_area_sf", "Shop A", 1_200], ["rent_psf_annual", "Shop A", 24], ["item_occupancy_pct", "Shop A", 95]]);
+  });
+  test("a French commercial block converts m2 and a rent per m2, and counts locaux", () => {
+    const d = tableDoc([["Commerce A", ""], ["Nombre de locaux", "3"], ["Superficie louable totale de ce type", "120 m²"], ["Loyer annuel au mètre carré", "280 $/m²/an"], ["Occupation de ce local", "90 %"]]);
+    const r = extractCandidates(d).candidates;
+    expect(r.map((c) => [c.fieldKey, c.itemKey])).toEqual([["unit_count", "Commerce A"], ["rentable_area_sf", "Commerce A"], ["rent_psf_annual", "Commerce A"], ["item_occupancy_pct", "Commerce A"]]);
+    expect(r[1]!.value).toBeCloseTo(1_291.67, 1);
+    expect(r[2]!.value).toBe(26.01);
+    expect(r[2]!.unitSeen).toContain("m2");
+  });
+  test("a monthly rent per area is refused, never multiplied", () => {
+    for (const d of [tableDoc([["Rent per square foot", "$2.10/sf/month"]]), linesDoc(["Rent per square foot: $2.10/sf/month"])]) {
+      const r = extractCandidates(d);
+      expect(r.candidates).toEqual([]);
+      expect(r.other.length).toBe(1);
+    }
+  });
 });
