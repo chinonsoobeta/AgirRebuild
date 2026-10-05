@@ -1638,4 +1638,123 @@ describe("totals and their parts", () => {
     })()), "p.xlsx"));
     expect(r.notes).toEqual([]);
   });
+  describe("more label forms and vocabulary", () => {
+    const withLines = (lines: string[], ...tables: Table[]) => extractCandidates(doc(lines, tables));
+    test("a capitalised label ending in a full stop, or a run of dots, is a label and its value", () => {
+      expect(pick(read("Loan amount. $3,400,000", "INTEREST. 6.10% per annum"))).toEqual([["senior_loan_amount", 3_400_000], ["senior_rate_pct", 6.1]]);
+      // A bare number after a label is money (it is not in a sentence).
+      expect(pick(read("Hard Costs. 3,200,000"))).toEqual([["hard_cost", 3_200_000]]);
+      expect(pick(read("Total project cost ........ $4,210,000", "Interest reserve .... $190,000"))).toEqual([["stated_total_cost", 4_210_000], ["stated_interest_reserve", 190_000]]);
+      expect(pick(read("Coût total du projet ...... 4,2 M$"))).toEqual([["stated_total_cost", 4_200_000]]);
+      expect(pick(read("Land cost . . . . . 485,000"))).toEqual([["land_cost", 485_000]]);
+      expect(pick(read("MONTANT AUTORISÉ : 2 750 000 $", "TAUX D'INTÉRÊT. 6,10 %"))).toEqual([["senior_loan_amount", 2_750_000], ["senior_rate_pct", 6.1]]);
+    });
+    test("negative: a sentence that ends in a full stop is not a label", () => {
+      const r = read("The loan was approved in 2026. The rate is 6%");
+      expect(pick(r)).toEqual([["senior_rate_pct", 6]]);
+      expect(noteOf(r, 2026)).toBe("This is a year, not an amount");
+      expect(pick(read("Phase 2. 24 units are planned"))).toEqual([]);
+      expect(pick(read("We expect to close in Late June. 6 months of construction follow"))).toEqual([]);
+    });
+
+    test("a lender's amount and authorised sum, in English and French", () => {
+      expect(pick(read("Authorized amount: $2,000,000", "Facility amount: $2,100,000"))).toEqual([["senior_loan_amount", 2_000_000], ["senior_loan_amount", 2_100_000]]);
+      expect(pick(read("Montant autorisé : 2 750 000 $"))).toEqual([["senior_loan_amount", 2_750_000]]);
+      // Under a mezzanine letter it is the mezzanine amount.
+      expect(pick(read("Mezzanine commitment letter", "Authorized amount: $650,000"))).toEqual([["mezz_loan_amount", 650_000]]);
+    });
+    test("an interest reserve and a stated total, in each form", () => {
+      expect(pick(read("Capitalized interest reserve: $190,000", "Réserve d'intérêts : 175 000 $"))).toEqual([["stated_interest_reserve", 190_000], ["stated_interest_reserve", 175_000]]);
+      expect(pick(read("All-in cost: $6,400,000", "Total project cost is $6,400,000"))).toEqual([["stated_total_cost", 6_400_000], ["stated_total_cost", 6_400_000]]);
+      expect(pick(read("Interest reserve of $190,000 is held back."))).toEqual([["stated_interest_reserve", 190_000]]);
+    });
+    test("government charges and taxes are other costs, never the land", () => {
+      expect(pick(read("Development charges: $120,000", "DCCs: $80,000", "Development cost charges: $60,000", "Permit levies: $12,000"))).toEqual([["other_cost", 120_000], ["other_cost", 80_000], ["other_cost", 60_000], ["other_cost", 12_000]]);
+      expect(pick(read("Land transfer tax: $45,000", "LTT: $46,000", "DCs: $9,000"))).toEqual([["other_cost", 45_000], ["other_cost", 46_000], ["other_cost", 9_000]]);
+      expect(pick(read("Taxe de bienvenue : 12 000 $", "Droits de mutation : 13 000 $"))).toEqual([["other_cost", 12_000], ["other_cost", 13_000]]);
+      expect(pick(read("Land transfer tax of $45,000 is due at closing."))).toEqual([["other_cost", 45_000]]);
+      const t = budget(["Item", "Amount"], ["Land", 485_000], ["Land transfer tax", 8_000], ["Development charges", 120_000]);
+      expect(pick(t)).toEqual([["land_cost", 485_000], ["other_cost", 128_000]]);
+      // Negative: the land alone is still the land.
+      expect(pick(read("Land: $485,000"))).toEqual([["land_cost", 485_000]]);
+    });
+    test("expense shares of EGI, with the base stated", () => {
+      expect(pick(read("Opex 35% of EGI", "Operating expenses (% of EGI): 38%"))).toEqual([["expense_ratio_pct", 35], ["expense_ratio_pct", 38]]);
+      expect(pick(read("Dépenses 36 % des revenus"))).toEqual([["expense_ratio_pct", 36]]);
+      expect(pick(read("Operating expenses run at 37% of EGI, with management 4% of EGI on top."))).toEqual([["expense_ratio_pct", 37], ["variable_expense_pct", 4]]);
+      expect(pick(read("Management 4% of EGI on top", "Gestion 5 % des revenus"))).toEqual([["variable_expense_pct", 4], ["variable_expense_pct", 5]]);
+    });
+    test("negative: management or expenses of something that is not EGI are not read", () => {
+      expect(pick(read("Asset management 1.5% of equity"))).toEqual([]);
+      expect(pick(read("Management 4%"))).toEqual([]);
+      expect(pick(read("Dépenses en capital 5 % du coût"))).toEqual([]);
+      expect(pick(read("Management fee: 4% of EGI"))).toEqual([["variable_expense_pct", 4]]);
+    });
+    test("recoveries are other income", () => {
+      expect(pick(read("Recoveries: $24,000", "CAM and tax recoveries: $30,000", "Récupérations : 18 000 $"))).toEqual([["other_income_annual", 24_000], ["other_income_annual", 30_000], ["other_income_annual", 18_000]]);
+      expect(pick(read("Other income: recoveries of $24,000 a year"))).toEqual([["other_income_annual", 24_000]]);
+    });
+    test("limited partners' percentage is the LP share; a return paid to them is not", () => {
+      expect(pick(read("Limited partners 70%, general partner 30%"))).toEqual([["lp_share_pct", 70]]);
+      expect(pick(read("LP: 80%"))).toEqual([["lp_share_pct", 80]]);
+      expect(pick(read("Commanditaires : 75 %"))).toEqual([["lp_share_pct", 75]]);
+      const r = read("Preferred return to limited partners 8%");
+      expect(pick(r)).toEqual([["preferred_return_pct", 8]]);
+    });
+    test("a covenant stated in words is the minimum DSCR; the forms that are not covenants stay shown", () => {
+      expect(pick(read("Covenant: debt service coverage of not less than 1.20x"))).toEqual([["min_dscr_covenant", 1.2]]);
+      expect(pick(read("The borrower shall keep a DSCR of at least 1.25x."))).toEqual([["min_dscr_covenant", 1.25]]);
+      expect(pick(read("Clause : ratio de couverture du service de la dette d'au moins 1,20x"))).toEqual([["min_dscr_covenant", 1.2]]);
+      expect(pick(read("Debt service coverage: 1.35x"))).toEqual([]);
+      expect(pick(read("Projected debt service coverage of at least 1.35x"))).toEqual([]);
+    });
+
+    const QUOTE = ["Fixed-price quote", "Prepared by Northfield Contractors Ltd."];
+    test("a builder's quote total is the hard cost", () => {
+      expect(pick(withLines([...QUOTE, "Total: $2,310,000"]))).toEqual([["hard_cost", 2_310_000]]);
+      expect(pick(withLines(["Soumission", "Entrepreneur : Construction Boréal inc.", "Prix du contrat : 1 980 000 $"]))).toEqual([["hard_cost", 1_980_000]]);
+      expect(pick(withLines(["Soumission", "Entrepreneur : Construction Boréal inc.", "Total : 1 980 000 $"]))).toEqual([["hard_cost", 1_980_000]]);
+      const t = grid(["Item", "Amount"], ["Framing", 900_000], ["Mechanical", 700_000], ["Subtotal", 1_600_000], ["Total", 1_840_000]);
+      expect(pick(withLines(QUOTE, t))).toEqual([["hard_cost", 1_840_000]]);
+    });
+    test("a later revision of the quote supersedes the earlier, whichever way the revision is written", () => {
+      const inLabel = withLines([...QUOTE, "Total (Rev A): $2,150,000", "Total (Rev B): $2,310,000"]);
+      expect(pick(inLabel)).toEqual([["hard_cost", 2_310_000]]);
+      expect(noteOf(inLabel, 2_150_000)).toMatch(/supersed/i);
+      const byHeading = withLines([...QUOTE, "Revision A", "Total: $2,150,000", "Revision B", "Total: $2,310,000"]);
+      expect(pick(byHeading)).toEqual([["hard_cost", 2_310_000]]);
+      expect(noteOf(byHeading, 2_150_000)).toMatch(/supersed/i);
+      const inTable = withLines(QUOTE, grid(["Item", "Amount"], ["Total (Rev A)", 2_150_000], ["Total (Rev B)", 2_310_000]));
+      expect(pick(inTable)).toEqual([["hard_cost", 2_310_000]]);
+      const fr = withLines(["Soumission", "Entrepreneur : Construction Boréal inc.", "Prix du contrat (rév. A) : 1 980 000 $", "Prix du contrat (rév. B) : 2 040 000 $"]);
+      expect(pick(fr)).toEqual([["hard_cost", 2_040_000]]);
+      expect(noteOf(fr, 1_980_000)).toMatch(/supersed/i);
+      // Negative: the same total twice, or two totals under no revision, is a conflict for a person, not a pick.
+      expect(withLines([...QUOTE, "Total: $2,150,000", "Total: $2,310,000"]).candidates.map((c) => c.value)).toEqual([2_150_000, 2_310_000]);
+    });
+    test("negative: Total outside a builder's quote is unchanged", () => {
+      expect(pick(read("Cost estimate", "Prepared by the developer", "Total: $2,000,000"))).toEqual([]);
+      expect(pick(read("Quote for an apartment sale", "Total: $2,000,000"))).toEqual([]);
+      expect(pick(budget(["Item", "Amount"], ["Land", 100_000], ["Total", 100_000]))).toEqual([["land_cost", 100_000]]);
+      const roll = extractCandidates(doc(["Rent roll"], [grid(["Unit type", "Units", "Monthly rent"], ["1BR", 10, 1_500], ["Grand total", 10, 15_000]) ]));
+      expect(roll.candidates.some((c) => c.fieldKey === "hard_cost")).toBe(false);
+      expect(pick(read("Coût total des travaux : 3 200 000 $"))).toEqual([]);
+    });
+
+    test("a loan named as the whole label gets its figures", () => {
+      const r = read("Senior $3.5M from Valleyline, mezz $650k at 11%");
+      expect(pick(r)).toEqual([["senior_loan_amount", 3_500_000], ["mezz_loan_amount", 650_000], ["mezz_rate_pct", 11]]);
+      expect(pick(read("Prêt de second rang 450 000 $ à 11 %"))).toEqual([["mezz_loan_amount", 450_000], ["mezz_rate_pct", 11]]);
+      expect(pick(read("Mezzanine: $650,000", "Mezz: 11%", "Mezz: 24 months interest only", "Senior: 25-year amortization"))).toEqual([["mezz_loan_amount", 650_000], ["mezz_rate_pct", 11], ["mezz_io_months", 24], ["senior_amort_years", 25]]);
+      expect(pick(extractCandidates(doc([], [grid(["Facility", "Amount"], ["Senior", 3_500_000], ["Second mortgage", 450_000])])))).toEqual([["senior_loan_amount", 3_500_000], ["mezz_loan_amount", 450_000]]);
+    });
+    test("negative: a lender's type or name, a share, or a limit or term is not a loan's figure", () => {
+      expect(pick(read("Credit union $3,000,000"))).toEqual([]);
+      expect(pick(read("Mezzanine lender Northgate Capital 650,000"))).toEqual([]);
+      expect(pick(read("Senior 65% of cost"))).toEqual([]);
+      expect(pick(read("Senior: 65% LTC"))).toEqual([["stated_ltc_pct", 65]]);
+      expect(pick(read("Senior: maximum $5,000,000", "Mezz: 24-month term"))).toEqual([]);
+      expect(pick(read("Authorized amount fee: 1%"))).toEqual([]);
+    });
+  });
 });
