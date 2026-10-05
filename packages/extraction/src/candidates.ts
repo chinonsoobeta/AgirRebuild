@@ -416,7 +416,7 @@ function readSentence(sentence: { text: string; start: number }, para: Paragraph
           other(t, "line:label-value", PER_UNIT_REFUSED_NOTE);
           continue;
         }
-        let mapped = used ? { kind: "unmapped" as const } : mapToken(label, t, { scope });
+        let mapped = used ? { kind: "unmapped" as const } : mapToken(label, t, { scope, ahead: text.slice(colon + 1, t.start) });
         if (mapped.kind === "field" && PER_UNIT_FIELDS.has(mapped.fieldKey) && perUnit(text, t)) {
           other(t, "line:label-value", PER_UNIT_NOTE);
           refusedPerUnit = true;
@@ -880,7 +880,7 @@ function fromTable(table: Table, result: ExtractionResult, notes: string[] = [],
           const t = cellToken(cell, result.format);
           if (!t) continue;
           const base = { raw: t.raw, location: cell.ref, context: `${table.name}: ${labelCell.text} ${cell.text}`.slice(0, 240), rule: "table:label-value" };
-          const mapped = mapToken(labelCell.text, t, { scope: s.scope });
+          const mapped = mapToken(labelCell.text, t, { scope: s.scope, ahead: cell.text.slice(0, t.start) });
           const label = fold(labelCell.text);
           // Under a rent roll, a row that restates the roll (a count, an area, a rent, an occupancy) is a summary, not an assumption.
           if (rollSeen && mapped.kind === "field" && ROLL_FIELDS.has(mapped.fieldKey) && !STABILIZED_LABEL_RE.test(label)) {

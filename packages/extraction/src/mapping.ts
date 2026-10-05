@@ -66,7 +66,10 @@ const VALUE_RE = /\b(value|valeur)\b/;
 
 const AREA_WORD_RE = /\b(area|sf|sq ft|superficie|surface|gla|nrsf|rsf)\b/;
 // A lender's condition, or a figure true only today, is not the stabilized assumption.
-const CONDITION_RE = /\b(minimum|min|at least|before fund\w*|prior to|conditions?|covenants?|required|requires?|au moins|minimale?|avant le deboursement)\b/;
+const LENDER_CONDITION = "A lender's condition, not the occupancy assumption";
+const CONDITION_RE = /\b(minimum|min|at least|before|prior to|until|consecutive months?|in order to|as a condition|conversion|first advance|funding|conditions?|covenants?|required|requires?|au moins|minimale?|avant|prealable\w*|deboursement)\b/;
+// A leased or occupied share with a condition marker is the lender's condition, whatever field it names.
+const LEASED_RE = /\b(pre-?leas\w*|leased|occupied|pre-?lou\w*|loue\w*|occupe\w*|occupancy|occupation)\b/;
 const CURRENT_RE = /\b(current|currently|today|as of|actuel(?:le)?|en date du)\b/;
 const STABILIZED_RE = /\b(stabili[sz]ed|stabilisee?|projected|pro forma|projete\w*)\b/;
 
@@ -79,6 +82,56 @@ const WEAK_MONEY = new Set(["lot", "site", "parking", "laundry", "storage", "sta
 const BUDGET_ONLY = new Set(["other", "autres"]);
 // A "rate" that is not a loan's.
 const NOT_A_LOAN_RATE = /\b(vacancy|growth|discount|tax|exchange|inflation|return|occupancy) rate\b|\b(taux de (croissance|vacance|actualisation|change|rendement|capitalisation|taxation)|taux d (inflation|imposition|occupation))\b|\brate of return\b/;
+
+// What a lender writes that looks like an input but is not. Words that are part of a field alias ("minimum DSCR", "construction term",
+// "management fee") stay valid: each alias holding one is taken out of the label before the words are looked for.
+const LIMIT_RE = /\b(maximum|max|not to exceed|not exceed|not more than|at most|up to|ceiling|cap of|minimum|min|at least|not less than|no less than|au plus|d au plus|maximale?|plafond|au moins|d au moins|minimale?|pas moins de)\b/;
+const COVERAGE_RE = /\b(dscr|dcr|debt service coverage|couverture|rcsd|rcd|ccd)\b/;
+const TERM_RE = /\b(term|terme|maturity|matures?|echeance|duree du pret)\b/;
+const TERM_AFTER_RE = /^\s*(loan |initial |renewal |fixed |conversion )?(term|terme)\b/;
+const AMORT_RE = /\bamorti[sz]\w*/;
+const FEE_RE = /\b(fees?|frais|honoraires|premiums?|prime d assurance)\b/;
+const FEE_AFTER_RE = /^\s*(de |d )?(commitment |lender |standby |structuring |broker |insurance |engagement |ouverture |dossier )?(fees?|premium|frais|honoraires|prime d assurance)\b/;
+const PER_INVESTOR_RE = /\b(minimum investment|min investment|minimum subscription|investissement minimal|investissement minimum|souscription minimale|souscription minimum|per limited partner|per investor|par commanditaire|par investisseur)\b/;
+const PER_INVESTOR_AFTER_RE = /^\s*(per|par)\s+(limited partner|investor|commanditaire|investisseur)\b/;
+const ALL_ALIASES = [...new Set(FIELDS.flatMap((f) => f.aliases))].sort((a, b) => b.length - a.length);
+
+/** The label with every field alias that holds one of `words` taken out. */
+function without(text: string, words: RegExp): string {
+  let out = text;
+  for (const a of ALL_ALIASES) {
+    if (!words.test(a)) continue;
+    const esc = a.replace(/[.*+?^${}()|[\]\\/]/g, "\\$&");
+    out = out.replace(new RegExp(`(^|[^a-z0-9])${esc}(?=$|[^a-z0-9])`, "g"), "$1 ");
+  }
+  return out;
+}
+
+/** Why a figure is a lender's limit, term, fee or per-investor amount, not an input; null when it is none of them. */
+function lenderFigure(rawLabel: string, t: NumberToken, opts: MapOptions): string | null {
+  const prose = opts.prose ?? false;
+  // In prose the clause just before the number; in a label the whole label.
+  const clause = prose ? (rawLabel.split(/[,;(]|\band\b|\bet\b/).pop() ?? "") : rawLabel;
+  const words_ = (x: string) => foldText(x.replace(/\([^)]*\)/g, " ")).replace(/[^a-z0-9\s-]/g, " ").replace(/\s+/g, " ").trim();
+  let plain = words_(clause);
+  // The words just after the number in its sentence ("5-year term", "3.1% insurance premium", "$25,000 per investor").
+  const ctx = foldText(opts.context ?? "");
+  const raw = foldText(t.raw);
+  const from = rawLabel.trim() ? ctx.indexOf(foldText(rawLabel).trim()) : -1;
+  const at = from >= 0 ? ctx.indexOf(raw, from) : ctx.indexOf(raw) === ctx.lastIndexOf(raw) ? ctx.indexOf(raw) : -1;
+  // A figure in an aside ("0.5% ($18,000)") has no label of its own: the clause before it names it.
+  if (prose && plain === "" && at >= 0) plain = words_((ctx.slice(0, at).split(/[,;]|\band\b|\bet\b/).pop() ?? "").replace("(", " "));
+  const tail = prose && at >= 0 ? ctx.slice(at + raw.length).replace(/^\s*[.,;]\s*/, "") : "";
+  const money = t.unit === "$" || t.unit === "$/mo" || t.currency;
+
+  if (money && (PER_INVESTOR_RE.test(plain) || PER_INVESTOR_AFTER_RE.test(tail))) return "A per-investor amount, not the deal's equity";
+  const words = plain.split(" ");
+  const near = (prose || opts.ahead ? [...words, ...words_(opts.ahead ?? "").split(" ")].filter(Boolean).slice(-4) : words).join(" ");
+  if (LIMIT_RE.test(without(near, LIMIT_RE)) && !COVERAGE_RE.test(plain)) return "A lender's limit, not the deal's figure";
+  if ((t.unit === "months" || t.unit === "years") && ((TERM_RE.test(without(plain, TERM_RE)) && !AMORT_RE.test(plain)) || TERM_AFTER_RE.test(tail))) return "A loan's term, not the build period, hold or amortization";
+  if (!opts.budget && (FEE_RE.test(without(plain, FEE_RE)) || FEE_AFTER_RE.test(tail))) return "A fee or premium, not an input";
+  return null;
+}
 
 /**
  * A money figure that names its currency records it after the unit it was read in:
@@ -240,6 +293,8 @@ export type MapOptions = {
   budget?: boolean;
   /** The sentence the label came from, for words about a sale that sit outside the label. */
   context?: string;
+  /** The words between a label and its number ("at least" in "Occupancy: at least 90%"), which may carry a limit. */
+  ahead?: string;
 };
 
 // What may follow a loose alias before the number: "income", "amount", or a verb phrase ("is planned at", "should take", "est de").
@@ -258,6 +313,10 @@ export function mapToken(rawLabel: string, t: NumberToken, opts: MapOptions = {}
   const output = OUTPUT_LIKE_PHRASES.find((p) => hasPhrase(label, p));
   if (output) return { kind: "ignored", reason: `"${rawLabel.trim()}" is an output figure, which is never taken as an input` };
   if (t.value === null) return { kind: "ignored", reason: t.refusal ?? "The number could not be read without guessing" };
+  const lender = lenderFigure(rawLabel, t, opts);
+  if (lender) return { kind: "ignored", reason: lender };
+  const where = prose && opts.context ? normalizeLabel(opts.context).label : label;
+  if (t.unit === "%" && LEASED_RE.test(where) && CONDITION_RE.test(where)) return { kind: "ignored", reason: LENDER_CONDITION };
   const scope: Scope = scopeIn(label) ?? opts.scope ?? "senior";
   const scoped = (key: string): FieldDef => FIELD_BY_KEY.get(scope === "senior" ? key : (SCOPE_FIELD[scope][key] ?? key))!;
   const asField = (def: FieldDef): Mapped | null => {
@@ -338,8 +397,7 @@ export function mapToken(rawLabel: string, t: NumberToken, opts: MapOptions = {}
   // An occupancy that is a lender's condition, or true only today, is not the stabilized assumption.
   const notAssumed = (key: string): Mapped | null => {
     if (key !== "stabilized_occupancy_pct" && key !== "item_occupancy_pct") return null;
-    const where = prose && opts.context ? normalizeLabel(opts.context).label : label;
-    if (CONDITION_RE.test(where)) return { kind: "ignored", reason: "A lender's occupancy condition is not the stabilized assumption" };
+    if (CONDITION_RE.test(where)) return { kind: "ignored", reason: LENDER_CONDITION };
     return CURRENT_RE.test(where) && !STABILIZED_RE.test(label) ? { kind: "ignored", reason: "A current occupancy is not the stabilized assumption" } : null;
   };
   // A unit type in parentheses ("End units (3 bed)") names the item.
