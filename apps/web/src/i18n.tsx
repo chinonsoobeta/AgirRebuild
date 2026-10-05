@@ -933,6 +933,7 @@ const FR_FIELDS: Record<string, string> = {
 };
 const FR_HELP: Record<string, string> = {
   contingency: "Saisissez 0 si le budget n'en prévoit pas.",
+  other_cost: "Saisissez un vrai crédit (remise, remboursement) sous forme de montant négatif, avec le motif.",
   lease_up_months: "Saisissez 0 si l'actif est stabilisé dès la fin des travaux.",
   expense_ratio_pct: "Part du RBE de l'année 1, maintenue en dollars fixes et indexée selon la croissance des charges.",
   senior_loan_amount: "Saisissez 0 pour un projet financé entièrement par fonds propres.",
@@ -1164,6 +1165,10 @@ const FR_REASONS: [RegExp, string | ((m: RegExpMatchArray) => string)][] = [
   [/^Give the committee's reasoning/, "Indiquez les motifs du comité (au moins 10 caractères)"],
   // The engine's own checks (validateInput and readiness). Numbers in the sentence are written the French way.
   [/^budget (land|hard|soft|contingency|other) must be a number of at least 0$/, (m) => `Le poste « ${BUDGET_LINES[m[1]!]} » du budget doit être un nombre positif ou nul`],
+  [/^a credit in other costs cannot take the total budget to 0 or below$/, "Un crédit dans les autres coûts ne peut pas ramener le budget total à 0 ou moins"],
+  [/^a credit in other costs cannot be more than hard costs, soft costs and contingency together$/, "Un crédit dans les autres coûts ne peut pas dépasser l'ensemble des coûts directs, des coûts indirects et de la provision pour imprévus"],
+  [/^A credit: reduces total cost$/, "Un crédit\u00a0: il réduit le coût total"],
+  [/^A negative figure that does not say it is a credit$/, "Chiffre négatif dont rien n'indique qu'il s'agit d'un crédit"],
   [/^at least one revenue component is required$/, "Au moins une composante de revenus est requise"],
   [/^revenue component "(.+)" needs a unit count above 0$/, (m) => `La composante de revenus « ${m[1]} » exige un nombre d'unités supérieur à 0`],
   [/^revenue component "(.+)" needs a monthly rent$/, (m) => `La composante de revenus « ${m[1]} » exige un loyer mensuel`],

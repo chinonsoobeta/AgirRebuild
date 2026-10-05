@@ -9,7 +9,7 @@ import { codeOf, SF_PER_M2, wholeUnitType, type CurrencyCode, type NumberToken }
 export type LabelUnit = "$" | "%" | "months" | "years" | "sf" | "m2" | "x" | null;
 
 export type Mapped =
-  | { kind: "field"; fieldKey: string; itemKey: string | null; value: number; unitSeen: string; quote?: true }
+  | { kind: "field"; fieldKey: string; itemKey: string | null; value: number; unitSeen: string; quote?: true; note?: string }
   | { kind: "ignored"; reason: string }
   | { kind: "unmapped" };
 
@@ -401,7 +401,36 @@ export function flagRead(rawLabel: string, answer: string): { fieldKey: string; 
 }
 
 /** Map one labelled number onto a field. In prose the alias nearest the number names it, and a bare number is never money. */
+export const CREDIT_NOTE = "A credit: reduces total cost";
+export const NEGATIVE_NOTE = "A negative figure that does not say it is a credit";
+
+// A label that says the figure is a credit. Folded (no accents, lower case) text.
+const CREDIT_WORD_RE = /^\s*less(?![a-z])|(?:^|[^a-z])(?:credits?|credited|rebates?|refunds?|refunded|reimbursements?|reimbursed|remises?|remboursements?|rembourse|ristournes?|subvention deduite|grant applied)(?![a-z])/;
+// Credit words that are not a credit against the cost: a loan line, a rating, a loss allowance, a tax credit, a restoration.
+const NOT_CREDIT_RE = /(?:line|lines|letter|letters|facility|facilities|marge|ligne|lettre|facilite|carte|card|tax|taxe|impot|impots)\s+(?:of\s+|de\s+|d\s+)?credits?(?![a-z])|credits?\s+(?:facility|facilities|union|rating|check|checks|score|loss|losses|risk|agreement|committee|card|bureau|enhancement|insurance|line|lines|support|policy|quality|worthiness|de risque|d impot)|cooperative de credit|remises?\s+(?:en etat|a neuf|en forme|des cles|de cles|des plans|de prix)/;
+// The budget lines a credit may be written against: it is read as the other costs, never as a reduction of one of these.
+const CREDITABLE = new Set(["land_cost", "hard_cost", "soft_cost", "contingency", "other_cost"]);
+
+/**
+ * A negative other cost is read only when its own label says it is a credit (then it is the other costs, with a note);
+ * a negative figure that does not say so is refused. Nothing is inferred from a sign, and no sign is flipped.
+ */
 export function mapToken(rawLabel: string, t: NumberToken, opts: MapOptions = {}): Mapped {
+  const m = mapLabel(rawLabel, t, opts);
+  if (t.value === null || t.value >= 0 || m.kind === "ignored") return m;
+  const { label, labelUnit, labelCode } = normalizeLabel(rawLabel);
+  const credit = CREDIT_WORD_RE.test(label) && !NOT_CREDIT_RE.test(label);
+  if (m.kind === "field") {
+    if (m.itemKey !== null || !CREDITABLE.has(m.fieldKey) || m.value >= 0) return m;
+    return credit ? { ...m, fieldKey: "other_cost", note: CREDIT_NOTE } : m.fieldKey === "other_cost" ? { kind: "ignored", reason: NEGATIVE_NOTE } : m;
+  }
+  // A credit named by its own words maps to no field by itself; a bare number counts as money only because of those words.
+  if (!credit || t.unit === "%" || t.unit === "months" || t.unit === "years") return m;
+  const c = compatibleValue(FIELD_BY_KEY.get("other_cost")!, t, label, labelUnit, labelCode);
+  return c && c.value < 0 ? { kind: "field", fieldKey: "other_cost", itemKey: null, value: c.value, unitSeen: c.unitSeen, note: CREDIT_NOTE } : m;
+}
+
+function mapLabel(rawLabel: string, t: NumberToken, opts: MapOptions = {}): Mapped {
   const prose = opts.prose ?? false;
   const norm = normalizeLabel(rawLabel);
   const { labelUnit, labelCode } = norm;

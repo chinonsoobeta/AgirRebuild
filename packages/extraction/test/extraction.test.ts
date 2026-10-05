@@ -1287,15 +1287,18 @@ describe("signs, explanatory parentheses and per-unit prices", () => {
   });
   test("negative: a figure attached to its sign stays negative", () => {
     expect(pick(read("Rent growth: -2%"))).toEqual([["rent_growth_pct", -2]]);
-    expect(pick(read("Contingency: (50,000)"))).toEqual([["contingency", -50_000]]);
+    expect(pick(read("Contingency: ($50,000)"))).toEqual([["contingency", -50_000]]);
     expect(pick(read("Selling costs: 2.5%"))).toEqual([["selling_costs_pct", 2.5]]);
   });
 
   // Task 35: only a figure whose own label says it is a credit may reduce the other costs.
   const CREDIT_NOTE = "A credit: reduces total cost";
+  // A lone "25,000" does not say which separator is the decimal one; a second line with a decimal point does.
+  const costs = (r: ReturnType<typeof read>) => pick(r).filter(([k]) => k === "other_cost");
+  const lines = (line: string) => (/\d,\d{3}/.test(line) ? read(line, "Selling costs: 2.5%") : read(line));
   test("a figure whose label says it is a credit is read as a negative other cost, in English and French", () => {
-    const en = read("Vendor credit on closing (25,000)");
-    expect(pick(en)).toEqual([["other_cost", -25_000]]);
+    const en = lines("Vendor credit on closing (25,000)");
+    expect(costs(en)).toEqual([["other_cost", -25_000]]);
     expect(en.candidates[0]!.note).toBe(CREDIT_NOTE);
     const fr = read("Remise du fournisseur -12 000 $");
     expect(pick(fr)).toEqual([["other_cost", -12_000]]);
@@ -1308,33 +1311,35 @@ describe("signs, explanatory parentheses and per-unit prices", () => {
       ["Less: GST rebate (6,200)", -6_200],
       ["Subvention déduite : (10 000 $)", -10_000],
       ["Credit on the land purchase: -$30,000", -30_000],
-    ] as const) expect(pick(read(line)), line).toEqual([["other_cost", value]]);
+    ] as const) expect(costs(lines(line)), line).toEqual([["other_cost", value]]);
   });
   test("in a budget table a credit row is a part like any other and subtracts", () => {
     const grid = (...rows: string[][]) => extractCandidates(doc([], [textGrid(["Line item", "Amount"], ...rows)]));
-    const mixed = grid(["Land acquisition", "1,000,000"], ["Other costs", "40,000"], ["Rebate", "($15,000)"]);
+    const mixed = grid(["Land acquisition", "1,000,000.00"], ["Other costs", "40,000.00"], ["Rebate", "($15,000.00)"]);
     expect(mixed.candidates.map((c) => [c.fieldKey, c.value])).toEqual([["land_cost", 1_000_000], ["other_cost", 25_000]]);
-    const only = grid(["Land acquisition", "1,000,000"], ["Vendor credit", "($25,000)"]);
+    const only = grid(["Land acquisition", "1,000,000.00"], ["Vendor credit", "($25,000.00)"]);
     expect(only.candidates.map((c) => [c.fieldKey, c.value])).toEqual([["land_cost", 1_000_000], ["other_cost", -25_000]]);
     expect(only.candidates[1]!.note).toBe(CREDIT_NOTE);
   });
   test("a negative figure that does not say it is a credit is refused, never read as one", () => {
     for (const line of ["Other costs: (12,500)", "Other costs (12,500)", "Other costs: -$12,500", "Autres coûts : -12 500 $"]) {
-      const r = read(line);
-      expect(pick(r), line).toEqual([]);
+      const r = lines(line);
+      expect(costs(r), line).toEqual([]);
+      // In prose a bare number is never money, so that line is not read at all.
+      if (!line.includes(":") && !line.includes("-")) continue;
       expect(r.other.some((o) => o.value === -12_500 && /does not say it is a credit/.test(o.note ?? "")), line).toBe(true);
     }
-    const table = extractCandidates(doc([], [textGrid(["Line item", "Amount"], ["Land acquisition", "1,000,000"], ["Other costs", "($25,000)"])]));
+    const table = extractCandidates(doc([], [textGrid(["Line item", "Amount"], ["Land acquisition", "1,000,000.00"], ["Other costs", "($25,000.00)"])]));
     expect(table.candidates.map((c) => [c.fieldKey, c.value])).toEqual([["land_cost", 1_000_000]]);
     expect(table.other.some((o) => o.value === -25_000 && /does not say it is a credit/.test(o.note ?? ""))).toBe(true);
   });
   test("a credit word that is not a credit, and a credit with no minus sign, reduce nothing", () => {
     for (const line of ["Line of credit: ($500,000)", "Credit facility (1,000,000)", "Marge de crédit : (500 000 $)", "Letter of credit -$250,000", "Vacancy and credit loss: (12,500)"]) {
-      expect(pick(read(line)).filter(([k]) => k === "other_cost"), line).toEqual([]);
+      expect(costs(lines(line)), line).toEqual([]);
     }
     // never a sign flipped: a positive rebate is not turned into a credit
     for (const line of ["Rebate: $8,000", "Remise du fournisseur : 12 000 $"]) {
-      expect(pick(read(line)).filter(([, v]) => (v as number) < 0), line).toEqual([]);
+      expect(pick(lines(line)).filter(([, v]) => (v as number) < 0), line).toEqual([]);
     }
   });
 

@@ -94,6 +94,7 @@ function sourcesAndUses(f: Formatter, x: ArtifactInput): Block {
     ["Contingency", f.input(i.budget.contingency, "$", "contingency")],
   ];
   if (i.budget.other > 0) rows.push(["Other costs", f.input(i.budget.other, "$", "other_cost")]);
+  else if (i.budget.other < 0) rows.push(["Other costs (credit)", f.input(i.budget.other, "$", "other_cost")]);
   rows.push(["Capitalized interest", f.metric("base", "capitalized_interest")]);
   rows.push(["Total uses", f.metric("base", "total_development_cost")]);
   const usesEnd = rows.length - 1;

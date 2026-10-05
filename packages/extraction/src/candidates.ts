@@ -1,7 +1,7 @@
 import { FIELD_BY_KEY, OUTPUT_LIKE_PHRASES } from "@agir/contracts";
 import { detectFormat, normalizeText, SF_PER_M2, tokenize, unitTypesIn, type DocumentFormat, type NumberToken } from "@agir/numbers";
 import type { Cell, NormalizedDocument, Table } from "./document.ts";
-import { canonicalItem, currencyOf, flagRead, hasPhrase, loanNameOnly, mapToken, normalizeLabel, rankScope, scopeIn, withCurrency, type MapOptions, type Mapped, type Scope } from "./mapping.ts";
+import { CREDIT_NOTE, canonicalItem, currencyOf, flagRead, hasPhrase, loanNameOnly, mapToken, normalizeLabel, rankScope, scopeIn, withCurrency, type MapOptions, type Mapped, type Scope } from "./mapping.ts";
 
 /** One value found in one document, with where it came from and why it was (or was not) mapped. */
 export type Candidate = {
@@ -101,7 +101,7 @@ const SUPERSEDED_NOTE = "Superseded by a later revision of this quote";
 
 function record(result: ExtractionResult, mapped: Mapped, token: NumberToken, base: Base) {
   if (mapped.kind === "field") {
-    result.candidates.push({ ...base, rule: mapped.quote ? base.rule.replace(/:[^:]*$/, ":quote-total") : base.rule, fieldKey: mapped.fieldKey, itemKey: mapped.itemKey, value: mapped.value, unitSeen: mapped.unitSeen });
+    result.candidates.push({ ...base, rule: mapped.quote ? base.rule.replace(/:[^:]*$/, ":quote-total") : base.rule, fieldKey: mapped.fieldKey, itemKey: mapped.itemKey, value: mapped.value, unitSeen: mapped.unitSeen, ...(mapped.note ? { note: mapped.note } : {}) });
   } else {
     result.other.push({
       ...base,
@@ -970,7 +970,7 @@ function fromBudget(table: Table, headerRow: number, roles: BudgetRoles, result:
   // line mapped to X, and raise both when they disagree. A line that maps to no
   // field, between the header (or the previous total) and a total row for X, is a component of X.
   // A line in another currency is never added to the deal's own: sums are kept per field and currency.
-  const components = new Map<string, { fieldKey: string; unitSeen: string; sum: number; refs: string[]; labels: string[]; rows: { value: number; ref: string; label: string }[] }>();
+  const components = new Map<string, { fieldKey: string; unitSeen: string; sum: number; refs: string[]; labels: string[]; rows: { value: number; ref: string; label: string }[]; credit?: true }>();
   const totals: Candidate[] = [];
   let started = false;
   let segment: { value: number; unitSeen: string; ref: string; label: string; shown: Candidate }[] = [];
@@ -1047,6 +1047,7 @@ function fromBudget(table: Table, headerRow: number, roles: BudgetRoles, result:
       acc.refs.push(ref);
       acc.labels.push(label);
       acc.rows.push({ value, ref, label });
+      if (mapped.note) acc.credit = true;
       components.set(ck, acc);
     };
     if (isTotal && mapped.fieldKey !== "stated_total_cost") {
@@ -1081,6 +1082,8 @@ function fromBudget(table: Table, headerRow: number, roles: BudgetRoles, result:
       location: acc.refs.join(", "),
       context: `${table.name}: ${acc.labels.join(" + ")}`,
       rule: acc.refs.length > 1 ? "table:budget-sum" : "table:budget",
+      // The note names a credit only when the rows add up to one.
+      ...(acc.credit && acc.sum < 0 ? { note: CREDIT_NOTE } : {}),
     });
   }
   for (const t of totals) {

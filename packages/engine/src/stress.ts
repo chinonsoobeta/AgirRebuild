@@ -15,7 +15,8 @@ export function applyStress(input: EngineInput, s: StressPreset): EngineInput {
       hard: input.budget.hard * cost,
       soft: input.budget.soft * cost,
       contingency: input.budget.contingency * cost,
-      other: input.budget.other * cost,
+      // A credit is not scaled: a cost overrun never enlarges it.
+      other: input.budget.other < 0 ? input.budget.other : input.budget.other * cost,
     },
     revenue: input.revenue.map((c) => ({
       ...c,

@@ -18,7 +18,13 @@ export function validateInput(input: EngineInput): void {
   const p: string[] = [];
   const b = input.budget;
   for (const k of ["land", "hard", "soft", "contingency", "other"] as const) {
-    if (!finite(b[k]) || b[k] < 0) p.push(`budget ${k} must be a number of at least 0`);
+    // Only a credit may take other costs below 0.
+    if (!finite(b[k]) || (k !== "other" && b[k] < 0)) p.push(`budget ${k} must be a number of at least 0`);
+  }
+  if (finite(b.other) && b.other < 0) {
+    if (b.land + b.hard + b.soft + b.contingency + b.other <= 0) p.push("a credit in other costs cannot take the total budget to 0 or below");
+    // The credit is spread with hard, soft and contingency: a bigger one would make a month's construction spend negative.
+    if (b.hard + b.soft + b.contingency + b.other < 0) p.push("a credit in other costs cannot be more than hard costs, soft costs and contingency together");
   }
   if (input.revenue.length === 0) p.push("at least one revenue component is required");
   for (const c of input.revenue) {
