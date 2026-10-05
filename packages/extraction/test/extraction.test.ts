@@ -2066,6 +2066,62 @@ describe("durations after the number, revisions in a sentence, percent cells, va
     expect(p.status).toBe("conflicting");
     expect(p.values.map((v) => v.value).sort((a, b) => a! - b!)).toEqual([8, 10]);
   });
+
+  test("a committed first-mortgage or senior principal is the loan amount, and under a mezzanine title the mezzanine amount", () => {
+    expect(pick(read("Committed first-mortgage principal: $2,450,000"))).toEqual([["senior_loan_amount", 2_450_000]]);
+    expect(pick(read("The committed senior principal is $1,900,000."))).toEqual([["senior_loan_amount", 1_900_000]]);
+    expect(pick(read("Mezzanine commitment letter", "Committed senior principal: $600,000"))).toEqual([["mezz_loan_amount", 600_000]]);
+  });
+  test("negative: a principal with no loan word is not the loan amount", () => {
+    expect(pick(read("Principal: $2,450,000"))).toEqual([]);
+  });
+  test("of leasing is a lease-up period, with or without a sequencing word after it", () => {
+    expect(pick(read("five months of leasing"))).toEqual([["lease_up_months", 5]]);
+    expect(pick(read("We allow 3 months of leasing after completion"))).toEqual([["lease_up_months", 3]]);
+    expect(pick(read("Nous prévoyons six mois de location"))).toEqual([["lease_up_months", 6]]);
+    expect(pick(read("four months of lease up"))).toEqual([["lease_up_months", 4]]);
+    expect(pick(read("trois mois de location ensuite."))).toEqual([["lease_up_months", 3]]);
+    expect(pick(read("quatre mois de location après la livraison"))).toEqual([["lease_up_months", 4]]);
+    expect(pick(read("three months of lease-up afterwards"))).toEqual([["lease_up_months", 3]]);
+    expect(pick(read("six months to lease, then stabilize"))).toEqual([["lease_up_months", 6]]);
+    expect(pick(read("six mois pour louer, puis stabilisation"))).toEqual([["lease_up_months", 6]]);
+  });
+  test("negative: a duration before a lease is not a lease-up, and a later number is not labelled by it", () => {
+    expect(pick(read("6 months, then a 12-month lease"))).toEqual([]);
+    expect(pick(read("a 12-month lease of the retail space"))).toEqual([]);
+  });
+  test("an exit or terminal capitalization assumption is the exit cap rate", () => {
+    expect(pick(read("Exit capitalization assumption 5.4%"))).toEqual([["exit_cap_rate_pct", 5.4]]);
+    expect(pick(read("Terminal capitalization assumption: 5.25%"))).toEqual([["exit_cap_rate_pct", 5.25]]);
+    expect(pick(read("We use an assumed exit capitalization rate of 5.4%."))).toEqual([["exit_cap_rate_pct", 5.4]]);
+    expect(pick(read("Taux de capitalisation de sortie retenu : 5,4 %"))).toEqual([["exit_cap_rate_pct", 5.4]]);
+  });
+  test("negative: capitalized interest stays the interest reserve, and a bare capitalization rate is not the exit rate", () => {
+    expect(pick(read("Capitalized interest: $300,000"))).toEqual([["stated_interest_reserve", 300_000]]);
+    expect(pick(read("Capitalization rate 5.1%"))).toEqual([]);
+  });
+  test("a field named inside another field's label: the one at the head of the label wins", () => {
+    const fromTable = (...cells: string[]) => pick(extractCandidates(doc([], [{ name: "Terms", rows: [cells.map((text, i) => ({ text, ref: `${"AB"[i]}1` }))] }])));
+    expect(pick(read("Sponsor promote over the pref hurdle 20%"))).toEqual([["gp_promote_pct", 20]]);
+    expect(pick(read("GP carried interest above the preferred return: 30%"))).toEqual([["gp_promote_pct", 30]]);
+    expect(pick(read("Prime de performance au-delà du rendement privilégié : 20 %"))).toEqual([["gp_promote_pct", 20]]);
+    expect(pick(read("The GP promote above the preferred return is 25%."))).toEqual([["gp_promote_pct", 25]]);
+    expect(fromTable("GP carried interest above the preferred return", "30%")).toEqual([["gp_promote_pct", 30]]);
+    expect(fromTable("Sponsor promote over the pref hurdle", "20%")).toEqual([["gp_promote_pct", 20]]);
+  });
+  test("negative: the preferred return alone, or with a word before it, is still the preferred return", () => {
+    expect(pick(read("Preferred return 8%"))).toEqual([["preferred_return_pct", 8]]);
+  });
+  test("a preferred annual return is the preferred return", () => {
+    expect(pick(read("Preferred annual return: 8%"))).toEqual([["preferred_return_pct", 8]]);
+    expect(pick(read("Annual preferred return 7.5%"))).toEqual([["preferred_return_pct", 7.5]]);
+    expect(pick(read("Rendement privilégié annuel : 8 %"))).toEqual([["preferred_return_pct", 8]]);
+    expect(pick(extractCandidates(doc([], [{ name: "Terms", rows: [[{ text: "Preferred annual return", ref: "A1" }, { text: "8%", ref: "B1" }]] }])))).toEqual([["preferred_return_pct", 8]]);
+  });
+  test("an indicative rate is the loan's rate in scope", () => {
+    expect(pick(read("Construction loan", "Taux indicatif : 6,25 %"))).toEqual([["senior_rate_pct", 6.25]]);
+    expect(pick(read("Mezzanine loan", "Indicative rate: 11%"))).toEqual([["mezz_rate_pct", 11]]);
+  });
 });
 
 describe("short-form multipliers in table cells", () => {
