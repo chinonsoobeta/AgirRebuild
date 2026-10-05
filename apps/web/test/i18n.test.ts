@@ -68,6 +68,16 @@ describe("the plain-language layer", () => {
     expect(checkText(fr, c)).toContain("Le CCD de dimensionnement");
   });
 
+  it("renders the mezzanine accrual check in French, with the balance at stabilization", () => {
+    const c = { key: "mezz_interest_accrued", kind: "bound", severity: "warning", message: "", expected: 5_000_000, actual: 250_000 };
+    const text = checkText(fr, c);
+    expect(text).toContain("mezzanine");
+    expect(text).not.toMatch(/\b(accrues|commitment|stabilization)\b/);
+    expect(text).toContain(fr.f.value(250_000, "$"));
+    expect(text).toContain(fr.f.value(5_000_000, "$"));
+    expect(text).toContain(fr.f.value(5_250_000, "$"));
+  });
+
   it("keeps the institutional term in the glossary", () => {
     expect(en.t("glossary.dcr")[0]).toBe("DCR (debt coverage ratio), called DSCR by many lenders");
     expect(fr.t("glossary.dcr")[0]).toBe("CCD (coefficient de couverture de la dette), appelé RCSD par de nombreux prêteurs");

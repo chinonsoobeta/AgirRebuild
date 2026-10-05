@@ -2,11 +2,22 @@ import { describe, expect, test } from "vitest";
 import fc from "fast-check";
 import { FIELDS, FIELD_BY_KEY, POLICY_V1, TEMPLATES, type AssumptionStatus, type EngineInput, type Readiness, type RunResult } from "@agir/contracts";
 import { createHash } from "node:crypto";
+import { readFileSync, readdirSync } from "node:fs";
+import { join } from "node:path";
 import { allocate, applyStress, assemble, buildLedger, canonicalJson, irrRoots, levelPayment, underwrite, validateInput, EngineInputError } from "../src/index.ts";
 import { allEquityDeal, developmentDeal } from "./fixtures.ts";
 
 const metric = (r: RunResult, key: string, scenario = "base") =>
   r.scenarios.find((s) => s.key === scenario)!.metrics.find((m) => m.key === key)!;
+
+/**
+ * The hash of a result as the engine produced it before task 37 added the `mezz_interest_accrued`
+ * metric: that one entry is left out, so a pin taken before it stays true for a deal it does not touch.
+ */
+function shaWithoutMezzMetric(r: RunResult): string {
+  const plain = { ...r, scenarios: r.scenarios.map((s) => ({ ...s, metrics: s.metrics.filter((m) => m.key !== "mezz_interest_accrued") })) };
+  return createHash("sha256").update(canonicalJson(plain)).digest("hex");
+}
 
 describe("hand-checkable all-equity deal", () => {
   const r = underwrite(allEquityDeal(), POLICY_V1);
@@ -175,7 +186,7 @@ describe("a credit in other costs", () => {
       throw e;
     }
   };
-  const sha = (x: unknown) => createHash("sha256").update(canonicalJson(x)).digest("hex");
+  const sha = shaWithoutMezzMetric;
 
   test("a negative other cost is accepted while the total stays above 0", () => {
     expect(problems(withOther(-20_000))).toEqual([]);
@@ -436,5 +447,100 @@ describe("quick-start templates", () => {
       expect(readiness.impossible[0]).toMatchObject({ fieldKey: "refinance_month" });
       expect(readiness.impossible[0]!.label).toMatch(/^refinance month must fall from stabilization \(month 15\)/);
     });
+  });
+});
+
+describe("mezzanine interest after its commitment (task 37)", () => {
+  const mezzDeal = (mezz: Partial<NonNullable<EngineInput["mezzanine"]>> = {}): EngineInput => ({
+    ...developmentDeal(),
+    mezzanine: { amount: 5_000_000, ratePct: 11, amortYears: 30, ioMonths: 60, ...mezz },
+  });
+  const accrued = (r: RunResult) => metric(r, "mezz_interest_accrued");
+  // What the undrawn commitment, drawn debt and accrued interest are, from the figures a run reports.
+  const unusedAtS = (r: RunResult, commitments: number) => commitments - (metric(r, "total_debt").value! - accrued(r).value!);
+
+  test("a mezzanine that fills early leaves nothing undrawn and no equity overrun", () => {
+    const L = buildLedger(mezzDeal());
+    const r = underwrite(mezzDeal(), POLICY_V1);
+    expect(L.converged).toBe(true);
+    expect(accrued(r).status).toBe("VALID");
+    expect(accrued(r).unit).toBe("$");
+    expect(accrued(r).value!).toBeGreaterThan(0);
+    // Unused commitment is zero within half a cent. Because the solve also requires |overrun - unused| < 0.005,
+    // the overrun is zero within half a cent too.
+    expect(Math.abs(unusedAtS(r, L.commitments))).toBeLessThan(0.005);
+    expect(L.balancesAtS.mezzanine).toBeCloseTo(5_000_000 + accrued(r).value!, 6);
+    expect(L.balancesAtS.senior).toBeCloseTo(27_000_000, 2);
+    expect(metric(r, "total_debt").value!).toBeCloseTo(32_000_000 + accrued(r).value!, 2);
+    // Sources equal uses, with the accrued interest inside both.
+    expect(L.requiredEquity + L.drawnDebtAtS).toBeCloseTo(L.tdc, 2);
+    expect(metric(r, "loan_to_cost").value!).toBeCloseTo((32_000_000 / L.tdc) * 100, 6);
+  });
+  test("equity falls by the old undrawn amount, within 3% of it", () => {
+    // Before the change this deal needed 14,387,603.39 of equity and left 1,100,000.00 of senior undrawn.
+    const L = buildLedger(mezzDeal());
+    expect(Math.abs(14_387_603.39 - L.requiredEquity - 1_100_000)).toBeLessThan(0.03 * 1_100_000);
+  });
+  test("the warning check says the amount, the commitment and the balance at stabilization", () => {
+    const r = underwrite(mezzDeal(), POLICY_V1);
+    const c = r.checks.find((k) => k.key === "mezz_interest_accrued");
+    expect(c?.severity).toBe("warning");
+    const x = accrued(r).value!;
+    const fmt = (v: number) => "$" + Math.round(v).toLocaleString("en-US");
+    expect(c!.message).toBe(
+      `Mezzanine interest of ${fmt(x)} accrues on the mezzanine balance after its ${fmt(5_000_000)} commitment is used; the mezzanine balance at stabilization is ${fmt(5_000_000 + x)}.`,
+    );
+    expect(c!.actual).toBeCloseTo(x, 6);
+    expect(c!.expected).toBe(5_000_000);
+  });
+  test("the payoff at sale includes the accrued interest", () => {
+    // Both loans are interest-only through the hold, so the payoff is exactly the balances at stabilization.
+    const io = { ...mezzDeal({ ioMonths: 120 }), senior: { amount: 27_000_000, ratePct: 6, amortYears: 30, ioMonths: 120 } };
+    const L = buildLedger(io);
+    const r = underwrite(io, POLICY_V1);
+    expect(accrued(r).value!).toBeGreaterThan(0);
+    expect(L.payoffAtSale).toBeCloseTo(32_000_000 + accrued(r).value!, 2);
+    expect(L.payoffAtSale).toBeCloseTo(metric(r, "total_debt").value!, 2);
+  });
+  test("a mezzanine whose loan never runs over reports 0 and adds no check", () => {
+    const r = underwrite(mezzDeal({ ratePct: 0 }), POLICY_V1);
+    expect(accrued(r).status).toBe("VALID");
+    expect(accrued(r).value).toBe(0);
+    expect(r.checks.find((k) => k.key === "mezz_interest_accrued")).toBeUndefined();
+  });
+  test("a senior-only deal reports the metric as not applicable, with a reason", () => {
+    const r = underwrite(developmentDeal(), POLICY_V1);
+    expect(accrued(r).status).toBe("NOT_APPLICABLE");
+    expect(accrued(r).value).toBeNull();
+    expect(accrued(r).reason).toMatch(/mezzanine/);
+    expect(r.checks.find((k) => k.key === "mezz_interest_accrued")).toBeUndefined();
+  });
+  test("results that the change must not touch are byte for byte as pinned before it", () => {
+    // Pinned on task/35-cost-credits (64925d2), before any engine change; only the new metric entry is left out.
+    expect(shaWithoutMezzMetric(underwrite(developmentDeal(), POLICY_V1))).toBe("61f6c980fbabf5faf49f1e6807e001106d3970479177e2a4ad08e32e3563b1a5");
+    expect(shaWithoutMezzMetric(underwrite(mezzDeal({ ratePct: 0 }), POLICY_V1))).toBe("0bc5c04d9ab07917f5be7b1ba19473377b9385faef21f88b5a9ddb00026a76f7");
+  });
+  test("overrun and unused commitment never coexist, over a grid of sizes, rates and lengths", () => {
+    for (const amount of [500_000, 2_000_000, 5_000_000, 9_000_000]) {
+      for (const ratePct of [4, 8, 12, 18]) {
+        for (const constructionMonths of [6, 18, 30]) {
+          for (const leaseUpMonths of [0, 12]) {
+            const deal = { ...mezzDeal({ amount, ratePct }), constructionMonths, leaseUpMonths };
+            const L = buildLedger(deal);
+            const r = underwrite(deal, POLICY_V1);
+            const label = JSON.stringify({ amount, ratePct, constructionMonths, leaseUpMonths });
+            expect(L.converged, label).toBe(true);
+            if (L.requiredEquity > 0.005) expect(Math.abs(unusedAtS(r, L.commitments)), label).toBeLessThan(0.005);
+            expect(r.checks.find((k) => k.key === "funding_not_converged"), label).toBeUndefined();
+          }
+        }
+      }
+    }
+  });
+  test("none of the six oracle deals has a mezzanine loan, so none can change", () => {
+    const dir = join(import.meta.dirname, "../../../oracles/deals");
+    const files = readdirSync(dir).filter((f) => f.endsWith(".json"));
+    expect(files.length).toBe(6);
+    for (const f of files) expect(readFileSync(join(dir, f), "utf8"), f).not.toMatch(/mezz/i);
   });
 });

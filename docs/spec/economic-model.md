@@ -22,6 +22,17 @@ line as "Other costs (credit)" with its amount.
 **Funding (decision 2).** Equity first, then mezzanine, then senior. Each tranche accrues interest
 on its opening balance every month before `S`, capitalized while commitment remains; any
 shortfall is paid by equity. Required equity is solved so the debt is exactly fully drawn at `S`.
+Owner decision (2026-10-05): once the mezzanine commitment is used, mezzanine interest accrues on the
+mezzanine balance (paid in kind), above its commitment. Equity does not pay it and the senior loan never
+funds it; senior interest beyond the senior commitment is still paid by equity. The amount is the ledger's
+`mezzAccruedBeyondCommitment` and the `mezz_interest_accrued` metric: it is `NOT_APPLICABLE` when there is no
+mezzanine loan, and 0 is a real value when the loan never ran over. A warning check states it, and the lender
+package and the memo repeat that sentence where the mezzanine loan is described. The mezzanine balance at
+`S` (commitment plus accrued) is what amortizes, sizes coverage, counts in `total_debt` and is repaid at
+sale; loan to cost stays on commitments. The invariant: at `S`, unused commitment is zero unless equity is
+zero, and an equity overrun and unused commitment never coexist. The solve reports `converged` only when
+`|overrun - unused| < 0.005` and `min(overrun, unused) < 0.005`, or equity is zero; otherwise
+`funding_not_converged` is raised.
 Total development cost = costs + interest before stabilization. A stated interest reserve is a
 check, never an input.
 
