@@ -11,11 +11,12 @@ const metric = (r: RunResult, key: string, scenario = "base") =>
   r.scenarios.find((s) => s.key === scenario)!.metrics.find((m) => m.key === key)!;
 
 /**
- * The hash of a result as the engine produced it before task 37 added the `mezz_interest_accrued`
- * metric: that one entry is left out, so a pin taken before it stays true for a deal it does not touch.
+ * The hash of a result as the engine produced it before task 37 added the `mezz_interest_accrued` metric and
+ * task 39 added three more: those entries are left out, so a pin taken before them stays true for a deal they do not touch.
  */
 function shaWithoutMezzMetric(r: RunResult): string {
-  const plain = { ...r, scenarios: r.scenarios.map((s) => ({ ...s, metrics: s.metrics.filter((m) => m.key !== "mezz_interest_accrued") })) };
+  const later = ["mezz_interest_accrued", "leaseup_operating_cost", "cumulative_cash_shortfall", "io_dscr_year1"];
+  const plain = { ...r, scenarios: r.scenarios.map((s) => ({ ...s, metrics: s.metrics.filter((m) => !later.includes(m.key)) })) };
   return createHash("sha256").update(canonicalJson(plain)).digest("hex");
 }
 
@@ -228,8 +229,12 @@ describe("a credit in other costs", () => {
   test("a deal with no credit computes byte for byte as before", () => {
     const withOtherCost = developmentDeal();
     withOtherCost.budget.other = 300_000;
-    expect(sha(underwrite(developmentDeal(), POLICY_V1))).toBe("61f6c980fbabf5faf49f1e6807e001106d3970479177e2a4ad08e32e3563b1a5");
-    expect(sha(underwrite(withOtherCost, POLICY_V1))).toBe("c346a2638ceca1a9345298bda5eb0a93b2b308f462896af3cf0f05c70c309039");
+    // Re-pinned for task 39 on 524ed85 with no lease-up: a ramp-off lease-up now carries fixed operating costs, so the old
+    // 12-month deal (61f6c980..., c346a263...) moves by design; these two do not.
+    const plain = { ...developmentDeal(), leaseUpMonths: 0 };
+    withOtherCost.leaseUpMonths = 0;
+    expect(sha(underwrite(plain, POLICY_V1))).toBe("52ca18ae941f2ccfa5699882c2de0aff37fce23dae690434d9d33e025a7aa12f");
+    expect(sha(underwrite(withOtherCost, POLICY_V1))).toBe("dc6fd4b771ef98533a01e488fbe204a3dbce9b8d022adecdf704ebc880ae8092");
   });
 });
 
@@ -480,7 +485,8 @@ describe("mezzanine interest after its commitment (task 37)", () => {
     // Before the change this deal needed 14,387,603.39 of equity, carried 45,287,603.38 of cost and left 1,100,000.00 of
     // senior undrawn. Equity is cost less debt at S, so its fall is the old undrawn amount, plus the mezzanine interest that
     // now accrues instead of being paid by equity, less the interest that the extra senior draw adds to the cost. Within 0.05.
-    const L = buildLedger(mezzDeal());
+    // The ramp is on so that the lease-up months carry no fixed cost (task 39) and the funding is what it was.
+    const L = buildLedger({ ...mezzDeal(), leaseUpRamp: true });
     const drop = 14_387_603.39 - L.requiredEquity;
     expect(drop).toBeGreaterThan(1_100_000);
     expect(drop).toBeCloseTo(1_100_000 + L.mezzAccruedBeyondCommitment - (L.tdc - 45_287_603.38), 1);
@@ -521,9 +527,11 @@ describe("mezzanine interest after its commitment (task 37)", () => {
   });
   test("results that the change must not touch are byte for byte as pinned before it", () => {
     // Pinned on task/35-cost-credits (64925d2), before any engine change; only the new metric entry is left out.
-    expect(shaWithoutMezzMetric(underwrite(developmentDeal(), POLICY_V1))).toBe("61f6c980fbabf5faf49f1e6807e001106d3970479177e2a4ad08e32e3563b1a5");
+    // Re-pinned for task 39 on 524ed85 with no lease-up (a ramp-off lease-up now carries fixed operating costs).
+    const noLeaseUp = { ...developmentDeal(), leaseUpMonths: 0 };
+    expect(shaWithoutMezzMetric(underwrite(noLeaseUp, POLICY_V1))).toBe("52ca18ae941f2ccfa5699882c2de0aff37fce23dae690434d9d33e025a7aa12f");
     // The stresses are left out of the second: a +150 bps rate stress lifts a 0% mezzanine to 1.5%, and that one does accrue.
-    expect(shaWithoutMezzMetric(underwrite(mezzDeal({ ratePct: 0 }), { ...POLICY_V1, stresses: [] }))).toBe("ee62512d23ae33fb7db80a2cd7cb0f1f75ca1c0a7c1a105f405069ac8a607881");
+    expect(shaWithoutMezzMetric(underwrite({ ...mezzDeal({ ratePct: 0 }), leaseUpMonths: 0 }, { ...POLICY_V1, stresses: [] }))).toBe("44159eaa9a5377ffa49b9ca857113656ec4fa12aa2d7854a15bd84420f105f95");
   });
   test("overrun and unused commitment never coexist, over a grid of sizes, rates and lengths", () => {
     for (const amount of [500_000, 2_000_000, 5_000_000, 9_000_000]) {
@@ -571,12 +579,12 @@ describe("fixed operating costs during lease-up, shortfall and interest-only cov
     expect(metric(r, "leaseup_operating_cost").unit).toBe("$");
     expect(metric(r, "leaseup_operating_cost").value!).toBeCloseTo(60_000, 2);
     // Identity: TDC = costs before financing + capitalized interest + lease-up operating cost. It rises by the 60,000 plus the
-    // extra capitalized interest that the 60,000 carries (and the NOI is untouched).
+    // change in capitalized interest (the equity pays for more of the build, so the debt is drawn later and that change is
+    // here a small fall), and the NOI is untouched.
     const capInt = metric(r, "capitalized_interest").value!;
     expect(metric(r, "hard_and_soft_cost").value!).toBeCloseTo(41_900_000, 2);
     expect(metric(r, "total_development_cost").value!).toBeCloseTo(41_900_000 + capInt + 60_000, 2);
     expect(metric(r, "total_development_cost").value! - OLD.tdc).toBeCloseTo(60_000 + (capInt - OLD.capitalizedInterest), 2);
-    expect(capInt).toBeGreaterThan(OLD.capitalizedInterest);
     expect(metric(r, "stabilized_noi").value!).toBeCloseTo(OLD.noi, 6);
     // The months before stabilization carry it as a cost, and the hold-year cash flows never see it.
     const leaseUp = L.rows.filter((x) => x.phase === "lease_up");
@@ -651,7 +659,14 @@ describe("fixed operating costs during lease-up, shortfall and interest-only cov
   });
   test("months before stabilization never count toward the shortfall", () => {
     // Ramp on, 12 months of lease-up with income far below the fixed costs: the lease-up deficit is not a shortfall.
-    const deal = { ...developmentDeal(), leaseUpRamp: true, fixedOpexAnnual: 3_000_000, expenseRatioPct: undefined } as EngineInput;
+    // Fixed costs of 1.9m against about 1.7m of ramped income over the lease-up (a loss), and 1.51m of year-1 NOI against 1.2m of interest.
+    const deal = {
+      ...developmentDeal(),
+      leaseUpRamp: true,
+      fixedOpexAnnual: 1_900_000,
+      expenseRatioPct: undefined,
+      senior: { amount: 20_000_000, ratePct: 6, amortYears: 30, ioMonths: 36 },
+    } as EngineInput;
     expect(buildLedger(deal).annual[0]!.noi).toBeLessThan(0);
     expect(metric(underwrite(deal, POLICY_V1), "cumulative_cash_shortfall").value).toBe(0);
   });
