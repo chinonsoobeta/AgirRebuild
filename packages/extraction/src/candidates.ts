@@ -40,7 +40,7 @@ function cellToken(cell: Cell, format: DocumentFormat): NumberToken | null {
       scaled: false,
     };
   }
-  const t = tokenize(cell.text, format)[0];
+  const t = tokenize(cell.text, format, true)[0];
   if (!t || isAddress(cell.text, t)) return null;
   // A floating rate's spread is shown, never read as the rate.
   return floating(cell.text, [t])?.spreads.includes(t) ? { ...t, value: null, refusal: SPREAD_NOTE } : t;

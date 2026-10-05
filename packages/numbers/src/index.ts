@@ -229,7 +229,9 @@ export function wholeUnitType(text: string): string | null {
 }
 
 // "m" is million only when it is not the m of m²: "$450 m²" is not $450,000,000.
-const SCALE_RE = /^\s?(billion|bn|million|mm|mn|m(?!²)|thousand|k)\b/i;
+const SCALE_RE = /^\s?(billions?|bn|millions?|mm|mn|m(?!²)|thousands?|k)\b/i;
+// In a table cell nothing around the figure says it is money, so only the spellings that cannot be a metre or a millimetre count: "85 m" and "5 mm" are not millions.
+const CELL_SCALE_RE = /^(?:[kK]|MM?|bn|[Bb]illions?|[Mm]illions?|[Tt]housands?)$/;
 // "²" is not a word character, so the rules that end in it close with a lookahead, not \b.
 const UNIT_RULES: { re: RegExp; unit: TokenUnit; money?: true }[] = [
   { re: /^\s?(%|percent\b|pct\b)/i, unit: "%" },
@@ -287,8 +289,8 @@ function wordTokens(text: string): NumberToken[] {
 
 function scaleOf(word: string): number {
   const w = word.toLowerCase();
-  if (w === "billion" || w === "bn") return 1e9;
-  if (w === "million" || w === "mm" || w === "mn" || w === "m") return 1e6;
+  if (w.startsWith("billion") || w === "bn") return 1e9;
+  if (w.startsWith("million") || w === "mm" || w === "mn" || w === "m") return 1e6;
   return 1e3;
 }
 
@@ -297,7 +299,7 @@ const MINUS_WORD_RE = /(?:^|[^\p{L}])(?<!\b(?:au|du|ou|or|plus|at|de|à|a|par|et
 const ANNUAL_RE = /^\s?(?:\/\s?(?:an|yr|year|ann[ée]e)\b|par\s+(?:an|ann[ée]e)\b|per\s+(?:year|annum)\b|annually\b|a\s+year\b)/iu;
 
 /** Every number in one line of text, with its unit and whether it was refused. */
-export function tokenize(line: string, format: DocumentFormat): NumberToken[] {
+export function tokenize(line: string, format: DocumentFormat, cell = false): NumberToken[] {
   const text = normalizeText(line);
   const out: NumberToken[] = [];
   let reached = 0;
@@ -310,7 +312,9 @@ export function tokenize(line: string, format: DocumentFormat): NumberToken[] {
     const rest = text.slice(end);
     const scale = rest.match(SCALE_RE);
     const suffix = (scale ? rest.slice(scale[0].length) : rest).match(SUFFIX_RE);
-    const currency = Boolean(cur) || Boolean(suffix);
+    // In a cell, "185k" or "1.2M" with no unit after it is an amount, as "$185k" is in prose.
+    const bare = cell && !cur && !suffix && scale && CELL_SCALE_RE.test(scale[1]!) && !UNIT_RULES.some((r) => !r.money && r.re.test(rest.slice(scale[0].length)));
+    const currency = Boolean(cur) || Boolean(suffix) || Boolean(bare);
     let currencyCode = codeOf(cur?.trim());
     let scaled = false;
     let unit: TokenUnit = currency ? "$" : null;
