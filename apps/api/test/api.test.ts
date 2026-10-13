@@ -128,6 +128,15 @@ describe("the whole workflow, from documents to an audit package", () => {
     expect(new Uint8Array(await file.arrayBuffer()).slice(0, 4)).toEqual(new TextEncoder().encode("%PDF"));
   }, 120_000);
 
+  test("the build decision report renders as a PDF end to end", async () => {
+    expect((await call(alice, "POST", `/api/runs/${run}/artifacts`, { kind: "build_decision", format: "pdf" })).status).toBe(200);
+    await work();
+    const art = (await call(alice, "GET", `/api/deals/${deal}/artifacts`)).json.find((a: any) => a.kind === "build_decision");
+    expect(art.status).toBe("ready");
+    const file = await app.request(`/api/artifacts/${art.id}/file`, { headers: { cookie: alice.cookie } });
+    expect(new Uint8Array(await file.arrayBuffer()).slice(0, 4)).toEqual(new TextEncoder().encode("%PDF"));
+  }, 120_000);
+
   test("the audit package validates itself, including an exact replay of the run", async () => {
     const pkg = (await call(alice, "GET", `/api/runs/${run}/audit-package`)).json;
     expect(pkg.validation.status).toBe("passed");

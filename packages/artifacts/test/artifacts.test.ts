@@ -1,8 +1,9 @@
 import { describe, expect, test } from "vitest";
 import { FIELD_BY_KEY, POLICY_V1 } from "@agir/contracts";
-import { assemble, underwrite, type AssumptionRow } from "@agir/engine";
+import { assemble, ENGINE_VERSION, underwrite, type AssumptionRow } from "@agir/engine";
 import { consolidate, extractCandidates, type SourcedCandidate } from "@agir/extraction";
 import { loadOracle } from "@agir/testkit";
+import { developmentDeal } from "../../engine/test/fixtures.ts";
 import { buildModel, renderArtifact, renderHtml, verifyProvenance, visibleText, type ArtifactInput } from "../src/index.ts";
 
 function mapleInput(kind: ArtifactInput["kind"]): ArtifactInput {
@@ -22,6 +23,7 @@ function mapleInput(kind: ArtifactInput["kind"]): ArtifactInput {
     kind,
     deal: { name: deal.name, assetType: deal.assetType, location: deal.location, currency: "CAD", province: "BC" },
     run: { id: "r1", runNumber: 1, createdAt: "2026-09-24T12:00:00.000Z", engineVersion: result.engineVersion, policyVersion: result.policyVersion, policyHash: "p", inputHash: "a".repeat(64), resultHash: "b".repeat(64) },
+    policy: POLICY_V1,
     result,
     input: input!,
     assumptions: proposals.map((p) => ({
@@ -217,5 +219,56 @@ describe("artifacts", () => {
     expect(rows[0]![5]).toBe("Confirmation");
     expect(rows[1]![5]).toBe("Stated by the sponsor, not independently confirmed");
     expect(rows[2]![5] ?? "").toBe("");
+  });
+});
+
+describe("the build decision report", () => {
+  /** The engine's own development deal with its rents scaled: 1 fails every gate, 1.6 passes them all. */
+  function dealInput(rentScale: number): ArtifactInput {
+    const base = mapleInput("build_decision");
+    const d = developmentDeal();
+    const input = { ...d, revenue: d.revenue.map((c) => ({ ...c, rentMonthly: c.rentMonthly && c.rentMonthly * rentScale, rentPsfAnnual: c.rentPsfAnnual && c.rentPsfAnnual * rentScale })) };
+    return { ...base, input, result: underwrite(input, POLICY_V1), assumptions: [], notFound: [] };
+  }
+  const textOf = (x: ArtifactInput) => {
+    const model = buildModel(x);
+    const text = visibleText(renderHtml(model));
+    return { model, text, scan: verifyProvenance(text, model.formatter.manifest) };
+  };
+
+  test("a failing-gate run shows the three numbers, the weakest stress and the break-even lines, all with a source", async () => {
+    const x = dealInput(1);
+    expect(x.result.verdict.gates.some((g) => g.status === "failed")).toBe(true);
+    const { model, text, scan } = textOf(x);
+    expect(model.kicker).toBe("Build decision");
+    expect(scan.orphans).toEqual([]);
+    const at = (s: string) => text.indexOf(s);
+    const order = ["Yield on cost", "Sizing DSCR (weakest year)", "Equity multiple", "Weakest stress", "What would change the answer", "Approved inputs and where each came from"].map(at);
+    expect(order.every((n) => n >= 0)).toBe(true);
+    expect([...order].sort((a, b) => a - b)).toEqual(order);
+    expect(text).toContain("Weakest stress: Combined");
+    expect(text).toContain("Everything else is held");
+    expect(text).toContain("Not within");
+    expect(model.formatter.manifest.some((e) => /^run:breakeven\.equity_multiple\.rent/.test(e.ref))).toBe(true);
+    expect((await renderArtifact(x, "docx")).provenance.pass).toBe(true);
+  });
+  test("an approved run has no break-even section and names its weakest stress", () => {
+    const x = dealInput(1.6);
+    expect(x.result.verdict.code).toBe("APPROVE");
+    const { text, scan } = textOf(x);
+    expect(scan.orphans).toEqual([]);
+    expect(text).not.toContain("What would change the answer");
+    expect(text).toContain("Weakest stress:");
+    expect(text).toContain("fails no gate");
+  });
+  test("a run from another engine version leaves the break-even section out and says why", () => {
+    const x = dealInput(1);
+    const old = { ...x, run: { ...x.run, engineVersion: "0.9.0" } };
+    expect(old.run.engineVersion).not.toBe(ENGINE_VERSION);
+    const { text, scan } = textOf(old);
+    expect(scan.orphans).toEqual([]);
+    expect(text).toContain("What would change the answer");
+    expect(text).toContain("Not shown: this run was made by an earlier engine");
+    expect(text).not.toContain("Everything else is held");
   });
 });
