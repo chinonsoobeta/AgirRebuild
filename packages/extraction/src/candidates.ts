@@ -1682,6 +1682,8 @@ function scalings(doc: NormalizedDocument, format: DocumentFormat): Map<string, 
   for (const l of doc.lines) {
     const stated = statedScales(l.text);
     if (isScaleHeading(l.text, stated)) heading = stated;
+    // Another heading under a scale heading may start a section the scale does not cover ("Financing"): its figures are neither scaled nor read as written.
+    else if (heading.length > 0 && stated.length === 0 && l.text.trim() !== "" && !/\d/.test(l.text) && l.text.trim().split(/\s+/).length <= 6) heading = ["unclear"];
     headingAt.push(heading);
     out.set(l.location, { rule: rulingOf(heading), own: false });
   }
@@ -1720,7 +1722,8 @@ function applyScales(doc: NormalizedDocument, result: ExtractionResult) {
     if (own.every(Boolean)) return true;
     const rules = hits.map((h) => h.rule);
     const factors = new Set(rules.map((r) => (r && "factor" in r ? r.factor : 0)));
-    if (own.some(Boolean) || hits.length < locs.length || factors.size !== 1 || factors.has(0)) {
+    // A figure already written in the millions is not plainly in thousands or millions: scaling it could make a $12,000,000 loan $12 billion.
+    if (own.some(Boolean) || hits.length < locs.length || factors.size !== 1 || factors.has(0) || Math.abs(c.value) >= 1e6) {
       result.other.push({ ...c, fieldKey: null, itemKey: null, note: SCALE_NOTE });
       return false;
     }

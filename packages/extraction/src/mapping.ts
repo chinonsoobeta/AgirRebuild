@@ -134,12 +134,12 @@ const INCLUDING_RE = /\b(including|incl|includes|comprenant|incluant|inclut)\b/;
 const BUDGET_NAME_RE = new RegExp(`\\b(${FIELDS.filter((f) => f.group === "budget").flatMap((f) => f.aliases).map((a) => a.replace(/[.*+?^${}()|[\]\\/]/g, "\\$&")).join("|")})\\b`);
 const FEE_RE = /\b(fees?|frais|honoraires|premiums?|prime d assurance)\b/;
 // A tenant improvement allowance is a landlord's contribution to the tenant's fit-out, never a rent: the words may stand in the label, the clause before the figure, or right after it.
-// A bare "allowance" or "allocation" next to a budget field's name ("Owner contingency allowance") is that budget line.
+// A bare "allowance" or "allocation" refuses only a rent-shaped figure: an interest-only allowance in months or a budget allowance in dollars is that line's own figure.
 const TI_WORDS = String.raw`(?:ti|tis|tenant (?:improvements?|allowances?)|ameliorations? locatives?|amenagements? du locataire)`;
-const ALLOWANCE_WORDS = String.raw`(?:${TI_WORDS}|allowances?|allocations?)`;
 const TI_RE = new RegExp(String.raw`\b${TI_WORDS}\b`);
-const ALLOWANCE_RE = new RegExp(String.raw`\b(?:allowances?|allocations?)\b`);
-const ALLOWANCE_AFTER_RE = new RegExp(String.raw`^\s*(?:(?:of|for|de|d) )?${ALLOWANCE_WORDS}\b`);
+const ALLOWANCE_RE = /\b(?:allowances?|allocations?)\b/;
+const TI_AFTER_RE = new RegExp(String.raw`^\s*(?:(?:of|for|de|d) )?${TI_WORDS}\b`);
+const ALLOWANCE_AFTER_RE = /^\s*(?:(?:of|for|de|d) )?(?:allowances?|allocations?)\b/;
 const FEE_AFTER_RE = /^\s*(de |d )?(commitment |lender |standby |structuring |broker |insurance |engagement |ouverture |dossier )?(fees?|premium|frais|honoraires|prime d assurance)\b/;
 const PER_INVESTOR_RE = /\b(minimum investment|min investment|minimum subscription|investissement minimal|investissement minimum|souscription minimale|souscription minimum|per limited partner|per investor|par commanditaire|par investisseur)\b/;
 const PER_INVESTOR_AFTER_RE = /^\s*(per|par)\s+(limited partner|investor|commanditaire|investisseur)\b/;
@@ -183,7 +183,8 @@ function lenderFigure(rawLabel: string, t: NumberToken, opts: MapOptions): strin
   const full = without(words_(rawLabel), FEE_RE);
   const before = full.slice(0, Math.max(full.search(FEE_RE), 0));
   const listed = INCLUDING_RE.test(before) || BUDGET_NAME_RE.test(before);
-  if (t.unit !== "%" && (TI_RE.test(plain) || (ALLOWANCE_RE.test(plain) && !BUDGET_NAME_RE.test(plain)) || ALLOWANCE_AFTER_RE.test(tail))) return "A tenant improvement allowance, not rent";
+  const rentShaped = t.unit === "$/sf" || t.unit === "$/m2";
+  if (t.unit !== "%" && (TI_RE.test(plain) || TI_AFTER_RE.test(tail) || (rentShaped && (ALLOWANCE_RE.test(plain) || ALLOWANCE_AFTER_RE.test(tail))))) return "A tenant improvement allowance, not rent";
   if (!opts.budget && ((FEE_RE.test(without(plain, FEE_RE)) && !listed) || FEE_AFTER_RE.test(tail))) return "A fee or premium, not an input";
   // A leased or occupied share (in its own label or right after it) with a condition marker in its clause is the lender's condition.
   const after = prose && at >= 0 ? (ctx.slice(at + raw.length).split(/[,;.]/)[0] ?? "") : "";

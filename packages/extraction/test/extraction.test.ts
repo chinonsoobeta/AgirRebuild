@@ -3295,6 +3295,13 @@ describe("wrong reads found by the V4 trap corpus: scales, spaced digits, allowa
     expect(cand(r, "land_cost")[0]!.raw).toBe("$34,500");
     expect(cand(r, "land_cost")[0]!.unitSeen).toMatch(/stated in thousands/);
     expect(values(read("Budget ($ millions)", "Land cost: $34.5"))).toMatchObject({ land_cost: 34_500_000 });
+    // A later heading may start a section the scale does not cover, and a figure written in the millions is not plainly scaled: both are refused, never scaled.
+    const later = read("Cost plan (in $000s)", "Land cost: $21,750", "Lending", "Senior loan amount: $48,000", "Rate: 6.1%");
+    expect(values(later)).toMatchObject({ land_cost: 21_750_000, senior_rate_pct: 6.1 });
+    expect(cand(later, "senior_loan_amount")).toEqual([]);
+    const big = read("Cost plan (in $000s)", "Senior loan amount: $48,000,000");
+    expect(cand(big, "senior_loan_amount")).toEqual([]);
+    expect(big.other.some((o) => o.note === SCALE_NOTE)).toBe(true);
   });
   test("negative: a scale that measures something else is not a money scale", () => {
     for (const heading of ["Rentable areas in thousands of SF", "Units (thousands)", "Population in thousands"]) expect(values(read(heading, "Land cost: $34,500")), heading).toMatchObject({ land_cost: 34_500 });
@@ -3346,6 +3353,9 @@ describe("wrong reads found by the V4 trap corpus: scales, spaced digits, allowa
   test("negative: rent in the same text still reads", () => {
     const r = read("Office rent $42/SF", "Tenant allowance: $75/SF");
     expect(r.candidates.map((c) => [c.fieldKey, c.value])).toEqual([["rent_psf_annual", 42]]);
+    // A bare allowance that is not rent-shaped is its own line's figure, not a tenant improvement allowance.
+    const other = read("Interest-only allowance on the loan: 15 months", "Design allowance $95,000 within soft costs");
+    expect(other.other.some((o) => o.note === "A tenant improvement allowance, not rent")).toBe(false);
   });
 
   // Rule 4
