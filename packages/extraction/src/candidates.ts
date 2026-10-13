@@ -1635,6 +1635,102 @@ function withoutStruck(text: string, struck: [number, number][] | undefined, loc
   return out + text.slice(at);
 }
 
+// ---- A money scale the document declares ("$ in thousands", "($000s)", "en milliers de dollars") -------------------
+// A sheet name, a caption row, a column header or a heading line may state that its money figures are in thousands or millions. A figure with no scale of its own
+// under it is read as written times the scale, and says so in `unitSeen`. A scale that measures something else is no money scale; one that cannot be read safely refuses the figures.
+type Stated = { factor: number } | "unclear";
+type Ruling = { factor: number } | { refuse: true };
+type Scaling = { rule: Ruling | null; own: boolean };
+const SCALE_PHRASE_RE = /\$\s?['’]?000s?\b|\b000s?\s?\$|['’]000s?\b|\(\s*000s?\s*\)|\$\s?mm\b|\bthousands?\b|\bmilliers?\b|\bmillions?\b/g;
+const SCALE_MEASURE_RE = /\b(?:areas?|superficies?|surfaces?|sf|sq\.? ?ft|square|pi2|m2|units?|unites?|logements?|doors?|suites?|homes?|population|people|persons?|habitants?|stalls?|employees?)\b/;
+const SCALE_NOTE = "The document states a scale for these amounts that Agir cannot read safely; enter the figure";
+const OWN_SCALE_RE = /\d\s?(?:billions?|bn|millions?|mm|mn|m|thousands?|k)\b/i;
+
+/** The money scales a text states, one entry per scale phrase; a phrase that measures something else (areas, units, people) is left out. */
+function statedScales(text: string): Stated[] {
+  const f = fold(text).replace(/²/g, "2");
+  const out: Stated[] = [];
+  for (const m of f.matchAll(SCALE_PHRASE_RE)) {
+    const factor = /million|mm/.test(m[0]) ? 1e6 : 1e3;
+    // The words between the nearest delimiters; inside parentheses the words just before them count too ("Units (thousands)").
+    const left = Math.max(...[";", ",", "|", "(", ")"].map((d) => f.lastIndexOf(d, m.index! - 1)));
+    const right = Math.min(...[";", ",", "|", ")"].map((d) => (f.indexOf(d, m.index! + m[0].length) + 1 || f.length + 1) - 1));
+    const near = f.slice(left + 1, right);
+    const money = /\$|\bdollars?\b|\b(?:cad|usd|cdn)\b/.test(near);
+    const measure = SCALE_MEASURE_RE.test(f[left] === "(" ? f.slice(Math.max(0, left - 20), right) : near);
+    const explicit = /\b(?:in|en)\s+(?:thousands?|millions?|milliers?)|['’]000/.test(near);
+    if (money) out.push({ factor });
+    else if (!measure) out.push(explicit ? { factor } : "unclear");
+  }
+  return out;
+}
+
+const rulingOf = (stated: Stated[]): Ruling | null => {
+  if (stated.length === 0) return null;
+  const factors = new Set(stated.map((s) => (s === "unclear" ? 0 : s.factor)));
+  return factors.size === 1 && !factors.has(0) ? { factor: [...factors][0]! } : { refuse: true };
+};
+
+/** A heading or title line: it states a scale and holds no figure of its own. */
+const isScaleHeading = (text: string, stated: Stated[]) => stated.length > 0 && text.trim().split(/\s+/).length <= 14 && !/\d/.test(fold(text).replace(SCALE_PHRASE_RE, " ").replace(/\b(?:19|20)\d\d\b/g, " "));
+
+/** For every line location and cell reference: the scale that governs it (a heading line; a sheet name, caption row or column header, the column's header winning), and whether the cell's own text carries a scale. */
+function scalings(doc: NormalizedDocument, format: DocumentFormat): Map<string, Scaling> {
+  const out = new Map<string, Scaling>();
+  let heading: Stated[] = [];
+  const headingAt: Stated[][] = [];
+  for (const l of doc.lines) {
+    const stated = statedScales(l.text);
+    if (isScaleHeading(l.text, stated)) heading = stated;
+    headingAt.push(heading);
+    out.set(l.location, { rule: rulingOf(heading), own: false });
+  }
+  for (const t of doc.tables) {
+    const sheet = [...statedScales(t.name), ...(t.at ? (headingAt[t.at - 1] ?? []) : [])];
+    let caption: Stated[] = [];
+    let columns = new Map<number, Stated[]>();
+    for (const row of t.rows) {
+      const stated = row.map((c) => (c.number === undefined ? statedScales(c.text) : []));
+      const figure = row.some((c) => c.number !== undefined || isValueText(c, format));
+      if (!figure && stated.some((x) => x.length > 0)) {
+        if (row.filter((c) => c.text).length === 1) {
+          caption = stated.find((x) => x.length > 0)!;
+          columns = new Map();
+        } else columns = new Map(stated.flatMap((x, i) => (x.length > 0 ? [[i, x] as const] : [])));
+        continue;
+      }
+      if (!figure && row.filter((c) => c.text).length >= 2) columns = new Map();
+      row.forEach((c, i) => out.set(c.ref, { rule: rulingOf(columns.get(i) ?? [...sheet, ...caption]), own: c.number === undefined && OWN_SCALE_RE.test(c.text) }));
+    }
+  }
+  return out;
+}
+
+/** Money candidates under a declared scale are multiplied by it; ones under a scale that is unclear, or differs, are shown with a note instead. */
+function applyScales(doc: NormalizedDocument, result: ExtractionResult) {
+  const map = scalings(doc, result.format);
+  result.candidates = result.candidates.filter((c) => {
+    const def = c.fieldKey ? FIELD_BY_KEY.get(c.fieldKey) : undefined;
+    if (!def || def.unit !== "$" || c.value === null || !/^(?:\$|number|CAD|USD|AUD)$/.test(c.unitSeen ?? "")) return true;
+    // A location is one line ("page 1, line 4") or one cell; a sum of rows lists several.
+    const locs = map.has(c.location) ? [c.location] : c.location.split(/,\s(?!line\s\d)/);
+    const hits = locs.flatMap((l) => map.get(l) ?? []);
+    if (hits.length === 0 || hits.every((h) => !h.rule)) return true;
+    const own = hits.map((h) => h.own || (locs.length === 1 && OWN_SCALE_RE.test(c.raw)));
+    if (own.every(Boolean)) return true;
+    const rules = hits.map((h) => h.rule);
+    const factors = new Set(rules.map((r) => (r && "factor" in r ? r.factor : 0)));
+    if (own.some(Boolean) || hits.length < locs.length || factors.size !== 1 || factors.has(0)) {
+      result.other.push({ ...c, fieldKey: null, itemKey: null, note: SCALE_NOTE });
+      return false;
+    }
+    const factor = [...factors][0]!;
+    c.value = Number((c.value * factor).toPrecision(12));
+    c.unitSeen = withCurrency(`$ (stated in ${factor === 1e3 ? "thousands" : "millions"}; × ${factor.toLocaleString("en-US")})`, currencyOf(c.unitSeen));
+    return true;
+  });
+}
+
 /** Every candidate value in one document. Deterministic: no model is consulted. */
 export function extractCandidates(doc0: NormalizedDocument): ExtractionResult {
   const result: ExtractionResult = { format: detectFormat(doc0.fullText), candidates: [], other: [], notes: [...(doc0.notes ?? [])] };
@@ -1657,6 +1753,7 @@ export function extractCandidates(doc0: NormalizedDocument): ExtractionResult {
   const notes = doc.kind === "docx" ? doc.lines.map((l) => l.text) : [];
   // A Word table is under the heading above it: the scope in force after the lines that come before it.
   for (const t of doc.tables) fromTable(t, result, notes, (t.at ? scopes[t.at - 1] : undefined) ?? "senior");
+  applyScales(doc, result);
   const aside = (c: Candidate, note: string) => result.other.push({ ...c, fieldKey: null, itemKey: null, note });
   // A later revision of a builder's quote supersedes the earlier ones; a revision heading on its own line names the revision of the lines under it.
   const heading = new Map<string, number>();
