@@ -3,7 +3,7 @@
 // It drains the jobs table with leases, retries with backoff, and a dead
 // letter. It runs as the trusted service principal.
 
-import { FIELD_BY_KEY, type Currency, type EngineInput, type FieldUnit, type RunResult } from "@agir/contracts";
+import { FIELD_BY_KEY, POLICY_V1, type Currency, type EngineInput, type FieldUnit, type RunResult } from "@agir/contracts";
 import { renderArtifact, RendererUnavailableError, type ArtifactInput } from "@agir/artifacts";
 import { sha256Hex, type BlobStore, type Db } from "@agir/db";
 import { consolidate, extractCandidates, kindOf, parseDocument, type SourcedCandidate } from "@agir/extraction";
@@ -307,6 +307,7 @@ async function renderJob(deps: WorkerDeps, artifactId: string) {
     },
     result: run.result,
     input: run.input_snapshot.input,
+    policy: POLICY_V1,
     assumptions: run.input_snapshot.assumptions.map((x) => ({ ...x, unit: (FIELD_BY_KEY.get(x.fieldKey)?.unit ?? "$") as FieldUnit })),
     notFound: run.input_snapshot.notFound ?? [],
     decision: decision

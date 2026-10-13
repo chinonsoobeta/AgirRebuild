@@ -9,6 +9,8 @@ const OPTIONS = [
   { kind: "ic_memo", format: "docx" },
   { kind: "lender_package", format: "pdf" },
   { kind: "lender_package", format: "docx" },
+  { kind: "build_decision", format: "pdf" },
+  { kind: "build_decision", format: "docx" },
   { kind: "model_export", format: "xlsx" },
 ] as const;
 
@@ -28,7 +30,7 @@ export function Reports({ dealId }: { dealId: string }) {
   });
   if (!deal.data) return <p className="muted">{t("common.loading")}</p>;
   const o = deal.data;
-  const kind = (k: string) => (k === "ic_memo" ? t("reports.memo") : k === "lender_package" ? t("reports.lender") : t("reports.modelExport"));
+  const kind = (k: string) => (k === "ic_memo" ? t("reports.memo") : k === "lender_package" ? t("reports.lender") : k === "build_decision" ? t("reports.buildDecision") : t("reports.modelExport"));
   const fmtName = (x: string) => (x === "pdf" ? "PDF" : x === "docx" ? t("reports.word") : t("reports.excel"));
   return (
     <>

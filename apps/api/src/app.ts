@@ -371,9 +371,9 @@ export function createApp({ db, store, secureCookies, demoSignIn = false }: AppD
 
   // ---- Artifacts ------------------------------------------------------------------------
   app.post("/api/runs/:id/artifacts", async (c) => {
-    const body = z.object({ kind: z.enum(["ic_memo", "lender_package", "model_export"]), format: z.enum(["pdf", "docx", "xlsx"]) }).parse(await c.req.json());
+    const body = z.object({ kind: z.enum(["ic_memo", "lender_package", "build_decision", "model_export"]), format: z.enum(["pdf", "docx", "xlsx"]) }).parse(await c.req.json());
     if (body.kind === "model_export" && body.format !== "xlsx") return c.json({ error: "The model export is an Excel file." }, 422);
-    if (body.kind !== "model_export" && body.format === "xlsx") return c.json({ error: "Memos and lender packages are PDF or Word." }, 422);
+    if (body.kind !== "model_export" && body.format === "xlsx") return c.json({ error: "Memos, lender packages and build decision reports are PDF or Word." }, 422);
     const [r] = await as(c, (tx) => tx.query<{ id: string }>(`select fn_request_artifact($1, $2, $3) as id`, [c.req.param("id"), body.kind, body.format]));
     return c.json({ id: r!.id });
   });
@@ -400,7 +400,7 @@ export function createApp({ db, store, secureCookies, demoSignIn = false }: AppD
     if (!a || a.status !== "ready" || !a.storage_key) return c.json({ error: "This file is not ready." }, 404);
     const bytes = await store.get(a.storage_key);
     const mime = { pdf: "application/pdf", docx: "application/vnd.openxmlformats-officedocument.wordprocessingml.document", xlsx: "application/vnd.openxmlformats-officedocument.spreadsheetml.sheet" }[a.format] ?? "application/octet-stream";
-    const label = { ic_memo: "IC memo", lender_package: "Lender package", model_export: "Model" }[a.kind] ?? a.kind;
+    const label = { ic_memo: "IC memo", lender_package: "Lender package", build_decision: "Build decision", model_export: "Model" }[a.kind] ?? a.kind;
     const inline = c.req.query("inline") === "1" && a.format === "pdf";
     return new Response(new Uint8Array(bytes), {
       headers: { "content-type": mime, "content-disposition": `${inline ? "inline" : "attachment"}; filename="${encodeURIComponent(`${a.deal} - ${label} - Run ${a.run_number}.${a.format}`)}"` },

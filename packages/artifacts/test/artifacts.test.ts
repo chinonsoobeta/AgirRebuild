@@ -243,12 +243,13 @@ describe("the build decision report", () => {
     expect(model.kicker).toBe("Build decision");
     expect(scan.orphans).toEqual([]);
     const at = (s: string) => text.indexOf(s);
-    const order = ["Yield on cost", "Sizing DSCR (weakest year)", "Equity multiple", "Weakest stress", "What would change the answer", "Approved inputs and where each came from"].map(at);
+    const order = ["Yield on cost", "Sizing DSCR (weakest year)", "Weakest stress", "What would change the answer", "Approved inputs and where each came from"].map(at);
     expect(order.every((n) => n >= 0)).toBe(true);
     expect([...order].sort((a, b) => a - b)).toEqual(order);
     expect(text).toContain("Weakest stress: Combined");
     expect(text).toContain("Everything else is held");
-    expect(text).toContain("Not within");
+    expect(text).toContain("Out of range");
+    expect(text).toContain("Not monotonic");
     expect(model.formatter.manifest.some((e) => /^run:breakeven\.equity_multiple\.rent/.test(e.ref))).toBe(true);
     expect((await renderArtifact(x, "docx")).provenance.pass).toBe(true);
   });

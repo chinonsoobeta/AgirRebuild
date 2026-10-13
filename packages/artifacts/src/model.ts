@@ -2,10 +2,11 @@
 // and the inputs that run used, and from nothing else: it never recomputes a
 // verdict, a gate or a metric.
 
-import { CURRENCY_NAMES, FIELD_BY_KEY, placeLabel, type Currency, type EngineInput, type FieldUnit, type RunResult, type VerdictCode } from "@agir/contracts";
+import { CURRENCY_NAMES, FIELD_BY_KEY, placeLabel, type Currency, type EngineInput, type FieldUnit, type Policy, type RunResult, type VerdictCode } from "@agir/contracts";
+import { breakeven, ENGINE_VERSION, type BreakevenEcho, type BreakevenRow } from "@agir/engine";
 import { Formatter, formatValue } from "./format.ts";
 
-export type ArtifactKind = "ic_memo" | "lender_package" | "model_export";
+export type ArtifactKind = "ic_memo" | "lender_package" | "build_decision" | "model_export";
 
 export type ArtifactInput = {
   kind: ArtifactKind;
@@ -23,6 +24,8 @@ export type ArtifactInput = {
   };
   result: RunResult;
   input: EngineInput;
+  /** The policy the run was made under (the run stores its version and hash); only the build decision reads it. */
+  policy: Policy;
   assumptions: {
     fieldKey: string;
     itemKey: string | null;
@@ -242,7 +245,7 @@ function sponsorStatedBlocks(f: Formatter, x: ArtifactInput): Block[] {
     { type: "heading", text: "Stated by the sponsor, not independently confirmed" },
     {
       type: "paragraph",
-      text: `${n} of the ${m} material inputs this run used ${stated.length === 1 ? "was" : "were"} stated by the sponsor and not confirmed by anyone else. Check them before relying on this ${x.kind === "ic_memo" ? "memo" : "package"}.`,
+      text: `${n} of the ${m} material inputs this run used ${stated.length === 1 ? "was" : "were"} stated by the sponsor and not confirmed by anyone else. Check them before relying on this ${x.kind === "ic_memo" ? "memo" : x.kind === "build_decision" ? "report" : "package"}.`,
     },
     { type: "table", columns: INPUT_COLUMNS, rows: stated.map((a) => inputRow(f, a)) },
   ];
@@ -255,6 +258,62 @@ function notFoundBlocks(x: ArtifactInput): Block[] {
   const list = x.notFound ?? [];
   if (list.length === 0) return [];
   return [{ type: "heading", text: "Not found in the documents" }, ...list.map((n): Block => ({ type: "paragraph", text: notFoundSentence(n) }))];
+}
+
+const STATE_WORDS = { out_of_range: "Out of range", no_effect: "No effect", not_monotonic: "Not monotonic" } as const;
+const DRIVER_NAME: Partial<Record<BreakevenRow["driver"], string>> = { rentPct: "Rent", exitCapBps: "Exit cap rate", costPct: "Project cost", rateBps: "Loan interest rates", occupancyPts: "Stabilized occupancy" };
+const ECHO_NAME: Record<BreakevenEcho["key"], string> = { rent: "Rent", cost: "Project cost", exit_cap: "Exit cap rate", senior_rate: "Senior loan rate", mezzanine_rate: "Mezzanine loan rate", refinance_rate: "Refinance rate", occupancy: "Stabilized occupancy" };
+const ECHO_UNIT = { "$/unit/mo": "$/mo", "$/sf/yr": "$/sf", $: "$", "%": "%" } as const;
+
+/** The stress with the most failed gates; a tie goes to the lower stressed sizing DSCR. One sentence, from the stored gates. */
+function weakestStress(f: Formatter, r: RunResult): Block[] {
+  const stresses = r.scenarios.filter((s) => s.key !== "base");
+  const failed = (key: string) => r.verdict.gates.filter((g) => g.scenario === key && g.status === "failed");
+  const dscr = (key: string) => {
+    const m = r.scenarios.find((s) => s.key === key)?.metrics.find((k) => k.key === "sizing_dscr");
+    return m?.status === "VALID" && m.value !== null ? m.value : Infinity;
+  };
+  const w = [...stresses].sort((a, b) => failed(b.key).length - failed(a.key).length || (dscr(a.key) < dscr(b.key) ? -1 : dscr(a.key) > dscr(b.key) ? 1 : 0))[0];
+  if (!w) return [];
+  const gates = failed(w.key);
+  const fails = gates.length
+    ? `It fails ${f.ident(String(gates.length), "stress.failedGates")} ${gates.length === 1 ? "gate" : "gates"}: ${gates.map((g) => g.label).join("; ")}.`
+    : "It fails no gate.";
+  return [{ type: "paragraph", text: `Weakest stress: ${f.ident(w.label, `policy.stress.${w.key}`)}. ${fails} Its sizing DSCR: ${f.metric(w.key, "sizing_dscr")}.` }];
+}
+
+/** For each failing gate, the one input that would make it pass, from `breakeven()` over the run's stored input and policy. */
+function changeTheAnswer(f: Formatter, x: ArtifactInput): Block[] {
+  const heading: Block = { type: "heading", text: "What would change the answer" };
+  const failing = x.result.verdict.gates.filter((g) => g.status === "failed");
+  if (x.result.verdict.code === "APPROVE" || failing.length === 0) return [];
+  if (x.run.engineVersion !== ENGINE_VERSION) return [heading, { type: "paragraph", muted: true, text: "Not shown: this run was made by an earlier engine." }];
+  if (x.run.policyVersion !== x.policy.version) return [heading, { type: "paragraph", muted: true, text: "Not shown: this run was made under a different policy." }];
+  const { rows } = breakeven(x.input, x.policy);
+  const blocks: Block[] = [heading];
+  for (const g of failing) {
+    const body: string[][] = [];
+    for (const row of rows.filter((k) => k.gate === g.key)) {
+      if (row.state !== "value") {
+        body.push([DRIVER_NAME[row.driver] ?? row.driver, "\u2014", STATE_WORDS[row.state]]);
+        continue;
+      }
+      for (const e of row.to) {
+        const ref = `breakeven.${g.key}.${e.key}${e.item ? "|" + e.item : ""}`;
+        const name = e.item ? `${ECHO_NAME[e.key]}, ${e.item}` : ECHO_NAME[e.key];
+        body.push([f.ident(name, `${ref}.label`), f.run(e.from, ECHO_UNIT[e.unit], `${ref}.from`), f.run(e.to, ECHO_UNIT[e.unit], `${ref}.to`)]);
+      }
+    }
+    const needs = f.run(g.threshold, g.unit, `gate.${g.key}.threshold`);
+    const has = g.actual === null ? "Not measured" : f.run(g.actual, g.unit, `gate.${g.key}.actual`);
+    blocks.push({
+      type: "table",
+      caption: `${g.label}: needs at least ${needs}; this run has ${has}. One input is moved at a time. Everything else is held.`,
+      columns: [{ label: "Input moved" }, { label: "In this run", numeric: true }, { label: "Passes at", numeric: true }],
+      rows: body,
+    });
+  }
+  return blocks;
 }
 
 export function buildModel(x: ArtifactInput): DocModel {
@@ -290,6 +349,20 @@ export function buildModel(x: ArtifactInput): DocModel {
     }
     blocks.push(sourcesAndUses(f, x), ...mezzAccrual(f, r), revenueProgram(f, x), operations(f), gates(f, r), stresses(f, r), annual(f, r, false));
     blocks.push({ type: "heading", text: "Checks" }, checks(f, r));
+    blocks.push(...notFoundBlocks(x), inputsAppendix(f, x));
+  } else if (x.kind === "build_decision") {
+    blocks.push(verdict, ...sponsorStatedBlocks(f, x));
+    blocks.push({
+      type: "stats",
+      items: [
+        { label: "Yield on cost", value: f.metric("base", "yield_on_cost") },
+        { label: "Sizing DSCR (weakest year)", value: f.metric("base", "sizing_dscr") },
+        { label: "Equity multiple", value: f.metric("base", "equity_multiple") },
+      ],
+    });
+    blocks.push(...weakestStress(f, r));
+    // An approved deal has no gate to move; its stresses stand in for the section.
+    blocks.push(...(r.verdict.code === "APPROVE" ? [stresses(f, r)] : changeTheAnswer(f, x)));
     blocks.push(...notFoundBlocks(x), inputsAppendix(f, x));
   } else {
     blocks.push(verdict, ...sponsorStatedBlocks(f, x));
@@ -328,7 +401,7 @@ export function buildModel(x: ArtifactInput): DocModel {
   const currency = x.deal.currency ? `All amounts in ${CURRENCY_NAMES[x.deal.currency][0]} (${x.deal.currency})` : "Currency not stated";
   return {
     title: f.ident(x.deal.name, "deal.name"),
-    kicker: x.kind === "ic_memo" ? "Investment Committee memorandum" : "Lender package",
+    kicker: { ic_memo: "Investment Committee memorandum", build_decision: "Build decision" }[x.kind as string] ?? "Lender package",
     meta: [
       f.ident(x.deal.assetType, "deal.assetType"),
       f.ident(placeLabel(x.deal.location, x.deal.province), "deal.location"),

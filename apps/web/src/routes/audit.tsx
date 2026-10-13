@@ -7,7 +7,7 @@ import { useI18n, type I18n } from "../i18n";
 function describe(i: I18n, e: AuditEvent): string {
   const p = e.payload ?? {};
   const fr = i.lang === "fr";
-  const kind = (k: string) => (k === "ic_memo" ? i.t("reports.memo") : k === "lender_package" ? i.t("reports.lender") : i.t("reports.modelExport"));
+  const kind = (k: string) => (k === "ic_memo" ? i.t("reports.memo") : k === "lender_package" ? i.t("reports.lender") : k === "build_decision" ? i.t("reports.buildDecision") : i.t("reports.modelExport"));
   const field = () => i.L.field(p.field, p.item || null);
   switch (e.action) {
     case "deal.created": return fr ? "A créé le projet" : "Created the deal";

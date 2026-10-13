@@ -8,6 +8,7 @@
   },
   "dependencies": {
     "@agir/contracts": "*",
+    "@agir/engine": "*",
     "docx": "^9.5.0",
     "exceljs": "^4.4.0",
     "playwright-core": "^1.55.0",
@@ -16,7 +17,6 @@
     "@fontsource-variable/newsreader": "^5.2.0"
   },
   "devDependencies": {
-    "@agir/engine": "*",
     "@agir/extraction": "*",
     "@agir/testkit": "*"
   }
