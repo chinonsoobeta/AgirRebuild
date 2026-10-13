@@ -216,9 +216,30 @@ function centralDirectory(b: Buffer): { heads: ZipHead[]; refuse: boolean } | nu
   }
 }
 
-/** Uploads are untrusted: an xlsx or docx that declares more than it may expand to is refused before exceljs or mammoth opens it. */
+/** One entry's stored bytes, after its local header. */
+const partData = (b: Buffer, h: ZipHead) => {
+  const start = h.local + 30 + b.readUInt16LE(h.local + 26) + b.readUInt16LE(h.local + 28);
+  return b.subarray(start, start + h.csize);
+};
+
+/**
+ * Uploads are untrusted: an xlsx or docx that declares more than it may expand to is refused before exceljs or mammoth opens it. A package
+ * may understate its sizes, so each compressed part is inflated once with its output capped at the size it declares: a part that inflates past it is refused.
+ */
 function assertPackageSize(bytes: Uint8Array): void {
-  if (centralDirectory(Buffer.from(bytes.buffer, bytes.byteOffset, bytes.byteLength))?.refuse) throw new Error("This file expands to more than 500 MB when opened; Agir does not read it");
+  const b = Buffer.from(bytes.buffer, bytes.byteOffset, bytes.byteLength);
+  const dir = centralDirectory(b);
+  let refuse = dir?.refuse ?? false;
+  for (const h of dir?.heads ?? []) {
+    if (refuse || h.method !== 8) continue;
+    try {
+      inflateRawSync(partData(b, h), { maxOutputLength: Math.max(h.size, 1) });
+    } catch (e) {
+      // Only an overflow is a refusal; a part that cannot be inflated is left to the reader's own error.
+      if (e instanceof RangeError || (e as { code?: string }).code === "ERR_BUFFER_TOO_LARGE") refuse = true;
+    }
+  }
+  if (refuse) throw new Error("This file expands to more than 500 MB when opened; Agir does not read it");
 }
 
 /** A PDF above MAX_PDF_PAGES is refused; null when the count is allowed. */
@@ -241,9 +262,9 @@ export function relativeLinks(bytes: Uint8Array): Uint8Array {
   const dir = centralDirectory(b);
   if (!dir || dir.refuse) return bytes;
   try {
-    for (const { name, method, time, date, crc, size, csize, local } of dir.heads) {
-      const start = local + 30 + b.readUInt16LE(local + 26) + b.readUInt16LE(local + 28);
-      let entry = { name, method, time, date, crc, size, data: b.subarray(start, start + csize) };
+    for (const h of dir.heads) {
+      const { name, method, time, date, crc, size } = h;
+      let entry = { name, method, time, date, crc, size, data: partData(b, h) };
       if (name.endsWith(".rels") || (name.startsWith("xl/") && name.endsWith(".xml"))) {
         const xml = (method === 8 ? inflateRawSync(entry.data, { maxOutputLength: MAX_PART }) : entry.data).toString("utf8");
         const rewritten = name.endsWith(".rels") ? relativeTargets(xml, name) : defaultNamespace(xml);

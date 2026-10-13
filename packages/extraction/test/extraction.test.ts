@@ -1874,6 +1874,13 @@ describe("totals and their parts", () => {
       // An encrypted entry and a zip64 marker.
       await expect(parseDocument(await declaring([1], (b, at) => b.writeUInt16LE(1, at + 8)), "e.xlsx")).rejects.toThrow(msg);
       await expect(parseDocument(await declaring([1], (b, at) => b.writeUInt32LE(0xffffffff, at + 20)), "z.xlsx")).rejects.toThrow(msg);
+      // A package that understates a part's size: the part inflates past what it declares.
+      const JSZip = (await import("jszip")).default;
+      const lying = new JSZip();
+      lying.file("xl/p0.xml", "<x>" + "0".repeat(200_000) + "</x>", { createFolders: false });
+      const lb = Buffer.from(await lying.generateAsync({ type: "uint8array", compression: "DEFLATE" }));
+      lb.writeUInt32LE(64, lb.readUInt32LE(lb.lastIndexOf(Buffer.from([0x50, 0x4b, 5, 6])) + 16) + 24);
+      await expect(parseDocument(new Uint8Array(lb), "l.xlsx")).rejects.toThrow(msg);
     });
     test("normal workbooks and Word files still read (task 47b)", async () => {
       expect((await parseDocument(await twoSheetBytes(), "r.xlsx")).kind).toBe("xlsx");
