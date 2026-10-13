@@ -3449,3 +3449,47 @@ describe("wrong reads found by the V4 trap corpus: scales, spaced digits, allowa
     expect(cand(read("Residential rent: $36,600 per unit"), "unit_rent_monthly")).toEqual([]);
   });
 });
+
+describe("a sentence in a workbook cell is read like a sentence in a text document", () => {
+  const sheet = async (rows: string[][], name = "Terms") => {
+    const ExcelJS = (await import("exceljs")).default;
+    const wb = new ExcelJS.Workbook();
+    const ws = wb.addWorksheet(name);
+    rows.forEach((r, i) => r.forEach((v, c) => (ws.getCell(i + 1, c + 1).value = v)));
+    return extractCandidates(await parseDocument(new Uint8Array(await wb.xlsx.writeBuffer()), "terms.xlsx"));
+  };
+  const got = (r: ReturnType<typeof extractCandidates>) => r.candidates.map((c) => [c.fieldKey, c.value, c.location]);
+  const FOUR = [["senior_loan_amount", 3_100_000], ["senior_rate_pct", 6.4], ["senior_amort_years", 30], ["senior_io_months", 12]];
+
+  test("an English sentence cell gives the loan terms, located at the cell", async () => {
+    const r = await sheet([["Name", "Birch Court"], ["The bank has agreed to lend $3,100,000 at 6.4% interest, amortized over 30 years, with 12 months interest-only."]]);
+    expect(got(r)).toEqual(FOUR.map(([k, v]) => [k, v, expect.any(String)]));
+    expect(r.candidates.every((c) => c.location === "Terms!A2")).toBe(true);
+  });
+  test("a French sentence cell with M$ and decimal commas gives the same four", async () => {
+    const r = await sheet([["La caisse accorde un prêt de 3,1 M$ au taux de 6,4 %, amortissement de 30 ans, intérêts seulement 12 mois."]]);
+    expect(got(r)).toEqual(FOUR.map(([k, v]) => [k, v, "Terms!A1"]));
+  });
+  test("negative: a short text cell and a label/value row read as before", async () => {
+    const r = await sheet([["Approved"], ["Interest rate", "6.4%"], ["Status is final and approved by the committee"]]);
+    expect(got(r)).toEqual([["senior_rate_pct", 6.4, "Terms!B2"]]);
+    expect(r.other).toEqual([]);
+  });
+  test("a lender's limit inside a sentence cell is refused with the limit note", async () => {
+    const r = await sheet([["The lender will advance not more than 70% of cost under this facility letter."]]);
+    expect(r.candidates).toEqual([]);
+    expect(r.other.map((o) => [o.value, o.note, o.location])).toEqual([[70, "A lender's limit, not the deal's figure", "Terms!A1"]]);
+  });
+  test("figures that match no field are shown with a note, none disappear", async () => {
+    const r = await sheet([["Parking has 41 stalls and 9 bicycle racks near the east lobby entrance."]]);
+    expect(r.candidates).toEqual([]);
+    expect(r.other.map((o) => [o.value, o.location]).sort()).toEqual([[9, "Terms!A1"], [41, "Terms!A1"]]);
+    expect(r.other.every((o) => !!o.note || o.rule.length > 0)).toBe(true);
+  });
+  test("a sentence cell on a sheet marked as not part of the deal gives no candidate", async () => {
+    const r = await sheet([["The bank has agreed to lend $3,100,000 at 6.4% interest, amortized over 30 years."]], "Not part of the deal - old terms");
+    expect(r.candidates).toEqual([]);
+    expect(r.other.length).toBe(3);
+    expect(r.other.every((o) => o.note === "Marked as not part of this deal")).toBe(true);
+  });
+});
