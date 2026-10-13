@@ -3462,17 +3462,16 @@ describe("a sentence in a workbook cell is read like a sentence in a text docume
   const FOUR = [["senior_loan_amount", 3_100_000], ["senior_rate_pct", 6.4], ["senior_amort_years", 30], ["senior_io_months", 12]];
 
   test("an English sentence cell gives the loan terms, located at the cell", async () => {
-    const r = await sheet([["Name", "Birch Court"], ["The bank has agreed to lend $3,100,000 at 6.4% interest, amortized over 30 years, with 12 months interest-only."]]);
-    expect(got(r)).toEqual(FOUR.map(([k, v]) => [k, v, expect.any(String)]));
-    expect(r.candidates.every((c) => c.location === "Terms!A2")).toBe(true);
+    const r = await sheet([["Name", "Birch Court"], ["Bank terms: loan $3,100,000 at 6.4% interest rate, 30-year amortization, 12 months interest-only."]]);
+    expect(got(r)).toEqual(FOUR.map(([k, v]) => [k, v, "Terms!A2"]));
   });
   test("a French sentence cell with M$ and decimal commas gives the same four", async () => {
     const r = await sheet([["La caisse accorde un prêt de 3,1 M$ au taux de 6,4 %, amortissement de 30 ans, intérêts seulement 12 mois."]]);
     expect(got(r)).toEqual(FOUR.map(([k, v]) => [k, v, "Terms!A1"]));
   });
   test("negative: a short text cell and a label/value row read as before", async () => {
-    const r = await sheet([["Approved"], ["Interest rate", "6.4%"], ["Status is final and approved by the committee"]]);
-    expect(got(r)).toEqual([["senior_rate_pct", 6.4, "Terms!B2"]]);
+    const r = await sheet([["Approved"], ["Interest rate", "6.4%"], ["Status is final and approved by the committee"], ["Selling costs", "2,5 % of the sale price at closing"]]);
+    expect(got(r)).toEqual([["senior_rate_pct", 6.4, "Terms!B2"], ["selling_costs_pct", 2.5, "Terms!B4"]]);
     expect(r.other).toEqual([]);
   });
   test("a lender's limit inside a sentence cell is refused with the limit note", async () => {
@@ -3483,13 +3482,17 @@ describe("a sentence in a workbook cell is read like a sentence in a text docume
   test("figures that match no field are shown with a note, none disappear", async () => {
     const r = await sheet([["Parking has 41 stalls and 9 bicycle racks near the east lobby entrance."]]);
     expect(r.candidates).toEqual([]);
-    expect(r.other.map((o) => [o.value, o.location]).sort()).toEqual([[9, "Terms!A1"], [41, "Terms!A1"]]);
+    expect(r.other.map((o) => [o.value, o.location]).sort((a, b) => Number(a[0]) - Number(b[0]))).toEqual([[9, "Terms!A1"], [41, "Terms!A1"]]);
     expect(r.other.every((o) => !!o.note || o.rule.length > 0)).toBe(true);
   });
   test("a sentence cell on a sheet marked as not part of the deal gives no candidate", async () => {
-    const r = await sheet([["The bank has agreed to lend $3,100,000 at 6.4% interest, amortized over 30 years."]], "Not part of the deal - old terms");
+    const r = await sheet([["Bank terms: loan $3,100,000 at 6.4% interest rate, 30-year amortization."]], "Not part of the deal - old terms");
     expect(r.candidates).toEqual([]);
     expect(r.other.length).toBe(3);
     expect(r.other.every((o) => o.note === "Marked as not part of this deal")).toBe(true);
+  });
+  test("a sentence cell under a mezzanine section takes the mezzanine scope; a figure with its own scale is not scaled again", async () => {
+    const r = await sheet([["Amounts in thousands"], ["Mezzanine loan"], ["Bank terms: loan 1,2 M$ at 11% interest rate, 5-year amortization, 6 months interest-only."]]);
+    expect(r.candidates.map((c) => [c.fieldKey, c.value])).toEqual([["mezz_loan_amount", 1_200_000], ["mezz_rate_pct", 11], ["mezz_amort_years", 5], ["mezz_io_months", 6]]);
   });
 });

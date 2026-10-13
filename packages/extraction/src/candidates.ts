@@ -1386,6 +1386,13 @@ type Section = { rows: Cell[][]; scope: Scope; excluded: boolean; rent?: Roles; 
  * its own; a section label row ends it too, sets the loan scope when it names a loan, and the rows under it with no column header
  * are label and value rows. Rows above the first header, when there is one and no label came first, are a title and read as nothing.
  */
+/** A text cell of a table that is a sentence: no number value, six words or more, and a figure in it. A cell that begins with its figure ("5 % des revenus bruts effectifs") is a value with a qualifier, not a sentence. */
+function isSentenceCell(c: Cell, format: DocumentFormat): boolean {
+  if (c.number !== undefined || c.text.trim().split(/\s+/).length < 6) return false;
+  const first = tokenize(c.text, format)[0];
+  return !!first && c.text.slice(0, first.start).trim() !== "";
+}
+
 function fromTable(table: Table, result: ExtractionResult, notes: string[] = [], scope0: Scope = "senior") {
   // A rank row names the loan for the whole table, the rows above it too; a section label below still overrides it.
   let scope = tableRank(table) ?? scope0;
@@ -1451,8 +1458,16 @@ function fromTable(table: Table, result: ExtractionResult, notes: string[] = [],
       // The item a block heading named, until a blank row or a total row.
       let block = s.item;
       const valueFirstSection = isValueFirstSection(s.rows, result.format);
-      s.rows.forEach((row) => {
-        if (!s.excluded && namedRow(row, table, result)) return;
+      s.rows.forEach((row0) => {
+        if (!s.excluded && namedRow(row0, table, result)) return;
+        // A sentence cell is read as a sentence under the scope and exclusion in force for its row; the other cells of the row read as usual.
+        const row = row0.filter((c) => !isSentenceCell(c, result.format));
+        for (const c of row0) {
+          if (row.includes(c)) continue;
+          const para: Paragraph = { text: c.text.trim(), segs: [{ start: 0, location: c.ref }], scope: s.scope, excluded: s.excluded || row.some((x) => markedNotPart(x.text)) };
+          for (const sentence of sentences(para.text)) readSentence(sentence, para, result);
+        }
+        if (row.length < row0.length && !row.some((c) => c.text || c.number !== undefined)) return;
         const vf = valueFirstSection ? valueFirst(row, result.format) : null;
         const labelCell = vf?.label ?? labelOf(row, result.format);
         const relative = block && labelCell ? BLOCK_RELATIVE_RE.test(labelCell.text) : false;
