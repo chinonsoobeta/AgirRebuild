@@ -92,6 +92,11 @@ async function parsePdf(bytes: Uint8Array): Promise<NormalizedDocument> {
   const pdfjs = await import("pdfjs-dist/legacy/build/pdf.mjs");
   const task = pdfjs.getDocument({ data: new Uint8Array(bytes), useSystemFonts: true });
   const doc = await task.promise;
+  const tooLong = pdfPageError(doc.numPages);
+  if (tooLong) {
+    await task.destroy();
+    throw tooLong;
+  }
   const lines: Line[] = [];
   let chars = 0;
   for (let p = 1; p <= doc.numPages; p++) {
@@ -145,8 +150,9 @@ function unitOfWord(w: string): CellUnit | null {
   return null;
 }
 
-const MAX_PART = 50 * 1024 * 1024;
-const MAX_PACKAGE = 200 * 1024 * 1024;
+const MAX_PART = 250 * 1024 * 1024;
+const MAX_PACKAGE = 500 * 1024 * 1024;
+export const MAX_PDF_PAGES = 5000;
 const SPREADSHEET_MAIN = "http://schemas.openxmlformats.org/spreadsheetml/2006/main";
 
 /** Internal absolute targets become relative to the folder holding the described part; an external target is never touched. */
@@ -176,40 +182,68 @@ function defaultNamespace(xml: string): string {
     .replace(new RegExp(`<(/?)${prefix}:`, "g"), "<$1");
 }
 
+type ZipHead = { name: string; method: number; time: number; date: number; crc: number; size: number; csize: number; local: number };
+
+/**
+ * The central directory of a zip, read once for both `relativeLinks` and `assertPackageSize`. `refuse` is set when the package declares a
+ * part above MAX_PART or a total above MAX_PACKAGE, is zip64, or has an encrypted entry. Null: a package this cannot read.
+ */
+function centralDirectory(b: Buffer): { heads: ZipHead[]; refuse: boolean } | null {
+  try {
+    let eocd = b.length - 22;
+    while (eocd >= 0 && b.readUInt32LE(eocd) !== 0x06054b50) eocd--;
+    if (eocd < 0) return null;
+    const count = b.readUInt16LE(eocd + 10);
+    let at = b.readUInt32LE(eocd + 16);
+    if (count === 0xffff || at === 0xffffffff) return { heads: [], refuse: true }; // zip64
+    const heads: ZipHead[] = [];
+    let total = 0;
+    for (let i = 0; i < count; i++) {
+      if (b.readUInt32LE(at) !== 0x02014b50) return null;
+      const method = b.readUInt16LE(at + 10);
+      const nameLen = b.readUInt16LE(at + 28);
+      const head = { name: b.toString("utf8", at + 46, at + 46 + nameLen), method, time: b.readUInt16LE(at + 12), date: b.readUInt16LE(at + 14), crc: b.readUInt32LE(at + 16), csize: b.readUInt32LE(at + 20), size: b.readUInt32LE(at + 24), local: b.readUInt32LE(at + 42) };
+      if (b.readUInt16LE(at + 8) & 1 || head.csize === 0xffffffff || head.local === 0xffffffff || head.size === 0xffffffff) return { heads: [], refuse: true };
+      if (method !== 0 && method !== 8) return null;
+      total += head.size;
+      if (head.size > MAX_PART || total > MAX_PACKAGE) return { heads: [], refuse: true };
+      heads.push(head);
+      at += 46 + nameLen + b.readUInt16LE(at + 30) + b.readUInt16LE(at + 32);
+    }
+    return { heads, refuse: false };
+  } catch {
+    return null;
+  }
+}
+
+/** Uploads are untrusted: an xlsx or docx that declares more than it may expand to is refused before exceljs or mammoth opens it. */
+function assertPackageSize(bytes: Uint8Array): void {
+  if (centralDirectory(Buffer.from(bytes.buffer, bytes.byteOffset, bytes.byteLength))?.refuse) throw new Error("This file expands to more than 500 MB when opened; Agir does not read it");
+}
+
+/** A PDF above MAX_PDF_PAGES is refused; null when the count is allowed. */
+export function pdfPageError(pages: number): Error | null {
+  return pages > MAX_PDF_PAGES ? new Error("This PDF has more than 5,000 pages; Agir does not read it") : null;
+}
+
 /**
  * Excel writes relative link targets inside the package ("worksheets/sheet1.xml"); other tools write absolute ones ("/xl/worksheets/sheet1.xml"),
  * which are just as valid but which exceljs does not follow for a sheet's comments or tables. A script that rewrites a part can also leave
  * the SpreadsheetML namespace on a prefix ("ns0:worksheet"), which exceljs's parser does not match. Only the link targets in `.rels` parts and
- * that prefix in `xl/` parts are changed; every other part is carried over byte for byte. Uploads are untrusted: a part above 50 MB, or a
- * package above 200 MB, is returned as it came. A package this cannot read is returned as it came, so the reader's own
+ * that prefix in `xl/` parts are changed; every other part is carried over byte for byte. Uploads are untrusted: a part above 250 MB, or a
+ * package above 500 MB, is returned as it came (`assertPackageSize` refuses such a file before a reader opens it). A package this cannot read is returned as it came, so the reader's own
  * failure message stands. (No zip library is a direct dependency here, so the few zip structures needed are read with node:zlib.)
  */
 export function relativeLinks(bytes: Uint8Array): Uint8Array {
   const b = Buffer.from(bytes.buffer, bytes.byteOffset, bytes.byteLength);
   const entries: { name: string; method: number; time: number; date: number; crc: number; size: number; data: Buffer }[] = [];
   let changed = false;
-  let total = 0;
+  const dir = centralDirectory(b);
+  if (!dir || dir.refuse) return bytes;
   try {
-    let eocd = b.length - 22;
-    while (eocd >= 0 && b.readUInt32LE(eocd) !== 0x06054b50) eocd--;
-    if (eocd < 0) return bytes;
-    const count = b.readUInt16LE(eocd + 10);
-    let at = b.readUInt32LE(eocd + 16);
-    if (count === 0xffff || at === 0xffffffff) return bytes; // zip64
-    for (let i = 0; i < count; i++) {
-      if (b.readUInt32LE(at) !== 0x02014b50) return bytes;
-      const flags = b.readUInt16LE(at + 8);
-      const method = b.readUInt16LE(at + 10);
-      const csize = b.readUInt32LE(at + 20);
-      const nameLen = b.readUInt16LE(at + 28);
-      const next = at + 46 + nameLen + b.readUInt16LE(at + 30) + b.readUInt16LE(at + 32);
-      const local = b.readUInt32LE(at + 42);
-      if (flags & 1 || csize === 0xffffffff || local === 0xffffffff || (method !== 0 && method !== 8)) return bytes;
-      const name = b.toString("utf8", at + 46, at + 46 + nameLen);
+    for (const { name, method, time, date, crc, size, csize, local } of dir.heads) {
       const start = local + 30 + b.readUInt16LE(local + 26) + b.readUInt16LE(local + 28);
-      let entry = { name, method, time: b.readUInt16LE(at + 12), date: b.readUInt16LE(at + 14), crc: b.readUInt32LE(at + 16), size: b.readUInt32LE(at + 24), data: b.subarray(start, start + csize) };
-      total += Number(b.readUInt32LE(at + 24));
-      if (b.readUInt32LE(at + 24) > MAX_PART || total > MAX_PACKAGE) return bytes;
+      let entry = { name, method, time, date, crc, size, data: b.subarray(start, start + csize) };
       if (name.endsWith(".rels") || (name.startsWith("xl/") && name.endsWith(".xml"))) {
         const xml = (method === 8 ? inflateRawSync(entry.data, { maxOutputLength: MAX_PART }) : entry.data).toString("utf8");
         const rewritten = name.endsWith(".rels") ? relativeTargets(xml, name) : defaultNamespace(xml);
@@ -220,7 +254,6 @@ export function relativeLinks(bytes: Uint8Array): Uint8Array {
         }
       }
       entries.push(entry);
-      at = next;
     }
     if (!changed) return bytes;
     const parts: Buffer[] = [];
@@ -265,6 +298,7 @@ export function relativeLinks(bytes: Uint8Array): Uint8Array {
 async function parseXlsx(bytes: Uint8Array): Promise<NormalizedDocument> {
   const ExcelJS = (await import("exceljs")).default;
   const wb = new ExcelJS.Workbook();
+  assertPackageSize(bytes);
   const linked = relativeLinks(bytes);
   await wb.xlsx.load(linked.buffer.slice(linked.byteOffset, linked.byteOffset + linked.byteLength) as ArrayBuffer);
   const tables: Table[] = [];
@@ -352,6 +386,7 @@ function unmark(marked: string): { text: string; struck: [number, number][] } {
  */
 async function parseDocx(bytes: Uint8Array): Promise<NormalizedDocument> {
   const mammoth = (await import("mammoth")).default;
+  assertPackageSize(bytes);
   const { value: html } = await mammoth.convertToHtml({ buffer: Buffer.from(bytes) });
   const lines: Line[] = [];
   const tables: Table[] = [];
