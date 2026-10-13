@@ -903,6 +903,17 @@ describe("which loan a term belongs to, and the words small developers use", () 
     });
   });
 
+  describe("a loan named before 'of' or 'de' labels the amount after it (task 51)", () => {
+    test("a possessive or article before the name, a linking word after it", () => {
+      expect(pick(read("Votre prêt de second rang de 380 000 $ comble l'écart avec notre mise de fonds."))).toEqual([["mezz_loan_amount", 380_000]]);
+      expect(pick(read("Notre prêt de second rang pour 125 000 $ s'ajoute à nos liquidités."))).toEqual([["mezz_loan_amount", 125_000]]);
+      expect(pick(read("Notre prêt de premier rang de 2 100 000 $ est avancé avec nos fonds propres."))).toEqual([["senior_loan_amount", 2_100_000]]);
+    });
+    test("negative: a loan with a figure of its own, and plain equity, are read as before", () => {
+      expect(pick(read("Notre mise de fonds de 380 000 $ complète le prêt."))).toEqual([["equity_amount", 380_000]]);
+    });
+  });
+
   describe("the exit cap rate comes from the sentence", () => {
     test("a cap rate in a sentence about a sale is the exit cap rate; alone it stays unread", () => {
       expect(pick(read("We plan to sell at a 5.0% cap rate."))).toEqual([["exit_cap_rate_pct", 5]]);
@@ -911,6 +922,17 @@ describe("which loan a term belongs to, and the words small developers use", () 
       expect(read("The going-in cap rate is 6%.").candidates).toEqual([]);
       expect(read("Cap rate: 5.25%").candidates).toEqual([]);
       expect(read("Le taux de capitalisation est de 5,5 %.").candidates).toEqual([]);
+    });
+    test("a percentage directly followed by cap, in a sentence about a sale, is the exit cap rate (task 51)", () => {
+      expect(pick(read("Disposition at a 6.1% cap after year five."))).toEqual([["exit_cap_rate_pct", 6.1]]);
+      expect(pick(read("We expect to sell at a 5.9% cap."))).toEqual([["exit_cap_rate_pct", 5.9]]);
+      expect(pick(read("Revente à 5,8 % cap."))).toEqual([["exit_cap_rate_pct", 5.8]]);
+      // negative: no sale word keeps the going-in note; "cap of", "cap on" and "capped" are not the rate
+      const going = read("Acquired at a 5.2% cap.");
+      expect(going.candidates).toEqual([]);
+      expect(going.other.map((o) => o.note)).toEqual([expect.stringMatching(/going-in/)]);
+      expect(read("The sale price carries a 3% cap on fees.").candidates).toEqual([]);
+      expect(read("On the sale, fees are capped at 3%.").candidates).toEqual([]);
     });
     test("a sentence that names a value is refused", () => {
       expect(read("On a sale, a 4.5% cap rate gives a value of $12,000,000.").candidates).toEqual([]);
@@ -929,6 +951,10 @@ describe("which loan a term belongs to, and the words small developers use", () 
       // negatives: a bare number is not months, a place is not a period
       expect(read("Construction: 14").candidates).toEqual([]);
       expect(read("Location: Moncton, 2 blocks from the river").candidates).toEqual([]);
+    });
+    test("coûts mous are the soft costs, and the fee words after the figure do not make it a fee (task 51)", () => {
+      expect(pick(read("Les coûts mous sont de 312 000 $ avec les honoraires et les permis."))).toEqual([["soft_cost", 312_000]]);
+      expect(pick(read("Coûts mous : 312 000 $"))).toEqual([["soft_cost", 312_000]]);
     });
     test("budget: land, building budget, construction and soft costs", () => {
       expect(pick(read("Terrain : 410 000 $", "Lot: $420,000", "Site: $430,000"))).toEqual([["land_cost", 410_000], ["land_cost", 420_000], ["land_cost", 430_000]]);
@@ -1208,6 +1234,16 @@ describe("reading safety: a figure that may be the wrong one is shown, never use
     test("negative: with no rent roll, a row labelled occupancy is the assumption", () => {
       expect(pick(sheets(grid("Inputs", ["Occupancy", [95, "%"]])))).toEqual([["stabilized_occupancy_pct", 95]]);
     });
+    test("in a mixed-use document a commercial space's occupancy is not the deal's (task 51)", () => {
+      const mixed = read("Apartment mix: 1BR at $1,800 a month.", "Underwrite the office floor at 88% occupancy.", "Stabilized occupancy for the apartments is 95%.");
+      expect(pick(mixed)).toContainEqual(["stabilized_occupancy_pct", 95]);
+      expect(pick(mixed)).not.toContainEqual(["stabilized_occupancy_pct", 88]);
+      expect(noteOf(mixed, 88)).toBe("An occupancy for the commercial space, not the deal's stabilized occupancy");
+      const fr = read("Types de logements : 2 chambres à 1 900 $ par mois.", "Les bureaux sont loués à un taux d'occupation de 85 %.");
+      expect(noteOf(fr, 85)).toBe("An occupancy for the commercial space, not the deal's stabilized occupancy");
+      // negative: with no residential unit type, an office building's occupancy is the deal's
+      expect(pick(read("Underwrite the office floor at 88% occupancy."))).toEqual([["stabilized_occupancy_pct", 88]]);
+    });
     test("a lender's condition, or today's occupancy, is shown and not used", () => {
       for (const line of [
         "The lender requires minimum occupancy of 92% before we fund.",
@@ -1467,6 +1503,9 @@ describe("a lender's limits, terms, fees and conditions are not inputs", () => {
         ["Minimum cash equity of $2,400,000", 2_400_000],
         ["Une mise de fonds d'au moins 900 000 $", 900_000],
         ["Take-out of not less than $6,000,000", 6_000_000],
+        // a limit word one place before the alias that names the figure (the alias counts as one word)
+        ["d) Maximum loan to cost of 65%; permits in hand before closing.", 65],
+        ["e) Maximum loan to value of 72%; the appraisal is ordered by the bank.", 72],
       ] as const) {
         const r = read(line);
         expect(r.candidates, line).toEqual([]);
@@ -1487,6 +1526,7 @@ describe("a lender's limits, terms, fees and conditions are not inputs", () => {
       expect(pick(read("Construction period: 16 months"))).toEqual([["construction_months", 16]]);
       expect(pick(read("Hold: 7 years"))).toEqual([["hold_years", 7]]);
       expect(pick(read("Stated LTC 68%"))).toEqual([["stated_ltc_pct", 68]]);
+      expect(pick(read("Our stated loan to cost of 68% is the sponsor's own figure."))).toEqual([["stated_ltc_pct", 68]]);
     });
   });
 
@@ -1495,6 +1535,8 @@ describe("a lender's limits, terms, fees and conditions are not inputs", () => {
       for (const [line, value] of [
         ["Term: 30 months", 30],
         ["Terme du prêt 24 mois (construction)", 24],
+        ["Construction term: 28 months", 28],
+        ["Construction term of 36 months from closing", 36],
         ["ÉCHÉANCE : 18 mois", 18],
         ["Renewal term 3 years", 3],
         ["The loan matures 30 months after closing.", 30],
@@ -1518,6 +1560,8 @@ describe("a lender's limits, terms, fees and conditions are not inputs", () => {
     });
     test("negative: the build period and the hold are still read", () => {
       expect(pick(read("Construction period 16 months"))).toEqual([["construction_months", 16]]);
+      expect(pick(read("Construction period: 14 months"))).toEqual([["construction_months", 14]]);
+      expect(pick(read("Construction duration: 15 months"))).toEqual([["construction_months", 15]]);
       expect(pick(read("Hold 7 years"))).toEqual([["hold_years", 7]]);
       expect(pick(read("Durée de construction : 14 mois"))).toEqual([["construction_months", 14]]);
     });
@@ -1566,6 +1610,26 @@ describe("a lender's limits, terms, fees and conditions are not inputs", () => {
       const r = extractCandidates(doc([], [letter(["Occupancy required before conversion", "85%"], ["Stabilized occupancy", "96%"])]));
       expect(pick(r)).toEqual([["stabilized_occupancy_pct", 96]]);
       expect(noteOf(r, 85)).toMatch(/lender's/);
+    });
+    test("the lender's underwriting basis is not the deal's assumption, whatever field it names (task 51)", () => {
+      const BASIS = "The lender's underwriting basis, not the deal's assumption";
+      const r = read("The bank sizes the loan on 94% occupancy and a 5.5% cap rate for lending value.");
+      expect(r.candidates).toEqual([]);
+      expect(noteOf(r, 94)).toBe(BASIS);
+      expect(noteOf(r, 5.5)).toBe(BASIS);
+      for (const [line, value] of [
+        ["For credit underwriting, 93% occupancy is used.", 93],
+        ["The loan is sized on 65% of cost.", 65],
+        ["La banque retient un taux d'occupation de 92 %.", 92],
+        ["Valeur de prêt établie à un taux de 5,75 %.", 5.75],
+      ] as const) {
+        const x = read(line);
+        expect(x.candidates, line).toEqual([]);
+        expect(noteOf(x, value), line).toBe(BASIS);
+      }
+      // negative: the sponsor's own underwriting is read
+      expect(pick(read("We underwrite stabilized occupancy at 95%."))).toEqual([["stabilized_occupancy_pct", 95]]);
+      expect(pick(read("Underwrite stabilized occupancy at 95%."))).toEqual([["stabilized_occupancy_pct", 95]]);
     });
     test("negative: the stabilized occupancy beside a funding condition is still read", () => {
       expect(pick(read("Stabilized occupancy 96%", "Funding is conditional on 90% occupancy."))).toEqual([["stabilized_occupancy_pct", 96]]);
@@ -1642,6 +1706,27 @@ describe("totals and their parts", () => {
     expect(pick(read("The project cost is $6,500,000, including land, hard costs and soft costs."))).toEqual([["stated_total_cost", 6_500_000]]);
     expect(pick(read("Coût du projet : 4 210 000 $ (comprenant terrain, construction, frais indirects et imprévus)"))).toEqual([["stated_total_cost", 4_210_000]]);
     expect(pick(read("Coût total : 3 800 000 $, incluant le terrain, les coûts de construction et les honoraires professionnels."))).toEqual([["stated_total_cost", 3_800_000]]);
+  });
+  test("a Total that closes a uses table is the stated total cost; other totals stay unread (task 51)", () => {
+    const uses = budget(["Use", "Amount"], ["Land", "$600,000"], ["Hard costs", "$2,900,000"], ["Soft costs", "$410,000"], ["Total", "$3,910,000"]);
+    expect(pick(uses)).toEqual([["land_cost", 600_000], ["hard_cost", 2_900_000], ["soft_cost", 410_000], ["stated_total_cost", 3_910_000]]);
+    expect(pick(budget(["Emplois", "Montant"], ["Terrain", "600 000 $"], ["Coûts de construction", "2 900 000 $"], ["Coûts indirects", "410 000 $"], ["Total des emplois", "3 910 000 $"])).slice(-1)).toEqual([["stated_total_cost", 3_910_000]]);
+    // a sheet block with no blank row
+    const block = extractCandidates(doc([], [grid(["Land", "$600,000"], ["Hard costs", "$2,900,000"], ["Total des coûts", "$3,500,000"])]));
+    expect(pick(block)).toContainEqual(["stated_total_cost", 3_500_000]);
+    // never summed: the printed figure is read even when it is not the sum
+    expect(pick(budget(["Use", "Amount"], ["Land", "$600,000"], ["Hard costs", "$2,900,000"], ["Total uses", "$3,999,000"]))).toContainEqual(["stated_total_cost", 3_999_000]);
+    // negative: rents, sources of funds and one budget field are not a uses table
+    const rents = budget(["Type", "Monthly rent"], ["Studio", "$1,400"], ["1BR", "$1,800"], ["Total", "$3,200"]);
+    expect(pick(rents).some(([k]) => k === "stated_total_cost")).toBe(false);
+    const sources = budget(["Source", "Amount"], ["Senior loan", "$2,000,000"], ["Equity", "$1,000,000"], ["Total", "$3,000,000"]);
+    expect(pick(sources).some(([k]) => k === "stated_total_cost")).toBe(false);
+    expect(noteOf(sources, 3_000_000)).not.toBe("");
+    const one = budget(["Use", "Amount"], ["Hard costs", "$2,900,000"], ["Total", "$2,900,000"]);
+    expect(pick(one).some(([k]) => k === "stated_total_cost")).toBe(false);
+    // negative: a table that already states its total cost has one
+    const stated = budget(["Use", "Amount"], ["Land", "$600,000"], ["Hard costs", "$2,900,000"], ["Total project cost", "$3,910,000"], ["Total", "$3,910,000"]);
+    expect(pick(stated).filter(([k]) => k === "stated_total_cost")).toEqual([["stated_total_cost", 3_910_000]]);
   });
   test("a component list after a label that names no cost goes to other costs shown, not read", () => {
     const r = read("Summary: $3,000,000 (land, hard costs and soft costs)");
@@ -2243,6 +2328,43 @@ describe("durations after the number, revisions in a sentence, percent cells, va
   test("negative: the preferred return alone, or with a word before it, is still the preferred return", () => {
     expect(pick(read("Preferred return 8%"))).toEqual([["preferred_return_pct", 8]]);
   });
+  test("a later promote tier is not the GP promote (task 51)", () => {
+    const LATER = "A later promote tier; the field holds the first tier only";
+    const row = (label: string, value: string) => extractCandidates(doc([], [{ name: "Terms", rows: [[{ text: label, ref: "A1" }, { text: value, ref: "B1" }]] }]));
+    for (const [label, value, n] of [
+      ["Carried interest (tier 3)", "35%", 35],
+      ["GP promote - second tier", "30%", 30],
+      ["Promote, tier II", "30%", 30],
+      ["Promote 2nd tier", "28%", 28],
+      ["Promote, tier two", "27%", 27],
+      ["Prime de performance (2e palier)", "30 %", 30],
+      ["Prime de performance, palier 2", "32 %", 32],
+      ["Prime de performance, deuxième palier", "33 %", 33],
+    ] as const) {
+      const r = row(label, value);
+      expect(r.candidates, label).toEqual([]);
+      expect(noteOf(r, n), label).toBe(LATER);
+    }
+    // negative: the first tier reads as before
+    expect(pick(row("Tier 1 promote", "20%"))).toEqual([["gp_promote_pct", 20]]);
+    expect(pick(row("GP promote (first tier)", "20%"))).toEqual([["gp_promote_pct", 20]]);
+    expect(pick(read("Tier 1 promote of 20%"))).toEqual([["gp_promote_pct", 20]]);
+  });
+  test("a share of distributions to the partners is not the preferred return (task 51)", () => {
+    const SHARE = "A share of distributions, not the preferred return";
+    for (const [line, value] of [
+      ["Cash flow first returns capital, then pays the preferred return, then 70% to the investors and 30% to the sponsor.", 70],
+      ["After the preferred return, 80% to the limited partners and 20% to the GP.", 80],
+      ["Une fois le rendement privilégié versé, 70 % aux commanditaires et 30 % au commandité.", 70],
+    ] as const) {
+      const r = read(line);
+      expect(r.candidates, line).toEqual([]);
+      expect(noteOf(r, value), line).toBe(SHARE);
+    }
+    // negative: a share to the GP is not caught by this rule, and the preferred return itself is read
+    expect(noteOf(read("After the preferred return, 80% to the LPs and 20% to the GP."), 20)).not.toBe(SHARE);
+    expect(pick(read("Preferred return of 8% to the investors"))).toEqual([["preferred_return_pct", 8]]);
+  });
   test("a preferred annual return is the preferred return", () => {
     expect(pick(read("Preferred annual return: 8%"))).toEqual([["preferred_return_pct", 8]]);
     expect(pick(read("Annual preferred return 7.5%"))).toEqual([["preferred_return_pct", 7.5]]);
@@ -2756,6 +2878,20 @@ describe("durations: a unit given by the label, number words, quarters, phases",
     expect(r.candidates[0]!.unitSeen).toContain("3");
     expect(r.candidates[0]!.raw).toContain("five quarters");
     expect(pick(prose("Lease-up: 3 quarters"))).toEqual([["lease_up_months", 9]]);
+  });
+  test("a duration in words is read like one in digits (task 51)", () => {
+    const r = extractCandidates(prose("A seven-year hold is planned.", "Les travaux dureront dix-huit mois.", "Amortization of thirty-five years."));
+    expect(r.candidates.map((c) => [c.fieldKey, c.value, c.raw])).toEqual([["hold_years", 7, "seven-year"], ["construction_months", 18, "dix-huit mois"], ["senior_amort_years", 35, "thirty-five years"]]);
+    // the same rules as digits: a loan's term is refused
+    const term = extractCandidates(prose("The loan has a three-year term."));
+    expect(term.candidates).toEqual([]);
+    expect(term.other.map((o) => [o.value, o.note])).toEqual([[3, "A loan's term, not the build period, hold or amortization"]]);
+    // digits win: one figure, the digits
+    const both = extractCandidates(prose("Construction will take twelve (12) months."));
+    expect(both.candidates.map((c) => [c.fieldKey, c.value])).toEqual([["construction_months", 12]]);
+    expect(both.other).toEqual([]);
+    // no duration unit after the number word: still text
+    expect(extractCandidates(prose("We own eight rentals and two lots.")).other).toEqual([]);
   });
   test("negative: a fraction, dates and a vague span are never a duration", () => {
     expect(pick(prose("Construction is three quarters complete."))).toEqual([]);
