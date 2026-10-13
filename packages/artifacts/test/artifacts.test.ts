@@ -1,6 +1,7 @@
 import { describe, expect, test } from "vitest";
 import { FIELD_BY_KEY, POLICY_V1 } from "@agir/contracts";
-import { assemble, ENGINE_VERSION, underwrite, type AssumptionRow } from "@agir/engine";
+import { createHash } from "node:crypto";
+import { assemble, canonicalJson, ENGINE_VERSION, underwrite, type AssumptionRow } from "@agir/engine";
 import { consolidate, extractCandidates, type SourcedCandidate } from "@agir/extraction";
 import { loadOracle } from "@agir/testkit";
 import { developmentDeal } from "../../engine/test/fixtures.ts";
@@ -228,7 +229,8 @@ describe("the build decision report", () => {
     const base = mapleInput("build_decision");
     const d = developmentDeal();
     const input = { ...d, revenue: d.revenue.map((c) => ({ ...c, rentMonthly: c.rentMonthly && c.rentMonthly * rentScale, rentPsfAnnual: c.rentPsfAnnual && c.rentPsfAnnual * rentScale })) };
-    return { ...base, input, result: underwrite(input, POLICY_V1), assumptions: [], notFound: [] };
+    const policyHash = createHash("sha256").update(canonicalJson(POLICY_V1)).digest("hex");
+    return { ...base, run: { ...base.run, policyHash }, input, result: underwrite(input, POLICY_V1), assumptions: [], notFound: [] };
   }
   const textOf = (x: ArtifactInput) => {
     const model = buildModel(x);
@@ -248,6 +250,7 @@ describe("the build decision report", () => {
     expect([...order].sort((a, b) => a - b)).toEqual(order);
     expect(text).toContain("Weakest stress: Combined");
     expect(text).toContain("Everything else is held");
+    expect(text).toContain("rents move together, by the same share");
     expect(text).toContain("Out of range");
     expect(text).toContain("Not monotonic");
     expect(model.formatter.manifest.some((e) => /^run:breakeven\.equity_multiple\.rent/.test(e.ref))).toBe(true);
@@ -271,5 +274,10 @@ describe("the build decision report", () => {
     expect(text).toContain("What would change the answer");
     expect(text).toContain("Not shown: this run was made by an earlier engine");
     expect(text).not.toContain("Everything else is held");
+    // A policy edited under the same version name is a different policy: its hash differs from the run's.
+    const edited: ArtifactInput = { ...x, policy: { ...x.policy, gates: { ...x.policy.gates, equityMultipleMin: 1.4 } } as unknown as ArtifactInput["policy"] };
+    const t = textOf(edited).text;
+    expect(t).toContain("Not shown: this run was made under a different policy");
+    expect(t).not.toContain("Everything else is held");
   });
 });

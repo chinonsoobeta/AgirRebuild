@@ -3,7 +3,8 @@
 // verdict, a gate or a metric.
 
 import { CURRENCY_NAMES, FIELD_BY_KEY, placeLabel, type Currency, type EngineInput, type FieldUnit, type Policy, type RunResult, type VerdictCode } from "@agir/contracts";
-import { breakeven, ENGINE_VERSION, type BreakevenEcho, type BreakevenRow } from "@agir/engine";
+import { createHash } from "node:crypto";
+import { breakeven, canonicalJson, ENGINE_VERSION, type BreakevenEcho, type BreakevenRow } from "@agir/engine";
 import { Formatter, formatValue } from "./format.ts";
 
 export type ArtifactKind = "ic_memo" | "lender_package" | "build_decision" | "model_export";
@@ -288,7 +289,8 @@ function changeTheAnswer(f: Formatter, x: ArtifactInput): Block[] {
   const failing = x.result.verdict.gates.filter((g) => g.status === "failed");
   if (x.result.verdict.code === "APPROVE" || failing.length === 0) return [];
   if (x.run.engineVersion !== ENGINE_VERSION) return [heading, { type: "paragraph", muted: true, text: "Not shown: this run was made by an earlier engine." }];
-  if (x.run.policyVersion !== x.policy.version) return [heading, { type: "paragraph", muted: true, text: "Not shown: this run was made under a different policy." }];
+  // The run stores its policy's hash: a policy edited under the same version name is a different policy.
+  if (x.run.policyHash !== createHash("sha256").update(canonicalJson(x.policy)).digest("hex")) return [heading, { type: "paragraph", muted: true, text: "Not shown: this run was made under a different policy." }];
   const { rows } = breakeven(x.input, x.policy);
   const blocks: Block[] = [heading];
   for (const g of failing) {
@@ -308,7 +310,7 @@ function changeTheAnswer(f: Formatter, x: ArtifactInput): Block[] {
     const has = g.actual === null ? "Not measured" : f.run(g.actual, g.unit, `gate.${g.key}.actual`);
     blocks.push({
       type: "table",
-      caption: `${g.label}: needs at least ${needs}; this run has ${has}. One input is moved at a time. Everything else is held.`,
+      caption: `${g.label}: needs at least ${needs}; this run has ${has}. One input is moved at a time${rows.some((k) => k.gate === g.key && k.state === "value" && k.to.length > 1) ? "; rents move together, by the same share" : ""}. Everything else is held.`,
       columns: [{ label: "Input moved" }, { label: "In this run", numeric: true }, { label: "Passes at", numeric: true }],
       rows: body,
     });
