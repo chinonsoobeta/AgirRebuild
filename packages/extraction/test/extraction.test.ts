@@ -1,7 +1,7 @@
 import { describe, expect, test } from "vitest";
 import { SF_PER_M2 } from "@agir/numbers";
 import { assemble, type AssumptionRow } from "@agir/engine";
-import { consolidate, extractCandidates, normalizeLabel, parseDocument, scoreExtraction, type Cell, type NormalizedDocument, type SourcedCandidate, type Table } from "../src/index.ts";
+import { applySuggestions, consolidate, extractCandidates, offerable, offeredIds, normalizeLabel, parseDocument, scoreExtraction, type Cell, type NormalizedDocument, type SourcedCandidate, type Table } from "../src/index.ts";
 import { MAX_PDF_PAGES, pdfPageError, relativeLinks } from "../src/parse.ts";
 import { loadOracles, toNormalized } from "./oracle.ts";
 
@@ -3495,5 +3495,71 @@ describe("a sentence in a workbook cell is read like a sentence in a text docume
   test("a sentence cell under a mezzanine section takes the mezzanine scope; a figure with its own scale is not scaled again", async () => {
     const r = await sheet([["Amounts in thousands"], ["Mezzanine loan"], ["Bank terms: loan 1,2 M$ at 11% interest rate, 5-year amortization, 6 months interest-only."]]);
     expect(r.candidates.map((c) => [c.fieldKey, c.value])).toEqual([["mezz_loan_amount", 1_200_000], ["mezz_rate_pct", 11], ["mezz_amort_years", 5], ["mezz_io_months", 6]]);
+  });
+});
+
+describe("a model's label suggestion crosses a boundary before it is a candidate (task 50a)", () => {
+  const lines = ["Sundry reserve: $48,000", "Atrium count: 14", "Float factor: 5.5%", "Cadence: 7 months", "Loan limit: maximum loan of $9,000,000", "Application fee: $12,500", "Hall area: 3,200 sf"];
+  const doc = (text: string[]): NormalizedDocument => ({ kind: "pdf", lines: text.map((t, i) => ({ text: t, location: `page 1, line ${i + 1}` })), tables: [], pageCount: 1, needsOcr: false, fullText: text.join("\n") });
+  const sourced = (c: ReturnType<typeof extractCandidates>["other"][number], documentId = "d1"): SourcedCandidate => ({ ...c, documentId, documentName: `${documentId}.pdf` });
+  const all = extractCandidates(doc(lines)).other.map((o) => sourced(o));
+  const offered = all.filter(offerable);
+  const idOf = (ctx: string) => offeredIds(offered)[offered.findIndex((o) => o.context.startsWith(ctx))]!;
+  const read = (fieldKey: string, value: number, itemKey: string | null = null): SourcedCandidate =>
+    ({ fieldKey, itemKey, value, raw: String(value), unitSeen: "$", location: "p2", context: "read", rule: "line:label-value", documentId: "d2", documentName: "d2.pdf" });
+
+  test("only a figure with no matching label is offered; a lender limit and a fee never are", () => {
+    expect(offered.map((o) => o.value)).toEqual([48_000, 14, 5.5, 7, 3_200]);
+    expect(all.filter((o) => !offerable(o)).map((o) => o.value)).toEqual([9_000_000, 12_500]);
+    expect(new Set(offeredIds(offered)).size).toBe(offered.length);
+  });
+  test("a kept suggestion is the figure itself, marked suggested; the model's value is ignored", () => {
+    const { kept, dropped } = applySuggestions([], offered, [{ id: idOf("Sundry"), fieldKey: "other_cost", value: 1 } as never]);
+    expect(dropped).toEqual([]);
+    expect(kept).toHaveLength(1);
+    expect(kept[0]).toMatchObject({ fieldKey: "other_cost", itemKey: null, value: 48_000, raw: "$48,000", unitSeen: "$", location: "page 1, line 1", context: "Sundry reserve: $48,000", rule: "suggested", documentId: "d1" });
+    expect(kept[0]!.note).toBe("Suggested label, not read by Agir's rules; confirm it");
+  });
+  test("a kept itemized suggestion needs an item named in the figure's own context", () => {
+    const ok = applySuggestions([], offered, [{ id: idOf("Atrium"), fieldKey: "unit_count", itemKey: "atrium" }]);
+    expect(ok.kept.map((c) => [c.fieldKey, c.itemKey, c.value])).toEqual([["unit_count", "atrium", 14]]);
+    const bad = applySuggestions([], offered, [{ id: idOf("Atrium"), fieldKey: "unit_count", itemKey: "Studio" }, { id: idOf("Hall"), fieldKey: "rentable_area_sf" }]);
+    expect(bad.kept).toEqual([]);
+    expect(bad.dropped.map((d) => d.why)).toHaveLength(2);
+  });
+  test("each drop has its own reason", () => {
+    const run = (s: { id: string; fieldKey: string; itemKey?: string }, results: SourcedCandidate[] = []) => applySuggestions(results, offered, [s]);
+    const why = (r: ReturnType<typeof run>) => (r.kept.length ? "kept" : r.dropped[0]!.why);
+    const reasons = [
+      why(run({ id: idOf("Sundry"), fieldKey: "ignore" })),
+      why(run({ id: idOf("Sundry"), fieldKey: "no_such_field" })),
+      why(run({ id: idOf("Sundry"), fieldKey: "lease_up_ramp" })),
+      why(run({ id: idOf("Float"), fieldKey: "other_cost" })),
+      why(run({ id: idOf("Sundry"), fieldKey: "senior_rate_pct" })),
+      why(run({ id: idOf("Cadence"), fieldKey: "hold_years" })),
+      why(run({ id: idOf("Atrium"), fieldKey: "unit_count" })),
+      why(run({ id: idOf("Sundry"), fieldKey: "other_cost" }, [read("other_cost", 50_000)])),
+      why(run({ id: "d1|page 9|$1", fieldKey: "other_cost" })),
+    ];
+    expect(new Set(reasons).size).toBe(reasons.length);
+    expect(reasons).not.toContain("kept");
+  });
+  test("units must fit the field: dollars, months, percent and a whole count are kept; others are not", () => {
+    const kept = (ctx: string, fieldKey: string, itemKey?: string) => applySuggestions([], offered, [{ id: idOf(ctx), fieldKey, itemKey }]).kept.length;
+    expect([kept("Sundry", "other_cost"), kept("Cadence", "lease_up_months"), kept("Float", "variable_expense_pct"), kept("Atrium", "unit_count", "Atrium"), kept("Hall", "rentable_area_sf", "Hall")]).toEqual([1, 1, 1, 1, 1]);
+    expect([kept("Cadence", "other_cost"), kept("Sundry", "unit_rent_monthly", "Sundry"), kept("Float", "unit_count", "Float")]).toEqual([0, 0, 0]);
+  });
+  test("a suggested candidate is never approved: alone or agreeing with a read figure it needs review", () => {
+    const { kept } = applySuggestions([], offered, [{ id: idOf("Sundry"), fieldKey: "other_cost" }]);
+    for (const withRead of [[], [read("other_cost", 48_000)]]) {
+      const p = consolidate([...kept, ...withRead]);
+      expect(p.map((x) => [x.status, x.value])).toEqual([["needs_review", 48_000]]);
+      expect(p[0]!.sources.some((s) => s.rule === "suggested")).toBe(true);
+    }
+  });
+  test("a suggested figure that disagrees with a read figure names a conflict", () => {
+    const { kept } = applySuggestions([], offered, [{ id: idOf("Sundry"), fieldKey: "other_cost" }]);
+    const p = consolidate([...kept, read("other_cost", 50_000)]);
+    expect(p.map((x) => [x.status, x.value, x.values.map((v) => v.value)])).toEqual([["conflicting", null, [48_000, 50_000]]]);
   });
 });
