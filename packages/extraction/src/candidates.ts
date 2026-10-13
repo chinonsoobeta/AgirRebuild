@@ -1386,9 +1386,12 @@ type Section = { rows: Cell[][]; scope: Scope; excluded: boolean; rent?: Roles; 
  * its own; a section label row ends it too, sets the loan scope when it names a loan, and the rows under it with no column header
  * are label and value rows. Rows above the first header, when there is one and no label came first, are a title and read as nothing.
  */
-/** A text cell of a table that is a sentence: no number value, six words or more, and a figure in it. A cell that begins with its figure ("5 % des revenus bruts effectifs") is a value with a qualifier, not a sentence. */
-function isSentenceCell(c: Cell, format: DocumentFormat): boolean {
-  if (c.number !== undefined || c.text.trim().split(/\s+/).length < 6) return false;
+/**
+ * A text cell of a table that is a sentence: no number value, six words or more, and a figure in it, on a row with no number cell (next to a number
+ * cell it is that number's label: "Contingency (5% of hard costs)"). A cell that begins with its figure ("5 % des revenus bruts effectifs") is a value with a qualifier, not a sentence.
+ */
+function isSentenceCell(c: Cell, row: Cell[], format: DocumentFormat): boolean {
+  if (c.number !== undefined || row.some((x) => x.number !== undefined) || c.text.trim().split(/\s+/).length < 6) return false;
   const first = tokenize(c.text, format)[0];
   return !!first && c.text.slice(0, first.start).trim() !== "";
 }
@@ -1461,7 +1464,7 @@ function fromTable(table: Table, result: ExtractionResult, notes: string[] = [],
       s.rows.forEach((row0) => {
         if (!s.excluded && namedRow(row0, table, result)) return;
         // A sentence cell is read as a sentence under the scope and exclusion in force for its row; the other cells of the row read as usual.
-        const row = row0.filter((c) => !isSentenceCell(c, result.format));
+        const row = row0.filter((c) => !isSentenceCell(c, row0, result.format));
         for (const c of row0) {
           if (row.includes(c)) continue;
           const para: Paragraph = { text: c.text.trim(), segs: [{ start: 0, location: c.ref }], scope: s.scope, excluded: s.excluded || row.some((x) => markedNotPart(x.text)) };

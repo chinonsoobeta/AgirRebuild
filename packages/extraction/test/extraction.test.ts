@@ -3451,7 +3451,7 @@ describe("wrong reads found by the V4 trap corpus: scales, spaced digits, allowa
 });
 
 describe("a sentence in a workbook cell is read like a sentence in a text document", () => {
-  const sheet = async (rows: string[][], name = "Terms") => {
+  const sheet = async (rows: (string | number)[][], name = "Terms") => {
     const ExcelJS = (await import("exceljs")).default;
     const wb = new ExcelJS.Workbook();
     const ws = wb.addWorksheet(name);
@@ -3470,8 +3470,9 @@ describe("a sentence in a workbook cell is read like a sentence in a text docume
     expect(got(r)).toEqual(FOUR.map(([k, v]) => [k, v, "Terms!A1"]));
   });
   test("negative: a short text cell and a label/value row read as before", async () => {
-    const r = await sheet([["Approved"], ["Interest rate", "6.4%"], ["Status is final and approved by the committee"], ["Selling costs", "2,5 % of the sale price at closing"]]);
-    expect(got(r)).toEqual([["senior_rate_pct", 6.4, "Terms!B2"], ["selling_costs_pct", 2.5, "Terms!B4"]]);
+    const r = await sheet([["Approved"], ["Interest rate", "6.4%"], ["Status is final and approved by the committee"], ["Selling costs", "2,5 % of the sale price at closing"], ["Contingency (4 % of the direct building costs)", 88_000]]);
+    // A long label next to a number cell is that number's label, not a sentence.
+    expect(got(r)).toEqual([["senior_rate_pct", 6.4, "Terms!B2"], ["selling_costs_pct", 2.5, "Terms!B4"], ["contingency", 88_000, "Terms!B5"]]);
     expect(r.other).toEqual([]);
   });
   test("a lender's limit inside a sentence cell is refused with the limit note", async () => {
