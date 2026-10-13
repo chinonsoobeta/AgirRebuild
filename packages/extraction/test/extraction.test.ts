@@ -3499,7 +3499,7 @@ describe("a sentence in a workbook cell is read like a sentence in a text docume
 });
 
 describe("a model's label suggestion crosses a boundary before it is a candidate (task 50a)", () => {
-  const lines = ["Sundry reserve: $48,000", "Atrium count: 14", "Float factor: 5.5%", "Cadence: 7 months", "Loan limit: maximum loan of $9,000,000", "Application fee: $12,500", "Hall area: 3,200 sf"];
+  const lines = ["Sundry reserve: $48,000", "Atrium count: 14", "Float factor: 5.5%", "Cadence: 7 months", "Loan limit: maximum loan of $9,000,000", "Application fee: $12,500", "Hall footprint: 3,200 sf"];
   const doc = (text: string[]): NormalizedDocument => ({ kind: "pdf", lines: text.map((t, i) => ({ text: t, location: `page 1, line ${i + 1}` })), tables: [], pageCount: 1, needsOcr: false, fullText: text.join("\n") });
   const sourced = (c: ReturnType<typeof extractCandidates>["other"][number], documentId = "d1"): SourcedCandidate => ({ ...c, documentId, documentName: `${documentId}.pdf` });
   const all = extractCandidates(doc(lines)).other.map((o) => sourced(o));

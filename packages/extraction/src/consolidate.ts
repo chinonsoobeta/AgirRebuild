@@ -1,3 +1,4 @@
+import { FIELD_BY_KEY } from "@agir/contracts";
 import type { Candidate } from "./candidates.ts";
 import { currencyOf } from "./mapping.ts";
 
@@ -69,4 +70,72 @@ export function consolidate(candidates: readonly SourcedCandidate[], dealCurrenc
     });
   }
   return out.sort((a, b) => (a.fieldKey + (a.itemKey ?? "")).localeCompare(b.fieldKey + (b.itemKey ?? "")));
+}
+
+const NO_MATCH_NOTES = ["No field matches this label", "No budget line matches this label"];
+export const SUGGESTED_NOTE = "Suggested label, not read by Agir's rules; confirm it";
+
+/** A figure the reader found but could not label. Any refused figure (limit, fee, range, year, struck, per-basis, scale, not part of the deal) carries another note and is never offered. */
+export const offerable = (c: Candidate): boolean => c.fieldKey === null && c.value !== null && NO_MATCH_NOTES.includes(c.note ?? "");
+
+/** A stable id for each offered figure: its document, location and raw text, numbered when the same triple repeats. */
+export function offeredIds(offered: readonly SourcedCandidate[]): string[] {
+  const seen = new Map<string, number>();
+  return offered.map((c) => {
+    const base = `${c.documentId}|${c.location}|${c.raw}`;
+    const n = seen.get(base) ?? 0;
+    seen.set(base, n + 1);
+    return n ? `${base}#${n}` : base;
+  });
+}
+
+/** The unit a figure was written with, without its currency code ("CAD" alone is "$"). */
+const seenUnit = (u: string | null): string | null => {
+  if (u === null) return null;
+  const bare = u.replace(/\s?(CAD|USD|AUD)$/, "");
+  return bare === "" ? "$" : bare;
+};
+const UNIT_SEEN: Record<string, string | null> = { "$": "$", "$/unit/mo": "$/mo", "$/sf/yr": "$/sf", "%": "%", months: "months", years: "years", x: "x", sf: "sf", units: null };
+
+/**
+ * Cross the boundary a model's label suggestion must pass. A kept candidate is the offered figure itself:
+ * only its fieldKey and itemKey come from the suggestion, and any other property of a suggestion is never read.
+ * The caller concatenates `kept` with the reader's candidates and calls `consolidate`. A "suggested" candidate
+ * reaches a person as needs_review or a conflict like any other; nothing here or in `consolidate` approves it.
+ */
+export function applySuggestions(
+  results: readonly SourcedCandidate[],
+  offered: readonly SourcedCandidate[],
+  suggestions: readonly { id: string; fieldKey: string | "ignore"; itemKey?: string | null }[],
+): { kept: SourcedCandidate[]; dropped: { id: string; why: string }[] } {
+  const ids = offeredIds(offered);
+  const read = new Set(results.filter((r) => r.fieldKey && r.value !== null).map((r) => `${r.fieldKey}|${(r.itemKey ?? "").toLowerCase()}`));
+  const used = new Set<string>();
+  const kept: SourcedCandidate[] = [];
+  const dropped: { id: string; why: string }[] = [];
+  for (const s of suggestions) {
+    const id = String(s.id);
+    const drop = (why: string) => dropped.push({ id, why });
+    const at = ids.indexOf(id);
+    const fig = offered[at];
+    if (!fig) { drop("The id names no offered figure"); continue; }
+    if (!offerable(fig)) { drop("This figure is not one that may be offered"); continue; }
+    if (used.has(id)) { drop("This figure was already suggested once"); continue; }
+    if (s.fieldKey === "ignore") { drop("The model said this figure is no input"); continue; }
+    const def = FIELD_BY_KEY.get(s.fieldKey);
+    if (!def) { drop("The key is not in the catalog"); continue; }
+    if (!def.extractable) { drop("This field is not read from documents"); continue; }
+    const unit = seenUnit(fig.unitSeen);
+    const fits = def.unit === "units" ? unit === null && Number.isInteger(fig.value) : def.unit in UNIT_SEEN && unit === UNIT_SEEN[def.unit];
+    if (!fits) { drop(`The figure's unit (${fig.unitSeen ?? "none"}) does not fit ${def.unit}`); continue; }
+    let itemKey: string | null = null;
+    if (def.itemized) {
+      itemKey = typeof s.itemKey === "string" ? s.itemKey.trim() : "";
+      if (!itemKey || !fig.context.toLowerCase().includes(itemKey.toLowerCase())) { drop("The item name is missing or not in the figure's own context"); continue; }
+    }
+    if (read.has(`${def.key}|${(itemKey ?? "").toLowerCase()}`)) { drop("The reader already read this field for the deal"); continue; }
+    used.add(id);
+    kept.push({ ...fig, fieldKey: def.key, itemKey, rule: "suggested", note: SUGGESTED_NOTE });
+  }
+  return { kept, dropped };
 }
