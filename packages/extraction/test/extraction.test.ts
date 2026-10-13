@@ -2,7 +2,7 @@ import { describe, expect, test } from "vitest";
 import { SF_PER_M2 } from "@agir/numbers";
 import { assemble, type AssumptionRow } from "@agir/engine";
 import { consolidate, extractCandidates, normalizeLabel, parseDocument, scoreExtraction, type Cell, type NormalizedDocument, type SourcedCandidate, type Table } from "../src/index.ts";
-import { relativeLinks } from "../src/parse.ts";
+import { MAX_PDF_PAGES, pdfPageError, relativeLinks } from "../src/parse.ts";
 import { loadOracles, toNormalized } from "./oracle.ts";
 
 const key = (f: string, i: string | null) => (i ? `${f}|${i}` : f);
@@ -1838,13 +1838,51 @@ describe("totals and their parts", () => {
       const kept = await relativeLinks(await pack({ "xl/worksheets/sheet1.xml": other, "xl/_rels/workbook.xml.rels": rels }));
       expect(await read(kept, "xl/worksheets/sheet1.xml")).toBe(other);
     });
-    test("a package with a part above the size cap is left exactly as it came", async () => {
+    /** A small zip whose central directory declares parts of the given sizes, without any such parts existing. */
+    const declaring = async (sizes: number[], patch?: (b: Buffer, at: number) => void, word = false) => {
       const JSZip = (await import("jszip")).default;
       const zip = new JSZip();
-      zip.file("xl/_rels/workbook.xml.rels", `<Relationships xmlns="http://schemas.openxmlformats.org/package/2006/relationships"><Relationship Id="rId1" Type="t" Target="/xl/styles.xml"/></Relationships>`);
-      zip.file("xl/extra.xml", "a".repeat(60 * 1024 * 1024), { compression: "DEFLATE" });
-      const bytes = new Uint8Array(await zip.generateAsync({ type: "uint8array", compression: "DEFLATE" }));
+      if (word) zip.file("word/document.xml", `<w:document xmlns:w="http://schemas.openxmlformats.org/wordprocessingml/2006/main"><w:body/></w:document>`);
+      sizes.forEach((_, i) => zip.file(`xl/p${i}.xml`, "a"));
+      const b = Buffer.from(await zip.generateAsync({ type: "uint8array" }));
+      let at = b.readUInt32LE(b.lastIndexOf(Buffer.from([0x50, 0x4b, 5, 6])) + 16);
+      if (word) at += 46 + b.readUInt16LE(at + 28);
+      sizes.forEach((size) => {
+        b.writeUInt32LE(size, at + 24);
+        patch?.(b, at);
+        at += 46 + b.readUInt16LE(at + 28);
+      });
+      return new Uint8Array(b);
+    };
+    const wordFile = async () => {
+      const JSZip = (await import("jszip")).default;
+      const zip = new JSZip();
+      zip.file("word/document.xml", `<w:document xmlns:w="http://schemas.openxmlformats.org/wordprocessingml/2006/main"><w:body><w:p><w:r><w:t>Land</w:t></w:r></w:p></w:body></w:document>`);
+      return new Uint8Array(await zip.generateAsync({ type: "uint8array" }));
+    };
+    test("a package with a part above the size cap is left exactly as it came", async () => {
+      const bytes = await declaring([300 * 1024 * 1024]);
       expect(relativeLinks(bytes)).toBe(bytes);
+    });
+    test("an upload that expands beyond the caps is refused with a plain message (task 47b)", async () => {
+      const msg = "This file expands to more than 500 MB when opened; Agir does not read it";
+      const big = 300 * 1024 * 1024;
+      await expect(parseDocument(await declaring([big]), "b.xlsx")).rejects.toThrow(msg);
+      await expect(parseDocument(await declaring([big], undefined, true), "b.docx")).rejects.toThrow(msg);
+      // Parts each under the part cap that together pass the package cap.
+      await expect(parseDocument(await declaring([200 * 1024 * 1024, 200 * 1024 * 1024, 200 * 1024 * 1024]), "b.xlsx")).rejects.toThrow(msg);
+      // An encrypted entry and a zip64 marker.
+      await expect(parseDocument(await declaring([1], (b, at) => b.writeUInt16LE(1, at + 8)), "e.xlsx")).rejects.toThrow(msg);
+      await expect(parseDocument(await declaring([1], (b, at) => b.writeUInt32LE(0xffffffff, at + 20)), "z.xlsx")).rejects.toThrow(msg);
+    });
+    test("normal workbooks and Word files still read (task 47b)", async () => {
+      expect((await parseDocument(await twoSheetBytes(), "r.xlsx")).kind).toBe("xlsx");
+      expect((await parseDocument(await wordFile(), "n.docx")).kind).toBe("docx");
+    });
+    test("a PDF above the page cap is refused (task 47b)", () => {
+      expect(MAX_PDF_PAGES).toBe(5000);
+      expect(pdfPageError(5001)?.message).toBe("This PDF has more than 5,000 pages; Agir does not read it");
+      expect(pdfPageError(5000)).toBeNull();
     });
     test("a relative-target workbook is read as before", async () => {
       const d = await parseDocument(await twoSheetBytes(), "r.xlsx");
