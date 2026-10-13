@@ -4,7 +4,7 @@
 // but it never becomes an input.
 
 import { FIELD_BY_KEY, FIELDS, OUTPUT_LIKE_PHRASES, type FieldDef } from "@agir/contracts";
-import { codeOf, SF_PER_M2, wholeUnitType, type CurrencyCode, type NumberToken } from "@agir/numbers";
+import { codeOf, SF_PER_M2, unitTypesIn, wholeUnitType, type CurrencyCode, type NumberToken } from "@agir/numbers";
 
 export type LabelUnit = "$" | "%" | "months" | "years" | "sf" | "m2" | "x" | null;
 
@@ -26,9 +26,9 @@ const GENERIC = new Set([
 
 const ITEMIZED_ALIASES: Record<string, string[]> = {
   unit_count: ["rental units", "units", "unit count", "homes", "suites", "apartments", "doors", "logements", "unites", "appartements", "nombre de logements", "nombre d unites", "nombre de locaux", "locaux"],
-  unit_rent_monthly: ["rent", "monthly rent", "rent per month", "rent per unit", "rent per suite", "rent per door", "rent per home", "loyer par unite", "loyer par local", "loyer annuel par logement", "loyer annuel par unite", "loyer annuel par local", "loyer mensuel par logement", "loyer mensuel par unite", "loyer mensuel par local", "market rent", "loyer", "loyer mensuel", "loyer par mois", "loyer par logement", "loyer du marche"],
+  unit_rent_monthly: ["rent", "monthly rent", "rent per month", "rent monthly", "rent per unit", "rent per suite", "rent per door", "rent per home", "loyer par unite", "loyer par local", "loyer annuel par logement", "loyer annuel par unite", "loyer annuel par local", "loyer mensuel par logement", "loyer mensuel par unite", "loyer mensuel par local", "market rent", "loyer", "loyer mensuel", "loyer par mois", "loyer par logement", "loyer du marche"],
   rent_psf_annual: ["rent", "rent psf", "rent per sf", "rent per sq ft", "rent per square foot", "rent per square metre", "rent per square meter", "rent per m2", "base rent", "loyer", "loyer au pi2", "loyer par pi2", "loyer au pied carre", "loyer par pied carre", "loyer au metre carre", "loyer par metre carre", "loyer annuel au pi2", "loyer annuel par pi2", "loyer annuel au pied carre", "loyer annuel au metre carre", "loyer annuel par metre carre"],
-  rentable_area_sf: ["area", "rentable area", "leasable area", "gla", "nrsf", "square feet", "sf", "superficie locative", "superficie louable", "surface locative", "aire locative"],
+  rentable_area_sf: ["area", "rentable area", "leasable area", "gla", "nrsf", "square feet", "sf", "superficie locative", "superficie louable", "superficie locative totale", "superficie louable totale", "surface locative", "aire locative"],
   item_occupancy_pct: ["occupancy", "occupation", "taux d occupation"],
 };
 
@@ -133,6 +133,13 @@ const IO_RE = /\b(interest[- ]only|io|interets? seulement)\b/;
 const INCLUDING_RE = /\b(including|incl|includes|comprenant|incluant|inclut)\b/;
 const BUDGET_NAME_RE = new RegExp(`\\b(${FIELDS.filter((f) => f.group === "budget").flatMap((f) => f.aliases).map((a) => a.replace(/[.*+?^${}()|[\]\\/]/g, "\\$&")).join("|")})\\b`);
 const FEE_RE = /\b(fees?|frais|honoraires|premiums?|prime d assurance)\b/;
+// A tenant improvement allowance is a landlord's contribution to the tenant's fit-out, never a rent: the words may stand in the label, the clause before the figure, or right after it.
+// A bare "allowance" or "allocation" next to a budget field's name ("Owner contingency allowance") is that budget line.
+const TI_WORDS = String.raw`(?:ti|tis|tenant (?:improvements?|allowances?)|ameliorations? locatives?|amenagements? du locataire)`;
+const ALLOWANCE_WORDS = String.raw`(?:${TI_WORDS}|allowances?|allocations?)`;
+const TI_RE = new RegExp(String.raw`\b${TI_WORDS}\b`);
+const ALLOWANCE_RE = new RegExp(String.raw`\b(?:allowances?|allocations?)\b`);
+const ALLOWANCE_AFTER_RE = new RegExp(String.raw`^\s*(?:(?:of|for|de|d) )?${ALLOWANCE_WORDS}\b`);
 const FEE_AFTER_RE = /^\s*(de |d )?(commitment |lender |standby |structuring |broker |insurance |engagement |ouverture |dossier )?(fees?|premium|frais|honoraires|prime d assurance)\b/;
 const PER_INVESTOR_RE = /\b(minimum investment|min investment|minimum subscription|investissement minimal|investissement minimum|souscription minimale|souscription minimum|per limited partner|per investor|par commanditaire|par investisseur)\b/;
 const PER_INVESTOR_AFTER_RE = /^\s*(per|par)\s+(limited partner|investor|commanditaire|investisseur)\b/;
@@ -176,6 +183,7 @@ function lenderFigure(rawLabel: string, t: NumberToken, opts: MapOptions): strin
   const full = without(words_(rawLabel), FEE_RE);
   const before = full.slice(0, Math.max(full.search(FEE_RE), 0));
   const listed = INCLUDING_RE.test(before) || BUDGET_NAME_RE.test(before);
+  if (t.unit !== "%" && (TI_RE.test(plain) || (ALLOWANCE_RE.test(plain) && !BUDGET_NAME_RE.test(plain)) || ALLOWANCE_AFTER_RE.test(tail))) return "A tenant improvement allowance, not rent";
   if (!opts.budget && ((FEE_RE.test(without(plain, FEE_RE)) && !listed) || FEE_AFTER_RE.test(tail))) return "A fee or premium, not an input";
   // A leased or occupied share (in its own label or right after it) with a condition marker in its clause is the lender's condition.
   const after = prose && at >= 0 ? (ctx.slice(at + raw.length).split(/[,;.]/)[0] ?? "") : "";
@@ -273,9 +281,12 @@ export function canonicalItem(name: string): string {
 
 const HEADING_NAME_RE = /^(summary|sommaire|totals?|subtotal|type|types|average|overall)\b/;
 
+// A function word is never an item name ("the allowance of $65/SF as rent" names no item "As").
+const FUNCTION_WORDS = new Set(["as", "of", "the", "a", "an", "at", "in", "on", "for", "to", "de", "du", "la", "le", "les", "des", "au", "en", "pour"]);
+
 function itemName(prefix: string): string {
   const words = prefix.split(" ").filter((w) => w && !GENERIC.has(w));
-  if (words.length === 0 || words.length > 4) return "";
+  if (words.length === 0 || words.length > 4 || words.every((w) => FUNCTION_WORDS.has(w))) return "";
   return canonicalItem(words.map((w) => (/^\d/.test(w) ? w.toUpperCase() : w[0]!.toUpperCase() + w.slice(1))).join(" "));
 }
 
@@ -684,7 +695,8 @@ function mapLabel(rawLabel: string, t: NumberToken, opts: MapOptions = {}): Mapp
       "$/sf": "rent_psf_annual",
       "$/m2": "rent_psf_annual",
     };
-    const key = t.unit ? byUnit[t.unit] : undefined;
+    // A label names an item for an area or a rent only when it holds a unit type; a count may be named by any short label.
+    const key = t.unit && (t.unit === "units" || unitTypesIn(rawLabel).length > 0) ? byUnit[t.unit] : undefined;
     const c = key ? compatibleValue(FIELD_BY_KEY.get(key)!, t, label, labelUnit, labelCode, prose) : null;
     if (key && c) return { kind: "field", fieldKey: key, itemKey: typed ?? name, value: c.value, unitSeen: c.unitSeen };
   }

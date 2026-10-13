@@ -26,6 +26,10 @@
 //     "4½" is a unit type, never the number 4.
 //  6e. A money figure may carry a per-year or per-month qualifier: "$/pi²/an",
 //     "1 200 $ par année", "$1,640 a month".
+//  6f. Single digits (and single "," "." "%" marks) each set apart by one space ("1 6 2 , 5 0 0") are
+//      OCR's letter-spacing: the whole run is one refused token, never read in part and never joined.
+//      A figure directly after "per", "par", "for every", "pour chaque" or "/" is the basis of a ratio
+//      ("1.8 stalls per 1,000 SF"), never a value.
 //  7. Square metres are their own unit. The engine works in square feet, so a
 //     figure in m² is converted where it is mapped, never here.
 
@@ -315,14 +319,27 @@ function scaleOf(word: string): number {
 const MINUS_WORD_RE = /(?:^|[^\p{L}])(?<!\b(?:au|du|ou|or|plus|at|de|à|a|par|et)\s+)(?:minus|moins)\s+$/iu;
 const ANNUAL_RE = /^\s?(?:\/\s?(?:an|yr|year|ann[ée]e)\b|par\s+(?:an|ann[ée]e)\b|per\s+(?:year|annum)\b|annually\b|a\s+year\b)/iu;
 
+// Three or more single digits, each set apart by one space: "1 6 2 , 5 0 0". Ordinary space groups ("1 250 000") never match.
+const SPACED_RE = /(?<![\d$€£])(?<!\d )(?:[$€£]\s?)?\d(?: [\d,.%])*(?!\d)(?! \d)/g;
+const SPACED_NOTE = "Letter-spaced digits, as OCR leaves them; enter the figure";
+const BASIS_NOTE = "A figure after 'per' is the basis of a ratio, not a value";
+const BASIS_BEFORE_RE = /(?:\b(?:per|par|for every|pour chaque))\s*$/i;
+
 /** Every number in one line of text, with its unit and whether it was refused. */
 export function tokenize(line: string, format: DocumentFormat, cell = false): NumberToken[] {
   const text = normalizeText(line);
   const out: NumberToken[] = [];
   let reached = 0;
+  const spaced = [...text.matchAll(SPACED_RE)].filter((m) => (m[0].match(/\d/g) ?? []).length >= 3);
+  for (const m of spaced) {
+    const raw = m[0].trim();
+    out.push({ raw, start: m.index!, end: m.index! + m[0].length, value: null, refusal: SPACED_NOTE, currency: /^[$€£]/.test(raw), currencyCode: null, unit: null, scaled: false });
+  }
   for (const m of text.matchAll(TOKEN_RE)) {
     const [whole, paren, sign, cur, core] = m;
     const start = m.index!;
+    // Part of a letter-spaced run: refused with the run, never a number of its own.
+    if (spaced.some((r) => start < r.index! + r[0].length && start + whole.length > r.index!)) continue;
     // The tail of a unit phrase ("7 2-bed units") is not a number of its own.
     if (start < reached) continue;
     let end = start + whole.length;
@@ -382,6 +399,12 @@ export function tokenize(line: string, format: DocumentFormat, cell = false): Nu
     if (signWord && value !== null) {
       value = null;
       refusal = "A sign written in words; enter the figure by hand";
+    }
+    // After "per" or a slash: the denominator of a ratio. A slash joining two digits ("2026/10") is a date unless a unit follows.
+    const before = text.slice(0, start);
+    if (value !== null && (BASIS_BEFORE_RE.test(before) || (/\/\s*$/.test(before) && (!/\d\/$/.test(before) || unit !== null)))) {
+      value = null;
+      refusal = BASIS_NOTE;
     }
     out.push({
       raw: text.slice(start, end).trim(),

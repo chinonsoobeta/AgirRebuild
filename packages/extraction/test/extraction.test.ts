@@ -111,8 +111,8 @@ describe("square metres become square feet at entry (decision 7)", () => {
     expect(c).toMatchObject({ itemKey: "Retail", unitSeen: "$/m2" });
     expect(c.value).toBe(34);
   });
-  test("a component named with only an area in m²", () => {
-    const c = only(extractCandidates(doc(["Retail: 836 m²"])), "rentable_area_sf");
+  test("a component named with an area and a rent in m²", () => {
+    const c = only(extractCandidates(doc(["Retail: 836 m² at $366/m²"])), "rentable_area_sf");
     expect(c).toMatchObject({ itemKey: "Retail", unitSeen: "m2" });
     expect(c.value).toBeCloseTo(8_998.63, 2);
   });
@@ -141,7 +141,7 @@ describe("square metres become square feet at entry (decision 7)", () => {
     expect(p!.values.map((v) => v.value)).toEqual([expect.closeTo(10_763.91, 2), 10_764]);
   });
   test("pi² in a French document is square feet", () => {
-    const c = only(extractCandidates(doc(["Commerce : 9 400 pi²", "Prix demandé : 31 200 000"])), "rentable_area_sf");
+    const c = only(extractCandidates(doc(["Commerce : 9 400 pi² à 34 $/pi²", "Prix demandé : 31 200 000"])), "rentable_area_sf");
     expect(c).toMatchObject({ itemKey: "Commerce", value: 9_400, unitSeen: "sf" });
   });
 });
@@ -1281,8 +1281,9 @@ describe("reading safety: a figure that may be the wrong one is shown, never use
     test("a place or heading before a colon is never an item name; the deal-wide count is read", () => {
       expect(items(read("Nanaimo, British Columbia: nine apartments above a pharmacy"))).toEqual([["unit_count", "All units", 9]]);
       expect(items(read("Gatineau (Québec) : huit logements au-dessus d'une boutique"))).toEqual([["unit_count", "All units", 8]]);
-      // negative: an area under a component name that is no residential type keeps that name
-      expect(items(read("Retail: 9,000 SF"))).toEqual([["rentable_area_sf", "Retail", 9_000]]);
+      // an area alone under a name that is no unit type is no item (task 47); with its rent it is
+      expect(items(read("Retail: 9,000 SF"))).toEqual([]);
+      expect(items(read("Retail: 9,000 SF at $24 per SF"))).toEqual([["rentable_area_sf", "Retail", 9_000], ["rent_psf_annual", "Retail", 24]]);
     });
     test("a count and a rent in one colon clause pair to the unit type that clause names", () => {
       expect(items(read("Units: 8 one-bedroom suites at $1,750 per month"))).toEqual([["unit_count", "1BR", 8], ["unit_rent_monthly", "1BR", 1_750]]);
