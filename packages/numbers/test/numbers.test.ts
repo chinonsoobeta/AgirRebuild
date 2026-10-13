@@ -297,3 +297,32 @@ describe("durations written as phrases", () => {
     expect(dur("a unit and a half")).toEqual([]);
   });
 });
+
+describe("letter-spaced digits and figures after 'per' (task 47)", () => {
+  test("a run of single digits is refused whole, never read in part or joined", () => {
+    const tokens = tokenize("amount: $ 1 6 2 , 5 0 0 , 0 0 0", US);
+    expect(tokens).toHaveLength(1);
+    expect(tokens[0]!.value).toBeNull();
+    expect(tokens[0]!.refusal).toBe("Letter-spaced digits, as OCR leaves them; enter the figure");
+    expect(tokenize("rate 5 . 2 5 %", US).map((t) => t.value)).toEqual([null]);
+  });
+  test("negative: space-grouped thousands and short digit pairs are not letter-spaced", () => {
+    expect(first("Loan: 1 250 000 $", EU).value).toBe(1_250_000);
+    expect(first("Common equity: $31 200 000", UNKNOWN).value).toBe(31_200_000);
+    expect(tokenize("Floors 1 2", US).map((t) => t.value)).toEqual([1, 2]);
+  });
+  test("a figure directly after per, par, for every, pour chaque or a slash is a basis, not a value", () => {
+    const t = tokenize("1.8 stalls per 1,000 SF", US);
+    expect(t.map((x) => x.value)).toEqual([1.8, null]);
+    expect(t[1]!.refusal).toMatch(/basis/);
+    expect(tokenize("$85/1,000 sf", US).map((x) => x.value)).toEqual([85, null]);
+    expect(tokenize("1 place par 100 pi²", EU).map((x) => x.value)).toEqual([1, null]);
+    expect(tokenize("1 stall for every 4 units", US).map((x) => x.value)).toEqual([1, null]);
+    expect(tokenize("1 place pour chaque 4 logements", EU).map((x) => x.value)).toEqual([1, null]);
+  });
+  test("negative: a rate per sf and a plain area keep their values", () => {
+    expect(first("Rent: $24.50 per SF", US)).toMatchObject({ value: 24.5, unit: "$/sf" });
+    expect(first("Rentable area: 12,000 SF", US)).toMatchObject({ value: 12_000, unit: "sf" });
+    expect(first("Closing 2026/10/01", US).value).toBe(2026);
+  });
+});

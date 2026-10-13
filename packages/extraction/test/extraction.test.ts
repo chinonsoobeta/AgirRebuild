@@ -3235,3 +3235,161 @@ describe("revenue layouts: income rows, unit types as columns, named types, suit
     expect(Object.values(items(lines("Orchard row: 3 homes at $2,300 per home per month")))).not.toContain(6_900);
   });
 });
+
+describe("wrong reads found by the V4 trap corpus: scales, spaced digits, allowances, bases, lone items (task 47)", () => {
+  const doc = (...text: string[]): NormalizedDocument => ({
+    kind: "txt",
+    lines: text.map((t, i) => ({ text: t, location: `line ${i + 1}` })),
+    tables: [],
+    pageCount: null,
+    needsOcr: false,
+    fullText: text.join("\n"),
+  });
+  const read = (...text: string[]) => extractCandidates(doc(...text));
+  const cand = (r: ReturnType<typeof extractCandidates>, fieldKey: string) => r.candidates.filter((c) => c.fieldKey === fieldKey);
+  const values = (r: ReturnType<typeof extractCandidates>) => Object.fromEntries(r.candidates.filter((c) => !c.itemKey).map((c) => [c.fieldKey, c.value]));
+  const SCALE_NOTE = "The document states a scale for these amounts that Agir cannot read safely; enter the figure";
+  const book = async (sheet: string, rows: (string | number | [number, string])[][]) => {
+    const ExcelJS = (await import("exceljs")).default;
+    const wb = new ExcelJS.Workbook();
+    const ws = wb.addWorksheet(sheet);
+    rows.forEach((r, i) =>
+      r.forEach((v, c) => {
+        const cell = ws.getCell(i + 1, c + 1);
+        if (Array.isArray(v)) {
+          cell.value = v[0];
+          cell.numFmt = v[1];
+        } else cell.value = v;
+      }),
+    );
+    return parseDocument(new Uint8Array(await wb.xlsx.writeBuffer()), "book.xlsx");
+  };
+  const plain = [["Land", 34_500], ["Hard costs", 120_000], ["Soft costs", 15_000], ["Stabilized occupancy", [0.93, "0%"]], ["Unit count", 24]] as (string | number | [number, string])[][];
+
+  // Rule 1
+  test("a sheet name that states thousands scales money, and only money, by 1,000", async () => {
+    const r = extractCandidates(await book("Budget ($ in thousands)", plain));
+    expect(values(r)).toMatchObject({ land_cost: 34_500_000, hard_cost: 120_000_000, soft_cost: 15_000_000, stabilized_occupancy_pct: 93 });
+    expect(r.candidates.filter((c) => c.fieldKey === "unit_count").map((c) => c.value)).toEqual([24]);
+    const land = cand(r, "land_cost")[0]!;
+    expect(land.raw).toBe("34500");
+    expect(land.unitSeen).toMatch(/stated in thousands/);
+  });
+  test("negative: with no scale stated the same sheet reads as written", async () => {
+    expect(values(extractCandidates(await book("Budget", plain)))).toMatchObject({ land_cost: 34_500, hard_cost: 120_000 });
+  });
+  test("a column header's scale beats the sheet's, and applies to its column", async () => {
+    const r = extractCandidates(await book("Budget ($ in thousands)", [["Line item", "Amount ($ millions)"], ["Land", 34.5], ["Hard costs", 120]]));
+    expect(values(r)).toMatchObject({ land_cost: 34_500_000, hard_cost: 120_000_000 });
+    const own = extractCandidates(await book("Budget", [["Line item", "Amount ($000)"], ["Land", 34_500]]));
+    expect(values(own)).toMatchObject({ land_cost: 34_500_000 });
+  });
+  test("a caption row with no figure scales the rows under it", async () => {
+    const r = extractCandidates(await book("Budget", [["Project budget (in $000s)"], ["Line item", "Amount"], ["Land", 34_500], ["Hard costs", 120_000]]));
+    expect(values(r)).toMatchObject({ land_cost: 34_500_000, hard_cost: 120_000_000 });
+  });
+  test("a heading in a text document scales the label and value lines under it", () => {
+    const r = read("Project budget (in $000s)", "Land cost: $34,500", "Hard costs: $120,000", "Loan-to-cost: 65%");
+    expect(values(r)).toMatchObject({ land_cost: 34_500_000, hard_cost: 120_000_000 });
+    expect(cand(r, "land_cost")[0]!.raw).toBe("$34,500");
+    expect(cand(r, "land_cost")[0]!.unitSeen).toMatch(/stated in thousands/);
+    expect(values(read("Budget ($ millions)", "Land cost: $34.5"))).toMatchObject({ land_cost: 34_500_000 });
+  });
+  test("negative: a scale that measures something else is not a money scale", () => {
+    for (const heading of ["Rentable areas in thousands of SF", "Units (thousands)", "Population in thousands"]) expect(values(read(heading, "Land cost: $34,500")), heading).toMatchObject({ land_cost: 34_500 });
+  });
+  test("two stated scales that differ refuse the figures, with the note", async () => {
+    const r = extractCandidates(await book("Budget ($ in thousands)", [["Budget in millions of dollars"], ["Line item", "Amount"], ["Land", 34.5]]));
+    expect(cand(r, "land_cost")).toEqual([]);
+    expect(r.other.some((o) => o.note === SCALE_NOTE)).toBe(true);
+    const t = read("Budget ($ in thousands; $ in millions)", "Land cost: $34,500");
+    expect(cand(t, "land_cost")).toEqual([]);
+    expect(t.other.some((o) => o.note === SCALE_NOTE)).toBe(true);
+  });
+  test("a scale word that is not clearly money refuses the figures", () => {
+    const r = read("Budget (000)", "Land cost: $34,500");
+    expect(cand(r, "land_cost")).toEqual([]);
+    expect(r.other.some((o) => o.note === SCALE_NOTE)).toBe(true);
+  });
+  test("a figure with a scale of its own is never scaled again", async () => {
+    const r = extractCandidates(await book("Budget ($ in thousands)", [["Land", "$1.2M"], ["Hard costs", 120_000]]));
+    expect(values(r)).toMatchObject({ land_cost: 1_200_000, hard_cost: 120_000_000 });
+    expect(values(read("Budget ($ in thousands)", "Land cost: $1.2M"))).toMatchObject({ land_cost: 1_200_000 });
+  });
+  test("a French caption scales the rows under it", () => {
+    const row = (text: string, number?: number): Cell[] => (number === undefined ? [{ text, ref: "A1" }] : [{ text, ref: "A2" }, { text: String(number), number, ref: "B2" }]);
+    const d: NormalizedDocument = { kind: "xlsx", lines: [], tables: [{ name: "Budget", rows: [row("Budget du projet (en milliers de dollars)"), row("Terrain", 34_500)] }], pageCount: null, needsOcr: false, fullText: "Terrain 34500" };
+    expect(values(extractCandidates(d))).toMatchObject({ land_cost: 34_500_000 });
+  });
+
+  // Rule 2
+  test("letter-spaced digits give no candidate and are never joined or read in part", () => {
+    const r = read("Senior loan", "amount: $ 1 6 2 , 5 0 0 , 0 0 0");
+    expect(cand(r, "senior_loan_amount")).toEqual([]);
+    expect(r.candidates.map((c) => c.value)).not.toContain(1);
+    expect(r.other.some((o) => /Letter-spaced digits, as OCR leaves them; enter the figure/.test(o.note ?? ""))).toBe(true);
+    expect(r.other.map((o) => o.value)).not.toContain(162_500_000);
+  });
+  test("negative: space-grouped thousands in a fr-CA document still read", () => {
+    expect(values(read("Prêt senior : 1 250 000 $"))).toMatchObject({ senior_loan_amount: 1_250_000 });
+  });
+
+  // Rule 3
+  test("a tenant improvement allowance is not rent, in both languages", () => {
+    for (const s of ["Tenant allowance: $75/SF", "The landlord offers the allowance of $65/SF as rent.", "TI allowance of $40/SF for the anchor", "Allocation pour améliorations locatives : 75 $/pi²", "Aménagements du locataire : 65 $/pi²"]) {
+      const r = read(s);
+      expect(r.candidates, s).toEqual([]);
+      expect(r.other.some((o) => o.note === "A tenant improvement allowance, not rent"), s).toBe(true);
+    }
+  });
+  test("negative: rent in the same text still reads", () => {
+    const r = read("Office rent $42/SF", "Tenant allowance: $75/SF");
+    expect(r.candidates.map((c) => [c.fieldKey, c.value])).toEqual([["rent_psf_annual", 42]]);
+  });
+
+  // Rule 4
+  test("a figure after 'per' is a basis, never an area", () => {
+    for (const s of ["Parking ratio: 1.8 stalls per 1,000 SF", "Parking is provided at 1.8 stalls per 1,000 SF of retail."]) expect(cand(read(s), "rentable_area_sf"), s).toEqual([]);
+  });
+  test("negative: a real area still reads", () => {
+    expect(read("Rentable area: 12,000 SF").candidates.map((c) => [c.fieldKey, c.value])).toEqual([["rentable_area_sf", 12_000]]);
+  });
+
+  // Rule 5
+  test("a lone area or rent under an unknown label makes no item", () => {
+    for (const s of ["Header: image box 65 sf", "Header: banner at $34 per sf"]) {
+      const r = read(s);
+      expect(r.candidates, s).toEqual([]);
+      expect(r.other.some((o) => o.note === "No field matches this label"), s).toBe(true);
+    }
+  });
+  test("negative: a count and rent, or a unit-type label, still name an item", () => {
+    const home = read("Mews home: 3 homes at $2,300 per home per month");
+    expect(home.candidates.map((c) => [c.fieldKey, c.itemKey, c.value])).toEqual([["unit_count", "Mews Home", 3], ["unit_rent_monthly", "Mews Home", 2_300]]);
+    expect(read("Loft: $2,100 per month").candidates.map((c) => [c.fieldKey, c.itemKey, c.value])).toEqual([["unit_rent_monthly", "Loft", 2_100]]);
+  });
+  test("a function word is never an item name", () => {
+    for (const s of ["Quoted at $65/SF as rent", "The rate is $65/SF in rent", "Asking $65/SF of rent"]) expect(read(s).candidates.filter((c) => /^(as|in|of)$/i.test(c.itemKey ?? "")), s).toEqual([]);
+  });
+
+  // Rule 6
+  test("two monthly-labelled rents per unit with different figures give a conflict", () => {
+    const tag = (r: ReturnType<typeof extractCandidates>, name: string): SourcedCandidate[] => r.candidates.map((c) => ({ ...c, documentId: name, documentName: name }));
+    const both = consolidate([...tag(read("Residential rent monthly: $3,250 per unit per month"), "a"), ...tag(read("Residential rent monthly: $3,050 per unit"), "b")]);
+    const rent = both.filter((p) => p.fieldKey === "unit_rent_monthly");
+    expect(rent).toHaveLength(1);
+    expect(rent[0]).toMatchObject({ status: "conflicting" });
+    expect(rent[0]!.values.map((v) => v.value)).toEqual([3_050, 3_250]);
+    const twoLines = consolidate(tag(read("Residential rent monthly: $3,250 per unit per month", "Residential rent monthly: $3,050 per unit"), "c")).filter((p) => p.fieldKey === "unit_rent_monthly");
+    expect(twoLines).toHaveLength(1);
+    expect(twoLines[0]!.status).toBe("conflicting");
+  });
+  test("one such line alone reads as the monthly rent per unit", () => {
+    for (const s of ["Residential rent monthly: $3,050 per unit", "Monthly rent: $3,050 per suite", "Loyer mensuel : 3 050 $ par logement"]) {
+      expect(read(s).candidates.map((c) => [c.fieldKey, c.value]), s).toEqual([["unit_rent_monthly", 3_050]]);
+    }
+  });
+  test("negative: a rent per unit with no monthly word is not read as monthly", () => {
+    expect(cand(read("Residential rent: $36,600 per unit"), "unit_rent_monthly")).toEqual([]);
+  });
+});
