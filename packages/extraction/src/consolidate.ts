@@ -1,6 +1,6 @@
 import { FIELD_BY_KEY } from "@agir/contracts";
 import type { Candidate } from "./candidates.ts";
-import { currencyOf } from "./mapping.ts";
+import { canonicalItem, currencyOf } from "./mapping.ts";
 
 export type SourcedCandidate = Candidate & { documentId: string; documentName: string };
 
@@ -126,12 +126,18 @@ export function applySuggestions(
     if (!def) { drop("The key is not in the catalog"); continue; }
     if (!def.extractable) { drop("This field is not read from documents"); continue; }
     const unit = seenUnit(fig.unitSeen);
-    const fits = def.unit === "units" ? unit === null && Number.isInteger(fig.value) : def.unit in UNIT_SEEN && unit === UNIT_SEEN[def.unit];
+    // A count is written bare or as "units", as the reader itself records it.
+    const fits = def.unit === "units" ? (unit === null || unit === "units") : def.unit in UNIT_SEEN && unit === UNIT_SEEN[def.unit];
     if (!fits) { drop(`The figure's unit (${fig.unitSeen ?? "none"}) does not fit ${def.unit}`); continue; }
+    // The field's own bounds: a figure the field could never hold is not that field's figure.
+    const v = fig.value!;
+    if ((def.integer && !Number.isInteger(v)) || (def.min !== undefined && v < def.min) || (def.max !== undefined && v > def.max)) { drop(`The figure is outside what ${def.key} can hold`); continue; }
     let itemKey: string | null = null;
     if (def.itemized) {
       itemKey = typeof s.itemKey === "string" ? s.itemKey.trim() : "";
       if (!itemKey || !fig.context.toLowerCase().includes(itemKey.toLowerCase())) { drop("The item name is missing or not in the figure's own context"); continue; }
+      // The same item name the reader would give it ("2-bed" is "2BR"), so it groups with the reader's figures in consolidate.
+      itemKey = canonicalItem(itemKey);
     }
     if (read.has(`${def.key}|${(itemKey ?? "").toLowerCase()}`)) { drop("The reader already read this field for the deal"); continue; }
     used.add(id);

@@ -3548,6 +3548,15 @@ describe("a model's label suggestion crosses a boundary before it is a candidate
     const kept = (ctx: string, fieldKey: string, itemKey?: string) => applySuggestions([], offered, [{ id: idOf(ctx), fieldKey, itemKey }]).kept.length;
     expect([kept("Sundry", "other_cost"), kept("Cadence", "lease_up_months"), kept("Float", "variable_expense_pct"), kept("Atrium", "unit_count", "Atrium"), kept("Hall", "rentable_area_sf", "Hall")]).toEqual([1, 1, 1, 1, 1]);
     expect([kept("Cadence", "other_cost"), kept("Sundry", "unit_rent_monthly", "Sundry"), kept("Float", "unit_count", "Float")]).toEqual([0, 0, 0]);
+    // A count written as units fits and takes the reader's item name; a figure outside the field's bounds is dropped.
+    const base = offered.find((o) => o.context.startsWith("Atrium"))!;
+    const wing: SourcedCandidate = { ...base, raw: "6 units", value: 6, unitSeen: "units", context: "the 2-bed wing has 6 units", location: "page 3, line 1" };
+    const counted = applySuggestions([], [wing], [{ id: offeredIds([wing])[0]!, fieldKey: "unit_count", itemKey: "2-bed" }]).kept;
+    expect(counted.map((c) => [c.fieldKey, c.itemKey, c.value])).toEqual([["unit_count", "2BR", 6]]);
+    const over: SourcedCandidate = { ...offered.find((o) => o.context.startsWith("Float"))!, raw: "140%", value: 140, location: "page 3, line 2" };
+    const r = applySuggestions([], [over], [{ id: offeredIds([over])[0]!, fieldKey: "stabilized_occupancy_pct" }]);
+    expect(r.kept).toEqual([]);
+    expect(r.dropped[0]!.why).toMatch(/outside what stabilized_occupancy_pct can hold/);
   });
   test("a suggested candidate is never approved: alone or agreeing with a read figure it needs review", () => {
     const { kept } = applySuggestions([], offered, [{ id: idOf("Sundry"), fieldKey: "other_cost" }]);
