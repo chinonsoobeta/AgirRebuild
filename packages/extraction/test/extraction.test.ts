@@ -1137,6 +1137,41 @@ describe("reading safety: a figure that may be the wrong one is shown, never use
   });
   const sheets = (...tables: Table[]) => extractCandidates({ ...doc([], tables), fullText: tables.flatMap((t) => t.rows.map((r) => r.map((c) => c.text).join(" "))).join("\n") });
 
+  describe("task 53: reads behind the v4 trap files", () => {
+    const sheet = (...rows: Cellish[][]) => sheets(grid("Budget", ...rows));
+    test("a figure outside what its field can hold is shown, never read, and never flipped", () => {
+      const r = read("Land cost: (1,250,000)", "Hard costs: $2,000,000");
+      expect(pick(r)).toEqual([["hard_cost", 2_000_000]]);
+      expect(noteOf(r, -1_250_000)).toBe("The figure is outside what Land cost can hold");
+      expect(pick(read("Land cost: $1,250,000"))).toEqual([["land_cost", 1_250_000]]);
+    });
+    test("a Line item column labels a budget row; a Description column still does", () => {
+      expect(pick(sheet(["Category", "Line item", "Amount"], ["soft", "Hard costs", 410_000]))).toEqual([["hard_cost", 410_000]]);
+      expect(pick(sheet(["Groupe", "Poste budgétaire", "Montant"], ["a", "Terrain", 90_000]))).toEqual([["land_cost", 90_000]]);
+      expect(pick(sheet(["Division", "Description", "Amount"], ["hard", "Hard costs", 410_000]))).toEqual([["hard_cost", 410_000]]);
+    });
+    test("a row marked as not an input is not read", () => {
+      for (const note of ["not a modeled input", "Not currently modelled", "for reference only", "memo item", "for information only", "pour information seulement", "à titre indicatif"]) {
+        const r = sheet(["Item", "Amount", "Note"], ["Other costs", 90_000, note]);
+        expect(pick(r)).toEqual([]);
+        expect(noteOf(r, 90_000)).toBe("Marked as not part of this deal");
+      }
+      expect(pick(sheet(["Item", "Amount", "Note"], ["Land", 90_000, "paid at closing"]))).toEqual([["land_cost", 90_000]]);
+    });
+    test("an interest reserve joined with a fee is not the interest reserve", () => {
+      for (const line of ["Lender fees and interest reserve: $410,000", "Interest reserve + financing fees: $410,000", "Financing costs and interest reserve: $410,000", "Réserve d'intérêts et frais de financement : 410 000 $"]) {
+        const r = read(line);
+        expect(pick(r)).toEqual([]);
+        expect(noteOf(r, 410_000)).toBe("A combined figure; the interest reserve is not stated alone");
+      }
+      expect(pick(read("Interest reserve: $200,000"))).toEqual([["stated_interest_reserve", 200_000]]);
+    });
+    test("a second field named after a colon's figure labels its own figure", () => {
+      expect(pick(read("Rent monthly: $1,400 per unit and a vacancy of 5%."))).toEqual([["unit_rent_monthly", 1_400], ["stabilized_occupancy_pct", 95]]);
+      expect(noteOf(read("Rent monthly: $1,400 and $1,600"), 1_600)).toBe("Another number on this line was used");
+    });
+  });
+
   test("a year in a label line is no amount; a figure with no mark of a year is still read", () => {
     expect(pick(read("Operating costs: the 2028 budget, $48,000"))).toEqual([["fixed_opex_annual", 48_000]]);
     expect(pick(read("Frais d'exploitation : budget 2028, 48 000 $"))).toEqual([["fixed_opex_annual", 48_000]]);
@@ -1174,9 +1209,9 @@ describe("reading safety: a figure that may be the wrong one is shown, never use
   test("a parenthesised number is negative only when it is money", () => {
     expect(pick(read("Interest-only: during the build (16 months)"))).toEqual([["senior_io_months", 16]]);
     expect(pick(read("Occupancy: (95%)"))).toEqual([["stabilized_occupancy_pct", 95]]);
-    // still negative: money
-    expect(pick(read("Contingency: ($50,000)"))).toEqual([["contingency", -50_000]]);
-    expect(pick(sheets(grid("S", ["Contingency", "(50,000.50)"])))).toEqual([["contingency", -50_000.5]]);
+    // still negative: money; a contingency cannot be negative, so it is shown and not read (task 53)
+    expect(noteOf(read("Contingency: ($50,000)"), -50_000)).toBe("The figure is outside what Contingency can hold");
+    expect(noteOf(sheets(grid("S", ["Contingency", "(50,000.50)"])), -50_000.5)).toBe("The figure is outside what Contingency can hold");
   });
 
   test("a range with a tight or mixed-spacing dash, or a hedge, is refused", () => {
@@ -1364,7 +1399,7 @@ describe("signs, explanatory parentheses and per-unit prices", () => {
   });
   test("negative: a figure attached to its sign stays negative", () => {
     expect(pick(read("Rent growth: -2%"))).toEqual([["rent_growth_pct", -2]]);
-    expect(pick(read("Contingency: ($50,000)"))).toEqual([["contingency", -50_000]]);
+    expect(noteOf(read("Contingency: ($50,000)"), -50_000)).toBe("The figure is outside what Contingency can hold");
     expect(pick(read("Selling costs: 2.5%"))).toEqual([["selling_costs_pct", 2.5]]);
   });
 
