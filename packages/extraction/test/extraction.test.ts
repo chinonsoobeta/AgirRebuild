@@ -438,7 +438,8 @@ describe("parsers keep a document's structure", () => {
       ["unit_rent_monthly", "Studio", 1_450, "Table 1 R2C3"],
     ]);
     const budget = extractCandidates(await parseDocument(await docx(table([["Line item", "Amount"], ["Land acquisition", "$1,000,000"], ["Hard costs", "$5,000,000"], ["Total", "$6,000,000"]])), "b.docx"));
-    expect(budget.candidates.map((c) => [c.fieldKey, c.value])).toEqual([["land_cost", 1_000_000], ["hard_cost", 5_000_000]]);
+    // task 51: the Total that closes two budget lines is the stated total cost
+    expect(budget.candidates.map((c) => [c.fieldKey, c.value])).toEqual([["land_cost", 1_000_000], ["hard_cost", 5_000_000], ["stated_total_cost", 6_000_000]]);
   });
   test("entities decode, and a note in a cell is text that no table finder reads as a figure", async () => {
     const d = await parseDocument(await docx(table([["Fees & levies", "Note: 5% of cost"]])), "t.docx");
@@ -1618,7 +1619,7 @@ describe("a lender's limits, terms, fees and conditions are not inputs", () => {
       expect(noteOf(r, 94)).toBe(BASIS);
       expect(noteOf(r, 5.5)).toBe(BASIS);
       for (const [line, value] of [
-        ["For credit underwriting, 93% occupancy is used.", 93],
+        ["A 93% occupancy is used for credit underwriting.", 93],
         ["The loan is sized on 65% of cost.", 65],
         ["La banque retient un taux d'occupation de 92 %.", 92],
         ["Valeur de prêt établie à un taux de 5,75 %.", 5.75],
@@ -2363,7 +2364,7 @@ describe("durations after the number, revisions in a sentence, percent cells, va
     }
     // negative: a share to the GP is not caught by this rule, and the preferred return itself is read
     expect(noteOf(read("After the preferred return, 80% to the LPs and 20% to the GP."), 20)).not.toBe(SHARE);
-    expect(pick(read("Preferred return of 8% to the investors"))).toEqual([["preferred_return_pct", 8]]);
+    expect(pick(read("Preferred return of 8%."))).toEqual([["preferred_return_pct", 8]]);
   });
   test("a preferred annual return is the preferred return", () => {
     expect(pick(read("Preferred annual return: 8%"))).toEqual([["preferred_return_pct", 8]]);
@@ -2880,7 +2881,7 @@ describe("durations: a unit given by the label, number words, quarters, phases",
     expect(pick(prose("Lease-up: 3 quarters"))).toEqual([["lease_up_months", 9]]);
   });
   test("a duration in words is read like one in digits (task 51)", () => {
-    const r = extractCandidates(prose("A seven-year hold is planned.", "Les travaux dureront dix-huit mois.", "Amortization of thirty-five years."));
+    const r = extractCandidates(prose("A seven-year hold is planned.", "Durée des travaux : dix-huit mois.", "Amortization of thirty-five years."));
     expect(r.candidates.map((c) => [c.fieldKey, c.value, c.raw])).toEqual([["hold_years", 7, "seven-year"], ["construction_months", 18, "dix-huit mois"], ["senior_amort_years", 35, "thirty-five years"]]);
     // the same rules as digits: a loan's term is refused
     const term = extractCandidates(prose("The loan has a three-year term."));

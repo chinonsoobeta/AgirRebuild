@@ -26,6 +26,12 @@ export type ExtractionResult = {
 };
 
 const TOTAL_RE = /^\s*(grand\s+)?(sub-?\s*|sous-?\s*)?total\b/i;
+// A row labelled only "Total": it closes a uses table when budget lines above it name at least two budget fields and none is the stated total yet.
+const BARE_TOTAL_RE = /^\s*total(?:\s+(?:uses|des\s+(?:couts|emplois)))?\s*:?\s*$/;
+const closesUses = (label: string, read: Iterable<string>) => {
+  const keys = new Set(read);
+  return BARE_TOTAL_RE.test(fold(label)) && !keys.has("stated_total_cost") && [...keys].filter((k) => BUDGET_FIELDS.has(k)).length >= 2;
+};
 
 function cellToken(cell: Cell, format: DocumentFormat): NumberToken | null {
   if (cell.number !== undefined) {
@@ -406,6 +412,7 @@ const SHARE_OF_RE = /^\s*(?:of|de|du|des)\s+((?:(?:the|les?|la)\s+)?[\p{L}][\p{L
 const SHARE_PROBE: NumberToken = { raw: "1", start: 0, end: 1, value: 1, currency: true, currencyCode: null, unit: "$", scaled: false };
 const isMoney = (t: NumberToken) => t.value !== null && (t.currency || t.unit === "$");
 
+const COMMERCIAL_RE = /\b(?:retail|commercial|office|crus?|storefronts?|commerces?|bureaux)\b/;
 const BUDGET_FIELDS = new Set(["land_cost", "hard_cost", "soft_cost", "contingency", "other_cost", "stated_interest_reserve"]);
 const SEVERAL_NOTE = "A total of several costs, not one of them";
 const NOT_SHOWN_NOTE = "Not shown to add up to the subtotal below it";
@@ -1227,7 +1234,8 @@ function fromBudget(table: Table, headerRow: number, roles: BudgetRoles, result:
     const labelText = isTotal ? labelCell.text.replace(TOTAL_RE, "").trim() || labelCell.text : labelCell.text;
     const moneyToken: NumberToken = { ...t, currency: true, unit: t.unit ?? "$" };
     const quoted = quoteDocs.has(result) ? mapToken(labelCell.text, moneyToken, { scope, budget: true, quote: true }) : null;
-    const mapped = quoted?.kind === "field" && quoted.quote ? quoted : mapToken(isTotal && /development|project/i.test(labelCell.text) ? labelCell.text : labelText, moneyToken, { scope, budget: true });
+    const closing = isTotal && closesUses(labelCell.text, [...components.values()].map((c) => c.fieldKey)) && table.rows.slice(r + 1).every((x) => !x[roles.amount] || !cellToken(x[roles.amount]!, result.format));
+    const mapped = quoted?.kind === "field" && quoted.quote ? quoted : mapToken(closing ? "total project cost" : isTotal && /development|project/i.test(labelCell.text) ? labelCell.text : labelText, moneyToken, { scope, budget: true });
     if (mapped.kind !== "field" || FIELD_BY_KEY.get(mapped.fieldKey)?.unit !== "$") {
       const shown: Candidate = {
         fieldKey: null,
@@ -1458,6 +1466,8 @@ function fromTable(table: Table, result: ExtractionResult, notes: string[] = [],
     else {
       // A plain two-column sheet: each row is "label: value". Money rows that name nothing are the lines of the next total or subtotal row.
       let lines: { value: number; ref: string; label: string }[] = [];
+      // The fields read since the last blank row: a bare "Total" closes a uses block that names two budget fields.
+      const read = new Set<string>();
       // The item a block heading named, until a blank row or a total row.
       let block = s.item;
       const valueFirstSection = isValueFirstSection(s.rows, result.format);
@@ -1474,6 +1484,7 @@ function fromTable(table: Table, result: ExtractionResult, notes: string[] = [],
         const vf = valueFirstSection ? valueFirst(row, result.format) : null;
         const labelCell = vf?.label ?? labelOf(row, result.format);
         const relative = block && labelCell ? BLOCK_RELATIVE_RE.test(labelCell.text) : false;
+        if (!row.some((c) => c.text || c.number !== undefined)) read.clear();
         if (!row.some((c) => c.text || c.number !== undefined) || (labelCell && !relative && TOTAL_RE.test(labelCell.text))) block = undefined;
         if (!labelCell) return;
         const after = vf ? [vf.value] : row.slice(row.indexOf(labelCell) + 1);
@@ -1496,6 +1507,7 @@ function fromTable(table: Table, result: ExtractionResult, notes: string[] = [],
           if (!t) continue;
           const base = { raw: t.raw, location: cell.ref, context: `${table.name}: ${labelCell.text} ${cell.text}`.slice(0, 240), rule: "table:label-value" };
           let mapped = mapToken(relative ? labelCell.text.replace(BLOCK_RELATIVE_RE, "") : labelCell.text, t, { scope: s.scope, ahead: cell.text.slice(0, t.start), after: cell.text.slice(t.end), quote: quoteDocs.has(result) });
+          if (mapped.kind !== "field" && t.value !== null && (t.unit === "$" || t.currency) && closesUses(labelCell.text, read)) mapped = mapToken("total project cost", t, { scope: s.scope });
           if (block && mapped.kind === "field" && BLOCK_FIELDS.has(mapped.fieldKey) && !(mapped.itemKey && unitTypesIn(mapped.itemKey).length > 0)) mapped = { ...mapped, itemKey: block };
           if (relative && mapped.kind === "field" && mapped.fieldKey === "stabilized_occupancy_pct") mapped = { ...mapped, fieldKey: "item_occupancy_pct", itemKey: block! };
           const label = fold(labelCell.text);
@@ -1509,6 +1521,7 @@ function fromTable(table: Table, result: ExtractionResult, notes: string[] = [],
             break;
           }
           record(result, mapped, t, base);
+          if (mapped.kind === "field") read.add(mapped.fieldKey);
           if (TOTAL_RE.test(labelCell.text)) {
             const def = mapped.kind === "field" ? FIELD_BY_KEY.get(mapped.fieldKey) : undefined;
             if (mapped.kind === "field" && def?.unit === "$" && mapped.fieldKey !== "stated_total_cost" && lines.length > 0) {
@@ -1802,6 +1815,12 @@ export function extractCandidates(doc0: NormalizedDocument): ExtractionResult {
   const named = new Set(result.candidates.filter(typed).map((c) => c.fieldKey));
   result.candidates.filter((c) => c.itemKey === "All units" && named.has(c.fieldKey)).forEach((c) => aside(c, "This document names items for this field; a deal-wide figure is not read beside them"));
   result.candidates = result.candidates.filter((c) => !(c.itemKey === "All units" && named.has(c.fieldKey)));
+  // In a document that names residential unit types, an occupancy for a commercial space is not the deal's.
+  if (unitTypesIn(doc0.fullText).length > 0) {
+    const commercial = (c: Candidate) => c.fieldKey === "stabilized_occupancy_pct" && COMMERCIAL_RE.test(fold(c.context.split(/[,;]/).find((p) => p.includes(c.raw)) ?? c.context));
+    result.candidates.filter(commercial).forEach((c) => aside(c, "An occupancy for the commercial space, not the deal's stabilized occupancy"));
+    result.candidates = result.candidates.filter((c) => !commercial(c));
+  }
   // Within one document, the same field and value found twice is one candidate.
   const seen = new Set<string>();
   result.candidates = result.candidates.filter((c) => {

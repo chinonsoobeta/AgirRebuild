@@ -281,6 +281,8 @@ const WORD_RE = new RegExp(
   String.raw`(?<![\p{L}\p{N}-])((?:${TENS})-(?:${DIGIT_WORDS})|dix-sept|dix-huit|dix-neuf|${Object.keys(WORD_VALUES).filter((w) => !w.includes("-")).join("|")}|an?)(\s+and\s+a\s+half)?(?:-|\s+)(months?|mois|${YEAR_NOUN}|(?:quarters|trimestres)${NOT_FRACTION}(?!['’])|${TYPE_BED}(?:[\s-]+(?:units?|suites?|homes?|apartments?|logements?|unités?))?|(?:units?|suites?|homes?|apartments?|logements?|unités?)|${TYPE_NAMED})(?![\p{L}\p{N}])(${HALF})`,
   "giu",
 );
+// "twelve (12) months": the digits in parentheses after their own words are the figure, and the words are not a second one.
+const WORDS_THEN_PAREN = new RegExp(String.raw`(?<![\p{L}\p{N}-])((?:${TENS})-(?:${DIGIT_WORDS})|${Object.keys(WORD_VALUES).join("|")})\s+$`, "iu");
 const PRECEDING_NUMBER_WORD = /(?:(?:hundred|thousand|million|cents?|mille)\s+(?:and|et)|hundred|thousand|million|cents?|mille|(?<=[\p{L}\p{N}])-)\s*$/iu;
 
 /** Number words directly followed by a unit word. "one hundred twenty units" is not read: a word that continues a larger number is skipped. */
@@ -337,7 +339,7 @@ export function tokenize(line: string, format: DocumentFormat, cell = false): Nu
   }
   for (const m of text.matchAll(TOKEN_RE)) {
     const [whole, paren, sign, cur, core] = m;
-    const start = m.index!;
+    let start = m.index!;
     // Part of a letter-spaced run: refused with the run, never a number of its own.
     if (spaced.some((r) => start < r.index! + r[0].length && start + whole.length > r.index!)) continue;
     // The tail of a unit phrase ("7 2-bed units") is not a number of its own.
@@ -383,6 +385,13 @@ export function tokenize(line: string, format: DocumentFormat, cell = false): Nu
         if (unit === r.unit) end += u[0].length;
         break;
       }
+    }
+    const worded = unit === null && paren && text[end] === ")" ? WORDS_THEN_PAREN.exec(text.slice(0, start)) : null;
+    const spelled = worded && UNIT_RULES.find((r) => !r.money && (r.unit === "months" || r.unit === "years") && r.re.test(text.slice(end + 1)));
+    if (worded && spelled) {
+      end += 1 + text.slice(end + 1).match(spelled.re)![0].length;
+      unit = spelled.unit;
+      start = worded.index;
     }
     // "/an", "par année", "per year" after a rent or an amount: the figure is yearly, which is what the field's unit is.
     if (currency && unit !== "$/mo") end += ANNUAL_RE.exec(text.slice(end))?.[0].length ?? 0;

@@ -118,7 +118,7 @@ const VARIABLE_RE = /\bvariables?\b/;
 // A "rate" that is not a loan's.
 const NOT_A_LOAN_RATE = /\b(vacancy|growth|discount|tax|exchange|inflation|return|occupancy) rate\b|\b(taux de (croissance|vacance|actualisation|change|rendement|capitalisation|taxation)|taux d (inflation|imposition|occupation))\b|\brate of return\b/;
 
-// What a lender writes that looks like an input but is not. Words that are part of a field alias ("minimum DSCR", "construction term",
+// What a lender writes that looks like an input but is not. Words that are part of a field alias ("minimum DSCR", "construction term loan",
 // "management fee") stay valid: each alias holding one is taken out of the label before the words are looked for.
 const LIMIT_RE = /\b(maximum|max|not to exceed|not exceed|not more than|at most|up to|ceiling|cap of|minimum|min|at least|not less than|no less than|au plus|d au plus|maximale?|plafond|au moins|d au moins|minimale?|pas moins de)\b/;
 // "Capped" limits a rate or a loan; a cost line capped at its fixed price ("hard costs are capped at $X under the contract") is that line's figure.
@@ -143,6 +143,8 @@ const ALLOWANCE_AFTER_RE = /^\s*(?:(?:of|for|de|d) )?(?:allowances?|allocations?
 const FEE_AFTER_RE = /^\s*(de |d )?(commitment |lender |standby |structuring |broker |insurance |engagement |ouverture |dossier )?(fees?|premium|frais|honoraires|prime d assurance)\b/;
 const PER_INVESTOR_RE = /\b(minimum investment|min investment|minimum subscription|investissement minimal|investissement minimum|souscription minimale|souscription minimum|per limited partner|per investor|par commanditaire|par investisseur)\b/;
 const PER_INVESTOR_AFTER_RE = /^\s*(per|par)\s+(limited partner|investor|commanditaire|investisseur)\b/;
+// The lender's own basis for sizing a loan; "we underwrite rents at ..." is the sponsor's and is not here.
+const BASIS_CUE_RE = /\b(?:credit underwriting|underwritten by the (?:lender|bank)|the (?:lender|bank) underwrites|the bank sizes|sized on|lending value|aux fins du pret|valeur de pret|la banque retient)\b/;
 const ALL_ALIASES = [...new Set(FIELDS.flatMap((f) => f.aliases))].sort((a, b) => b.length - a.length);
 
 /** The label with every field alias that holds one of `words` taken out. */
@@ -174,8 +176,11 @@ function lenderFigure(rawLabel: string, t: NumberToken, opts: MapOptions): strin
   const money = t.unit === "$" || t.unit === "$/mo" || t.currency;
 
   if (money && (PER_INVESTOR_RE.test(plain) || PER_INVESTOR_AFTER_RE.test(tail))) return "A per-investor amount, not the deal's equity";
+  if (BASIS_CUE_RE.test(`${plain} ${tail.split(/[,;.]|\band\b|\bet\b/)[0]}`)) return "The lender's underwriting basis, not the deal's assumption";
   const words = plain.split(" ");
-  const near = (prose || opts.ahead ? [...words, ...words_(opts.ahead ?? "").split(" ")].filter(Boolean).slice(-4) : words).join(" ");
+  // The last four words before the figure; a ratio's name ("loan to cost") counts as one.
+  const lastFour = (x: string[]) => (x.join(" ").match(/loan to (?:cost|value)|debt service coverage|\S+/g) ?? []).slice(-4);
+  const near = (prose || opts.ahead ? lastFour([...words, ...words_(opts.ahead ?? "").split(" ")]) : words).join(" ");
   const capped = CAPPED_RE.test(near) && !(money && CAPPED_COST_RE.test(plain) && !LOAN_WORD_RE.test(plain));
   if ((LIMIT_RE.test(without(near, LIMIT_RE)) || capped) && !COVERAGE_RE.test(plain)) return "A lender's limit, not the deal's figure";
   if ((t.unit === "months" || t.unit === "years") && ((TERM_RE.test(without(plain, TERM_RE)) && !AMORT_RE.test(plain)) || TERM_AFTER_RE.test(tail)) && !IO_RE.test(plain) && !IO_RE.test(tail.split(/[,;.]/)[0] ?? "")) return "A loan's term, not the build period, hold or amortization";
@@ -414,7 +419,7 @@ export function loanNameOnly(rawLabel: string): Scope | null {
   const names = new Set(clause.trim().split(/\s+/).slice(1).filter((w) => /^\p{Lu}/u.test(w)).map((w) => foldText(w).replace(/[^a-z0-9]/g, "")));
   let rest = foldText(clause);
   for (const r of Object.values(SCOPE_WORDS)) rest = rest.replace(new RegExp(r.source, "g"), " ");
-  rest = rest.replace(LOAN_WORDS, " ").replace(LOAN_FILLER, " ");
+  rest = rest.replace(LOAN_WORDS, " ").replace(/^\s*(?:our|your|my|their|this|notre|votre|ton|ta|mon|ma|nos|vos|leur|un|une)\b/, " ").replace(LOAN_FILLER, " ");
   return rest.split(/[^a-z0-9]+/).filter(Boolean).every((w) => names.has(w)) ? scope : null;
 }
 
@@ -458,6 +463,12 @@ export function loanTerm(tail: string, after: string, t: NumberToken, scope: Sco
   return m.kind === "field" ? m : null;
 }
 
+// A percentage "to the investors" is a share of distributions; to the GP or sponsor it is read as it always was.
+const SHARE_TO_RE = /^\s*(?:to|aux)\s+(?:the\s+|our\s+|les\s+|nos\s+)?(?:partners|investors|lps?|limited partners|members|commanditaires|investisseurs|associes)\b/;
+// "Sale at a 6.1% cap": the word "cap" right after the percentage, not "cap of", "cap on" or "capped".
+const CAP_AFTER_RE = /^\s*cap\b(?!\s+(?:of|on)\b)/;
+// A promote tier from the second up.
+const LATER_TIER_RE = /\b(?:tier\s*(?:[2-9]|ii|iii|iv|two|three|four)|(?:2nd|3rd|[4-9]th|second|third|fourth)\s+tier|palier\s*(?:[2-9]|ii|iii|iv|deux|trois|quatre)|(?:[2-9]e|[2-9]eme|deuxieme|troisieme|quatrieme)\s+palier)\b/;
 const VACANCY_RE = /\b(vacancy(?! rate)|(?<!taux de )vacance|inoccupation)\b/;
 // A duration labelled by the words right after it: "16 months to build", "huit mois pour louer".
 const BUILD_AFTER_RE = /^\s*to build\b/;
@@ -525,6 +536,7 @@ function mapLabel(rawLabel: string, t: NumberToken, opts: MapOptions = {}): Mapp
   if (t.value === null) return { kind: "ignored", reason: t.refusal ?? "The number could not be read without guessing" };
   const lender = lenderFigure(rawLabel, t, opts);
   if (lender) return { kind: "ignored", reason: lender };
+  if (t.unit === "%" && SHARE_TO_RE.test(foldText(opts.after ?? ""))) return { kind: "ignored", reason: "A share of distributions, not the preferred return" };
   // A broker's, agent's or appraiser's view of the rent, or a possible or potential one, is an opinion, not the sponsor's assumption.
   if (REVENUE_LABEL_RE.test(foldText(rawLabel)) && OPINION_RE.test(foldText(rawLabel))) return { kind: "ignored", reason: OPINION_NOTE };
   // A rent per area is yearly; a monthly one is refused. A yearly rent with no per-unit word is a total.
@@ -587,7 +599,7 @@ function mapLabel(rawLabel: string, t: NumberToken, opts: MapOptions = {}): Mapp
   }
 
   // A cap rate is the exit rate only when the sentence is about a sale; alone it may be the going-in rate.
-  if (CAP_RE.test(label) && !FIELD_BY_KEY.get("exit_cap_rate_pct")!.aliases.some((a) => hasPhrase(label, a))) {
+  if ((CAP_RE.test(label) || (t.unit === "%" && CAP_AFTER_RE.test(foldText(opts.after ?? "")))) && !FIELD_BY_KEY.get("exit_cap_rate_pct")!.aliases.some((a) => hasPhrase(label, a))) {
     const ctx = normalizeLabel(opts.context ?? rawLabel).label;
     if (EXIT_RE.test(ctx) && VALUE_RE.test(ctx)) return { kind: "ignored", reason: "This sentence names a value as well as a cap rate; the figure is not taken as an input" };
     if (EXIT_RE.test(ctx)) return asField(FIELD_BY_KEY.get("exit_cap_rate_pct")!) ?? { kind: "unmapped" };
@@ -666,6 +678,7 @@ function mapLabel(rawLabel: string, t: NumberToken, opts: MapOptions = {}): Mapp
   }
   // An occupancy that is a lender's condition, or true only today, is not the stabilized assumption.
   const notAssumed = (key: string): Mapped | null => {
+    if (key === "gp_promote_pct" && LATER_TIER_RE.test(foldText(rawLabel))) return { kind: "ignored", reason: "A later promote tier; the field holds the first tier only" };
     if (key !== "stabilized_occupancy_pct" && key !== "item_occupancy_pct") return null;
     // In prose only the clause the figure stands in counts, not a condition elsewhere in the sentence.
     const lead = foldText(rawLabel.split(/[,;]/).pop() ?? "").trim();
