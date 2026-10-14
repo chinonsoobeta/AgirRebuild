@@ -666,8 +666,8 @@ function readSentence(sentence: { text: string; start: number }, para0: Paragrap
           continue;
         }
         // After the first figure, one whose own words just before it name a different field ("at an exit cap of 5.5%") is read by that field; one with no words of its own stays with the label.
-        const own = used && i > 0 ? mapToken(text.slice(tokens[i - 1]!.end, t.start), t, { scope, quote, after: text.slice(t.end), prose: true, context: text }) : null;
-        let mapped = used ? (own?.kind === "field" && own.fieldKey !== usedKey ? own : { kind: "unmapped" as const }) : mapToken(label, t, { ...opt(t), ahead: text.slice(colon + 1, t.start) });
+        const own: Mapped | null = used && i > 0 ? mapToken(text.slice(tokens[i - 1]!.end, t.start), t, { scope, quote, after: text.slice(t.end), prose: true, context: text }) : null;
+        let mapped: Mapped = used ? (own?.kind === "field" && own.fieldKey !== usedKey ? own : { kind: "unmapped" as const }) : mapToken(label, t, { ...opt(t), ahead: text.slice(colon + 1, t.start) });
         if (mapped.kind === "field" && BUDGET_LINES.has(mapped.fieldKey) && isDeposit(text, t)) {
           other(t, "line:label-value", DEPOSIT_NOTE);
           continue;

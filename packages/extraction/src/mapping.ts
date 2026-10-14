@@ -512,7 +512,8 @@ const SUPERSEDED_LABEL_NOTE = "An earlier figure, named old or original by its o
 export function mapToken(rawLabel: string, t: NumberToken, opts: MapOptions = {}): Mapped {
   const m = mapSigned(rawLabel, t, opts);
   // A figure its field could never hold is shown, never read: nothing is flipped, rescaled or clamped.
-  const def = m.kind === "field" ? FIELD_BY_KEY.get(m.fieldKey) : undefined;
+  if (m.kind !== "field") return m;
+  const def = FIELD_BY_KEY.get(m.fieldKey);
   return def && outsideBounds(def, m.value) ? { kind: "ignored", reason: `The figure is outside what ${def.label} can hold` } : m;
 }
 
