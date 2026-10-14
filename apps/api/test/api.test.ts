@@ -3,7 +3,8 @@ import { mkdtempSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { fileStore, migrate, openPglite, type Db } from "@agir/db";
-import { drain } from "@agir/worker";
+import Anthropic from "@anthropic-ai/sdk";
+import { drain, reconcileDeal, type SuggestRequest, type SuggestReply } from "@agir/worker";
 import { documentBytes, loadOracle } from "@agir/testkit";
 import { createApp } from "../src/app.ts";
 import { canonicalJson } from "@agir/engine";
@@ -441,5 +442,131 @@ describe("Agir review", () => {
     expect(input).toMatchObject({ confirmedBy: "Rowan Reviewer", confirmedByReview: true });
     expect(input.confirmedAt).not.toBeNull();
     expect((await call(alice, "POST", `/api/workspaces/${ws}/review-mode`, { mode: "team" })).status).toBe(200);
+  });
+});
+
+describe("model label suggestions", () => {
+  let sw: string, sd: string;
+  const calls: SuggestRequest[] = [];
+  let reply: (req: SuggestRequest) => SuggestReply | Promise<SuggestReply>;
+  const suggest = async (req: SuggestRequest) => {
+    calls.push(req);
+    return reply(req);
+  };
+  const figuresOf = (req: SuggestRequest): { id: string; raw: string }[] => JSON.parse(req.messages[0]!.content).figures;
+  const ok = (suggestions: unknown[]): SuggestReply => ({ model: "claude-fake-served", stop_reason: "end_turn", text: JSON.stringify({ suggestions }) });
+  const wk = () => drain({ db, store, suggest });
+  const put = async (d: string, name: string, text: string) =>
+    expect((await call(alice, "PUT", `/api/deals/${d}/documents?name=${name}`, undefined, new TextEncoder().encode(text))).status).toBe(200);
+  const newDeal = async (name: string) => (await call(alice, "POST", `/api/workspaces/${sw}/deals`, { name, assetType: "Multifamily", location: "Burnaby", province: "BC" })).json.id as string;
+  const rows = () => db.query<any>(`select * from label_suggestions order by created_at, document_id`);
+  const assumptions = async (d = sd) => (await call(alice, "GET", `/api/deals/${d}/review`)).json.assumptions as any[];
+  const byField = async (k: string) => (await assumptions()).find((a) => a.fieldKey === k);
+  const three = "Project notes\nWidget allowance: $5,000\nLandscaping reserve of $12,000 is held\nSignage kit: $3,000\n";
+
+  test("with the switch off the provider is never called and nothing is stored", async () => {
+    sw = (await call(alice, "POST", "/api/workspaces", { name: "Suggesting" })).json.id;
+    expect((await call(alice, "POST", `/api/workspaces/${sw}/members`, { email: "bob@example.com", role: "admin" })).status).toBe(200);
+    sd = await newDeal("Suggest Heights");
+    reply = () => ok([]);
+    await put(sd, "off.txt", "Project notes\nBanner allowance: $7,000\n");
+    await wk();
+    expect(calls).toHaveLength(0);
+    expect(await rows()).toHaveLength(0);
+    expect((await call(alice, "GET", "/api/me")).json.workspaces.find((w: any) => w.id === sw).label_suggestions).toBe(false);
+  });
+
+  test("only an owner can turn it on", async () => {
+    expect((await call(bob, "POST", `/api/workspaces/${sw}/label-suggestions`, { on: true })).status).toBe(403);
+    expect((await call(alice, "POST", `/api/workspaces/${sw}/label-suggestions`, { on: true })).status).toBe(200);
+    expect((await call(alice, "GET", "/api/me")).json.workspaces.find((w: any) => w.id === sw).label_suggestions).toBe(true);
+    const ev = await db.query<any>(`select payload from audit_events where action = 'workspace.label_suggestions_changed' and workspace_id = $1`, [sw]);
+    expect(ev).toHaveLength(1);
+  });
+
+  test("the provider gets only the offered figures; a kept suggestion reaches review as a suggested label", async () => {
+    reply = (req) =>
+      ok([
+        ...figuresOf(req).map((f) => ({ id: f.id, fieldKey: { "$5,000": "other_cost", "$12,000": "stabilized_occupancy_pct", "$3,000": "land_cost" }[f.raw] ?? "ignore", itemKey: null })),
+        { id: "nowhere|line 9|$1", fieldKey: "other_cost", itemKey: null },
+      ]);
+    await put(sd, "three.txt", three);
+    await wk();
+    expect(calls).toHaveLength(1);
+    const body = JSON.parse(calls[0]!.messages[0]!.content);
+    expect(Object.keys(body).sort()).toEqual(["catalog", "figures"]);
+    expect(body.figures).toHaveLength(3);
+    for (const f of body.figures) expect(Object.keys(f).sort()).toEqual(["context", "id", "location", "raw", "unitSeen", "value"]);
+    expect(Object.keys(body.catalog[0]).sort()).toEqual(["aliases", "itemized", "key", "label", "unit"]);
+    expect(JSON.stringify(calls[0])).not.toMatch(/Suggest Heights|Suggesting|Burnaby/);
+    expect(calls[0]).toMatchObject({ output_config: { effort: "medium", format: { type: "json_schema" } }, thinking: { type: "adaptive" }, max_tokens: 16000, fallbacks: "default" });
+    const [row] = await rows();
+    expect(row).toMatchObject({ model: "claude-fake-served", outcome: "ok", stop_reason: "end_turn", prompt_hash: sha256(JSON.stringify(calls[0])), workspace_id: sw, deal_id: sd });
+    expect(row.request).toEqual(JSON.parse(JSON.stringify(calls[0])));
+    expect(row.response).toHaveLength(4);
+    for (const k of ["other_cost", "land_cost"]) {
+      const a = await byField(k);
+      expect(a).toMatchObject({ status: "needs_review" });
+      expect(a.sources[0]).toMatchObject({ rule: "suggested", note: expect.stringContaining("Suggested label") });
+    }
+    expect(await byField("stabilized_occupancy_pct")).toBeUndefined();
+  });
+
+  test("a person approving a suggested value is audited, with the suggestion marked", async () => {
+    const a = await byField("other_cost");
+    expect((await call(alice, "POST", `/api/assumptions/${a.id}/review`, { action: "approve", version: a.version })).status).toBe(200);
+    const [ev] = await db.query<any>(`select payload from audit_events where action = 'assumption.approve' and entity_id = $1`, [a.id]);
+    expect(ev.payload).toMatchObject({ field: "other_cost", to: "approved", suggested: true });
+  });
+
+  test("a reconcile never calls the model, and gives the same answer each time", async () => {
+    const snap = async () => (await assumptions()).map((a) => [a.fieldKey, a.status, a.value, a.version, a.sources.map((s: any) => s.rule)]);
+    const before = await snap();
+    const n = calls.length;
+    await reconcileDeal(db, sd);
+    await reconcileDeal(db, sd);
+    expect(await snap()).toEqual(before);
+    expect(calls).toHaveLength(n);
+  });
+
+  test("a document with more than 100 figures is sent in batches of at most 100", async () => {
+    const d = await newDeal("Many figures");
+    reply = (req) => ok(figuresOf(req).map((f) => ({ id: f.id, fieldKey: "ignore", itemKey: null })));
+    const before = calls.length;
+    await put(d, "many.txt", Array.from({ length: 130 }, (_, i) => `Gadget ${i} reserve: $${1000 + i}`).join("\n") + "\n");
+    await wk();
+    const sizes = calls.slice(before).map((c) => figuresOf(c).length);
+    expect(sizes).toEqual([100, 30]);
+    expect(new Set(calls.slice(before).flatMap((c) => figuresOf(c).map((f) => f.id))).size).toBe(130);
+  });
+
+  test("a refusal, a cut-off and an API error each store a row, and the document still ends extracted", async () => {
+    const d = await newDeal("Failing");
+    const cases: [string, () => SuggestReply, string, string | null][] = [
+      ["refusal.txt", () => ({ model: "claude-fake-served", stop_reason: "refusal", text: "" }), "refused", "refusal"],
+      ["cut.txt", () => ({ model: "claude-fake-served", stop_reason: "max_tokens", text: "{" }), "failed", "max_tokens"],
+      ["error.txt", () => { throw Anthropic.APIError.generate(500, { error: { message: "down" } }, "down", new Headers()); }, "failed", null],
+    ];
+    for (const [i, [name, r, outcome, stop]] of cases.entries()) {
+      reply = r;
+      await put(d, name, `Project notes\nHard costs: $2,000,000\nKiosk allowance: $${2000 + i}\n`);
+      await wk();
+      const [doc] = await db.query<any>(`select id, stage from documents where deal_id = $1 and name = $2`, [d, name]);
+      expect(doc.stage).toBe("extracted");
+      expect((await db.query<any>(`select 1 from candidates where document_id = $1 and field_key = 'hard_cost'`, [doc.id])).length).toBe(1);
+      const [row] = await db.query<any>(`select * from label_suggestions where document_id = $1`, [doc.id]);
+      expect(row).toMatchObject({ outcome, stop_reason: stop });
+      expect(row.response === null || row.response.error === "InternalServerError").toBe(true);
+    }
+    expect((await db.query<any>(`select payload from audit_events where action = 'document.suggestions_failed' and deal_id = $1`, [d])).length).toBe(2);
+  });
+
+  test("turning the switch off takes suggested values out of review; approved ones stay", async () => {
+    const n = calls.length;
+    expect((await call(alice, "POST", `/api/workspaces/${sw}/label-suggestions`, { on: false })).status).toBe(200);
+    await wk();
+    expect(calls).toHaveLength(n);
+    expect((await byField("land_cost"))?.status ?? "rejected").toBe("rejected");
+    expect(await byField("other_cost")).toMatchObject({ status: "approved" });
   });
 });
