@@ -132,6 +132,8 @@ const AMORT_RE = /\bamorti[sz]\w*/;
 const IO_RE = /\b(interest[- ]only|io|interets? seulement)\b/;
 const INCLUDING_RE = /\b(including|incl|includes|comprenant|incluant|inclut)\b/;
 const BUDGET_NAME_RE = new RegExp(`\\b(${FIELDS.filter((f) => f.group === "budget").flatMap((f) => f.aliases).map((a) => a.replace(/[.*+?^${}()|[\]\\/]/g, "\\$&")).join("|")})\\b`);
+// The interest reserve joined with a fee, cost or charge ("lender fees and interest reserve", "interest reserve + financing fees").
+const COMBINED_RESERVE_RE = /(?:\b(?:interest reserve|reserve d\W?interets?)\s*(?:and|&|\+|et|plus)\s+(?:\w+\s+){0,3}?(?:fees?|costs?|charges?|frais|couts?)\b|\b(?:fees?|costs?|charges?|frais|couts?)\s*(?:and|&|\+|et|plus)\s+(?:\w+\s+){0,2}?(?:interest reserve|reserve d\W?interets?)\b)/;
 const FEE_RE = /\b(fees?|frais|honoraires|premiums?|prime d assurance)\b/;
 // A tenant improvement allowance is a landlord's contribution to the tenant's fit-out, never a rent: the words may stand in the label, the clause before the figure, or right after it.
 // A bare "allowance" or "allocation" refuses only a rent-shaped figure: an interest-only allowance in months or a budget allowance in dollars is that line's own figure.
@@ -508,6 +510,18 @@ const SUPERSEDED_LABEL_NOTE = "An earlier figure, named old or original by its o
  * a negative figure that does not say so is refused. Nothing is inferred from a sign, and no sign is flipped.
  */
 export function mapToken(rawLabel: string, t: NumberToken, opts: MapOptions = {}): Mapped {
+  const m = mapSigned(rawLabel, t, opts);
+  // A figure its field could never hold is shown, never read: nothing is flipped, rescaled or clamped.
+  const def = m.kind === "field" ? FIELD_BY_KEY.get(m.fieldKey) : undefined;
+  return def && outsideBounds(def, m.value) ? { kind: "ignored", reason: `The figure is outside what ${def.label} can hold` } : m;
+}
+
+/** Whether a value is outside the field's own `integer`, `min` and `max`; one check for the reader and for suggestions. */
+export function outsideBounds(def: FieldDef, v: number): boolean {
+  return (def.integer === true && !Number.isInteger(v)) || (def.min !== undefined && v < def.min) || (def.max !== undefined && v > def.max);
+}
+
+function mapSigned(rawLabel: string, t: NumberToken, opts: MapOptions = {}): Mapped {
   const m = mapLabel(rawLabel, t, opts);
   // A budget line whose own label calls the figure the old, original or earlier one is shown: a later figure for the line replaces it.
   if (m.kind === "field" && m.itemKey === null && CREDITABLE.has(m.fieldKey) && OLD_LABEL_RE.test(normalizeLabel(rawLabel).label)) return { kind: "ignored", reason: SUPERSEDED_LABEL_NOTE };
@@ -535,6 +549,7 @@ function mapLabel(rawLabel: string, t: NumberToken, opts: MapOptions = {}): Mapp
   const output = OUTPUT_LIKE_PHRASES.find((p) => hasPhrase(label, p));
   if (output) return { kind: "ignored", reason: `"${rawLabel.trim()}" is an output figure, which is never taken as an input` };
   if (t.value === null) return { kind: "ignored", reason: t.refusal ?? "The number could not be read without guessing" };
+  if (COMBINED_RESERVE_RE.test(foldText(rawLabel).replace(/\s+/g, " "))) return { kind: "ignored", reason: "A combined figure; the interest reserve is not stated alone" };
   const lender = lenderFigure(rawLabel, t, opts);
   if (lender) return { kind: "ignored", reason: lender };
   // Unless the figure's own clause names the preferred return ("a preferred return of 8% to the investors").

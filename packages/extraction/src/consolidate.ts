@@ -1,6 +1,6 @@
 import { FIELD_BY_KEY } from "@agir/contracts";
 import type { Candidate } from "./candidates.ts";
-import { canonicalItem, currencyOf } from "./mapping.ts";
+import { canonicalItem, currencyOf, outsideBounds } from "./mapping.ts";
 
 export type SourcedCandidate = Candidate & { documentId: string; documentName: string };
 
@@ -131,7 +131,7 @@ export function applySuggestions(
     if (!fits) { drop(`The figure's unit (${fig.unitSeen ?? "none"}) does not fit ${def.unit}`); continue; }
     // The field's own bounds: a figure the field could never hold is not that field's figure.
     const v = fig.value!;
-    if ((def.integer && !Number.isInteger(v)) || (def.min !== undefined && v < def.min) || (def.max !== undefined && v > def.max)) { drop(`The figure is outside what ${def.key} can hold`); continue; }
+    if (outsideBounds(def, v)) { drop(`The figure is outside what ${def.key} can hold`); continue; }
     let itemKey: string | null = null;
     if (def.itemized) {
       itemKey = typeof s.itemKey === "string" ? s.itemKey.trim() : "";

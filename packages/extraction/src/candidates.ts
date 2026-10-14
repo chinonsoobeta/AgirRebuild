@@ -271,6 +271,9 @@ const NOT_PART_RE = new RegExp(
     String.raw`\b(?:for|pour) illustrat\w*`,
     String.raw`\b(?:for (?:reference|comparison)|(?:reference|comparison) only|pour (?:reference|comparaison)|(?:reference|comparaison) seulement)\b`,
     String.raw`\ba titre (?:indicatif|illustratif|d['’]exemple|de reference|de comparaison)\b`,
+    String.raw`\bnot (?:a |an )?(?:currently )?(?:modell?ed )?input\b`,
+    String.raw`\bnot currently modell?ed\b`,
+    String.raw`\b(?:for (?:information|reference) only|memo items?|pour information seulement)\b`,
     String.raw`\bnot (?:a )?part of\b`,
     String.raw`\bnot included in (?:the |this |our |that )?(?:project|deal|transaction|budget|scope)\b`,
     String.raw`\bne (?:fait|font) pas partie\b`,
@@ -639,6 +642,7 @@ function readSentence(sentence: { text: string; start: number }, para0: Paragrap
     } else if (tokens.every((t) => mapToken(label, t, opt(t)).kind === "unmapped")) proseFrom = colon + 1;
     else {
       let used = false;
+      let usedKey: string | null = null;
       let refusedPerUnit = false;
       let total: NumberToken | null = null;
       const ranged = rangeEnds(text, tokens);
@@ -661,7 +665,9 @@ function readSentence(sentence: { text: string; start: number }, para0: Paragrap
           other(t, "line:label-value", PER_UNIT_REFUSED_NOTE);
           continue;
         }
-        let mapped = used ? { kind: "unmapped" as const } : mapToken(label, t, { ...opt(t), ahead: text.slice(colon + 1, t.start) });
+        // After the first figure, one whose own words just before it name a different field ("at an exit cap of 5.5%") is read by that field; one with no words of its own stays with the label.
+        const own = used && i > 0 ? mapToken(text.slice(tokens[i - 1]!.end, t.start), t, { scope, quote, after: text.slice(t.end), prose: true, context: text }) : null;
+        let mapped = used ? (own?.kind === "field" && own.fieldKey !== usedKey ? own : { kind: "unmapped" as const }) : mapToken(label, t, { ...opt(t), ahead: text.slice(colon + 1, t.start) });
         if (mapped.kind === "field" && BUDGET_LINES.has(mapped.fieldKey) && isDeposit(text, t)) {
           other(t, "line:label-value", DEPOSIT_NOTE);
           continue;
@@ -678,9 +684,10 @@ function readSentence(sentence: { text: string; start: number }, para0: Paragrap
           other(t, "line:label-value", AS_IS_NOTE);
           continue;
         }
-        if (!used && mapped.kind === "field") {
+        if (mapped.kind === "field") {
           record(result, mapped, t, { raw: t.raw, location: locationOf(t.start), context: context.slice(0, 240), rule: "line:label-value" });
           used = true;
+          usedKey ??= mapped.fieldKey;
         } else if (!used || t.value !== null) {
           other(t, "line:label-value", mapped.kind === "ignored" ? mapped.reason : used ? "Another number on this line was used" : "No field matches this label");
         }
@@ -852,7 +859,9 @@ function rentRollRoles(header: Cell[]): Roles | null {
   return roles.item.length > 0 && roles.rent !== undefined && (roles.units !== undefined || roles.area !== undefined) ? roles : null;
 }
 
-const BUDGET_LABEL_RE = /\b(line\s*item|description|category|item|cost\s*item|use|poste|libelle|designation|categorie|rubrique)\b/;
+const BUDGET_LABEL_RE = /\b(line\s*items?|description|category|items?|cost\s*items?|use|poste|libelle|designation|categorie|rubrique)\b/;
+// A column named by one of these labels the row before any other label column ("Category | Line item | Amount" is labelled by its line item).
+const BUDGET_ITEM_RE = /\b(line\s*items?|items?|cost\s*items?|postes?(?: budgetaires?)?)\b/;
 // A label column named by one of these only when no column is named by the words above ("Division | Description | Amount" is labelled by its description).
 const BUDGET_WEAK_LABEL_RE = /\b(line|division)\b/;
 const BUDGET_AMOUNT_RE = /\b(amount|cost|budget|total|montant|couts?|\$)\b/;
@@ -872,16 +881,19 @@ function budgetRoles(header: Cell[]): BudgetRoles | null {
   let label = -1;
   let weak = -1;
   let amount = -1;
+  let item = -1;
   const revisions: number[] = [];
   header.forEach((c, i) => {
     const h = headerOf(c);
-    if (label < 0 && BUDGET_LABEL_RE.test(h)) label = i;
+    if (item < 0 && BUDGET_ITEM_RE.test(h)) item = i;
+    else if (label < 0 && BUDGET_LABEL_RE.test(h)) label = i;
     else if (weak < 0 && BUDGET_WEAK_LABEL_RE.test(h)) weak = i;
     else {
       if (REVISION_COL_RE.test(h) && (BUDGET_AMOUNT_RE.test(h) || /^\s*[^a-z]*(rev|original|initial|previous|precedent|current|actuel|courant|revis)/.test(h))) revisions.push(i);
       if (amount < 0 && BUDGET_AMOUNT_RE.test(h)) amount = i;
     }
   });
+  if (item >= 0) label = item;
   if (label < 0) label = weak;
   if (label < 0) return null;
   if (revisions.length >= 2) {
