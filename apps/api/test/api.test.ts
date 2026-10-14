@@ -571,6 +571,6 @@ describe("model label suggestions", () => {
     await wk();
     expect(calls).toHaveLength(n);
     expect((await byField("land_cost"))?.status ?? "rejected").toBe("rejected");
-    expect(await byField("other_cost")).toMatchObject({ status: "needs_review", value: 5000 });
+    expect(await byField("other_cost")).toMatchObject({ status: "needs_review", value: 5000, reason: "Its label was a model's suggestion, and suggestions are now off; confirm or reject it" });
   });
 });

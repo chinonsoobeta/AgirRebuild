@@ -38,7 +38,8 @@ const SUGGEST_BATCH = 100;
 
 /** The real call, used only when ANTHROPIC_API_KEY is set (the SDK reads it). */
 const anthropicProvider: SuggestionProvider = async (request) => {
-  const m = await new Anthropic().beta.messages.create({ ...request, betas: ["server-side-fallback-2026-07-01"] });
+  // A job's lease is 5 minutes: each call, with its one retry, ends well inside it, and the batches run side by side.
+  const m = await new Anthropic({ timeout: 140_000, maxRetries: 1 }).beta.messages.create({ ...request, betas: ["server-side-fallback-2026-07-01"] });
   return { model: m.model, stop_reason: m.stop_reason, text: m.content.flatMap((b) => (b.type === "text" ? [b.text] : [])).join("") };
 };
 
@@ -57,8 +58,9 @@ async function suggestLabels(deps: WorkerDeps, workspaceId: string, offered: Sou
   const ids = offeredIds(offered);
   const figures = offered.map((c, i) => ({ id: ids[i]!, raw: c.raw, value: c.value, unitSeen: c.unitSeen, location: c.location, context: c.context }));
   figures.sort((a, b) => (a.id < b.id ? -1 : a.id > b.id ? 1 : 0));
-  const rows: SuggestionRow[] = [];
-  for (let i = 0; i < figures.length; i += SUGGEST_BATCH) {
+  const batches: (typeof figures)[] = [];
+  for (let i = 0; i < figures.length; i += SUGGEST_BATCH) batches.push(figures.slice(i, i + SUGGEST_BATCH));
+  return Promise.all(batches.map(async (batch) => {
     const request: SuggestRequest = {
       model: process.env.AGIR_SUGGEST_MODEL || "claude-opus-5-5",
       max_tokens: 16000,
@@ -66,7 +68,7 @@ async function suggestLabels(deps: WorkerDeps, workspaceId: string, offered: Sou
       thinking: { type: "adaptive" },
       output_config: { effort: (process.env.AGIR_SUGGEST_EFFORT || "medium") as SuggestRequest["output_config"]["effort"], format: { type: "json_schema", schema: SUGGEST_SCHEMA } },
       system: SUGGEST_SYSTEM,
-      messages: [{ role: "user", content: JSON.stringify({ catalog, figures: figures.slice(i, i + SUGGEST_BATCH) }) }],
+      messages: [{ role: "user", content: JSON.stringify({ catalog, figures: batch }) }],
     };
     const row: SuggestionRow = { model: null, prompt_hash: sha256Hex(new TextEncoder().encode(JSON.stringify(request))), request, response: null, stop_reason: null, outcome: "failed" };
     try {
@@ -85,9 +87,8 @@ async function suggestLabels(deps: WorkerDeps, workspaceId: string, offered: Sou
       row.response = { error: row.error.class, status: row.error.status };
       row.outcome = "failed";
     }
-    rows.push(row);
-  }
-  return rows;
+    return row;
+  }));
 }
 
 type Job = { id: number; kind: string; payload: Record<string, string>; attempts: number; max_attempts: number };
@@ -356,19 +357,21 @@ export async function reconcileDeal(db: Db, dealId: string) {
     for (const e of existing) {
       const key = `${e.field_key}|${e.item_key}`;
       if (seen.has(key) || e.source_kind !== "document") continue;
+      // A value whose every source was a model's suggestion leaves because the switch is off, not because a document went.
+      const gone = !on && e.sources?.length && e.sources.every((x) => (x as { rule?: string }).rule === "suggested") ? "Its label was a model's suggestion, and suggestions are now off" : "Its source document was removed";
       if (e.status === "needs_review" || e.status === "conflicting") {
         await tx.query(`update assumptions set status = 'rejected', sources = '[]', conflict_values = null, reason = $2, version = version + 1, updated_at = now() where id = $1`, [
           e.id,
-          "Its source document was removed",
+          gone,
         ]);
-        await log(e.id, "source_removed", e.status, "rejected", e.value, e.value, "Its source document was removed");
+        await log(e.id, "source_removed", e.status, "rejected", e.value, e.value, gone);
         changed++;
       } else if (e.status === "approved") {
         await tx.query(`update assumptions set status = 'needs_review', sources = '[]', reason = $2, version = version + 1, updated_at = now() where id = $1`, [
           e.id,
-          "Its source document was removed; confirm or reject it",
+          `${gone}; confirm or reject it`,
         ]);
-        await log(e.id, "source_removed", "approved", "needs_review", e.value, e.value, "Its source document was removed");
+        await log(e.id, "source_removed", "approved", "needs_review", e.value, e.value, gone);
         changed++;
       }
     }
