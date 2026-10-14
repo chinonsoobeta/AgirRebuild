@@ -488,6 +488,7 @@ function clauseAround(text: string, t: NumberToken): string {
 
 /** A budget-line figure whose own clause says it is a deposit or an amount already paid. */
 // A total that says it includes the deposit ("$900,000 including the deposit") is the total, not the deposit.
+const PART_OF_RE = /\b(?:including|includes|included|incl|inclusive of|of which|y compris|incluant|comprenant|inclut|dont)\b/;
 const INCLUDES_DEPOSIT_RE = /\b(?:including|includes|included|incl|inclusive of|with|y compris|incluant|comprenant|inclus)\b(?:\s+(?:the|our|a|le|la|notre|un|une)|\s+l\s*['’])?\s*(?:deposits?|down payments?|acomptes?|depots?)\b/;
 const isDeposit = (text: string, t: NumberToken) => {
   if (!isMoney(t) || t.value === null || t.value <= 0) return false;
@@ -667,7 +668,9 @@ function readSentence(sentence: { text: string; start: number }, para0: Paragrap
         }
         // After the first figure, one whose own words just before it name a different field ("at an exit cap of 5.5%") is read by that field; one with no words of its own stays with the label.
         const own: Mapped | null = used && i > 0 ? mapToken(text.slice(tokens[i - 1]!.end, t.start), t, { scope, quote, after: text.slice(t.end), prose: true, context: text }) : null;
-        let mapped: Mapped = used ? (own?.kind === "field" && own.fieldKey !== usedKey ? own : { kind: "unmapped" as const }) : mapToken(label, t, { ...opt(t), ahead: text.slice(colon + 1, t.start) });
+        // A part the colon's budget line includes ("Hard costs: $X, including contingency of $Y") is inside that line, not a line of its own.
+        const inside: boolean = usedKey !== null && BUDGET_LINES.has(usedKey) && PART_OF_RE.test(fold(text.slice(colon + 1, t.start)));
+        let mapped: Mapped = used ? (own?.kind === "field" && own.fieldKey !== usedKey && !inside ? own : { kind: "unmapped" as const }) : mapToken(label, t, { ...opt(t), ahead: text.slice(colon + 1, t.start) });
         if (mapped.kind === "field" && BUDGET_LINES.has(mapped.fieldKey) && isDeposit(text, t)) {
           other(t, "line:label-value", DEPOSIT_NOTE);
           continue;

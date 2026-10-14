@@ -1168,6 +1168,9 @@ describe("reading safety: a figure that may be the wrong one is shown, never use
     });
     test("a second field named after a colon's figure labels its own figure", () => {
       expect(pick(read("Rent monthly: $1,400 per unit and a vacancy of 5%."))).toEqual([["unit_rent_monthly", 1_400], ["stabilized_occupancy_pct", 95]]);
+      // negative: a part the colon's budget line includes is not read as a line of its own
+      const inside = read("Construction cost: $3,100,000, which includes a contingency of $200,000.");
+      expect(pick(inside)).toEqual([["hard_cost", 3_100_000]]);
       expect(noteOf(read("Rent monthly: $1,400 and $1,600"), 1_600)).toBe("Another number on this line was used");
     });
   });
