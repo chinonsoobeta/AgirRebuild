@@ -176,7 +176,8 @@ function lenderFigure(rawLabel: string, t: NumberToken, opts: MapOptions): strin
   const money = t.unit === "$" || t.unit === "$/mo" || t.currency;
 
   if (money && (PER_INVESTOR_RE.test(plain) || PER_INVESTOR_AFTER_RE.test(tail))) return "A per-investor amount, not the deal's equity";
-  if (BASIS_CUE_RE.test(`${plain} ${tail.split(/[,;.]|\band\b|\bet\b/)[0]}`)) return "The lender's underwriting basis, not the deal's assumption";
+  // A cue after the figure qualifies a rate or an occupancy ("93% occupancy for credit underwriting"); after an amount it describes the loan ("$2M, sized on ...").
+  if (BASIS_CUE_RE.test(money ? plain : `${plain} ${tail.split(/[,;.]|\band\b|\bet\b/)[0]}`)) return "The lender's underwriting basis, not the deal's assumption";
   const words = plain.split(" ");
   // The last four words before the figure; a ratio's name ("loan to cost") counts as one.
   const lastFour = (x: string[]) => (x.join(" ").match(/loan to (?:cost|value)|debt service coverage|\S+/g) ?? []).slice(-4);
@@ -536,7 +537,9 @@ function mapLabel(rawLabel: string, t: NumberToken, opts: MapOptions = {}): Mapp
   if (t.value === null) return { kind: "ignored", reason: t.refusal ?? "The number could not be read without guessing" };
   const lender = lenderFigure(rawLabel, t, opts);
   if (lender) return { kind: "ignored", reason: lender };
-  if (t.unit === "%" && SHARE_TO_RE.test(foldText(opts.after ?? ""))) return { kind: "ignored", reason: "A share of distributions, not the preferred return" };
+  // Unless the figure's own clause names the preferred return ("a preferred return of 8% to the investors").
+  const prefLead = () => FIELD_BY_KEY.get("preferred_return_pct")!.aliases.some((a) => hasPhrase(normalizeLabel(rawLabel.split(/[,;]/).pop() ?? "").label, a));
+  if (t.unit === "%" && SHARE_TO_RE.test(foldText(opts.after ?? "")) && !prefLead()) return { kind: "ignored", reason: "A share of distributions, not the preferred return" };
   // A broker's, agent's or appraiser's view of the rent, or a possible or potential one, is an opinion, not the sponsor's assumption.
   if (REVENUE_LABEL_RE.test(foldText(rawLabel)) && OPINION_RE.test(foldText(rawLabel))) return { kind: "ignored", reason: OPINION_NOTE };
   // A rent per area is yearly; a monthly one is refused. A yearly rent with no per-unit word is a total.
@@ -601,6 +604,8 @@ function mapLabel(rawLabel: string, t: NumberToken, opts: MapOptions = {}): Mapp
   // A cap rate is the exit rate only when the sentence is about a sale; alone it may be the going-in rate.
   if ((CAP_RE.test(label) || (t.unit === "%" && CAP_AFTER_RE.test(foldText(opts.after ?? "")))) && !FIELD_BY_KEY.get("exit_cap_rate_pct")!.aliases.some((a) => hasPhrase(label, a))) {
     const ctx = normalizeLabel(opts.context ?? rawLabel).label;
+    // A sale that already happened ("the duplex next door sold at a 4.9% cap") is a comparable, not this deal's exit.
+    if (/\b(?:sold|traded|vendue?s?)\b/.test(foldText(rawLabel.split(/[.;]/).pop() ?? ""))) return { kind: "ignored", reason: "A completed sale's cap rate, not this deal's exit" };
     if (EXIT_RE.test(ctx) && VALUE_RE.test(ctx)) return { kind: "ignored", reason: "This sentence names a value as well as a cap rate; the figure is not taken as an input" };
     if (EXIT_RE.test(ctx)) return asField(FIELD_BY_KEY.get("exit_cap_rate_pct")!) ?? { kind: "unmapped" };
     return { kind: "ignored", reason: "A cap rate with no word about a sale or an exit may be the going-in rate; enter it by hand if it is the exit rate" };

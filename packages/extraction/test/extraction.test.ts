@@ -934,6 +934,12 @@ describe("which loan a term belongs to, and the words small developers use", () 
       expect(going.other.map((o) => o.note)).toEqual([expect.stringMatching(/going-in/)]);
       expect(read("The sale price carries a 3% cap on fees.").candidates).toEqual([]);
       expect(read("On the sale, fees are capped at 3%.").candidates).toEqual([]);
+      // negative: a sale that already happened is a comparable, whether "cap" or "cap rate" follows
+      for (const line of ["We sell at a 5.5% cap; the triplex on Elm sold last fall at a 4.6% cap.", "The corner building traded at a 4.4% cap rate in March."]) {
+        const comp = read(line);
+        expect(comp.candidates.filter((c) => c.value !== 5.5), line).toEqual([]);
+        expect(comp.other.find((o) => o.value === 4.6 || o.value === 4.4)?.note, line).toBe("A completed sale's cap rate, not this deal's exit");
+      }
     });
     test("a sentence that names a value is refused", () => {
       expect(read("On a sale, a 4.5% cap rate gives a value of $12,000,000.").candidates).toEqual([]);
@@ -1631,6 +1637,8 @@ describe("a lender's limits, terms, fees and conditions are not inputs", () => {
       // negative: the sponsor's own underwriting is read
       expect(pick(read("We underwrite stabilized occupancy at 95%."))).toEqual([["stabilized_occupancy_pct", 95]]);
       expect(pick(read("Underwrite stabilized occupancy at 95%."))).toEqual([["stabilized_occupancy_pct", 95]]);
+      // negative: an amount the cue follows is the loan's, not a basis
+      expect(pick(read("The construction loan of $4,200,000 is sized on a 1.25x coverage."))).toEqual([["senior_loan_amount", 4200000]]);
     });
     test("negative: the stabilized occupancy beside a funding condition is still read", () => {
       expect(pick(read("Stabilized occupancy 96%", "Funding is conditional on 90% occupancy."))).toEqual([["stabilized_occupancy_pct", 96]]);
@@ -2365,6 +2373,7 @@ describe("durations after the number, revisions in a sentence, percent cells, va
     // negative: a share to the GP is not caught by this rule, and the preferred return itself is read
     expect(noteOf(read("After the preferred return, 80% to the LPs and 20% to the GP."), 20)).not.toBe(SHARE);
     expect(pick(read("Preferred return of 8%."))).toEqual([["preferred_return_pct", 8]]);
+    expect(pick(read("A preferred return of 6% to the limited partners, then the split."))).toEqual([["preferred_return_pct", 6]]);
   });
   test("a preferred annual return is the preferred return", () => {
     expect(pick(read("Preferred annual return: 8%"))).toEqual([["preferred_return_pct", 8]]);
