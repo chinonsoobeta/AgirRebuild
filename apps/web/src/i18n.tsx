@@ -160,6 +160,7 @@ const EN = {
 
   "review.stillReading": "Documents are still being read.",
   "review.stillReadingBody": "Values will appear here as each one finishes.",
+  "review.suggested": "Suggested label, please confirm",
   "review.fromM2": "The document gives this in square metres. Agir works in square feet and converted it.",
   "review.statedIn": (p) => `The document states this in ${p.code}. It is shown here but never used.`,
   "review.summary": (p) => [`${p.c} conflicting`, `${p.m} missing`, `${p.r} to review`, `${p.a} approved`],
@@ -456,6 +457,9 @@ const EN = {
   "settings.mode.team": "Team review",
   "settings.mode.teamBody": "A material value entered by hand waits for a second person.",
   "settings.mode.solo": "Solo review",
+  "settings.suggest": "Label suggestions",
+  "settings.suggestOn": "Let a model suggest labels",
+  "settings.suggestNotice": "When this is on, the text around each figure Agir could not label is sent to Anthropic's Claude API, which processes it in the United States. A suggested label is never approved by itself.",
   "settings.mode.soloBody": "Values you enter are used right away and labelled as stated by you until someone else confirms them.",
   "settings.review": "Request Agir review",
   "settings.reviewBody": "Give an Agir reviewer time-limited access to confirm the values you stated. They can read the workspace and confirm values, nothing else.",
@@ -617,6 +621,7 @@ const FR: Record<Key, Entry> = {
 
   "review.stillReading": "Des documents sont encore en lecture.",
   "review.stillReadingBody": "Les valeurs apparaîtront ici à mesure que chaque document est terminé.",
+  "review.suggested": "Libellé suggéré, à confirmer",
   "review.fromM2": "Le document l'indique en mètres carrés. Agir travaille en pieds carrés et l'a converti.",
   "review.statedIn": (p) => `Le document l'indique en ${p.code}. Il est affiché ici, mais jamais utilisé.`,
   "review.summary": (p) => [
@@ -920,6 +925,9 @@ const FR: Record<Key, Entry> = {
   "settings.mode.team": "Examen en équipe",
   "settings.mode.teamBody": "Une valeur déterminante saisie à la main attend une seconde personne.",
   "settings.mode.solo": "Examen individuel",
+  "settings.suggest": "Suggestions de libellés",
+  "settings.suggestOn": "Laisser un modèle suggérer des libellés",
+  "settings.suggestNotice": "Lorsque cette option est activée, le texte entourant chaque chiffre qu'Agir n'a pas pu libeller est envoyé à l'API Claude d'Anthropic, qui le traite aux États-Unis. Un libellé suggéré n'est jamais approuvé automatiquement.",
   "settings.mode.soloBody": "Les valeurs que vous saisissez sont utilisées tout de suite et marquées comme déclarées par vous jusqu'à ce qu'une autre personne les confirme.",
   "settings.review": "Demander une révision Agir",
   "settings.reviewBody": "Donnez à un réviseur Agir un accès limité dans le temps pour confirmer les valeurs que vous avez déclarées. Il peut consulter l'espace et confirmer des valeurs, rien d'autre.",

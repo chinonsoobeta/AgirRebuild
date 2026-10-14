@@ -26,7 +26,7 @@ export const api = {
 };
 
 // ---- Response shapes ---------------------------------------------------------------
-export type Me = { user: { id: string; email: string; name: string }; workspaces: { id: string; name: string; review_mode: "team" | "solo"; role: "owner" | "admin" | "analyst" | "viewer" | "reviewer" }[] };
+export type Me = { user: { id: string; email: string; name: string }; workspaces: { id: string; name: string; review_mode: "team" | "solo"; label_suggestions: boolean; role: "owner" | "admin" | "analyst" | "viewer" | "reviewer" }[] };
 export type Tone = "pass" | "review" | "stop" | "neutral";
 export type DealOverview = {
   deal: {
@@ -53,7 +53,7 @@ export type DocumentRow = {
   id: string; name: string; kind: string; size_bytes: number; stage: string; stage_detail: string | null; page_count: number | null;
   number_format: string | null; needs_ocr: boolean; candidate_count: number; other_count: number; created_at: string; uploaded_by: string | null;
 };
-export type Source = { document_id: string; document_name: string; value: number; location: string; raw: string; unit_seen?: string | null; context: string };
+export type Source = { document_id: string; document_name: string; value: number; location: string; raw: string; unit_seen?: string | null; context: string; rule?: string; note?: string };
 export type Assumption = {
   id: string; fieldKey: string; itemKey: string | null; label: string; group: string; groupLabel: string; unit: string; material: boolean;
   conservative: "max" | "min" | null; status: string; value: number | null; pendingValue: number | null; sourceKind: "document" | "analyst" | "default";

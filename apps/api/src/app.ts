@@ -107,7 +107,7 @@ export function createApp({ db, store, secureCookies, demoSignIn = false }: AppD
   app.get("/api/me", async (c) => {
     const workspaces = await as(c, (tx) =>
       tx.query(
-        `select w.id, w.name, w.review_mode, m.role from workspaces w join workspace_members m on m.workspace_id = w.id and m.user_id = agir_uid() order by w.created_at`,
+        `select w.id, w.name, w.review_mode, w.label_suggestions, m.role from workspaces w join workspace_members m on m.workspace_id = w.id and m.user_id = agir_uid() order by w.created_at`,
       ),
     );
     return c.json({ user: c.get("user"), workspaces });
@@ -127,6 +127,12 @@ export function createApp({ db, store, secureCookies, demoSignIn = false }: AppD
   app.post("/api/workspaces/:ws/review-mode", async (c) => {
     const { mode } = z.object({ mode: z.enum(REVIEW_MODES) }).parse(await c.req.json());
     await as(c, (tx) => tx.query(`select fn_set_review_mode($1, $2)`, [c.req.param("ws"), mode]));
+    return c.json({ ok: true });
+  });
+
+  app.post("/api/workspaces/:ws/label-suggestions", async (c) => {
+    const { on } = z.object({ on: z.boolean() }).parse(await c.req.json());
+    await as(c, (tx) => tx.query(`select fn_set_label_suggestions($1, $2)`, [c.req.param("ws"), on]));
     return c.json({ ok: true });
   });
 

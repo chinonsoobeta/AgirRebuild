@@ -3,14 +3,92 @@
 // It drains the jobs table with leases, retries with backoff, and a dead
 // letter. It runs as the trusted service principal.
 
-import { FIELD_BY_KEY, POLICY_V1, type Currency, type EngineInput, type FieldUnit, type RunResult } from "@agir/contracts";
+import Anthropic from "@anthropic-ai/sdk";
+import { FIELDS, FIELD_BY_KEY, POLICY_V1, type Currency, type EngineInput, type FieldUnit, type RunResult } from "@agir/contracts";
 import { renderArtifact, RendererUnavailableError, type ArtifactInput } from "@agir/artifacts";
 import { sha256Hex, type BlobStore, type Db } from "@agir/db";
-import { consolidate, extractCandidates, kindOf, parseDocument, type SourcedCandidate } from "@agir/extraction";
+import { applySuggestions, consolidate, extractCandidates, kindOf, offerable, offeredIds, parseDocument, type SourcedCandidate } from "@agir/extraction";
 
 export const MAX_UPLOAD_BYTES = 75 * 1024 * 1024;
 
-export type WorkerDeps = { db: Db; store: BlobStore; log?: (event: Record<string, unknown>) => void };
+/** What a model is asked: the exact body of the call. The figures and the catalog are in the one user turn, as JSON. */
+export type SuggestRequest = {
+  model: string; max_tokens: number; fallbacks: "default"; system: string;
+  thinking: { type: "adaptive" };
+  output_config: { effort: "low" | "medium" | "high" | "xhigh" | "max"; format: { type: "json_schema"; schema: Record<string, unknown> } };
+  messages: { role: "user"; content: string }[];
+};
+export type SuggestReply = { model: string; stop_reason: string | null; text: string };
+export type SuggestionProvider = (request: SuggestRequest) => Promise<SuggestReply>;
+
+export type WorkerDeps = { db: Db; store: BlobStore; log?: (event: Record<string, unknown>) => void; suggest?: SuggestionProvider };
+
+const SUGGEST_SYSTEM = `You label figures that a document reader could not label. For each figure, choose one catalog key, or "ignore".
+Never change, compute, sum or convert a value. Return only ids and keys.
+For an itemized field, the item name must be words from the figure's own context.
+Ignore anything unclear, a lender's limit or condition, a scenario or sensitivity, a range, an output or result figure, or a figure about another property.`;
+const SUGGEST_SCHEMA = {
+  type: "object", additionalProperties: false, required: ["suggestions"],
+  properties: { suggestions: { type: "array", items: {
+    type: "object", additionalProperties: false, required: ["id", "fieldKey", "itemKey"],
+    properties: { id: { type: "string" }, fieldKey: { type: "string" }, itemKey: { type: ["string", "null"] } },
+  } } },
+};
+const SUGGEST_BATCH = 100;
+
+/** The real call, used only when ANTHROPIC_API_KEY is set (the SDK reads it). */
+const anthropicProvider: SuggestionProvider = async (request) => {
+  const m = await new Anthropic().beta.messages.create({ ...request, betas: ["server-side-fallback-2026-07-01"] });
+  return { model: m.model, stop_reason: m.stop_reason, text: m.content.flatMap((b) => (b.type === "text" ? [b.text] : [])).join("") };
+};
+
+/** The figures that may be offered, in one order for the worker and for a reconcile, so their ids match. */
+const offeredOf = (cs: SourcedCandidate[]) =>
+  cs.filter(offerable).sort((a, b) => (a.location < b.location ? -1 : a.location > b.location ? 1 : 0) || (a.raw < b.raw ? -1 : a.raw > b.raw ? 1 : 0) || (a.context < b.context ? -1 : a.context > b.context ? 1 : 0) || a.value! - b.value!);
+
+type SuggestionRow = { model: string | null; prompt_hash: string; request: SuggestRequest; response: unknown; stop_reason: string | null; outcome: "ok" | "refused" | "failed"; error?: { class: string; status: number | null } };
+
+/** One call per batch of 100 figures. A failure is a row, never an error: the reader's own candidates stand. */
+async function suggestLabels(deps: WorkerDeps, workspaceId: string, offered: SourcedCandidate[]): Promise<SuggestionRow[]> {
+  const [ws] = await deps.db.query<{ label_suggestions: boolean }>(`select label_suggestions from workspaces where id = $1`, [workspaceId]);
+  const provider = deps.suggest ?? (process.env.ANTHROPIC_API_KEY ? anthropicProvider : null);
+  if (!ws?.label_suggestions || !provider || offered.length === 0) return [];
+  const catalog = FIELDS.filter((f) => f.extractable).map((f) => ({ key: f.key, label: f.label, unit: f.unit, itemized: f.itemized ?? false, aliases: f.aliases.slice(0, 4) }));
+  const ids = offeredIds(offered);
+  const figures = offered.map((c, i) => ({ id: ids[i]!, raw: c.raw, value: c.value, unitSeen: c.unitSeen, location: c.location, context: c.context }));
+  figures.sort((a, b) => (a.id < b.id ? -1 : a.id > b.id ? 1 : 0));
+  const rows: SuggestionRow[] = [];
+  for (let i = 0; i < figures.length; i += SUGGEST_BATCH) {
+    const request: SuggestRequest = {
+      model: process.env.AGIR_SUGGEST_MODEL || "claude-opus-5-5",
+      max_tokens: 16000,
+      fallbacks: "default",
+      thinking: { type: "adaptive" },
+      output_config: { effort: (process.env.AGIR_SUGGEST_EFFORT || "medium") as SuggestRequest["output_config"]["effort"], format: { type: "json_schema", schema: SUGGEST_SCHEMA } },
+      system: SUGGEST_SYSTEM,
+      messages: [{ role: "user", content: JSON.stringify({ catalog, figures: figures.slice(i, i + SUGGEST_BATCH) }) }],
+    };
+    const row: SuggestionRow = { model: null, prompt_hash: sha256Hex(new TextEncoder().encode(JSON.stringify(request))), request, response: null, stop_reason: null, outcome: "failed" };
+    try {
+      const reply = await provider(request);
+      row.model = reply.model;
+      row.stop_reason = reply.stop_reason;
+      if (reply.stop_reason === "refusal") row.outcome = "refused";
+      else if (reply.stop_reason !== "max_tokens") {
+        const parsed = JSON.parse(reply.text) as { suggestions?: unknown };
+        if (!Array.isArray(parsed.suggestions)) throw new Error("The reply has no suggestions list");
+        row.response = parsed.suggestions;
+        row.outcome = "ok";
+      }
+    } catch (e) {
+      row.error = { class: (e as Error).constructor.name, status: e instanceof Anthropic.APIError ? (e.status ?? null) : null };
+      row.response = { error: row.error.class, status: row.error.status };
+      row.outcome = "failed";
+    }
+    rows.push(row);
+  }
+  return rows;
+}
 
 type Job = { id: number; kind: string; payload: Record<string, string>; attempts: number; max_attempts: number };
 
@@ -94,8 +172,17 @@ async function extractDocument(deps: WorkerDeps, documentId: string) {
   await setStage(db, d.id, "extracting", null, { page_count: parsed.pageCount });
   const result = extractCandidates(parsed);
   const format = result.format.mixed ? "mixed" : result.format.decimal === "." ? "1,234.56" : result.format.decimal === "," ? "1.234,56" : "not detected";
+  const asSourced = (c: (typeof result.candidates)[number]): SourcedCandidate => ({ ...c, documentId: d.id, documentName: d.name });
+  const suggestions = await suggestLabels(deps, d.workspace_id, offeredOf([...result.candidates, ...result.other].map(asSourced)));
   await db.transaction(async (tx) => {
     await tx.query(`delete from candidates where document_id = $1`, [d.id]);
+    await tx.query(`delete from label_suggestions where document_id = $1`, [d.id]);
+    for (const r of suggestions) {
+      await tx.query(
+        `insert into label_suggestions (document_id, deal_id, workspace_id, model, prompt_hash, request, response, stop_reason, outcome) values ($1,$2,$3,$4,$5,$6,$7,$8,$9)`,
+        [d.id, d.deal_id, d.workspace_id, r.model, r.prompt_hash, JSON.stringify(r.request), r.response && JSON.stringify(r.response), r.stop_reason, r.outcome],
+      );
+    }
     for (const c of [...result.candidates, ...result.other]) {
       await tx.query(
         `insert into candidates (document_id, deal_id, workspace_id, field_key, item_key, value, raw, unit_seen, location, context, rule, note)
@@ -109,6 +196,7 @@ async function extractDocument(deps: WorkerDeps, documentId: string) {
     );
     await tx.query(`insert into jobs (kind, payload) values ('reconcile_deal', $1)`, [JSON.stringify({ deal_id: d.deal_id })]);
   });
+  for (const r of suggestions) if (r.error) await audit(db, d.workspace_id, d.deal_id, "document.suggestions_failed", "document", d.id, r.error);
   await audit(db, d.workspace_id, d.deal_id, "document.extracted", "document", d.id, {
     candidates: result.candidates.length,
     other: result.other.length,
@@ -149,18 +237,37 @@ export async function reconcileDeal(db: Db, dealId: string) {
     if (!deal) return;
     const rows = await tx.query<{
       id: string; document_id: string; document_name: string; field_key: string; item_key: string | null; value: number;
-      raw: string; unit_seen: string | null; location: string; context: string; rule: string;
+      raw: string; unit_seen: string | null; location: string; context: string; rule: string; note: string | null;
     }>(
-      `select c.id, c.document_id, d.name as document_name, c.field_key, c.item_key, c.value, c.raw, c.unit_seen, c.location, c.context, c.rule
+      `select c.id, c.document_id, d.name as document_name, c.field_key, c.item_key, c.value, c.raw, c.unit_seen, c.location, c.context, c.rule, c.note
        from candidates c join documents d on d.id = c.document_id
        where c.deal_id = $1 and c.field_key is not null and c.value is not null and d.retired_at is null and d.stage = 'extracted'`,
       [dealId],
     );
-    const sourced: SourcedCandidate[] = rows.map((r) => ({
+    const toSourced = (r: (typeof rows)[number]): SourcedCandidate => ({
       fieldKey: r.field_key, itemKey: r.item_key, value: r.value, raw: r.raw, unitSeen: r.unit_seen, location: r.location,
-      context: r.context, rule: r.rule, documentId: r.document_id, documentName: r.document_name,
-    }));
-    const proposals = consolidate(sourced, deal.currency);
+      context: r.context, rule: r.rule, ...(r.note ? { note: r.note } : {}), documentId: r.document_id, documentName: r.document_name,
+    });
+    const sourced = rows.map(toSourced);
+    // A stored suggestion counts only while the workspace switch is on, and only after the boundary has checked it. The model is never called here.
+    const [{ label_suggestions: on } = { label_suggestions: false }] = await tx.query<{ label_suggestions: boolean }>(`select label_suggestions from workspaces where id = $1`, [deal.workspace_id]);
+    let kept: SourcedCandidate[] = [];
+    let dropped: { id: string; why: string }[] = [];
+    if (on) {
+      const unlabelled = await tx.query<(typeof rows)[number]>(
+        `select c.id, c.document_id, d.name as document_name, c.field_key, c.item_key, c.value, c.raw, c.unit_seen, c.location, c.context, c.rule, c.note
+         from candidates c join documents d on d.id = c.document_id
+         where c.deal_id = $1 and c.field_key is null and c.value is not null and d.retired_at is null and d.stage = 'extracted'`,
+        [dealId],
+      );
+      const stored = await tx.query<{ response: unknown[] }>(
+        `select s.response from label_suggestions s join documents d on d.id = s.document_id
+         where s.deal_id = $1 and s.outcome = 'ok' and d.retired_at is null and d.stage = 'extracted' order by s.document_id, s.created_at, s.id`,
+        [dealId],
+      );
+      ({ kept, dropped } = applySuggestions(sourced, offeredOf(unlabelled.map(toSourced)), stored.flatMap((r) => r.response as { id: string; fieldKey: string; itemKey?: string | null }[])));
+    }
+    const proposals = consolidate([...sourced, ...kept], deal.currency);
     const existing = await tx.query<AssumptionRowDb>(
       `select id, field_key, item_key, status, value, source_kind, sources, conflict_values, reason, version from assumptions where deal_id = $1 for update`,
       [dealId],
@@ -186,6 +293,8 @@ export async function reconcileDeal(db: Db, dealId: string) {
         raw: s.raw,
         unit_seen: s.unitSeen,
         context: s.context,
+        rule: s.rule,
+        ...(s.note ? { note: s.note } : {}),
       }));
       const reason = p.reason;
       const conflictFromDocs = p.values.map((v) => ({ value: v.value, documents: [...new Set(v.sources.map((s) => s.documentName))] }));
@@ -267,7 +376,7 @@ export async function reconcileDeal(db: Db, dealId: string) {
       deal.workspace_id,
       dealId,
       dealId,
-      JSON.stringify({ proposals: proposals.length, changed }),
+      JSON.stringify({ proposals: proposals.length, changed, ...(on ? { suggested: kept.length, dropped } : {}) }),
     ]);
   });
 }

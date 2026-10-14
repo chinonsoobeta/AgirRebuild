@@ -12,6 +12,7 @@ export function Settings() {
   const add = useMutation({ mutationFn: (b: { email: string; role: string }) => api.post(`/workspaces/${workspaceId}/members`, b), onSuccess: () => qc.invalidateQueries({ queryKey: ["members"] }) });
   const grant = useMutation({ mutationFn: (b: { email: string; days: number }) => api.post(`/workspaces/${workspaceId}/review-grant`, b), onSuccess: () => qc.invalidateQueries({ queryKey: ["members"] }) });
   const mode = useMutation({ mutationFn: (m: "team" | "solo") => api.post(`/workspaces/${workspaceId}/review-mode`, { mode: m }), onSuccess: () => qc.invalidateQueries({ queryKey: ["me"] }) });
+  const suggest = useMutation({ mutationFn: (on: boolean) => api.post(`/workspaces/${workspaceId}/label-suggestions`, { on }), onSuccess: () => qc.invalidateQueries({ queryKey: ["me"] }) });
   const create = useMutation({ mutationFn: (name: string) => api.post(`/workspaces`, { name }), onSuccess: () => qc.invalidateQueries({ queryKey: ["me"] }) });
   const ws = me.workspaces.find((w) => w.id === workspaceId);
   return (
@@ -58,6 +59,13 @@ export function Settings() {
               </label>
             ))}
             <ErrorText error={mode.error} />
+          </fieldset>
+          <fieldset className="panel stack" style={{ margin: 0 }} disabled={role !== "owner"}>
+            <legend className="h-section" style={{ padding: "0 4px" }}>{t("settings.suggest")}</legend>
+            <label className="choice"><input type="checkbox" checked={ws?.label_suggestions ?? false} onChange={(e) => suggest.mutate(e.target.checked)} />
+              <span><strong>{t("settings.suggestOn")}</strong><span className="small muted" style={{ display: "block" }}>{t("settings.suggestNotice")}</span></span>
+            </label>
+            <ErrorText error={suggest.error} />
           </fieldset>
           {role === "owner" && (
             <form

@@ -20,6 +20,7 @@ function Quote({ s, currency }: { s: Source; currency: string | null | undefined
     <div className="stack" style={{ gap: 6 }}>
       <span className="row small" style={{ gap: 8, fontWeight: 600 }}><I.Doc />{s.document_name}</span>
       <div className="source-quote">{i >= 0 ? (<>{s.context.slice(0, i)}<mark>{s.raw}</mark>{s.context.slice(i + s.raw.length)}</>) : s.context}</div>
+      {s.rule === "suggested" && <span className="small" style={{ fontWeight: 600 }}>{t("review.suggested")}</span>}
       <span className="small faint">{msg(s.location)}</span>
       {(s.unit_seen?.startsWith("m2") || s.unit_seen?.startsWith("$/m2")) && <span className="small faint">{t("review.fromM2")}</span>}
       {foreignIn(s, currency) && <span className="small faint">{t("review.statedIn", { code: foreignIn(s, currency) })}</span>}

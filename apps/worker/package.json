@@ -9,6 +9,7 @@
     "@agir/artifacts": "*",
     "@agir/contracts": "*",
     "@agir/db": "*",
-    "@agir/extraction": "*"
+    "@agir/extraction": "*",
+    "@anthropic-ai/sdk": "^0.133.0"
   }
 }
