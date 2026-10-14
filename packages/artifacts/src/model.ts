@@ -266,6 +266,23 @@ const DRIVER_NAME: Partial<Record<BreakevenRow["driver"], string>> = { rentPct: 
 const ECHO_NAME: Record<BreakevenEcho["key"], string> = { rent: "Rent", cost: "Project cost", exit_cap: "Exit cap rate", senior_rate: "Senior loan rate", mezzanine_rate: "Mezzanine loan rate", refinance_rate: "Refinance rate", occupancy: "Stabilized occupancy" };
 const ECHO_UNIT = { "$/unit/mo": "$/mo", "$/sf/yr": "$/sf", $: "$", "%": "%" } as const;
 
+/** Which way each break-even echo rounds to keep passing, and to what step, at the precision this report prints. */
+const PASSING_ROUND: Record<BreakevenEcho["key"], (unit: BreakevenEcho["unit"]) => [1 | -1, number]> = {
+  rent: (u) => [1, u === "$/sf/yr" ? 0.01 : 1],
+  cost: () => [-1, 1],
+  exit_cap: () => [-1, 0.01],
+  senior_rate: () => [-1, 0.01],
+  mezzanine_rate: () => [-1, 0.01],
+  refinance_rate: () => [-1, 0.01],
+  occupancy: () => [1, 0.01],
+};
+
+/** Round toward passing on a grid; a value already on the grid (within a hair) stays put. */
+export function roundToward(value: number, dir: 1 | -1, step: number): number {
+  const q = value / step;
+  return (dir > 0 ? Math.ceil(q - 1e-6) : Math.floor(q + 1e-6)) / Math.round(1 / step);
+}
+
 /** The stress with the most failed gates; a tie goes to the lower stressed sizing DSCR. One sentence, from the stored gates. */
 function weakestStress(f: Formatter, r: RunResult): Block[] {
   const stresses = r.scenarios.filter((s) => s.key !== "base");
@@ -292,30 +309,44 @@ function changeTheAnswer(f: Formatter, x: ArtifactInput): Block[] {
   // The run stores its policy's hash: a policy edited under the same version name is a different policy.
   if (x.run.policyHash !== createHash("sha256").update(canonicalJson(x.policy)).digest("hex")) return [heading, { type: "paragraph", muted: true, text: "Not shown: this run was made under a different policy." }];
   const { rows } = breakeven(x.input, x.policy);
-  const blocks: Block[] = [heading];
+  const body: string[][] = [];
   for (const g of failing) {
-    const body: string[][] = [];
+    const needs = f.run(g.threshold, g.unit, `gate.${g.key}.threshold`);
+    const has = g.actual === null ? "Not measured" : f.run(g.actual, g.unit, `gate.${g.key}.actual`);
+    // The gate's name, need and result print on its first row only.
+    let first = true;
+    const add = (cells: string[]) => {
+      body.push([...(first ? [g.label, needs, has] : ["", "", ""]), ...cells]);
+      first = false;
+    };
     for (const row of rows.filter((k) => k.gate === g.key)) {
       if (row.state !== "value") {
-        body.push([DRIVER_NAME[row.driver] ?? row.driver, "\u2014", STATE_WORDS[row.state]]);
+        add([DRIVER_NAME[row.driver] ?? row.driver, "\u2014", STATE_WORDS[row.state]]);
+        continue;
+      }
+      if (row.driver === "rentPct" && row.to.length > 1) {
+        // Rents move together by one share: the row says so, and the engine's own shock is the figure.
+        add([`Rent, all ${f.ident(String(row.to.length), `breakeven.${g.key}.rent.count`)} unit types (same share)`, "\u2014", `+${f.run(row.shock, "%", `breakeven.${g.key}.rent.shock`)}`]);
         continue;
       }
       for (const e of row.to) {
         const ref = `breakeven.${g.key}.${e.key}${e.item ? "|" + e.item : ""}`;
         const name = e.item ? `${ECHO_NAME[e.key]}, ${e.item}` : ECHO_NAME[e.key];
-        body.push([f.ident(name, `${ref}.label`), f.run(e.from, ECHO_UNIT[e.unit], `${ref}.from`), f.run(e.to, ECHO_UNIT[e.unit], `${ref}.to`)]);
+        const unit = ECHO_UNIT[e.unit];
+        const [dir, step] = PASSING_ROUND[e.key](e.unit);
+        add([f.ident(name, `${ref}.label`), f.run(e.from, unit, `${ref}.from`), f.derived(roundToward(e.to, dir, step), unit, `${dir > 0 ? "ceil" : "floor"}(${ref}.to, ${step})`)]);
       }
     }
-    const needs = f.run(g.threshold, g.unit, `gate.${g.key}.threshold`);
-    const has = g.actual === null ? "Not measured" : f.run(g.actual, g.unit, `gate.${g.key}.actual`);
-    blocks.push({
-      type: "table",
-      caption: `${g.label}: needs at least ${needs}; this run has ${has}. One input is moved at a time${rows.some((k) => k.gate === g.key && k.state === "value" && k.to.length > 1) ? "; rents move together, by the same share" : ""}. Everything else is held.`,
-      columns: [{ label: "Input moved" }, { label: "In this run", numeric: true }, { label: "Passes at", numeric: true }],
-      rows: body,
-    });
   }
-  return blocks;
+  return [
+    heading,
+    {
+      type: "table",
+      columns: [{ label: "Gate" }, { label: "Needs", numeric: true }, { label: "This run", numeric: true }, { label: "Input moved" }, { label: "In this run", numeric: true }, { label: "Passes at", numeric: true }],
+      rows: body,
+    },
+    { type: "paragraph", muted: true, text: "One input is moved at a time. Everything else is held." },
+  ];
 }
 
 export function buildModel(x: ArtifactInput): DocModel {
@@ -365,7 +396,7 @@ export function buildModel(x: ArtifactInput): DocModel {
     blocks.push(...weakestStress(f, r));
     // An approved deal has no gate to move; its stresses stand in for the section.
     blocks.push(...(r.verdict.code === "APPROVE" ? [stresses(f, r)] : changeTheAnswer(f, x)));
-    blocks.push(...notFoundBlocks(x), inputsAppendix(f, x));
+    blocks.push(...notFoundBlocks(x), { type: "paragraph", muted: true, text: "Every input and its source is listed in the IC memo and the lender package." });
   } else {
     blocks.push(verdict, ...sponsorStatedBlocks(f, x));
     const i = x.input;

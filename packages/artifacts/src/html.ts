@@ -49,7 +49,7 @@ function block(b: Block): string {
     case "stats":
       return `<div class="stats">${b.items.map((i) => `<div><span class="label">${esc(i.label)}</span><span class="num big">${esc(i.value)}</span></div>`).join("")}</div>`;
     case "table":
-      return `<section class="tbl">${b.caption ? `<h3>${esc(b.caption)}</h3>` : ""}<table><thead><tr>${b.columns
+      return `<section class="tbl${b.rows.length > 12 ? " long" : ""}">${b.caption ? `<h3>${esc(b.caption)}</h3>` : ""}<table><thead><tr>${b.columns
         .map((c) => `<th class="${c.numeric ? "r" : ""}">${esc(c.label)}</th>`)
         .join("")}</tr></thead><tbody>${b.rows
         .map(
@@ -89,9 +89,13 @@ h1{font-family:'Newsreader',Georgia,serif;font-weight:500;font-size:30pt;line-he
 .label{font-size:8pt;font-weight:500;letter-spacing:.06em;text-transform:uppercase;color:#454A55}
 .num{font-family:'IBM Plex Mono',ui-monospace,monospace;font-variant-numeric:tabular-nums}
 .big{font-size:13pt}
-h2{font-size:11pt;font-weight:600;margin:14pt 0 6pt}
+h2{font-size:11pt;font-weight:600;margin:14pt 0 6pt;break-after:avoid}
 h3{font-size:10.5pt;font-weight:600;margin:0 0 5pt}
 .tbl{margin:0 0 14pt;break-inside:avoid}
+.tbl.long{break-inside:auto}
+.long td{padding:2pt 6pt 2pt 0}
+.long td.num{white-space:nowrap}
+tr{break-inside:avoid}
 table{width:100%;border-collapse:collapse;font-size:9.5pt}
 th{text-align:left;font-size:8pt;font-weight:500;color:#454A55;border-bottom:1px solid #15171C;padding:4pt 6pt 4pt 0}
 td{padding:4pt 6pt 4pt 0;border-bottom:1px solid #DDD8CC;vertical-align:top}

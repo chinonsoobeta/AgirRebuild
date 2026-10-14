@@ -1,7 +1,7 @@
 import { describe, expect, test } from "vitest";
 import { FIELD_BY_KEY, POLICY_V1, type EngineInput } from "@agir/contracts";
 import { createHash } from "node:crypto";
-import { assemble, canonicalJson, ENGINE_VERSION, shockInput, underwrite, type AssumptionRow } from "@agir/engine";
+import { assemble, canonicalJson, ENGINE_VERSION, underwrite, type AssumptionRow } from "@agir/engine";
 import { consolidate, extractCandidates, type SourcedCandidate } from "@agir/extraction";
 import { loadOracle } from "@agir/testkit";
 import { developmentDeal } from "../../engine/test/fixtures.ts";
@@ -295,7 +295,7 @@ describe("the build decision report", () => {
     const seen: string[] = [];
     for (const r of table(x)) {
       gate = r[0] || gate;
-      if (!name.test(r[3]!)) continue;
+      if (!name.test(r[3]!) || !/^[$\d]/.test(r[5]!)) continue;
       const key = x.result.verdict.gates.find((g) => g.label === gate)!.key;
       seen.push(r[5]!);
       const after = underwrite(apply(x.input, num(r[5]!), r[3]!), POLICY_V1);
@@ -312,7 +312,10 @@ describe("the build decision report", () => {
     const seen = passAfterRounding(rent, /^Rent, Apt/, (i, to) => ({ ...i, revenue: i.revenue.map((c) => ({ ...c, rentMonthly: to })) }));
     expect(seen.every((s) => /^\$[\d,]+\/mo$/.test(s))).toBe(true);
     const x = dealInput(1);
-    passAfterRounding(x, /^Project cost$/, (i, to) => shockInput(i, { costPct: (to / (i.budget.land + i.budget.hard + i.budget.soft + i.budget.contingency + i.budget.other) - 1) * 100 }));
+    passAfterRounding(x, /^Project cost$/, (i, to) => {
+      const k = to / (i.budget.land + i.budget.hard + i.budget.soft + i.budget.contingency + i.budget.other);
+      return { ...i, budget: { land: i.budget.land * k, hard: i.budget.hard * k, soft: i.budget.soft * k, contingency: i.budget.contingency * k, other: i.budget.other * k } };
+    });
     passAfterRounding(x, /^Exit cap rate$/, (i, to) => ({ ...i, exitCapPct: to }));
     for (const t of [rent, x]) expect(verifyProvenance(visibleText(renderHtml(buildModel(t))), buildModel(t).formatter.manifest).orphans).toEqual([]);
     // A value already on the grid is not moved a step.
