@@ -332,6 +332,15 @@ describe("the build decision report", () => {
       expect(r[5]).toMatch(/^\+\d+\.\d{2}%$/);
     }
     expect(table(x).some((r) => /^Rent, (1BR|2BR|3BR)/.test(r[3]!))).toBe(false);
+    // The printed share, applied to every rent, passes its gate.
+    let gate = "";
+    for (const r of table(x)) {
+      gate = r[0] || gate;
+      if (!/^Rent, all/.test(r[3]!) || !r[5]!.startsWith("+")) continue;
+      const k = 1 + Number(r[5]!.slice(1, -1)) / 100;
+      const after = underwrite({ ...x.input, revenue: x.input.revenue.map((c) => ({ ...c, rentMonthly: c.rentMonthly && c.rentMonthly * k, rentPsfAnnual: c.rentPsfAnnual && c.rentPsfAnnual * k })) }, POLICY_V1);
+      expect(after.verdict.gates.find((g) => g.label === gate)!.status, `${gate} at ${r[5]}`).toBe("passed");
+    }
   });
   test("every failing gate shares one table, each gate named once", () => {
     const x = dealInput(1);
