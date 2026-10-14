@@ -48,7 +48,7 @@ npm run gate -- --tier=release   # typecheck, every test, web build
 
 ## Rules the code enforces
 
-- Only the engine produces numbers; no model is consulted anywhere.
+- Only the engine produces numbers. A model may suggest a label for a figure the reader could not label, only when a workspace owner turns that on; a person confirms it, and a model never supplies a value.
 - The engine reads only approved or explicitly default-accepted inputs. Missing, conflicting,
   pending or out-of-range inputs block the run and are named.
 - A conflict resolves only to a documented value. Overriding a material field needs a written
