@@ -1,11 +1,12 @@
 import { describe, expect, test } from "vitest";
-import { FIELD_BY_KEY, POLICY_V1 } from "@agir/contracts";
+import { FIELD_BY_KEY, POLICY_V1, type EngineInput } from "@agir/contracts";
 import { createHash } from "node:crypto";
-import { assemble, canonicalJson, ENGINE_VERSION, underwrite, type AssumptionRow } from "@agir/engine";
+import { assemble, canonicalJson, ENGINE_VERSION, shockInput, underwrite, type AssumptionRow } from "@agir/engine";
 import { consolidate, extractCandidates, type SourcedCandidate } from "@agir/extraction";
 import { loadOracle } from "@agir/testkit";
 import { developmentDeal } from "../../engine/test/fixtures.ts";
-import { buildModel, renderArtifact, renderHtml, verifyProvenance, visibleText, type ArtifactInput } from "../src/index.ts";
+import { roundToward } from "../src/model.ts";
+import { buildModel, htmlToPdf, RendererUnavailableError, renderArtifact, renderHtml, verifyProvenance, visibleText, type ArtifactInput } from "../src/index.ts";
 
 function mapleInput(kind: ArtifactInput["kind"]): ArtifactInput {
   const deal = loadOracle("maple-heights");
@@ -225,10 +226,10 @@ describe("artifacts", () => {
 
 describe("the build decision report", () => {
   /** The engine's own development deal with its rents scaled: 1 fails every gate, 1.6 passes them all. */
-  function dealInput(rentScale: number): ArtifactInput {
+  function dealInput(rentScale: number, edit: (i: EngineInput) => EngineInput = (i) => i): ArtifactInput {
     const base = mapleInput("build_decision");
     const d = developmentDeal();
-    const input = { ...d, revenue: d.revenue.map((c) => ({ ...c, rentMonthly: c.rentMonthly && c.rentMonthly * rentScale, rentPsfAnnual: c.rentPsfAnnual && c.rentPsfAnnual * rentScale })) };
+    const input = edit({ ...d, revenue: d.revenue.map((c) => ({ ...c, rentMonthly: c.rentMonthly && c.rentMonthly * rentScale, rentPsfAnnual: c.rentPsfAnnual && c.rentPsfAnnual * rentScale })) });
     const policyHash = createHash("sha256").update(canonicalJson(POLICY_V1)).digest("hex");
     return { ...base, run: { ...base.run, policyHash }, input, result: underwrite(input, POLICY_V1), assumptions: [], notFound: [] };
   }
@@ -245,12 +246,14 @@ describe("the build decision report", () => {
     expect(model.kicker).toBe("Build decision");
     expect(scan.orphans).toEqual([]);
     const at = (s: string) => text.indexOf(s);
-    const order = ["Yield on cost", "Sizing DSCR (weakest year)", "Weakest stress", "What would change the answer", "Approved inputs and where each came from"].map(at);
+    const order = ["Yield on cost", "Sizing DSCR (weakest year)", "Weakest stress", "What would change the answer", "Every input and its source"].map(at);
     expect(order.every((n) => n >= 0)).toBe(true);
     expect([...order].sort((a, b) => a - b)).toEqual(order);
     expect(text).toContain("Weakest stress: Combined");
     expect(text).toContain("Everything else is held");
-    expect(text).toContain("rents move together, by the same share");
+    expect(text).not.toContain("rents move together");
+    expect(text).toContain("Every input and its source is listed in the IC memo and the lender package.");
+    expect(text).not.toContain("Approved inputs and where each came from");
     expect(text).toContain("Out of range");
     expect(text).toContain("Not monotonic");
     expect(model.formatter.manifest.some((e) => /^run:breakeven\.equity_multiple\.rent/.test(e.ref))).toBe(true);
@@ -279,5 +282,89 @@ describe("the build decision report", () => {
     const t = textOf(edited).text;
     expect(t).toContain("Not shown: this run was made under a different policy");
     expect(t).not.toContain("Everything else is held");
+  });
+
+  const table = (x: ArtifactInput) => {
+    const t = buildModel(x).blocks.find((b) => b.type === "table" && b.columns[0]!.label === "Gate");
+    return t && t.type === "table" ? t.rows : [];
+  };
+  const num = (cell: string) => Number(cell.replace(/[^\d.]/g, ""));
+  /** Every printed "Passes at" figure of one kind, put back into the run as that one input: does its gate pass? */
+  function passAfterRounding(x: ArtifactInput, name: RegExp, apply: (i: EngineInput, to: number, label: string) => EngineInput) {
+    let gate = "";
+    const seen: string[] = [];
+    for (const r of table(x)) {
+      gate = r[0] || gate;
+      if (!name.test(r[3]!)) continue;
+      const key = x.result.verdict.gates.find((g) => g.label === gate)!.key;
+      seen.push(r[5]!);
+      const after = underwrite(apply(x.input, num(r[5]!), r[3]!), POLICY_V1);
+      expect(after.verdict.gates.find((g) => g.key === key)!.status, `${gate}: ${r[3]} at ${r[5]}`).toBe("passed");
+    }
+    expect(seen.length).toBeGreaterThan(0);
+    return seen;
+  }
+
+  test("a Passes at figure is rounded toward passing at print precision, so it passes when put back", () => {
+    // One unit type, so rent prints as its own row.
+    const one = (i: EngineInput): EngineInput => ({ ...i, revenue: [{ key: "A", label: "Apt", basis: "per_unit", units: 120, rentMonthly: 2_333.33 }] });
+    const rent = dealInput(1, one);
+    const seen = passAfterRounding(rent, /^Rent, Apt/, (i, to) => ({ ...i, revenue: i.revenue.map((c) => ({ ...c, rentMonthly: to })) }));
+    expect(seen.every((s) => /^\$[\d,]+\/mo$/.test(s))).toBe(true);
+    const x = dealInput(1);
+    passAfterRounding(x, /^Project cost$/, (i, to) => shockInput(i, { costPct: (to / (i.budget.land + i.budget.hard + i.budget.soft + i.budget.contingency + i.budget.other) - 1) * 100 }));
+    passAfterRounding(x, /^Exit cap rate$/, (i, to) => ({ ...i, exitCapPct: to }));
+    for (const t of [rent, x]) expect(verifyProvenance(visibleText(renderHtml(buildModel(t))), buildModel(t).formatter.manifest).orphans).toEqual([]);
+    // A value already on the grid is not moved a step.
+    expect(roundToward(2_174.0000000001, 1, 1)).toBe(2_174);
+    expect(roundToward(5_412_300.6, -1, 1)).toBe(5_412_300);
+  });
+  test("rents that move together print as one row with the shock", () => {
+    const x = dealInput(1);
+    const rows = table(x).filter((r) => r[3]!.startsWith("Rent"));
+    expect(rows.length).toBeGreaterThan(0);
+    for (const r of rows.filter((r) => r[5] !== "Out of range" && r[5] !== "No effect" && r[5] !== "Not monotonic")) {
+      expect(r[3]).toBe("Rent, all 3 unit types (same share)");
+      expect(r[4]).toBe("\u2014");
+      expect(r[5]).toMatch(/^\+\d+\.\d{2}%$/);
+    }
+    expect(table(x).some((r) => /^Rent, (1BR|2BR|3BR)/.test(r[3]!))).toBe(false);
+  });
+  test("every failing gate shares one table, each gate named once", () => {
+    const x = dealInput(1);
+    const failing = x.result.verdict.gates.filter((g) => g.status === "failed");
+    expect(failing.length).toBeGreaterThan(1);
+    const model = buildModel(x);
+    expect(model.blocks.filter((b) => b.type === "table" && b.columns[0]!.label === "Gate")).toHaveLength(1);
+    const rows = table(x);
+    for (const g of failing) expect(rows.filter((r) => r[0] === g.label)).toHaveLength(1);
+    expect(rows.filter((r) => r[0] !== "").length).toBe(failing.length);
+  });
+  test("the worst case (five failing gates, many rents, sponsor-stated inputs) fits two pages", async () => {
+    const many = (i: EngineInput): EngineInput => ({ ...i, revenue: Array.from({ length: 8 }, (_, k) => ({ key: `T${k}`, label: `Type ${k + 1}`, basis: "per_unit" as const, units: 15, rentMonthly: 1_800 + 150 * k })) });
+    const x = dealInput(0.8, many);
+    x.assumptions = mapleInput("build_decision").assumptions.slice(0, 6).map((a) => ({ ...a, sponsorStated: true }));
+    expect(x.result.verdict.gates.filter((g) => g.status === "failed")).toHaveLength(5);
+    expect(buildModel(x).blocks.some((b) => b.type === "table" && b.columns[0]!.label === "Gate")).toBe(true);
+    let pdf;
+    try {
+      pdf = await htmlToPdf(renderHtml(buildModel(x)));
+    } catch (e) {
+      if (e instanceof RendererUnavailableError) return;
+      throw e;
+    }
+    const pages = new TextDecoder("latin1").decode(pdf).match(/\/Type\s*\/Page[^s]/g)?.length ?? 0;
+    expect(pages).toBeGreaterThan(0);
+    expect(pages).toBeLessThanOrEqual(2);
+  }, 60_000);
+  test("every artifact kind passes the provenance scan with no orphans", () => {
+    for (const x of [dealInput(1), dealInput(1.6)]) {
+      const model = buildModel(x);
+      expect(verifyProvenance(visibleText(renderHtml(model)), model.formatter.manifest).orphans).toEqual([]);
+    }
+    for (const kind of ["ic_memo", "lender_package", "build_decision", "model_export"] as const) {
+      const model = buildModel(mapleInput(kind));
+      expect(verifyProvenance(visibleText(renderHtml(model)), model.formatter.manifest).orphans, kind).toEqual([]);
+    }
   });
 });
