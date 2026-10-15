@@ -3538,6 +3538,105 @@ describe("revenue layouts: income rows, unit types as columns, named types, suit
   test("nothing is multiplied or summed: a count and a per-home rent stay as written", () => {
     expect(Object.values(items(lines("Orchard row: 3 homes at $2,300 per home per month")))).not.toContain(6_900);
   });
+
+  // Task 55
+  test("a unit type written after a count labels that line's rent, one item per type, in English and French (task 55)", () => {
+    expect(items(lines("Dwellings planned: 4 three-bed; Rent for each dwelling: $2,600 per unit per month", "Dwellings planned: 7 studios; Rent for each dwelling: $1,350 per unit per month"))).toEqual({
+      "3BR|unit_count": 4,
+      "3BR|unit_rent_monthly": 2_600,
+      "Studio|unit_count": 7,
+      "Studio|unit_rent_monthly": 1_350,
+    });
+    expect(items(lines("Logements prévus : 3 trois et demie ; loyer mensuel par logement : 1 650 $ par logement par mois"))).toEqual({ "3½|unit_count": 3, "3½|unit_rent_monthly": 1_650 });
+  });
+  test("negative: a count with no unit type reads as before, and storeys and stalls make no item (task 55)", () => {
+    expect(items(lines("Units: 12"))).toEqual({ "All units|unit_count": 12 });
+    expect(itemKeys(lines("Floors: 3 storeys", "Parking: 4 parking stalls"))).toEqual([]);
+    // A suite number followed by a type is a name and a number, not a count.
+    expect(items(lines("Suite 12 two-bed"))).toEqual({});
+  });
+  test("a plain-language rent per unit is the monthly rent; a yearly one is divided by 12 with its note (task 55)", () => {
+    for (const [label, rent] of [["Monthly rent for each suite: $1,750", 1_750], ["Monthly price for each home: $1,800", 1_800], ["Asking lease per door monthly: $1,900", 1_900], ["Loyer demandé par logement : 1 650 $", 1_650]] as const) {
+      expect(items(lines(label)), label).toEqual({ "All units|unit_rent_monthly": rent });
+    }
+    const yearly = extractCandidates(lines("Annual lease per dwelling: $21,600"));
+    expect(yearly.candidates.map((c) => [c.fieldKey, c.value])).toEqual([["unit_rent_monthly", 1_800]]);
+    expect(yearly.candidates[0]!.unitSeen).toMatch(/divided by 12/);
+  });
+  test("negative: a sale price, a price per area or an asking price with no period is no rent (task 55)", () => {
+    for (const s of ["Price per door paid by the buyer: $90,000", "Sale price for each suite: $310,000", "Monthly price per sf: $4", "Asking price per door: $450,000", "Prix de vente par logement : 310 000 $"]) {
+      expect(items(lines(s)), s).toEqual({});
+    }
+  });
+  test("a unit-mix table is found by its header words, and each type reads with its count and rent (task 55)", () => {
+    expect(items(withTables([], grid(["Plan", "Inventory by plan", "Monthly price for each suite"], ["Studio", "5", "$1,250"], ["2-bed", "3", "$2,050"], ["Total", "8", ""])))).toEqual({
+      "Studio|unit_count": 5,
+      "Studio|unit_rent_monthly": 1_250,
+      "2BR|unit_count": 3,
+      "2BR|unit_rent_monthly": 2_050,
+    });
+    expect(items(withTables([], grid(["Type", "Nombre", "Loyer demandé par logement"], ["Studio", "2", "1 100 $"], ["4½", "3", "1 800 $"])))).toEqual({ "Studio|unit_count": 2, "Studio|unit_rent_monthly": 1_100, "4½|unit_count": 3, "4½|unit_rent_monthly": 1_800 });
+  });
+  test("negative: months or years as headers are no unit mix, and a non-unit row or as-is figure is still refused (task 55)", () => {
+    expect(itemKeys(withTables([], grid(["Plan", "Jan", "Feb"], ["Studio", "5", "$1,250"], ["2-bed", "3", "$2,050"])))).not.toContain("Studio");
+    const r = extractCandidates(withTables([], grid(["Plan", "Homes in total", "Asking rent per home monthly"], ["Existing retail", "2", "$1,000"], ["2-bed", "3", "$2,100"])));
+    expect(r.candidates.filter((c) => c.itemKey).map((c) => c.itemKey)).toEqual(["2BR", "2BR"]);
+    expect(r.other.some((o) => AS_IS.test(o.note ?? ""))).toBe(true);
+  });
+  test("a field, a dash and a whole unit type name the item, in lines and rows; both orders read, and the key keeps no separator (task 55)", () => {
+    const want = { "Studio|unit_count": 6, "Studio|unit_rent_monthly": 1_450 };
+    expect(items(lines("Number of units – studio: 6", "Rent per door per month – studio: $1,450"))).toEqual(want);
+    expect(items(withTables([], grid(["Number of units – studio", "6"], ["Rent per door per month – studio", "$1,450"])))).toEqual(want);
+    expect(items(lines("Studio – number of units: 6", "Studio - rent per door per month: $1,450"))).toEqual(want);
+    expect(itemKeys(lines("Studio - rent per door per month: $1,450"))).toEqual(["Studio"]);
+  });
+  test("negative: a dash before something that is no unit type names no item (task 55)", () => {
+    expect(itemKeys(lines("Number of units – phase two: 6", "Rent per door per month – total: $1,450")).filter((k) => k !== "All units")).toEqual([]);
+  });
+  test("a category column beside the line items is set aside; its word stays in the context and the rows read (task 55)", () => {
+    const sheet = grid(
+      ["Uses", "Land purchase", "450000"],
+      ["Uses", "Hard costs", "1800000"],
+      ["Uses", "Soft costs", "300000"],
+      ["Assumptions", "Construction period", "12 months"],
+      ["Revenue", "Rent per door per month – studio", "$1,500"],
+      ["Revenue", "Number of units – studio", "8"],
+    );
+    const r = extractCandidates(withTables([], sheet));
+    expect(r.candidates.map((c) => [c.fieldKey, c.itemKey, c.value])).toEqual([["land_cost", null, 450_000], ["hard_cost", null, 1_800_000], ["soft_cost", null, 300_000], ["construction_months", null, 12], ["unit_rent_monthly", "Studio", 1_500], ["unit_count", "Studio", 8]]);
+    expect(r.candidates[1]!.context).toMatch(/Uses/);
+    expect(r.other).toEqual([]);
+    // A third column of notes is no part of the label.
+    const noted = extractCandidates(withTables([], grid(["Uses", "Land purchase", "450000", "paid at closing"], ["Uses", "Hard costs", "1800000", "fixed price"], ["Uses", "Soft costs", "300000", "estimate"])));
+    expect(noted.candidates.map((c) => [c.fieldKey, c.value])).toEqual([["land_cost", 450_000], ["hard_cost", 1_800_000], ["soft_cost", 300_000]]);
+  });
+  test("negative: a two-column sheet, a sheet with a header row and a first column of distinct labels read as before (task 55)", () => {
+    const two = extractCandidates(withTables([], grid(["Land purchase", "450000"], ["Hard costs", "1800000"], ["Soft costs", "300000"])));
+    expect(two.candidates.map((c) => c.fieldKey)).toEqual(["land_cost", "hard_cost", "soft_cost"]);
+    const money = (n: number, i: number): Cell => ({ text: String(n), ref: `C${i}`, number: n });
+    const headed = extractCandidates(withTables([], { name: "Sheet", rows: [grid(["Group", "Line item", "Amount"]).rows[0]!, ...[["Land purchase", 450_000], ["Hard costs", 1_800_000], ["Soft costs", 300_000]].map(([l, n], i) => [{ text: "Uses", ref: `A${i}` }, { text: l as string, ref: `B${i}` }, money(n as number, i)])] }));
+    expect(headed.candidates.map((c) => c.fieldKey)).toEqual(["land_cost", "hard_cost", "soft_cost"]);
+    // Distinct, non-section first words are labels: the second text cell is not read in their place.
+    const distinct = extractCandidates(withTables([], grid(["Site", "Corner lot", "450000"], ["Frame", "Wood", "1800000"], ["Permit", "City", "300000"])));
+    expect(distinct.candidates.map((c) => c.fieldKey)).not.toContain("land_cost");
+  });
+  test("each layout of a full invented document reads every type with its count and rent (task 55)", () => {
+    expect(items(lines("Dwellings planned: 4 three-bed; Rent for each dwelling: $2,600 per unit per month", "Dwellings planned: 7 studios; Rent for each dwelling: $1,350 per unit per month"))).toEqual({ "3BR|unit_count": 4, "3BR|unit_rent_monthly": 2_600, "Studio|unit_count": 7, "Studio|unit_rent_monthly": 1_350 });
+    expect(items(withTables([], grid(["Plan", "Qty", "Asking rent per home monthly"], ["Studio", "7", "$1,350"], ["3-bed", "4", "$2,600"])))).toEqual({ "Studio|unit_count": 7, "Studio|unit_rent_monthly": 1_350, "3BR|unit_count": 4, "3BR|unit_rent_monthly": 2_600 });
+    expect(items(lines("Number of units – studio: 7", "Rent per door per month – studio: $1,350", "Number of units – three-bed: 4", "Rent per door per month – three-bed: $2,600"))).toEqual({ "Studio|unit_count": 7, "Studio|unit_rent_monthly": 1_350, "3BR|unit_count": 4, "3BR|unit_rent_monthly": 2_600 });
+    expect(items(withTables([], grid(["Revenue", "Number of units – studio", "7"], ["Revenue", "Rent per door per month – studio", "$1,350"], ["Revenue", "Number of units – three-bed", "4"], ["Revenue", "Rent per door per month – three-bed", "$2,600"], ["Uses", "Hard costs", "1800000"], ["Uses", "Land purchase", "450000"], ["Uses", "Soft costs", "300000"])))).toEqual({ "Studio|unit_count": 7, "Studio|unit_rent_monthly": 1_350, "3BR|unit_count": 4, "3BR|unit_rent_monthly": 2_600 });
+  });
+  test("'example' inside an e-mail or web address is no marker; the word on its own still is (task 55)", () => {
+    for (const first of ["From: Dana Roe <dana@builder.example>", "builder.example/projects", "dana@builder.example", "www.builder-example.ca"]) {
+      const r = extractCandidates(lines(first, "Hard costs: $2,100,000"));
+      expect(r.candidates.map((c) => [c.fieldKey, c.value]), first).toEqual([["hard_cost", 2_100_000]]);
+    }
+    for (const first of ["Example budget", "Example figures"]) {
+      const r = extractCandidates(lines(first, "Hard costs: $2,100,000"));
+      expect(r.candidates, first).toEqual([]);
+      expect(r.other.some((o) => o.note === "Marked as not part of this deal"), first).toBe(true);
+    }
+  });
 });
 
 describe("wrong reads found by the V4 trap corpus: scales, spaced digits, allowances, bases, lone items (task 47)", () => {
