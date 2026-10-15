@@ -1313,6 +1313,16 @@ describe("reading safety: a figure that may be the wrong one is shown, never use
       // "replaces" keeps its own rule
       expect(pick(read("Hard costs $980,000, which replaces the earlier $900,000."))).toEqual([["hard_cost", 980_000]]);
     });
+    test("audit: a second with no loan word, a 'now' that only introduces a figure, and a base-scenario sheet", () => {
+      for (const line of ["Phase one site works are $700,000; the second is $640,000.", "We got two bids, the first at $1,310,000 and the second: $1,280,000."]) expect(pick(read(line)).filter((p) => String(p[0]).startsWith("mezz_")), line).toEqual([]);
+      // a bare "the second" in its own clause is unsure: shown, never read as the senior loan
+      expect(pick(read("Construction loan $1,900,000; the second is $260,000 at 11%."))).toEqual([["senior_loan_amount", 1_900_000]]);
+      expect(pick(read("Hard costs $1,750,000, now including the $60,000 demolition.")).filter((p) => p[0] === "hard_cost")).toEqual([["hard_cost", 1_750_000]]);
+      expect(pick(read("Hard costs: $1,750,000, now $1,810,000.")).filter((p) => p[0] === "hard_cost")).toEqual([["hard_cost", 1_750_000], ["hard_cost", 1_810_000]]);
+      const rows = [["Land", [410_000, "$"]]] as Cellish[][];
+      for (const name of ["Base scenario", "Scénario retenu"]) expect(pick(sheets(grid(name, ...rows))), name).toEqual([["land_cost", 410_000]]);
+      expect(pick(sheets(grid("Base vs downside", ...rows)))).toEqual([]);
+    });
   });
 
   test("a year in a label line is no amount; a figure with no mark of a year is still read", () => {

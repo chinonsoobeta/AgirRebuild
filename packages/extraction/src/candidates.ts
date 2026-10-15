@@ -527,9 +527,12 @@ function labelValueForm(text: string): string {
   return leader ? leader[1]! + ":" + " ".repeat(leader[0].length - leader[1]!.length - 1) + text.slice(leader[0].length) : text;
 }
 
+const BASE_SCENARIO_RE = /\b(?:base|selected|chosen|proposed|retenu)\s+scenarios?\b|\bscenarios?\s+(?:de base|retenu|selected|chosen|proposed)\b/g;
 // A figure that follows one of these words in the same line corrects the figure before it (task 56).
-const CORRECTION_RE = /\b(?:corrected|revised|amended|updated|restated|now|corrige\w*|revise\w*|modifie\w*|mis a jour)\b/;
-const corrects = (gap: string, prev: NumberToken, t: NumberToken) => CORRECTION_RE.test(fold(gap)) && prev.unit === t.unit && !!prev.currency === !!t.currency;
+const CORRECTION_RE = /\b(?:corrected|revised|amended|updated|restated|corrige\w*|revise\w*|modifie\w*|mis a jour)\b/;
+// "now" corrects only the figure right after it ("now $1,030,000"), not one it merely introduces ("now including the $90,000 site prep").
+const NOW_RE = /\bnow(?: at| to| is)?\s*:?\s*$/;
+const corrects = (gap: string, prev: NumberToken, t: NumberToken) => (CORRECTION_RE.test(fold(gap)) || NOW_RE.test(fold(gap))) && prev.unit === t.unit && !!prev.currency === !!t.currency;
 
 const CHANGE_FROM_RE = /(?<![\p{L}])(?:moved|went|increased|decreased|revised|changed|rose|fell|passe|pass[ée]e?s?)\s+(?:from|de|d['’])\s*$/iu;
 
@@ -1906,7 +1909,8 @@ export function extractCandidates(doc0: NormalizedDocument): ExtractionResult {
     // A sheet named old, original, prior or archive holds no current figures: what it gave is shown, not read.
     // A sheet named for a scenario (downside, lender case) holds no base-case figures either (task 56).
     const old = OLD_SHEET_RE.test(fold(t.name));
-    if (!old && !SCENARIO_SHEET_RE.test(fold(t.name))) continue;
+    // "Base scenario" or "Scénario retenu" is the base case; "Base vs downside" still names a scenario.
+    if (!old && !SCENARIO_SHEET_RE.test(fold(t.name).replace(BASE_SCENARIO_RE, " "))) continue;
     const [named, note] = old ? [OLD_SHEET_RE, SUPERSEDED_LABEL_NOTE] : [SCENARIO_SHEET_RE, SCENARIO_SHEET_NOTE];
     // (a name that also says "not part of the deal" in other words keeps that note)
     if (!markedNotPart(fold(t.name).replace(new RegExp(named, "g"), " "))) for (const o of result.other.slice(beforeOther)) if (o.note === NOT_PART_NOTE) o.note = note;
