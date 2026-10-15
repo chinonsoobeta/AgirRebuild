@@ -1175,6 +1175,75 @@ describe("reading safety: a figure that may be the wrong one is shown, never use
     });
   });
 
+  describe("task 54: draw conditions, loan terms, partner rates, unused scenarios and old sheets", () => {
+    const COND = "A lender's condition, not the occupancy assumption";
+    const TERM_NOTE = "A loan's term, not the build period, hold or amortization";
+    const NOT_PART = "Marked as not part of this deal";
+    const OLD_NOTE = "An earlier figure, named old or original by its own label; a later figure for the line replaces it";
+    test("an occupancy that releases an advance is the lender's condition; stabilized occupancy still reads", () => {
+      for (const [line, v] of [
+        ["The final tranche is funded once the property is 84% leased.", 84],
+        ["Holdback paid upon reaching 78% occupancy.", 78],
+        ["La banque autorise le dernier tirage lorsque l'immeuble est loué à 82 %.", 82],
+        ["Retenue libérée à 77 % d'occupation.", 77],
+      ] as const) {
+        const r = read(line);
+        expect(pick(r), line).toEqual([]);
+        expect(noteOf(r, v), line).toBe(COND);
+      }
+      expect(pick(read("Stabilized occupancy: 94%"))).toEqual([["stabilized_occupancy_pct", 94]]);
+      expect(pick(read("We expect 93% occupancy after a nine-month lease-up."))).toEqual([["stabilized_occupancy_pct", 93]]);
+    });
+    test("a figure named as the loan's term is never its interest-only period", () => {
+      for (const line of ["The 30-month term is separate from the interest-only period.", "Loan term 20 months; interest only for 8 months."]) {
+        const r = read(line);
+        expect(pick(r).filter((p) => p[0] === "senior_io_months" && (p[1] === 30 || p[1] === 20)), line).toEqual([]);
+        expect(noteOf(r, line.startsWith("The") ? 30 : 20), line).toBe(TERM_NOTE);
+      }
+      expect(pick(read("Loan term 20 months; interest only for 8 months."))).toContainEqual(["senior_io_months", 8]);
+      expect(pick(read("12 months IO."))).toContainEqual(["senior_io_months", 12]);
+      expect(pick(read("Interest-only term: 15 months"))).toContainEqual(["senior_io_months", 15]);
+    });
+    test("a partner's rate is never a loan's rate", () => {
+      for (const [line, v] of [["Hurdle rate: 9%", 9], ["Priority return rate: 7%", 7]] as const) {
+        const r = read(line);
+        expect(pick(r).filter((p) => p[0] === "senior_rate_pct"), line).toEqual([]);
+        expect(r.other.some((o) => o.value === v) || pick(r).some((p) => p[0] === "preferred_return_pct" && p[1] === v), line).toBe(true);
+      }
+      expect(pick(read("Preference rate: 7%"))).toEqual([["preferred_return_pct", 7]]);
+      expect(noteOf(read("Promote rate: 20%"), 20)).not.toBe("");
+      expect(pick(read("Taux de rendement privilégié : 6 %"))).toEqual([["preferred_return_pct", 6]]);
+      expect(pick(read("Interest rate: 6.5%"))).toEqual([["senior_rate_pct", 6.5]]);
+      expect(pick(read("Senior loan: 6.4%"))).toEqual([["senior_rate_pct", 6.4]]);
+    });
+    test("a line marked as an unused scenario is not part of the deal", () => {
+      for (const [line, v] of [
+        ["Scenario not pursued: loan $2,900,000 at 7%.", 2_900_000],
+        ["Option B (rejected): loan $3,100,000 at 8%.", 3_100_000],
+        ["Scénario non retenu : prêt de 3 300 000 $.", 3_300_000],
+        ["Option écartée : prêt de 3 400 000 $.", 3_400_000],
+        ["The earlier structure is superseded: loan $3,500,000.", 3_500_000],
+      ] as const) {
+        const r = read(line);
+        expect(pick(r), line).toEqual([]);
+        expect(noteOf(r, v), line).toBe(NOT_PART);
+      }
+      expect(pick(read("Scenario not pursued", "Loan amount: $2,900,000", "Rate: 7%", "Current plan", "Loan amount: $3,000,000"))).toEqual([["senior_loan_amount", 3_000_000]]);
+      expect(pick(read("Downside scenario: rate 8.5%.")).filter((p) => p[0] === "senior_rate_pct")).toEqual([]);
+    });
+    test("every figure on a sheet named old or superseded is shown, not read; other sheets read", () => {
+      const rows = [["Land", [410_000, "$"]], ["Hard costs", [1_900_000, "$"]]] as Cellish[][];
+      for (const name of ["Prior version", "Archive", "Superseded", "Ancien budget", "Original budget"]) {
+        const r = sheets(grid(name, ...rows));
+        expect(pick(r), name).toEqual([]);
+        expect(noteOf(r, 410_000), name).toBe(OLD_NOTE);
+      }
+      expect(pick(sheets(grid("Inputs", ...rows)))).toEqual([["land_cost", 410_000], ["hard_cost", 1_900_000]]);
+      const both = sheets(grid("Original budget", ["Land", [400_000, "$"]]), grid("Budget", ["Land", [410_000, "$"]]));
+      expect(pick(both)).toEqual([["land_cost", 410_000]]);
+    });
+  });
+
   test("a year in a label line is no amount; a figure with no mark of a year is still read", () => {
     expect(pick(read("Operating costs: the 2028 budget, $48,000"))).toEqual([["fixed_opex_annual", 48_000]]);
     expect(pick(read("Frais d'exploitation : budget 2028, 48 000 $"))).toEqual([["fixed_opex_annual", 48_000]]);
