@@ -93,7 +93,7 @@ const OPINION_NOTE = "An opinion of rent, not the deal's assumption";
 const AREA_WORD_RE = /\b(area|sf|sq ft|superficie|surface|gla|nrsf|rsf)\b/;
 // A lender's condition, or a figure true only today, is not the stabilized assumption.
 const LENDER_CONDITION = "A lender's condition, not the occupancy assumption";
-const CONDITION_RE = /\b(minimum|min|at least|before|prior to|until|consecutive months?|in order to|as a condition|conversion|first advance|funding|conditions?|covenants?|required|requires?|au moins|minimale?|avant|prealable\w*|deboursement|advances?|draws?|drawdowns?|disbursements?|holdbacks?|releas(?:es?|ed|ing)|funded|avances?|tirages?|debourse\w*|retenues?|versements?|libere\w*)\b/;
+const CONDITION_RE = /\b(minimum|min|at least|before|prior to|until|consecutive months?|in order to|as a condition|conversion|first advance|funding|conditions?|covenants?|required|requires?|au moins|minimale?|avant|prealable\w*|deboursement|advances?|draws?|drawdowns?|disbursements?|holdbacks?|releas(?:es?|ed|ing)|funded|avances?|tirages?|debourse\w*|retenues? de garantie|versements?|libere\w*)\b/;
 // A leased or occupied share with a condition marker is the lender's condition, whatever field it names.
 const LEASED_RE = /\b(pre-?leas\w*|leased|occupied|pre-?lou\w*|loue\w*|occupe\w*|occupancy|occupation)\b/;
 const CURRENT_RE = /\b(current|currently|today|as of|actuel(?:le)?|en date du)\b/;
@@ -133,6 +133,9 @@ const IO_RE = /\b(interest[- ]only|io|interets? seulement)\b/;
 // A partner's return, never a loan's rate; the preferred-return words read as that field, a promote is only shown.
 const PARTNER_RE = /\b(?:prefs?|preference|preferred|hurdle|priority returns?|privilegie\w*|prefere\w*|seuil de rendement|rendement prioritaire|promote|prime de performance)\b/;
 const PARTNER_PREF_RE = /\b(?:prefs?|preference|preferred|hurdle|priority returns?|privilegie\w*|prefere\w*|seuil de rendement|rendement prioritaire)\b/;
+// "Preferred lender" and "banque privilégiée" name the lender, and preferred equity is a class of capital: neither is a preferred return.
+const LENDER_PREF_RE = /\b(?:preferred|preference|priority|privilegie\w*|prefere\w*) (?:lenders?|banks?|loans?|mortgages?|financing|credit unions?|preteurs?|banques?|prets?)\b|\b(?:preteurs?|banques?|prets?) (?:privilegie|prefere)\w*/;
+const PREF_EQUITY_RE = /\bpref(?:s|erred)? equity\b|\bactions? privilegiee?s?\b/;
 const IO_START_RE = /^\s*(?:months?\s+|years?\s+|mois\s+|ans?\s+)?(?:of\s+|de\s+)?(?:interest[- ]only|io|interets? seulement)\b/;
 const INCLUDING_RE = /\b(including|incl|includes|comprenant|incluant|inclut)\b/;
 const BUDGET_NAME_RE = new RegExp(`\\b(${FIELDS.filter((f) => f.group === "budget").flatMap((f) => f.aliases).map((a) => a.replace(/[.*+?^${}()|[\]\\/]/g, "\\$&")).join("|")})\\b`);
@@ -684,8 +687,9 @@ function mapLabel(rawLabel: string, t: NumberToken, opts: MapOptions = {}): Mapp
     best = { def, alias, end: at[1], ...c };
   }
   // A label naming a partner's return never maps to a loan field.
-  if (t.unit === "%" && best && best.def.group === "senior" && PARTNER_RE.test(label)) {
-    return PARTNER_PREF_RE.test(label) ? asField(FIELD_BY_KEY.get("preferred_return_pct")!) ?? { kind: "unmapped" } : { kind: "ignored", reason: "A partner's return, not a loan's rate" };
+  const partner = label.replace(LENDER_PREF_RE, " ");
+  if (t.unit === "%" && best && best.def.group === "senior" && PARTNER_RE.test(partner)) {
+    return PARTNER_PREF_RE.test(partner) && !PREF_EQUITY_RE.test(partner) ? asField(FIELD_BY_KEY.get("preferred_return_pct")!) ?? { kind: "unmapped" } : { kind: "ignored", reason: "A partner's return, not a loan's rate" };
   }
   // A generic senior-loan label under another loan's scope is that loan's; a term it has no field for is shown, not given to the senior loan.
   if (best && best.def.group === "senior" && scope !== "senior") {
