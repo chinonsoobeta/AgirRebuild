@@ -36,8 +36,8 @@ const ITEMIZED_ALIASES: Record<string, string[]> = {
 export type Scope = "senior" | "mezzanine" | "refinance";
 
 const SCOPE_WORDS: Record<Scope, RegExp> = {
-  mezzanine: /\b(mezzanine|mezz|second mortgage|2nd mortgage|second charge|second[- ]ranking|second[- ]position|junior|subordinate loan|deuxieme rang|deuxieme hypotheque|pret de second rang|second rang)\b/,
-  refinance: /\b(take-?out|take out|refinanc\w*|permanent loan|permanent financing|exit financing|long[- ]term mortgage|pret permanent|financement permanent|financement de sortie|reprise(?!\s+(?:des?\s+|du\s+|de la\s+)?(?:travaux|chantier|construction|possession|bail|baux|terrain)))\b/,
+  mezzanine: /\b(mezzanine|mezz|second mortgage|2nd mortgage|second charge|second[- ]ranking|second[- ]position|junior|subordinate loan|deuxieme rang|deuxieme hypotheque|pret de second rang|second rang|(?:mic|mortgage investment corporation) (?:second|2nd)|private second|(?:the\s+)?second(?=\s*(?:is\b|:|\$))|^\s*second\s*$|preteur prive de second rang)\b/,
+  refinance: /\b(take-?out|take out|refinanc\w*|permanent loan|permanent financing|exit financing|long[- ]term mortgage|pret permanent|financement permanent|financement de sortie|permanent (?:mortgage|debt|facility|lender)|permanent (?=(?:io|interest|amorti[sz]\w*|repayment|rate|term)\b)|conversion (?:rate|coupon)|converts? to (?:(?:an?|the) )?(?:\$|\d|(?:[a-z-]+ ){0,2}(?:loan|mortgage|debt|financing|facility|rate))|term[- ]out|hypotheque permanente|pret a terme|reprise(?!\s+(?:des?\s+|du\s+|de la\s+)?(?:travaux|chantier|construction|possession|bail|baux|terrain)))\b/,
   senior: /\b(senior|construction loan|first mortgage|premier rang|pret de construction)\b/,
 };
 const TERM_SHEET_RE = /\b(term sheet|feuille de modalites)\b/;
@@ -536,6 +536,9 @@ const CREDITABLE = new Set(["land_cost", "hard_cost", "soft_cost", "contingency"
 const OLD_LABEL_RE = /(?:^|[^a-z])(?:ancien(?:ne)?s?|old|superseded|previous(?:ly)?|precedent\w*|formerly|original(?:ly)?|earlier)\s+(?:[a-z]+\s+){0,2}?(?:total|price|priced|prix|quote|quoted|cost|costs|couts?|budget|montant|travaux|land|terrain|contract|soumission|estimate|estimated)(?![a-z])/;
 // A sheet whose name says it is old holds no current figures.
 export const OLD_SHEET_RE = /\b(?:ancien(?:ne)?s?|old|superseded|previous|precedent\w*|formerly|original|earlier|prior|archiv\w*)\b/;
+// A sheet named for a scenario holds that scenario's figures, not the deal's base case.
+export const SCENARIO_SHEET_RE = /\b(?:downside|upside|sensitivit\w*|sensibilite|stress|scenarios?|what[- ]?if|(?:credit|lender|bank|worst|best) case|cas defavorable)\b/;
+export const SCENARIO_SHEET_NOTE = "A scenario sheet, not the deal's base case";
 export const SUPERSEDED_LABEL_NOTE = "An earlier figure, named old or original by its own label; a later figure for the line replaces it";
 
 /**

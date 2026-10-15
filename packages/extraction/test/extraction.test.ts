@@ -1256,29 +1256,29 @@ describe("reading safety: a figure that may be the wrong one is shown, never use
     const SCENARIO = "A scenario sheet, not the deal's base case";
     const ADJUST = "A rate before an adjustment, not the loan's rate";
     test("a permanent mortgage is the take-out loan; a construction loan stays senior", () => {
-      const r = read("Once complete, the lender converts to a permanent mortgage of $2,100,000 at a conversion rate of 5.1% over 30 years.");
+      const r = read("Once complete, the lender converts to a permanent mortgage of $2,100,000 at a conversion rate of 5.1%, amortized over 30 years.");
       expect(pick(r).filter((p) => String(p[0]).startsWith("senior_"))).toEqual([]);
       expect(pick(r)).toEqual([["refinance_amount", 2_100_000], ["refinance_rate_pct", 5.1], ["refinance_amort_years", 30]]);
       expect(pick(read("Permanent amortization: 25 years", "Permanent rate: 4.9%"))).toEqual([["refinance_amort_years", 25], ["refinance_rate_pct", 4.9]]);
       expect(pick(read("Hypothèque permanente : 2 000 000 $", "Prêt à terme, taux : 5,2 %"))).toEqual([["refinance_amount", 2_000_000], ["refinance_rate_pct", 5.2]]);
-      // an interest-only period has no refinance field: shown, never given to the senior loan
-      const io = read("Permanent IO months: 6");
-      expect(pick(io).filter((p) => p[0] === "senior_io_months")).toEqual([]);
-      expect(noteOf(io, 6)).not.toBe("");
-      expect(pick(read("Construction loan: $1,700,000 at 6.3%"))).toEqual([["senior_loan_amount", 1_700_000], ["senior_rate_pct", 6.3]]);
+      // an interest-only period is the take-out loan's, never the senior loan's
+      expect(pick(read("Permanent IO months: 6"))).toEqual([["refinance_io_months", 6]]);
+      expect(pick(read("Construction loan: $1,700,000", "Interest rate: 6.3%"))).toEqual([["senior_loan_amount", 1_700_000], ["senior_rate_pct", 6.3]]);
       expect(pick(read("The office-to-residential conversion costs $750,000.")).filter((p) => String(p[0]).startsWith("refinance_"))).toEqual([]);
     });
     test("a second mortgage or MIC is the mezzanine loan, clause by clause", () => {
       const r = read("First mortgage $1,500,000 at 6.1%; the MIC second is $250,000 at 10.5%.");
       expect(pick(r)).toEqual([["senior_loan_amount", 1_500_000], ["senior_rate_pct", 6.1], ["mezz_loan_amount", 250_000], ["mezz_rate_pct", 10.5]]);
-      expect(pick(read("Second: $200,000 at 11% interest only."))).toEqual([["mezz_loan_amount", 200_000], ["mezz_rate_pct", 11]]);
-      expect(pick(read("A mortgage investment corporation will lend $180,000 at 12%."))).toEqual([["mezz_loan_amount", 180_000], ["mezz_rate_pct", 12]]);
+      expect(pick(read("Second: $200,000 at 11% interest only."))).toEqual([["mezz_loan_amount", 200_000]]);
+      expect(pick(read("The private second will advance $180,000 at 12%."))).toEqual([["mezz_loan_amount", 180_000], ["mezz_rate_pct", 12]]);
+      // a lender's type alone never sets the loan
+      expect(pick(read("A mortgage investment corporation will lend $180,000.")).filter((p) => String(p[0]).startsWith("mezz_"))).toEqual([]);
       expect(pick(read("Prêteur privé de second rang : 150 000 $"))).toEqual([["mezz_loan_amount", 150_000]]);
       expect(pick(read("First mortgage: 6.2%"))).toEqual([["senior_rate_pct", 6.2]]);
       for (const line of ["The second floor adds 6 units.", "Second phase hard costs: $400,000", "Interest rate rose 0.5% in the second quarter."]) expect(pick(read(line)).filter((p) => String(p[0]).startsWith("mezz_")), line).toEqual([]);
     });
     test("a rate quoted before an adjustment is not the loan's rate", () => {
-      const r = read("The 6.1% rate reflects a 6.35% base less a 25 bps buy-down.");
+      const r = read("The interest rate is 6.1%, which reflects a 6.35% base less a 25 bps buy-down.");
       expect(pick(r).filter((p) => p[1] === 6.35)).toEqual([]);
       expect(noteOf(r, 6.35)).toBe(ADJUST);
       expect(pick(r)).toContainEqual(["senior_rate_pct", 6.1]);

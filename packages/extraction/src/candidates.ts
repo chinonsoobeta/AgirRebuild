@@ -1,7 +1,7 @@
 import { FIELD_BY_KEY, OUTPUT_LIKE_PHRASES } from "@agir/contracts";
 import { detectFormat, normalizeText, SF_PER_M2, tokenize, unitTypesIn, wholeUnitType, type DocumentFormat, type NumberToken } from "@agir/numbers";
 import type { Cell, NormalizedDocument, Table } from "./document.ts";
-import { CREDIT_NOTE, DEPOSIT_RE, LTV_BASIS, canonicalItem, costSentence, currencyOf, flagRead, flagSentence, hasPhrase, isPlainRentLabel, loanNameOnly, loanTerm, mapToken, normalizeLabel, OLD_SHEET_RE, rankScope, SUPERSEDED_LABEL_NOTE, scopeIn, scopesIn, withCurrency, type MapOptions, type Mapped, type Scope } from "./mapping.ts";
+import { CREDIT_NOTE, DEPOSIT_RE, LTV_BASIS, canonicalItem, costSentence, currencyOf, flagRead, flagSentence, hasPhrase, isPlainRentLabel, loanNameOnly, loanTerm, mapToken, normalizeLabel, OLD_SHEET_RE, rankScope, SCENARIO_SHEET_NOTE, SCENARIO_SHEET_RE, SUPERSEDED_LABEL_NOTE, scopeIn, scopesIn, withCurrency, type MapOptions, type Mapped, type Scope } from "./mapping.ts";
 
 /** One value found in one document, with where it came from and why it was (or was not) mapped. */
 export type Candidate = {
@@ -527,6 +527,10 @@ function labelValueForm(text: string): string {
   return leader ? leader[1]! + ":" + " ".repeat(leader[0].length - leader[1]!.length - 1) + text.slice(leader[0].length) : text;
 }
 
+// A figure that follows one of these words in the same line corrects the figure before it (task 56).
+const CORRECTION_RE = /\b(?:corrected|revised|amended|updated|restated|now|corrige\w*|revise\w*|modifie\w*|mis a jour)\b/;
+const corrects = (gap: string, prev: NumberToken, t: NumberToken) => CORRECTION_RE.test(fold(gap)) && prev.unit === t.unit && !!prev.currency === !!t.currency;
+
 const CHANGE_FROM_RE = /(?<![\p{L}])(?:moved|went|increased|decreased|revised|changed|rose|fell|passe|pass[ée]e?s?)\s+(?:from|de|d['’])\s*$/iu;
 
 function readSentence(sentence: { text: string; start: number }, para0: Paragraph, result: ExtractionResult, carried: string | null = null) {
@@ -586,6 +590,10 @@ function readSentence(sentence: { text: string; start: number }, para0: Paragrap
   const replaced = tokens.filter((t) => revised.includes(t) || (replacing && t.start >= replacing.index + replacing[0].length) || (replacedBy && t.end <= replacedBy.index));
   for (const t of replaced) other(t, "line:prose", "A later figure in the same sentence replaces this one");
   tokens = tokens.filter((t) => !replaced.includes(t));
+  // A rate that an adjustment follows ("6.65% base less a 25 bps buy-down") is the figure before it, not the loan's rate.
+  const unadjusted = tokens.filter((t, i) => t.unit === "%" && /\b(?:less|minus|before|net of)\b/i.test(text.slice(t.end, tokens[i + 1]?.start ?? text.length)) && /\b(?:buy-?down|discount|bps?)\b/i.test(text.slice(t.end).split(/[;.]/)[0]!));
+  for (const t of unadjusted) other(t, "line:prose", "A rate before an adjustment, not the loan's rate");
+  tokens = tokens.filter((t) => !unadjusted.includes(t));
   const colon = text.indexOf(":");
   // A figure said to be part of a budget field is shown, not added. A figure that lists two or more budget fields after it is a total of them: the stated total cost when its own label names a cost, total or budget, else shown only.
   const parts = new Set<NumberToken>();
@@ -683,6 +691,11 @@ function readSentence(sentence: { text: string; start: number }, para0: Paragrap
         // A part the colon's budget line includes ("Hard costs: $X, including contingency of $Y") is inside that line, not a line of its own.
         const inside: boolean = usedKey !== null && BUDGET_LINES.has(usedKey) && PART_OF_RE.test(fold(text.slice(colon + 1, t.start)));
         let mapped: Mapped = used ? (own?.kind === "field" && own.fieldKey !== usedKey && !inside ? own : { kind: "unmapped" as const }) : mapToken(label, t, { ...opt(t), ahead: text.slice(colon + 1, t.start) });
+        // A figure after a correction word is the label's field again, so the two disagree and the conflict is named.
+        if (used && mapped.kind === "unmapped" && !inside && corrects(text.slice(tokens[i - 1]!.end, t.start), tokens[i - 1]!, t)) {
+          const again = mapToken(label, t, { ...opt(t), ahead: text.slice(colon + 1, t.start) });
+          if (again.kind === "field" && again.fieldKey === usedKey) mapped = again;
+        }
         if (mapped.kind === "field" && BUDGET_LINES.has(mapped.fieldKey) && isDeposit(text, t)) {
           other(t, "line:label-value", DEPOSIT_NOTE);
           continue;
@@ -718,6 +731,7 @@ function readSentence(sentence: { text: string; start: number }, para0: Paragrap
   const totalLabels = new Map<NumberToken, string>();
   // The loan a figure's label named by itself ("mezz $650k"): a percentage right after it, with no loan of its own, is that loan's rate.
   let carry: { scope: Scope; at: number } | null = null;
+  let lastRead: { label: string; key: string; t: NumberToken } | null = null;
   const RATE_WORD: Record<Scope, string> = { senior: "senior rate", mezzanine: "mezzanine rate", refinance: "take-out rate" };
   // A sentence that names a non-senior loan carries it: the loan a clause names holds until a clause names another.
   // A loan named only inside a condition ("if the take-out does not fund, we amortize over 25 years") is not the loan the terms belong to.
@@ -750,6 +764,11 @@ function readSentence(sentence: { text: string; start: number }, para0: Paragrap
     if (mapped.kind === "unmapped" && sentenceLoan && !totalLabels.has(t)) {
       const clause = (label.split(/[,;]/).pop() ?? "");
       mapped = loanTerm(clause, text.slice(t.end).split(/[,;.]/)[0] ?? "", t, sentenceLoan) ?? mapped;
+    }
+    // A figure after a correction word is the earlier figure's field again (task 56).
+    if (mapped.kind === "unmapped" && lastRead && corrects(label, lastRead.t, t)) {
+      const again = mapToken(lastRead.label, t, opts);
+      if (again.kind === "field" && again.fieldKey === lastRead.key) mapped = again;
     }
     from = t.end;
     // "to build", "to lease (up)" and "pour louer" right after a duration belong to it alone.
@@ -803,6 +822,7 @@ function readSentence(sentence: { text: string; start: number }, para0: Paragrap
       return;
     }
     carry = named && mapped.kind === "field" && isMoney(t) ? { scope: named, at: i } : null;
+    lastRead = mapped.kind === "field" && isMoney(t) ? { label: usedLabel, key: mapped.fieldKey, t } : null;
     record(result, mapped, t, { raw: t.raw, location: where, context, rule: "line:prose" });
   });
 }
@@ -1884,10 +1904,13 @@ export function extractCandidates(doc0: NormalizedDocument): ExtractionResult {
     const [before, beforeOther] = [result.candidates.length, result.other.length];
     fromTable(t, result, notes, (t.at ? scopes[t.at - 1] : undefined) ?? "senior");
     // A sheet named old, original, prior or archive holds no current figures: what it gave is shown, not read.
-    if (!OLD_SHEET_RE.test(fold(t.name))) continue;
+    // A sheet named for a scenario (downside, lender case) holds no base-case figures either (task 56).
+    const old = OLD_SHEET_RE.test(fold(t.name));
+    if (!old && !SCENARIO_SHEET_RE.test(fold(t.name))) continue;
+    const [named, note] = old ? [OLD_SHEET_RE, SUPERSEDED_LABEL_NOTE] : [SCENARIO_SHEET_RE, SCENARIO_SHEET_NOTE];
     // (a name that also says "not part of the deal" in other words keeps that note)
-    if (!markedNotPart(fold(t.name).replace(new RegExp(OLD_SHEET_RE, "g"), " "))) for (const o of result.other.slice(beforeOther)) if (o.note === NOT_PART_NOTE) o.note = SUPERSEDED_LABEL_NOTE;
-    result.candidates.splice(before).forEach((c) => result.other.push({ ...c, fieldKey: null, itemKey: null, note: SUPERSEDED_LABEL_NOTE }));
+    if (!markedNotPart(fold(t.name).replace(new RegExp(named, "g"), " "))) for (const o of result.other.slice(beforeOther)) if (o.note === NOT_PART_NOTE) o.note = note;
+    result.candidates.splice(before).forEach((c) => result.other.push({ ...c, fieldKey: null, itemKey: null, note }));
   }
   applyScales(doc, result);
   const aside = (c: Candidate, note: string) => result.other.push({ ...c, fieldKey: null, itemKey: null, note });
