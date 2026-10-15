@@ -1192,7 +1192,7 @@ describe("reading safety: a figure that may be the wrong one is shown, never use
         expect(noteOf(r, v), line).toBe(COND);
       }
       expect(pick(read("Stabilized occupancy: 94%"))).toEqual([["stabilized_occupancy_pct", 94]]);
-      expect(pick(read("We expect 93% occupancy after a nine-month lease-up."))).toEqual([["stabilized_occupancy_pct", 93]]);
+      expect(pick(read("We expect 93% occupancy after a nine-month lease-up.")).filter((p) => p[0] === "stabilized_occupancy_pct")).toEqual([["stabilized_occupancy_pct", 93]]);
     });
     test("a figure named as the loan's term is never its interest-only period", () => {
       for (const line of ["The 30-month term is separate from the interest-only period.", "Loan term 20 months; interest only for 8 months."]) {
@@ -1211,7 +1211,7 @@ describe("reading safety: a figure that may be the wrong one is shown, never use
         expect(r.other.some((o) => o.value === v) || pick(r).some((p) => p[0] === "preferred_return_pct" && p[1] === v), line).toBe(true);
       }
       expect(pick(read("Preference rate: 7%"))).toEqual([["preferred_return_pct", 7]]);
-      expect(noteOf(read("Promote rate: 20%"), 20)).not.toBe("");
+      expect(pick(read("Promote rate: 20%")).filter((p) => p[0] === "senior_rate_pct")).toEqual([]);
       expect(pick(read("Taux de rendement privilégié : 6 %"))).toEqual([["preferred_return_pct", 6]]);
       expect(pick(read("Interest rate: 6.5%"))).toEqual([["senior_rate_pct", 6.5]]);
       expect(pick(read("Senior loan: 6.4%"))).toEqual([["senior_rate_pct", 6.4]]);

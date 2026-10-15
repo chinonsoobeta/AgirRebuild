@@ -1,7 +1,7 @@
 import { FIELD_BY_KEY, OUTPUT_LIKE_PHRASES } from "@agir/contracts";
 import { detectFormat, normalizeText, SF_PER_M2, tokenize, unitTypesIn, wholeUnitType, type DocumentFormat, type NumberToken } from "@agir/numbers";
 import type { Cell, NormalizedDocument, Table } from "./document.ts";
-import { CREDIT_NOTE, DEPOSIT_RE, LTV_BASIS, canonicalItem, costSentence, currencyOf, flagRead, flagSentence, hasPhrase, loanNameOnly, loanTerm, mapToken, normalizeLabel, rankScope, scopeIn, scopesIn, withCurrency, type MapOptions, type Mapped, type Scope } from "./mapping.ts";
+import { CREDIT_NOTE, DEPOSIT_RE, LTV_BASIS, canonicalItem, costSentence, currencyOf, flagRead, flagSentence, hasPhrase, loanNameOnly, loanTerm, mapToken, normalizeLabel, OLD_SHEET_RE, rankScope, SUPERSEDED_LABEL_NOTE, scopeIn, scopesIn, withCurrency, type MapOptions, type Mapped, type Scope } from "./mapping.ts";
 
 /** One value found in one document, with where it came from and why it was (or was not) mapped. */
 export type Candidate = {
@@ -278,6 +278,9 @@ const NOT_PART_RE = new RegExp(
     String.raw`\bnot included in (?:the |this |our |that )?(?:project|deal|transaction|budget|scope)\b`,
     String.raw`\bne (?:fait|font) pas partie\b`,
     String.raw`\bnon retenu(?:e|s|es)?\b`,
+    // An unused scenario or a discarded option.
+    String.raw`\bunused scenarios?\b|\bscenarios? not (?:used|pursued)\b|\bnot pursued\b|\b(?:rejected option|option rejected)\b|\boptions?(?: [a-z0-9])?\s*\(?rejected\b|\bdiscarded\b|\bsuperseded\b(?! by)|\bno longer applies\b`,
+    String.raw`\boption ecartee?s?\b|\babandonne(?:e|s|es)?\b|(?:[(:;,]\s*|\b(?:est|sont|ete) )remplace(?:e|s|es)?\b`,
     String.raw`\bnon inclus(?:e|es)? (?:dans|au) (?:le |ce |la |cette )?(?:projet|budget|transaction)\b`,
     String.raw`\bhypothe(?:tical|tiques?)\b`,
     String.raw`\bnot (?:yet )?committed\b`,
@@ -1801,7 +1804,15 @@ export function extractCandidates(doc0: NormalizedDocument): ExtractionResult {
   // A Word file's paragraphs may carry the note about a rent column ("Retail rents are ..."); there is no order between them and its tables.
   const notes = doc.kind === "docx" ? doc.lines.map((l) => l.text) : [];
   // A Word table is under the heading above it: the scope in force after the lines that come before it.
-  for (const t of doc.tables) fromTable(t, result, notes, (t.at ? scopes[t.at - 1] : undefined) ?? "senior");
+  for (const t of doc.tables) {
+    const [before, beforeOther] = [result.candidates.length, result.other.length];
+    fromTable(t, result, notes, (t.at ? scopes[t.at - 1] : undefined) ?? "senior");
+    // A sheet named old, original, prior or archive holds no current figures: what it gave is shown, not read.
+    if (!OLD_SHEET_RE.test(fold(t.name))) continue;
+    // (a name that also says "not part of the deal" in other words keeps that note)
+    if (!markedNotPart(fold(t.name).replace(new RegExp(OLD_SHEET_RE, "g"), " "))) for (const o of result.other.slice(beforeOther)) if (o.note === NOT_PART_NOTE) o.note = SUPERSEDED_LABEL_NOTE;
+    result.candidates.splice(before).forEach((c) => result.other.push({ ...c, fieldKey: null, itemKey: null, note: SUPERSEDED_LABEL_NOTE }));
+  }
   applyScales(doc, result);
   const aside = (c: Candidate, note: string) => result.other.push({ ...c, fieldKey: null, itemKey: null, note });
   // A later revision of a builder's quote supersedes the earlier ones; a revision heading on its own line names the revision of the lines under it.

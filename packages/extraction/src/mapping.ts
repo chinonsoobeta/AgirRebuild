@@ -93,7 +93,7 @@ const OPINION_NOTE = "An opinion of rent, not the deal's assumption";
 const AREA_WORD_RE = /\b(area|sf|sq ft|superficie|surface|gla|nrsf|rsf)\b/;
 // A lender's condition, or a figure true only today, is not the stabilized assumption.
 const LENDER_CONDITION = "A lender's condition, not the occupancy assumption";
-const CONDITION_RE = /\b(minimum|min|at least|before|prior to|until|consecutive months?|in order to|as a condition|conversion|first advance|funding|conditions?|covenants?|required|requires?|au moins|minimale?|avant|prealable\w*|deboursement)\b/;
+const CONDITION_RE = /\b(minimum|min|at least|before|prior to|until|consecutive months?|in order to|as a condition|conversion|first advance|funding|conditions?|covenants?|required|requires?|au moins|minimale?|avant|prealable\w*|deboursement|advances?|draws?|drawdowns?|disbursements?|holdbacks?|releas(?:es?|ed|ing)|funded|avances?|tirages?|debourse\w*|retenues?|versements?|libere\w*)\b/;
 // A leased or occupied share with a condition marker is the lender's condition, whatever field it names.
 const LEASED_RE = /\b(pre-?leas\w*|leased|occupied|pre-?lou\w*|loue\w*|occupe\w*|occupancy|occupation)\b/;
 const CURRENT_RE = /\b(current|currently|today|as of|actuel(?:le)?|en date du)\b/;
@@ -130,6 +130,10 @@ const TERM_RE = /\b(term|terme|maturity|matures?|echeance|duree du pret)\b/;
 const TERM_AFTER_RE = /^\s*(loan |initial |renewal |fixed |conversion )?(term|terme)\b/;
 const AMORT_RE = /\bamorti[sz]\w*/;
 const IO_RE = /\b(interest[- ]only|io|interets? seulement)\b/;
+// A partner's return, never a loan's rate; the preferred-return words read as that field, a promote is only shown.
+const PARTNER_RE = /\b(?:prefs?|preference|preferred|hurdle|priority returns?|privilegie\w*|prefere\w*|seuil de rendement|rendement prioritaire|promote|prime de performance)\b/;
+const PARTNER_PREF_RE = /\b(?:prefs?|preference|preferred|hurdle|priority returns?|privilegie\w*|prefere\w*|seuil de rendement|rendement prioritaire)\b/;
+const IO_START_RE = /^\s*(?:months?\s+|years?\s+|mois\s+|ans?\s+)?(?:of\s+|de\s+)?(?:interest[- ]only|io|interets? seulement)\b/;
 const INCLUDING_RE = /\b(including|incl|includes|comprenant|incluant|inclut)\b/;
 const BUDGET_NAME_RE = new RegExp(`\\b(${FIELDS.filter((f) => f.group === "budget").flatMap((f) => f.aliases).map((a) => a.replace(/[.*+?^${}()|[\]\\/]/g, "\\$&")).join("|")})\\b`);
 // The interest reserve joined with a fee, cost or charge ("lender fees and interest reserve", "interest reserve + financing fees").
@@ -186,7 +190,9 @@ function lenderFigure(rawLabel: string, t: NumberToken, opts: MapOptions): strin
   const near = (prose || opts.ahead ? lastFour([...words, ...words_(opts.ahead ?? "").split(" ")]) : words).join(" ");
   const capped = CAPPED_RE.test(near) && !(money && CAPPED_COST_RE.test(plain) && !LOAN_WORD_RE.test(plain));
   if ((LIMIT_RE.test(without(near, LIMIT_RE)) || capped) && !COVERAGE_RE.test(plain)) return "A lender's limit, not the deal's figure";
-  if ((t.unit === "months" || t.unit === "years") && ((TERM_RE.test(without(plain, TERM_RE)) && !AMORT_RE.test(plain)) || TERM_AFTER_RE.test(tail)) && !IO_RE.test(plain) && !IO_RE.test(tail.split(/[,;.]/)[0] ?? "")) return "A loan's term, not the build period, hold or amortization";
+  // The figure's own noun decides: an interest-only word before it or right after it makes it the IO period; one further on in the sentence does not.
+  const ownIo = IO_RE.test(plain) || IO_START_RE.test(prose && at >= 0 ? ctx.slice(at + raw.length) : foldText(opts.after ?? ""));
+  if ((t.unit === "months" || t.unit === "years") && ((TERM_RE.test(without(plain, TERM_RE)) && !AMORT_RE.test(plain)) || TERM_AFTER_RE.test(tail)) && !ownIo) return "A loan's term, not the build period, hold or amortization";
   // A fee named after a budget field or inside an "including" list is a part of that cost, not the figure's label.
   const full = without(words_(rawLabel), FEE_RE);
   const before = full.slice(0, Math.max(full.search(FEE_RE), 0));
@@ -503,7 +509,9 @@ const NOT_CREDIT_RE = /(?:line|lines|letter|letters|facility|facilities|marge|li
 const CREDITABLE = new Set(["land_cost", "hard_cost", "soft_cost", "contingency", "other_cost"]);
 
 const OLD_LABEL_RE = /(?:^|[^a-z])(?:ancien(?:ne)?s?|old|superseded|previous(?:ly)?|precedent\w*|formerly|original(?:ly)?|earlier)\s+(?:[a-z]+\s+){0,2}?(?:total|price|priced|prix|quote|quoted|cost|costs|couts?|budget|montant|travaux|land|terrain|contract|soumission|estimate|estimated)(?![a-z])/;
-const SUPERSEDED_LABEL_NOTE = "An earlier figure, named old or original by its own label; a later figure for the line replaces it";
+// A sheet whose name says it is old holds no current figures.
+export const OLD_SHEET_RE = /\b(?:ancien(?:ne)?s?|old|superseded|previous|precedent\w*|formerly|original|earlier|prior|archiv\w*)\b/;
+export const SUPERSEDED_LABEL_NOTE = "An earlier figure, named old or original by its own label; a later figure for the line replaces it";
 
 /**
  * A negative other cost is read only when its own label says it is a credit (then it is the other costs, with a note);
@@ -674,6 +682,10 @@ function mapLabel(rawLabel: string, t: NumberToken, opts: MapOptions = {}): Mapp
     }
     if (best && (prose ? at[1] < best.end || (at[1] === best.end && alias.length <= best.alias.length) : alias.length <= best.alias.length)) continue;
     best = { def, alias, end: at[1], ...c };
+  }
+  // A label naming a partner's return never maps to a loan field.
+  if (t.unit === "%" && best && best.def.group === "senior" && PARTNER_RE.test(label)) {
+    return PARTNER_PREF_RE.test(label) ? asField(FIELD_BY_KEY.get("preferred_return_pct")!) ?? { kind: "unmapped" } : { kind: "ignored", reason: "A partner's return, not a loan's rate" };
   }
   // A generic senior-loan label under another loan's scope is that loan's; a term it has no field for is shown, not given to the senior loan.
   if (best && best.def.group === "senior" && scope !== "senior") {
