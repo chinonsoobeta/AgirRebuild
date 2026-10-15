@@ -1422,6 +1422,12 @@ function categoryCells(rows: Cell[][], format: DocumentFormat): Map<Cell[], Cell
   return out;
 }
 
+/** A table figure's context: its sheet, its category, and every text cell of its row from the label up to the figure, so a person sees the line item even when the label is a category word (task 57). */
+function rowContext(sheet: string, cat: string | undefined, row: Cell[], label: Cell, cell: Cell): string {
+  const between = row.slice(row.indexOf(label) + 1, row.indexOf(cell)).filter((c) => c.number === undefined && c.text.trim() !== "");
+  return `${sheet}: ${cat ? `${cat} ` : ""}${[label, ...between].map((c) => c.text.trim()).join(" ")} ${cell.text}`.slice(0, 240);
+}
+
 /** A row that is only a short text, no number: a section label ("SENIOR LOAN", "Unit mix", "Répartition des logements"). */
 function sectionLabel(row: Cell[]): string | null {
   const filled = row.filter((c) => c.text || c.number !== undefined);
@@ -1609,7 +1615,7 @@ function fromTable(table0: Table, result: ExtractionResult, notes: string[] = []
         if (s.excluded || (cat && markedNotPart(cat)) || row.some((c) => markedNotPart(c.text))) {
           for (const cell of after) {
             const t = cellToken(cell, result.format);
-            if (t) result.other.push({ fieldKey: null, itemKey: null, value: t.value, raw: t.raw, unitSeen: t.unit, location: cell.ref, context: `${table.name}: ${cat ? `${cat} ` : ""}${labelCell.text} ${cell.text}`.slice(0, 240), rule: "table:label-value", note: NOT_PART_NOTE });
+            if (t) result.other.push({ fieldKey: null, itemKey: null, value: t.value, raw: t.raw, unitSeen: t.unit, location: cell.ref, context: rowContext(table.name, cat, row, labelCell, cell), rule: "table:label-value", note: NOT_PART_NOTE });
           }
           return;
         }
@@ -1622,7 +1628,7 @@ function fromTable(table0: Table, result: ExtractionResult, notes: string[] = []
         for (const cell of after) {
           const t = cellToken(cell, result.format);
           if (!t) continue;
-          const base = { raw: t.raw, location: cell.ref, context: `${table.name}: ${cat ? `${cat} ` : ""}${labelCell.text} ${cell.text}`.slice(0, 240), rule: "table:label-value" };
+          const base = { raw: t.raw, location: cell.ref, context: rowContext(table.name, cat, row, labelCell, cell), rule: "table:label-value" };
           let mapped = mapToken(relative ? labelCell.text.replace(BLOCK_RELATIVE_RE, "") : labelCell.text, t, { scope, ahead: cell.text.slice(0, t.start), after: cell.text.slice(t.end), quote: quoteDocs.has(result) });
           if (mapped.kind !== "field" && t.value !== null && (t.unit === "$" || t.currency) && closesUses(labelCell.text, read)) mapped = mapToken("total project cost", t, { scope: s.scope });
           if (block && mapped.kind === "field" && BLOCK_FIELDS.has(mapped.fieldKey) && !(mapped.itemKey && unitTypesIn(mapped.itemKey).length > 0)) mapped = { ...mapped, itemKey: block };
