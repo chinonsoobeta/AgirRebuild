@@ -17,7 +17,7 @@ export type Mapped =
 const GENERIC = new Set([
   "stabilized", "stabilised", "economic", "physical", "lender", "average", "avg", "annual", "total", "overall",
   "project", "portfolio", "minimum", "min", "target", "market", "gross", "net", "blended", "monthly", "base", "the",
-  "of", "per", "unit", "all", "in", "place", "in-place", "asking", "effective", "current", "residential rental",
+  "of", "per", "unit", "all", "in", "place", "in-place", "asking", "effective", "current", "residential rental", "number", "nombre", "count",
   // The heading of a letter or email, not a component.
   "subject", "objet", "re", "note", "notes", "purpose",
   // Who the deal is with, not a component: "Borrower: Maple Court Inc. ... 10 units".
@@ -80,10 +80,20 @@ const VALUE_RE = /\b(value|valeur)\b/;
 
 // A yearly rent, a per-unit or per-area label, and the rent figures they refuse.
 const ANNUAL_RE = /\b(annual|annually|yearly|per year|a year|each year|annuel|annuelle|par an|par annee)\b|\/\s?(yr|year|an|annee)\b/;
-const PER_UNIT_RE = /\b(per (unit|suite|door|home)|each|par (logement|unite|local))\b/;
+const PER_UNIT_RE = /\b(per (unit|suite|door|home|dwelling)|each|par (logement|unite|local))\b/;
 const PER_AREA_RE = /\b(sf|psf|sq ft|square f\w+|pi2|pied carre|m2|psm|sqm|metre carre|square met(re|er))\b/;
 const MONTHLY_RE = /\b(monthly|per month|mensuel|mensuelle|par mois)\b|\/\s?(mo|month|mois)\b/;
 const RENT_WORD_RE = /\b(rents?|loyers?)\b/;
+// A plain-language rent per unit (task 55): "monthly rent for each home", "annual lease per dwelling", "loyer demande par logement". "Price" and "asking" alone need a period word, and a sale, a fee or a per-area label is no rent.
+const PLAIN_RENT_RE = /\b(?:rents?|leases?(?!-?\s?up)|prices?|asking|loyers?|locations?)\b(?:\s+[a-z0-9$%/-]+){0,5}?\s+(?:for each|each|per|par)\s+(?:home|unit|suite|dwelling|door|logement|unite|local|appartement)s?\b(?:\s+(?:monthly|per month|a month|mensuel(?:le)?|par mois|annual(?:ly)?|yearly|per year|a year|par an|par annee))?$/;
+/** Whether a label is a plain-language rent per unit ("monthly rent for each home"), not a sale price, a fee or a rent per area. */
+export function isPlainRentLabel(raw: string): boolean {
+  const { label } = normalizeLabel(raw);
+  return PLAIN_RENT_RE.test(label) && !NOT_PLAIN_RENT_RE.test(label) && !PER_AREA_RE.test(label) && (PLAIN_RENT_STRONG_RE.test(label) || PLAIN_RENT_PERIOD_RE.test(label));
+}
+const PLAIN_RENT_STRONG_RE = /\b(?:rents?|leases?|loyers?|locations?)\b/;
+const PLAIN_RENT_PERIOD_RE = /\b(?:monthly|per month|a month|mensuel(?:le)?|par mois|annual(?:ly)?|yearly|per year|a year|par an|par annee)\b/;
+const NOT_PLAIN_RENT_RE = /\b(?:free|deposits?|increases?|growth|escalat\w*|concessions?|reserves?|allowances?|commissions?|fees?|costs?|insurance|taxes|incentives?|sale|sold|purchase|paid|vente|achat|buyer|acheteur|renewal|vacancy|tenant|cout|frais)\b/;
 const ANNUAL_TOTAL_NOTE = "An annual rent total, not a rent per unit";
 const MONTHLY_AREA_NOTE = "A monthly rent per area is not an annual rate; it is not multiplied";
 const REVENUE_LABEL_RE = /\b(rents?|loyers?|revenues?|revenus?)\b/;
@@ -222,6 +232,16 @@ export function currencyOf(unitSeen: string | null | undefined): CurrencyCode | 
   return (/(?:^|\s)(CAD|USD|AUD)$/.exec(unitSeen ?? "")?.[1] as CurrencyCode | undefined) ?? null;
 }
 
+const FIELD_BEFORE_TYPE_RE = /\b(?:count|number|nombre|units?|homes?|doors?|suites?|logements?|rents?|leases?|price|loyer)\b/i;
+
+/** "Unit count – one-bed": a count or rent field, a dash, then a whole unit type reads as "one-bed unit count" (task 55). */
+function fieldThenType(raw: string): string {
+  const m = /^(.+?)(?:\s*[–—]\s*|\s+[-‒]\s+)([^–—]+)$/.exec(raw);
+  const before = m?.[1]!.trim() ?? "";
+  const after = m?.[2]!.trim() ?? "";
+  return m && wholeUnitType(after) && unitTypesIn(before).length === 0 && FIELD_BEFORE_TYPE_RE.test(before) ? `${after} ${before}` : raw;
+}
+
 export function normalizeLabel(raw: string): { label: string; labelUnit: LabelUnit; labelCode: CurrencyCode | null } {
   let labelUnit: LabelUnit = null;
   let labelCode: CurrencyCode | null = null;
@@ -239,7 +259,7 @@ export function normalizeLabel(raw: string): { label: string; labelUnit: LabelUn
     else if (/^(m²|m2|sq\.? ?m|sqm|square met(re|er)s)$/.test(inner)) labelUnit = "m2";
     else if (/^x$/.test(inner)) labelUnit = "x";
   }
-  const label = raw
+  const label = fieldThenType(raw)
     .replace(/\([^)]*\)/g, " ")
     .replace(/²/g, "2")
     .toLowerCase()
@@ -251,6 +271,8 @@ export function normalizeLabel(raw: string): { label: string; labelUnit: LabelUn
     // "Coach house / count": a type, a slash and the field it holds name the item and the field, as "Coach house count" does.
     .replace(/(\S) \/ (?:count|number|nombre)\b/g, "$1 unit count")
     .replace(/(\S) \/ (?=(?:monthly rent|rent|area|occupancy|loyer|superficie|occupation)\b)/g, "$1 ")
+    // A hyphen set apart by spaces is a separator, never part of a name ("Lane house - monthly rent").
+    .replace(/\s[-‒]\s/g, " ")
     .replace(/\s+/g, " ")
     .trim();
   // A short label may end with its unit: "Build period, months", "Lease-up months", "Amortissement, ans".
@@ -712,6 +734,13 @@ function mapLabel(rawLabel: string, t: NumberToken, opts: MapOptions = {}): Mapp
         item = { def, alias, itemKey: name, ...c };
       }
     }
+  }
+  // A rent per unit written in plain words names no alias but is the rent; a type in the label names the item.
+  if (!item && isPlainRentLabel(rawLabel)) {
+    const def = FIELD_BY_KEY.get("unit_rent_monthly")!;
+    const c = compatibleValue(def, t, label, labelUnit, labelCode, prose);
+    const types = unitTypesIn(label);
+    if (c) item = { def, alias: label, itemKey: types.length === 1 ? types[0]! : "", ...c };
   }
   // An occupancy that is a lender's condition, or true only today, is not the stabilized assumption.
   const notAssumed = (key: string): Mapped | null => {

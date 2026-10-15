@@ -1,7 +1,7 @@
 import { FIELD_BY_KEY, OUTPUT_LIKE_PHRASES } from "@agir/contracts";
 import { detectFormat, normalizeText, SF_PER_M2, tokenize, unitTypesIn, wholeUnitType, type DocumentFormat, type NumberToken } from "@agir/numbers";
 import type { Cell, NormalizedDocument, Table } from "./document.ts";
-import { CREDIT_NOTE, DEPOSIT_RE, LTV_BASIS, canonicalItem, costSentence, currencyOf, flagRead, flagSentence, hasPhrase, loanNameOnly, loanTerm, mapToken, normalizeLabel, OLD_SHEET_RE, rankScope, SUPERSEDED_LABEL_NOTE, scopeIn, scopesIn, withCurrency, type MapOptions, type Mapped, type Scope } from "./mapping.ts";
+import { CREDIT_NOTE, DEPOSIT_RE, LTV_BASIS, canonicalItem, costSentence, currencyOf, flagRead, flagSentence, hasPhrase, isPlainRentLabel, loanNameOnly, loanTerm, mapToken, normalizeLabel, OLD_SHEET_RE, rankScope, SUPERSEDED_LABEL_NOTE, scopeIn, scopesIn, withCurrency, type MapOptions, type Mapped, type Scope } from "./mapping.ts";
 
 /** One value found in one document, with where it came from and why it was (or was not) mapped. */
 export type Candidate = {
@@ -292,9 +292,12 @@ const EXAMPLE_RE = /\b(?:examples?|exemples?)\b/g;
 const EXAMPLE_BEFORE = /(?:\bfor|\bpar|\b(?:rue|avenue|av|boulevard|boul|chemin|route|place|rang)(?:\s+(?:de l['’]|de la |du |des |d['’]))?)\s*$/;
 const EXAMPLE_AFTER = /^\s+(?:street|st|ave|avenue|road|rd|drive|dr|way|blvd|boulevard|lane|ln|crescent|court|place|plaza|park|square|building|tower|inc|corp|ltd|llc|group|holdings|properties|developments|capital|realty|homes)\b/;
 
+const ADDRESS_LIKE_RE = /\S*@\S*|(?<![\p{L}\p{N}])[\p{L}\p{N}_-]+(?:\.[\p{L}\p{N}_-]+)+(?:\/\S*)?/gu;
+
 /** Whether a row, line or heading says, in English or French, that its figures are an example, for reference, or not part of the deal. */
 function markedNotPart(text: string): boolean {
-  const f = fold(text).replace(TAX_BASIS_RE, " ");
+  // A word joined to a dot or an @ with no space is part of an e-mail address, a domain or a web address, not a marker (task 55).
+  const f = fold(text).replace(TAX_BASIS_RE, " ").replace(ADDRESS_LIKE_RE, " ");
   if (NOT_PART_RE.test(f)) return true;
   return [...f.matchAll(EXAMPLE_RE)].some((m) => !EXAMPLE_BEFORE.test(f.slice(0, m.index)) && !EXAMPLE_AFTER.test(f.slice(m.index! + m[0].length)));
 }
@@ -371,6 +374,8 @@ function rangeEnds(text: string, tokens: NumberToken[]): Set<number> {
 
 /** The itemized unit fields: an item for them is a unit type, never a place or a heading. */
 const UNIT_FIELDS = new Set(["unit_count", "unit_rent_monthly", "rentable_area_sf", "rent_psf_annual"]);
+/** The per-unit figures of a line whose count names its unit type. */
+const LINE_TYPE_FIELDS = new Set(["unit_rent_monthly", "rent_psf_annual"]);
 
 /**
  * The words right after a number and its unit, up to a comma, semicolon, slash, bar, "and"/"et" or the end of the sentence.
@@ -524,7 +529,7 @@ function labelValueForm(text: string): string {
 
 const CHANGE_FROM_RE = /(?<![\p{L}])(?:moved|went|increased|decreased|revised|changed|rose|fell|passe|pass[ée]e?s?)\s+(?:from|de|d['’])\s*$/iu;
 
-function readSentence(sentence: { text: string; start: number }, para0: Paragraph, result: ExtractionResult) {
+function readSentence(sentence: { text: string; start: number }, para0: Paragraph, result: ExtractionResult, carried: string | null = null) {
   const text = labelValueForm(normalizeText(sentence.text));
   const quote = quoteDocs.has(result);
   // A short label that names a loan ("Take-out: ...") scopes every number on its line, the prose after the colon too; the next line is back under the document's scope.
@@ -623,6 +628,7 @@ function readSentence(sentence: { text: string; start: number }, para0: Paragrap
     }
   }
   if (tokens.length === 0) return;
+  const lineType = countedType(text, tokens) ?? carried;
   let proseFrom = 0;
   // The unit type a colon label is made of ("Studios: 4 at $1,450"); it names the items of the clause after the colon when that clause names none.
   let lead: string | null = null;
@@ -639,7 +645,10 @@ function readSentence(sentence: { text: string; start: number }, para0: Paragrap
     const first = tokens.map((t) => mapToken(label, t, opt(t))).find((m) => m.kind === "field");
     const unitField = first?.kind === "field" && first.itemKey !== null && UNIT_FIELDS.has(first.fieldKey);
     const labelTypes = unitTypesIn(label);
-    if (unitField && labelTypes.length <= 1 && (labelTypes.length === 1 || unitTypesIn(text.slice(colon + 1)).length > 0)) {
+    const afterTypes = unitTypesIn(text.slice(colon + 1)).length > 0;
+    // A label that holds its own type and its own rent ("One-bed rent per door per month: $2,100") labels its figure; nothing after the colon names a type (task 55).
+    const ownRent = labelTypes.length === 1 && !afterTypes && first?.kind === "field" && first.fieldKey !== "unit_count" && first.itemKey === labelTypes[0] && /\b(?:rents?|leases?|price|loyers?|location)\b/i.test(label);
+    if (unitField && !ownRent && labelTypes.length <= 1 && (labelTypes.length === 1 || afterTypes)) {
       proseFrom = colon + 1;
       lead = labelTypes[0] ?? null;
       bareCount = true;
@@ -691,6 +700,7 @@ function readSentence(sentence: { text: string; start: number }, para0: Paragrap
           continue;
         }
         if (mapped.kind === "field") {
+          mapped = withLineType(mapped, lineType, text);
           record(result, mapped, t, { raw: t.raw, location: locationOf(t.start), context: context.slice(0, 240), rule: "line:label-value" });
           used = true;
           usedKey ??= mapped.fieldKey;
@@ -769,6 +779,7 @@ function readSentence(sentence: { text: string; start: number }, para0: Paragrap
       if (types.length === 1) mapped = { kind: "field", fieldKey: "unit_count", itemKey: types[0]!, value: t.value, unitSeen: "units" };
     }
     if (mapped.kind === "unmapped" || (mapped.kind === "ignored" && mapped.reason.startsWith("Looks like"))) mapped = clauseItem(text, t, lead) ?? mapped;
+    mapped = withLineType(mapped, lineType, clauseOf(text, t));
     // A count whose clause names no unit type is the deal-wide count.
     if (bareCount && mapped.kind === "unmapped" && t.unit === "units" && t.value !== null) mapped = { kind: "field", fieldKey: "unit_count", itemKey: "All units", value: t.value, unitSeen: "units" };
     else if (mapped.kind === "field" && mapped.itemKey !== null && (UNIT_FIELDS.has(mapped.fieldKey) && (proseFrom > 0 || mapped.fieldKey === "unit_count" || mapped.fieldKey === "unit_rent_monthly"))) {
@@ -796,9 +807,29 @@ function readSentence(sentence: { text: string; start: number }, para0: Paragrap
   });
 }
 
+/** A deal-wide rent in a line whose count names its unit type belongs to that type, when its own clause names none. */
+function withLineType<M extends Mapped>(mapped: M, lineType: string | null, clause: string): M {
+  if (!lineType || mapped.kind !== "field" || !LINE_TYPE_FIELDS.has(mapped.fieldKey) || (mapped.itemKey !== null && mapped.itemKey !== "All units") || unitTypesIn(clause).length > 0) return mapped;
+  return { ...mapped, itemKey: lineType } as M;
+}
+
+/** The unit type a count is written right before ("3 two-bed"), when the sentence names no other type (task 55). */
+function countedType(text: string, tokens: NumberToken[]): string | null {
+  const types = unitTypesIn(text);
+  return types.length === 1 && tokens.some((t) => t.unit === "units" && unitTypesIn(t.raw).length === 1) ? types[0]! : null;
+}
+
 /** Prose: sentences of text, each read on its own. Lines in `skip` were read as table rows. */
 function fromLines(doc: NormalizedDocument, result: ExtractionResult, skip: Set<number>, scopes: Scope[], excluded: boolean[]) {
-  for (const para of paragraphs(doc, skip, scopes, excluded)) for (const s of sentences(para.text)) readSentence(s, para, result);
+  for (const para of paragraphs(doc, skip, scopes, excluded)) {
+    // A type named after a count labels the per-unit rents of the clauses after it in the same line (task 55).
+    let carried: string | null = null;
+    for (const s of sentences(para.text)) {
+      readSentence(s, para, result, carried);
+      const text = labelValueForm(normalizeText(s.text));
+      carried = countedType(text, tokenize(text, result.format)) ?? carried;
+    }
+  }
 }
 
 type RentBasis = "monthly" | "annual" | "psf";
@@ -829,13 +860,17 @@ const ANNUAL_RE = /\b(annual|yearly|annuel(le)?|per year|per annum|par annee|par
 
 type RentRole = "units" | "item" | "rent" | "basis" | "area" | "occupancy";
 
+const COUNT_HEADER_RE = /\b(inventory|count|units|homes|doors|suites|totals|number|quantity|qty|nombre|logements)\b/;
+
 function rentRole(h: string): RentRole | null {
   // French: "Nombre de logements" counts units; "Type de logement" and "Unité" name them; "Loyer par logement" is a rent.
   if (/\b(nombre|nbre|nb|quantite)\b/.test(h)) return "units";
+  // A count word with no type word ("Inventory by plan", "Homes by plan") is the count, not the plan (task 55).
+  if (COUNT_HEADER_RE.test(h) && !/\b(types?|rent|loyer)\b/.test(h) && !isPlainRentLabel(h)) return "units";
   // "Rent per suite" is a rent, not an item; a lone "Unit" names the row.
-  if (!/\b(rent|loyer)\b/.test(h) && (h.trim() === "unit" || /\b(unit\s*type|type|component|space|tenant|suite|plan|floor\s*plan|use)\b/.test(h) || /\b(logement|unite|appartement|locataire|espace|local)\b/.test(h))) return "item";
+  if (!/\b(rent|loyer)\b/.test(h) && !isPlainRentLabel(h) && (h.trim() === "unit" || /\b(unit\s*type|type|component|space|tenant|suite|plan|floor\s*plan|use)\b/.test(h) || /\b(logement|unite|appartement|locataire|espace|local)\b/.test(h))) return "item";
   if (/\b(units|unit count|count|#|doors|suites|homes|logements|unites|appartements)\b/.test(h)) return "units";
-  if (/\b(rent|loyer)\b/.test(h) && !/basis/.test(h)) return "rent";
+  if ((/\b(rent|loyer)\b/.test(h) || isPlainRentLabel(h)) && !/basis/.test(h)) return "rent";
   if (/basis/.test(h)) return "basis";
   if (/\b(area|sf|nrsf|rsf|gla|square feet|superficie|surface|pi2)\b/.test(h) || M2_RE.test(h)) return "area";
   if (/occupancy|occupation|occ\b/.test(h)) return "occupancy";
@@ -1113,7 +1148,8 @@ function typeName(raw: string, probe: NumberToken): string | null {
  */
 function namedType(nameText: string, rest: string, bare: boolean, location: string, context: string, rule: string, result: ExtractionResult): boolean {
   const tokens = tokenize(rest, result.format).filter((t) => t.value !== null);
-  if (tokens.length !== 2) return false;
+  // A unit type written after the count ("3 two-bed") is the item; the name before it is a label (task 55).
+  if (tokens.length !== 2 || unitTypesIn(rest).length > 0) return false;
   const perHome = (t: NumberToken) => (t.unit === "$" && PER_HOME_MONTH_RE.test(rest.slice(t.end))) || (t.unit === "$/mo" && new RegExp(DWELLING, "i").test(t.raw));
   const perArea = (t: NumberToken) => (t.unit === "$/sf" || t.unit === "$/m2") && !/^\s*(?:per|par|\/)\s*(?:month|mois|mo)\b/i.test(rest.slice(t.end));
   const counted = (t: NumberToken) => Number.isInteger(t.value) && t.value! > 0 && (t.unit === "units" || (t.unit === null && (COUNT_NOUN_RE.test(rest.slice(t.end)) || bare)));
@@ -1335,6 +1371,34 @@ function fromBudget(table: Table, headerRow: number, roles: BudgetRoles, result:
   }
 }
 
+// A word that opens a section of a sheet: a first column of these (or of any few repeated words) is a category column.
+const SECTION_WORD_RE = /^(?:uses?|sources?|hard|soft|finance|financing|financement|revenues?|revenus?|income|assumptions?|operating|opex|timing|emplois|hypotheses|costs?|couts?|loan|equity|capital|exit)\b/;
+
+/**
+ * In a sheet with no header row, a first text column of a few short words, each repeated or opening a section, beside a column of distinct line items
+ * is a category column. Returns, per row, the category cell; the row's label is then the next text cell (task 55).
+ */
+function categoryCells(rows: Cell[][], format: DocumentFormat): Map<Cell[], Cell> {
+  const out = new Map<Cell[], Cell>();
+  // A real header row (a budget or rent-roll column set) names the columns itself.
+  if (rows.some((r) => !r.some((c) => c.number !== undefined) && (rentRollRoles(r) || budgetRoles(r)))) return out;
+  const pair = (r: Cell[]) => {
+    const [a, b, ...rest] = r.filter((c) => c.text || c.number !== undefined);
+    const text = (c: Cell | undefined) => c !== undefined && c.number === undefined && /^\p{L}/u.test(c.text) && !isValueText(c, format);
+    return text(a) && text(b) && rest.some((c) => cellToken(c, format)) ? { a: a!, b: b! } : null;
+  };
+  const found = rows.flatMap((r) => { const p = pair(r); return p ? [{ r, ...p }] : []; });
+  const figures = rows.filter((r) => r.some((c) => cellToken(c, format))).length;
+  if (found.length < 3 || found.length < 0.6 * figures) return out;
+  const key = (c: Cell) => fold(c.text).replace(/\s+/g, " ").trim();
+  const cats = new Map<string, number>();
+  for (const f of found) cats.set(key(f.a), (cats.get(key(f.a)) ?? 0) + 1);
+  if (cats.size > 8 || [...cats].some(([k, n]) => k.split(" ").length > 3 || (n < 2 && !SECTION_WORD_RE.test(k)))) return out;
+  if (new Set(found.map((f) => key(f.b))).size <= found.length / 2) return out;
+  for (const f of found) out.set(f.r, f.a);
+  return out;
+}
+
 /** A row that is only a short text, no number: a section label ("SENIOR LOAN", "Unit mix", "Répartition des logements"). */
 function sectionLabel(row: Cell[]): string | null {
   const filled = row.filter((c) => c.text || c.number !== undefined);
@@ -1422,7 +1486,17 @@ function isSentenceCell(c: Cell, row: Cell[], format: DocumentFormat): boolean {
   return !!first && c.text.slice(0, first.start).trim() !== "";
 }
 
-function fromTable(table: Table, result: ExtractionResult, notes: string[] = [], scope0: Scope = "senior") {
+function fromTable(table0: Table, result: ExtractionResult, notes: string[] = [], scope0: Scope = "senior") {
+  // A category column beside the line items is set aside; its word stays with the row (task 55).
+  const cats = categoryCells(table0.rows, result.format);
+  const catOf = new Map<Cell[], string>();
+  const table: Table = cats.size === 0 ? table0 : { ...table0, rows: table0.rows.map((r) => {
+    const c = cats.get(r);
+    if (!c) return r;
+    const kept = r.filter((x) => x !== c);
+    catOf.set(kept, c.text.trim());
+    return kept;
+  }) };
   // A rank row names the loan for the whole table, the rows above it too; a section label below still overrides it.
   let scope = tableRank(table) ?? scope0;
   let labelled = false;
@@ -1490,6 +1564,8 @@ function fromTable(table: Table, result: ExtractionResult, notes: string[] = [],
       let block = s.item;
       const valueFirstSection = isValueFirstSection(s.rows, result.format);
       s.rows.forEach((row0) => {
+        const cat = catOf.get(row0);
+        const scope = (cat && scopeIn(cat)) || s.scope;
         if (!s.excluded && namedRow(row0, table, result)) return;
         // A sentence cell is read as a sentence under the scope and exclusion in force for its row; the other cells of the row read as usual.
         const row = row0.filter((c) => !isSentenceCell(c, row0, result.format));
@@ -1507,10 +1583,10 @@ function fromTable(table: Table, result: ExtractionResult, notes: string[] = [],
         if (!labelCell) return;
         const after = vf ? [vf.value] : row.slice(row.indexOf(labelCell) + 1);
         // A row that says it is not part of the deal, or one under such a heading, is shown and never read.
-        if (s.excluded || row.some((c) => markedNotPart(c.text))) {
+        if (s.excluded || (cat && markedNotPart(cat)) || row.some((c) => markedNotPart(c.text))) {
           for (const cell of after) {
             const t = cellToken(cell, result.format);
-            if (t) result.other.push({ fieldKey: null, itemKey: null, value: t.value, raw: t.raw, unitSeen: t.unit, location: cell.ref, context: `${table.name}: ${labelCell.text} ${cell.text}`.slice(0, 240), rule: "table:label-value", note: NOT_PART_NOTE });
+            if (t) result.other.push({ fieldKey: null, itemKey: null, value: t.value, raw: t.raw, unitSeen: t.unit, location: cell.ref, context: `${table.name}: ${cat ? `${cat} ` : ""}${labelCell.text} ${cell.text}`.slice(0, 240), rule: "table:label-value", note: NOT_PART_NOTE });
           }
           return;
         }
@@ -1523,8 +1599,8 @@ function fromTable(table: Table, result: ExtractionResult, notes: string[] = [],
         for (const cell of after) {
           const t = cellToken(cell, result.format);
           if (!t) continue;
-          const base = { raw: t.raw, location: cell.ref, context: `${table.name}: ${labelCell.text} ${cell.text}`.slice(0, 240), rule: "table:label-value" };
-          let mapped = mapToken(relative ? labelCell.text.replace(BLOCK_RELATIVE_RE, "") : labelCell.text, t, { scope: s.scope, ahead: cell.text.slice(0, t.start), after: cell.text.slice(t.end), quote: quoteDocs.has(result) });
+          const base = { raw: t.raw, location: cell.ref, context: `${table.name}: ${cat ? `${cat} ` : ""}${labelCell.text} ${cell.text}`.slice(0, 240), rule: "table:label-value" };
+          let mapped = mapToken(relative ? labelCell.text.replace(BLOCK_RELATIVE_RE, "") : labelCell.text, t, { scope, ahead: cell.text.slice(0, t.start), after: cell.text.slice(t.end), quote: quoteDocs.has(result) });
           if (mapped.kind !== "field" && t.value !== null && (t.unit === "$" || t.currency) && closesUses(labelCell.text, read)) mapped = mapToken("total project cost", t, { scope: s.scope });
           if (block && mapped.kind === "field" && BLOCK_FIELDS.has(mapped.fieldKey) && !(mapped.itemKey && unitTypesIn(mapped.itemKey).length > 0)) mapped = { ...mapped, itemKey: block };
           if (relative && mapped.kind === "field" && mapped.fieldKey === "stabilized_occupancy_pct") mapped = { ...mapped, fieldKey: "item_occupancy_pct", itemKey: block! };

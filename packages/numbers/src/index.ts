@@ -210,9 +210,11 @@ export function parseCore(
 
 // Unit types a count or a rent is named by: "one-bedroom", "2-bed", "3½", "studio", "loft", "townhome", "maison de ville".
 const TYPE_BED = String.raw`(?:one|two|three|un|une|deux|trois|[123])[-\s]?(?:bed(?:room)?s?|br|chambres?)`;
-const TYPE_NAMED = String.raw`\d\s?½|studios?|bachelors?|lofts?|town-?homes?|townhouses?|maisons?\s+de\s+ville`;
+const TYPE_HALF = String.raw`(?:un|une|deux|trois|quatre|cinq|six)[\s-]+et[\s-]+demie?`;
+const TYPE_NAMED = String.raw`\d\s?½|${TYPE_HALF}|studios?|bachelors?|lofts?|town-?homes?|townhouses?|maisons?\s+de\s+ville`;
 // A digit count takes only a plural type ("4 studios"): "Suite 12 Bachelor" is a name and a number.
 const TYPE_PLURAL = String.raw`studios|bachelors|lofts|town-?homes|townhouses|maisons\s+de\s+ville`;
+const HALF_NAMES: Record<string, number> = { un: 1, une: 1, deux: 2, trois: 3, quatre: 4, cinq: 5, six: 6 };
 const BED_NAMES: Record<string, string> = { one: "1BR", un: "1BR", une: "1BR", "1": "1BR", two: "2BR", deux: "2BR", "2": "2BR", three: "3BR", trois: "3BR", "3": "3BR" };
 
 /** The distinct unit types a clause names, in the order written, as one name each ("1BR", "Studio", "3½"). "one- and two-bedroom" names both. */
@@ -220,7 +222,7 @@ export function unitTypesIn(text: string): string[] {
   const found: { at: number; name: string }[] = [];
   for (const m of text.matchAll(new RegExp(String.raw`(?<![\p{L}\p{N}])(?:(${TYPE_BED})|(${TYPE_NAMED})|((?:one|two|three|un|deux|trois|[123])-)(?=\s+(?:and|or|et|ou)\s))(?![\p{L}\p{N}])`, "giu"))) {
     const w = m[0].toLowerCase();
-    const name = m[1] || m[3] ? BED_NAMES[/^(?:one|two|three|une?|deux|trois|[123])/.exec(w)![0]]! : /^\d/.test(w) ? w.replace(/\s/g, "") : /^studio/.test(w) ? "Studio" : /^bachelor/.test(w) ? "Bachelor" : /^loft/.test(w) ? "Loft" : /^maison/.test(w) ? "Maison de ville" : "Townhome";
+    const name = m[1] || m[3] ? BED_NAMES[/^(?:one|two|three|une?|deux|trois|[123])/.exec(w)![0]]! : /^\d/.test(w) ? w.replace(/\s/g, "") : HALF_NAMES[w.split(/[\s-]/)[0]!] ? `${HALF_NAMES[w.split(/[\s-]/)[0]!]}½` : /^studio/.test(w) ? "Studio" : /^bachelor/.test(w) ? "Bachelor" : /^loft/.test(w) ? "Loft" : /^maison/.test(w) ? "Maison de ville" : "Townhome";
     found.push({ at: m.index!, name });
   }
   return [...new Set(found.sort((a, b) => a.at - b.at).map((f) => f.name))];
@@ -241,7 +243,7 @@ const CELL_SCALE_RE = /^(?:[kK]|MM?|bn|[Bb]illions?|[Mm]illions?|[Tt]housands?)$
 // "three quarters of the units" and "three quarters complete" are fractions, not spans of time.
 const NOT_FRACTION = String.raw`(?!\s+(?:of|de|du|des|complete|completed|done|finished|built|leased|occupied|sold|full|achev[ée]s?|termin[ée]s?|lou[ée]s?)\b)`;
 // "²" is not a word character, so the rules that end in it close with a lookahead, not \b.
-const UNIT_RULES: { re: RegExp; unit: TokenUnit; money?: true; quarters?: true }[] = [
+const UNIT_RULES: { re: RegExp; unit: TokenUnit; money?: true; quarters?: true; named?: true }[] = [
   { re: /^\s?(%|percent\b|pct\b)/i, unit: "%" },
   { re: /^\s?(bps|basis points)\b/i, unit: "bps" },
   { re: /^\s?((x|×)(?![a-z])|(times|fois)\b)/i, unit: "x" },
@@ -257,6 +259,8 @@ const UNIT_RULES: { re: RegExp; unit: TokenUnit; money?: true; quarters?: true }
   { re: new RegExp(String.raw`^\s?(?:${TYPE_BED}[\s-]+)?(?:units?|homes|suites|apartments|doors)\b`, "i"), unit: "units" },
   { re: new RegExp(String.raw`^\s?(?:${TYPE_BED}[\s-]+)?(?:logements?|unités?|unites?|appartements?)(?![\p{L}\d])`, "iu"), unit: "units" },
   { re: new RegExp(String.raw`^\s?(?:${TYPE_PLURAL})(?![\p{L}\p{N}])`, "iu"), unit: "units" },
+  // A count right before a bedroom type or a spelled half ("3 two-bed", "2 quatre et demie") counts that type; "Suite 12 2-bed" is a name and a number.
+  { re: new RegExp(String.raw`^\s(?:${TYPE_BED}|${TYPE_HALF})(?![\p{L}\p{N}])`, "iu"), unit: "units", named: true },
   // "au 26e mois": the ordinal's own "mois" is the unit.
   { re: /^(e|er|ème|eme)\s+mois\b/i, unit: "months" },
   // "5 quarters" is fifteen months; "3 quarters of the units" is a fraction, not a span.
@@ -264,6 +268,8 @@ const UNIT_RULES: { re: RegExp; unit: TokenUnit; money?: true; quarters?: true }
   { re: /^[-\s]?(months?|mos?\.?|mois)\b/i, unit: "months" },
   { re: /^[-\s]?(years?|yrs?\.?|ans?)\b/i, unit: "years" },
 ];
+
+const NUMBERED_NAME_RE = /(?:\b(?:suite|unit|apt|apartment|no|number|unité|unite|appartement|local|porte|door)\.?|#)\s*$/i;
 
 const WORD_VALUES: Record<string, number> = {
   zero: 0, zéro: 0, one: 1, un: 1, une: 1, two: 2, deux: 2, three: 3, trois: 3, four: 4, quatre: 4, five: 5, cinq: 5, six: 6, seven: 7, sept: 7,
@@ -374,6 +380,7 @@ export function tokenize(line: string, format: DocumentFormat, cell = false): Nu
     let quarters = false;
     for (const r of UNIT_RULES) {
       if (r.money && !currency) continue;
+      if (r.named && NUMBERED_NAME_RE.test(text.slice(0, start))) continue;
       const u = after.match(r.re);
       if (u) {
         if (r.quarters && !currency && value !== null) {
