@@ -1252,6 +1252,69 @@ describe("reading safety: a figure that may be the wrong one is shown, never use
     });
   });
 
+  describe("task 56: permanent and second loans, scenario sheets and in-line corrections", () => {
+    const SCENARIO = "A scenario sheet, not the deal's base case";
+    const ADJUST = "A rate before an adjustment, not the loan's rate";
+    test("a permanent mortgage is the take-out loan; a construction loan stays senior", () => {
+      const r = read("Once complete, the lender converts to a permanent mortgage of $2,100,000 at a conversion rate of 5.1% over 30 years.");
+      expect(pick(r).filter((p) => String(p[0]).startsWith("senior_"))).toEqual([]);
+      expect(pick(r)).toEqual([["refinance_amount", 2_100_000], ["refinance_rate_pct", 5.1], ["refinance_amort_years", 30]]);
+      expect(pick(read("Permanent amortization: 25 years", "Permanent rate: 4.9%"))).toEqual([["refinance_amort_years", 25], ["refinance_rate_pct", 4.9]]);
+      expect(pick(read("Hypothèque permanente : 2 000 000 $", "Prêt à terme, taux : 5,2 %"))).toEqual([["refinance_amount", 2_000_000], ["refinance_rate_pct", 5.2]]);
+      // an interest-only period has no refinance field: shown, never given to the senior loan
+      const io = read("Permanent IO months: 6");
+      expect(pick(io).filter((p) => p[0] === "senior_io_months")).toEqual([]);
+      expect(noteOf(io, 6)).not.toBe("");
+      expect(pick(read("Construction loan: $1,700,000 at 6.3%"))).toEqual([["senior_loan_amount", 1_700_000], ["senior_rate_pct", 6.3]]);
+      expect(pick(read("The office-to-residential conversion costs $750,000.")).filter((p) => String(p[0]).startsWith("refinance_"))).toEqual([]);
+    });
+    test("a second mortgage or MIC is the mezzanine loan, clause by clause", () => {
+      const r = read("First mortgage $1,500,000 at 6.1%; the MIC second is $250,000 at 10.5%.");
+      expect(pick(r)).toEqual([["senior_loan_amount", 1_500_000], ["senior_rate_pct", 6.1], ["mezz_loan_amount", 250_000], ["mezz_rate_pct", 10.5]]);
+      expect(pick(read("Second: $200,000 at 11% interest only."))).toEqual([["mezz_loan_amount", 200_000], ["mezz_rate_pct", 11]]);
+      expect(pick(read("A mortgage investment corporation will lend $180,000 at 12%."))).toEqual([["mezz_loan_amount", 180_000], ["mezz_rate_pct", 12]]);
+      expect(pick(read("Prêteur privé de second rang : 150 000 $"))).toEqual([["mezz_loan_amount", 150_000]]);
+      expect(pick(read("First mortgage: 6.2%"))).toEqual([["senior_rate_pct", 6.2]]);
+      for (const line of ["The second floor adds 6 units.", "Second phase hard costs: $400,000", "Interest rate rose 0.5% in the second quarter."]) expect(pick(read(line)).filter((p) => String(p[0]).startsWith("mezz_")), line).toEqual([]);
+    });
+    test("a rate quoted before an adjustment is not the loan's rate", () => {
+      const r = read("The 6.1% rate reflects a 6.35% base less a 25 bps buy-down.");
+      expect(pick(r).filter((p) => p[1] === 6.35)).toEqual([]);
+      expect(noteOf(r, 6.35)).toBe(ADJUST);
+      expect(pick(r)).toContainEqual(["senior_rate_pct", 6.1]);
+      const b = read("Rate: 5.9% before the rate buy-down");
+      expect(pick(b)).toEqual([]);
+      expect(noteOf(b, 5.9)).toBe(ADJUST);
+      expect(pick(read("Interest rate: 6.1% with a buy-down available"))).toEqual([["senior_rate_pct", 6.1]]);
+      expect(pick(read("Rate: 6.1% fixed, less than prime"))).toEqual([["senior_rate_pct", 6.1]]);
+    });
+    test("a figure on a sheet named for a scenario is shown, not read", () => {
+      const rows = [["Land", [410_000, "$"]], ["Hard costs", [1_900_000, "$"]]] as Cellish[][];
+      for (const name of ["Downside", "Lender case", "Stress test", "Sensitivity", "What-if", "Worst case", "Cas défavorable", "Scénario 2"]) {
+        const r = sheets(grid(name, ...rows));
+        expect(pick(r), name).toEqual([]);
+        expect(noteOf(r, 410_000), name).toBe(SCENARIO);
+      }
+      for (const name of ["Base", "Base case", "Inputs", "Budget", "Summary"]) expect(pick(sheets(grid(name, ...rows))), name).toEqual([["land_cost", 410_000], ["hard_cost", 1_900_000]]);
+      const both = sheets(grid("Base", ["Land", [400_000, "$"]]), grid("Downside", ["Land", [450_000, "$"]]));
+      expect(pick(both)).toEqual([["land_cost", 400_000]]);
+    });
+    test("a correction later in the line is the same field again, so the conflict is named", () => {
+      for (const [line, field, a, b] of [
+        ["Hard costs: $980,000 — corrected signed contract $1,030,000.", "hard_cost", 980_000, 1_030_000],
+        ["Soft costs $210,000 (revised: $235,000)", "soft_cost", 210_000, 235_000],
+        ["Coûts indirects : 210 000 $ (corrigé : 235 000 $)", "soft_cost", 210_000, 235_000],
+      ] as const) {
+        const r = read(line);
+        expect(pick(r), line).toEqual([[field, a], [field, b]]);
+      }
+      expect(pick(read("Hard costs $980,000, soft costs $210,000"))).toEqual([["hard_cost", 980_000], ["soft_cost", 210_000]]);
+      expect(pick(read("Hard costs: $980,000. The new total is $3,000,000 now.")).filter((p) => p[0] === "hard_cost")).toEqual([["hard_cost", 980_000]]);
+      // "replaces" keeps its own rule
+      expect(pick(read("Hard costs $980,000, which replaces the earlier $900,000."))).toEqual([["hard_cost", 980_000]]);
+    });
+  });
+
   test("a year in a label line is no amount; a figure with no mark of a year is still read", () => {
     expect(pick(read("Operating costs: the 2028 budget, $48,000"))).toEqual([["fixed_opex_annual", 48_000]]);
     expect(pick(read("Frais d'exploitation : budget 2028, 48 000 $"))).toEqual([["fixed_opex_annual", 48_000]]);
