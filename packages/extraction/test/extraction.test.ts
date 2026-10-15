@@ -3689,6 +3689,22 @@ describe("revenue layouts: income rows, unit types as columns, named types, suit
     const noted = extractCandidates(withTables([], grid(["Uses", "Land purchase", "450000", "paid at closing"], ["Uses", "Hard costs", "1800000", "fixed price"], ["Uses", "Soft costs", "300000", "estimate"])));
     expect(noted.candidates.map((c) => [c.fieldKey, c.value])).toEqual([["land_cost", 450_000], ["hard_cost", 1_800_000], ["soft_cost", 300_000]]);
   });
+  test("a figure's context holds every text cell of its row before it, even when the row's first word is not its label (task 57)", () => {
+    const mixed = extractCandidates(withTables([], grid(
+      ["Pro forma for a fictional duplex"],
+      ["Cost", "Design and permit allowance", "92000"],
+      ["Note", "Siding upgrade, already in the build price", "18000"],
+      ["Construction period", "11 months"],
+      ["Stabilized occupancy", "96%"],
+      ["Exit cap rate", "5.25%"],
+      ["Interest rate", "6.1%"],
+    )));
+    expect(mixed.other.find((o) => o.value === 92_000)?.context).toBe("Sheet: Cost Design and permit allowance 92000");
+    expect(mixed.other.find((o) => o.value === 18_000)?.context).toBe("Sheet: Note Siding upgrade, already in the build price 18000");
+    // what is read does not change
+    expect(mixed.candidates.map((c) => [c.fieldKey, c.value])).toEqual([["construction_months", 11], ["stabilized_occupancy_pct", 96], ["exit_cap_rate_pct", 5.25], ["senior_rate_pct", 6.1]]);
+    expect(mixed.candidates.find((c) => c.value === 11)?.context).toBe("Sheet: Construction period 11 months");
+  });
   test("negative: a two-column sheet, a sheet with a header row and a first column of distinct labels read as before (task 55)", () => {
     const two = extractCandidates(withTables([], grid(["Land purchase", "450000"], ["Hard costs", "1800000"], ["Soft costs", "300000"])));
     expect(two.candidates.map((c) => c.fieldKey)).toEqual(["land_cost", "hard_cost", "soft_cost"]);
@@ -3698,6 +3714,8 @@ describe("revenue layouts: income rows, unit types as columns, named types, suit
     // Distinct, non-section first words are labels: the second text cell is not read in their place.
     const distinct = extractCandidates(withTables([], grid(["Site", "Corner lot", "450000"], ["Frame", "Wood", "1800000"], ["Permit", "City", "300000"])));
     expect(distinct.candidates.map((c) => c.fieldKey)).not.toContain("land_cost");
+    // Its context still shows every text cell before the figure, so a person (or a suggested label) sees the whole row (task 57).
+    expect(distinct.other.find((o) => o.value === 450_000)?.context).toBe("Sheet: Site Corner lot 450000");
   });
   test("each layout of a full invented document reads every type with its count and rent (task 55)", () => {
     expect(items(lines("Dwellings planned: 4 three-bed; Rent for each dwelling: $2,600 per unit per month", "Dwellings planned: 7 studios; Rent for each dwelling: $1,350 per unit per month"))).toEqual({ "3BR|unit_count": 4, "3BR|unit_rent_monthly": 2_600, "Studio|unit_count": 7, "Studio|unit_rent_monthly": 1_350 });
