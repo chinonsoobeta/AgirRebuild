@@ -729,6 +729,9 @@ describe("prose: sentences, labels and refusals", () => {
     expect(r.candidates).toEqual([]);
     expect(r.other[0]!.note).toContain("another property");
     expect(read("The comps show rents near $1,900 per month.").candidates).toEqual([]);
+    // A neighbouring building's units and rents are not the deal's, now that a count names its type (task 55 audit).
+    expect(read("The adjacent tower has 9 one-bed suites leasing at $2,350 per unit per month.").candidates).toEqual([]);
+    expect(read("L'immeuble voisin loue ses 4 ½ à 1 950 $ par mois.").candidates).toEqual([]);
     expect(pick(read("Our hard costs are $1,450,000."))).toEqual([["hard_cost", 1_450_000]]);
   });
   test("a sentence that names an output gives no input for any number in it", () => {
@@ -3548,6 +3551,9 @@ describe("revenue layouts: income rows, unit types as columns, named types, suit
       "Studio|unit_rent_monthly": 1_350,
     });
     expect(items(lines("Logements prévus : 3 trois et demie ; loyer mensuel par logement : 1 650 $ par logement par mois"))).toEqual({ "3½|unit_count": 3, "3½|unit_rent_monthly": 1_650 });
+    // A singular named type after a count is that type too (audit); "Suite 9 Loft" stays a name and a number.
+    expect(items(lines("Dwellings planned: 2 loft; Rent for each dwelling: $2,900 per unit per month"))).toEqual({ "Loft|unit_count": 2, "Loft|unit_rent_monthly": 2_900 });
+    expect(items(lines("Suite 9 Loft rents at $2,900 per month."))).not.toHaveProperty("Loft|unit_count");
   });
   test("negative: a count with no unit type reads as before, and storeys and stalls make no item (task 55)", () => {
     expect(items(lines("Units: 12"))).toEqual({ "All units|unit_count": 12 });

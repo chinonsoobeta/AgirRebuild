@@ -259,8 +259,8 @@ const UNIT_RULES: { re: RegExp; unit: TokenUnit; money?: true; quarters?: true; 
   { re: new RegExp(String.raw`^\s?(?:${TYPE_BED}[\s-]+)?(?:units?|homes|suites|apartments|doors)\b`, "i"), unit: "units" },
   { re: new RegExp(String.raw`^\s?(?:${TYPE_BED}[\s-]+)?(?:logements?|unités?|unites?|appartements?)(?![\p{L}\d])`, "iu"), unit: "units" },
   { re: new RegExp(String.raw`^\s?(?:${TYPE_PLURAL})(?![\p{L}\p{N}])`, "iu"), unit: "units" },
-  // A count right before a bedroom type or a spelled half ("3 two-bed", "2 quatre et demie") counts that type; "Suite 12 2-bed" is a name and a number.
-  { re: new RegExp(String.raw`^\s(?:${TYPE_BED}|${TYPE_HALF})(?![\p{L}\p{N}])`, "iu"), unit: "units", named: true },
+  // A count right before a bedroom type, a spelled half or a named type ("3 two-bed", "2 quatre et demie", "4 studio") counts that type; "Suite 12 2-bed" is a name and a number.
+  { re: new RegExp(String.raw`^\s(?:${TYPE_BED}|${TYPE_HALF}|studio|bachelor|loft|town-?home|townhouse)(?![\p{L}\p{N}])`, "iu"), unit: "units", named: true },
   // "au 26e mois": the ordinal's own "mois" is the unit.
   { re: /^(e|er|ème|eme)\s+mois\b/i, unit: "months" },
   // "5 quarters" is fifteen months; "3 quarters of the units" is a fraction, not a span.

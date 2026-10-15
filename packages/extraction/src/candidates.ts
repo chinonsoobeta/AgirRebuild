@@ -314,7 +314,7 @@ function excludedLines(doc: NormalizedDocument, format: DocumentFormat): boolean
 }
 
 const HEDGE_RE = /\b(i.?d guess|i guess|or so|probably|maybe|perhaps|roughly|ballpark|not confirmed|unconfirmed|to be confirmed|tbc|a confirmer|je pense|peut-etre|somewhere|around about|give or take|or thereabouts|quelque part|environ [^.;]*ou plus)\b|(?:\d|-)ish\b/;
-const BORROWED_RE = /\b(my other (?:building|property)s?|another (?:property|building)|comparables?|comps|autres? immeubles?)\b/;
+const BORROWED_RE = /\b(my other (?:building|property)s?|another (?:property|building)|comparables?|comps|autres? immeubles?|(?:the )?(?:neighbou?ring|nearby|adjacent) (?:building|property|project|tower|block)s?|(?:the )?(?:building|property|project) next door|immeubles? voisins?|projets? voisins?)\b/;
 const YEAR_BEFORE = /\b(the|for|pour|fiscal|fy|budget|jan(?:uary)?|feb(?:ruary)?|mar(?:ch)?|apr(?:il)?|may|jun(?:e)?|jul(?:y)?|aug(?:ust)?|sep(?:t(?:ember)?)?|oct(?:ober)?|nov(?:ember)?|dec(?:ember)?|janvier|fevrier|mars|avril|mai|juin|juillet|aout|septembre|octobre|novembre|decembre|in|en|since|depuis)\.?[,\s]*$/;
 const YEAR_AFTER = /^\s*(budget|premium|taxes|operating)\b/;
 
