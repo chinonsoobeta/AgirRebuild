@@ -284,7 +284,7 @@ export function Review({ dealId }: { dealId: string }) {
         <div className="input-affix" style={{ maxWidth: 320 }}><input id="add-occ" name="occ-value" inputMode="decimal" autoComplete="off" /><span>{f.suffix("%")}</span></div>
       </div>
       <div className="row" style={{ alignItems: "flex-start" }}>
-        <input className="input grow" name="reason" aria-label={t("review.addItem")} placeholder={t("review.sourceHint")} minLength={10} required style={{ minWidth: 220, flexBasis: 240 }} />
+        <input className="input grow" name="reason" aria-label={t("review.why")} placeholder={t("review.sourceHint")} minLength={10} required style={{ minWidth: 220, flexBasis: 240 }} />
         <button className="btn small" type="submit" style={{ height: 44 }} disabled={addItem.isPending}>{t("common.save")}</button>
         <button className="btn quiet small" type="button" style={{ height: 44 }} onClick={() => { setAdding(false); setFormError(null); }}>{t("common.cancel")}</button>
       </div>
@@ -543,8 +543,8 @@ export function Review({ dealId }: { dealId: string }) {
                 ))}
               </tbody>
             </table>
-            {editable && (adding ? addItemForm() : <button className="btn small" type="button" style={{ marginTop: 12 }} onClick={() => { setAdding(true); setFormError(null); }}>{t("review.addItem")}</button>)}
           </details>
+          {editable && (adding ? addItemForm() : <div><button className="btn small" type="button" onClick={() => { setAdding(true); setFormError(null); }}>{t("review.addItem")}</button></div>)}
           {rejected.length > 0 && (
             <details style={{ borderTop: "1px solid var(--rule)", paddingTop: 16 }}>
               <summary>{t("review.rejected")} <span className="num faint" style={{ fontWeight: 400 }}>{rejected.length}</span></summary>

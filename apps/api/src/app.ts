@@ -344,12 +344,15 @@ export function createApp({ db, store, secureCookies, demoSignIn = false }: AppD
       .refine((x) => (x.unitCount !== undefined && x.rentMonthly !== undefined && x.areaSf === undefined && x.rentPsfAnnual === undefined)
         || (x.areaSf !== undefined && x.rentPsfAnnual !== undefined && x.unitCount === undefined && x.rentMonthly === undefined), "Give either a count and a monthly rent, or an area and an annual rent per square foot")
       .parse(await c.req.json());
-    const name = canonicalItem(b.name);
+    // One space between words, as the reader writes names; a type written in another case is the same type.
+    const name = canonicalItem(b.name.replace(/\s+/g, " "));
     const values: [string, number | undefined][] = [["unit_count", b.unitCount], ["unit_rent_monthly", b.rentMonthly], ["rentable_area_sf", b.areaSf], ["rent_psf_annual", b.rentPsfAnnual], ["item_occupancy_pct", b.occupancyPct]];
     await as(c, async (tx) => {
-      if ((await tx.query(`select 1 from assumptions where deal_id = $1 and item_key = $2 and status <> 'rejected'`, [c.req.param("id"), name])).length) {
-        throw new HttpError(409, `This deal already has ${name}; change its values instead.`);
-      }
+      const [has] = await tx.query<{ item_key: string }>(
+        `select item_key from assumptions where deal_id = $1 and lower(regexp_replace(item_key, '\\s+', ' ', 'g')) = lower($2) and status <> 'rejected' limit 1`,
+        [c.req.param("id"), name],
+      );
+      if (has) throw new HttpError(409, `This deal already has ${has.item_key}; change its values instead.`);
       for (const [fieldKey, value] of values) {
         if (value !== undefined) await tx.query(`select fn_enter_value($1, $2, $3, $4, $5)`, [c.req.param("id"), fieldKey, name, value, b.reason]);
       }

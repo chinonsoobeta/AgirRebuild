@@ -1248,6 +1248,7 @@ const FR_REASONS: [RegExp, string | ((m: RegExpMatchArray) => string)][] = [
   [/^A second approver must be a different person from the one who entered the value$/, "Le second approbateur doit être une autre personne que celle qui a saisi la valeur"],
   [/^Say where this value comes from \(at least 10 characters\)$/, "Précisez d'où vient cette valeur (au moins 10 caractères)"],
   [/^This field already has a value; review it instead$/, "Ce champ a déjà une valeur ; examinez-la plutôt"],
+  [/^This deal already has (.+); change its values instead\.$/, (m) => `Ce projet a déjà ${m[1]} ; modifiez plutôt ses valeurs.`],
   [/^State the conditions$/, "Précisez les conditions"],
   [/^The inputs changed after this run\. Run underwriting again before recording a decision\.$/, "Les données ont changé après cette analyse. Relancez l'analyse avant de consigner une décision."],
   [/^A newer run exists\. Decide on the latest run\.$/, "Une analyse plus récente existe. Décidez sur la plus récente."],
