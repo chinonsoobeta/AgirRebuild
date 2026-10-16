@@ -1,5 +1,5 @@
 import { describe, expect, test } from "vitest";
-import { FIELD_BY_KEY, POLICY_V1, type EngineInput } from "@agir/contracts";
+import { FIELD_BY_KEY, POLICY_V1, policyFor, type EngineInput } from "@agir/contracts";
 import { createHash } from "node:crypto";
 import { assemble, canonicalJson, ENGINE_VERSION, underwrite, type AssumptionRow } from "@agir/engine";
 import { consolidate, extractCandidates, type SourcedCandidate } from "@agir/extraction";
@@ -378,5 +378,68 @@ describe("the build decision report", () => {
       const model = buildModel(mapleInput(kind));
       expect(verifyProvenance(visibleText(renderHtml(model)), model.formatter.manifest).orphans, kind).toEqual([]);
     }
+  });
+});
+
+describe("a deal that is kept and refinanced (card 60)", () => {
+  const DRAFT = "Draft policy, not signed by credit";
+  const UNREALIZED = "unrealized, not a sale";
+  function holdInput(kind: ArtifactInput["kind"]): ArtifactInput {
+    const input: EngineInput = { ...developmentDeal(), refinance: { month: 36, ltvPct: 65, ratePct: 5, amortYears: 30, ioMonths: 0 }, exit: "refinance_hold" };
+    const policy = policyFor(input);
+    const result = underwrite(input, policy);
+    return {
+      kind,
+      deal: { name: "Kept Rental", assetType: "Multifamily", location: "Calgary", currency: "CAD", province: "AB" },
+      run: { id: "r1", runNumber: 1, createdAt: "2026-10-15T12:00:00.000Z", engineVersion: result.engineVersion, policyVersion: result.policyVersion, policyHash: createHash("sha256").update(canonicalJson(policy)).digest("hex"), inputHash: "a".repeat(64), resultHash: "b".repeat(64) },
+      policy,
+      result,
+      input,
+      assumptions: [],
+      decision: null,
+    };
+  }
+  const textOf = (x: ArtifactInput) => {
+    const model = buildModel(x);
+    const text = visibleText(renderHtml(model));
+    return { model, text, report: verifyProvenance(text, model.formatter.manifest) };
+  };
+
+  test.each(["ic_memo", "lender_package", "build_decision"] as const)("the %s says the policy is a draft, leads with the hold measures, and shows no sale", (kind) => {
+    const { model, text, report } = textOf(holdInput(kind));
+    expect(report.orphans).toEqual([]);
+    expect(text).toContain(DRAFT);
+    for (const label of ["Cash returned at refinance", "Cash left in the deal", "Coverage after refinance", "Cash-on-cash after refinance"]) expect(text, label).toContain(label);
+    expect(text).toContain(UNREALIZED);
+    for (const sale of ["Net sale proceeds", "Exit value", "Development profit", "Profit on cost", "Sale to equity"]) expect(text, sale).not.toContain(sale);
+    // The first figures after the verdict are the four hold measures, in order.
+    const stats = model.blocks.find((b) => b.type === "stats");
+    expect(stats && stats.type === "stats" ? stats.items.slice(0, 4).map((i) => i.label) : []).toEqual(["Cash returned at refinance", "Cash left in the deal", "Coverage after refinance (DCR)", "Cash-on-cash after refinance"]);
+  });
+
+  test("a sale deal's reports do not mention a draft policy, and still show the sale", () => {
+    for (const kind of ["ic_memo", "lender_package"] as const) {
+      const { text } = textOf(mapleInput(kind));
+      expect(text, kind).not.toContain(DRAFT);
+      expect(text, kind).not.toContain(UNREALIZED);
+    }
+  });
+
+  test("the model export names the draft policy and labels the unrealized flow", async () => {
+    const out = await renderArtifact(holdInput("model_export"), "xlsx");
+    expect(out.provenance.pass).toBe(true);
+    const ExcelJS = (await import("exceljs")).default;
+    const wb = new ExcelJS.Workbook();
+    await wb.xlsx.load(Buffer.from(out.bytes) as never);
+    const cells = (name: string) => {
+      const rows: unknown[][] = [];
+      wb.getWorksheet(name)!.eachRow((row) => rows.push((row.values as unknown[]).slice(1)));
+      return rows.flat().map(String);
+    };
+    expect(cells("Summary").some((c) => c.includes(DRAFT))).toBe(true);
+    const kinds = cells("Equity flows");
+    expect(kinds.filter((c) => /unrealized/i.test(c))).toHaveLength(1);
+    expect(kinds.filter((c) => /unrealized/i.test(c))[0]).toMatch(/unrealized, not a sale/i);
+    expect(kinds).not.toContain("sale");
   });
 });

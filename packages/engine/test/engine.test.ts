@@ -1,10 +1,10 @@
 import { describe, expect, test } from "vitest";
 import fc from "fast-check";
-import { FIELDS, FIELD_BY_KEY, POLICY_V1, TEMPLATES, type AssumptionStatus, type EngineInput, type Readiness, type RunResult } from "@agir/contracts";
+import { FIELDS, FIELD_BY_KEY, METRICS, POLICIES, POLICY_V1, RENTAL_HOLD_V1_DRAFT, TEMPLATES, policyFor, type AssumptionStatus, type EngineInput, type Readiness, type RunResult } from "@agir/contracts";
 import { createHash } from "node:crypto";
 import { readFileSync, readdirSync } from "node:fs";
 import { join } from "node:path";
-import { allocate, applyStress, assemble, buildLedger, canonicalJson, irrRoots, levelPayment, underwrite, validateInput, EngineInputError } from "../src/index.ts";
+import { allocate, applyStress, assemble, buildLedger, canonicalJson, gateSpecs, irrRoots, levelPayment, underwrite, validateInput, EngineInputError } from "../src/index.ts";
 import { allEquityDeal, developmentDeal } from "./fixtures.ts";
 
 const metric = (r: RunResult, key: string, scenario = "base") =>
@@ -696,3 +696,295 @@ describe("fixed operating costs during lease-up, shortfall and interest-only cov
 function total(xs: number[]): number {
   return xs.reduce((a, b) => a + b, 0);
 }
+
+describe("exit by refinancing and holding (card 60)", () => {
+  const POLICY_V1_HASH = "9f95780101a9ecfe6444c47dd319c1cb8d77251d60700a1a4dde1733055296b9";
+  const sha = (x: unknown) => createHash("sha256").update(canonicalJson(x)).digest("hex");
+  const HOLD_METRICS = ["refinance_cash_returned", "cash_left_in_deal", "dcr_after_refinance", "cash_on_cash_after_refinance", "stated_value", "unrealized_equity_multiple", "unrealized_equity_irr"];
+  const SALE_METRICS = ["exit_value", "net_sale_proceeds", "development_profit", "profit_on_cost", "equity_multiple", "equity_irr", "sale_month", "lp_irr", "gp_irr", "gp_promote"];
+  const NOT_SOLD = "The deal is kept and refinanced, not sold.";
+  const v = (r: RunResult, key: string, scenario = "base") => metric(r, key, scenario).value!;
+
+  /**
+   * An invented rental with no build (stabilized at month 0), all rates 0% so the arithmetic is exact.
+   * Rent 10 x 1,000 x 12 = 120,000 less fixed costs 20,000 gives NOI 100,000 a year, flat. Land 1,000,000 is
+   * paid at month 0 with a senior loan of 600,000 (20-year amortization, so 2,500 a month, 30,000 a year);
+   * equity is 400,000. Hold 3 years, so the end of the hold T is month 35. Exit cap 10%.
+   */
+  const rental = (refinance: NonNullable<EngineInput["refinance"]>, extra: Partial<EngineInput> = {}): EngineInput => ({
+    budget: { land: 1_000_000, hard: 0, soft: 0, contingency: 0, other: 0 },
+    revenue: [{ key: "A", label: "A", basis: "per_unit", units: 10, rentMonthly: 1_000 }],
+    otherIncomeAnnual: 0,
+    constructionMonths: 0,
+    leaseUpMonths: 0,
+    holdYears: 3,
+    stabilizedOccupancyPct: 100,
+    fixedOpexAnnual: 20_000,
+    rentGrowthPct: 0,
+    expenseGrowthPct: 0,
+    leaseUpRamp: false,
+    sCurveDraws: false,
+    exitCapPct: 10,
+    sellingCostsPct: 0,
+    senior: { amount: 600_000, ratePct: 0, amortYears: 20, ioMonths: 0 },
+    refinance,
+    exit: "refinance_hold",
+    stated: {},
+    ...extra,
+  });
+  const byAmount = () => rental({ month: 12, amount: 800_000, ratePct: 0, amortYears: 20, ioMonths: 0 });
+  const byLtv = () => rental({ month: 12, ltvPct: 75, ratePct: 0, amortYears: 20, ioMonths: 0 });
+  const npv = (rate: number, flows: [number, number][]) => flows.reduce((a, [t, amt]) => a + amt / Math.pow(1 + rate, t), 0);
+
+  test("a refinance by amount: every hold metric equals its hand computation", () => {
+    const r = underwrite(byAmount(), policyFor(byAmount()));
+    // Senior balance at month 12 (twelve payments of 2,500 made in months 0 to 11): 600,000 - 30,000 = 570,000.
+    // Cash returned = 800,000 - 570,000 = 230,000. Cash left = 400,000 - 230,000 = 170,000.
+    expect(v(r, "refinance_cash_returned")).toBeCloseTo(230_000, 6);
+    expect(v(r, "cash_left_in_deal")).toBeCloseTo(170_000, 6);
+    // Months 12 to 23: NOI 100,000; sizing debt service 800,000 / 240 x 12 = 40,000. DCR = 100,000 / 40,000 = 2.5.
+    expect(v(r, "dcr_after_refinance")).toBeCloseTo(2.5, 9);
+    // Debt service actually due in those months is also 40,000: (100,000 - 40,000) / 170,000 = 35.2941...%.
+    expect(v(r, "cash_on_cash_after_refinance")).toBeCloseTo((60_000 / 170_000) * 100, 9);
+    // Stated value = final-year NOI 100,000 / 10% = 1,000,000, no selling costs.
+    expect(v(r, "stated_value")).toBeCloseTo(1_000_000, 6);
+    // Debt at T: 800,000 - 24 x 3,333.33 = 720,000. Unrealized flow = 1,000,000 - 720,000 = 280,000.
+    // Distributions: 230,000 + 70,000 (year 1: 100,000 - 30,000) + 60,000 + 60,000 + 280,000 = 700,000; contributions 400,000.
+    expect(v(r, "unrealized_equity_multiple")).toBeCloseTo(1.75, 9);
+    // The IRR is the rate at which the dated flows net to zero.
+    const flows: [number, number][] = [[0, -400_000], [1, 230_000 + 70_000], [2, 60_000], [3, 60_000 + 280_000]];
+    expect(npv(v(r, "unrealized_equity_irr") / 100, flows)).toBeCloseTo(0, 4);
+    expect(metric(r, "unrealized_equity_multiple").unit).toBe("x");
+    expect(metric(r, "stated_value").label).toMatch(/unrealized, not a sale/i);
+    expect(metric(r, "unrealized_equity_multiple").label).toMatch(/unrealized, not a sale/i);
+    expect(metric(r, "unrealized_equity_irr").label).toMatch(/unrealized, not a sale/i);
+  });
+
+  test("a refinance by loan-to-value: the loan is the share of the forward value", () => {
+    const r = underwrite(byLtv(), policyFor(byLtv()));
+    // Forward NOI (months 12 to 23) 100,000 / 10% = 1,000,000 value; 75% gives a loan of 750,000.
+    // Cash returned = 750,000 - 570,000 = 180,000. Cash left = 400,000 - 180,000 = 220,000.
+    expect(v(r, "refinance_cash_returned")).toBeCloseTo(180_000, 6);
+    expect(v(r, "cash_left_in_deal")).toBeCloseTo(220_000, 6);
+    // Sizing debt service 750,000 / 240 x 12 = 37,500: DCR = 100,000 / 37,500 = 2.6667.
+    expect(v(r, "dcr_after_refinance")).toBeCloseTo(100_000 / 37_500, 9);
+    // (100,000 - 37,500) / 220,000 = 28.4091...%.
+    expect(v(r, "cash_on_cash_after_refinance")).toBeCloseTo((62_500 / 220_000) * 100, 9);
+    // Debt at T: 750,000 - 24 x 3,125 = 675,000; unrealized flow 325,000. Distributions 180,000 + 70,000 + 62,500 + 62,500 + 325,000 = 700,000.
+    expect(v(r, "unrealized_equity_multiple")).toBeCloseTo(1.75, 9);
+    const flows: [number, number][] = [[0, -400_000], [1, 180_000 + 70_000], [2, 62_500], [3, 62_500 + 325_000]];
+    expect(npv(v(r, "unrealized_equity_irr") / 100, flows)).toBeCloseTo(0, 4);
+  });
+
+  test("an exit-cap shock moves both the loan sized by loan-to-value and the stated value", () => {
+    const r = underwrite(byLtv(), policyFor(byLtv()));
+    // Cap 10.75%: value 100,000 / 0.1075 = 930,232.56; loan 75% = 697,674.42; cash returned = 697,674.42 - 570,000.
+    expect(v(r, "stated_value", "exit_cap")).toBeCloseTo(100_000 / 0.1075, 4);
+    expect(v(r, "refinance_cash_returned", "exit_cap")).toBeCloseTo(0.75 * (100_000 / 0.1075) - 570_000, 4);
+    expect(r.scenarios.map((s) => s.key)).toEqual(["base", "exit_cap", "cost", "rate", "rent", "occupancy", "expense", "combined"]);
+    for (const s of r.scenarios) for (const k of HOLD_METRICS) expect(s.metrics.some((m) => m.key === k), `${s.key} ${k}`).toBe(true);
+  });
+
+  test("there is no sale flow and exactly one unrealized flow, at the end of the hold", () => {
+    const r = underwrite(byAmount(), policyFor(byAmount()));
+    expect(r.equityFlows.filter((f) => f.kind === ("sale" as string))).toEqual([]);
+    const un = r.equityFlows.filter((f) => f.kind === ("unrealized" as string));
+    expect(un).toHaveLength(1);
+    expect(un[0]).toMatchObject({ month: 35, t: 3, amount: 280_000 });
+    expect(r.ledger.every((row) => row.saleNet === 0)).toBe(true);
+    expect(r.checks.map((c) => c.key)).not.toContain("equity_wipeout");
+  });
+
+  test("the sale metrics are not applicable with the reason, never 0", () => {
+    const base = underwrite(byAmount(), policyFor(byAmount()));
+    const waterfall = underwrite({ ...byAmount(), waterfall: { lpSharePct: 90, preferredReturnPct: 8, gpPromotePct: 20 } }, policyFor(byAmount()));
+    for (const r of [base, waterfall]) {
+      for (const s of r.scenarios) {
+        for (const k of SALE_METRICS) {
+          const m = metric(r, k, s.key);
+          expect([m.status, m.value, m.reason], `${s.key} ${k}`).toEqual(["NOT_APPLICABLE", null, NOT_SOLD]);
+        }
+      }
+    }
+  });
+
+  test("the hold metrics are appended after every existing metric, in order, and the others are computed as before", () => {
+    const r = underwrite(byAmount(), policyFor(byAmount()));
+    const keys = r.scenarios[0]!.metrics.map((m) => m.key);
+    expect(keys.slice(-HOLD_METRICS.length)).toEqual(HOLD_METRICS);
+    expect(METRICS.map((m) => m.key).slice(-HOLD_METRICS.length)).toEqual(HOLD_METRICS);
+    expect(keys.slice(0, -HOLD_METRICS.length)).toEqual(METRICS.map((m) => m.key).slice(0, -HOLD_METRICS.length));
+    // Everything up to T is the same ledger as the sale of the same deal.
+    const { exit: _e, ...asSale } = byAmount();
+    const sold = underwrite(asSale, POLICY_V1);
+    expect(r.annual).toEqual(sold.annual);
+    for (const k of ["total_development_cost", "required_equity", "stabilized_noi", "sizing_dscr", "contractual_dscr", "refinance_net_proceeds", "debt_yield", "cumulative_cash_shortfall"]) {
+      expect(metric(r, k), k).toEqual(metric(sold, k));
+    }
+  });
+
+  test("when all the equity has come back, cash-on-cash after refinance is not meaningful, with its reason", () => {
+    const input = rental({ month: 12, amount: 1_200_000, ratePct: 0, amortYears: 20, ioMonths: 0 });
+    const r = underwrite(input, policyFor(input));
+    // Cash returned = 1,200,000 - 570,000 = 630,000; cash left = 400,000 - 630,000 = -230,000.
+    expect(v(r, "cash_left_in_deal")).toBeCloseTo(-230_000, 6);
+    const m = metric(r, "cash_on_cash_after_refinance");
+    expect([m.status, m.value]).toEqual(["NOT_MEANINGFUL", null]);
+    expect(m.reason).toMatch(/cash left in the deal/i);
+  });
+
+  test("with fewer than 12 months left the window is the months that remain, scaled to a year, and the reason says so", () => {
+    const input = rental({ month: 30, amount: 800_000, ratePct: 0, amortYears: 20, ioMonths: 0 });
+    const r = underwrite(input, policyFor(input));
+    // Months 30 to 35 are 6 months. Senior balance at 30: 600,000 - 30 x 2,500 = 525,000; cash returned 275,000; cash left 125,000.
+    // NOI 6 x 8,333.33 = 50,000; sizing debt service 6 x 3,333.33 = 20,000: DCR 2.5. Scaled: (50,000 - 20,000) x 12 / 6 = 60,000 / 125,000 = 48%.
+    expect(v(r, "cash_left_in_deal")).toBeCloseTo(125_000, 6);
+    expect(v(r, "dcr_after_refinance")).toBeCloseTo(2.5, 9);
+    expect(v(r, "cash_on_cash_after_refinance")).toBeCloseTo(48, 9);
+    expect(metric(r, "cash_on_cash_after_refinance").reason).toMatch(/Only 6 months remain/);
+    expect(metric(r, "dcr_after_refinance").reason).toMatch(/Only 6 months remain/);
+  });
+
+  test("a stated value below the debt fires the wipeout check with the hold message, and the unrealized flow is 0", () => {
+    const input = { ...byAmount(), exitCapPct: 50 };
+    const r = underwrite(input, policyFor(input));
+    // Stated value 100,000 / 50% = 200,000; debt outstanding at T is 720,000.
+    const c = r.checks.find((k) => k.key === "equity_wipeout")!;
+    expect(c.severity).toBe("error");
+    expect(c.message).toBe("The stated value of $200,000 does not cover the $720,000 of debt outstanding. Equity has no value at the end of the hold.");
+    const un = r.equityFlows.filter((f) => f.kind === ("unrealized" as string));
+    expect(un).toHaveLength(1);
+    expect(un[0]!.amount).toBe(0);
+    expect(r.verdict.code).toBe("REJECT");
+  });
+
+  test("a stated value with no positive NOI is not meaningful, with no unrealized flow", () => {
+    const input = { ...byAmount(), fixedOpexAnnual: 130_000 };
+    const r = underwrite(input, policyFor(input));
+    for (const k of ["stated_value", "unrealized_equity_multiple", "unrealized_equity_irr"]) expect(metric(r, k).status, k).toBe("NOT_MEANINGFUL");
+    expect(r.equityFlows.filter((f) => f.kind === ("unrealized" as string))).toEqual([]);
+  });
+
+  test("the engine refuses hold mode with no refinance", () => {
+    const { refinance: _r, ...none } = byAmount();
+    expect(() => underwrite(none, policyFor(none))).toThrow(EngineInputError);
+    expect(() => validateInput(none)).toThrow(/needs its refinance/);
+  });
+
+  describe("readiness", () => {
+    const rows = (fields: Record<string, number>) => {
+      const all: Record<string, number> = {
+        land_cost: 1_000_000, hard_cost: 0, soft_cost: 0, contingency: 0, construction_months: 0, lease_up_months: 0, hold_years: 3,
+        stabilized_occupancy_pct: 100, fixed_opex_annual: 20_000, exit_cap_rate_pct: 10, selling_costs_pct: 0,
+        senior_loan_amount: 600_000, senior_rate_pct: 0, senior_amort_years: 20, ...fields,
+      };
+      return [
+        ...Object.entries(all).map(([fieldKey, valueNumeric]) => ({ fieldKey, itemKey: null, status: "approved" as AssumptionStatus, valueNumeric })),
+        { fieldKey: "unit_count", itemKey: "A", status: "approved" as AssumptionStatus, valueNumeric: 10 },
+        { fieldKey: "unit_rent_monthly", itemKey: "A", status: "approved" as AssumptionStatus, valueNumeric: 1_000 },
+      ];
+    };
+    const refi = { refinance_month: 12, refinance_amount: 800_000, refinance_rate_pct: 0, refinance_amort_years: 20 };
+
+    test("the flag is a field: optional, a review choice, never read from a document", () => {
+      const d = FIELD_BY_KEY.get("refinance_and_hold")!;
+      expect(d).toMatchObject({ label: "Keep and refinance (no sale)", group: "refinance", unit: "flag", min: 0, max: 1, integer: true, required: false, material: true, conservative: null, extractable: false });
+      expect(d.absentMeans).toBe("the deal is sold at the end of the hold");
+      expect(d.aliases).toEqual(expect.arrayContaining(["refinance and hold", "keep and refinance", "conserver et refinancer"]));
+    });
+
+    test("with the flag at 1 the input says so and readiness is ready", () => {
+      const { readiness, input } = assemble(rows({ ...refi, refinance_and_hold: 1 }));
+      expect(readiness.status).toBe("ready");
+      expect(input!.exit).toBe("refinance_hold");
+      expect(policyFor(input!).version).toBe("rental-hold-v1-draft");
+    });
+
+    test("with the flag at 0 or absent the key is absent, so the input hashes as before", () => {
+      const absent = assemble(rows(refi)).input!;
+      const zero = assemble(rows({ ...refi, refinance_and_hold: 0 })).input!;
+      expect("exit" in absent).toBe(false);
+      expect("exit" in zero).toBe(false);
+      expect(sha(zero)).toBe(sha(absent));
+      expect(policyFor(zero)).toBe(POLICY_V1);
+    });
+
+    test("hold mode without a refinance month is blocked, and the problem points at the refinance month", () => {
+      const { readiness, input } = assemble(rows({ refinance_and_hold: 1 }));
+      expect(input).toBeNull();
+      expect(readiness.status).toBe("blocked");
+      expect(readiness.impossible).toHaveLength(1);
+      expect(readiness.impossible[0]).toMatchObject({
+        fieldKey: "refinance_month",
+        label: "A deal that is kept and refinanced needs its refinance: the month, the amount or loan-to-value, the rate and the amortization.",
+      });
+    });
+
+    test("the existing refinance rules still apply in hold mode", () => {
+      const both = assemble(rows({ ...refi, refinance_ltv_pct: 65, refinance_and_hold: 1 }));
+      expect(both.input).toBeNull();
+      expect(both.readiness.impossible.map((i) => i.fieldKey)).toEqual(["refinance_amount"]);
+      const early = assemble(rows({ ...refi, refinance_month: 0, refinance_and_hold: 1 }));
+      expect(early.input).toBeNull();
+    });
+  });
+
+  describe("policy", () => {
+    test("policy v1 is byte for byte what it was: its hash is pinned and it has no draft key", () => {
+      expect(sha(POLICY_V1)).toBe(POLICY_V1_HASH);
+      expect("draft" in POLICY_V1).toBe(false);
+      expect(POLICY_V1.version).toBe("policy-v1");
+    });
+
+    test("the draft takes v1's rules and has four gates, with proposed thresholds", () => {
+      expect(RENTAL_HOLD_V1_DRAFT.version).toBe("rental-hold-v1-draft");
+      expect(RENTAL_HOLD_V1_DRAFT.draft).toBe(true);
+      for (const k of ["stresses", "maxLtcPct", "baseSizingDscrFloor", "maxFailedGatesForConditions", "agreementTolerancePct", "sourcePrecedence"] as const) {
+        expect(RENTAL_HOLD_V1_DRAFT[k], k).toEqual(POLICY_V1[k]);
+      }
+      expect(gateSpecs(RENTAL_HOLD_V1_DRAFT).map((g) => [g.metricKey, g.scenario, g.threshold])).toEqual([
+        ["development_spread", "base", 100],
+        ["dcr_after_refinance", "base", 1.2],
+        ["sizing_dscr", "combined", 1.2],
+        ["unrealized_equity_multiple", "combined", 1],
+      ]);
+      expect(gateSpecs(POLICY_V1)).toHaveLength(5);
+    });
+
+    test("the registry maps each version to its policy, and hold mode gets the draft", () => {
+      expect(POLICIES["policy-v1"]).toBe(POLICY_V1);
+      expect(POLICIES["rental-hold-v1-draft"]).toBe(RENTAL_HOLD_V1_DRAFT);
+      expect(policyFor(byAmount())).toBe(RENTAL_HOLD_V1_DRAFT);
+      const { exit: _e, ...sale } = byAmount();
+      expect(policyFor(sale)).toBe(POLICY_V1);
+    });
+
+    test("a hold deal runs under the draft with four gates; a sale deal under policy-v1 with five", () => {
+      const hold = underwrite(byAmount(), policyFor(byAmount()));
+      expect(hold.policyVersion).toBe("rental-hold-v1-draft");
+      expect(hold.verdict.gates).toHaveLength(4);
+      expect(hold.verdict.gates.find((g) => g.metricKey === "dcr_after_refinance")).toMatchObject({ scenario: "base", threshold: 1.2, status: "passed", unit: "x" });
+      const sale = underwrite(developmentDeal(), policyFor(developmentDeal()));
+      expect(sale.policyVersion).toBe("policy-v1");
+      expect(sale.verdict.gates).toHaveLength(5);
+    });
+  });
+
+  describe("a sale deal does not move", () => {
+    test("it gets none of the hold metrics, and its result hash is what it was", () => {
+      const r = underwrite(allEquityDeal(), POLICY_V1);
+      for (const s of r.scenarios) for (const k of HOLD_METRICS) expect(s.metrics.some((m) => m.key === k), `${s.key} ${k}`).toBe(false);
+      expect(r.equityFlows.some((f) => f.kind === ("unrealized" as string))).toBe(false);
+      // The pinned hash of the plain all-equity sale deal, taken before this card (the same pin as the lease-up test above).
+      const earlier = ["leaseup_operating_cost", "cumulative_cash_shortfall", "io_dscr_year1"];
+      expect(sha({ ...r, scenarios: r.scenarios.map((s) => ({ ...s, metrics: s.metrics.filter((m) => !earlier.includes(m.key)) })) })).toBe("4b1aa853505ea0ed888f41c3cd57d61f87072f61a70ce399d8782e3724f33938");
+    });
+
+    test("the six oracle deals are all sales: none states the flag", () => {
+      const dir = join(import.meta.dirname, "../../../oracles/deals");
+      const files = readdirSync(dir).filter((f) => f.endsWith(".json"));
+      expect(files.length).toBe(6);
+      for (const f of files) expect(readFileSync(join(dir, f), "utf8"), f).not.toMatch(/refinance and hold|keep and refinance|refinance_and_hold/i);
+    });
+  });
+});

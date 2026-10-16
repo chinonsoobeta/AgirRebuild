@@ -7,6 +7,7 @@ import Anthropic from "@anthropic-ai/sdk";
 import { drain, reconcileDeal, type SuggestRequest, type SuggestReply } from "@agir/worker";
 import { documentBytes, loadOracle } from "@agir/testkit";
 import { createApp } from "../src/app.ts";
+import { POLICY_V1, RENTAL_HOLD_V1_DRAFT } from "@agir/contracts";
 import { canonicalJson } from "@agir/engine";
 import { sha256, sourceLabel } from "../src/services.ts";
 
@@ -775,5 +776,93 @@ describe("audit of task 59: using one's own label as stated keeps its document s
     const [row] = await db.query<any>(`select * from assumptions where id = $1`, [a.id]);
     expect(row).toMatchObject({ status: "approved", value: 5.75, source_kind: "document", second_approver: null });
     expect(sourceLabel(row)).toMatch(/kept\.txt, .*labelled by a person/);
+  });
+});
+
+describe("card 60: a deal that is kept and refinanced runs under its own policy", () => {
+  let hal: Session, hw: string, hd: string, holdRun: string;
+  const sha = (x: unknown) => sha256(canonicalJson(x));
+  // A build, lease-up, and a refinance at month 24 sized by loan-to-value. Hold 5 years (the accepted default).
+  const put = async (d: string, fieldKey: string, value: number, itemKey?: string) =>
+    expect((await call(hal, "POST", `/api/deals/${d}/values`, { fieldKey, value, reason: "Quick start answer", ...(itemKey ? { itemKey } : {}) })).status).toBe(200);
+  const fill = async (d: string, flag: boolean) => {
+    for (const [f, v, i] of [["land_cost", 800000], ["hard_cost", 2400000], ["soft_cost", 300000], ["contingency", 120000], ["construction_months", 12], ["lease_up_months", 6],
+      ["unit_count", 4, "Residential"], ["unit_rent_monthly", 2400, "Residential"], ["stabilized_occupancy_pct", 95], ["exit_cap_rate_pct", 5.5], ["senior_loan_amount", 2000000],
+      ["senior_rate_pct", 6], ["senior_amort_years", 30], ["refinance_month", 24], ["refinance_ltv_pct", 65], ["refinance_rate_pct", 5], ["refinance_amort_years", 30]] as [string, number, string?][]) await put(d, f, v, i);
+    if (flag) await put(d, "refinance_and_hold", 1);
+    expect((await call(hal, "POST", `/api/deals/${d}/defaults`, { fields: ["hold_years", "selling_costs_pct", "expense_ratio_pct"] })).status).toBe(200);
+  };
+
+  test("a hold-mode run records the draft policy and its hash, and is fresh after creation", async () => {
+    hal = await signup("hal@example.com", "Hal Holder", "solo");
+    hw = (await call(hal, "GET", "/api/me")).json.workspaces[0].id;
+    hd = (await call(hal, "POST", `/api/workspaces/${hw}/deals`, { name: "Kept Fourplex", assetType: "Multifamily", location: "Calgary", province: "AB" })).json.id;
+    await fill(hd, true);
+    const r = await call(hal, "POST", `/api/deals/${hd}/runs`);
+    expect(r.status).toBe(200);
+    holdRun = r.json.id;
+    const view = (await call(hal, "GET", `/api/runs/${holdRun}`)).json;
+    expect(view).toMatchObject({ policyVersion: "rental-hold-v1-draft", fresh: true, staleReasons: [] });
+    expect(view.result.verdict.gates).toHaveLength(4);
+    expect(view.result.scenarios[0].metrics.some((m: any) => m.key === "refinance_cash_returned")).toBe(true);
+    const [row] = await db.query<any>(`select policy_version, policy_hash from runs where id = $1`, [holdRun]);
+    expect(row).toMatchObject({ policy_version: "rental-hold-v1-draft", policy_hash: sha(RENTAL_HOLD_V1_DRAFT) });
+    expect(row.policy_hash).not.toBe(sha(POLICY_V1));
+    expect((await call(hal, "GET", `/api/deals/${hd}`)).json.status.text).toMatch(/^Verdict: /);
+    const overview = (await call(hal, "GET", `/api/deals/${hd}`)).json;
+    expect(overview.step).toBe("decision");
+  });
+
+  test("it replays: the audit package validates, signature and replay included", async () => {
+    const pkg = (await call(hal, "GET", `/api/runs/${holdRun}/audit-package`)).json;
+    expect(pkg.validation.checks.filter((c: any) => c.status !== "passed")).toEqual([]);
+    expect(pkg.validation.status).toBe("passed");
+  });
+
+  test("the sensitivity routes use the run's own policy", async () => {
+    const e = (await call(hal, "POST", `/api/runs/${holdRun}/explore`, { shock: {} })).json;
+    expect(e.policyVersion).toBe("rental-hold-v1-draft");
+    expect(e.verdict.gates).toHaveLength(4);
+    const b = await call(hal, "POST", `/api/runs/${holdRun}/breakeven`, {});
+    expect(b.status).toBe(200);
+  });
+
+  test("the catalog exposes the registry so the web can label a draft policy", async () => {
+    const cat = (await call(hal, "GET", "/api/catalog")).json;
+    expect(cat.policy.version).toBe("policy-v1");
+    expect(cat.policies["policy-v1"].draft).toBeUndefined();
+    expect(cat.policies["rental-hold-v1-draft"].draft).toBe(true);
+  });
+
+  test("a decision can be recorded on a draft policy run, and the artifacts carry the draft line", async () => {
+    const view = (await call(hal, "GET", `/api/runs/${holdRun}`)).json;
+    const body = view.result.verdict.code === "APPROVE"
+      ? { decision: "approve", rationale: "Holds its coverage after the refinance" }
+      : view.result.verdict.code === "APPROVE_WITH_CONDITIONS"
+        ? { decision: "approve_with_conditions", rationale: "Holds its coverage after the refinance", conditions: "Lender to confirm the take-out terms" }
+        : { decision: "reject", rationale: "Does not hold its coverage after the refinance" };
+    expect((await call(hal, "POST", `/api/runs/${holdRun}/decision`, body)).status).toBe(200);
+    for (const [kind, format] of [["ic_memo", "docx"], ["lender_package", "docx"], ["model_export", "xlsx"]]) {
+      expect((await call(hal, "POST", `/api/runs/${holdRun}/artifacts`, { kind, format })).status).toBe(200);
+    }
+    await work();
+    const arts = (await call(hal, "GET", `/api/deals/${hd}/artifacts`)).json;
+    expect(arts.map((a: any) => a.status)).toEqual(["ready", "ready", "ready"]);
+  }, 120_000);
+
+  test("a policy-v1 run is still fresh, with the hash it was pinned to before this card", async () => {
+    const sd = (await call(hal, "POST", `/api/workspaces/${hw}/deals`, { name: "Sold Fourplex", assetType: "Multifamily", location: "Calgary", province: "AB" })).json.id;
+    await fill(sd, false);
+    const r = await call(hal, "POST", `/api/deals/${sd}/runs`);
+    expect(r.status).toBe(200);
+    const view = (await call(hal, "GET", `/api/runs/${r.json.id}`)).json;
+    expect(view).toMatchObject({ policyVersion: "policy-v1", fresh: true });
+    expect(view.result.verdict.gates).toHaveLength(5);
+    const [row] = await db.query<any>(`select policy_hash from runs where id = $1`, [r.json.id]);
+    expect(row.policy_hash).toBe("9f95780101a9ecfe6444c47dd319c1cb8d77251d60700a1a4dde1733055296b9");
+    // The same, for the Maple Heights run made earlier in this file.
+    const [maple] = await db.query<any>(`select policy_version, policy_hash from runs where id = $1`, [run]);
+    expect(maple).toMatchObject({ policy_version: "policy-v1", policy_hash: "9f95780101a9ecfe6444c47dd319c1cb8d77251d60700a1a4dde1733055296b9" });
+    expect((await call(hal, "GET", `/api/runs/${r.json.id}/audit-package`)).json.validation.status).toBe("passed");
   });
 });

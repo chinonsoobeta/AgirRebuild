@@ -87,6 +87,30 @@ describe("the plain-language layer", () => {
     }
   });
 
+  it("has English and French text for a deal that is kept and refinanced (card 60)", () => {
+    for (const k of ["refinance_cash_returned", "cash_left_in_deal", "dcr_after_refinance", "cash_on_cash_after_refinance", "stated_value", "unrealized_equity_multiple", "unrealized_equity_irr"]) {
+      expect(fr.L.metric(k), k).not.toBe(k);
+      expect(fr.L.metric(k), k).not.toBe(en.L.metric(k));
+      expect(fr.L.formula(k).length, k).toBeGreaterThan(10);
+      expect(fr.L.formula(k), k).not.toBe(en.L.formula(k));
+    }
+    expect(en.L.metric("dcr_after_refinance")).toBe("Coverage after refinance (DCR)");
+    expect(fr.L.metric("stated_value")).toMatch(/non réalisée/);
+    expect(fr.L.field("refinance_and_hold")).not.toBe(en.L.field("refinance_and_hold"));
+    expect(fr.L.absent("refinance_and_hold")).not.toBe(en.L.absent("refinance_and_hold"));
+    expect(en.t("run.draftPolicy")).toBe("Draft policy, not signed by credit");
+    expect(fr.t("run.draftPolicy")).toMatch(/provisoire/);
+    for (const g of ["dcr_after_refinance", "stressed_unrealized_equity_multiple"]) expect(fr.L.gate(g, "x"), g).not.toBe("x");
+    expect(fr.msg("The deal is kept and refinanced, not sold.")).not.toBe("The deal is kept and refinanced, not sold.");
+    const wipe = { key: "equity_wipeout", kind: "bound", severity: "error", message: "The stated value of $200,000 does not cover the $720,000 of debt outstanding. Equity has no value at the end of the hold.", expected: 720_000, actual: 200_000 };
+    expect(checkText(en, wipe)).toBe(wipe.message);
+    expect(checkText(fr, wipe)).not.toMatch(/does not cover|stated value/);
+    expect(checkText(fr, wipe)).toContain(fr.f.value(200_000, "$"));
+    const four = { code: "APPROVE", hardFailReasons: [], gates: ["a", "b", "c", "d"].map((key) => ({ key, label: key, status: "passed" })) };
+    expect(verdictText(en, four, []).headline).toBe("All four gates pass.");
+    expect(verdictText(fr, four, []).headline).toBe("Les quatre seuils sont respectés.");
+  });
+
   it("keeps the institutional term in the glossary", () => {
     expect(en.t("glossary.dcr")[0]).toBe("DCR (debt coverage ratio), called DSCR by many lenders");
     expect(fr.t("glossary.dcr")[0]).toBe("CCD (coefficient de couverture de la dette), appelé RCSD par de nombreux prêteurs");
