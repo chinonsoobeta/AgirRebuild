@@ -298,10 +298,11 @@ export async function reconcileDeal(db: Db, dealId: string) {
       );
     };
     // A proposal meets the existing row whose item name folds equal (task 60d); when several do, it meets none of them and readiness blocks the run.
+    // A row with the proposal's own name comes first, whatever its status, so a value a person rejected stays rejected (task 60d audit).
     const folded = new Map<string, AssumptionRowDb[]>();
     for (const e of existing.filter((x) => x.status !== "rejected")) folded.set(`${e.field_key}|${itemFold(e.item_key)}`, [...(folded.get(`${e.field_key}|${itemFold(e.item_key)}`) ?? []), e]);
     for (const p of proposals) {
-      const meets = folded.get(`${p.fieldKey}|${itemFold(p.itemKey ?? "")}`) ?? [];
+      const meets = byKey.has(`${p.fieldKey}|${p.itemKey ?? ""}`) ? [] : (folded.get(`${p.fieldKey}|${itemFold(p.itemKey ?? "")}`) ?? []);
       if (meets.length === 1) p.itemKey = meets[0]!.item_key || null;
       const key = `${p.fieldKey}|${p.itemKey ?? ""}`;
       seen.add(key);
