@@ -1,6 +1,6 @@
 import { Link, useNavigate, useRouterState } from "@tanstack/react-router";
-import { useQuery, useQueryClient } from "@tanstack/react-query";
-import { createContext, useContext, useEffect, useState, type ReactNode } from "react";
+import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
+import { createContext, useContext, useEffect, useRef, useState, type FormEvent, type ReactNode } from "react";
 import { api, ApiError, type DealOverview, type Me, type Tone } from "../api";
 import { dealStatus, useI18n } from "../i18n";
 import * as I from "./icons";
@@ -180,7 +180,18 @@ export function reviewWaiting(o: Pick<DealOverview, "documents" | "review">): bo
 export function DealHeader({ o, active }: { o: DealOverview; active: string }) {
   const i = useI18n();
   const { t, L } = i;
-  const { solo } = useSession();
+  const { solo, role } = useSession();
+  const navigate = useNavigate();
+  const qc = useQueryClient();
+  const dialog = useRef<HTMLDialogElement>(null);
+  const copy = useMutation({
+    mutationFn: (name: string) => api.post<{ id: string }>(`/deals/${o.deal.id}/copy`, { name }),
+    onSuccess: async (r) => {
+      dialog.current?.close();
+      await qc.invalidateQueries({ queryKey: ["deals"] });
+      void navigate({ to: "/deals/$dealId/review", params: { dealId: r.id } });
+    },
+  });
   const status = dealStatus(i, o, solo);
   const order: string[] = [...STEPS];
   const state = (key: string): { text: string; tone: "done" | "stop" | "faint" | "normal" } => {
@@ -212,10 +223,30 @@ export function DealHeader({ o, active }: { o: DealOverview; active: string }) {
           <div className="stack" style={{ gap: 6 }}>
             <h1 className="h-title">{o.deal.name}</h1>
             <span className="muted">{[L.asset(o.deal.asset_type), L.place(o.deal.location, o.deal.province), L.currency(o.deal.currency)].filter(Boolean).join(" · ")}</span>
+            {o.copiedFrom && (
+              <span className="small muted">{t("copy.variantOf")} <Link to="/deals/$dealId/review" params={{ dealId: o.copiedFrom.id }}>{o.copiedFrom.name}</Link></span>
+            )}
           </div>
-          <Link to="/deals/$dealId/audit" params={{ dealId: o.deal.id }} className="btn small">{t("step.audit")}</Link>
+          <div className="row">
+            {canEdit(role) && <button className="btn small" type="button" onClick={() => dialog.current?.showModal()}>{t("copy.button")}</button>}
+            <Link to="/deals/$dealId/audit" params={{ dealId: o.deal.id }} className="btn small">{t("step.audit")}</Link>
+          </div>
         </div>
       </div>
+      <dialog ref={dialog} aria-labelledby="copy-deal-title">
+        <form
+          onSubmit={(e: FormEvent<HTMLFormElement>) => {
+            e.preventDefault();
+            copy.mutate(String(new FormData(e.currentTarget).get("name")));
+          }}
+        >
+          <h2 id="copy-deal-title" className="h-section">{t("copy.title")}</h2>
+          <p className="muted">{t("copy.intro")}</p>
+          <div className="field"><label htmlFor="cd-name">{t("copy.name")}</label><input className="input" id="cd-name" name="name" required maxLength={160} defaultValue={`${o.deal.name}${t("copy.suffix")}`.slice(0, 160)} /></div>
+          <ErrorText error={copy.error} />
+          <div className="row"><button className="btn primary" type="submit" disabled={copy.isPending}>{t("copy.create")}</button><button className="btn quiet" type="button" onClick={() => dialog.current?.close()}>{t("common.cancel")}</button></div>
+        </form>
+      </dialog>
       <ol className="stepper" aria-label={t("step.steps")}>
         {STEPS.map((key, n) => {
           const st = state(key);

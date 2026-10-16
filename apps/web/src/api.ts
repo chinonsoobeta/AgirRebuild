@@ -41,6 +41,7 @@ export type DealOverview = {
     province: string | null;
     created_at: string;
   };
+  copiedFrom: { id: string; name: string } | null;
   step: "documents" | "review" | "run" | "decision" | "reports";
   status: { tone: Tone; text: string };
   next: string;
