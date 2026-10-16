@@ -61,6 +61,10 @@ begin
     v_values := v_values + 1;
   end loop;
 
+  -- A reconcile the source still has queued (a document read or retired, a label changed) is the copy's too. On a copy
+  -- in exactly its source's state it changes nothing.
+  insert into jobs (kind, payload) values ('reconcile_deal', jsonb_build_object('deal_id', v_id));
+
   perform agir_audit(d.workspace_id, p_deal, 'deal.copied', 'deal', p_deal::text, jsonb_build_object('copy', v_id, 'name', p_name));
   perform agir_audit(d.workspace_id, v_id, 'deal.created_as_copy', 'deal', v_id::text,
     jsonb_build_object('source', p_deal, 'name', d.name, 'documents', v_docs, 'values', v_values, 'labels', v_labels));

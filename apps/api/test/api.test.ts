@@ -1480,12 +1480,14 @@ describe("card 62: a deal is copied as a variant, in exactly the state of its so
     expect(await byField(d, "hard_cost")).toBeUndefined();
     const read = (await call(alice, "POST", `/api/deals/${d}/copy`, { name: "Queued Fourplex, read" })).json.id;
     await work();
-    for (const c of [retired, read]) {
-      const s = await byField(d, "soft_cost");
-      expect(await byField(c, "soft_cost"), c).toMatchObject({ status: s.status, value: s.value, sources: [] });
-    }
-    expect(await byField(d, "soft_cost")).toMatchObject({ status: "needs_review" });
+    // The first copy had one reconcile, as the source had before the budget came.
+    expect(await byField(retired, "soft_cost")).toMatchObject({ status: "needs_review", value: 300000, sources: [], reason: "Its source document was removed; confirm or reject it" });
+    expect(await db.query(`select 1 from documents where deal_id = $1`, [retired])).toHaveLength(0);
+    // The second had the reconcile its source had after it.
+    const s = await byField(d, "soft_cost");
+    expect(await byField(read, "soft_cost")).toMatchObject({ status: s.status, value: s.value, sources: [], reason: s.reason });
     expect(await byField(read, "hard_cost")).toMatchObject({ status: "needs_review", value: 2400000 });
     expect(await hashOf(read)).toBe(await hashOf(d));
+    expect(await stored(read)).toEqual(await stored(d));
   });
 });
