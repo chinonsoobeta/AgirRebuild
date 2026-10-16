@@ -1081,7 +1081,7 @@ const FR_METRICS: Record<string, [string, string]> = {
   stabilization_month: ["Mois de stabilisation", "construction + période de location"],
   sale_month: ["Mois de la vente", "stabilisation + 12 x années de détention - 1"],
   refinance_cash_returned: ["Encaisse remise au refinancement", "nouveau prêt - remboursement du solde du prêt principal ; un montant négatif signifie qu'il a fallu injecter des fonds"],
-  cash_left_in_deal: ["Encaisse restée dans le projet", "apports en fonds propres - encaisse remise au refinancement ; 0 ou moins signifie que tous les fonds propres ont été récupérés"],
+  cash_left_in_deal: ["Encaisse restée dans le projet", "fonds propres requis - encaisse remise au refinancement ; 0 ou moins signifie que tous les fonds propres ont été récupérés"],
   dcr_after_refinance: ["Couverture après refinancement (RCSD)", "RNE des 12 mois suivant le mois du refinancement / service de la dette amortissable de toute la dette en vigueur durant ces mois"],
   cash_on_cash_after_refinance: ["Rendement en espèces après refinancement", "(RNE - service de la dette réellement dû) sur les 12 mois suivant le refinancement / encaisse restée dans le projet"],
   stated_value: ["Valeur déclarée (non réalisée, pas une vente)", "RNE de la dernière année de détention / taux de sortie, sans frais de vente"],
@@ -1105,7 +1105,7 @@ const GATES: Record<string, [string, string]> = {
   stressed_sizing_dscr: ["Sizing DSCR, combined stress", "RCSD de dimensionnement, stress combiné"],
   stressed_equity_multiple: ["Equity multiple, combined stress", "Multiple des fonds propres, stress combiné"],
   dcr_after_refinance: ["Coverage after refinance (DCR)", "Couverture après refinancement (RCSD)"],
-  stressed_unrealized_equity_multiple: ["Equity multiple (unrealized), combined stress", "Multiple des fonds propres (non réalisé), stress combiné"],
+  stressed_unrealized_equity_multiple: ["Equity multiple (unrealized, not a sale), combined stress", "Multiple des fonds propres (non réalisé, pas une vente), stress combiné"],
 };
 const DRIVERS_L: Record<string, [string, string]> = {
   exitCapBps: ["Exit cap rate", "Taux de sortie"],

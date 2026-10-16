@@ -22,7 +22,7 @@ const GATE_CATALOG: Record<string, Omit<GateSpec, "threshold"> & { threshold: st
   stressed_sizing_dscr: { key: "stressed_sizing_dscr", label: "Sizing DSCR, combined stress", scenario: "combined", metricKey: "sizing_dscr", threshold: "stressedSizingDscrMin" },
   stressed_equity_multiple: { key: "stressed_equity_multiple", label: "Equity multiple, combined stress", scenario: "combined", metricKey: "equity_multiple", threshold: "stressedEquityMultipleMin" },
   dcr_after_refinance: { key: "dcr_after_refinance", label: "Coverage after refinance (DCR)", scenario: "base", metricKey: "dcr_after_refinance", threshold: "dcrAfterRefinanceMin" },
-  stressed_unrealized_equity_multiple: { key: "stressed_unrealized_equity_multiple", label: "Equity multiple, unrealized, combined stress", scenario: "combined", metricKey: "unrealized_equity_multiple", threshold: "stressedUnrealizedMultipleMin" },
+  stressed_unrealized_equity_multiple: { key: "stressed_unrealized_equity_multiple", label: "Equity multiple (unrealized, not a sale), combined stress", scenario: "combined", metricKey: "unrealized_equity_multiple", threshold: "stressedUnrealizedMultipleMin" },
 };
 const V1_GATE_KEYS = ["equity_multiple", "profit_on_cost", "development_spread", "stressed_sizing_dscr", "stressed_equity_multiple"];
 

@@ -53,7 +53,7 @@ export const METRICS: readonly MetricDef[] = [
   { key: "sale_month", label: "Sale month", unit: "months", formula: "stabilization + 12 x hold years - 1" },
   // Held deals only (card 60): added to a result when the deal is kept and refinanced, never to a sale.
   { key: "refinance_cash_returned", label: "Cash returned at refinance", unit: "$", formula: "new loan - payoff of the senior balance; negative means cash was put in" },
-  { key: "cash_left_in_deal", label: "Cash left in the deal", unit: "$", formula: "equity contributions - cash returned at refinance; 0 or below means all the equity came back" },
+  { key: "cash_left_in_deal", label: "Cash left in the deal", unit: "$", formula: "required equity - cash returned at refinance; 0 or below means all the equity came back" },
   { key: "dcr_after_refinance", label: "Coverage after refinance (DCR)", unit: "x", formula: "NOI over the 12 months from the refinance month / amortizing debt service on all debt in force in those months" },
   { key: "cash_on_cash_after_refinance", label: "Cash-on-cash after refinance", unit: "%", formula: "(NOI - debt service actually due) over the 12 months from the refinance month / cash left in the deal" },
   { key: "stated_value", label: "Stated value (unrealized, not a sale)", unit: "$", formula: "final hold-year NOI / exit cap rate, no selling costs" },
