@@ -303,8 +303,8 @@ export async function reconcileDeal(db: Db, dealId: string) {
         [id, dealId, deal.workspace_id, action, from, to, fromV, toV, reason, restoreTo === undefined ? null : JSON.stringify(restoreTo)],
       );
     };
-    // A value a person's label reopened (card 58b) comes back when the label goes, if no person has acted on it since and
-    // nothing else disagrees. The latest reopen, and only if it recorded what the value was because of a label.
+    // A value a label or a document reopened (cards 58b, 63) comes back when what disagreed goes, if no person has acted on it
+    // since and nothing else disagrees. The latest reopen, if it recorded what the value was.
     const reopened = new Map<string, RestoreTo>();
     for (const r of await tx.query<{ assumption_id: string; restore_to: RestoreTo }>(
       `select e.assumption_id, e.restore_to from assumption_events e join assumptions a on a.id = e.assumption_id
@@ -313,14 +313,14 @@ export async function reconcileDeal(db: Db, dealId: string) {
          and not exists (select 1 from assumption_events y where y.assumption_id = a.id and y.id > e.id and y.actor is not null)`,
       [dealId],
     )) reopened.set(r.assumption_id, r.restore_to);
-    const restorable = new Map([...reopened].filter(([, r]) => r.by_label));
-    const restoredValues: { field: string; item: string }[] = [];
+    const restoredValues: { field: string; item: string; by: "label" | "document" }[] = [];
     const restore = async (e: AssumptionRowDb, rt: RestoreTo, sources: unknown) => {
       await tx.query(`update assumptions set status = $2, value = $3, reason = $4, sources = $5, conflict_values = null, version = version + 1, updated_at = now() where id = $1`, [
         e.id, rt.status, rt.value, rt.reason, JSON.stringify(sources),
       ]);
-      await log(e.id, "restored", "conflicting", rt.status, e.value, rt.value, `The label that disagreed was removed; the value is back as it was ${rt.status === "approved" ? "approved" : "accepted"}`);
-      restoredValues.push({ field: e.field_key, item: e.item_key });
+      const by = rt.by_label ? "label" : "document";
+      await log(e.id, "restored", "conflicting", rt.status, e.value, rt.value, `The ${by} that disagreed was removed; the value is back as it was ${rt.status === "approved" ? "approved" : "accepted"}`);
+      restoredValues.push({ field: e.field_key, item: e.item_key, by });
       changed++;
     };
     // A proposal meets the existing row whose item name folds equal (task 60d); when several do, it meets none of them and readiness blocks the run.
@@ -362,7 +362,7 @@ export async function reconcileDeal(db: Db, dealId: string) {
       const agreesWithStanding =
         (p.status === "needs_review" && same(p.value, e.value)) ||
         (p.foreign.length > 0 && foreignKnown && p.values.length === 1 && same(p.values[0]!.value, e.value));
-      const rt = restorable.get(e.id);
+      const rt = reopened.get(e.id);
       if (rt && e.status === "conflicting") {
         // The approved branch's test, against the value as it was settled.
         const knownThen = rt.sources.map((x) => x.value);
@@ -434,7 +434,7 @@ export async function reconcileDeal(db: Db, dealId: string) {
     for (const e of existing) {
       const key = `${e.field_key}|${e.item_key}`;
       // No proposal for a hand entry or an accepted default: the label that disagreed went, and nothing else did (card 58b).
-      const rt = restorable.get(e.id);
+      const rt = reopened.get(e.id);
       if (rt && !seen.has(key) && e.status === "conflicting" && e.source_kind !== "document") {
         await restore(e, rt, rt.sources);
         continue;
