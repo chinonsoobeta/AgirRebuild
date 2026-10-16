@@ -1491,3 +1491,184 @@ describe("card 62: a deal is copied as a variant, in exactly the state of its so
     expect(await stored(read)).toEqual(await stored(d));
   });
 });
+
+describe("card 58b: undoing a label puts back the value the label reopened, when the label was the only disagreement", () => {
+  let sw: string, tw: string;
+  const mkDeal = async (w: string, name: string) =>
+    (await call(alice, "POST", `/api/workspaces/${w}/deals`, { name, assetType: "Multifamily", location: "Regina", province: "SK" })).json.id as string;
+  const upload = async (d: string, name: string, text: string) => {
+    expect((await call(alice, "PUT", `/api/deals/${d}/documents?name=${name}`, undefined, new TextEncoder().encode(text))).status).toBe(200);
+    await work();
+  };
+  const review = async (d: string) => (await call(alice, "GET", `/api/deals/${d}/review`)).json;
+  const byField = async (d: string, k: string, item: string | null = null) => (await review(d)).assumptions.find((a: any) => a.fieldKey === k && a.itemKey === item);
+  const figure = async (d: string, raw: string) => (await review(d)).other.find((o: any) => o.raw === raw);
+  const label = async (d: string, raw: string, fieldKey: string, itemKey?: string) => {
+    const f = await figure(d, raw);
+    expect((await call(alice, "POST", `/api/deals/${d}/figure-labels`, { documentId: f.documentId, figureId: f.figureId, fieldKey, ...(itemKey ? { itemKey } : {}) })).status, raw).toBe(200);
+    await work();
+  };
+  const undo = async (d: string, raw: string) => {
+    const f = await figure(d, raw);
+    expect((await call(alice, "DELETE", `/api/deals/${d}/figure-labels`, { documentId: f.documentId, figureId: f.figureId })).status, raw).toBe(200);
+    await work();
+  };
+  const hashOf = async (d: string) => ((await db.query<any>(`select fn_assumptions_hash($1) as h`, [d])) as [{ h: string }])[0].h;
+  const settled = async (d: string, k: string, item = "") =>
+    ((await db.query<any>(
+      `select status, value, reason, sources, source_kind, decided_by, decided_at, second_approver, second_approved_at, conflict_values from assumptions where deal_id = $1 and field_key = $2 and item_key = $3`,
+      [d, k, item],
+    )) as any[])[0];
+  const events = (d: string, k: string, action: string) =>
+    db.query<any>(`select e.* from assumption_events e join assumptions a on a.id = e.assumption_id where a.deal_id = $1 and a.field_key = $2 and e.action = $3 order by e.id`, [d, k, action]);
+  const reconciled = async (d: string) => ((await db.query<any>(`select payload from audit_events where action = 'assumptions.reconciled' and deal_id = $1 order by seq desc limit 1`, [d])) as any[])[0].payload;
+  const enter = async (d: string, fieldKey: string, value: number, itemKey?: string) =>
+    expect((await call(alice, "POST", `/api/deals/${d}/values`, { fieldKey, value, reason: "Quick start answer", ...(itemKey ? { itemKey } : {}) })).status, fieldKey).toBe(200);
+
+  test("a workspace in solo review and one in team review are set up", async () => {
+    sw = (await call(alice, "POST", "/api/workspaces", { name: "Undo solo", reviewMode: "solo" })).json.id;
+    tw = (await call(alice, "POST", "/api/workspaces", { name: "Undo team", reviewMode: "team" })).json.id;
+    expect((await call(alice, "POST", `/api/workspaces/${tw}/members`, { email: "bob@example.com", role: "admin" })).status).toBe(200);
+  });
+
+  test("a hand entry comes back as it was, the hash matches the one before the label, and the events say so", async () => {
+    const d = await mkDeal(sw, "Undo Hand");
+    await upload(d, "notes.txt", "Notes\nGauge: 5.25%\n");
+    await enter(d, "exit_cap_rate_pct", 5.5);
+    const before = await settled(d, "exit_cap_rate_pct");
+    expect(before).toMatchObject({ status: "approved", value: 5.5, source_kind: "analyst" });
+    const hash = await hashOf(d);
+    await label(d, "5.25%", "exit_cap_rate_pct");
+    expect(await settled(d, "exit_cap_rate_pct")).toMatchObject({ status: "conflicting" });
+    expect(await hashOf(d)).not.toBe(hash);
+    const [reopened] = await events(d, "exit_cap_rate_pct", "reopened");
+    expect(reopened.restore_to).toEqual({ status: "approved", value: 5.5, reason: before.reason, sources: before.sources, by_label: true });
+    expect((await events(d, "exit_cap_rate_pct", "extracted")).concat(await events(d, "exit_cap_rate_pct", "entered")).every((e: any) => e.restore_to === null)).toBe(true);
+    await undo(d, "5.25%");
+    const after = await settled(d, "exit_cap_rate_pct");
+    expect(after).toEqual(before);
+    expect(await hashOf(d)).toBe(hash);
+    const [restored] = await events(d, "exit_cap_rate_pct", "restored");
+    expect(restored).toMatchObject({ actor: null, from_status: "conflicting", to_status: "approved", restore_to: null });
+    expect(restored.reason).toBe("The label that disagreed was removed; the value is back as it was approved");
+    expect(await reconciled(d)).toMatchObject({ restored: 1 });
+    // A reconcile with nothing to restore has no `restored` key, and writes no second event.
+    await reconcileDeal(db, d);
+    expect(Object.keys(await reconciled(d))).not.toContain("restored");
+    expect(await events(d, "exit_cap_rate_pct", "restored")).toHaveLength(1);
+  });
+
+  test("a document value that was approved and second-approved comes back with both approvals, not as needs_review", async () => {
+    const d = await mkDeal(tw, "Undo Team");
+    await upload(d, "notes.txt", "Notes\nGauge: 5.25%\nQuota: 5.75%\n");
+    await label(d, "5.25%", "exit_cap_rate_pct");
+    const a = await byField(d, "exit_cap_rate_pct");
+    expect((await call(alice, "POST", `/api/assumptions/${a.id}/review`, { action: "approve", version: a.version })).status).toBe(200);
+    const waiting = await byField(d, "exit_cap_rate_pct");
+    expect(waiting.status).toBe("awaiting_second_approval");
+    expect((await call(bob, "POST", `/api/assumptions/${a.id}/review`, { action: "second_approve", version: waiting.version })).status).toBe(200);
+    const before = await settled(d, "exit_cap_rate_pct");
+    expect(before).toMatchObject({ status: "approved", value: 5.25, source_kind: "document" });
+    expect(before.second_approver).not.toBeNull();
+    await label(d, "5.75%", "exit_cap_rate_pct");
+    expect(await settled(d, "exit_cap_rate_pct")).toMatchObject({ status: "conflicting" });
+    await undo(d, "5.75%");
+    const after = await settled(d, "exit_cap_rate_pct");
+    expect(after).toMatchObject({ status: "approved", value: 5.25 });
+    expect(after).toEqual(before);
+  });
+
+  test("an accepted default comes back as default_accepted", async () => {
+    const d = await mkDeal(sw, "Undo Default");
+    await upload(d, "notes.txt", "Notes\nSpan: 7 years\n");
+    expect((await call(alice, "POST", `/api/deals/${d}/defaults`, { fields: ["hold_years"] })).status).toBe(200);
+    const before = await settled(d, "hold_years");
+    expect(before).toMatchObject({ status: "default_accepted", value: 5 });
+    await label(d, "7 years", "hold_years");
+    expect(await settled(d, "hold_years")).toMatchObject({ status: "conflicting" });
+    await undo(d, "7 years");
+    expect(await settled(d, "hold_years")).toEqual(before);
+    const [restored] = await events(d, "hold_years", "restored");
+    expect(restored).toMatchObject({ from_status: "conflicting", to_status: "default_accepted", reason: "The label that disagreed was removed; the value is back as it was accepted" });
+  });
+
+  test("a value a person has acted on since the reopen is not restored", async () => {
+    const d = await mkDeal(sw, "Undo Acted");
+    await upload(d, "notes.txt", "Notes\nGauge: 5.25%\nQuota: 5.75%\n");
+    await enter(d, "exit_cap_rate_pct", 5.5);
+    await label(d, "5.25%", "exit_cap_rate_pct");
+    const c = await byField(d, "exit_cap_rate_pct");
+    expect((await call(alice, "POST", `/api/assumptions/${c.id}/review`, { action: "modify", value: 5.0, reason: "Lender's term sheet says five", version: c.version })).status).toBe(200);
+    await undo(d, "5.25%");
+    expect(await settled(d, "exit_cap_rate_pct")).toMatchObject({ status: "approved", value: 5.0, source_kind: "analyst" });
+    expect(await events(d, "exit_cap_rate_pct", "restored")).toHaveLength(0);
+    // A person who settles the conflict and reopens it has acted too: the value stays conflicting.
+    const e = await mkDeal(sw, "Undo Reopened");
+    await upload(e, "notes.txt", "Notes\nGauge: 5.25%\n");
+    await enter(e, "exit_cap_rate_pct", 5.5);
+    await label(e, "5.25%", "exit_cap_rate_pct");
+    const r = await byField(e, "exit_cap_rate_pct");
+    expect((await call(alice, "POST", `/api/assumptions/${r.id}/review`, { action: "resolve", value: 5.5, reason: "Keep mine", version: r.version })).status).toBe(200);
+    const settledAgain = await byField(e, "exit_cap_rate_pct");
+    expect((await call(alice, "POST", `/api/assumptions/${r.id}/review`, { action: "reopen", version: settledAgain.version })).status).toBe(200);
+    expect(await settled(e, "exit_cap_rate_pct")).toMatchObject({ status: "conflicting" });
+    await undo(e, "5.25%");
+    expect(await settled(e, "exit_cap_rate_pct")).toMatchObject({ status: "conflicting" });
+    expect(await events(e, "exit_cap_rate_pct", "restored")).toHaveLength(0);
+  });
+
+  test("a document that still disagrees keeps the value conflicting", async () => {
+    const d = await mkDeal(sw, "Undo Document");
+    await upload(d, "notes.txt", "Notes\nGauge: 5.25%\n");
+    await enter(d, "exit_cap_rate_pct", 5.5);
+    await label(d, "5.25%", "exit_cap_rate_pct");
+    await upload(d, "budget.txt", "Budget\nExit cap rate: 5.0%\n");
+    await undo(d, "5.25%");
+    expect(await settled(d, "exit_cap_rate_pct")).toMatchObject({ status: "conflicting", value: 5.5 });
+    expect(await events(d, "exit_cap_rate_pct", "restored")).toHaveLength(0);
+  });
+
+  test("with two labels, undoing one leaves the value conflicting and undoing both restores it", async () => {
+    const d = await mkDeal(sw, "Undo Two");
+    await upload(d, "notes.txt", "Notes\nGauge: 5.25%\nQuota: 5.75%\n");
+    await enter(d, "exit_cap_rate_pct", 5.5);
+    const before = await settled(d, "exit_cap_rate_pct");
+    await label(d, "5.25%", "exit_cap_rate_pct");
+    await label(d, "5.75%", "exit_cap_rate_pct");
+    await undo(d, "5.25%");
+    expect(await settled(d, "exit_cap_rate_pct")).toMatchObject({ status: "conflicting" });
+    await undo(d, "5.75%");
+    expect(await settled(d, "exit_cap_rate_pct")).toEqual(before);
+  });
+
+  test("a label that spells the item another way restores the row it reopened", async () => {
+    const d = await mkDeal(sw, "Undo Item");
+    await upload(d, "notes.txt", "Notes\nShop rent: $3,200\n");
+    expect((await call(alice, "POST", `/api/deals/${d}/items`, { name: "Retail", unitCount: 2, rentMonthly: 3000, reason: "Two shops on the ground floor" })).status).toBe(200);
+    const before = await settled(d, "unit_rent_monthly", "Retail");
+    expect(before).toMatchObject({ status: "approved", value: 3000 });
+    await label(d, "$3,200", "unit_rent_monthly", "retail");
+    expect(await settled(d, "unit_rent_monthly", "Retail")).toMatchObject({ status: "conflicting" });
+    await undo(d, "$3,200");
+    expect(await settled(d, "unit_rent_monthly", "Retail")).toEqual(before);
+    const rows = (await review(d)).assumptions.filter((a: any) => a.fieldKey === "unit_rent_monthly");
+    expect(rows.map((a: any) => a.itemKey)).toEqual(["Retail"]);
+  });
+
+  test("a copy has no reopened event, so a label undone in the copy leaves its value conflicting", async () => {
+    const d = await mkDeal(sw, "Undo Variant");
+    await upload(d, "notes.txt", "Notes\nGauge: 5.25%\n");
+    await enter(d, "exit_cap_rate_pct", 5.5);
+    await label(d, "5.25%", "exit_cap_rate_pct");
+    const copy = (await call(alice, "POST", `/api/deals/${d}/copy`, { name: "Undo Variant, copy" })).json.id as string;
+    await work();
+    expect(await settled(copy, "exit_cap_rate_pct")).toMatchObject({ status: "conflicting" });
+    expect(await events(copy, "exit_cap_rate_pct", "reopened")).toHaveLength(0);
+    await undo(copy, "5.25%");
+    expect(await settled(copy, "exit_cap_rate_pct")).toMatchObject({ status: "conflicting" });
+    expect(await events(copy, "exit_cap_rate_pct", "restored")).toHaveLength(0);
+    expect(Object.keys(await reconciled(copy))).not.toContain("restored");
+    // The source still has its label and its reopened value.
+    expect(await settled(d, "exit_cap_rate_pct")).toMatchObject({ status: "conflicting" });
+  });
+});
