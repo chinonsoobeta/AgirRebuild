@@ -57,7 +57,7 @@ export function Login() {
     setBusy(true);
     setError(null);
     try {
-      await api.post("/auth/login", { email: f.get("email"), password: f.get("password") });
+      await api.post("/auth/login", { email: f.get("email"), password: f.get("password"), reviewMode: f.get("reviewMode") });
       await qc.invalidateQueries();
       void navigate({ to: "/deals" });
     } catch (err) {
@@ -104,6 +104,10 @@ export function Signup() {
         <div className="field"><label htmlFor="name">{t("auth.name")}</label><input className="input" id="name" name="name" autoComplete="name" required /></div>
         <div className="field"><label htmlFor="email">{t("auth.email")}</label><input className="input" id="email" name="email" type="email" autoComplete="username" required /></div>
         <div className="field"><label htmlFor="password">{t("auth.password")}</label><input className="input" id="password" name="password" type="password" autoComplete="new-password" minLength={10} required /><span className="help">{t("auth.passwordHelp")}</span></div>
+        <fieldset className="field" style={{ border: 0, padding: 0, margin: 0 }}>
+          <legend>{t("auth.reviewMode")}</legend>
+          {(["solo", "team"] as const).map((m) => <label key={m} className="choice"><input type="radio" name="reviewMode" value={m} defaultChecked={m === "solo"} /><span>{t(`auth.mode.${m}`)}</span></label>)}
+        </fieldset>
         <ErrorText error={error} />
         <div className="row"><button className="btn primary" type="submit">{t("auth.create")}</button><Link to="/login">{t("auth.haveAccount")}</Link></div>
       </form>

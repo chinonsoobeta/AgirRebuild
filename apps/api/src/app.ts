@@ -13,6 +13,13 @@ export type AppDeps = { db: Db; store: BlobStore; secureCookies: boolean; demoSi
 type Env = { Variables: { user: { id: string; email: string; name: string } } };
 
 const COOKIE = "agir_session";
+// A new workspace starts in team review; asking for solo goes through fn_set_review_mode, so the change is audited.
+async function createWorkspace(tx: Db, name: string, reviewMode?: string): Promise<string> {
+  const [r] = await tx.query<{ id: string }>(`select fn_create_workspace($1) as id`, [name]);
+  if (reviewMode === "solo") await tx.query(`select fn_set_review_mode($1, $2)`, [r!.id, reviewMode]);
+  return r!.id;
+}
+
 const PG_STATUS: Record<string, number> = { "42501": 403, "28000": 401, P0002: 404, "22023": 422, "23505": 409, "40001": 409, "23514": 422 };
 
 export function createApp({ db, store, secureCookies, demoSignIn = false }: AppDeps) {
@@ -48,7 +55,7 @@ export function createApp({ db, store, secureCookies, demoSignIn = false }: AppD
   app.post("/api/auth/signup", async (c) => {
     if (!authLimit(c.req.header("x-forwarded-for") ?? "local")) return c.json({ error: "Too many attempts. Wait a minute." }, 429);
     const body = z
-      .object({ email: z.string().email(), name: z.string().min(1).max(120), password: z.string().min(10, "Use at least 10 characters").max(200) })
+      .object({ email: z.string().email(), name: z.string().min(1).max(120), password: z.string().min(10, "Use at least 10 characters").max(200), reviewMode: z.enum(REVIEW_MODES).optional() })
       .parse(await c.req.json());
     const email = body.email.toLowerCase();
     const [exists] = await db.query(`select 1 from users where email = $1`, [email]);
@@ -58,7 +65,7 @@ export function createApp({ db, store, secureCookies, demoSignIn = false }: AppD
       body.name,
       await hashPassword(body.password),
     ]);
-    await asUser(db, u!.id, (tx) => tx.query(`select fn_create_workspace($1)`, [`${body.name.split(" ")[0]}'s workspace`]));
+    await asUser(db, u!.id, (tx) => createWorkspace(tx, `${body.name.split(" ")[0]}'s workspace`, body.reviewMode));
     setCookie(c, COOKIE, await createSession(db, u!.id), cookieOpts);
     return c.json({ ok: true });
   });
@@ -119,9 +126,8 @@ export function createApp({ db, store, secureCookies, demoSignIn = false }: AppD
 
   // ---- Workspaces -----------------------------------------------------------------
   app.post("/api/workspaces", async (c) => {
-    const { name } = z.object({ name: z.string().min(1).max(120) }).parse(await c.req.json());
-    const [r] = await as(c, (tx) => tx.query<{ id: string }>(`select fn_create_workspace($1) as id`, [name]));
-    return c.json({ id: r!.id });
+    const { name, reviewMode } = z.object({ name: z.string().min(1).max(120), reviewMode: z.enum(REVIEW_MODES).optional() }).parse(await c.req.json());
+    return c.json({ id: await as(c, (tx) => createWorkspace(tx, name, reviewMode)) });
   });
 
   app.post("/api/workspaces/:ws/review-mode", async (c) => {
@@ -294,7 +300,7 @@ export function createApp({ db, store, secureCookies, demoSignIn = false }: AppD
   app.post("/api/assumptions/:id/review", async (c) => {
     const body = z
       .object({
-        action: z.enum(["approve", "resolve", "modify", "second_approve", "reject", "reopen"]),
+        action: z.enum(["approve", "resolve", "modify", "second_approve", "use_as_stated", "reject", "reopen"]),
         value: z.number().finite().nullable().optional(),
         reason: z.string().max(2000).nullable().optional(),
         version: z.number().int().nullable().optional(),

@@ -13,7 +13,7 @@ export function Settings() {
   const grant = useMutation({ mutationFn: (b: { email: string; days: number }) => api.post(`/workspaces/${workspaceId}/review-grant`, b), onSuccess: () => qc.invalidateQueries({ queryKey: ["members"] }) });
   const mode = useMutation({ mutationFn: (m: "team" | "solo") => api.post(`/workspaces/${workspaceId}/review-mode`, { mode: m }), onSuccess: () => qc.invalidateQueries({ queryKey: ["me"] }) });
   const suggest = useMutation({ mutationFn: (on: boolean) => api.post(`/workspaces/${workspaceId}/label-suggestions`, { on }), onSuccess: () => qc.invalidateQueries({ queryKey: ["me"] }) });
-  const create = useMutation({ mutationFn: (name: string) => api.post(`/workspaces`, { name }), onSuccess: () => qc.invalidateQueries({ queryKey: ["me"] }) });
+  const create = useMutation({ mutationFn: (b: { name: string; reviewMode: string }) => api.post(`/workspaces`, b), onSuccess: () => qc.invalidateQueries({ queryKey: ["me"] }) });
   const ws = me.workspaces.find((w) => w.id === workspaceId);
   return (
     <>
@@ -105,7 +105,8 @@ export function Settings() {
             className="panel stack"
             onSubmit={(e: FormEvent<HTMLFormElement>) => {
               e.preventDefault();
-              create.mutate(String(new FormData(e.currentTarget).get("name")));
+              const fd = new FormData(e.currentTarget);
+              create.mutate({ name: String(fd.get("name")), reviewMode: String(fd.get("reviewMode")) });
               e.currentTarget.reset();
             }}
           >
@@ -114,6 +115,10 @@ export function Settings() {
               <div className="field grow"><label htmlFor="w-name">{t("settings.col.name")}</label><input className="input" id="w-name" name="name" required /></div>
               <button className="btn" type="submit">{t("settings.create")}</button>
             </div>
+            <fieldset className="field" style={{ border: 0, padding: 0, margin: 0 }}>
+              <legend>{t("auth.reviewMode")}</legend>
+              {(["solo", "team"] as const).map((m) => <label key={m} className="choice"><input type="radio" name="reviewMode" value={m} defaultChecked={m === "solo"} /><span>{t(`auth.mode.${m}`)}</span></label>)}
+            </fieldset>
             <ErrorText error={create.error} />
           </form>
         </div>

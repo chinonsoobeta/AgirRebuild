@@ -372,9 +372,11 @@ export function Review({ dealId }: { dealId: string }) {
                 {a.reason && <p className="small muted">{t("review.reason", { r: a.reason })}</p>}
                 {editable && (
                   <div className="row">
-                    <button className="btn primary small" type="button" disabled={mine} onClick={() => act.mutate({ id: a.id, action: "second_approve" })}>{t("review.confirm")}</button>
+                    {mine && solo
+                      ? <button className="btn primary small" type="button" onClick={() => act.mutate({ id: a.id, action: "use_as_stated" })}>{t("review.useAsStated")}</button>
+                      : <button className="btn primary small" type="button" disabled={mine} onClick={() => act.mutate({ id: a.id, action: "second_approve" })}>{t("review.confirm")}</button>}
                     <button className="btn quiet small" type="button" onClick={() => act.mutate({ id: a.id, action: "reject", reason: t("review.declined") })}>{t("review.decline")}</button>
-                    {mine && <span className="why">{t("review.mine")}</span>}
+                    {mine && !solo && <span className="why">{t("review.mine")}</span>}
                   </div>
                 )}
               </div>

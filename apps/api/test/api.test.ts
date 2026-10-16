@@ -745,7 +745,7 @@ describe("task 59: a person working alone is not blocked on day one", () => {
     await put("exit_cap_rate_pct", 5.5);
     const partial = (await call(sam, "GET", `/api/deals/${sd}`)).json;
     expect(partial.step).toBe("review");
-    expect((await call(sam, "GET", "/api/deals")).json.find((x: any) => x.deal.id === sd).step).toBe("review");
+    expect((await call(sam, "GET", `/api/workspaces/${sw}/deals`)).json.find((x: any) => x.deal.id === sd).step).toBe("review");
     for (const [f, v, i] of [["land_cost", 800000], ["hard_cost", 2400000], ["soft_cost", 300000], ["contingency", 120000], ["construction_months", 12], ["lease_up_months", 6],
       ["unit_count", 4, "Residential"], ["unit_rent_monthly", 2400, "Residential"], ["stabilized_occupancy_pct", 95], ["senior_loan_amount", 2000000], ["senior_rate_pct", 6], ["senior_amort_years", 30]] as [string, number, string?][]) await put(f, v, i);
     expect((await call(sam, "POST", `/api/deals/${sd}/defaults`, { fields: ["hold_years", "selling_costs_pct", "expense_ratio_pct"] })).status).toBe(200);
@@ -753,6 +753,6 @@ describe("task 59: a person working alone is not blocked on day one", () => {
     const o = (await call(sam, "GET", `/api/deals/${sd}`)).json;
     expect(o).toMatchObject({ step: "decision", next: "Record the committee decision" });
     expect(o.status.text).toMatch(/^Verdict: /);
-    expect((await call(sam, "GET", "/api/deals")).json.find((x: any) => x.deal.id === sd)).toMatchObject({ step: "decision", next: "Record the committee decision" });
+    expect((await call(sam, "GET", `/api/workspaces/${sw}/deals`)).json.find((x: any) => x.deal.id === sd)).toMatchObject({ step: "decision", next: "Record the committee decision" });
   });
 });

@@ -144,7 +144,8 @@ export async function dealOverview(tx: Db, dealId: string) {
   let step: "documents" | "review" | "run" | "decision" | "reports" = "documents";
   let status: { tone: "pass" | "review" | "stop" | "neutral"; text: string };
   let next: string;
-  if (docs.length === 0) {
+  // Documents are optional evidence: a deal with values and no documents is read from its values.
+  if (docs.length === 0 && counts.approved + counts.needsReview + counts.conflicting + counts.awaitingSecond === 0) {
     status = { tone: "neutral", text: "No documents yet" };
     next = "Upload the deal documents";
   } else if (processing > 0) {
