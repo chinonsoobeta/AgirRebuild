@@ -39,14 +39,14 @@ export function enteredInUnit(unit: string, metric: boolean, value: number, reas
   return { value: unit === "sf" ? value * SF_PER_M2 : value / SF_PER_M2, reason: `${reason} (${lang === "fr" ? "saisi en" : "entered as"} ${typed} ${label})` };
 }
 
-function ValueInput({ unit, id, defaultValue }: { unit: string; id: string; defaultValue?: number | null }) {
+function ValueInput({ unit, id, defaultValue, label }: { unit: string; id: string; defaultValue?: number | null; label: string }) {
   const { t, f, lang } = useI18n();
   const [metric, setMetric] = useState(false);
   const suffix = f.suffix(unit);
   // A flag is a choice, not a number: yes posts 1 and no posts 0, with neither chosen to start.
   if (unit === "flag") {
     return (
-      <div className="row" role="radiogroup" id={id} style={{ gap: 16, minHeight: 44 }}>
+      <div className="row" role="radiogroup" id={id} aria-label={label} style={{ gap: 16, minHeight: 44 }}>
         {([["1", "common.yes"], ["0", "common.no"]] as const).map(([v, k]) => (
           <label key={v} className="row" style={{ gap: 6 }}><input type="radio" name="value" value={v} required />{t(k)}</label>
         ))}
@@ -185,7 +185,7 @@ export function Review({ dealId }: { dealId: string }) {
         }
       }}
     >
-      <div className="field"><label htmlFor={`v-${a.id}`}>{t("review.differentValue")}</label><ValueInput unit={a.unit} id={`v-${a.id}`} defaultValue={a.value} /></div>
+      <div className="field"><label htmlFor={`v-${a.id}`}>{t("review.differentValue")}</label><ValueInput unit={a.unit} id={`v-${a.id}`} defaultValue={a.value} label={t("review.differentValue")} /></div>
       <div className="field"><label htmlFor={`r-${a.id}`}>{t("review.why")}</label><input className="input" id={`r-${a.id}`} name="reason" minLength={10} required placeholder={t("review.whyHint")} /></div>
       {a.material && <p className="help row" style={{ gap: 6 }}><I.Lock />{t(solo ? "review.materialNoteSolo" : "review.materialNote")}</p>}
       <ErrorText error={formError ?? act.error} />
@@ -213,7 +213,7 @@ export function Review({ dealId }: { dealId: string }) {
       {head}
       {editable && (
         <div className="row" style={{ alignItems: "flex-start" }}>
-          <ValueInput unit={m.unit} id={id} />
+          <ValueInput unit={m.unit} id={id} label={name(m)} />
           <input className="input grow" name="reason" aria-label={t("review.sourceFor", { label: name(m) })} placeholder={t("review.sourceHint")} minLength={10} required style={{ minWidth: 220, flexBasis: 240 }} />
           <button className="btn small" type="submit" style={{ height: 44 }}>{t("common.save")}</button>
         </div>
