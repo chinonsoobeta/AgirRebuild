@@ -168,3 +168,68 @@ failures reject; one or two give APPROVE_WITH_CONDITIONS. A run records the poli
 under, is fresh against that policy's own hash, and replays under it. Beside the verdict, the run screen and every
 artifact say "Draft policy, not signed by credit". A decision can still be recorded, and it names the policy
 version.
+
+## Canadian cost lines and mortgage insurance
+
+Card 61. A small Canadian builder's budget has lines Agir could not name, and the CMHC-insured take-out loan
+that keeps most rentals alive carries an insurance premium that is added to the loan. This section adds them as
+values a person enters. **There are no defaults, no rates and no tables here**: every value is entered by a
+person, and the cited, dated tables (mortgage insurance terms, provincial land transfer tax, rebates) come later,
+from a person. The fields are never read from documents (`extractable: false`), so reading does not change. They
+appear in review under "Choices only you make", and the premium only once a refinance month is stated.
+
+**The fields.** All are optional, 0 or more, and in dollars unless stated. Each is set on the engine input only
+when it has a value; an absent field is omitted, never `0` and never `undefined`, so a deal that states none of
+them has the input, the ledger and the result it had before this section, byte for byte.
+
+| Field | Engine input | Absent means |
+|---|---|---|
+| `development_charges` | `budget.developmentCharges` | none stated |
+| `land_transfer_tax` | `budget.landTransferTax` | none stated |
+| `gst_hst_net` (GST/HST net of the rental rebates) | `budget.gstHstNet` | none stated |
+| `property_tax_annual` | `propertyTaxAnnual` | included in operating costs, or none |
+| `refinance_insurance_premium_pct` (0 to 10) | `refinance.insurancePremiumPct` | no mortgage insurance |
+
+The premium needs `refinance_month`, like the other refinance terms: stated without a refinance it is not put on
+the input (as `refinance_io_months` is not), and review offers it only when a refinance month is stated. If a
+cost line already sits in soft or other costs, or property tax in the expense ratio or fixed operating costs, the
+person leaves it out; each field's help line says so.
+
+**Timing.** Development charges and land transfer tax are paid at month 0, with land. GST/HST net is paid in the
+last construction month, `C - 1`, or at month 0 when `C` is 0. All three are funded as any cost before `S` is:
+equity first, then mezzanine, then senior.
+
+**Totals.** The three lines are part of costs before financing and of total development cost, as "other" costs
+with their own timing. No formula text changes: "other" includes these named lines. Interest on the debt that
+funds them is capitalized as for any cost, so total development cost rises by their sum plus that interest.
+
+**Property tax** is a fixed operating cost, added to the fixed part of decision 8 on top of
+`fixed_opex_annual`, or on top of the expense ratio's fixed dollars. It grows at expense growth, is charged in
+the lease-up months like the other fixed costs (cards 39 and 40), and counts in year-1 operating expenses and in
+break-even occupancy through the fixed costs. The expense stress moves the expense ratio or the variable share
+and so does not move it.
+
+**Stresses.** The cost stress scales the three cost lines like every other positive cost.
+
+**The insurance premium** is capitalized into the refinance loan. The refinance loan amount is the stated amount,
+or the loan-to-value share of forward value; the loan-to-value sizes the loan before the premium. The premium
+added is that amount times the premium percent, and the balance at the refinance is the amount times
+`(1 + premium %)`. Debt service, sizing debt service, `dcr_after_refinance` (card 60) and the debt outstanding at
+`T` all use the balance with the premium. The cash returned at the refinance, and `refinance_net_proceeds`, is the
+loan amount less the payoff of the senior balance: the premium is not cash. With a premium stated and a refinance
+made, the metric `refinance_premium_added` (the premium added to the loan, in dollars) is reported beside
+`refinance_net_proceeds`; with no premium stated it is not added to the result at all, so every other result is
+byte for byte what it was.
+
+**Checks.** An agreement check that compares a stated total cost already uses total development cost, so it
+includes the new lines. No check is added.
+
+**Outputs.** Sources and uses shows each cost line by name, only when it is stated. The lender package says, beside
+the debt terms, "Mortgage insurance premium: X% (Y added to the loan)" when a premium is stated. The operating
+statement shows property tax as its own fixed line when it is stated. The quick start asks for development
+charges and property tax per year in both templates, with 0 allowed so the person states it rather than a default
+applying, and the apartment template also asks, as optional questions, for land transfer tax and GST/HST net.
+
+**Open for the owner.** When development charges are paid (permit or occupancy) and whether some are deferred;
+whether the cost stress should scale them; whether a premium on an insured construction loan is needed now (not
+in this card); and the cited tables that will replace entered values.
