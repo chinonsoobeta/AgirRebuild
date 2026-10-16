@@ -756,3 +756,24 @@ describe("task 59: a person working alone is not blocked on day one", () => {
     expect((await call(sam, "GET", `/api/workspaces/${sw}/deals`)).json.find((x: any) => x.deal.id === sd)).toMatchObject({ step: "decision", next: "Record the committee decision" });
   });
 });
+
+describe("audit of task 59: using one's own label as stated keeps its document source", () => {
+  test("a labelled material value waiting in team review, used as stated after the switch to solo, still names its document", async () => {
+    const ws = (await call(alice, "POST", "/api/workspaces", { name: "Label then solo", reviewMode: "team" })).json.id;
+    const deal = (await call(alice, "POST", `/api/workspaces/${ws}/deals`, { name: "Kept Source", assetType: "Multifamily", location: "Moncton", province: "NB" })).json.id;
+    expect((await call(alice, "PUT", `/api/deals/${deal}/documents?name=kept.txt`, undefined, new TextEncoder().encode("Gauge: 5.75%\n"))).status).toBe(200);
+    await work();
+    const review = async () => (await call(alice, "GET", `/api/deals/${deal}/review`)).json;
+    const fig = (await review()).other.find((o: any) => o.raw === "5.75%");
+    expect((await call(alice, "POST", `/api/deals/${deal}/figure-labels`, { documentId: fig.documentId, figureId: fig.figureId, fieldKey: "exit_cap_rate_pct" })).status).toBe(200);
+    await work();
+    const a = (await review()).assumptions.find((x: any) => x.fieldKey === "exit_cap_rate_pct");
+    expect((await call(alice, "POST", `/api/assumptions/${a.id}/review`, { action: "approve", version: a.version })).status).toBe(200);
+    expect((await review()).assumptions.find((x: any) => x.fieldKey === "exit_cap_rate_pct").status).toBe("awaiting_second_approval");
+    expect((await call(alice, "POST", `/api/workspaces/${ws}/review-mode`, { mode: "solo" })).status).toBe(200);
+    expect((await call(alice, "POST", `/api/assumptions/${a.id}/review`, { action: "use_as_stated" })).status).toBe(200);
+    const [row] = await db.query<any>(`select * from assumptions where id = $1`, [a.id]);
+    expect(row).toMatchObject({ status: "approved", value: 5.75, source_kind: "document", second_approver: null });
+    expect(sourceLabel(row)).toMatch(/kept\.txt, .*labelled by a person/);
+  });
+});
