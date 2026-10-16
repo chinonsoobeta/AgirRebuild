@@ -1,7 +1,7 @@
 import { describe, expect, test } from "vitest";
 import { SF_PER_M2 } from "@agir/numbers";
 import { assemble, type AssumptionRow } from "@agir/engine";
-import { applyLabels, itemFold, applySuggestions, consolidate, extractCandidates, offerable, offeredIds, figureOrder, withoutLabelled, normalizeLabel, parseDocument, scoreExtraction, type Cell, type NormalizedDocument, type SourcedCandidate, type Table } from "../src/index.ts";
+import { WAIVED_NOTE, applyLabels, itemFold, applySuggestions, consolidate, extractCandidates, offerable, offeredIds, figureOrder, withoutLabelled, normalizeLabel, parseDocument, scoreExtraction, type Cell, type NormalizedDocument, type SourcedCandidate, type Table } from "../src/index.ts";
 import { MAX_PDF_PAGES, pdfPageError, relativeLinks } from "../src/parse.ts";
 import { loadOracles, toNormalized } from "./oracle.ts";
 
@@ -4202,5 +4202,26 @@ describe("card 61b: development charges and land transfer tax are read into thei
   });
   test("permit levies are still other costs", () => {
     expect(pick(read("Permit levies: $5,000"))).toEqual([["other_cost", 5_000]]);
+  });
+  // Audit of task 61b: "incl." and "excl." are abbreviations, so the words after them stay in the label.
+  test("a cost line that says what it includes or excludes is that cost, not the charge it names", () => {
+    expect(pick(read("Soft costs incl. DCs: $300,000"))).toEqual([["soft_cost", 300_000]]);
+    expect(pick(read("Hard costs incl. DCs: $3,000,000"))).toEqual([["hard_cost", 3_000_000]]);
+    expect(pick(read("Other costs incl. LTT: $70,000"))).toEqual([["other_cost", 70_000]]);
+    expect(pick(read("Soft costs excl. DCs: $300,000"))).toEqual([["soft_cost", 300_000]]);
+  });
+  // Audit of task 61b: a waived or exempt charge is not what the deal pays; the figure is shown, never read as a cost.
+  test("a charge the city waived or exempted is shown, not read as a cost", () => {
+    for (const line of ["The city waived development charges of $85,000 for rental units.", "Development charges exempt under the rental program: $85,000", "Development charges: $85,000 (waived)", "Land transfer tax exemption: $4,000", "Redevances de développement exonérées : 85 000 $"]) {
+      const r = read(line);
+      expect(pick(r), line).toEqual([]);
+      expect(r.other.map((o) => o.note), line).toContain(WAIVED_NOTE);
+    }
+    // A waived charge stated as $0 is 0, and a figure net of an exemption is what is paid.
+    expect(pick(read("Development charges (waived): $0"))).toEqual([["development_charges", 0]]);
+    expect(pick(read("Development charges, net of the rental exemption: $40,000"))).toEqual([["development_charges", 40_000]]);
+    // A cost exempt from a sales tax is still the cost.
+    expect(pick(read("Hard costs (HST exempt): $3,000,000"))).toEqual([["hard_cost", 3_000_000]]);
+    expect(pick(read("Soft costs, exempt from GST: $300,000"))).toEqual([["soft_cost", 300_000]]);
   });
 });
