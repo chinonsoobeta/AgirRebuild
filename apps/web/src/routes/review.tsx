@@ -40,9 +40,19 @@ export function enteredInUnit(unit: string, metric: boolean, value: number, reas
 }
 
 function ValueInput({ unit, id, defaultValue }: { unit: string; id: string; defaultValue?: number | null }) {
-  const { f, lang } = useI18n();
+  const { t, f, lang } = useI18n();
   const [metric, setMetric] = useState(false);
   const suffix = f.suffix(unit);
+  // A flag is a choice, not a number: yes posts 1 and no posts 0, with neither chosen to start.
+  if (unit === "flag") {
+    return (
+      <div className="row" role="radiogroup" id={id} style={{ gap: 16, minHeight: 44 }}>
+        {([["1", "common.yes"], ["0", "common.no"]] as const).map(([v, k]) => (
+          <label key={v} className="row" style={{ gap: 6 }}><input type="radio" name="value" value={v} required />{t(k)}</label>
+        ))}
+      </div>
+    );
+  }
   const shown = metric || defaultValue === null || defaultValue === undefined ? "" : lang === "fr" ? String(defaultValue).replace(".", ",") : String(defaultValue);
   return (
     <div className="input-affix" style={{ maxWidth: 320 }}>
@@ -354,6 +364,25 @@ export function Review({ dealId }: { dealId: string }) {
                       {editable && entering !== id && <button className="btn quiet small" type="button" onClick={() => setEntering(id)}>{t("review.notFoundEnter")}</button>}
                     </div>
                     {entering === id && entryForm(m, id, <label htmlFor={id} className="sr-only">{name(m)}</label>)}
+                  </div>
+                );
+              })}
+            </div>
+          )}
+
+          {r.choices.length > 0 && (
+            <div className="card">
+              <div className="row"><span style={{ fontSize: 17, fontWeight: 600 }}>{t("review.choices")}</span></div>
+              <p className="small muted">{t("review.choicesBody")}</p>
+              {r.choices.map((m) => {
+                const id = `c-${m.fieldKey}`;
+                return (
+                  <div key={id} className="stack" style={{ gap: 8, paddingTop: 12, borderTop: "1px solid var(--sunken)" }}>
+                    <div className="spread">
+                      <span>{t("review.choiceLine", { field: name(m), meaning: L.absent(m.fieldKey) })}</span>
+                      {editable && entering !== id && <button className="btn quiet small" type="button" onClick={() => setEntering(id)}>{t("review.choiceEnter")}</button>}
+                    </div>
+                    {entering === id && entryForm(m, id, <span className="sr-only">{name(m)}</span>)}
                   </div>
                 );
               })}

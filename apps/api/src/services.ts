@@ -268,6 +268,10 @@ export async function reviewView(tx: Db, dealId: string) {
       const def = FIELD_BY_KEY.get(m.fieldKey)!;
       return { ...m, unit: def.unit, material: def.material, default: def.default ?? null, help: def.help ?? null, groupLabel: FIELD_GROUP_LABELS[def.group] };
     }),
+    choices: readiness.choices.map((m) => {
+      const def = FIELD_BY_KEY.get(m.fieldKey)!;
+      return { ...m, unit: def.unit, material: def.material, default: def.default ?? null, help: def.help ?? null, groupLabel: FIELD_GROUP_LABELS[def.group] };
+    }),
     other,
   };
 }

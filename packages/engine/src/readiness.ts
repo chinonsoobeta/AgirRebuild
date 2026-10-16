@@ -164,10 +164,14 @@ export function assemble(rows: readonly AssumptionRow[]): { readiness: Readiness
   const notFound: ReadinessItem[] = FIELDS.filter(
     (d) => !d.itemized && d.extractable && d.required === false && d.absentMeans && !has(d.key) && !isBlockedKey(d.key) && !parentAbsent[d.key],
   ).map((d) => ({ fieldKey: d.key, label: d.label, detail: d.absentMeans! }));
+  // Choices: the same test for the fields no document is ever read for. Only a person states them.
+  const choices: ReadinessItem[] = FIELDS.filter(
+    (d) => !d.itemized && !d.extractable && d.required === false && d.absentMeans && !has(d.key) && !isBlockedKey(d.key) && !parentAbsent[d.key],
+  ).map((d) => ({ fieldKey: d.key, label: d.label, detail: d.absentMeans! }));
 
   const defaultable = missing.map((m) => m.fieldKey).filter((k) => FIELD_BY_KEY.get(k)?.default !== undefined);
   const blocked = missing.length + conflicting.length + pending.length + impossible.length > 0;
-  const readiness: Readiness = { status: blocked ? "blocked" : "ready", missing, conflicting, pending, impossible, notFound, defaultable };
+  const readiness: Readiness = { status: blocked ? "blocked" : "ready", missing, conflicting, pending, impossible, notFound, choices, defaultable };
   if (blocked) return { readiness, input: null };
 
   const v = (k: string) => values.get(k);

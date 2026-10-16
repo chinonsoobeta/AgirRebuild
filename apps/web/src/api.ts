@@ -63,10 +63,11 @@ export type Assumption = {
 };
 export type ReadinessItem = { fieldKey: string; itemKey?: string; label: string; detail?: string };
 export type Review = {
-  readiness: { status: "ready" | "blocked"; missing: ReadinessItem[]; conflicting: ReadinessItem[]; pending: ReadinessItem[]; impossible: ReadinessItem[]; notFound: ReadinessItem[]; defaultable: string[] };
+  readiness: { status: "ready" | "blocked"; missing: ReadinessItem[]; conflicting: ReadinessItem[]; pending: ReadinessItem[]; impossible: ReadinessItem[]; notFound: ReadinessItem[]; choices: ReadinessItem[]; defaultable: string[] };
   assumptions: Assumption[];
   missing: (ReadinessItem & { unit: string; material: boolean; default: number | null; help: string | null; groupLabel: string })[];
   notFound: Review["missing"];
+  choices: Review["missing"];
   other: { documentId: string; document_name: string; raw: string; value: number | null; location: string; context: string; note: string | null; figureId: string | null; label: { fieldKey: string; itemKey: string | null; by: string; at: string } | null }[];
 };
 export type Metric = { key: string; label: string; unit: string; value: number | null; status: string; reason?: string; formula: string };

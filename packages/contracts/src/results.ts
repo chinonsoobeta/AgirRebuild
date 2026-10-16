@@ -170,6 +170,8 @@ export type Readiness = {
   impossible: ReadinessItem[];
   /** Optional lines no document gave; `detail` is what the run treats each as. A disclosure with no number: it never blocks. */
   notFound: ReadinessItem[];
+  /** Fields never read from documents (a flag only a person sets) that are not stated; `detail` is what the run treats each as. Offered on review, never stored in a run. */
+  choices: ReadinessItem[];
   /** Missing fields that have a static default the analyst may accept. */
   defaultable: string[];
 };

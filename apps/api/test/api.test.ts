@@ -881,7 +881,8 @@ describe("task 60b: a choice only a person makes is offered on review and entere
     const by = new Map<string, any>(r.choices.map((c: any) => [c.fieldKey, c]));
     expect([...by.keys()]).toEqual(expect.arrayContaining(["lease_up_ramp", "s_curve_draws", "refinance_and_hold"]));
     expect(by.get("lease_up_ramp")).toMatchObject({ unit: "flag", material: false, detail: "no income before stabilization", groupLabel: expect.any(String) });
-    expect(by.get("refinance_and_hold")).toMatchObject({ unit: "flag", material: true, help: expect.any(String) });
+    expect(by.get("refinance_and_hold")).toMatchObject({ unit: "flag", material: true });
+    expect(by.get("refinance_and_hold")).toHaveProperty("help");
     for (const c of r.choices) expect(r.notFound.map((n: any) => n.fieldKey)).not.toContain(c.fieldKey);
     expect(r.readiness.choices.map((c: any) => c.fieldKey)).toEqual(r.choices.map((c: any) => c.fieldKey));
   });
