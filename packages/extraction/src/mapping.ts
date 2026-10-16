@@ -531,9 +531,13 @@ export const CARRYING_NOTE = "A carrying cost; label it under the cost line it b
 const SALES_TAX_WORD = String.raw`(?:hst|gst|pst|qst|tps|tvq|tvh|sales tax|taxe de vente)`;
 const SALES_TAX_RE = new RegExp(String.raw`(?:^|[^a-z])${SALES_TAX_WORD}(?![a-z])`);
 // The tax as the basis of a cost: "incl. HST", "net of GST/HST", "HST extra".
-const SALES_TAX_BASIS_RE = new RegExp(String.raw`(?:^|[^a-z])(?:incl|including|includes|excl|excluding|before|after|net of|plus|with|without|inclus|incluant|avant|apres|sans|avec|hors)\s+(?:the\s+|of\s+|de\s+|la\s+|des\s+)?(?:(?:gst|pst|qst|hst)/)?${SALES_TAX_WORD}(?![a-z])|${SALES_TAX_WORD}\s+(?:included|extra|excluded|inclus\w*|en sus)(?![a-z])`);
+const SALES_TAX_BASIS_RE = new RegExp(String.raw`(?:^|[^a-z])(?:incl|including|includes|inclusive|excl|excluding|exclusive|ex|before|after|net of|plus|with|without|no|inclus|incluant|avant|apres|sans|avec|hors|pas de)\s+(?:the\s+|of\s+|de\s+|la\s+|des\s+)?(?:(?:gst|pst|qst|hst)/)?${SALES_TAX_WORD}(?![a-z])|${SALES_TAX_WORD}\s+(?:included|extra|excluded|not applicable|n/a|nil|free|zero rated|inclus\w*|en sus|non applicable|sans objet)(?![a-z])`);
 const INTEREST_WORD_RE = /(?:^|[^a-z])(?:interests?|interets?)(?![a-z])/;
-const FEE_WORD_RE = /(?:^|[^a-z])(?:fees?|frais)(?![a-z])/;
+// Fees are soft costs, so a soft-cost line about fees is that line. In French "frais" is mostly a cost ("frais de construction"),
+// so it is a fee only on a loan ("frais du prêt").
+const FEE_WORD_RE = /(?:^|[^a-z])fees?(?![a-z])/;
+const LOAN_FEE_WORD_RE = /(?:^|[^a-z])(?:fees?|frais)(?![a-z])/;
+const LOAN_AMOUNTS = new Set(["senior_loan_amount", "mezz_loan_amount", "refinance_amount"]);
 const INTEREST_ONLY_RE = /interest[- ]only|interets? seulement/g;
 const CARRYING_RE = /(?:^|[^a-z])(?:insurance|assurances?|utilities|services publics|property taxes?|taxes|taxe fonciere|taxes foncieres|carrying costs?|holding costs?|couts? de portage)(?![a-z])/;
 const TAXES_BASIS_RE = /(?:^|[^a-z])taxes\s+(?:included|extra|inclus\w*|en sus)(?![a-z])/;
@@ -559,7 +563,7 @@ export const SUPERSEDED_LABEL_NOTE = "An earlier figure, named old or original b
 export function mapToken(rawLabel: string, t: NumberToken, opts: MapOptions = {}): Mapped {
   // A sales tax line, or a rebate of one, is refused before any credit rule reads it; a cost that only states its tax basis is read.
   const folded = foldText(rawLabel);
-  if (t.value !== null && (t.unit === "$" || t.currency || t.unit === null) && SALES_TAX_RE.test(folded) && !SALES_TAX_BASIS_RE.test(folded.replace(/[^a-z0-9/]+/g, " ")) && !SALES_TAX_EXEMPT_RE.test(folded)) return { kind: "ignored", reason: SALES_TAX_NOTE };
+  if (t.value !== null && (t.unit === "$" || t.currency || t.unit === null) && SALES_TAX_RE.test(folded) && !SALES_TAX_BASIS_RE.test(folded.replace(/\+/g, " plus ").replace(/[^a-z0-9/]+/g, " ")) && !SALES_TAX_EXEMPT_RE.test(folded)) return { kind: "ignored", reason: SALES_TAX_NOTE };
   const m = mapSigned(rawLabel, t, opts);
   // A figure its field could never hold is shown, never read: nothing is flipped, rescaled or clamped.
   if (m.kind !== "field") return m;
@@ -571,7 +575,8 @@ export function mapToken(rawLabel: string, t: NumberToken, opts: MapOptions = {}
     if (cover && cover.index > 0 && BUDGET_NAME_RE.test(label.slice(0, cover.index))) label = label.slice(0, cover.index);
     const own = (re: RegExp) => without(label.replace(INTEREST_ONLY_RE, " "), re, def.aliases);
     if (INTEREST_FEE_FIELDS.has(def.key) && INTEREST_WORD_RE.test(own(INTEREST_WORD_RE))) return { kind: "ignored", reason: INTEREST_NOTE };
-    if (INTEREST_FEE_FIELDS.has(def.key) && FEE_WORD_RE.test(own(FEE_WORD_RE))) return { kind: "ignored", reason: "A fee or premium, not an input" };
+    const fee = LOAN_AMOUNTS.has(def.key) ? LOAN_FEE_WORD_RE : FEE_WORD_RE;
+    if (INTEREST_FEE_FIELDS.has(def.key) && def.key !== "soft_cost" && fee.test(own(fee))) return { kind: "ignored", reason: "A fee or premium, not an input" };
     const carrying = label.replace(TRANSFER_TAX_RE, " ");
     if (CARRYING_FIELDS.has(def.key) && CARRYING_RE.test(without(carrying, CARRYING_RE, def.aliases)) && !TAXES_BASIS_RE.test(carrying)) return { kind: "ignored", reason: CARRYING_NOTE };
   }
