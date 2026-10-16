@@ -7,7 +7,7 @@ import { FIELDS } from "@agir/contracts";
 import { SF_PER_M2 } from "@agir/numbers";
 import { reviewWaiting } from "../src/components/ui.tsx";
 import { enteredInUnit, foreignIn } from "../src/routes/review.tsx";
-import { build, checkText, translateMessage, verdictText, type Key } from "../src/i18n.tsx";
+import { build, checkText, dealStatus, translateMessage, verdictText, type Key } from "../src/i18n.tsx";
 
 describe("a run's source labels in French", () => {
   it("translates the line a value was read from", () => {
@@ -463,5 +463,36 @@ describe("card 61: Canadian cost lines and the insurance premium, in both langua
     expect(translateMessage("budget gstHstNet must be a number of at least 0")).toMatch(/^Le poste « .+ » du budget doit être un nombre positif ou nul$/);
     expect(translateMessage("property tax must be a number of at least 0")).toBe("La taxe foncière doit être un nombre positif ou nul");
     expect(translateMessage("refinance insurance premium must be a number from 0 to 10")).toBe("La prime d'assurance du refinancement doit se situer entre 0 % et 10 %");
+  });
+});
+
+// The server's overview reads a deal with values and no documents from its values (card 59); the web's status line must agree.
+describe("a deal's status line when it has values and no documents", () => {
+  const [en, fr] = [build("en", () => {}), build("fr", () => {})];
+  const overview = (review: Partial<{ approved: number; needsReview: number; conflicting: number; awaitingSecond: number; missing: number; impossible: number }>, status = "blocked") => ({
+    step: "review",
+    documents: { total: 0, processing: 0, failed: 0 },
+    review: { approved: 0, needsReview: 0, conflicting: 0, awaitingSecond: 0, missing: 0, impossible: 0, status, ...review },
+    run: null,
+    decision: null,
+    reports: 0,
+  });
+
+  it("says what blocks the run, not that there are no documents", () => {
+    const st = dealStatus(en, overview({ approved: 4, missing: 13, impossible: 1 }), true);
+    expect(st.text).toBe("Blocked · 13 missing, 1 to correct");
+    expect(st.next).toBe("Enter 13 missing inputs");
+    expect(st.blockedParts).toEqual(["13 missing", "1 to correct"]);
+    expect(dealStatus(fr, overview({ approved: 4, missing: 13, impossible: 1 }), true).text).toBe("Bloqué · 13 manquantes, 1 à corriger");
+  });
+
+  it("is ready to run when every value is approved", () => {
+    expect(dealStatus(en, overview({ approved: 20 }, "ready"), true).text).toBe("Ready to run");
+  });
+
+  it("still asks for documents when the deal has neither documents nor values", () => {
+    const st = dealStatus(en, overview({ missing: 13 }), true);
+    expect(st.text).toBe("No documents yet");
+    expect(st.next).toBe("Upload the deal documents");
   });
 });
