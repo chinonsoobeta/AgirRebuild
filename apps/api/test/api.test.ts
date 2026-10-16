@@ -630,3 +630,58 @@ describe("a person labels a figure Agir did not use (task 58)", () => {
     expect(ev.payload.labelDropped).toEqual([expect.objectContaining({ id: "nowhere|line 9|$1" })]);
   });
 });
+
+describe("audit of task 58: a label is checked when it is saved, and in team review one's own label needs a second person", () => {
+  let aw: string, ad: string;
+  const review = async () => (await call(alice, "GET", `/api/deals/${ad}/review`)).json;
+  const row = async (raw: string) => (await review()).other.find((o: any) => o.raw === raw);
+  const byField = async (k: string) => (await review()).assumptions.find((a: any) => a.fieldKey === k);
+  const labelAs = async (raw: string, fieldKey: string, itemKey?: string) => {
+    const r = await row(raw);
+    return call(alice, "POST", `/api/deals/${ad}/figure-labels`, { documentId: r.documentId, figureId: r.figureId, fieldKey, ...(itemKey ? { itemKey } : {}) });
+  };
+
+  test("a label the boundary would refuse is refused with its reason, and nothing is stored", async () => {
+    aw = (await call(alice, "POST", "/api/workspaces", { name: "Label audit" })).json.id;
+    expect((await call(alice, "POST", `/api/workspaces/${aw}/members`, { email: "bob@example.com", role: "analyst" })).status).toBe(200);
+    expect((await call(alice, "POST", `/api/workspaces/${aw}/review-mode`, { mode: "team" })).status).toBe(200);
+    ad = (await call(alice, "POST", `/api/workspaces/${aw}/deals`, { name: "Audit Row", assetType: "Multifamily", location: "Regina", province: "SK" })).json.id;
+    expect((await call(alice, "PUT", `/api/deals/${ad}/documents?name=audit.txt`, undefined, new TextEncoder().encode("Gauge: 5.25%\nTariff: $2,350\nQuota: 6.10%\n"))).status).toBe(200);
+    await work();
+    const bad = await labelAs("$2,350", "construction_months");
+    expect(bad.status).toBe(422);
+    expect(JSON.stringify(bad.json)).toMatch(/does not fit/);
+    expect(await db.query(`select 1 from figure_labels where deal_id = $1`, [ad])).toHaveLength(0);
+  });
+
+  test("a plain dollar figure labelled as a monthly rent reaches review", async () => {
+    expect((await labelAs("$2,350", "unit_rent_monthly", "2-bed")).status).toBe(200);
+    await work();
+    expect(await byField("unit_rent_monthly")).toMatchObject({ status: "needs_review", value: 2350, itemKey: "2BR" });
+  });
+
+  test("in team review, approving a material value only one's own label supports waits for someone else", async () => {
+    expect((await labelAs("5.25%", "exit_cap_rate_pct")).status).toBe(200);
+    await work();
+    const a = await byField("exit_cap_rate_pct");
+    expect(a).toMatchObject({ status: "needs_review", value: 5.25 });
+    expect(a.sources[0]).toMatchObject({ rule: "labelled" });
+    expect((await call(alice, "POST", `/api/assumptions/${a.id}/review`, { action: "approve", version: a.version })).status).toBe(200);
+    const waiting = await byField("exit_cap_rate_pct");
+    expect(waiting.status).toBe("awaiting_second_approval");
+    expect((await call(alice, "POST", `/api/assumptions/${a.id}/review`, { action: "second_approve", version: waiting.version })).status).toBe(403);
+    expect((await call(bob, "POST", `/api/assumptions/${a.id}/review`, { action: "second_approve", version: waiting.version })).status).toBe(200);
+    expect(await byField("exit_cap_rate_pct")).toMatchObject({ status: "approved", value: 5.25 });
+    const [row0] = await db.query<any>(`select * from assumptions where id = $1`, [a.id]);
+    expect(sourceLabel(row0)).toMatch(/audit\.txt, .*labelled by a person/);
+  });
+
+  test("in solo review the same person approves their own label at once", async () => {
+    expect((await call(alice, "POST", `/api/workspaces/${aw}/review-mode`, { mode: "solo" })).status).toBe(200);
+    expect((await labelAs("6.10%", "senior_rate_pct")).status).toBe(200);
+    await work();
+    const a = await byField("senior_rate_pct");
+    expect((await call(alice, "POST", `/api/assumptions/${a.id}/review`, { action: "approve", version: a.version })).status).toBe(200);
+    expect(await byField("senior_rate_pct")).toMatchObject({ status: "approved", value: 6.1 });
+  });
+});

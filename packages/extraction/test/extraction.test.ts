@@ -4079,3 +4079,21 @@ describe("a person's label for a figure Agir did not use crosses a boundary (tas
     expect(applySuggestions([], figures.filter(offerable), rest).kept.map((c) => c.value)).toEqual([7]);
   });
 });
+
+describe("audit of task 58: the unit a person's label may give a figure", () => {
+  const fig = (raw: string, value: number, unitSeen: string | null, n: number): SourcedCandidate =>
+    ({ fieldKey: null, itemKey: null, value, raw, unitSeen, location: `page 3, line ${n}`, context: `Row ${n} ${raw}`, rule: "", note: "No field matches this label", documentId: "d3", documentName: "d3.pdf" });
+  const figures = figureOrder([fig("$2,350", 2350, "$", 1), fig("$1,600 a month", 1600, "$/mo", 2), fig("$38 per sf", 38, "$/sf", 3), fig("$41", 41, "$", 4)]);
+  const label = (raw: string, fieldKey: string, itemKey?: string) => applyLabels(figures, [{ id: offeredIds(figures)[figures.findIndex((f) => f.raw === raw)]!, fieldKey, itemKey }]);
+
+  test("a plain dollar figure takes the basis of the money field a person names, as a rent-roll cell under a 'Monthly rent' heading needs", () => {
+    expect(label("$2,350", "unit_rent_monthly", "2-bed").kept.map((c) => [c.fieldKey, c.itemKey, c.value])).toEqual([["unit_rent_monthly", "2BR", 2350]]);
+    expect(label("$41", "rent_psf_annual", "retail").kept.map((c) => [c.fieldKey, c.value])).toEqual([["rent_psf_annual", 41]]);
+  });
+  test("a figure written with its own basis must fit the field, and a dollar figure never becomes another kind of unit", () => {
+    expect(label("$1,600 a month", "other_income_annual").dropped[0]!.why).toMatch(/does not fit/);
+    expect(label("$38 per sf", "unit_rent_monthly", "1-bed").dropped[0]!.why).toMatch(/does not fit/);
+    expect(label("$2,350", "construction_months").dropped[0]!.why).toMatch(/does not fit/);
+    expect(label("$2,350", "exit_cap_rate_pct").dropped[0]!.why).toMatch(/does not fit/);
+  });
+});
