@@ -454,7 +454,8 @@ export function Review({ dealId }: { dealId: string }) {
                       {editable && entering !== id && <button className="btn quiet small" type="button" onClick={() => setEntering(id)}>{m.unit === "flag" ? t("review.choiceEnter") : t("review.notFoundEnter")}</button>}
                     </div>
                     {L.help(m.fieldKey, m.help) && <span className="help">{L.help(m.fieldKey, m.help)}</span>}
-                    {entering === id && entryForm(m, id, <span className="sr-only">{name(m)}</span>)}
+                    {/* A Yes/No choice is named by its radiogroup; a number needs a label of its own. */}
+                    {entering === id && entryForm(m, id, m.unit === "flag" ? <span className="sr-only">{name(m)}</span> : <label htmlFor={id} className="sr-only">{name(m)}</label>)}
                   </div>
                 );
               })}
