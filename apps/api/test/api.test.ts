@@ -1684,3 +1684,166 @@ describe("card 58b: undoing a label puts back the value the label reopened, when
     expect(Object.keys(await reconciled(d))).not.toContain("restored_values");
   });
 });
+
+describe("card 63: a person's decision stands through a later, unrelated reconcile", () => {
+  let sw: string, tw: string;
+  const mkDeal = async (w: string, name: string) =>
+    (await call(alice, "POST", `/api/workspaces/${w}/deals`, { name, assetType: "Multifamily", location: "Regina", province: "SK" })).json.id as string;
+  const upload = async (d: string, name: string, text: string) => {
+    expect((await call(alice, "PUT", `/api/deals/${d}/documents?name=${name}`, undefined, new TextEncoder().encode(text))).status).toBe(200);
+    await work();
+  };
+  const retire = async (d: string, name: string) => {
+    const doc = (await call(alice, "GET", `/api/deals/${d}/documents`)).json.find((x: any) => x.name === name);
+    expect((await call(alice, "POST", `/api/documents/${doc.id}/retire`)).status).toBe(200);
+    await work();
+  };
+  const review = async (d: string) => (await call(alice, "GET", `/api/deals/${d}/review`)).json;
+  const byField = async (d: string, k: string) => (await review(d)).assumptions.find((a: any) => a.fieldKey === k && a.itemKey === null);
+  const act = async (s: Session, a: any, body: Record<string, unknown>) => {
+    const r = await call(s, "POST", `/api/assumptions/${a.id}/review`, { version: a.version, ...body });
+    expect(r.status, JSON.stringify(r.json)).toBe(200);
+  };
+  const stored = async (d: string, k: string) =>
+    ((await db.query<any>(`select status, value, version, source_kind, sources, conflict_values, reason from assumptions where deal_id = $1 and field_key = $2`, [d, k])) as any[])[0];
+  const events = (d: string, k: string) =>
+    db.query<any>(`select e.action from assumption_events e join assumptions a on a.id = e.assumption_id where a.deal_id = $1 and a.field_key = $2 order by e.id`, [d, k]);
+  const label = async (d: string, raw: string, fieldKey: string) => {
+    const f = (await review(d)).other.find((o: any) => o.raw === raw);
+    expect((await call(alice, "POST", `/api/deals/${d}/figure-labels`, { documentId: f.documentId, figureId: f.figureId, fieldKey })).status, raw).toBe(200);
+    await work();
+  };
+  const unlabel = async (d: string, raw: string) => {
+    const f = (await review(d)).other.find((o: any) => o.raw === raw);
+    expect((await call(alice, "DELETE", `/api/deals/${d}/figure-labels`, { documentId: f.documentId, figureId: f.figureId })).status, raw).toBe(200);
+    await work();
+  };
+  const enter = async (d: string, fieldKey: string, value: number) =>
+    expect((await call(alice, "POST", `/api/deals/${d}/values`, { fieldKey, value, reason: "Quick start answer" })).status, fieldKey).toBe(200);
+  const unrelated = (d: string, n: number) => upload(d, `site-${n}.txt`, `Site notes ${n}\nParking stalls: ${100 + n}\n`);
+  // A land cost the budget states, approved, and the budget then retired: the value waits to be confirmed or rejected.
+  const waiting = async (w: string, name: string) => {
+    const d = await mkDeal(w, name);
+    await upload(d, "budget.txt", "Budget\nLand cost: $800,000\n");
+    await act(alice, await byField(d, "land_cost"), { action: "approve" });
+    await retire(d, "budget.txt");
+    expect(await byField(d, "land_cost")).toMatchObject({ status: "needs_review", value: 800000, sources: [], reason: "Its source document was removed; confirm or reject it" });
+    return d;
+  };
+
+  test("a workspace in solo review and one in team review are set up", async () => {
+    sw = (await call(alice, "POST", "/api/workspaces", { name: "Stands solo", reviewMode: "solo" })).json.id;
+    tw = (await call(alice, "POST", "/api/workspaces", { name: "Stands team", reviewMode: "team" })).json.id;
+    expect((await call(alice, "POST", `/api/workspaces/${tw}/members`, { email: "bob@example.com", role: "admin" })).status).toBe(200);
+  });
+
+  test("a resolved conflict stands through an unrelated upload, and a third value reopens it with every value named", async () => {
+    const d = await mkDeal(sw, "Stands Resolved");
+    await upload(d, "budget.txt", "Budget\nLand cost: $800,000\n");
+    await upload(d, "purchase.txt", "Purchase agreement\nLand cost: $850,000\n");
+    await act(alice, await byField(d, "land_cost"), { action: "resolve", value: 850000, reason: "The agreement governs" });
+    const before = await stored(d, "land_cost");
+    const eventsBefore = await events(d, "land_cost");
+    expect(before).toMatchObject({ status: "approved", value: 850000, source_kind: "document" });
+    await unrelated(d, 1);
+    expect(await stored(d, "land_cost")).toEqual(before);
+    expect(await events(d, "land_cost")).toEqual(eventsBefore);
+    await upload(d, "appraisal.txt", "Appraisal\nLand cost: $900,000\n");
+    const after = await byField(d, "land_cost");
+    expect(after.status).toBe("conflicting");
+    expect(after.conflictValues.map((v: any) => v.value).sort((a: number, b: number) => a - b)).toEqual([800000, 850000, 900000]);
+  });
+
+  test("a resolved conflict whose chosen document is retired reopens, naming the settled value", async () => {
+    const d = await mkDeal(sw, "Stands Retired");
+    await upload(d, "budget.txt", "Budget\nLand cost: $800,000\n");
+    await upload(d, "purchase.txt", "Purchase agreement\nLand cost: $850,000\n");
+    await act(alice, await byField(d, "land_cost"), { action: "resolve", value: 850000, reason: "The agreement governs" });
+    await retire(d, "purchase.txt");
+    const a = await byField(d, "land_cost");
+    expect(a).toMatchObject({ status: "conflicting", value: 850000 });
+    expect(a.conflictValues).toEqual([{ value: 850000, documents: ["Approved earlier"] }, { value: 800000, documents: ["budget.txt"] }]);
+  });
+
+  test("a document value approved from review still reopens when a document states another value", async () => {
+    const d = await mkDeal(sw, "Stands Review");
+    await upload(d, "budget.txt", "Budget\nLand cost: $800,000\n");
+    await act(alice, await byField(d, "land_cost"), { action: "approve" });
+    await upload(d, "purchase.txt", "Purchase agreement\nLand cost: $850,000\n");
+    const a = await byField(d, "land_cost");
+    expect(a.status).toBe("conflicting");
+    expect(a.conflictValues.map((v: any) => v.value).sort((x: number, y: number) => x - y)).toEqual([800000, 850000]);
+  });
+
+  test("a value waiting after its document went stays waiting through an unrelated upload, at the same version", async () => {
+    const d = await waiting(sw, "Stands Waiting");
+    const before = await stored(d, "land_cost");
+    const eventsBefore = await events(d, "land_cost");
+    await unrelated(d, 1);
+    await unrelated(d, 2);
+    expect(await stored(d, "land_cost")).toEqual(before);
+    expect(await events(d, "land_cost")).toEqual(eventsBefore);
+  });
+
+  test("a value confirmed with no source set up directly in the database stays approved through two unrelated uploads", async () => {
+    const d = await waiting(sw, "Stands Direct");
+    await db.query(`update assumptions set status = 'approved' where deal_id = $1 and field_key = 'land_cost'`, [d]);
+    const before = await stored(d, "land_cost");
+    expect(before).toMatchObject({ status: "approved", source_kind: "document", sources: [] });
+    await unrelated(d, 1);
+    await unrelated(d, 2);
+    expect(await stored(d, "land_cost")).toEqual(before);
+  });
+
+  test("a value waiting after its document went takes the new document's value and sources when a document states the field again", async () => {
+    const d = await waiting(sw, "Stands Again");
+    await upload(d, "purchase.txt", "Purchase agreement\nLand cost: $850,000\n");
+    const a = await byField(d, "land_cost");
+    expect(a).toMatchObject({ status: "needs_review", value: 850000 });
+    expect(a.sources).toHaveLength(1);
+    expect(a.sources[0]).toMatchObject({ document_name: "purchase.txt", value: 850000 });
+  });
+
+  test("a value that came only from a person's label waits after the label is undone, through an unrelated upload", async () => {
+    const d = await mkDeal(sw, "Stands Label");
+    await upload(d, "notes.txt", "Notes\nBanner allowance: $7,000\n");
+    await label(d, "$7,000", "other_cost");
+    await act(alice, await byField(d, "other_cost"), { action: "approve" });
+    await unlabel(d, "$7,000");
+    expect(await byField(d, "other_cost")).toMatchObject({ status: "needs_review", value: 7000, reason: "The label a person gave its figure was removed; confirm or reject it" });
+    const before = await stored(d, "other_cost");
+    await unrelated(d, 1);
+    expect(await stored(d, "other_cost")).toEqual(before);
+  });
+
+  test("a reopened document value keeps naming the settled value through an unrelated upload", async () => {
+    const d = await mkDeal(sw, "Stands Reopened Document");
+    await upload(d, "notes.txt", "Notes\nExit cap rate: 5.25%\nQuota: 5.75%\n");
+    await act(alice, await byField(d, "exit_cap_rate_pct"), { action: "approve" });
+    await label(d, "5.75%", "exit_cap_rate_pct");
+    expect(await byField(d, "exit_cap_rate_pct")).toMatchObject({ status: "conflicting", value: 5.25 });
+    await unrelated(d, 1);
+    const a = await byField(d, "exit_cap_rate_pct");
+    expect(a).toMatchObject({ status: "conflicting", value: 5.25 });
+    expect(a.conflictValues).toEqual([{ value: 5.25, documents: ["Approved earlier"] }, { value: 5.75, documents: ["notes.txt"] }]);
+  });
+
+  test("a reopened hand entry follows the documents: a new value joins its conflict, and a value no document states leaves it", async () => {
+    const d = await mkDeal(sw, "Stands Reopened Hand");
+    await enter(d, "exit_cap_rate_pct", 5.5);
+    await upload(d, "first.txt", "First\nExit cap rate: 5.25%\n");
+    expect(await byField(d, "exit_cap_rate_pct")).toMatchObject({ status: "conflicting", value: 5.5 });
+    await upload(d, "second.txt", "Second\nExit cap rate: 5.0%\n");
+    const both = await byField(d, "exit_cap_rate_pct");
+    expect(both).toMatchObject({ status: "conflicting", value: 5.5 });
+    expect(both.conflictValues).toEqual([{ value: 5.5, documents: ["Entered by an analyst"] }, { value: 5.25, documents: ["first.txt"] }, { value: 5.0, documents: ["second.txt"] }]);
+    await retire(d, "first.txt");
+    const one = await byField(d, "exit_cap_rate_pct");
+    expect(one).toMatchObject({ status: "conflicting", value: 5.5 });
+    expect(one.conflictValues).toEqual([{ value: 5.5, documents: ["Entered by an analyst"] }, { value: 5.0, documents: ["second.txt"] }]);
+    // A reconcile that only updates a conflict writes no second reopened event.
+    expect((await events(d, "exit_cap_rate_pct")).filter((e: any) => e.action === "reopened")).toHaveLength(1);
+  });
+  // card 63 rule 3 tests
+  // card 63 extension tests
+});
