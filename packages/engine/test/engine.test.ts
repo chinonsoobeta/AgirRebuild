@@ -347,6 +347,24 @@ describe("quick-start templates", () => {
     expect(input!.revenue).toHaveLength(1);
   });
 
+  // Card 60d: one item written two ways is never counted twice.
+  test("approved rows for 'Retail' and 'retail' block the run, and neither is in the revenue program", () => {
+    const retail = (name: string) => [
+      { fieldKey: "unit_count", itemKey: name, status: "approved" as const, valueNumeric: 2 },
+      { fieldKey: "unit_rent_monthly", itemKey: name, status: "approved" as const, valueNumeric: 3_000 },
+    ];
+    const rows = [...rowsFor("multiplex"), ...retail("Retail"), ...retail("retail")];
+    const { readiness, input } = assemble(rows);
+    expect(readiness.status).toBe("blocked");
+    expect(input).toBeNull();
+    const named = readiness.impossible.filter((i) => i.detail === "Reject the values of one, or enter them under one name.");
+    expect(named.map((i) => [i.itemKey, i.label.includes("Retail and retail are one item written two ways")]).sort()).toEqual(expect.arrayContaining([["Retail", true], ["retail", true]]));
+    // Rejecting one name's values clears it, and the item is one component.
+    const cleared = assemble(rows.map((r) => (r.itemKey === "retail" ? { ...r, status: "rejected" as const } : r)));
+    expect(cleared.readiness.status).toBe("ready");
+    expect(cleared.input!.revenue.filter((c) => c.key === "Retail")).toHaveLength(1);
+  });
+
   // Task 35: an approved credit is not an impossible value.
   test("an approved negative other cost is accepted by readiness", () => {
     const rows = rowsFor("apartment").map((r) => (r.fieldKey === "other_cost" ? { ...r, valueNumeric: -20_000 } : r));

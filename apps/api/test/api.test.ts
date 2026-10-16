@@ -1025,6 +1025,68 @@ describe("audit of task 60c: a type written another way is the same type", () =>
   });
 });
 
+describe("card 60d: a person's entry and a document meet in one row however the name is written", () => {
+  let pat: Session, pw: string;
+  const make = async (name: string) => (await call(pat, "POST", `/api/workspaces/${pw}/deals`, { name, assetType: "Mixed use", location: "Regina", province: "SK" })).json.id as string;
+  const put = async (d: string, fieldKey: string, value: number, itemKey?: string) =>
+    expect((await call(pat, "POST", `/api/deals/${d}/values`, { fieldKey, value, reason: "Quick start answer", ...(itemKey ? { itemKey } : {}) })).status).toBe(200);
+  const base = async (d: string) => {
+    for (const [f, v, i] of [["land_cost", 800000], ["hard_cost", 2400000], ["soft_cost", 300000], ["contingency", 120000], ["construction_months", 12], ["lease_up_months", 6],
+      ["unit_count", 4, "2BR"], ["unit_rent_monthly", 2000, "2BR"], ["stabilized_occupancy_pct", 95], ["exit_cap_rate_pct", 5.5], ["senior_loan_amount", 2000000],
+      ["senior_rate_pct", 6], ["senior_amort_years", 30]] as [string, number, string?][]) await put(d, f, v, i);
+    expect((await call(pat, "POST", `/api/deals/${d}/defaults`, { fields: ["hold_years", "selling_costs_pct", "expense_ratio_pct"] })).status).toBe(200);
+  };
+  const gpr = async (d: string) => {
+    const r = await call(pat, "POST", `/api/deals/${d}/runs`);
+    expect(r.status).toBe(200);
+    const view = (await call(pat, "GET", `/api/runs/${r.json.id}`)).json;
+    return view.result.scenarios[0].metrics.find((m: any) => m.key === "gross_potential_rent").value as number;
+  };
+  const retailRows = async (d: string) => (await call(pat, "GET", `/api/deals/${d}/review`)).json.assumptions.filter((a: any) => /^retail$/i.test(a.itemKey ?? ""));
+  const sheet = (rent: number) => new TextEncoder().encode(`Unit type,Units,Rent ($/mo)\nretail,2,${rent}\n`);
+
+  test("a person's 'Retail' and a document's 'retail' at the same rent are one row each, with the document as a source", async () => {
+    pat = await signup("pia@example.com", "Pia Folder", "solo");
+    pw = (await call(pat, "GET", "/api/me")).json.workspaces[0].id;
+    const d = await make("Fold Same");
+    await base(d);
+    expect((await call(pat, "POST", `/api/deals/${d}/items`, { name: "Retail", unitCount: 2, rentMonthly: 3000, reason: "Two shops on the ground floor" })).status).toBe(200);
+    const before = await gpr(d);
+    expect((await call(pat, "PUT", `/api/deals/${d}/documents?name=roll.csv`, undefined, sheet(3000))).status).toBe(200);
+    await work();
+    const rows = await retailRows(d);
+    expect(rows.map((a: any) => [a.fieldKey, a.itemKey, a.status, a.value]).sort()).toEqual([["unit_count", "Retail", "approved", 2], ["unit_rent_monthly", "Retail", "approved", 3000]]);
+    expect(rows.find((a: any) => a.fieldKey === "unit_rent_monthly").sources.map((s: any) => s.document_name)).toEqual(["roll.csv"]);
+    expect((await call(pat, "GET", `/api/deals/${d}/review`)).json.readiness.status).toBe("ready");
+    expect(await gpr(d)).toBeCloseTo(before, 2);
+  });
+
+  test("at a different rent the row is conflicting and names both values", async () => {
+    const d = await make("Fold Differ");
+    await base(d);
+    expect((await call(pat, "POST", `/api/deals/${d}/items`, { name: "Retail", unitCount: 2, rentMonthly: 3000, reason: "Two shops on the ground floor" })).status).toBe(200);
+    expect((await call(pat, "PUT", `/api/deals/${d}/documents?name=roll.csv`, undefined, sheet(3200))).status).toBe(200);
+    await work();
+    const rent = (await retailRows(d)).find((a: any) => a.fieldKey === "unit_rent_monthly");
+    expect(await retailRows(d)).toHaveLength(2);
+    expect(rent).toMatchObject({ itemKey: "Retail", status: "conflicting" });
+    expect(rent.conflictValues.map((c: any) => c.value).sort()).toEqual([3000, 3200]);
+  });
+
+  test("two older rows that fold equal take no proposal and block the run until one is rejected", async () => {
+    const d = await make("Fold Old Pair");
+    await base(d);
+    for (const name of ["Retail", "retail"]) {
+      await put(d, "unit_count", 2, name);
+      await put(d, "unit_rent_monthly", 3000, name);
+    }
+    const r = (await call(pat, "GET", `/api/deals/${d}/review`)).json;
+    expect(r.readiness.status).toBe("blocked");
+    expect(r.readiness.impossible.map((i: any) => i.label)).toContain("Retail and retail are one item written two ways");
+    expect((await call(pat, "POST", `/api/deals/${d}/runs`)).status).toBeGreaterThanOrEqual(400);
+  });
+});
+
 describe("card 61: Canadian cost lines and a mortgage insurance premium are entered by a person", () => {
   let nina: Session, nw: string;
   const make = async (name: string) =>

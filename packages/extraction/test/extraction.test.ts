@@ -1,7 +1,7 @@
 import { describe, expect, test } from "vitest";
 import { SF_PER_M2 } from "@agir/numbers";
 import { assemble, type AssumptionRow } from "@agir/engine";
-import { applyLabels, applySuggestions, consolidate, extractCandidates, offerable, offeredIds, figureOrder, withoutLabelled, normalizeLabel, parseDocument, scoreExtraction, type Cell, type NormalizedDocument, type SourcedCandidate, type Table } from "../src/index.ts";
+import { applyLabels, itemFold, applySuggestions, consolidate, extractCandidates, offerable, offeredIds, figureOrder, withoutLabelled, normalizeLabel, parseDocument, scoreExtraction, type Cell, type NormalizedDocument, type SourcedCandidate, type Table } from "../src/index.ts";
 import { MAX_PDF_PAGES, pdfPageError, relativeLinks } from "../src/parse.ts";
 import { loadOracles, toNormalized } from "./oracle.ts";
 
@@ -4095,5 +4095,69 @@ describe("audit of task 58: the unit a person's label may give a figure", () => 
     expect(label("$38 per sf", "unit_rent_monthly", "1-bed").dropped[0]!.why).toMatch(/does not fit/);
     expect(label("$2,350", "construction_months").dropped[0]!.why).toMatch(/does not fit/);
     expect(label("$2,350", "exit_cap_rate_pct").dropped[0]!.why).toMatch(/does not fit/);
+  });
+});
+
+describe("card 60d: one item, however its name is written", () => {
+  const nd = (lines: string[], tables: Table[] = []): NormalizedDocument => ({
+    kind: "pdf",
+    lines: lines.map((text, i) => ({ text, location: `page 1, line ${i + 1}` })),
+    tables,
+    pageCount: 1,
+    needsOcr: false,
+    fullText: lines.join("\n"),
+  });
+  const rentTable = (name: string, rent: number): Table => ({
+    name: "Rent roll",
+    rows: [
+      [{ text: "Unit type", ref: "A1" }, { text: "Units", ref: "B1" }, { text: "Rent ($/mo)", ref: "C1" }],
+      [{ text: name, ref: "A2" }, { text: "2", number: 2, ref: "B2" }, { text: String(rent), number: rent, unit: "$", ref: "C2" }],
+    ],
+  });
+  const from = (r: ReturnType<typeof extractCandidates>, documentName: string): SourcedCandidate[] => r.candidates.map((c) => ({ ...c, documentId: documentName, documentName }));
+  const rents = (ps: ReturnType<typeof consolidate>) => ps.filter((p) => p.fieldKey === "unit_rent_monthly");
+
+  test("a table's 'retail' and a sentence's 'Retail' at the same rent are one proposal with both sources", () => {
+    const table = extractCandidates(nd([], [rentTable("retail", 3000)]));
+    const text = extractCandidates(nd(["Retail monthly rent: $3,000 per unit per month"]));
+    expect(table.candidates.find((c) => c.fieldKey === "unit_rent_monthly")?.itemKey).toBe("retail");
+    expect(text.candidates.find((c) => c.fieldKey === "unit_rent_monthly")?.itemKey).toBe("Retail");
+    const p = rents(consolidate([...from(table, "Rent roll"), ...from(text, "Memo")]));
+    expect(p).toHaveLength(1);
+    expect(p[0]).toMatchObject({ itemKey: "Retail", status: "needs_review", value: 3000 });
+    expect(p[0]!.sources.map((s) => s.documentName).sort()).toEqual(["Memo", "Rent roll"]);
+  });
+
+  test("at $3,000 and $3,200 they are one conflicting proposal naming both values", () => {
+    const table = extractCandidates(nd([], [rentTable("retail", 3000)]));
+    const text = extractCandidates(nd(["Retail monthly rent: $3,200 per unit per month"]));
+    const p = rents(consolidate([...from(table, "Rent roll"), ...from(text, "Memo")]));
+    expect(p).toHaveLength(1);
+    expect(p[0]).toMatchObject({ status: "conflicting", value: null });
+    expect(p[0]!.values.map((v) => v.value)).toEqual([3000, 3200]);
+  });
+
+  test("the group takes the form most sources use, and on a tie the one that sorts first", () => {
+    const one = (itemKey: string, documentName: string): SourcedCandidate => ({
+      fieldKey: "unit_rent_monthly", itemKey, value: 3000, raw: "$3,000", unitSeen: "$/mo", location: "page 1, line 1", context: "", rule: "test", documentId: documentName, documentName,
+    } as SourcedCandidate);
+    expect(rents(consolidate([one("retail", "a"), one("Retail", "b")]))[0]!.itemKey).toBe("Retail");
+    expect(rents(consolidate([one("Retail", "a"), one("retail", "b")]))[0]!.itemKey).toBe("Retail");
+    expect(rents(consolidate([one("retail", "a"), one("retail", "b"), one("Retail", "c")]))[0]!.itemKey).toBe("retail");
+  });
+
+  test("'Office space' and 'Office Space' are one item", () => {
+    const a = extractCandidates(nd([], [rentTable("Office space", 1800)]));
+    const b = extractCandidates(nd(["Office Space monthly rent: $1,800 per unit per month"]));
+    const p = rents(consolidate([...from(a, "a"), ...from(b, "b")]));
+    expect(p).toHaveLength(1);
+    expect(p[0]!.sources).toHaveLength(2);
+  });
+
+  test("itemFold: one unit type in any spelling is one fold; a different name is not", () => {
+    expect(itemFold("3-bed")).toBe(itemFold("3 BR"));
+    expect(itemFold("3 BR")).toBe(itemFold("3br"));
+    expect(itemFold("Office   SPACE ")).toBe(itemFold("office space"));
+    expect(itemFold("Retail")).not.toBe(itemFold("Retail 2"));
   });
 });
