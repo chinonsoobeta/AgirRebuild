@@ -1255,3 +1255,210 @@ describe("card 61: Canadian cost lines and a mortgage insurance premium are ente
     });
   });
 });
+
+describe("card 62: a deal is copied as a variant, in exactly the state of its source", () => {
+  let vw: string, src: string, copyA: string, copyB: string, dan: Session, quin: Session, qw: string;
+  const nameOf = "Variant Heights";
+  const upload = async (d: string, name: string, text: string) => {
+    expect((await call(alice, "PUT", `/api/deals/${d}/documents?name=${name}`, undefined, new TextEncoder().encode(text))).status).toBe(200);
+  };
+  const review = async (d: string, s = alice) => (await call(s, "GET", `/api/deals/${d}/review`)).json;
+  const byField = async (d: string, k: string, item: string | null = null) => (await review(d)).assumptions.find((a: any) => a.fieldKey === k && a.itemKey === item);
+  const hashOf = async (d: string) => ((await db.query<any>(`select fn_assumptions_hash($1) as h`, [d])) as [{ h: string }])[0].h;
+  const stored = (d: string) =>
+    db.query<any>(
+      `select field_key, item_key, status, value, pending_value, source_kind, reason, conflict_values, decided_by, decided_at, second_approver, second_approved_at from assumptions where deal_id = $1 order by field_key, item_key`,
+      [d],
+    );
+  const reconciled = async (d: string) => {
+    await reconcileDeal(db, d);
+    const [ev] = await db.query<any>(`select payload from audit_events where action = 'assumptions.reconciled' and deal_id = $1 order by seq desc limit 1`, [d]);
+    return ev.payload;
+  };
+  const runRow = async (id: string) => ((await db.query<any>(`select input_hash, result_hash from runs where id = $1`, [id])) as [{ input_hash: string; result_hash: string }])[0];
+  const copyOf = (s: Session, d: string, name: string) => call(s, "POST", `/api/deals/${d}/copy`, { name });
+
+  test("a deal with two documents and every kind of value is set up", async () => {
+    vw = (await call(alice, "POST", "/api/workspaces", { name: "Variants" })).json.id;
+    expect((await call(alice, "POST", `/api/workspaces/${vw}/members`, { email: "bob@example.com", role: "admin" })).status).toBe(200);
+    expect((await call(alice, "POST", `/api/workspaces/${vw}/members`, { email: "carol@example.com", role: "viewer" })).status).toBe(200);
+    dan = await signup("dan@example.com", "Dan Outsider");
+    src = (await call(alice, "POST", `/api/workspaces/${vw}/deals`, { name: nameOf, assetType: "Multifamily", location: "Burnaby", province: "BC" })).json.id;
+    await upload(src, "budget.txt", "Budget\nLand cost: $800,000\nHard costs: $2,400,000\nSoft costs: $300,000\nContingency: $120,000\nExit cap rate: 5.5%\n");
+    await upload(src, "notes.txt", "Project notes\nLand cost: $850,000\nBanner allowance: $7,000\nSignage kit: $3,000\n");
+    await work();
+    const docs = (await call(alice, "GET", `/api/deals/${src}/documents`)).json;
+    expect(docs.map((d: any) => d.stage)).toEqual(["extracted", "extracted"]);
+    for (const k of ["hard_cost", "soft_cost", "contingency", "exit_cap_rate_pct"]) {
+      const a = await byField(src, k);
+      expect(a, k).toMatchObject({ status: "needs_review" });
+      expect((await call(alice, "POST", `/api/assumptions/${a.id}/review`, { action: "approve", version: a.version })).status, k).toBe(200);
+    }
+    expect(await byField(src, "land_cost")).toMatchObject({ status: "conflicting" });
+    for (const [f, v, i] of [["construction_months", 12], ["lease_up_months", 6], ["unit_count", 4, "Residential"], ["unit_rent_monthly", 2400, "Residential"], ["stabilized_occupancy_pct", 95], ["senior_loan_amount", 0]] as [string, number, string?][]) {
+      const r = await call(alice, "POST", `/api/deals/${src}/values`, { fieldKey: f, value: v, reason: "Quick start answer", ...(i ? { itemKey: i } : {}) });
+      expect(r.status, f).toBe(200);
+    }
+    expect((await call(alice, "POST", `/api/deals/${src}/defaults`, { fields: ["hold_years", "selling_costs_pct", "expense_ratio_pct"] })).status).toBe(200);
+    // A person's label, and a model's stored suggestion for another figure.
+    const fig = (raw: string) => review(src).then((r) => r.other.find((o: any) => o.raw === raw));
+    const banner = await fig("$7,000");
+    expect((await call(alice, "POST", `/api/deals/${src}/figure-labels`, { documentId: banner.documentId, figureId: banner.figureId, fieldKey: "other_cost" })).status).toBe(200);
+    await work();
+    const sign = await fig("$3,000");
+    await db.query(
+      `insert into label_suggestions (document_id, deal_id, workspace_id, model, prompt_hash, request, response, stop_reason, outcome) values ($1, $2, $3, 'claude-fake-served', 'hash-kept-as-sent', $4, $5, 'end_turn', 'ok')`,
+      [sign.documentId, src, vw, JSON.stringify({ figures: [{ id: sign.figureId }] }), JSON.stringify([{ id: sign.figureId, fieldKey: "other_cost", itemKey: null }])],
+    );
+    const statuses = (await review(src)).assumptions.map((a: any) => a.status);
+    for (const s of ["approved", "default_accepted", "conflicting", "awaiting_second_approval", "needs_review"]) expect(statuses, s).toContain(s);
+    expect((await byField(src, "other_cost")).sources[0]).toMatchObject({ rule: "labelled" });
+  });
+
+  test("a viewer cannot copy, a member of another workspace cannot see the deal, and a name is required", async () => {
+    expect((await copyOf(carol, src, "Nope")).status).toBe(403);
+    expect((await copyOf(dan, src, "Nope")).status).toBe(404);
+    expect((await copyOf(alice, src, "")).status).toBe(422);
+    expect((await copyOf(alice, src, "x".repeat(161))).status).toBe(422);
+    expect((await call(alice, "GET", `/api/workspaces/${vw}/deals`)).json).toHaveLength(1);
+  });
+
+  test("a deal with a document still being read cannot be copied", async () => {
+    const busy = (await call(alice, "POST", `/api/workspaces/${vw}/deals`, { name: "Busy Heights", assetType: "Multifamily", location: "Burnaby", province: "BC" })).json.id;
+    await upload(busy, "unread.txt", "Notes\nLand cost: $1,000,000\n");
+    const r = await copyOf(alice, busy, "Busy variant");
+    expect(r.status).toBe(409);
+    expect(r.json.error).toBe("Wait until every document is read, then copy the deal.");
+    await work();
+    expect((await copyOf(alice, busy, "Busy variant")).status).toBe(200);
+  });
+
+  test("the copy has the source's values, approvals, documents and labels, remapped to its own documents", async () => {
+    const r = await copyOf(alice, src, `${nameOf}, variant`);
+    expect(r.status).toBe(200);
+    copyA = r.json.id;
+    expect(copyA).not.toBe(src);
+    expect(await hashOf(copyA)).toBe(await hashOf(src));
+    expect(await stored(copyA)).toEqual(await stored(src));
+    const [a, b] = await Promise.all([call(alice, "GET", `/api/deals/${src}`), call(alice, "GET", `/api/deals/${copyA}`)]);
+    expect(a.json.copiedFrom).toBeNull();
+    expect(b.json.copiedFrom).toEqual({ id: src, name: nameOf });
+    expect(b.json.deal).toMatchObject({ name: `${nameOf}, variant`, workspace_id: vw, asset_type: "Multifamily", location: "Burnaby", province: "BC", currency: "CAD", country: "CA" });
+    // Documents: new rows over the same stored bytes.
+    const docs = (d: string) => db.query<any>(`select id, name, kind, sha256, storage_key, stage, uploaded_by, candidate_count from documents where deal_id = $1 and retired_at is null order by name`, [d]);
+    const [sd, cd] = [await docs(src), await docs(copyA)];
+    expect(cd).toHaveLength(2);
+    expect(cd.map(({ id, ...x }: any) => x)).toEqual(sd.map(({ id, ...x }: any) => x));
+    const own = new Set(cd.map((d: any) => d.id));
+    for (const d of sd) expect(own.has(d.id)).toBe(false);
+    for (const d of cd) {
+      const n = (x: string) => db.query<any>(`select count(*)::int as n from candidates where document_id = $1`, [x]).then((q) => q[0].n);
+      expect(await n(d.id)).toBe(await n(sd.find((s: any) => s.name === d.name).id));
+    }
+    // Every document id the copy holds is one of its own.
+    const copyReview = await review(copyA);
+    for (const x of copyReview.assumptions) for (const s of x.sources) expect(own.has(s.document_id), x.fieldKey).toBe(true);
+    const labels = await db.query<any>(`select document_id, figure_id, field_key, created_by from figure_labels where deal_id = $1`, [copyA]);
+    const sourceLabels = await db.query<any>(`select figure_id, field_key, created_by from figure_labels where deal_id = $1`, [src]);
+    expect(labels).toHaveLength(1);
+    expect(own.has(labels[0].document_id)).toBe(true);
+    expect(labels[0].figure_id.startsWith(`${labels[0].document_id}|`)).toBe(true);
+    expect(labels[0].figure_id.split("|").slice(1)).toEqual(sourceLabels[0].figure_id.split("|").slice(1));
+    expect(labels[0]).toMatchObject({ field_key: sourceLabels[0].field_key, created_by: sourceLabels[0].created_by });
+    // The model's suggestion: request and hash as sent, the figure ids in the response remapped.
+    const [ss] = await db.query<any>(`select * from label_suggestions where deal_id = $1`, [src]);
+    const [cs] = await db.query<any>(`select * from label_suggestions where deal_id = $1`, [copyA]);
+    expect(cs).toMatchObject({ prompt_hash: "hash-kept-as-sent", model: "claude-fake-served", outcome: "ok", stop_reason: "end_turn", request: ss.request });
+    expect(own.has(cs.document_id)).toBe(true);
+    expect(cs.response[0].id).toBe(ss.response[0].id.replace(ss.document_id, cs.document_id));
+    expect(JSON.stringify(cs.response)).not.toContain(ss.document_id);
+  });
+
+  test("a reconcile of the copy changes nothing, and its review lists the same unused figures with the label shown", async () => {
+    const before = await stored(copyA);
+    expect(await reconciled(copyA)).toMatchObject({ changed: 0 });
+    expect(await stored(copyA)).toEqual(before);
+    expect(await reconciled(src)).toMatchObject({ changed: 0 });
+    const [s, c] = [await review(src), await review(copyA)];
+    const shape = (r: any) => r.other.map((o: any) => ({ document_name: o.document_name, raw: o.raw, value: o.value, location: o.location, label: o.label && { fieldKey: o.label.fieldKey, by: o.label.by } }));
+    expect(shape(c)).toEqual(shape(s));
+    expect(shape(c).find((o: any) => o.raw === "$7,000").label).toEqual({ fieldKey: "other_cost", by: "Alice Analyst" });
+    expect(c.assumptions.map((a: any) => [a.fieldKey, a.itemKey, a.status, a.value, a.pendingValue, a.decidedBy, a.version])).toEqual(
+      s.assumptions.map((a: any) => [a.fieldKey, a.itemKey, a.status, a.value, a.pendingValue, a.decidedBy, 1]),
+    );
+  });
+
+  test("each copied value has a copied event, and the audit names both deals", async () => {
+    const events = await db.query<any>(`select action, from_status, to_status, reason from assumption_events where deal_id = $1`, [copyA]);
+    const rows = await stored(copyA);
+    expect(events).toHaveLength(rows.length);
+    for (const e of events) expect(e).toMatchObject({ action: "copied", from_status: null, reason: `Copied from ${nameOf}` });
+    expect(events.map((e: any) => e.to_status).sort()).toEqual(rows.map((r: any) => r.status).sort());
+    const [copied] = await db.query<any>(`select payload from audit_events where action = 'deal.copied' and deal_id = $1`, [src]);
+    expect(copied.payload).toMatchObject({ copy: copyA });
+    const [made] = await db.query<any>(`select payload from audit_events where action = 'deal.created_as_copy' and deal_id = $1`, [copyA]);
+    expect(made.payload).toMatchObject({ source: src, name: nameOf, documents: 2, values: rows.length, labels: 1 });
+    const audit = (await call(alice, "GET", `/api/deals/${copyA}/audit`)).json.map((e: any) => e.action);
+    expect(audit).toContain("deal.created_as_copy");
+    // Runs, decisions and history stay with the source.
+    expect(await db.query(`select 1 from runs where deal_id = $1`, [copyA])).toHaveLength(0);
+    expect(await db.query(`select 1 from decisions where deal_id = $1`, [copyA])).toHaveLength(0);
+  });
+
+  test("in team review a material value changed in the copy waits for a second person, and the source is untouched", async () => {
+    const a = await byField(copyA, "exit_cap_rate_pct");
+    expect(a).toMatchObject({ status: "approved", value: 5.5 });
+    const r = await call(alice, "POST", `/api/assumptions/${a.id}/review`, { action: "modify", value: 6.25, reason: "The lender wants a wider cap rate", version: a.version });
+    expect(r.status).toBe(200);
+    expect(await byField(copyA, "exit_cap_rate_pct")).toMatchObject({ status: "awaiting_second_approval", pendingValue: 6.25 });
+    expect(await byField(src, "exit_cap_rate_pct")).toMatchObject({ status: "approved", value: 5.5, pendingValue: null, version: 2 });
+  });
+
+  test("once the source is clear, a second copy runs to the same input and result hashes as the source", async () => {
+    const land = await byField(src, "land_cost");
+    expect((await call(alice, "POST", `/api/assumptions/${land.id}/review`, { action: "resolve", value: 800000, reason: "The budget is the later document", version: land.version })).status).toBe(200);
+    const senior = await byField(src, "senior_loan_amount");
+    expect((await call(bob, "POST", `/api/assumptions/${senior.id}/review`, { action: "second_approve", version: senior.version })).status).toBe(200);
+    const label = await byField(src, "other_cost");
+    expect((await call(bob, "POST", `/api/assumptions/${label.id}/review`, { action: "approve", version: label.version })).status).toBe(200);
+    copyB = (await copyOf(bob, src, "Variant Heights, second")).json.id;
+    expect(copyB).toEqual(expect.any(String));
+    expect(await hashOf(copyB)).toBe(await hashOf(src));
+    // The approvals travel: the second approver is still Bob, and the entry is still Alice's.
+    const [s, c] = [await stored(src), await stored(copyB)];
+    expect(c).toEqual(s);
+    expect(c.find((x: any) => x.field_key === "senior_loan_amount").second_approver).toEqual(expect.any(String));
+    expect(await reconciled(copyB)).toMatchObject({ changed: 0 });
+    expect(await stored(copyB)).toEqual(s);
+    const runSrc = await call(alice, "POST", `/api/deals/${src}/runs`);
+    const runCopy = await call(alice, "POST", `/api/deals/${copyB}/runs`);
+    expect(runSrc.status).toBe(200);
+    expect(runCopy.status).toBe(200);
+    expect(await runRow(runCopy.json.id)).toEqual(await runRow(runSrc.json.id));
+    expect((await call(alice, "GET", `/api/runs/${runCopy.json.id}`)).json.fresh).toBe(true);
+    expect((await call(alice, "GET", `/api/deals/${src}`)).json.run.fresh).toBe(true);
+  }, 60_000);
+
+  test("a quick-start deal with values and no documents copies too", async () => {
+    quin = await signup("quin@example.com", "Quin Builder", "solo");
+    qw = (await call(quin, "GET", "/api/me")).json.workspaces[0].id;
+    const d = (await call(quin, "POST", `/api/workspaces/${qw}/deals`, { name: "Quick Fourplex", assetType: "Multifamily", location: "Halifax", province: "NS" })).json.id;
+    for (const [f, v, i] of [["land_cost", 800000], ["hard_cost", 2400000], ["soft_cost", 300000], ["contingency", 120000], ["construction_months", 12], ["lease_up_months", 6],
+      ["unit_count", 4, "Residential"], ["unit_rent_monthly", 2400, "Residential"], ["stabilized_occupancy_pct", 95], ["exit_cap_rate_pct", 5.5], ["senior_loan_amount", 2000000],
+      ["senior_rate_pct", 6], ["senior_amort_years", 30]] as [string, number, string?][]) {
+      expect((await call(quin, "POST", `/api/deals/${d}/values`, { fieldKey: f, value: v, reason: "Quick start answer", ...(i ? { itemKey: i } : {}) })).status, f).toBe(200);
+    }
+    expect((await call(quin, "POST", `/api/deals/${d}/defaults`, { fields: ["hold_years", "selling_costs_pct", "expense_ratio_pct"] })).status).toBe(200);
+    const c = await call(quin, "POST", `/api/deals/${d}/copy`, { name: "Quick Fourplex, kept" });
+    expect(c.status).toBe(200);
+    expect(await hashOf(c.json.id)).toBe(await hashOf(d));
+    expect(await stored(c.json.id)).toEqual(await stored(d));
+    expect(await db.query(`select 1 from documents where deal_id = $1`, [c.json.id])).toHaveLength(0);
+    expect(await reconciled(c.json.id)).toMatchObject({ changed: 0 });
+    expect(await stored(c.json.id)).toEqual(await stored(d));
+    const [a, b] = [await call(quin, "POST", `/api/deals/${d}/runs`), await call(quin, "POST", `/api/deals/${c.json.id}/runs`)];
+    expect(a.status).toBe(200);
+    expect(b.status).toBe(200);
+    expect(await runRow(b.json.id)).toEqual(await runRow(a.json.id));
+  });
+});
