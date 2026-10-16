@@ -952,6 +952,11 @@ describe("exit by refinancing and holding (card 60)", () => {
       expect(gateSpecs(POLICY_V1)).toHaveLength(5);
     });
 
+    test("audit of task 60: an unrealized gate says so, and cash left is measured on required equity, as the spec says", () => {
+      expect(gateSpecs(RENTAL_HOLD_V1_DRAFT).find((g) => g.metricKey === "unrealized_equity_multiple")!.label).toMatch(/unrealized, not a sale/);
+      expect(METRICS.find((m) => m.key === "cash_left_in_deal")!.formula).toMatch(/^required equity - cash returned at refinance/);
+    });
+
     test("the registry maps each version to its policy, and hold mode gets the draft", () => {
       expect(POLICIES["policy-v1"]).toBe(POLICY_V1);
       expect(POLICIES["rental-hold-v1-draft"]).toBe(RENTAL_HOLD_V1_DRAFT);
