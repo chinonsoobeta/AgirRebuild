@@ -912,3 +912,90 @@ describe("task 60b: a choice only a person makes is offered on review and entere
     expect(Object.keys(snap).sort()).toEqual(["assumptions", "input", "notFound"]);
   });
 });
+
+describe("task 60c: a person adds a unit type or space that no document states", () => {
+  let uw: string, ud: string, usr: Session, tsr: Session, td2: string;
+  const make = async (s: Session, w: string, name: string) =>
+    (await call(s, "POST", `/api/workspaces/${w}/deals`, { name, assetType: "Multifamily", location: "Calgary", province: "AB" })).json.id as string;
+  const put = async (s: Session, d: string, fieldKey: string, value: number, itemKey?: string) =>
+    expect((await call(s, "POST", `/api/deals/${d}/values`, { fieldKey, value, reason: "Quick start answer", ...(itemKey ? { itemKey } : {}) })).status).toBe(200);
+  const items = async (s: Session, d: string) => (await call(s, "GET", `/api/deals/${d}/review`)).json.assumptions.filter((a: any) => a.itemKey);
+  const gpr = async (s: Session, d: string) => {
+    const r = await call(s, "POST", `/api/deals/${d}/runs`);
+    expect(r.status).toBe(200);
+    const view = (await call(s, "GET", `/api/runs/${r.json.id}`)).json;
+    return view.result.scenarios[0].metrics.find((m: any) => m.key === "gross_potential_rent").value as number;
+  };
+
+  test("3BR with 2 units at $2,400 joins a deal that has 2BR: two approved items, counted by readiness", async () => {
+    usr = await signup("una@example.com", "Una Adder", "solo");
+    uw = (await call(usr, "GET", "/api/me")).json.workspaces[0].id;
+    ud = await make(usr, uw, "Added Type Fourplex");
+    for (const [f, v, i] of [["land_cost", 800000], ["hard_cost", 2400000], ["soft_cost", 300000], ["contingency", 120000], ["construction_months", 12], ["lease_up_months", 6],
+      ["unit_count", 4, "2BR"], ["unit_rent_monthly", 2000, "2BR"], ["stabilized_occupancy_pct", 95], ["exit_cap_rate_pct", 5.5], ["senior_loan_amount", 2000000],
+      ["senior_rate_pct", 6], ["senior_amort_years", 30]] as [string, number, string?][]) await put(usr, ud, f, v, i);
+    expect((await call(usr, "POST", `/api/deals/${ud}/defaults`, { fields: ["hold_years", "selling_costs_pct", "expense_ratio_pct"] })).status).toBe(200);
+    const before = await gpr(usr, ud);
+    const add = await call(usr, "POST", `/api/deals/${ud}/items`, { name: "3BR", unitCount: 2, rentMonthly: 2400, reason: "Two larger units on the top floor" });
+    expect(add.status).toBe(200);
+    const mine = (await items(usr, ud)).filter((a: any) => a.itemKey === "3BR");
+    expect(mine.map((a: any) => [a.fieldKey, a.value, a.status]).sort()).toEqual([["unit_count", 2, "approved"], ["unit_rent_monthly", 2400, "approved"]]);
+    const r = (await call(usr, "GET", `/api/deals/${ud}/review`)).json;
+    expect(r.readiness.status).toBe("ready");
+    expect(r.readiness.revenue.map((x: any) => x.key).sort()).toEqual(["2BR", "3BR"]);
+    expect((await gpr(usr, ud)) - before).toBeCloseTo(2 * 2400 * 12, 2);
+  });
+
+  test("3-bed when 3BR exists is refused under the canonical name, and nothing is written", async () => {
+    const n = (await items(usr, ud)).length;
+    const dup = await call(usr, "POST", `/api/deals/${ud}/items`, { name: "3-bed", unitCount: 1, rentMonthly: 2500, reason: "Same type written another way" });
+    expect(dup.status).toBe(409);
+    expect(dup.json.error).toBe("This deal already has 3BR; change its values instead.");
+    expect((await items(usr, ud)).length).toBe(n);
+  });
+
+  test("a space is added by area and rent per sf, with an occupancy; the two ways are never mixed", async () => {
+    const add = await call(usr, "POST", `/api/deals/${ud}/items`, { name: "Retail", areaSf: 1200, rentPsfAnnual: 30, occupancyPct: 90, reason: "Ground-floor shop, not in the documents" });
+    expect(add.status).toBe(200);
+    const mine = (await items(usr, ud)).filter((a: any) => a.itemKey === "Retail");
+    expect(mine.map((a: any) => a.fieldKey).sort()).toEqual(["item_occupancy_pct", "rent_psf_annual", "rentable_area_sf"]);
+    const body = { reason: "Checking what is refused" };
+    const bad = [
+      { name: "Mixed", unitCount: 2, rentMonthly: 2000, areaSf: 800, rentPsfAnnual: 20 },
+      { name: "Half", unitCount: 2 },
+      { name: "HalfSf", areaSf: 800 },
+      { name: "Pipe|Name", unitCount: 2, rentMonthly: 2000 },
+      { name: "  ", unitCount: 2, rentMonthly: 2000 },
+      { name: "Short", unitCount: 2, rentMonthly: 2000, reason: "short" },
+    ];
+    for (const b of bad) expect((await call(usr, "POST", `/api/deals/${ud}/items`, { ...body, ...b })).status).toBe(422);
+  });
+
+  test("a value the database refuses rolls the whole type back", async () => {
+    const before = (await items(usr, ud)).length;
+    const r = await call(usr, "POST", `/api/deals/${ud}/items`, { name: "Penthouse", unitCount: 1.5, rentMonthly: 5000, reason: "A half unit is not a unit" });
+    expect(r.status).toBeGreaterThanOrEqual(400);
+    expect(r.status).toBeLessThan(500);
+    expect(r.status).not.toBe(404);
+    expect((await items(usr, ud)).length).toBe(before);
+  });
+
+  test("in team review, the entries are governed as a typed value is: by the person's role and recorded as hand entries", async () => {
+    tsr = await signup("tobi@example.com", "Tobi Team", "team");
+    const w = (await call(tsr, "GET", "/api/me")).json.workspaces[0].id;
+    td2 = await make(tsr, w, "Team Added Type");
+    const add = await call(tsr, "POST", `/api/deals/${td2}/items`, { name: "1BR", unitCount: 3, rentMonthly: 1800, reason: "Three one-bedrooms we plan to add" });
+    expect(add.status).toBe(200);
+    const direct = await call(tsr, "POST", `/api/deals/${td2}/values`, { fieldKey: "unit_count", itemKey: "2BR", value: 3, reason: "Typed one value by hand" });
+    const rows = await db.query<any>(`select field_key, item_key, status, source_kind from assumptions where deal_id = $1 and item_key = '1BR' order by field_key`, [td2]);
+    expect(rows.map((x: any) => x.source_kind)).toEqual(["analyst", "analyst"]);
+    expect(rows.map((x: any) => x.status)).toEqual(Array(2).fill(direct.json.status));
+  });
+
+  test("someone outside the deal cannot add a type to it", async () => {
+    const outsider = await signup("vera@example.com", "Vera Viewer", "solo");
+    const r = await call(outsider, "POST", `/api/deals/${td2}/items`, { name: "Studio", unitCount: 1, rentMonthly: 1200, reason: "Not my deal at all" });
+    expect(r.status).toBeGreaterThanOrEqual(400);
+    expect((await db.query<any>(`select 1 from assumptions where deal_id = $1 and item_key = 'Studio'`, [td2])).length).toBe(0);
+  });
+});

@@ -373,3 +373,18 @@ describe("breakeven rows in both languages (task 38)", () => {
     expect(fr.t("explore.be.hardFail")).toMatch(/ne changerait pas le verdict/i);
   });
 });
+
+describe("task 60c: adding a unit type or space on review", () => {
+  const keys = ["review.addItem", "review.addItemName", "review.addItemPerUnit", "review.addItemPerSf", "review.addItemSave", "review.addItemErrName", "review.addItemErrPipe"];
+  it("has its strings in both languages, and the French is not the English", () => {
+    const en = build("en", () => {});
+    const fr = build("fr", () => {});
+    for (const k of keys) {
+      expect(en.t(k as Key), k).not.toBe(k);
+      expect(fr.t(k as Key), k).not.toBe(k);
+      expect(fr.t(k as Key), k).not.toBe(en.t(k as Key));
+    }
+    expect(en.t("review.addItem" as Key)).toBe("Add a unit type or space");
+    expect(fr.t("review.addItem" as Key)).toBe("Ajouter un type de logement ou d'espace");
+  });
+});
