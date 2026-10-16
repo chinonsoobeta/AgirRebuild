@@ -4225,3 +4225,86 @@ describe("card 61b: development charges and land transfer tax are read into thei
     expect(pick(read("Soft costs, exempt from GST: $300,000"))).toEqual([["soft_cost", 300_000]]);
   });
 });
+
+describe("card 61d: a tax, interest, fee or carrying-cost line is not read as the item it names", () => {
+  const doc = (...text: string[]): NormalizedDocument => ({
+    kind: "pdf",
+    lines: text.map((t, i) => ({ text: t, location: `page 1, line ${i + 1}` })),
+    tables: [],
+    pageCount: 1,
+    needsOcr: false,
+    fullText: text.join("\n"),
+  });
+  const read = (...text: string[]) => extractCandidates(doc(...text));
+  const pick = (r: ReturnType<typeof extractCandidates>) => r.candidates.map((c) => [c.fieldKey, c.value]);
+  const SALES_TAX_NOTE = "A sales tax line; enter GST/HST net of rebates, or label it";
+  const INTEREST_NOTE = "Interest on this item, not the item; label it if it belongs to a cost line";
+  const FEE_NOTE = "A fee or premium, not an input";
+  const CARRYING_NOTE = "A carrying cost; label it under the cost line it belongs to";
+
+  test("each line that names an item only as the object of a tax, interest, fee or carrying cost is refused with its note", () => {
+    const lines: [string, string][] = [
+      ["HST on construction: $180,000", SALES_TAX_NOTE],
+      ["HST on hard costs: $180,000", SALES_TAX_NOTE],
+      ["HST on soft costs: $30,000", SALES_TAX_NOTE],
+      ["GST on land: $32,000", SALES_TAX_NOTE],
+      ["TVH sur la construction : 180 000 $", SALES_TAX_NOTE],
+      ["Construction loan interest: $96,000", INTEREST_NOTE],
+      ["Intérêts du prêt de construction : 96 000 $", INTEREST_NOTE],
+      ["Construction loan fee: $23,000", FEE_NOTE],
+      ["Construction loan interest reserve: $96,000", INTEREST_NOTE],
+      ["Land loan interest: $30,000", INTEREST_NOTE],
+      ["Interest during construction: $96,000", INTEREST_NOTE],
+      ["Property taxes during construction: $7,200", CARRYING_NOTE],
+      ["Taxes during construction: $7,200", CARRYING_NOTE],
+      ["Taxe foncière pendant la construction : 7 200 $", CARRYING_NOTE],
+      ["Insurance during construction: $11,000", CARRYING_NOTE],
+      ["Utilities during construction: $4,000", CARRYING_NOTE],
+      ["Land carrying costs: $15,000", CARRYING_NOTE],
+      ["Land holding costs: $15,000", CARRYING_NOTE],
+    ];
+    for (const [line, note] of lines) {
+      const r = read(line);
+      expect(pick(r), line).toEqual([]);
+      expect(r.other.map((o) => o.note), line).toContain(note);
+    }
+  });
+  test("a rebate or credit of a sales tax is a sales tax line, positive or negative", () => {
+    for (const line of ["HST rebate (rental): -$95,000", "HST rebate: $95,000"]) {
+      const r = read(line);
+      expect(pick(r), line).toEqual([]);
+      expect(r.other.map((o) => o.note), line).toContain(SALES_TAX_NOTE);
+    }
+  });
+  test("a cost line that states its tax basis is still that cost", () => {
+    expect(pick(read("Hard costs (incl. HST): $2,130,000"))).toEqual([["hard_cost", 2_130_000]]);
+    expect(pick(read("Hard costs before HST: $1,950,000"))).toEqual([["hard_cost", 1_950_000]]);
+    expect(pick(read("Hard costs, net of HST: $1,950,000"))).toEqual([["hard_cost", 1_950_000]]);
+    expect(pick(read("Hard costs (HST exempt): $1,950,000"))).toEqual([["hard_cost", 1_950_000]]);
+    expect(pick(read("Contingency on hard costs: $97,500"))).toEqual([["contingency", 97_500]]);
+  });
+  test("a loan, the interest reserve and a credit to other costs are still read", () => {
+    expect(pick(read("Construction loan: $1,900,000"))).toEqual([["senior_loan_amount", 1_900_000]]);
+    expect(pick(read("Prêt de construction : 1 900 000 $"))).toEqual([["senior_loan_amount", 1_900_000]]);
+    expect(pick(read("Interest reserve: $96,000"))).toEqual([["stated_interest_reserve", 96_000]]);
+    expect(pick(read("Other costs credit: -$4,000"))).toEqual([["other_cost", -4_000]]);
+    expect(pick(read("Soft costs (insurance, permits, fees): $300,000"))).toEqual([["soft_cost", 300_000]]);
+  });
+  test("in a budget table the refused rows are not summed into the head and are shown with their notes", () => {
+    const row = (label: string, amount: string, n: number) => [{ text: label, ref: `A${n}` }, { text: amount, ref: `B${n}` }];
+    const table = {
+      name: "Budget",
+      rows: [
+        [{ text: "Line item", ref: "A1" }, { text: "Amount", ref: "B1" }],
+        row("Land", "$640,000", 2),
+        row("Hard costs", "$1,950,000", 3),
+        row("HST on construction", "$180,000", 4),
+        row("Construction loan interest", "$96,000", 5),
+        row("Property taxes during construction", "$7,200", 6),
+      ],
+    } as Table;
+    const r = extractCandidates({ ...doc(), tables: [table] });
+    expect(pick(r)).toEqual([["land_cost", 640_000], ["hard_cost", 1_950_000]]);
+    expect(r.other.map((o) => [o.value, o.note])).toEqual([[180_000, SALES_TAX_NOTE], [96_000, INTEREST_NOTE], [7_200, CARRYING_NOTE]]);
+  });
+});
