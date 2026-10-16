@@ -76,11 +76,13 @@ begin
       where id = a.id returning * into a;
 
   elsif p_action = 'use_as_stated' then
-    -- A person working alone uses their own waiting value: the end state is what a solo entry ends in, sponsor-stated.
+    -- A person working alone uses their own waiting value: the end state is what a solo entry ends in.
     if v_team then raise exception 'Only a workspace in solo review can use its own value as stated; here a second person must confirm it' using errcode = '22023'; end if;
     if a.status <> 'awaiting_second_approval' then raise exception 'Only a value waiting for a second approver can be used as stated' using errcode = '22023'; end if;
     if a.decided_by is distinct from agir_uid() then raise exception 'Only the person who entered this value can use it as stated' using errcode = '42501'; end if;
-    update assumptions set status = 'approved', value = coalesce(pending_value, value), pending_value = null, source_kind = 'analyst',
+    -- The source is kept: a hand entry is already 'analyst' (sponsor-stated once approved), and a value waiting because the
+    -- caller labelled a figure stays a document value with its source, as a solo approval of that label would be (task 59 audit).
+    update assumptions set status = 'approved', value = coalesce(pending_value, value), pending_value = null,
       second_approver = null, second_approved_at = null, version = version + 1, updated_at = now() where id = a.id returning * into a;
 
   elsif p_action = 'reject' then
