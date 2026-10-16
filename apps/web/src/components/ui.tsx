@@ -192,6 +192,7 @@ export function DealHeader({ o, active }: { o: DealOverview; active: string }) {
       void navigate({ to: "/deals/$dealId/review", params: { dealId: r.id } });
     },
   });
+  const defaultName = `${o.deal.name}${t("copy.suffix")}`.slice(0, 160);
   const status = dealStatus(i, o, solo);
   const order: string[] = [...STEPS];
   const state = (key: string): { text: string; tone: "done" | "stop" | "faint" | "normal" } => {
@@ -228,7 +229,21 @@ export function DealHeader({ o, active }: { o: DealOverview; active: string }) {
             )}
           </div>
           <div className="row">
-            {canEdit(role) && <button className="btn small" type="button" onClick={() => dialog.current?.showModal()}>{t("copy.button")}</button>}
+            {canEdit(role) && (
+              <button
+                className="btn small"
+                type="button"
+                onClick={() => {
+                  // Each opening starts from this deal's name in the current language, with no earlier error.
+                  const field = dialog.current?.querySelector<HTMLInputElement>("#cd-name");
+                  if (field) field.value = defaultName;
+                  copy.reset();
+                  dialog.current?.showModal();
+                }}
+              >
+                {t("copy.button")}
+              </button>
+            )}
             <Link to="/deals/$dealId/audit" params={{ dealId: o.deal.id }} className="btn small">{t("step.audit")}</Link>
           </div>
         </div>
@@ -242,7 +257,7 @@ export function DealHeader({ o, active }: { o: DealOverview; active: string }) {
         >
           <h2 id="copy-deal-title" className="h-section">{t("copy.title")}</h2>
           <p className="muted">{t("copy.intro")}</p>
-          <div className="field"><label htmlFor="cd-name">{t("copy.name")}</label><input className="input" id="cd-name" name="name" required maxLength={160} defaultValue={`${o.deal.name}${t("copy.suffix")}`.slice(0, 160)} /></div>
+          <div className="field"><label htmlFor="cd-name">{t("copy.name")}</label><input className="input" id="cd-name" name="name" required maxLength={160} defaultValue={defaultName} /></div>
           <ErrorText error={copy.error} />
           <div className="row"><button className="btn primary" type="submit" disabled={copy.isPending}>{t("copy.create")}</button><button className="btn quiet" type="button" onClick={() => dialog.current?.close()}>{t("common.cancel")}</button></div>
         </form>
