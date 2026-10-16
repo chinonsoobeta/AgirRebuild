@@ -1313,6 +1313,8 @@ const FR_REASONS: [RegExp, string | ((m: RegExpMatchArray) => string)][] = [
   [/^below the minimum of (-?[\d.]+)$/, (m) => `inférieur au minimum de ${frNum(m[1]!)}`],
   [/^above the maximum of (-?[\d.]+)$/, (m) => `supérieur au maximum de ${frNum(m[1]!)}`],
   [/^must be a whole number$/, "doit être un nombre entier"],
+  [/^(.+) and (.+) are one item written two ways$/, (m) => `${m[1]} et ${m[2]} désignent un même élément écrit de deux façons`],
+  [/^Reject the values of one, or enter them under one name\.$/, "rejetez les valeurs de l'un, ou saisissez-les sous un seul nom."],
   [/^(.+) (cannot be below|cannot be above|must be a whole number|needs a number)(.*)$/, (m) => `${m[1]} : ${m[2] === "cannot be below" ? "ne peut pas être inférieur à" : m[2] === "cannot be above" ? "ne peut pas être supérieur à" : m[2] === "must be a whole number" ? "doit être un nombre entier" : "exige un nombre"}${m[3]}`],
 ];
 
@@ -1416,7 +1418,8 @@ export function build(lang: Lang, setLang: (l: Lang) => void) {
     /** One readiness item as a line of the review card: the field's name (with the item), then the reason when there is one; the engine's own sentence when it is about no single field. */
     item: (i: ReadinessItem) => {
       const sentence = (x: string) => { const o = msg(x); return o.charAt(0).toUpperCase() + o.slice(1); };
-      if (i.detail) return lang === "fr" ? `${L.field(i.fieldKey, i.itemKey)}\u00a0: ${msg(i.detail)}` : `${i.label}: ${i.detail}`;
+      // In French the field's name stands for the label, unless the label is a sentence of its own (two names for one item).
+      if (i.detail) return lang === "fr" ? `${translateMessage(i.label) !== i.label ? sentence(i.label) : L.field(i.fieldKey, i.itemKey)}\u00a0: ${msg(i.detail)}` : `${i.label}: ${i.detail}`;
       if (lang === "en") return i.label.charAt(0).toUpperCase() + i.label.slice(1);
       if (i.fieldKey === "unit_count" && !i.itemKey) return t("review.revenueProgram");
       return translateMessage(i.label) !== i.label || i.fieldKey === "input" ? sentence(i.label) : L.field(i.fieldKey, i.itemKey);
