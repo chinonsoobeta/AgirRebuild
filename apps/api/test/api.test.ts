@@ -1083,6 +1083,7 @@ describe("card 60d: a person's entry and a document meet in one row however the 
     const r = (await call(pat, "GET", `/api/deals/${d}/review`)).json;
     expect(r.readiness.status).toBe("blocked");
     expect(r.readiness.impossible.map((i: any) => i.label)).toContain("Retail and retail are one item written two ways");
+    expect((await call(pat, "GET", `/api/deals/${d}`)).json.status.text).toBe("Blocked · 1 to correct");
     expect((await call(pat, "POST", `/api/deals/${d}/runs`)).status).toBeGreaterThanOrEqual(400);
   });
 

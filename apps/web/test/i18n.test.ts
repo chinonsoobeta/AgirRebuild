@@ -323,9 +323,17 @@ describe("the review card in French", () => {
 
   it("audit of task 60d: says in French that one item is written two ways, and what to do", () => {
     const { readiness } = assemble([row("unit_count", "Retail", 2), row("unit_rent_monthly", "Retail", 3000), row("unit_count", "retail", 2), row("unit_rent_monthly", "retail", 3000)]);
-    const item = readiness.impossible.find((m) => m.itemKey === "retail")!;
+    const item = readiness.impossible.find((m) => m.label.endsWith("written two ways"))!;
     expect(show(en, item)).toBe("Retail and retail are one item written two ways: Reject the values of one, or enter them under one name.");
     expect(show(fr, item)).toBe("Retail et retail désignent un même élément écrit de deux façons\u00a0: rejetez les valeurs de l'un, ou saisissez-les sous un seul nom.");
+  });
+
+  it("audit of task 60d: counts what cannot be run as values to correct, since not every one is out of range", () => {
+    const [enT, frT] = [build("en", () => {}).t, build("fr", () => {}).t];
+    expect(enT("review.b.impossible", { n: 1 })).toBe("1 input needs correcting");
+    expect(frT("review.b.impossible", { n: 2 })).toBe("2 données doivent être corrigées");
+    expect(enT("status.outOfRange", { n: 1 })).toBe("1 to correct");
+    expect(frT("status.outOfRange", { n: 1 })).toBe("1 à corriger");
   });
 });
 

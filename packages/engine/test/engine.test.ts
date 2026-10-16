@@ -358,7 +358,9 @@ describe("quick-start templates", () => {
     expect(readiness.status).toBe("blocked");
     expect(input).toBeNull();
     const named = readiness.impossible.filter((i) => i.detail === "Reject the values of one, or enter them under one name.");
-    expect(named.map((i) => [i.itemKey, i.label.includes("Retail and retail are one item written two ways")]).sort()).toEqual(expect.arrayContaining([["Retail", true], ["retail", true]]));
+    // One line for the item, naming both forms (audit of task 60d: two identical lines read as a repeat).
+    expect(named).toHaveLength(1);
+    expect(named[0]).toMatchObject({ itemKey: "Retail", label: "Retail and retail are one item written two ways" });
     // Rejecting one name's values clears it, and the item is one component.
     const cleared = assemble(rows.map((r) => (r.itemKey === "retail" ? { ...r, status: "rejected" as const } : r)));
     expect(cleared.readiness.status).toBe("ready");
