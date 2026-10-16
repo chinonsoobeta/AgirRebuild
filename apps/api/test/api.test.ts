@@ -1257,7 +1257,7 @@ describe("card 61: Canadian cost lines and a mortgage insurance premium are ente
 });
 
 describe("card 62: a deal is copied as a variant, in exactly the state of its source", () => {
-  let vw: string, src: string, copyA: string, copyB: string, dan: Session, quin: Session, qw: string;
+  let vw: string, src: string, copyA: string, copyB: string, qw: string;
   const nameOf = "Variant Heights";
   const upload = async (d: string, name: string, text: string) => {
     expect((await call(alice, "PUT", `/api/deals/${d}/documents?name=${name}`, undefined, new TextEncoder().encode(text))).status).toBe(200);
@@ -1281,8 +1281,6 @@ describe("card 62: a deal is copied as a variant, in exactly the state of its so
   test("a deal with two documents and every kind of value is set up", async () => {
     vw = (await call(alice, "POST", "/api/workspaces", { name: "Variants" })).json.id;
     expect((await call(alice, "POST", `/api/workspaces/${vw}/members`, { email: "bob@example.com", role: "admin" })).status).toBe(200);
-    expect((await call(alice, "POST", `/api/workspaces/${vw}/members`, { email: "carol@example.com", role: "viewer" })).status).toBe(200);
-    dan = await signup("dan@example.com", "Dan Outsider");
     src = (await call(alice, "POST", `/api/workspaces/${vw}/deals`, { name: nameOf, assetType: "Multifamily", location: "Burnaby", province: "BC" })).json.id;
     await upload(src, "budget.txt", "Budget\nLand cost: $800,000\nHard costs: $2,400,000\nSoft costs: $300,000\nContingency: $120,000\nExit cap rate: 5.5%\n");
     await upload(src, "notes.txt", "Project notes\nLand cost: $850,000\nBanner allowance: $7,000\nSignage kit: $3,000\n");
@@ -1316,8 +1314,10 @@ describe("card 62: a deal is copied as a variant, in exactly the state of its so
   });
 
   test("a viewer cannot copy, a member of another workspace cannot see the deal, and a name is required", async () => {
+    // Carol is in no workspace of this deal until she is added as a viewer.
+    expect((await copyOf(carol, src, "Nope")).status).toBe(404);
+    expect((await call(alice, "POST", `/api/workspaces/${vw}/members`, { email: "carol@example.com", role: "viewer" })).status).toBe(200);
     expect((await copyOf(carol, src, "Nope")).status).toBe(403);
-    expect((await copyOf(dan, src, "Nope")).status).toBe(404);
     expect((await copyOf(alice, src, "")).status).toBe(422);
     expect((await copyOf(alice, src, "x".repeat(161))).status).toBe(422);
     expect((await call(alice, "GET", `/api/workspaces/${vw}/deals`)).json).toHaveLength(1);
@@ -1440,23 +1440,23 @@ describe("card 62: a deal is copied as a variant, in exactly the state of its so
   }, 60_000);
 
   test("a quick-start deal with values and no documents copies too", async () => {
-    quin = await signup("quin@example.com", "Quin Builder", "solo");
-    qw = (await call(quin, "GET", "/api/me")).json.workspaces[0].id;
-    const d = (await call(quin, "POST", `/api/workspaces/${qw}/deals`, { name: "Quick Fourplex", assetType: "Multifamily", location: "Halifax", province: "NS" })).json.id;
+    qw = (await call(alice, "POST", "/api/workspaces", { name: "Quick starts" })).json.id;
+    expect((await call(alice, "POST", `/api/workspaces/${qw}/review-mode`, { mode: "solo" })).status).toBe(200);
+    const d = (await call(alice, "POST", `/api/workspaces/${qw}/deals`, { name: "Quick Fourplex", assetType: "Multifamily", location: "Halifax", province: "NS" })).json.id;
     for (const [f, v, i] of [["land_cost", 800000], ["hard_cost", 2400000], ["soft_cost", 300000], ["contingency", 120000], ["construction_months", 12], ["lease_up_months", 6],
       ["unit_count", 4, "Residential"], ["unit_rent_monthly", 2400, "Residential"], ["stabilized_occupancy_pct", 95], ["exit_cap_rate_pct", 5.5], ["senior_loan_amount", 2000000],
       ["senior_rate_pct", 6], ["senior_amort_years", 30]] as [string, number, string?][]) {
-      expect((await call(quin, "POST", `/api/deals/${d}/values`, { fieldKey: f, value: v, reason: "Quick start answer", ...(i ? { itemKey: i } : {}) })).status, f).toBe(200);
+      expect((await call(alice, "POST", `/api/deals/${d}/values`, { fieldKey: f, value: v, reason: "Quick start answer", ...(i ? { itemKey: i } : {}) })).status, f).toBe(200);
     }
-    expect((await call(quin, "POST", `/api/deals/${d}/defaults`, { fields: ["hold_years", "selling_costs_pct", "expense_ratio_pct"] })).status).toBe(200);
-    const c = await call(quin, "POST", `/api/deals/${d}/copy`, { name: "Quick Fourplex, kept" });
+    expect((await call(alice, "POST", `/api/deals/${d}/defaults`, { fields: ["hold_years", "selling_costs_pct", "expense_ratio_pct"] })).status).toBe(200);
+    const c = await call(alice, "POST", `/api/deals/${d}/copy`, { name: "Quick Fourplex, kept" });
     expect(c.status).toBe(200);
     expect(await hashOf(c.json.id)).toBe(await hashOf(d));
     expect(await stored(c.json.id)).toEqual(await stored(d));
     expect(await db.query(`select 1 from documents where deal_id = $1`, [c.json.id])).toHaveLength(0);
     expect(await reconciled(c.json.id)).toMatchObject({ changed: 0 });
     expect(await stored(c.json.id)).toEqual(await stored(d));
-    const [a, b] = [await call(quin, "POST", `/api/deals/${d}/runs`), await call(quin, "POST", `/api/deals/${c.json.id}/runs`)];
+    const [a, b] = [await call(alice, "POST", `/api/deals/${d}/runs`), await call(alice, "POST", `/api/deals/${c.json.id}/runs`)];
     expect(a.status).toBe(200);
     expect(b.status).toBe(200);
     expect(await runRow(b.json.id)).toEqual(await runRow(a.json.id));
