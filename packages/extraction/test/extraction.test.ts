@@ -1,7 +1,7 @@
 import { describe, expect, test } from "vitest";
 import { SF_PER_M2 } from "@agir/numbers";
 import { assemble, type AssumptionRow } from "@agir/engine";
-import { applySuggestions, consolidate, extractCandidates, offerable, offeredIds, normalizeLabel, parseDocument, scoreExtraction, type Cell, type NormalizedDocument, type SourcedCandidate, type Table } from "../src/index.ts";
+import { applyLabels, applySuggestions, consolidate, extractCandidates, offerable, offeredIds, figureOrder, withoutLabelled, normalizeLabel, parseDocument, scoreExtraction, type Cell, type NormalizedDocument, type SourcedCandidate, type Table } from "../src/index.ts";
 import { MAX_PDF_PAGES, pdfPageError, relativeLinks } from "../src/parse.ts";
 import { loadOracles, toNormalized } from "./oracle.ts";
 
@@ -4024,5 +4024,58 @@ describe("a model's label suggestion crosses a boundary before it is a candidate
     const { kept } = applySuggestions([], offered, [{ id: idOf("Sundry"), fieldKey: "other_cost" }]);
     const p = consolidate([...kept, read("other_cost", 50_000)]);
     expect(p.map((x) => [x.status, x.value, x.values.map((v) => v.value)])).toEqual([["conflicting", null, [48_000, 50_000]]]);
+  });
+});
+
+describe("a person's label for a figure Agir did not use crosses a boundary (task 58)", () => {
+  const lines = ["Sundry reserve: $48,000", "Atrium count: 14", "Float factor: 5.5%", "Cadence: 7 months", "Loan limit: maximum loan of $9,000,000", "Spread: 140%", "Hall footprint: 3,200 sf"];
+  const doc: NormalizedDocument = { kind: "pdf", lines: lines.map((t, i) => ({ text: t, location: `page 1, line ${i + 1}` })), tables: [], pageCount: 1, needsOcr: false, fullText: lines.join("\n") };
+  const figures = figureOrder(extractCandidates(doc).other.map((o) => ({ ...o, documentId: "d1", documentName: "d1.pdf" })));
+  const idOf = (ctx: string) => offeredIds(figures)[figures.findIndex((o) => o.context.startsWith(ctx))]!;
+  const label = (ctx: string, fieldKey: string, itemKey?: string | null) => applyLabels(figures, [{ id: idOf(ctx), fieldKey, itemKey }]);
+  const read = (fieldKey: string, value: number): SourcedCandidate =>
+    ({ fieldKey, itemKey: null, value, raw: String(value), unitSeen: "months", location: "p2", context: "read", rule: "line:label-value", documentId: "d2", documentName: "d2.pdf" });
+
+  test("a bare number takes the unit of the field a person names; the figure keeps its source", () => {
+    const { kept, dropped } = label("Atrium", "lease_up_months");
+    expect(dropped).toEqual([]);
+    expect(kept[0]).toMatchObject({ fieldKey: "lease_up_months", itemKey: null, value: 14, raw: "14", location: "page 1, line 2", context: "Atrium count: 14", rule: "labelled", documentId: "d1" });
+    expect(kept[0]!.note).toBe("Labelled by a person from the document; confirm it");
+  });
+  test("a figure refused by the reader may be labelled; a percent never becomes dollars", () => {
+    expect(figures.some((f) => f.value === 9_000_000)).toBe(true);
+    expect(label("Loan limit", "other_cost").kept.map((c) => c.value)).toEqual([9_000_000]);
+    const r = label("Float", "other_cost");
+    expect(r.kept).toEqual([]);
+    expect(r.dropped[0]!.why).toMatch(/does not fit/);
+    expect(label("Float", "variable_expense_pct").kept.map((c) => c.value)).toEqual([5.5]);
+  });
+  test("a value outside the field's bounds is refused", () => {
+    const r = label("Spread", "stabilized_occupancy_pct");
+    expect(r.kept).toEqual([]);
+    expect(r.dropped[0]!.why).toMatch(/outside what stabilized_occupancy_pct can hold/);
+  });
+  test("an itemized field needs an item, made canonical; it need not appear in the context", () => {
+    expect(label("Atrium", "unit_count").kept).toEqual([]);
+    expect(label("Atrium", "unit_count", "  ").dropped).toHaveLength(1);
+    expect(label("Atrium", "unit_count", "2-bed").kept.map((c) => [c.fieldKey, c.itemKey, c.value])).toEqual([["unit_count", "2BR", 14]]);
+  });
+  test("an unknown field, a field not read from documents and an unknown id are dropped", () => {
+    const r = applyLabels(figures, [{ id: idOf("Sundry"), fieldKey: "no_such_field" }, { id: idOf("Sundry"), fieldKey: "lease_up_ramp" }, { id: "d1|page 9|$1", fieldKey: "other_cost" }]);
+    expect(r.kept).toEqual([]);
+    expect(new Set(r.dropped.map((d) => d.why)).size).toBe(3);
+  });
+  test("a label is kept although the reader read the field; consolidate names the conflict", () => {
+    const { kept } = label("Atrium", "lease_up_months");
+    expect(kept).toHaveLength(1);
+    const p = consolidate([...kept, read("lease_up_months", 18)]);
+    expect(p.map((x) => [x.status, x.value, x.values.map((v) => v.value)])).toEqual([["conflicting", null, [14, 18]]]);
+    expect(consolidate(kept).map((x) => x.status)).toEqual(["needs_review"]);
+  });
+  test("a person's label beats a model's suggestion for the same figure", () => {
+    const sugg = [{ id: idOf("Sundry"), fieldKey: "other_cost" }, { id: idOf("Cadence"), fieldKey: "lease_up_months" }];
+    const rest = withoutLabelled(figures, [{ id: idOf("Sundry") }], sugg);
+    expect(rest.map((s) => s.id)).toEqual([idOf("Cadence")]);
+    expect(applySuggestions([], figures.filter(offerable), rest).kept.map((c) => c.value)).toEqual([7]);
   });
 });

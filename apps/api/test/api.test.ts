@@ -574,3 +574,59 @@ describe("model label suggestions", () => {
     expect(await byField("other_cost")).toMatchObject({ status: "needs_review", value: 5000, reason: "Its label was a model's suggestion, and suggestions are now off; confirm or reject it" });
   });
 });
+
+describe("a person labels a figure Agir did not use (task 58)", () => {
+  let lw: string, ld: string;
+  const put = async (name: string, text: string) =>
+    expect((await call(alice, "PUT", `/api/deals/${ld}/documents?name=${name}`, undefined, new TextEncoder().encode(text))).status).toBe(200);
+  const review = async (s = alice) => (await call(s, "GET", `/api/deals/${ld}/review`)).json;
+  const row = async (raw: string) => (await review()).other.find((o: any) => o.raw === raw);
+  const byField = async (k: string) => (await review()).assumptions.find((a: any) => a.fieldKey === k);
+
+  test("with label suggestions off, a labelled figure reaches review as a labelled value and an approval is audited", async () => {
+    lw = (await call(alice, "POST", "/api/workspaces", { name: "Labelling" })).json.id;
+    expect((await call(alice, "POST", `/api/workspaces/${lw}/members`, { email: "carol@example.com", role: "viewer" })).status).toBe(200);
+    ld = (await call(alice, "POST", `/api/workspaces/${lw}/deals`, { name: "Label Heights", assetType: "Multifamily", location: "Burnaby", province: "BC" })).json.id;
+    await put("notes.txt", "Project notes\nBanner allowance: $7,000\nSignage kit: $3,000\n");
+    await work();
+    const r = await row("$7,000");
+    expect(r).toMatchObject({ value: 7000, label: null });
+    expect(r.figureId).toEqual(expect.any(String));
+    expect(await byField("other_cost")).toBeUndefined();
+    const body = { documentId: r.documentId, figureId: r.figureId, fieldKey: "other_cost" };
+    expect((await call(carol, "POST", `/api/deals/${ld}/figure-labels`, body)).status).toBe(403);
+    expect((await call(alice, "POST", `/api/deals/${ld}/figure-labels`, { ...body, fieldKey: "no_such_field" })).status).toBe(422);
+    expect((await call(alice, "POST", `/api/deals/${ld}/figure-labels`, body)).status).toBe(200);
+    await work();
+    const a = await byField("other_cost");
+    expect(a).toMatchObject({ status: "needs_review", value: 7000 });
+    expect(a.sources[0]).toMatchObject({ rule: "labelled", raw: "$7,000", document_name: "notes.txt", note: expect.stringContaining("Labelled by a person") });
+    expect((await row("$7,000")).label).toMatchObject({ fieldKey: "other_cost", by: "Alice Analyst" });
+    expect((await call(alice, "POST", `/api/assumptions/${a.id}/review`, { action: "approve", version: a.version })).status).toBe(200);
+    const [ev] = await db.query<any>(`select payload from audit_events where action = 'assumption.approve' and entity_id = $1`, [a.id]);
+    expect(ev.payload).toMatchObject({ field: "other_cost", to: "approved", labelled: true });
+    expect((await db.query<any>(`select payload from audit_events where action = 'figure.labelled' and deal_id = $1`, [ld]))[0].payload).toMatchObject({ field: "other_cost" });
+  });
+
+  test("undo removes the label and its value; a viewer cannot undo", async () => {
+    const r = await row("$3,000");
+    const body = { documentId: r.documentId, figureId: r.figureId };
+    expect((await call(alice, "POST", `/api/deals/${ld}/figure-labels`, { ...body, fieldKey: "land_cost" })).status).toBe(200);
+    await work();
+    expect(await byField("land_cost")).toMatchObject({ status: "needs_review" });
+    expect((await call(carol, "DELETE", `/api/deals/${ld}/figure-labels`, body)).status).toBe(403);
+    expect((await call(alice, "DELETE", `/api/deals/${ld}/figure-labels`, body)).status).toBe(200);
+    await work();
+    expect((await byField("land_cost"))?.status ?? "rejected").toBe("rejected");
+    expect((await row("$3,000")).label).toBeNull();
+    expect((await db.query<any>(`select id from audit_events where action = 'figure.unlabelled' and deal_id = $1`, [ld]))).toHaveLength(1);
+  });
+
+  test("a label whose figure is gone is dropped at reconcile, and the audit says so", async () => {
+    const r = await row("$3,000");
+    await db.query(`insert into figure_labels (deal_id, workspace_id, document_id, figure_id, field_key, created_by) select $1, $2, $3, 'nowhere|line 9|$1', 'land_cost', id from users where email = 'alice@example.com'`, [ld, lw, r.documentId]);
+    await reconcileDeal(db, ld);
+    const [ev] = await db.query<any>(`select payload from audit_events where action = 'assumptions.reconciled' and deal_id = $1 order by seq desc limit 1`, [ld]);
+    expect(ev.payload.labelDropped).toEqual([expect.objectContaining({ id: "nowhere|line 9|$1" })]);
+  });
+});
