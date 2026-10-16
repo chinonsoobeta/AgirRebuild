@@ -4311,3 +4311,39 @@ describe("card 61d: a tax, interest, fee or carrying-cost line is not read as th
     expect(r.other.map((o) => [o.value, o.note])).toEqual([[180_000, SALES_TAX_NOTE], [96_000, INTEREST_NOTE], [7_200, CARRYING_NOTE]]);
   });
 });
+
+describe("audit of card 61d: a tax basis, a soft-cost fee and the French 'frais' are still read", () => {
+  const doc = (...text: string[]): NormalizedDocument => ({
+    kind: "pdf",
+    lines: text.map((t, i) => ({ text: t, location: `page 1, line ${i + 1}` })),
+    tables: [],
+    pageCount: 1,
+    needsOcr: false,
+    fullText: text.join("\n"),
+  });
+  const read = (...text: string[]) => extractCandidates(doc(...text));
+  const pick = (r: ReturnType<typeof extractCandidates>) => r.candidates.map((c) => [c.fieldKey, c.value]);
+  const budget = (...rows: [string, string][]) => {
+    const cells = [["Line item", "Amount"], ...rows].map((r, i) => r.map((text, c) => ({ text, ref: `${"AB"[c]}${i + 1}` })));
+    return pick(extractCandidates({ ...doc(), tables: [{ name: "Budget", rows: cells } as Table] }));
+  };
+  test("a cost line that states its tax basis another way is still that cost", () => {
+    for (const line of ["Hard costs ex-GST: $990,000", "Hard costs (exclusive of HST): $990,000", "Hard costs + HST: $990,000"])
+      expect(pick(read(line)), line).toEqual([["hard_cost", 990_000]]);
+    for (const line of ["Land purchase price (HST not applicable): $640,000", "Land (no HST): $640,000"])
+      expect(pick(read(line)), line).toEqual([["land_cost", 640_000]]);
+    // A corrected figure on an ex-GST line is still a named conflict.
+    expect(pick(read("Hard costs ex-GST: $990,000 — corrected signed build figure $1,040,000."))).toContainEqual(["hard_cost", 1_040_000]);
+  });
+  test("fees are soft costs, so a soft-cost row about fees is summed as before", () => {
+    expect(budget(["Land", "$640,000"], ["Hard costs", "$1,950,000"], ["Soft costs - fees", "$25,000"])).toEqual([["land_cost", 640_000], ["hard_cost", 1_950_000], ["soft_cost", 25_000]]);
+  });
+  test("'frais' is a fee only on a loan; in French it is mostly a cost", () => {
+    expect(budget(["Terrain", "640 000 $"], ["Frais de construction", "1 950 000 $"], ["Frais indirects", "300 000 $"])).toEqual([["land_cost", 640_000], ["hard_cost", 1_950_000], ["soft_cost", 300_000]]);
+    for (const line of ["Frais du prêt de construction : 23 000 $", "Frais d'engagement du prêt : 23 000 $"]) {
+      const r = read(line);
+      expect(pick(r), line).toEqual([]);
+      expect(r.other.map((o) => o.note), line).toContain("A fee or premium, not an input");
+    }
+  });
+});
