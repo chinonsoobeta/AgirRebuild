@@ -234,6 +234,9 @@ const sameValues = (a: { value: number }[] | null, b: { value: number }[] | null
   return x.length === y.length && x.every((v, i) => v === y[i]);
 };
 
+/** How a settled value is named beside the documents that disagree with it. */
+const settledLabel = (e: { source_kind: string }) => (e.source_kind === "default" ? "Default accepted" : e.source_kind === "analyst" ? "Entered by an analyst" : "Approved earlier");
+
 /** Fold every live document's values into the review queue. Never approves anything. */
 export async function reconcileDeal(db: Db, dealId: string) {
   await db.transaction(async (tx) => {
@@ -302,14 +305,15 @@ export async function reconcileDeal(db: Db, dealId: string) {
     };
     // A value a person's label reopened (card 58b) comes back when the label goes, if no person has acted on it since and
     // nothing else disagrees. The latest reopen, and only if it recorded what the value was because of a label.
-    const restorable = new Map<string, RestoreTo>();
+    const reopened = new Map<string, RestoreTo>();
     for (const r of await tx.query<{ assumption_id: string; restore_to: RestoreTo }>(
       `select e.assumption_id, e.restore_to from assumption_events e join assumptions a on a.id = e.assumption_id
        where a.deal_id = $1 and a.status = 'conflicting' and e.action = 'reopened' and e.restore_to is not null
          and e.id = (select max(x.id) from assumption_events x where x.assumption_id = a.id and x.action = 'reopened')
          and not exists (select 1 from assumption_events y where y.assumption_id = a.id and y.id > e.id and y.actor is not null)`,
       [dealId],
-    )) if (r.restore_to.by_label) restorable.set(r.assumption_id, r.restore_to);
+    )) reopened.set(r.assumption_id, r.restore_to);
+    const restorable = new Map([...reopened].filter(([, r]) => r.by_label));
     const restoredValues: { field: string; item: string }[] = [];
     const restore = async (e: AssumptionRowDb, rt: RestoreTo, sources: unknown) => {
       await tx.query(`update assumptions set status = $2, value = $3, reason = $4, sources = $5, conflict_values = null, version = version + 1, updated_at = now() where id = $1`, [
@@ -366,13 +370,22 @@ export async function reconcileDeal(db: Db, dealId: string) {
         const agreesThen =
           (p.status === "needs_review" && same(p.value, rt.value)) ||
           (p.foreign.length > 0 && foreignKnownThen && p.values.length === 1 && same(p.values[0]!.value, rt.value));
-        const nothingNewThen = e.source_kind !== "document" && foreignKnownThen && p.values.every((v) => knownThen.some((k) => same(k, v.value)));
+        const nothingNewThen = foreignKnownThen && p.values.every((v) => knownThen.some((k) => same(k, v.value))) && (e.source_kind !== "document" || p.values.some((v) => same(v.value, rt.value)));
         if (agreesThen || nothingNewThen) {
           await restore(e, rt, agreesThen ? sources : rt.sources);
           continue;
         }
       }
-      if (e.status === "needs_review" || e.status === "conflicting") {
+      if (e.status === "conflicting" && reopened.has(e.id)) {
+        // A conflict a reconcile reopened from a settled value (card 63): recomputed from the documents now, the settled value first.
+        const values = [{ value: e.value as number, documents: [settledLabel(e)] }, ...conflictFromDocs.filter((c) => !same(c.value, e.value))];
+        const nextReason = reason ?? e.reason;
+        if (nextReason === e.reason && sameValues(e.conflict_values, values) && sameList(sourceForm(e.sources), sourceForm(sources))) continue;
+        await tx.query(`update assumptions set sources = $2, conflict_values = $3, reason = $4, version = version + 1, updated_at = now() where id = $1`, [
+          e.id, JSON.stringify(sources), JSON.stringify(values), nextReason,
+        ]);
+        changed++;
+      } else if (e.status === "needs_review" || e.status === "conflicting") {
         if (e.source_kind === "document") {
           // The currency reason is this function's own: set it while it holds, and clear it when it no longer does.
           const nextReason = reason ?? (e.reason?.startsWith("A document states this in ") ? null : e.reason);
@@ -393,12 +406,13 @@ export async function reconcileDeal(db: Db, dealId: string) {
         // An analyst's override or an accepted default already answered the
         // documents it saw. Only a value it has not seen reopens it.
         const known = (e.sources ?? []).map((x) => x.value);
-        const nothingNew = e.source_kind !== "document" && foreignKnown && p.values.every((v) => known.some((k) => same(k, v.value)));
+        // A document value stands only while a document still states it.
+        const nothingNew = foreignKnown && p.values.every((v) => known.some((k) => same(k, v.value))) && (e.source_kind !== "document" || p.values.some((v) => same(v.value, e.value)));
         if (agreesWithStanding || nothingNew) {
           if (agreesWithStanding) await tx.query(`update assumptions set sources = $2, updated_at = now() where id = $1`, [e.id, JSON.stringify(sources)]);
         } else {
           // A document now disagrees with a settled value: reopen it, never overwrite it.
-          const settled = { value: e.value, documents: [e.source_kind === "default" ? "Default accepted" : e.source_kind === "analyst" ? "Entered by an analyst" : "Approved earlier"] };
+          const settled = { value: e.value, documents: [settledLabel(e)] };
           const values = [settled, ...conflictFromDocs.filter((c) => !same(c.value, e.value))];
           await tx.query(
             `update assumptions set status = 'conflicting', sources = $2, conflict_values = $3, reason = coalesce($4, reason), version = version + 1, updated_at = now() where id = $1`,
@@ -425,7 +439,18 @@ export async function reconcileDeal(db: Db, dealId: string) {
         await restore(e, rt, rt.sources);
         continue;
       }
+      // A reopened hand entry or default whose documents all went keeps only its settled value (card 63).
+      if (!seen.has(key) && e.status === "conflicting" && e.source_kind !== "document" && reopened.has(e.id)) {
+        const lone = [{ value: e.value as number, documents: [settledLabel(e)] }];
+        if (e.sources?.length || !sameValues(e.conflict_values, lone)) {
+          await tx.query(`update assumptions set sources = '[]', conflict_values = $2, version = version + 1, updated_at = now() where id = $1`, [e.id, JSON.stringify(lone)]);
+          changed++;
+        }
+        continue;
+      }
       if (seen.has(key) || e.source_kind !== "document") continue;
+      // A value waiting after its source went, or confirmed by a person after that, is left as it is until a person acts (card 63).
+      if (!e.sources?.length && (e.status === "approved" || e.status === "needs_review")) continue;
       // A value whose every source was a model's suggestion leaves because the switch is off, not because a document went.
       const everyRule = (r: string) => !!e.sources?.length && e.sources.every((x) => (x as { rule?: string }).rule === r);
       const gone = !on && everyRule("suggested") ? "Its label was a model's suggestion, and suggestions are now off" : everyRule("labelled") ? "The label a person gave its figure was removed" : "Its source document was removed";

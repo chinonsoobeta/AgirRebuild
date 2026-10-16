@@ -1836,7 +1836,7 @@ describe("card 63: a person's decision stands through a later, unrelated reconci
     await upload(d, "second.txt", "Second\nExit cap rate: 5.0%\n");
     const both = await byField(d, "exit_cap_rate_pct");
     expect(both).toMatchObject({ status: "conflicting", value: 5.5 });
-    expect(both.conflictValues).toEqual([{ value: 5.5, documents: ["Entered by an analyst"] }, { value: 5.25, documents: ["first.txt"] }, { value: 5.0, documents: ["second.txt"] }]);
+    expect(both.conflictValues).toEqual([{ value: 5.5, documents: ["Entered by an analyst"] }, { value: 5.0, documents: ["second.txt"] }, { value: 5.25, documents: ["first.txt"] }]);
     await retire(d, "first.txt");
     const one = await byField(d, "exit_cap_rate_pct");
     expect(one).toMatchObject({ status: "conflicting", value: 5.5 });
