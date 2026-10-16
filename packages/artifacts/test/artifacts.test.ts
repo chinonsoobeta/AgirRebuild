@@ -62,6 +62,46 @@ describe("artifacts", () => {
     expect(row![1]).toContain("20,000");
     expect(rowsOf(credit).map((r) => r[0])).not.toContain("Other costs");
   });
+  test("card 61: the cost lines, the property tax and the premium are shown only when stated, and every figure traces to the run", () => {
+    // developmentDeal: S = 30, hold 5 years. A refinance of 30,000,000 at month 40 with a 4% premium adds 1,200,000 to the loan.
+    const withFields = (kind: ArtifactInput["kind"]): ArtifactInput => {
+      const x = mapleInput(kind);
+      const input: EngineInput = {
+        ...developmentDeal(),
+        budget: { ...developmentDeal().budget, developmentCharges: 500_000, landTransferTax: 0, gstHstNet: 250_000 },
+        propertyTaxAnnual: 120_000,
+        refinance: { month: 40, amount: 30_000_000, ratePct: 5, amortYears: 30, ioMonths: 0, insurancePremiumPct: 4 },
+      };
+      return { ...x, input, result: underwrite(input, POLICY_V1) };
+    };
+    const table = (m: ReturnType<typeof buildModel>, caption: string) => {
+      const t = m.blocks.find((b) => b.type === "table" && b.caption === caption);
+      return t && t.type === "table" ? t.rows : [];
+    };
+    const paragraphs = (m: ReturnType<typeof buildModel>) => m.blocks.flatMap((b) => (b.type === "paragraph" ? [b.text] : []));
+    for (const kind of ["ic_memo", "lender_package"] as const) {
+      const model = buildModel(withFields(kind));
+      const rows = table(model, "Sources and uses");
+      const row = (label: string) => rows.find((r) => r[0] === label)?.[1];
+      expect(row("Development charges"), kind).toBe("$500,000");
+      expect(row("Land transfer tax"), kind).toBe("$0");
+      expect(row("GST/HST net of rebates"), kind).toBe("$250,000");
+      // The lines are in the total: uses still add up.
+      const amount = (label: string) => Number(row(label)!.replace(/[^\d.]/g, ""));
+      const uses = ["Land", "Hard costs", "Soft costs", "Contingency", "Development charges", "Land transfer tax", "GST/HST net of rebates", "Operating costs during lease-up", "Capitalized interest"].filter((l) => row(l) !== undefined).map(amount).reduce((a, b) => a + b, 0);
+      expect(Math.abs(uses - amount("Total uses")), kind).toBeLessThanOrEqual(3);
+      expect(table(model, "Stabilized operations, year 1").find((r) => r[0] === "Property tax (fixed, within operating expenses)")?.[1], kind).toBe("$120,000");
+      expect(verifyProvenance(visibleText(renderHtml(model)), model.formatter.manifest).orphans, kind).toEqual([]);
+    }
+    const lender = buildModel(withFields("lender_package"));
+    expect(paragraphs(lender)).toContain("Mortgage insurance premium: 4.00% ($1,200,000 added to the loan)");
+    expect(paragraphs(buildModel(withFields("ic_memo"))).some((t) => /Mortgage insurance premium/.test(t))).toBe(false);
+    // Nothing stated, nothing shown.
+    const plain = buildModel(mapleInput("lender_package"));
+    expect(table(plain, "Sources and uses").map((r) => r[0])).not.toEqual(expect.arrayContaining(["Development charges"]));
+    expect(table(plain, "Stabilized operations, year 1").map((r) => r[0])).not.toContain("Property tax (fixed, within operating expenses)");
+    expect(paragraphs(plain).some((t) => /Mortgage insurance premium/.test(t))).toBe(false);
+  });
   test("the memo and the lender package both say where mezzanine interest ran past its commitment", () => {
     for (const kind of ["ic_memo", "lender_package"] as const) {
       const x = mapleInput(kind);

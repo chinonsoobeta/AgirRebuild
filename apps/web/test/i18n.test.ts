@@ -394,3 +394,50 @@ describe("audit of task 60c: the refusal of a type the deal has, in French", () 
     expect(translateMessage("This deal already has 3BR; change its values instead.")).toBe("Ce projet a déjà 3BR ; modifiez plutôt ses valeurs.");
   });
 });
+
+describe("card 61: Canadian cost lines and the insurance premium, in both languages", () => {
+  const en = build("en", () => {});
+  const fr = build("fr", () => {});
+  const KEYS = ["development_charges", "land_transfer_tax", "gst_hst_net", "property_tax_annual", "refinance_insurance_premium_pct"];
+
+  it("has a French label, a French help line and a French meaning for each field", () => {
+    for (const k of KEYS) {
+      const def = FIELDS.find((f) => f.key === k)!;
+      expect(fr.L.field(k), k).not.toBe(en.L.field(k));
+      expect(fr.L.field(k), k).not.toBe(k);
+      expect(en.L.help(k, def.help ?? null), k).toBe(def.help);
+      expect(fr.L.help(k, def.help ?? null), k).toBeTruthy();
+      expect(fr.L.help(k, def.help ?? null), k).not.toBe(def.help);
+      expect(fr.L.absent(k), k).not.toBe(def.absentMeans);
+    }
+    expect(fr.L.help("property_tax_annual", null)).toMatch(/ratio des charges/);
+  });
+
+  it("asks the quick-start questions in both languages, with a hint that says 0 is an answer", () => {
+    for (const k of ["development_charges", "property_tax_annual", "land_transfer_tax", "gst_hst_net"]) {
+      const [q] = en.L.ask(k);
+      const [qf, hf] = fr.L.ask(k);
+      expect(q, k).not.toBe(en.L.field(k));
+      expect(qf, k).not.toBe(q);
+      expect(hf, k).toBeTruthy();
+    }
+    expect(en.L.ask("development_charges")[1]).toMatch(/Enter 0/);
+    expect(en.L.ask("property_tax_annual")[1]).toMatch(/Enter 0/);
+    expect(fr.L.ask("development_charges")[1]).toMatch(/Saisissez 0/);
+  });
+
+  it("states the premium's metric in French", () => {
+    expect(fr.L.metric("refinance_premium_added")).not.toBe("refinance_premium_added");
+    expect(fr.L.metric("refinance_premium_added")).not.toBe(en.L.metric("refinance_premium_added"));
+    expect(fr.L.formula("refinance_premium_added").length).toBeGreaterThan(10);
+    expect(fr.L.formula("refinance_premium_added")).not.toBe(en.L.formula("refinance_premium_added"));
+  });
+
+  it("renders the engine's new refusals in French", () => {
+    expect(translateMessage("budget developmentCharges must be a number of at least 0")).toBe("Le poste « Redevances de développement » du budget doit être un nombre positif ou nul");
+    expect(translateMessage("budget landTransferTax must be a number of at least 0")).toMatch(/^Le poste « .+ » du budget doit être un nombre positif ou nul$/);
+    expect(translateMessage("budget gstHstNet must be a number of at least 0")).toMatch(/^Le poste « .+ » du budget doit être un nombre positif ou nul$/);
+    expect(translateMessage("property tax must be a number of at least 0")).toBe("La taxe foncière doit être un nombre positif ou nul");
+    expect(translateMessage("refinance insurance premium must be a number from 0 to 10")).toBe("La prime d'assurance du refinancement doit se situer entre 0 % et 10 %");
+  });
+});

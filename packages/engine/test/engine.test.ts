@@ -300,6 +300,7 @@ describe("quick-start templates", () => {
     construction_months: 12, lease_up_months: 3, unit_count: 4, unit_rent_monthly: 2_100,
     stabilized_occupancy_pct: 95, other_income_annual: 3_000, exit_cap_rate_pct: 5.25,
     senior_loan_amount: 1_500_000, senior_rate_pct: 5.2, senior_amort_years: 30,
+    development_charges: 0, property_tax_annual: 0, land_transfer_tax: 0, gst_hst_net: 0,
   };
   const rowsFor = (key: "multiplex" | "apartment", loan = 1_500_000) => {
     const t = TEMPLATES.find((x) => x.key === key)!;
@@ -1034,6 +1035,381 @@ describe("exit by refinancing and holding (card 60)", () => {
       const files = readdirSync(dir).filter((f) => f.endsWith(".json"));
       expect(files.length).toBe(6);
       for (const f of files) expect(readFileSync(join(dir, f), "utf8"), f).not.toMatch(/refinance and hold|keep and refinance|refinance_and_hold/i);
+    });
+  });
+});
+
+describe("Canadian cost lines and a mortgage insurance premium, as entered values (card 61)", () => {
+  const sha = (x: unknown) => createHash("sha256").update(canonicalJson(x)).digest("hex");
+  const v = (r: RunResult, key: string, scenario = "base") => metric(r, key, scenario).value!;
+  const KEYS = ["development_charges", "land_transfer_tax", "gst_hst_net", "property_tax_annual", "refinance_insurance_premium_pct"];
+
+  /**
+   * An invented build, no debt, so every figure is exact. Land 1,000,000 at month 0; hard costs 600,000 over the
+   * 6 construction months (100,000 a month); 3 months of lease-up, no income ramp; a 2-year hold, so S = 9 and T = 32.
+   * Rent 10 x 1,000 x 12 = 120,000 at 100% occupancy. Fixed costs 60,000 a year, growing 5% a year.
+   */
+  const plain = (extra: Partial<EngineInput> = {}): EngineInput => ({
+    budget: { land: 1_000_000, hard: 600_000, soft: 0, contingency: 0, other: 0 },
+    revenue: [{ key: "A", label: "A", basis: "per_unit", units: 10, rentMonthly: 1_000 }],
+    otherIncomeAnnual: 0,
+    constructionMonths: 6,
+    leaseUpMonths: 3,
+    holdYears: 2,
+    stabilizedOccupancyPct: 100,
+    fixedOpexAnnual: 60_000,
+    rentGrowthPct: 0,
+    expenseGrowthPct: 5,
+    leaseUpRamp: false,
+    sCurveDraws: false,
+    exitCapPct: 10,
+    sellingCostsPct: 0,
+    senior: { amount: 0, ratePct: 0, amortYears: 30, ioMonths: 0 },
+    stated: {},
+    ...extra,
+  });
+  // 50,000 + 20,000 + 30,000 = 100,000 of the three lines.
+  const withLines = (extra: Partial<EngineInput> = {}) =>
+    plain({ budget: { land: 1_000_000, hard: 600_000, soft: 0, contingency: 0, other: 0, developmentCharges: 50_000, landTransferTax: 20_000, gstHstNet: 30_000 }, ...extra });
+  const loaned = { senior: { amount: 1_000_000, ratePct: 6, amortYears: 25, ioMonths: 0 } };
+  const draws = (i: EngineInput) => buildLedger(i).rows.slice(0, 9).map((r) => r.costDraw);
+
+  describe("the fields", () => {
+    test("each is optional, never read from a document, and 0 or more", () => {
+      for (const k of KEYS) {
+        const d = FIELD_BY_KEY.get(k)!;
+        expect(d, k).toBeDefined();
+        expect(d, k).toMatchObject({ required: false, extractable: false, min: 0 });
+        expect(d.absentMeans, k).toBeTruthy();
+        expect(d.aliases.length, k).toBeGreaterThan(0);
+        expect(d.help, k).toBeTruthy();
+      }
+    });
+    test("labels, groups, units, flags and bounds", () => {
+      expect(FIELD_BY_KEY.get("development_charges")).toMatchObject({ label: "Development charges", group: "budget", unit: "$", material: false, conservative: "max", absentMeans: "none stated" });
+      expect(FIELD_BY_KEY.get("land_transfer_tax")).toMatchObject({ label: "Land transfer tax", group: "budget", unit: "$", material: false, conservative: "max", absentMeans: "none stated" });
+      expect(FIELD_BY_KEY.get("gst_hst_net")).toMatchObject({ label: "GST/HST net of rebates", group: "budget", unit: "$", material: false, conservative: "max", absentMeans: "none stated" });
+      expect(FIELD_BY_KEY.get("property_tax_annual")).toMatchObject({ label: "Property tax (per year)", group: "operations", unit: "$", material: false, conservative: "max", absentMeans: "included in operating costs or none" });
+      expect(FIELD_BY_KEY.get("refinance_insurance_premium_pct")).toMatchObject({
+        label: "Refinance mortgage insurance premium", group: "refinance", unit: "%", material: true, conservative: "max", max: 10, absentMeans: "no mortgage insurance",
+      });
+    });
+    test("the help lines", () => {
+      for (const k of ["development_charges", "land_transfer_tax", "gst_hst_net"]) expect(FIELD_BY_KEY.get(k)!.help, k).toBe("If your soft or other costs already include it, leave this out.");
+      expect(FIELD_BY_KEY.get("property_tax_annual")!.help).toBe("Leave this out if your expense ratio or fixed operating costs already include it.");
+    });
+    test("a catalog alias is claimed by one field only, and no new alias is a fee word the reader keys on", () => {
+      for (const k of KEYS) {
+        for (const a of FIELD_BY_KEY.get(k)!.aliases) {
+          expect(FIELDS.filter((f) => f.aliases.includes(a)).map((f) => f.key), a).toEqual([k]);
+          expect(a, a).not.toMatch(/\b(fees?|frais|honoraires|premiums?|prime d assurance|minimum|maximum|term|terme)\b/);
+        }
+      }
+    });
+  });
+
+  describe("readiness", () => {
+    const rows = (fields: Record<string, number>) => {
+      const all: Record<string, number> = {
+        land_cost: 1_000_000, hard_cost: 0, soft_cost: 0, contingency: 0, construction_months: 0, lease_up_months: 0, hold_years: 3,
+        stabilized_occupancy_pct: 100, fixed_opex_annual: 20_000, exit_cap_rate_pct: 10, selling_costs_pct: 0,
+        senior_loan_amount: 600_000, senior_rate_pct: 0, senior_amort_years: 20, ...fields,
+      };
+      return [
+        ...Object.entries(all).map(([fieldKey, valueNumeric]) => ({ fieldKey, itemKey: null, status: "approved" as AssumptionStatus, valueNumeric })),
+        { fieldKey: "unit_count", itemKey: "A", status: "approved" as AssumptionStatus, valueNumeric: 10 },
+        { fieldKey: "unit_rent_monthly", itemKey: "A", status: "approved" as AssumptionStatus, valueNumeric: 1_000 },
+      ];
+    };
+    const refi = { refinance_month: 12, refinance_amount: 800_000, refinance_rate_pct: 0, refinance_amort_years: 20 };
+
+    test("a field that is not stated is omitted from the input, never 0 and never undefined", () => {
+      const { input } = assemble(rows(refi));
+      expect(Object.keys(input!.budget).sort()).toEqual(["contingency", "hard", "land", "other", "soft"]);
+      expect("propertyTaxAnnual" in input!).toBe(false);
+      expect(Object.keys(input!.refinance!).sort()).toEqual(["amortYears", "amount", "ioMonths", "month", "ratePct"]);
+      expect(canonicalJson(input)).not.toMatch(/developmentCharges|landTransferTax|gstHstNet|propertyTaxAnnual|insurancePremiumPct|undefined/);
+    });
+    test("a stated value is set, and a stated 0 is a value", () => {
+      const { readiness, input } = assemble(rows({ ...refi, development_charges: 50_000, land_transfer_tax: 0, gst_hst_net: 30_000, property_tax_annual: 12_000, refinance_insurance_premium_pct: 4 }));
+      expect(readiness.status).toBe("ready");
+      expect(input!.budget).toEqual({ land: 1_000_000, hard: 0, soft: 0, contingency: 0, other: 0, developmentCharges: 50_000, landTransferTax: 0, gstHstNet: 30_000 });
+      expect(input!.propertyTaxAnnual).toBe(12_000);
+      expect(input!.refinance!.insurancePremiumPct).toBe(4);
+    });
+    test("a premium with no refinance month is not put on the input, as refinance_io_months is not", () => {
+      const { input } = assemble(rows({ refinance_io_months: 6, refinance_insurance_premium_pct: 4 }));
+      expect(input!.refinance).toBeUndefined();
+      expect(canonicalJson(input)).not.toMatch(/insurancePremiumPct/);
+    });
+    test("a value out of bounds is impossible: the premium above 10 percent, a negative cost line", () => {
+      const bad = assemble(rows({ ...refi, refinance_insurance_premium_pct: 10.5, development_charges: -1 }));
+      expect(bad.input).toBeNull();
+      expect(bad.readiness.impossible.map((i) => i.fieldKey).sort()).toEqual(["development_charges", "refinance_insurance_premium_pct"]);
+    });
+    test("review offers the four cost lines as choices, and the premium only when a refinance month is stated", () => {
+      const keys = (r: Readiness) => r.choices.map((c) => c.fieldKey);
+      const none = assemble(rows({})).readiness;
+      expect(keys(none)).toEqual(expect.arrayContaining(["development_charges", "land_transfer_tax", "gst_hst_net", "property_tax_annual"]));
+      expect(keys(none)).not.toContain("refinance_insurance_premium_pct");
+      expect(none.choices.find((c) => c.fieldKey === "property_tax_annual")!.detail).toBe("included in operating costs or none");
+      const refinanced = assemble(rows(refi)).readiness;
+      expect(keys(refinanced)).toContain("refinance_insurance_premium_pct");
+      expect(refinanced.choices.find((c) => c.fieldKey === "refinance_insurance_premium_pct")!.detail).toBe("no mortgage insurance");
+      for (const r of [none, refinanced]) for (const k of KEYS) expect(r.notFound.map((n) => n.fieldKey), k).not.toContain(k);
+    });
+    test("a stated choice leaves the list", () => {
+      const r = assemble(rows({ ...refi, development_charges: 0, refinance_insurance_premium_pct: 0 })).readiness;
+      expect(r.choices.map((c) => c.fieldKey)).not.toContain("development_charges");
+      expect(r.choices.map((c) => c.fieldKey)).not.toContain("refinance_insurance_premium_pct");
+    });
+  });
+
+  describe("the three cost lines", () => {
+    test("each lands in the month the spec says", () => {
+      // Month 0: land 1,000,000 + the first of six hard-cost draws 100,000 + development charges 50,000 + land transfer tax 20,000 = 1,170,000.
+      // Months 1 to 4: 100,000 of hard cost. Month 5, the last construction month: 100,000 + GST/HST 30,000 = 130,000.
+      // Months 6 to 8 (lease-up): fixed costs 60,000 / 12 = 5,000 each.
+      expect(draws(plain())).toEqual([1_100_000, 100_000, 100_000, 100_000, 100_000, 100_000, 5_000, 5_000, 5_000]);
+      expect(draws(withLines())).toEqual([1_170_000, 100_000, 100_000, 100_000, 100_000, 130_000, 5_000, 5_000, 5_000]);
+    });
+    test("GST/HST net is paid at month 0 when there is no construction", () => {
+      // C = 0, L = 3: month 0 carries land 1,000,000 + hard 600,000 (spread over one month) + 50,000 + 20,000 + 30,000 = 1,700,000.
+      const i = withLines({ constructionMonths: 0 });
+      expect(buildLedger(i).rows[0]!.costDraw).toBe(1_700_000);
+      // With no lease-up either, everything is paid at month 0: total development cost is 1,700,000.
+      expect(v(underwrite(withLines({ constructionMonths: 0, leaseUpMonths: 0 }), POLICY_V1), "total_development_cost")).toBeCloseTo(1_700_000, 6);
+    });
+    test("an S-curve moves the hard costs, not the lines that are paid on a date", () => {
+      const i = withLines({ sCurveDraws: true });
+      const base = plain({ sCurveDraws: true });
+      const a = draws(i);
+      const b = draws(base);
+      expect(a[0]! - b[0]!).toBeCloseTo(70_000, 6);
+      expect(a[5]! - b[5]!).toBeCloseTo(30_000, 6);
+      for (const m of [1, 2, 3, 4, 6, 7, 8]) expect(a[m], `month ${m}`).toBeCloseTo(b[m]!, 6);
+    });
+    test("total development cost rises by exactly their sum when nothing is borrowed", () => {
+      // Costs before financing 1,600,000 + 100,000 = 1,700,000. Lease-up fixed costs 3 x 5,000 = 15,000. No debt, so no interest.
+      const a = underwrite(plain(), POLICY_V1);
+      const b = underwrite(withLines(), POLICY_V1);
+      expect(v(a, "total_development_cost")).toBeCloseTo(1_615_000, 6);
+      expect(v(b, "total_development_cost")).toBeCloseTo(1_715_000, 6);
+      expect(v(b, "hard_and_soft_cost") - v(a, "hard_and_soft_cost")).toBeCloseTo(100_000, 6);
+      expect(v(b, "required_equity")).toBeCloseTo(1_715_000, 6);
+    });
+    test("with a loan they rise by their sum plus the extra interest they cause, funded equity first", () => {
+      const a = underwrite(plain(loaned), POLICY_V1);
+      const b = underwrite(withLines(loaned), POLICY_V1);
+      const extraInterest = v(b, "capitalized_interest") - v(a, "capitalized_interest");
+      expect(extraInterest).toBeGreaterThan(0);
+      expect(v(b, "total_development_cost") - v(a, "total_development_cost")).toBeCloseTo(100_000 + extraInterest, 6);
+      // The 1,000,000 loan is a commitment either way; the extra cost is equity plus the interest on what the loan funds.
+      const first = buildLedger(withLines(loaned)).rows[0]!;
+      expect(first.equityDraw).toBeGreaterThan(0);
+      expect(first.equityDraw + first.debtDraw).toBeCloseTo(1_170_000, 6);
+    });
+    test("an agreement check against a stated total cost uses total development cost, lines included", () => {
+      const r = underwrite(withLines({ stated: { totalCost: 1_715_000 } }), POLICY_V1);
+      expect(r.checks.find((c) => c.key === "stated_total_cost")).toMatchObject({ severity: "pass" });
+      expect(underwrite(plain({ stated: { totalCost: 1_715_000 } }), POLICY_V1).checks.find((c) => c.key === "stated_total_cost")).toMatchObject({ severity: "warning" });
+    });
+    test("the cost stress scales the three lines like every other cost", () => {
+      const s = applyStress(withLines(), { key: "c", label: "c", costPct: 10 });
+      expect(s.budget.developmentCharges).toBeCloseTo(55_000, 6);
+      expect(s.budget.landTransferTax).toBeCloseTo(22_000, 6);
+      expect(s.budget.gstHstNet).toBeCloseTo(33_000, 6);
+      expect(s.budget.land).toBeCloseTo(1_100_000, 6);
+      // A deal that states none has none added by a stress.
+      expect(canonicalJson(applyStress(plain(), { key: "c", label: "c", costPct: 10 }).budget)).not.toMatch(/developmentCharges|landTransferTax|gstHstNet/);
+    });
+    test("a cost line below 0 is refused by the engine", () => {
+      for (const k of ["developmentCharges", "landTransferTax", "gstHstNet"] as const) {
+        const i = plain({ budget: { land: 1_000_000, hard: 600_000, soft: 0, contingency: 0, other: 0, [k]: -1 } });
+        expect(() => validateInput(i), k).toThrow(EngineInputError);
+      }
+    });
+  });
+
+  describe("property tax", () => {
+    test("it adds to the fixed costs in year 1, on top of fixed operating costs", () => {
+      // Fixed 60,000 + property tax 12,000 = 72,000. EGI 120,000 - 72,000 = NOI 48,000.
+      const r = underwrite(plain({ propertyTaxAnnual: 12_000 }), POLICY_V1);
+      expect(v(r, "operating_expenses")).toBeCloseTo(72_000, 6);
+      expect(v(r, "stabilized_noi")).toBeCloseTo(48_000, 6);
+      expect(buildLedger(plain({ propertyTaxAnnual: 12_000 })).year1.fixedOpex).toBe(72_000);
+    });
+    test("it adds on top of the expense ratio's fixed dollars", () => {
+      // 40% of year-1 EGI 120,000 = 48,000 + 12,000 = 60,000.
+      const { fixedOpexAnnual: _f, ...rest } = plain({ propertyTaxAnnual: 12_000 });
+      const r = underwrite({ ...rest, expenseRatioPct: 40 }, POLICY_V1);
+      expect(v(r, "operating_expenses")).toBeCloseTo(60_000, 6);
+    });
+    test("it grows at expense growth", () => {
+      // Year 2: (60,000 + 12,000) x 1.05 = 75,600, against 63,000 without it.
+      const a = buildLedger(plain());
+      const b = buildLedger(plain({ propertyTaxAnnual: 12_000 }));
+      expect(a.annual[2]!.opex).toBeCloseTo(63_000, 6);
+      expect(b.annual[2]!.opex).toBeCloseTo(75_600, 6);
+    });
+    test("it is charged in lease-up months like the other fixed costs", () => {
+      // Each of the 3 lease-up months: (60,000 + 12,000) / 12 = 6,000, against 5,000.
+      expect(draws(plain({ propertyTaxAnnual: 12_000 })).slice(6)).toEqual([6_000, 6_000, 6_000]);
+      const r = underwrite(plain({ propertyTaxAnnual: 12_000 }), POLICY_V1);
+      expect(v(r, "leaseup_operating_cost")).toBeCloseTo(18_000, 6);
+      expect(v(r, "total_development_cost")).toBeCloseTo(1_618_000, 6);
+    });
+    test("it counts in break-even occupancy through the fixed costs", () => {
+      // (fixed costs + debt service) / rent = 72,000 / 120,000 = 60%, against 60,000 / 120,000 = 50%.
+      expect(v(underwrite(plain(), POLICY_V1), "break_even_occupancy")).toBeCloseTo(50, 9);
+      expect(v(underwrite(plain({ propertyTaxAnnual: 12_000 }), POLICY_V1), "break_even_occupancy")).toBeCloseTo(60, 9);
+    });
+    test("the expense stress leaves it alone", () => {
+      // Ratio 40% + 5 points = 45% of 120,000 = 54,000, plus the same 12,000 = 66,000.
+      const { fixedOpexAnnual: _f, ...rest } = plain({ propertyTaxAnnual: 12_000 });
+      const i: EngineInput = { ...rest, expenseRatioPct: 40 };
+      const s = applyStress(i, { key: "e", label: "e", expensePts: 5 });
+      expect(s.propertyTaxAnnual).toBe(12_000);
+      expect(buildLedger(s).year1.fixedOpex).toBeCloseTo(66_000, 6);
+      expect(buildLedger(i).year1.fixedOpex).toBeCloseTo(60_000, 6);
+    });
+    test("it must be a number of 0 or more", () => {
+      expect(() => validateInput(plain({ propertyTaxAnnual: -1 }))).toThrow(EngineInputError);
+    });
+  });
+
+  describe("the insurance premium", () => {
+    /**
+     * An invented rental with no build and all rates 0%, as in card 60. Rent 10 x 1,000 x 12 = 120,000 less fixed
+     * costs 20,000 gives NOI 100,000 a year. Land 1,000,000 with a senior loan of 600,000 over 20 years (2,500 a
+     * month); at month 12 the balance is 600,000 - 12 x 2,500 = 570,000. Hold 3 years, so T is month 35. Exit cap 10%.
+     */
+    const rental = (refinance: NonNullable<EngineInput["refinance"]>, extra: Partial<EngineInput> = {}): EngineInput => ({
+      budget: { land: 1_000_000, hard: 0, soft: 0, contingency: 0, other: 0 },
+      revenue: [{ key: "A", label: "A", basis: "per_unit", units: 10, rentMonthly: 1_000 }],
+      otherIncomeAnnual: 0,
+      constructionMonths: 0,
+      leaseUpMonths: 0,
+      holdYears: 3,
+      stabilizedOccupancyPct: 100,
+      fixedOpexAnnual: 20_000,
+      rentGrowthPct: 0,
+      expenseGrowthPct: 0,
+      leaseUpRamp: false,
+      sCurveDraws: false,
+      exitCapPct: 10,
+      sellingCostsPct: 0,
+      senior: { amount: 600_000, ratePct: 0, amortYears: 20, ioMonths: 0 },
+      refinance,
+      stated: {},
+      ...extra,
+    });
+    const refi = { month: 12, ratePct: 0, amortYears: 20, ioMonths: 0 };
+    const amount4 = () => rental({ ...refi, amount: 1_000_000, insurancePremiumPct: 4 });
+    const amount0 = () => rental({ ...refi, amount: 1_000_000 });
+
+    test("a 4% premium on a $1,000,000 refinance gives a balance of $1,040,000", () => {
+      const L = buildLedger(amount4());
+      // Right after the month-12 payment the balance is 1,040,000 less one payment of 1,040,000 / 240 = 4,333.33.
+      expect(L.rows[12]!.debtBalance).toBeCloseTo(1_040_000 - 1_040_000 / 240, 6);
+      expect(L.rows[11]!.debtBalance).toBeCloseTo(600_000 - 12 * 2_500, 6);
+      // Debt at T (month 35): 24 payments made since the refinance, 1,040,000 - 24 x 4,333.33 = 936,000.
+      expect(L.payoffAtSale).toBeCloseTo(936_000, 6);
+      expect(buildLedger(amount0()).payoffAtSale).toBeCloseTo(900_000, 6);
+    });
+    test("debt service follows the balance", () => {
+      // Month 12: 1,040,000 / 240 = 4,333.33 a month, against 1,000,000 / 240 = 4,166.67. Year 2 of the hold is 52,000 against 50,000.
+      const a = buildLedger(amount4());
+      const b = buildLedger(amount0());
+      expect(a.rows[12]!.debtService).toBeCloseTo(1_040_000 / 240, 6);
+      expect(a.annual[2]!.debtService).toBeCloseTo(52_000, 6);
+      expect(b.annual[2]!.debtService).toBeCloseTo(50_000, 6);
+      expect(a.annual[2]!.sizingDebtService).toBeCloseTo(52_000, 6);
+    });
+    test("the cash returned is the loan less the payoff: the premium is not cash", () => {
+      // 1,000,000 - 570,000 = 430,000 with or without the premium.
+      for (const i of [amount4(), amount0()]) {
+        const r = underwrite(i, POLICY_V1);
+        expect(v(r, "refinance_net_proceeds")).toBeCloseTo(430_000, 6);
+        expect(buildLedger(i).refinance!.net).toBeCloseTo(430_000, 6);
+        expect(buildLedger(i).rows[12]!.refinanceNet).toBeCloseTo(430_000, 6);
+      }
+    });
+    test("the premium added is reported beside the net proceeds, and only when a premium is stated", () => {
+      const r = underwrite(amount4(), POLICY_V1);
+      // 1,000,000 x 4% = 40,000.
+      expect(v(r, "refinance_premium_added")).toBeCloseTo(40_000, 6);
+      const keys = r.scenarios[0]!.metrics.map((m) => m.key);
+      expect(keys[keys.indexOf("refinance_net_proceeds") + 1]).toBe("refinance_premium_added");
+      const catalog = METRICS.map((m) => m.key);
+      expect(catalog.indexOf("refinance_premium_added")).toBe(catalog.indexOf("refinance_net_proceeds") + 1);
+      for (const s of underwrite(amount0(), POLICY_V1).scenarios) expect(s.metrics.some((m) => m.key === "refinance_premium_added"), s.key).toBe(false);
+      // A premium of 0 is stated, so it is a real 0 added.
+      const zero = underwrite(rental({ ...refi, amount: 1_000_000, insurancePremiumPct: 0 }), POLICY_V1);
+      expect(metric(zero, "refinance_premium_added")).toMatchObject({ status: "VALID", value: 0 });
+    });
+    test("a loan sized by loan-to-value is sized before the premium", () => {
+      // Forward NOI 100,000 / 10% = 1,000,000 of value; 80% gives a loan of 800,000, then x 1.04 = 832,000.
+      const i = rental({ ...refi, ltvPct: 80, insurancePremiumPct: 4 });
+      const r = underwrite(i, POLICY_V1);
+      expect(v(r, "refinance_net_proceeds")).toBeCloseTo(800_000 - 570_000, 6);
+      expect(v(r, "refinance_premium_added")).toBeCloseTo(32_000, 6);
+      expect(buildLedger(i).payoffAtSale).toBeCloseTo(832_000 - 24 * (832_000 / 240), 6);
+    });
+    test("in a held deal the coverage after the refinance and the debt at T use the balance with the premium", () => {
+      const held = (r: NonNullable<EngineInput["refinance"]>) => { const i = rental(r, { exit: "refinance_hold" }); return underwrite(i, policyFor(i)); };
+      const a = held({ ...refi, amount: 1_000_000, insurancePremiumPct: 4 });
+      const b = held({ ...refi, amount: 1_000_000 });
+      // Months 12 to 23: NOI 100,000; sizing debt service 12 x 1,040,000 / 240 = 52,000. DCR = 100,000 / 52,000 = 1.9231. Without: 100,000 / 50,000 = 2.
+      expect(v(a, "dcr_after_refinance")).toBeCloseTo(100_000 / 52_000, 9);
+      expect(v(b, "dcr_after_refinance")).toBeCloseTo(2, 9);
+      // Cash returned is 430,000 either way, so cash left is 400,000 - 430,000 = -30,000.
+      expect(v(a, "refinance_cash_returned")).toBeCloseTo(430_000, 6);
+      expect(v(a, "cash_left_in_deal")).toBeCloseTo(-30_000, 6);
+      // Stated value 1,000,000 less debt at T 936,000 = 64,000 (900,000 and 100,000 without).
+      expect(a.equityFlows.find((f) => f.kind === ("unrealized" as string))!.amount).toBeCloseTo(64_000, 6);
+      expect(b.equityFlows.find((f) => f.kind === ("unrealized" as string))!.amount).toBeCloseTo(100_000, 6);
+    });
+    test("the premium must be from 0 to 10 percent", () => {
+      for (const bad of [-1, 10.5]) expect(() => validateInput(rental({ ...refi, amount: 1_000_000, insurancePremiumPct: bad })), String(bad)).toThrow(EngineInputError);
+      expect(() => validateInput(rental({ ...refi, amount: 1_000_000, insurancePremiumPct: 10 }))).not.toThrow();
+    });
+    test("a stress moves the loan's rate, not its premium", () => {
+      const s = applyStress(amount4(), { key: "r", label: "r", rateBps: 100 });
+      expect(s.refinance!.insurancePremiumPct).toBe(4);
+    });
+  });
+
+  describe("a deal that states none of the five computes as before", () => {
+    test("the result of the plain all-equity deal is the pinned one, and no new metric appears", () => {
+      const r = underwrite(allEquityDeal(), POLICY_V1);
+      for (const s of r.scenarios) expect(s.metrics.some((m) => m.key === "refinance_premium_added"), s.key).toBe(false);
+      const earlier = ["leaseup_operating_cost", "cumulative_cash_shortfall", "io_dscr_year1"];
+      expect(sha({ ...r, scenarios: r.scenarios.map((s) => ({ ...s, metrics: s.metrics.filter((m) => !earlier.includes(m.key)) })) })).toBe("4b1aa853505ea0ed888f41c3cd57d61f87072f61a70ce399d8782e3724f33938");
+    });
+    test("a stated 0 is a stated value: the numbers match, and the input records it", () => {
+      const a = underwrite(plain(), POLICY_V1);
+      const b = underwrite(plain({ budget: { land: 1_000_000, hard: 600_000, soft: 0, contingency: 0, other: 0, developmentCharges: 0, landTransferTax: 0, gstHstNet: 0 }, propertyTaxAnnual: 0 }), POLICY_V1);
+      expect(v(b, "total_development_cost")).toBe(v(a, "total_development_cost"));
+      expect(v(b, "stabilized_noi")).toBe(v(a, "stabilized_noi"));
+      expect(canonicalJson(plain())).not.toBe(canonicalJson(plain({ propertyTaxAnnual: 0 })));
+    });
+  });
+
+  describe("the quick start", () => {
+    test("both templates ask for development charges and property tax per year, and 0 is allowed", () => {
+      for (const t of TEMPLATES) {
+        for (const k of ["development_charges", "property_tax_annual"]) {
+          const q = t.questions.find((x) => x.field === k);
+          expect(q, `${t.key} ${k}`).toMatchObject({ zeroAllowed: true });
+        }
+      }
+    });
+    test("the apartment template also asks for land transfer tax and GST/HST net, as optional questions", () => {
+      const apartment = TEMPLATES.find((t) => t.key === "apartment")!;
+      for (const k of ["land_transfer_tax", "gst_hst_net"]) expect(apartment.questions.find((x) => x.field === k), k).toMatchObject({ optional: true });
+      const multiplex = TEMPLATES.find((t) => t.key === "multiplex")!;
+      for (const k of ["land_transfer_tax", "gst_hst_net"]) expect(multiplex.questions.some((x) => x.field === k), k).toBe(false);
     });
   });
 });

@@ -1024,3 +1024,94 @@ describe("audit of task 60c: a type written another way is the same type", () =>
     expect(r.json.itemKey).toBe("Corner shop");
   });
 });
+
+describe("card 61: Canadian cost lines and a mortgage insurance premium are entered by a person", () => {
+  let nina: Session, nw: string;
+  const make = async (name: string) =>
+    (await call(nina, "POST", `/api/workspaces/${nw}/deals`, { name, assetType: "Multifamily", location: "Halifax", province: "NS" })).json.id as string;
+  const put = async (d: string, fieldKey: string, value: number, itemKey?: string) => {
+    const r = await call(nina, "POST", `/api/deals/${d}/values`, { fieldKey, value, reason: "Quick start answer", ...(itemKey ? { itemKey } : {}) });
+    expect(r.status, fieldKey).toBe(200);
+    return r;
+  };
+  // Invented round numbers: no rate, table or rebate is cited anywhere.
+  const base = async (d: string) => {
+    for (const [f, v, i] of [["land_cost", 800000], ["hard_cost", 2400000], ["soft_cost", 300000], ["contingency", 120000], ["construction_months", 12], ["lease_up_months", 6],
+      ["unit_count", 4, "Residential"], ["unit_rent_monthly", 2400, "Residential"], ["stabilized_occupancy_pct", 95], ["exit_cap_rate_pct", 5.5], ["senior_loan_amount", 2000000],
+      ["senior_rate_pct", 6], ["senior_amort_years", 30]] as [string, number, string?][]) await put(d, f, v, i);
+    expect((await call(nina, "POST", `/api/deals/${d}/defaults`, { fields: ["hold_years", "selling_costs_pct", "expense_ratio_pct"] })).status).toBe(200);
+  };
+  const choices = async (d: string) => (await call(nina, "GET", `/api/deals/${d}/review`)).json.choices as { fieldKey: string; unit: string; help: string | null; detail: string }[];
+  const metrics = async (runId: string) => (await call(nina, "GET", `/api/runs/${runId}`)).json.result.scenarios[0].metrics as { key: string; value: number | null; status: string }[];
+  const snapshot = async (runId: string) => ((await db.query<any>(`select input_snapshot as snap from runs where id = $1`, [runId])) as [{ snap: any }])[0].snap;
+
+  test("review offers the four cost lines with their unit and help, and the premium only once a refinance month is stated", async () => {
+    nina = await signup("nina@example.com", "Nina Builder", "solo");
+    nw = (await call(nina, "GET", "/api/me")).json.workspaces[0].id;
+    const d = await make("Halifax Fourplex");
+    const before = await choices(d);
+    const by = new Map(before.map((c) => [c.fieldKey, c]));
+    for (const k of ["development_charges", "land_transfer_tax", "gst_hst_net"]) {
+      expect(by.get(k), k).toMatchObject({ unit: "$", help: "If your soft or other costs already include it, leave this out.", detail: "none stated" });
+    }
+    expect(by.get("property_tax_annual")).toMatchObject({ unit: "$", help: "Leave this out if your expense ratio or fixed operating costs already include it." });
+    expect(by.has("refinance_insurance_premium_pct")).toBe(false);
+    await put(d, "refinance_month", 24);
+    const after = await choices(d);
+    expect(after.find((c) => c.fieldKey === "refinance_insurance_premium_pct")).toMatchObject({ unit: "%", detail: "no mortgage insurance" });
+    const nf = (await call(nina, "GET", `/api/deals/${d}/review`)).json.notFound.map((n: any) => n.fieldKey);
+    for (const k of ["development_charges", "property_tax_annual", "refinance_insurance_premium_pct"]) expect(nf).not.toContain(k);
+  });
+
+  test("a run with the lines records them, shows the metric, and builds its lender package", async () => {
+    const d = await make("Halifax Fourplex With Lines");
+    await base(d);
+    for (const [f, v] of [["refinance_month", 24], ["refinance_ltv_pct", 65], ["refinance_rate_pct", 5], ["refinance_amort_years", 30],
+      ["development_charges", 50000], ["land_transfer_tax", 20000], ["gst_hst_net", 30000], ["property_tax_annual", 12000], ["refinance_insurance_premium_pct", 4]] as [string, number][]) await put(d, f, v);
+    const r = await call(nina, "POST", `/api/deals/${d}/runs`);
+    expect(r.status).toBe(200);
+    const snap = await snapshot(r.json.id);
+    expect(snap.input.budget).toMatchObject({ developmentCharges: 50000, landTransferTax: 20000, gstHstNet: 30000 });
+    expect(snap.input.propertyTaxAnnual).toBe(12000);
+    expect(snap.input.refinance.insurancePremiumPct).toBe(4);
+    expect(Object.keys(snap)).not.toContain("choices");
+    const premium = (await metrics(r.json.id)).find((m) => m.key === "refinance_premium_added")!;
+    expect(premium.status).toBe("VALID");
+    expect(premium.value!).toBeGreaterThan(0);
+    expect((await call(nina, "GET", `/api/runs/${r.json.id}`)).json.fresh).toBe(true);
+    expect((await call(nina, "POST", `/api/runs/${r.json.id}/artifacts`, { kind: "lender_package", format: "docx" })).status).toBe(200);
+    await work();
+    const arts = (await call(nina, "GET", `/api/deals/${d}/artifacts`)).json;
+    expect(arts.map((a: any) => a.status)).toEqual(["ready"]);
+    expect((await call(nina, "GET", `/api/runs/${r.json.id}/audit-package`)).json.validation.status).toBe("passed");
+  }, 120_000);
+
+  test("0 is accepted for each, is recorded as a stated value, and changes no number", async () => {
+    const zero = await make("Halifax Fourplex Zero");
+    const plain = await make("Halifax Fourplex Plain");
+    await base(zero);
+    await base(plain);
+    for (const k of ["development_charges", "property_tax_annual", "land_transfer_tax", "gst_hst_net"]) expect((await put(zero, k, 0)).json.status, k).toBe("approved");
+    const a = await call(nina, "POST", `/api/deals/${zero}/runs`);
+    const b = await call(nina, "POST", `/api/deals/${plain}/runs`);
+    expect(a.status).toBe(200);
+    expect(b.status).toBe(200);
+    const snap = await snapshot(a.json.id);
+    expect(snap.input.budget).toMatchObject({ developmentCharges: 0, landTransferTax: 0, gstHstNet: 0 });
+    expect(snap.input.propertyTaxAnnual).toBe(0);
+    const plainSnap = await snapshot(b.json.id);
+    expect(JSON.stringify(plainSnap.input)).not.toMatch(/developmentCharges|landTransferTax|gstHstNet|propertyTaxAnnual|insurancePremiumPct/);
+    const pick = async (id: string) => Object.fromEntries((await metrics(id)).filter((m) => ["total_development_cost", "stabilized_noi", "sizing_dscr"].includes(m.key)).map((m) => [m.key, m.value]));
+    expect(await pick(a.json.id)).toEqual(await pick(b.json.id));
+  });
+
+  test("a premium above 10 percent or a negative cost line is refused", async () => {
+    const d = await make("Halifax Fourplex Refused");
+    await put(d, "refinance_month", 24);
+    for (const [fieldKey, value] of [["refinance_insurance_premium_pct", 10.5], ["development_charges", -1]] as const) {
+      const r = await call(nina, "POST", `/api/deals/${d}/values`, { fieldKey, value, reason: "Checking what is refused" });
+      expect(r.status, fieldKey).toBeGreaterThanOrEqual(400);
+      expect(r.status, fieldKey).toBeLessThan(500);
+    }
+  });
+});
