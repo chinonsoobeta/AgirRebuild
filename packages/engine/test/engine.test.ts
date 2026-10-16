@@ -1095,11 +1095,11 @@ describe("Canadian cost lines and a mortgage insurance premium, as entered value
   const draws = (i: EngineInput) => buildLedger(i).rows.slice(0, 9).map((r) => r.costDraw);
 
   describe("the fields", () => {
-    test("each is optional, never read from a document, and 0 or more", () => {
+    test("each is optional and 0 or more; only development charges and land transfer tax are read from a document (card 61b)", () => {
       for (const k of KEYS) {
         const d = FIELD_BY_KEY.get(k)!;
         expect(d, k).toBeDefined();
-        expect(d, k).toMatchObject({ required: false, extractable: false, min: 0 });
+        expect(d, k).toMatchObject({ required: false, extractable: k === "development_charges" || k === "land_transfer_tax", min: 0 });
         expect(d.absentMeans, k).toBeTruthy();
         expect(d.aliases.length, k).toBeGreaterThan(0);
         expect(d.help, k).toBeTruthy();
@@ -1167,16 +1167,21 @@ describe("Canadian cost lines and a mortgage insurance premium, as entered value
       expect(bad.input).toBeNull();
       expect(bad.readiness.impossible.map((i) => i.fieldKey).sort()).toEqual(["development_charges", "refinance_insurance_premium_pct"]);
     });
-    test("review offers the four cost lines as choices, and the premium only when a refinance month is stated", () => {
+    test("review offers GST/HST net and property tax as choices, development charges and land transfer tax as not found, and the premium only when a refinance month is stated", () => {
       const keys = (r: Readiness) => r.choices.map((c) => c.fieldKey);
+      const found = (r: Readiness) => r.notFound.map((n) => n.fieldKey);
       const none = assemble(rows({})).readiness;
-      expect(keys(none)).toEqual(expect.arrayContaining(["development_charges", "land_transfer_tax", "gst_hst_net", "property_tax_annual"]));
+      expect(keys(none)).toEqual(expect.arrayContaining(["gst_hst_net", "property_tax_annual"]));
+      expect(keys(none)).not.toContain("development_charges");
+      expect(keys(none)).not.toContain("land_transfer_tax");
+      expect(found(none)).toEqual(expect.arrayContaining(["development_charges", "land_transfer_tax"]));
+      expect(none.notFound.find((n) => n.fieldKey === "development_charges")!.detail).toBe("none stated");
       expect(keys(none)).not.toContain("refinance_insurance_premium_pct");
       expect(none.choices.find((c) => c.fieldKey === "property_tax_annual")!.detail).toBe("included in operating costs or none");
       const refinanced = assemble(rows(refi)).readiness;
       expect(keys(refinanced)).toContain("refinance_insurance_premium_pct");
       expect(refinanced.choices.find((c) => c.fieldKey === "refinance_insurance_premium_pct")!.detail).toBe("no mortgage insurance");
-      for (const r of [none, refinanced]) for (const k of KEYS) expect(r.notFound.map((n) => n.fieldKey), k).not.toContain(k);
+      for (const r of [none, refinanced]) for (const k of ["gst_hst_net", "property_tax_annual", "refinance_insurance_premium_pct"]) expect(found(r), k).not.toContain(k);
     });
     test("a stated choice leaves the list", () => {
       const r = assemble(rows({ ...refi, development_charges: 0, refinance_insurance_premium_pct: 0 })).readiness;

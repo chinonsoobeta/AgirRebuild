@@ -1129,22 +1129,23 @@ describe("card 61: Canadian cost lines and a mortgage insurance premium are ente
   const metrics = async (runId: string) => (await call(nina, "GET", `/api/runs/${runId}`)).json.result.scenarios[0].metrics as { key: string; value: number | null; status: string }[];
   const snapshot = async (runId: string) => ((await db.query<any>(`select input_snapshot as snap from runs where id = $1`, [runId])) as [{ snap: any }])[0].snap;
 
-  test("review offers the four cost lines with their unit and help, and the premium only once a refinance month is stated", async () => {
+  test("review offers GST/HST net and property tax as choices and the other two lines as not found, and the premium only once a refinance month is stated", async () => {
     nina = await signup("nina@example.com", "Nina Builder", "solo");
     nw = (await call(nina, "GET", "/api/me")).json.workspaces[0].id;
     const d = await make("Halifax Fourplex");
     const before = await choices(d);
     const by = new Map(before.map((c) => [c.fieldKey, c]));
-    for (const k of ["development_charges", "land_transfer_tax", "gst_hst_net"]) {
-      expect(by.get(k), k).toMatchObject({ unit: "$", help: "If your soft or other costs already include it, leave this out.", detail: "none stated" });
-    }
+    expect(by.get("gst_hst_net")).toMatchObject({ unit: "$", help: "If your soft or other costs already include it, leave this out.", detail: "none stated" });
+    expect(by.has("development_charges")).toBe(false);
+    expect(by.has("land_transfer_tax")).toBe(false);
     expect(by.get("property_tax_annual")).toMatchObject({ unit: "$", help: "Leave this out if your expense ratio or fixed operating costs already include it." });
     expect(by.has("refinance_insurance_premium_pct")).toBe(false);
     await put(d, "refinance_month", 24);
     const after = await choices(d);
     expect(after.find((c) => c.fieldKey === "refinance_insurance_premium_pct")).toMatchObject({ unit: "%", detail: "no mortgage insurance" });
     const nf = (await call(nina, "GET", `/api/deals/${d}/review`)).json.notFound.map((n: any) => n.fieldKey);
-    for (const k of ["development_charges", "property_tax_annual", "refinance_insurance_premium_pct"]) expect(nf).not.toContain(k);
+    for (const k of ["development_charges", "land_transfer_tax"]) expect(nf, k).toContain(k);
+    for (const k of ["gst_hst_net", "property_tax_annual", "refinance_insurance_premium_pct"]) expect(nf, k).not.toContain(k);
   });
 
   test("a run with the lines records them, shows the metric, and builds its lender package", async () => {
@@ -1197,5 +1198,60 @@ describe("card 61: Canadian cost lines and a mortgage insurance premium are ente
       expect(r.status, fieldKey).toBeGreaterThanOrEqual(400);
       expect(r.status, fieldKey).toBeLessThan(500);
     }
+  });
+  describe("card 61b: a document's line goes to the field the person entered", () => {
+    const upload = async (d: string, name: string, text: string) => {
+      expect((await call(nina, "PUT", `/api/deals/${d}/documents?name=${name}`, undefined, new TextEncoder().encode(text))).status).toBe(200);
+      await work();
+    };
+    const rowsOf = async (d: string, k: string) => ((await call(nina, "GET", `/api/deals/${d}/review`)).json.assumptions as any[]).filter((a) => a.fieldKey === k);
+
+    test("development charges entered and then stated in a document are counted once", async () => {
+      const d = await make("Halifax Fourplex Charges");
+      await base(d);
+      await put(d, "development_charges", 85000);
+      await upload(d, "budget.txt", "Budget\nDevelopment charges: $85,000\n");
+      const dc = await rowsOf(d, "development_charges");
+      expect(dc).toHaveLength(1);
+      expect(dc[0]).toMatchObject({ status: "approved", value: 85000 });
+      expect(dc[0].sources.map((s: any) => s.document_name)).toEqual(["budget.txt"]);
+      expect(await rowsOf(d, "other_cost")).toEqual([]);
+      const r = await call(nina, "POST", `/api/deals/${d}/runs`);
+      expect(r.status).toBe(200);
+      expect((await metrics(r.json.id)).find((m) => m.key === "hard_and_soft_cost")!.value).toBe(3_705_000);
+    });
+
+    test("a document at a different value reopens the entry as a named conflict", async () => {
+      const d = await make("Halifax Fourplex Charges Differ");
+      await put(d, "development_charges", 85000);
+      await upload(d, "budget.txt", "Budget\nDevelopment charges: $90,000\n");
+      const dc = await rowsOf(d, "development_charges");
+      expect(dc).toHaveLength(1);
+      expect(dc[0]).toMatchObject({ status: "conflicting" });
+      expect(dc[0].conflictValues.map((c: any) => c.value).sort()).toEqual([85000, 90000]);
+      expect(await rowsOf(d, "other_cost")).toEqual([]);
+    });
+
+    test("a person can label a figure as land transfer tax", async () => {
+      const d = await make("Halifax Fourplex Labelled");
+      await upload(d, "notes.txt", "Project notes\nBanner allowance: $7,000\n");
+      const review = async () => (await call(nina, "GET", `/api/deals/${d}/review`)).json;
+      const fig = (await review()).other.find((o: any) => o.raw === "$7,000");
+      const body = { documentId: fig.documentId, figureId: fig.figureId, fieldKey: "land_transfer_tax" };
+      expect((await call(nina, "POST", `/api/deals/${d}/figure-labels`, body)).status).toBe(200);
+      await work();
+      expect(await rowsOf(d, "land_transfer_tax")).toMatchObject([{ status: "needs_review", value: 7000 }]);
+    });
+
+    test("a deal read before the split loses its other-cost row to the source-removed rule and waits on the new value", async () => {
+      const d = await make("Halifax Fourplex Before");
+      await upload(d, "budget.txt", "Budget\nDevelopment charges: $85,000\n");
+      // What the reader used to file: the same line under other costs, approved.
+      await db.query(`update assumptions set field_key = 'other_cost', status = 'approved' where deal_id = $1 and field_key = 'development_charges'`, [d]);
+      expect(await rowsOf(d, "development_charges")).toEqual([]);
+      await upload(d, "notes.txt", "Site visit notes, nothing priced.\n");
+      expect(await rowsOf(d, "other_cost")).toMatchObject([{ status: "needs_review", value: 85000, reason: "Its source document was removed; confirm or reject it" }]);
+      expect(await rowsOf(d, "development_charges")).toMatchObject([{ status: "needs_review", value: 85000 }]);
+    });
   });
 });

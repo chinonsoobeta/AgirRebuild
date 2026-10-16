@@ -4161,3 +4161,46 @@ describe("card 60d: one item, however its name is written", () => {
     expect(itemFold("Retail")).not.toBe(itemFold("Retail 2"));
   });
 });
+
+describe("card 61b: development charges and land transfer tax are read into their own fields", () => {
+  const doc = (...text: string[]): NormalizedDocument => ({
+    kind: "pdf",
+    lines: text.map((t, i) => ({ text: t, location: `page 1, line ${i + 1}` })),
+    tables: [],
+    pageCount: 1,
+    needsOcr: false,
+    fullText: text.join("\n"),
+  });
+  const read = (...text: string[]) => extractCandidates(doc(...text));
+  const pick = (r: ReturnType<typeof extractCandidates>) => r.candidates.map((c) => [c.fieldKey, c.value]);
+
+  test("each wording of a development charges line is development charges, never other costs", () => {
+    for (const line of ["Development charges: $85,000", "Development charge: $85,000", "Dev charges: $85,000", "DCCs: $85,000", "Redevances de développement : 85 000 $"]) {
+      expect(pick(read(line)), line).toEqual([["development_charges", 85_000]]);
+    }
+  });
+  test("each wording of a land transfer tax line is land transfer tax, never land or other costs", () => {
+    for (const line of ["Land transfer tax: $20,000", "LTT: $20,000", "Land transfer duty: $20,000", "Property transfer tax: $20,000", "Welcome tax: $20,000", "Droits de mutation : 20 000 $"]) {
+      expect(pick(read(line)), line).toEqual([["land_transfer_tax", 20_000]]);
+    }
+  });
+  test("beside a land line, land transfer duty is its own value and the land is not in conflict", () => {
+    const r = read("Land: $800,000", "Land transfer duty: $20,000");
+    expect(pick(r)).toEqual([["land_cost", 800_000], ["land_transfer_tax", 20_000]]);
+    const proposals = consolidate(r.candidates.map((c) => ({ ...c, documentId: "d", documentName: "d" })));
+    expect(proposals.map((p) => [p.fieldKey, p.status])).toEqual([["land_cost", "needs_review"], ["land_transfer_tax", "needs_review"]]);
+  });
+  test("beside an other costs line, development charges are their own value and nothing conflicts", () => {
+    const r = read("Other costs: $50,000", "Development charges: $85,000");
+    expect(pick(r)).toEqual([["other_cost", 50_000], ["development_charges", 85_000]]);
+    const proposals = consolidate(r.candidates.map((c) => ({ ...c, documentId: "d", documentName: "d" })));
+    expect(proposals.map((p) => [p.fieldKey, p.status])).toEqual([["other_cost", "needs_review"], ["development_charges", "needs_review"]]);
+  });
+  test("property tax and GST/HST net of rebates are still not read as any field", () => {
+    expect(pick(read("Property tax: $12,000"))).toEqual([]);
+    expect(pick(read("GST/HST net of rebates: $40,000"))).toEqual([]);
+  });
+  test("permit levies are still other costs", () => {
+    expect(pick(read("Permit levies: $5,000"))).toEqual([["other_cost", 5_000]]);
+  });
+});
