@@ -234,6 +234,7 @@ describe("every sentence the engine's checks can produce has a French rendering"
     ["loan interest-only", withLoan("senior", { ioMonths: 601 })],
     ["refinance month", (d) => { d.holdYears = 5; d.refinance = { month: 100, amount: 1, ratePct: 5, amortYears: 30, ioMonths: 0 }; }],
     ["refinance amount or LTV", (d) => { d.holdYears = 5; d.refinance = { month: 12, ratePct: 5, amortYears: 30, ioMonths: 0 }; }],
+    ["refinance and hold without a refinance", (d) => { d.exit = "refinance_hold"; }],
     ["LP share", (d) => { d.waterfall = { lpSharePct: 0, preferredReturnPct: 8, gpPromotePct: 20 }; }],
     ["preferred return", (d) => { d.waterfall = { lpSharePct: 90, preferredReturnPct: -1, gpPromotePct: 20 }; }],
     ["GP promote", (d) => { d.waterfall = { lpSharePct: 90, preferredReturnPct: 8, gpPromotePct: 101 }; }],

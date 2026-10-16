@@ -75,6 +75,9 @@ export function validateInput(input: EngineInput): void {
     if (hasAmount === hasLtv) p.push("give the refinance either a loan amount or a loan-to-value, not both or neither");
     loan("refinance loan", { amount: r.amount ?? 1, ratePct: r.ratePct, amortYears: r.amortYears, ioMonths: r.ioMonths });
   }
+  if (input.exit === "refinance_hold" && !input.refinance) {
+    p.push("A deal that is kept and refinanced needs its refinance: the month, the amount or loan-to-value, the rate and the amortization.");
+  }
   if (input.waterfall) {
     const w = input.waterfall;
     if (!finite(w.lpSharePct) || w.lpSharePct <= 0 || w.lpSharePct >= 100) p.push("LP share must be above 0 and below 100");

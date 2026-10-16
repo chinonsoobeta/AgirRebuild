@@ -29,9 +29,13 @@
 // Refinance At the start of month R the senior balance is paid off and replaced.
 // Sale      Exit value = final hold-year NOI / exit cap. Debt is paid off at T.
 //           The non-recourse floor applies to the sale leg only.
+// Held      A deal kept and refinanced (card 60) has no sale: a stated value
+//           (final hold-year NOI / exit cap, no selling costs) less the debt at
+//           T is one `unrealized` flow at (T + 1)/12, and nothing is sold.
 // Flows     Contributions are dated when paid (t = m/12). Operating cash is
 //           distributed per hold year at its end; lease-up income at t = S/12;
-//           a refinance at t = R/12; the sale at t = (T + 1)/12.
+//           a refinance at t = R/12; the sale (or, for a held deal, the
+//           unrealized flow) at t = (T + 1)/12.
 
 import type { AnnualRow, EngineInput, EquityFlow, LedgerRow, LoanTerms } from "@agir/contracts";
 import { allocate, drawShares, levelPayment, sum } from "./math.ts";
@@ -75,11 +79,19 @@ export type Ledger = {
   annual: AnnualRow[];
   year1: { gpr: number; egi: number; opex: number; fixedOpex: number; variableShare: number; noi: number };
   finalYearNoi: number;
+  /** Null for a held deal, which has no sale. */
   exitValue: number | null;
   netSale: number | null;
+  /** Debt outstanding at T: repaid at a sale, deducted from the stated value of a held deal. */
   payoffAtSale: number;
   saleLeg: number;
   wipeout: boolean;
+  /** A held deal only: final hold-year NOI / exit cap, no selling costs (null when that NOI is not positive). */
+  statedValue: number | null;
+  /** A held deal only: stated value less the debt at T, floored at 0 (null with no stated value). */
+  unrealizedLeg: number | null;
+  /** A held deal only: the months from the refinance month (up to 12, fewer if the hold ends first). */
+  afterRefinance: { months: number; noi: number; debtService: number; sizingDebtService: number } | null;
   refinance: { month: number; newAmount: number; payoff: number; net: number } | null;
   sizingDsByYear: number[];
   contractualDsByYear: number[];
@@ -302,6 +314,8 @@ export function buildLedger(input: EngineInput): Ledger {
     annual.push({ year: y, gpr: 0, egi: 0, opex: 0, noi: 0, debtService: 0, sizingDebtService: 0, cashFlow: 0 });
   }
   let cumulativeCashShortfall = 0;
+  const hold = input.exit === "refinance_hold";
+  const afterRefinance = { months: 0, noi: 0, debtService: 0, sizingDebtService: 0 };
   const seniorSizingMonths: number[] = [];
   const mezzSizingMonths: number[] = [];
 
@@ -360,6 +374,12 @@ export function buildLedger(input: EngineInput): Ledger {
         }
       }
     }
+    if (hold && refinance && m < refinance.month + 12) {
+      afterRefinance.months += 1;
+      afterRefinance.noi += noi;
+      afterRefinance.debtService += debtService;
+      afterRefinance.sizingDebtService += sizing;
+    }
     a.gpr += o.gpr;
     a.egi += o.egi;
     a.opex += o.opex;
@@ -394,10 +414,14 @@ export function buildLedger(input: EngineInput): Ledger {
   // ---- Sale -----------------------------------------------------------------
   const finalYearNoi = annual[H]!.noi;
   const payoffAtSale = sum(live.map((l) => Math.max(0, l.balance)));
-  const exitValue = finalYearNoi > 0 ? finalYearNoi / (input.exitCapPct / 100) : null;
+  const capitalized = finalYearNoi > 0 ? finalYearNoi / (input.exitCapPct / 100) : null;
+  // A held deal is not sold: its value is a stated one, with no selling costs, and it makes no sale leg.
+  const exitValue = hold ? null : capitalized;
+  const statedValue = hold ? capitalized : null;
   const netSale = exitValue === null ? null : exitValue * (1 - input.sellingCostsPct / 100);
   const saleLeg = netSale === null ? 0 : Math.max(0, netSale - payoffAtSale);
-  const wipeout = netSale !== null && netSale < payoffAtSale;
+  const unrealizedLeg = statedValue === null ? null : Math.max(0, statedValue - payoffAtSale);
+  const wipeout = hold ? statedValue !== null && statedValue < payoffAtSale : netSale !== null && netSale < payoffAtSale;
   const last = rows[T]!;
   last.saleNet = saleLeg;
 
@@ -420,6 +444,8 @@ export function buildLedger(input: EngineInput): Ledger {
     if (Math.abs(cf) > 0.005) equityFlows.push({ month: S + 12 * y - 1, t: (S + 12 * y) / 12, amount: cf, kind: "operating" });
   }
   if (saleLeg > 0) equityFlows.push({ month: T, t: (T + 1) / 12, amount: saleLeg, kind: "sale" });
+  // The only flow of its kind, kept even at 0 so a held deal always shows what its value left for equity.
+  if (unrealizedLeg !== null) equityFlows.push({ month: T, t: (T + 1) / 12, amount: unrealizedLeg, kind: "unrealized" });
   equityFlows.sort((x, y) => x.t - y.t);
 
   const y1 = annual[1]!;
@@ -455,6 +481,9 @@ export function buildLedger(input: EngineInput): Ledger {
     payoffAtSale,
     saleLeg,
     wipeout,
+    statedValue,
+    unrealizedLeg,
+    afterRefinance: hold ? afterRefinance : null,
     refinance,
     sizingDsByYear: annual.slice(1).map((r) => r.sizingDebtService),
     contractualDsByYear: annual.slice(1).map((r) => r.debtService),

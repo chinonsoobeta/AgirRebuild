@@ -48,6 +48,8 @@ export type EngineInput = {
   senior: LoanTerms;
   mezzanine?: LoanTerms;
   refinance?: { month: number; amount?: number; ltvPct?: number; ratePct: number; amortYears: number; ioMonths: number };
+  /** The deal is kept and refinanced, not sold. Set only when the flag is 1; absent otherwise, so a sale deal's input hashes as before. */
+  exit?: "refinance_hold";
   waterfall?: { lpSharePct: number; preferredReturnPct: number; gpPromotePct: number };
   stated: {
     equity?: number;
@@ -66,7 +68,7 @@ export type Metric = {
   unit: MetricUnit;
   value: number | null;
   status: MetricStatus;
-  /** Why a non-VALID metric has no value, in plain words. */
+  /** Why a non-VALID metric has no value, in plain words; a valid one may carry a note on how it was measured. */
   reason?: string;
   formula: string;
 };
@@ -122,7 +124,8 @@ export type EquityFlow = {
   /** Years from t0. */
   t: number;
   amount: number;
-  kind: "contribution" | "operating" | "refinance" | "sale";
+  /** `unrealized` is a stated value less debt at the end of a held deal: not a sale. */
+  kind: "contribution" | "operating" | "refinance" | "sale" | "unrealized";
 };
 
 export type LedgerRow = {

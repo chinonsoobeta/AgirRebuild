@@ -21,12 +21,14 @@ function m(key: string, value: number | null, status?: MetricStatus, reason?: st
 
 const na = (key: string, reason: string) => m(key, null, "NOT_APPLICABLE", reason);
 const nm = (key: string, reason: string) => m(key, null, "NOT_MEANINGFUL", reason);
+const NOT_SOLD = "The deal is kept and refinanced, not sold.";
 
 export type ScenarioMetrics = { metrics: Metric[]; irrRoots: number[] };
 
 /** Every catalog metric for one scenario, each a projection of its ledger. */
 export function computeMetrics(input: EngineInput, L: Ledger): ScenarioMetrics {
   const out: Metric[] = [];
+  const hold = input.exit === "refinance_hold";
   const hasDebt = L.drawnDebtAtS > 0;
   const tdc = L.tdc;
   const y1 = L.year1;
@@ -56,12 +58,17 @@ export function computeMetrics(input: EngineInput, L: Ledger): ScenarioMetrics {
   );
 
   const exitReason = "Final-year NOI is not positive, so the asset has no capitalized value.";
-  out.push(L.exitValue === null ? nm("exit_value", exitReason) : m("exit_value", L.exitValue));
-  out.push(L.netSale === null ? nm("net_sale_proceeds", exitReason) : m("net_sale_proceeds", L.netSale));
-  const profit = L.netSale === null ? null : L.netSale - tdc;
-  out.push(profit === null ? nm("development_profit", exitReason) : m("development_profit", profit));
-  const poc = profit === null ? null : ratio(profit, tdc);
-  out.push(poc === null ? nm("profit_on_cost", exitReason) : m("profit_on_cost", poc * 100));
+  if (hold) {
+    // A held deal has no sale: these keep their place in the result, as not applicable, never 0.
+    for (const k of ["exit_value", "net_sale_proceeds", "development_profit", "profit_on_cost"]) out.push(na(k, NOT_SOLD));
+  } else {
+    out.push(L.exitValue === null ? nm("exit_value", exitReason) : m("exit_value", L.exitValue));
+    out.push(L.netSale === null ? nm("net_sale_proceeds", exitReason) : m("net_sale_proceeds", L.netSale));
+    const profit = L.netSale === null ? null : L.netSale - tdc;
+    out.push(profit === null ? nm("development_profit", exitReason) : m("development_profit", profit));
+    const poc = profit === null ? null : ratio(profit, tdc);
+    out.push(poc === null ? nm("profit_on_cost", exitReason) : m("profit_on_cost", poc * 100));
+  }
 
   out.push(hasDebt ? m("total_debt", L.drawnDebtAtS) : na("total_debt", "The deal has no debt."));
   out.push(
@@ -119,7 +126,10 @@ export function computeMetrics(input: EngineInput, L: Ledger): ScenarioMetrics {
   const contributions = -sum(L.equityFlows.filter((f) => f.amount < 0).map((f) => f.amount));
   const distributions = sum(L.equityFlows.filter((f) => f.amount > 0).map((f) => f.amount));
   let roots: number[] = [];
-  if (L.exitValue === null) {
+  if (hold) {
+    out.push(na("equity_multiple", NOT_SOLD));
+    out.push(na("equity_irr", NOT_SOLD));
+  } else if (L.exitValue === null) {
     out.push(nm("equity_multiple", exitReason));
     out.push(nm("equity_irr", exitReason));
   } else if (contributions <= 0) {
@@ -149,7 +159,9 @@ export function computeMetrics(input: EngineInput, L: Ledger): ScenarioMetrics {
   out.push(L.refinance ? m("refinance_net_proceeds", L.refinance.net) : na("refinance_net_proceeds", "No refinance."));
   out.push(L.units > 0 ? m("cost_per_unit", tdc / L.units) : na("cost_per_unit", "The program has no dwelling units."));
 
-  if (!input.waterfall) {
+  if (hold) {
+    for (const k of ["lp_irr", "gp_irr", "gp_promote"]) out.push(na(k, NOT_SOLD));
+  } else if (!input.waterfall) {
     out.push(na("lp_irr", "No LP/GP split."));
     out.push(na("gp_irr", "No LP/GP split."));
     out.push(na("gp_promote", "No LP/GP split."));
@@ -166,6 +178,59 @@ export function computeMetrics(input: EngineInput, L: Ledger): ScenarioMetrics {
     out.push(m("gp_promote", w.promote));
   }
   out.push(m("stabilization_month", L.S));
-  out.push(m("sale_month", L.T));
+  out.push(hold ? na("sale_month", NOT_SOLD) : m("sale_month", L.T));
+  if (hold) {
+    const held = holdMetrics(L, contributions, distributions);
+    out.push(...held.metrics);
+    roots = held.roots;
+  }
   return { metrics: out, irrRoots: roots };
+}
+
+/** The twelve months from the refinance month are scaled to a year when the hold ends first; the reason says so. */
+function withScaleNote(metric: Metric, months: number): Metric {
+  return metric.status === "VALID" && months < 12
+    ? { ...metric, reason: `Only ${months} months remain before the end of the hold, so this uses them, scaled to a year.` }
+    : metric;
+}
+
+/** The metrics of a deal that is kept and refinanced, in catalog order. Computed in hold mode only. */
+function holdMetrics(L: Ledger, contributions: number, distributions: number): { metrics: Metric[]; roots: number[] } {
+  const out: Metric[] = [];
+  const r = L.refinance!;
+  const w = L.afterRefinance!;
+  out.push(m("refinance_cash_returned", r.net));
+  const left = L.requiredEquity - r.net;
+  out.push(m("cash_left_in_deal", left));
+  const scale = w.months > 0 ? 12 / w.months : 0;
+  const dcr = ratio(w.noi, w.sizingDebtService);
+  out.push(dcr === null ? nm("dcr_after_refinance", "No debt is in force after the refinance.") : withScaleNote(m("dcr_after_refinance", dcr), w.months));
+  out.push(
+    left <= 0
+      ? nm("cash_on_cash_after_refinance", "Cash left in the deal is 0 or below, so all of the equity has come back and there is nothing left to earn on.")
+      : withScaleNote(m("cash_on_cash_after_refinance", (((w.noi - w.debtService) * scale) / left) * 100), w.months),
+  );
+  const reason = "Final-year NOI is not positive, so the asset has no capitalized value.";
+  out.push(L.statedValue === null ? nm("stated_value", reason) : m("stated_value", L.statedValue));
+  let roots: number[] = [];
+  if (L.statedValue === null) {
+    out.push(nm("unrealized_equity_multiple", reason));
+    out.push(nm("unrealized_equity_irr", reason));
+  } else if (contributions <= 0) {
+    out.push(nm("unrealized_equity_multiple", "No equity is contributed, so there is nothing to multiply."));
+    out.push(nm("unrealized_equity_irr", "No equity is contributed."));
+  } else {
+    out.push(m("unrealized_equity_multiple", distributions / contributions));
+    roots = irrRoots(L.equityFlows);
+    if (roots.length === 1) out.push(m("unrealized_equity_irr", roots[0]! * 100));
+    else if (roots.length === 0) out.push(nm("unrealized_equity_irr", "The equity cash flows have no rate of return (no sign change)."));
+    else
+      out.push(
+        nm(
+          "unrealized_equity_irr",
+          `The equity cash flows have ${roots.length} IRRs (${roots.map((x) => (x * 100).toFixed(2) + "%").join(", ")}), so no single IRR is meaningful.`,
+        ),
+      );
+  }
+  return { metrics: out, roots };
 }

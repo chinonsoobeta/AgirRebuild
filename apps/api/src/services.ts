@@ -6,7 +6,8 @@ import { createHash, createHmac } from "node:crypto";
 import {
   FIELD_BY_KEY,
   FIELD_GROUP_LABELS,
-  POLICY_V1,
+  POLICIES,
+  policyFor,
   type AssumptionStatus,
   type EngineInput,
   type Readiness,
@@ -17,7 +18,8 @@ import type { Db } from "@agir/db";
 import { applyLabels, figureOrder, offeredIds, type SourcedCandidate } from "@agir/extraction";
 
 export const sha256 = (s: string) => createHash("sha256").update(s).digest("hex");
-export const POLICY_HASH = sha256(canonicalJson(POLICY_V1));
+/** The hash of each registered policy, by version. A run is fresh against the hash of the policy it was made under. */
+export const POLICY_HASHES: Readonly<Record<string, string>> = Object.fromEntries(Object.entries(POLICIES).map(([v, p]) => [v, sha256(canonicalJson(p))]));
 
 export class HttpError extends Error {
   constructor(public status: number, message: string, public body?: unknown) {
@@ -34,9 +36,9 @@ export function signingSecret(): { secret: string; dev: boolean } {
   return { secret: "agir-development-signing-secret-not-for-production", dev: true };
 }
 
-export function signRun(inputHash: string, resultHash: string): string {
+export function signRun(inputHash: string, resultHash: string, policyHash: string): string {
   const { secret, dev } = signingSecret();
-  const mac = createHmac("sha256", secret).update(`${inputHash}.${resultHash}.${ENGINE_VERSION}.${POLICY_HASH}`).digest("hex");
+  const mac = createHmac("sha256", secret).update(`${inputHash}.${resultHash}.${ENGINE_VERSION}.${policyHash}`).digest("hex");
   return dev ? `dev-unsafe:${mac}` : mac;
 }
 
@@ -125,12 +127,12 @@ export async function dealOverview(tx: Db, dealId: string) {
     missing: readiness.missing.length,
     impossible: readiness.impossible.length,
   };
-  const [latest] = await tx.query<{ id: string; run_number: number; verdict_code: string; assumptions_hash: string; policy_hash: string; engine_version: string; created_at: string }>(
-    `select id, run_number, verdict_code, assumptions_hash, policy_hash, engine_version, created_at from latest_runs where deal_id = $1`,
+  const [latest] = await tx.query<{ id: string; run_number: number; verdict_code: string; assumptions_hash: string; policy_version: string; policy_hash: string; engine_version: string; created_at: string }>(
+    `select id, run_number, verdict_code, assumptions_hash, policy_version, policy_hash, engine_version, created_at from latest_runs where deal_id = $1`,
     [dealId],
   );
   const [{ h }] = (await tx.query<{ h: string }>(`select fn_assumptions_hash($1) as h`, [dealId])) as [{ h: string }];
-  const fresh = latest ? latest.assumptions_hash === h && latest.policy_hash === POLICY_HASH && latest.engine_version === ENGINE_VERSION : false;
+  const fresh = latest ? latest.assumptions_hash === h && latest.policy_hash === POLICY_HASHES[latest.policy_version] && latest.engine_version === ENGINE_VERSION : false;
   const [decision] = latest
     ? await tx.query<{ decision: string; created_at: string }>(`select decision, created_at from decisions where run_id = $1 order by created_at desc limit 1`, [latest.id])
     : [];
@@ -282,7 +284,8 @@ export async function createRun(tx: Db, dealId: string) {
   const assumptions = await loadAssumptions(tx, dealId);
   const { readiness, input } = readinessFor(assumptions);
   if (!input) throw new HttpError(409, "Underwriting is blocked until review is clear.", { readiness });
-  const result = underwrite(input, POLICY_V1);
+  const policy = policyFor(input);
+  const result = underwrite(input, policy);
   const used = assumptions
     .filter((a) => a.status === "approved" || a.status === "default_accepted")
     .map((a) => ({
@@ -302,15 +305,15 @@ export async function createRun(tx: Db, dealId: string) {
   const [{ h }] = (await tx.query<{ h: string }>(`select fn_assumptions_hash($1) as h`, [dealId])) as [{ h: string }];
   const payload = {
     engine_version: ENGINE_VERSION,
-    policy_version: POLICY_V1.version,
-    policy_hash: POLICY_HASH,
+    policy_version: policy.version,
+    policy_hash: POLICY_HASHES[policy.version],
     input_snapshot: { input, assumptions: used, notFound: readiness.notFound },
     input_hash: inputHash,
     assumptions_hash: h,
     result,
     result_hash: resultHash,
     verdict_code: result.verdict.code,
-    signature: signRun(inputHash, resultHash),
+    signature: signRun(inputHash, resultHash, POLICY_HASHES[policy.version]!),
     metrics: flattenMetrics(result),
     gates: result.verdict.gates,
     checks: result.checks,
@@ -333,7 +336,7 @@ export async function runView(tx: Db, runId: string) {
   const [latest] = await tx.query<{ id: string }>(`select id from latest_runs where deal_id = $1`, [run.deal_id]);
   const staleReasons: string[] = [];
   if (run.assumptions_hash !== h) staleReasons.push("An approved input changed after this run.");
-  if (run.policy_hash !== POLICY_HASH) staleReasons.push("The policy thresholds changed after this run.");
+  if (run.policy_hash !== POLICY_HASHES[run.policy_version]) staleReasons.push("The policy thresholds changed after this run.");
   if (run.engine_version !== ENGINE_VERSION) staleReasons.push("The engine was updated after this run.");
   const decisions = await tx.query(
     `select d.id, d.decision, d.rationale, d.conditions, d.override_reason, d.created_at, u.name as decided_by
@@ -363,7 +366,7 @@ export async function runView(tx: Db, runId: string) {
 /** The audit package: everything a reviewer needs, plus proof that it hangs together. */
 export async function auditPackage(tx: Db, runId: string) {
   const [run] = await tx.query<{
-    id: string; deal_id: string; run_number: number; engine_version: string; policy_hash: string; input_hash: string;
+    id: string; deal_id: string; run_number: number; engine_version: string; policy_version: string; policy_hash: string; input_hash: string;
     result_hash: string; signature: string; result: RunResult; input_snapshot: { input: EngineInput; assumptions: unknown[] }; created_at: string;
   }>(`select * from runs where id = $1`, [runId]);
   if (!run) throw new HttpError(404, "Run not found");
@@ -379,7 +382,7 @@ export async function auditPackage(tx: Db, runId: string) {
   check("signature", verifySignature(run.signature, run.input_hash, run.result_hash, run.engine_version, run.policy_hash), "The run signature verifies.");
   let replayed = false;
   try {
-    replayed = sha256(canonicalJson(replay(run.engine_version, run.input_snapshot.input, POLICY_V1))) === run.result_hash;
+    replayed = sha256(canonicalJson(replay(run.engine_version, run.input_snapshot.input, POLICIES[run.policy_version]!))) === run.result_hash;
   } catch {
     replayed = false;
   }

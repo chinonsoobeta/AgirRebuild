@@ -14,17 +14,30 @@ export function gateStatusOf(metric: Metric | undefined, threshold: number): Gat
 
 export type GateSpec = { key: string; label: string; scenario: string; metricKey: string; threshold: number };
 
-/** The gate list, once: each gate's scenario, metric and threshold, from the policy. */
+/** Every gate any policy can use: where it reads, and the name of its threshold in the policy. */
+const GATE_CATALOG: Record<string, Omit<GateSpec, "threshold"> & { threshold: string }> = {
+  equity_multiple: { key: "equity_multiple", label: "Equity multiple", scenario: "base", metricKey: "equity_multiple", threshold: "equityMultipleMin" },
+  profit_on_cost: { key: "profit_on_cost", label: "Profit on cost", scenario: "base", metricKey: "profit_on_cost", threshold: "profitOnCostMinPct" },
+  development_spread: { key: "development_spread", label: "Development spread", scenario: "base", metricKey: "development_spread", threshold: "developmentSpreadMinBps" },
+  stressed_sizing_dscr: { key: "stressed_sizing_dscr", label: "Sizing DSCR, combined stress", scenario: "combined", metricKey: "sizing_dscr", threshold: "stressedSizingDscrMin" },
+  stressed_equity_multiple: { key: "stressed_equity_multiple", label: "Equity multiple, combined stress", scenario: "combined", metricKey: "equity_multiple", threshold: "stressedEquityMultipleMin" },
+  dcr_after_refinance: { key: "dcr_after_refinance", label: "Coverage after refinance (DCR)", scenario: "base", metricKey: "dcr_after_refinance", threshold: "dcrAfterRefinanceMin" },
+  stressed_unrealized_equity_multiple: { key: "stressed_unrealized_equity_multiple", label: "Equity multiple, unrealized, combined stress", scenario: "combined", metricKey: "unrealized_equity_multiple", threshold: "stressedUnrealizedMultipleMin" },
+};
+const V1_GATE_KEYS = ["equity_multiple", "profit_on_cost", "development_spread", "stressed_sizing_dscr", "stressed_equity_multiple"];
+
+/** The gate list, once: each gate's scenario, metric and threshold, from the policy it is given. */
 export function gateSpecs(policy: Policy): GateSpec[] {
-  const g = policy.gates;
-  return [
-    { key: "equity_multiple", label: "Equity multiple", scenario: "base", metricKey: "equity_multiple", threshold: g.equityMultipleMin },
-    { key: "profit_on_cost", label: "Profit on cost", scenario: "base", metricKey: "profit_on_cost", threshold: g.profitOnCostMinPct },
-    { key: "development_spread", label: "Development spread", scenario: "base", metricKey: "development_spread", threshold: g.developmentSpreadMinBps },
-    { key: "stressed_sizing_dscr", label: "Sizing DSCR, combined stress", scenario: "combined", metricKey: "sizing_dscr", threshold: g.stressedSizingDscrMin },
-    { key: "stressed_equity_multiple", label: "Equity multiple, combined stress", scenario: "combined", metricKey: "equity_multiple", threshold: g.stressedEquityMultipleMin },
-  ];
+  return (policy.gateKeys ?? V1_GATE_KEYS).map((key) => {
+    const def = GATE_CATALOG[key];
+    const threshold = def && policy.gates[def.threshold];
+    if (!def || threshold === undefined) throw new Error(`Policy ${policy.version} has no threshold for gate "${key}"`);
+    return { ...def, threshold };
+  });
 }
+
+/** "five" and "four" are spelled out; a v1 verdict's other counts stay digits, so its stored text never changes. */
+const countWord = (n: number, total: number) => (n === 5 ? "five" : n === 4 && total === 4 ? "four" : String(n));
 
 function gate(scenarios: ScenarioResult[], spec: GateSpec): Gate {
   const metric = find(scenarios, spec.scenario, spec.metricKey);
@@ -61,7 +74,7 @@ export function computeVerdict(scenarios: ScenarioResult[], checks: Check[], pol
   let explanation: string;
   switch (code) {
     case "APPROVE":
-      headline = measured === gates.length ? "All five gates pass." : `All ${measured} applicable gates pass.`;
+      headline = measured === gates.length ? `All ${countWord(measured, gates.length)} gates pass.` : `All ${measured} applicable gates pass.`;
       explanation = "The deal clears every return hurdle and holds its coverage under combined stress.";
       break;
     case "APPROVE_WITH_CONDITIONS":
@@ -77,7 +90,7 @@ export function computeVerdict(scenarios: ScenarioResult[], checks: Check[], pol
         headline = errors.length === 1 ? "The deal fails a check that no gate can offset." : `The deal fails ${errors.length} checks that no gate can offset.`;
         explanation = hardFailReasons.join(" ");
       } else {
-        headline = failed.length === measured ? `All ${measured === 5 ? "five" : measured} gates fail.` : `${failed.length} of ${measured} gates fail.`;
+        headline = failed.length === measured ? `All ${countWord(measured, gates.length)} gates fail.` : `${failed.length} of ${measured} gates fail.`;
         explanation = `Failing: ${failed.map((x) => x.label).join("; ")}.`;
       }
   }

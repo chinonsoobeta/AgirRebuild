@@ -4,7 +4,7 @@
 // letter. It runs as the trusted service principal.
 
 import Anthropic from "@anthropic-ai/sdk";
-import { FIELDS, FIELD_BY_KEY, POLICY_V1, type Currency, type EngineInput, type FieldUnit, type RunResult } from "@agir/contracts";
+import { FIELDS, FIELD_BY_KEY, POLICIES, type Currency, type EngineInput, type FieldUnit, type RunResult } from "@agir/contracts";
 import { renderArtifact, RendererUnavailableError, type ArtifactInput } from "@agir/artifacts";
 import { sha256Hex, type BlobStore, type Db } from "@agir/db";
 import { applyLabels, applySuggestions, consolidate, extractCandidates, figureOrder, kindOf, offerable, offeredIds, parseDocument, withoutLabelled, type SourcedCandidate } from "@agir/extraction";
@@ -419,6 +419,12 @@ async function renderJob(deps: WorkerDeps, artifactId: string) {
     [a.run_id],
   );
   if (!run || !deal) return;
+  // The policy the run was made under, by its stored version: a held deal is not read under v1.
+  const policy = POLICIES[run.policy_version];
+  if (!policy) {
+    await db.query(`update artifacts set status = 'failed', error = $2, updated_at = now() where id = $1`, [a.id, `This run was made under policy ${run.policy_version}, which this build does not have.`]);
+    return;
+  }
   const input: ArtifactInput = {
     kind: a.kind,
     deal: { name: deal.name, assetType: deal.asset_type, location: deal.location, currency: deal.currency, province: deal.province },
@@ -434,7 +440,7 @@ async function renderJob(deps: WorkerDeps, artifactId: string) {
     },
     result: run.result,
     input: run.input_snapshot.input,
-    policy: POLICY_V1,
+    policy,
     assumptions: run.input_snapshot.assumptions.map((x) => ({ ...x, unit: (FIELD_BY_KEY.get(x.fieldKey)?.unit ?? "$") as FieldUnit })),
     notFound: run.input_snapshot.notFound ?? [],
     decision: decision

@@ -294,6 +294,7 @@ const EN = {
   "run.outOfDate": (p) => `Run ${p.n} is out of date.`,
   "run.outOfDateBody": "Its figures are shown as they were; run again before deciding.",
   "run.verdictLabel": (p) => `Verdict · Run ${p.n} · ${p.policy}`,
+  "run.draftPolicy": "Draft policy, not signed by credit",
   "run.memo": "Generate IC memo",
   "run.decide": "Record decision",
   "run.explore": "Explore changes",
@@ -774,6 +775,7 @@ const FR: Record<Key, Entry> = {
   "run.outOfDate": (p) => `L'analyse ${p.n} est périmée.`,
   "run.outOfDateBody": "Ses chiffres sont affichés tels qu'ils étaient ; relancez l'analyse avant de décider.",
   "run.verdictLabel": (p) => `Verdict · Analyse ${p.n} · ${p.policy}`,
+  "run.draftPolicy": "Politique provisoire, non approuvée par le crédit",
   "run.memo": "Générer le mémo du comité",
   "run.decide": "Consigner la décision",
   "run.explore": "Explorer des variantes",
@@ -977,7 +979,7 @@ const FR_FIELDS: Record<string, string> = {
   mezz_rate_pct: "Taux du prêt mezzanine", mezz_amort_years: "Amortissement du prêt mezzanine", mezz_io_months: "Période d'intérêts seulement (mezzanine)",
   equity_amount: "Fonds propres déclarés", refinance_month: "Mois du refinancement", refinance_amount: "Montant du refinancement",
   refinance_ltv_pct: "Ratio prêt-valeur du refinancement", refinance_rate_pct: "Taux du refinancement", refinance_amort_years: "Amortissement du refinancement",
-  refinance_io_months: "Période d'intérêts seulement (refinancement)", lp_share_pct: "Part des commanditaires", preferred_return_pct: "Rendement privilégié",
+  refinance_and_hold: "Conserver et refinancer (sans vente)", refinance_io_months: "Période d'intérêts seulement (refinancement)", lp_share_pct: "Part des commanditaires", preferred_return_pct: "Rendement privilégié",
   gp_promote_pct: "Intéressement du commandité au-delà du rendement privilégié", stated_total_cost: "Coût total déclaré du projet",
   stated_ltc_pct: "Ratio prêt-coût déclaré", stated_interest_reserve: "Réserve d'intérêts déclarée",
 };
@@ -1010,6 +1012,7 @@ const FR_ABSENT: Record<string, string> = {
   refinance_amount: "établi selon le ratio prêt-valeur",
   refinance_ltv_pct: "établi selon le montant",
   refinance_io_months: "amortissement dès le refinancement",
+  refinance_and_hold: "le projet est vendu à la fin de la détention",
   lp_share_pct: "aucun partage entre commanditaires et commandité",
   stated_total_cost: "rien à vérifier",
   stated_ltc_pct: "rien à vérifier",
@@ -1077,6 +1080,13 @@ const FR_METRICS: Record<string, [string, string]> = {
   gp_promote: ["Intéressement du commandité", "distributions du commandité au-delà de sa quote-part"],
   stabilization_month: ["Mois de stabilisation", "construction + période de location"],
   sale_month: ["Mois de la vente", "stabilisation + 12 x années de détention - 1"],
+  refinance_cash_returned: ["Encaisse remise au refinancement", "nouveau prêt - remboursement du solde du prêt principal ; un montant négatif signifie qu'il a fallu injecter des fonds"],
+  cash_left_in_deal: ["Encaisse restée dans le projet", "apports en fonds propres - encaisse remise au refinancement ; 0 ou moins signifie que tous les fonds propres ont été récupérés"],
+  dcr_after_refinance: ["Couverture après refinancement (RCSD)", "RNE des 12 mois suivant le mois du refinancement / service de la dette amortissable de toute la dette en vigueur durant ces mois"],
+  cash_on_cash_after_refinance: ["Rendement en espèces après refinancement", "(RNE - service de la dette réellement dû) sur les 12 mois suivant le refinancement / encaisse restée dans le projet"],
+  stated_value: ["Valeur déclarée (non réalisée, pas une vente)", "RNE de la dernière année de détention / taux de sortie, sans frais de vente"],
+  unrealized_equity_multiple: ["Multiple des fonds propres (non réalisé, pas une vente)", "(distributions d'exploitation + refinancement + distribution non réalisée) / apports"],
+  unrealized_equity_irr: ["TRI des fonds propres (non réalisé, pas une vente)", "taux qui annule la VAN des flux datés des fonds propres, avec le flux non réalisé"],
 };
 const STRESS: Record<string, [string, string]> = {
   base: ["Base case", "Scénario de base"],
@@ -1094,6 +1104,8 @@ const GATES: Record<string, [string, string]> = {
   development_spread: ["Development spread", "Écart de développement"],
   stressed_sizing_dscr: ["Sizing DSCR, combined stress", "RCSD de dimensionnement, stress combiné"],
   stressed_equity_multiple: ["Equity multiple, combined stress", "Multiple des fonds propres, stress combiné"],
+  dcr_after_refinance: ["Coverage after refinance (DCR)", "Couverture après refinancement (RCSD)"],
+  stressed_unrealized_equity_multiple: ["Equity multiple (unrealized), combined stress", "Multiple des fonds propres (non réalisé), stress combiné"],
 };
 const DRIVERS_L: Record<string, [string, string]> = {
   exitCapBps: ["Exit cap rate", "Taux de sortie"],
@@ -1148,6 +1160,11 @@ const FR_REASONS: [RegExp, string | ((m: RegExpMatchArray) => string)][] = [
   [/^The equity cash flows have no rate of return \(no sign change\)\.$/, "Les flux des fonds propres n'ont pas de taux de rendement (aucun changement de signe)."],
   [/^The equity cash flows have (\d+) IRRs \((.+)\), so no single IRR is meaningful\.$/, (m) => `Les flux des fonds propres ont ${m[1]} TRI (${m[2]}) ; aucun TRI unique n'est significatif.`],
   [/^No refinance\.$/, "Aucun refinancement."],
+  [/^A deal that is kept and refinanced needs its refinance: the month, the amount or loan-to-value, the rate and the amortization\.$/, "Un projet conservé et refinancé exige son refinancement : le mois, le montant ou le ratio prêt-valeur, le taux et l'amortissement."],
+  [/^The deal is kept and refinanced, not sold\.$/, "Le projet est conservé et refinancé, non vendu."],
+  [/^No debt is in force after the refinance\.$/, "Aucune dette n'est en vigueur après le refinancement."],
+  [/^Cash left in the deal is 0 or below, so all of the equity has come back and there is nothing left to earn on\.$/, "L'encaisse restée dans le projet est de 0 ou moins : tous les fonds propres sont revenus et il ne reste rien sur quoi gagner un rendement."],
+  [/^Only (\d+) months remain before the end of the hold, so this uses them, scaled to a year\.$/, (m) => `Il ne reste que ${m[1]} mois avant la fin de la détention ; ils sont utilisés ici, ramenés à une année.`],
   [/^The program has no dwelling units\.$/, "Le programme ne compte aucun logement."],
   [/^No LP\/GP split\.$/, "Aucun partage commanditaires-commandité."],
   [/^Deal returns are not meaningful\.$/, "Les rendements du projet ne sont pas significatifs."],
@@ -1461,6 +1478,10 @@ export function verdictText(i: I18n, v: VerdictLike, checks: CheckLike[], solo =
   return { headline: plainTerm(i.lang, r.headline), explanation: plainTerm(i.lang, r.explanation) };
 }
 
+/** "five" and "four" are spelled out as the engine does, so a v1 verdict's other counts stay digits. */
+const countWord = (n: number, total: number) => (n === 5 ? "five" : n === 4 && total === 4 ? "four" : String(n));
+const frCount = (n: number, total: number) => (n === 5 ? "cinq" : n === 4 && total === 4 ? "quatre" : String(n));
+
 function verdictTextRaw(i: I18n, v: VerdictLike, checks: CheckLike[], solo: boolean): { headline: string; explanation: string } {
   if (i.lang === "en") {
     const failed = v.gates.filter((g) => g.status === "failed");
@@ -1469,7 +1490,7 @@ function verdictTextRaw(i: I18n, v: VerdictLike, checks: CheckLike[], solo: bool
     const errors = checks.filter((c) => c.severity === "error");
     switch (v.code) {
       case "APPROVE":
-        return { headline: measured === v.gates.length ? "All five gates pass." : `All ${measured} applicable gates pass.`, explanation: "The deal clears every return hurdle and holds its coverage under combined stress." };
+        return { headline: measured === v.gates.length ? `All ${countWord(measured, v.gates.length)} gates pass.` : `All ${measured} applicable gates pass.`, explanation: "The deal clears every return hurdle and holds its coverage under combined stress." };
       case "APPROVE_WITH_CONDITIONS":
         return { headline: `${failed.length} ${s(failed.length, "gate fails", "gates fail")}. ${solo ? "You set the conditions." : "The committee sets conditions."}`, explanation: `Failing: ${failed.map((g) => g.label).join("; ")}.` };
       case "NOT_EVALUATED":
@@ -1481,7 +1502,7 @@ function verdictTextRaw(i: I18n, v: VerdictLike, checks: CheckLike[], solo: bool
             explanation: v.hardFailReasons.join(" "),
           };
         }
-        return { headline: failed.length === measured ? `All ${measured === 5 ? "five" : measured} gates fail.` : `${failed.length} of ${measured} gates fail.`, explanation: `Failing: ${failed.map((g) => g.label).join("; ")}.` };
+        return { headline: failed.length === measured ? `All ${countWord(measured, v.gates.length)} gates fail.` : `${failed.length} of ${measured} gates fail.`, explanation: `Failing: ${failed.map((g) => g.label).join("; ")}.` };
     }
   }
   const failed = v.gates.filter((g) => g.status === "failed").map((g) => i.L.gate(g.key, g.label));
@@ -1491,7 +1512,7 @@ function verdictTextRaw(i: I18n, v: VerdictLike, checks: CheckLike[], solo: bool
   switch (v.code) {
     case "APPROVE":
       return {
-        headline: measured === v.gates.length ? "Les cinq seuils sont respectés." : `Les ${measured} seuils applicables sont respectés.`,
+        headline: measured === v.gates.length ? `Les ${frCount(measured, v.gates.length)} seuils sont respectés.` : `Les ${measured} seuils applicables sont respectés.`,
         explanation: "Le projet franchit tous les seuils de rendement et maintient sa couverture sous le stress combiné.",
       };
     case "APPROVE_WITH_CONDITIONS":
@@ -1509,7 +1530,7 @@ function verdictTextRaw(i: I18n, v: VerdictLike, checks: CheckLike[], solo: bool
         };
       }
       return {
-        headline: failed.length === measured ? (measured === 5 ? "Aucun des cinq seuils n'est respecté." : `Aucun des ${measured} seuils n'est respecté.`) : `${failed.length} seuils sur ${measured} ne sont pas respectés.`,
+        headline: failed.length === measured ? `Aucun des ${frCount(measured, v.gates.length)} seuils n'est respecté.` : `${failed.length} seuils sur ${measured} ne sont pas respectés.`,
         explanation: `Non respectés : ${failed.join(" ; ")}.`,
       };
   }
@@ -1537,6 +1558,7 @@ function checkTextRaw(i: I18n, c: CheckLike, ltcCeiling: number): string {
     case "noi_not_positive":
       return `Le RNE stabilisé est de ${$(a)}. Un projet déficitaire à la stabilisation ne peut pas être évalué par capitalisation.`;
     case "equity_wipeout":
+      if (c.message.startsWith("The stated value")) return `La valeur déclarée, ${$(a)}, ne couvre pas les ${$(e)} de dette en cours. Les fonds propres n'ont aucune valeur à la fin de la détention.`;
       return `Le produit net de la vente, ${$(a)}, ne rembourse pas les ${$(e)} de dette en cours. Les fonds propres sont anéantis à la sortie.`;
     case "mezz_interest_accrued":
       return `Des intérêts de ${$(a)} sur la mezzanine s'ajoutent à son solde une fois son engagement de ${$(e)} utilisé ; le solde de la mezzanine à la stabilisation est de ${$((e ?? NaN) + (a ?? NaN))}.`;

@@ -151,6 +151,23 @@ function operations(f: Formatter): Block {
   };
 }
 
+export const DRAFT_POLICY_LINE = "Draft policy, not signed by credit";
+
+/** A deal kept and refinanced has no sale: its reports lead with the hold measures and show the unrealized ones under their label. */
+const isHeld = (x: ArtifactInput) => x.input.exit === "refinance_hold";
+
+/** Under a draft policy, said once beside the verdict. */
+function draftLine(x: ArtifactInput): Block[] {
+  return x.policy.draft ? [{ type: "paragraph", text: DRAFT_POLICY_LINE }] : [];
+}
+
+/** The hold measures, then the unrealized multiple and IRR with the stated value, each under its own label. */
+function heldStats(f: Formatter, unrealized = true): { label: string; value: string }[] {
+  const item = (key: string) => ({ label: f.metricOf("base", key).label, value: f.metric("base", key) });
+  const hold = ["refinance_cash_returned", "cash_left_in_deal", "dcr_after_refinance", "cash_on_cash_after_refinance"].map(item);
+  return unrealized ? [...hold, ...["unrealized_equity_multiple", "unrealized_equity_irr", "stated_value"].map(item)] : hold;
+}
+
 function gates(f: Formatter, r: RunResult): Block {
   const label = { passed: "Passes", failed: "Fails", not_applicable: "Not applicable", not_evaluated: "Not evaluated" } as const;
   return {
@@ -166,12 +183,14 @@ function gates(f: Formatter, r: RunResult): Block {
   };
 }
 
-function stresses(f: Formatter, r: RunResult): Block {
+function stresses(f: Formatter, r: RunResult, held = false): Block {
+  // A held deal has no sale, so its stress table reads coverage after the refinance and the unrealized multiple instead.
+  const read = held ? ["sizing_dscr", "dcr_after_refinance", "unrealized_equity_multiple"] : ["sizing_dscr", "equity_multiple", "profit_on_cost"];
   return {
     type: "table",
     caption: "Stresses (each a full re-run of the model)",
-    columns: [{ label: "Scenario" }, { label: "Sizing DSCR", numeric: true }, { label: "Equity multiple", numeric: true }, { label: "Profit on cost", numeric: true }],
-    rows: r.scenarios.map((s) => [f.ident(s.label, `policy.stress.${s.key}`), f.metric(s.key, "sizing_dscr"), f.metric(s.key, "equity_multiple"), f.metric(s.key, "profit_on_cost")]),
+    columns: [{ label: "Scenario" }, ...read.map((k) => ({ label: k === "sizing_dscr" ? "Sizing DSCR" : f.metricOf("base", k).label, numeric: true }))],
+    rows: r.scenarios.map((s) => [f.ident(s.label, `policy.stress.${s.key}`), ...read.map((k) => f.metric(s.key, k))]),
     strong: [r.scenarios.length - 1],
   };
 }
@@ -362,17 +381,20 @@ export function buildModel(x: ArtifactInput): DocModel {
     explanation: f.text(r.verdict.explanation, "verdict.explanation"),
   };
   const blocks: Block[] = [];
+  const held = isHeld(x);
   if (x.kind === "ic_memo") {
-    blocks.push(verdict, ...sponsorStatedBlocks(f, x));
+    blocks.push(verdict, ...draftLine(x), ...sponsorStatedBlocks(f, x));
     blocks.push({
       type: "stats",
-      items: [
-        { label: "Total cost", value: f.metric("base", "total_development_cost") },
-        { label: "Yield on cost", value: f.metric("base", "yield_on_cost") },
-        { label: "Sizing DSCR", value: f.metric("base", "sizing_dscr") },
-        { label: "Equity multiple", value: f.metric("base", "equity_multiple") },
-        { label: "Equity IRR", value: f.metric("base", "equity_irr") },
-      ],
+      items: held
+        ? heldStats(f)
+        : [
+            { label: "Total cost", value: f.metric("base", "total_development_cost") },
+            { label: "Yield on cost", value: f.metric("base", "yield_on_cost") },
+            { label: "Sizing DSCR", value: f.metric("base", "sizing_dscr") },
+            { label: "Equity multiple", value: f.metric("base", "equity_multiple") },
+            { label: "Equity IRR", value: f.metric("base", "equity_irr") },
+          ],
     });
     if (x.decision) {
       blocks.push({ type: "heading", text: "Committee decision" });
@@ -380,25 +402,32 @@ export function buildModel(x: ArtifactInput): DocModel {
       blocks.push({ type: "paragraph", text: `${x.decision.decision.replace(/_/g, " ")}: ${f.ident(x.decision.rationale, "decision.rationale")}` });
       if (x.decision.conditions) blocks.push({ type: "paragraph", text: `Conditions: ${f.ident(x.decision.conditions, "decision.conditions")}` });
     }
-    blocks.push(sourcesAndUses(f, x), ...mezzAccrual(f, r), revenueProgram(f, x), operations(f), gates(f, r), stresses(f, r), annual(f, r, false));
+    blocks.push(sourcesAndUses(f, x), ...mezzAccrual(f, r), revenueProgram(f, x), operations(f), gates(f, r), stresses(f, r, held), annual(f, r, false));
     blocks.push({ type: "heading", text: "Checks" }, checks(f, r));
     blocks.push(...notFoundBlocks(x), inputsAppendix(f, x));
   } else if (x.kind === "build_decision") {
-    blocks.push(verdict, ...sponsorStatedBlocks(f, x));
+    blocks.push(verdict, ...draftLine(x), ...sponsorStatedBlocks(f, x));
     blocks.push({
       type: "stats",
-      items: [
-        { label: "Yield on cost", value: f.metric("base", "yield_on_cost") },
-        { label: "Sizing DSCR (weakest year)", value: f.metric("base", "sizing_dscr") },
-        { label: "Equity multiple", value: f.metric("base", "equity_multiple") },
-      ],
+      items: held
+        ? [
+            ...heldStats(f, false),
+            { label: "Yield on cost", value: f.metric("base", "yield_on_cost") },
+            { label: "Sizing DSCR (weakest year)", value: f.metric("base", "sizing_dscr") },
+          ]
+        : [
+            { label: "Yield on cost", value: f.metric("base", "yield_on_cost") },
+            { label: "Sizing DSCR (weakest year)", value: f.metric("base", "sizing_dscr") },
+            { label: "Equity multiple", value: f.metric("base", "equity_multiple") },
+          ],
     });
     blocks.push(...weakestStress(f, r));
     // An approved deal has no gate to move; its stresses stand in for the section.
-    blocks.push(...(r.verdict.code === "APPROVE" ? [stresses(f, r)] : changeTheAnswer(f, x)));
+    blocks.push(...(r.verdict.code === "APPROVE" ? [stresses(f, r, held)] : changeTheAnswer(f, x)));
     blocks.push(...notFoundBlocks(x), { type: "paragraph", muted: true, text: "Every input and its source is listed in the IC memo and the lender package." });
   } else {
-    blocks.push(verdict, ...sponsorStatedBlocks(f, x));
+    blocks.push(verdict, ...draftLine(x), ...sponsorStatedBlocks(f, x));
+    if (held) blocks.push({ type: "stats", items: heldStats(f) });
     const i = x.input;
     const debtRows: string[][] = [];
     if (i.senior.amount > 0) {
@@ -422,7 +451,7 @@ export function buildModel(x: ArtifactInput): DocModel {
       ["Break-even occupancy", f.metric("base", "break_even_occupancy")],
     );
     blocks.push({ type: "table", caption: "Debt and coverage", columns: [{ label: "Term" }, { label: "Value", numeric: true }], rows: debtRows });
-    blocks.push(sourcesAndUses(f, x), ...mezzAccrual(f, r), operations(f), annual(f, r, true), stresses(f, r));
+    blocks.push(sourcesAndUses(f, x), ...mezzAccrual(f, r), operations(f), annual(f, r, true), stresses(f, r, held));
     blocks.push({ type: "heading", text: "Checks" }, checks(f, r));
     blocks.push(...notFoundBlocks(x), inputsAppendix(f, x));
   }

@@ -1,7 +1,7 @@
 import { Link } from "@tanstack/react-router";
 import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
 import { useState } from "react";
-import { FIELD_BY_KEY } from "@agir/contracts";
+import { FIELD_BY_KEY, POLICIES } from "@agir/contracts";
 import { api, type Metric, type RunView } from "../api";
 import { Banner, canEdit, DealHeader, ErrorText, Glossary, MetricValue, StatusTag, useDeal, useSession, VerdictBadge } from "../components/ui";
 import * as I from "../components/icons";
@@ -10,6 +10,13 @@ import { checkText, dealStatus, useI18n, verdictText } from "../i18n";
 export const HEADLINE = [
   "total_development_cost", "capitalized_interest", "stabilized_noi", "yield_on_cost", "development_spread", "exit_value", "development_profit",
   "profit_on_cost", "loan_to_cost", "required_equity", "debt_yield", "sizing_dscr", "contractual_dscr", "equity_multiple", "equity_irr", "cost_per_unit",
+];
+
+/** A deal that is kept and refinanced leads with its hold measures; the sale figures are not applicable. */
+const HELD_HEADLINE = [
+  "total_development_cost", "capitalized_interest", "stabilized_noi", "yield_on_cost", "development_spread", "refinance_cash_returned", "cash_left_in_deal",
+  "dcr_after_refinance", "cash_on_cash_after_refinance", "stated_value", "unrealized_equity_multiple", "unrealized_equity_irr",
+  "loan_to_cost", "required_equity", "debt_yield", "sizing_dscr", "contractual_dscr", "cost_per_unit",
 ];
 
 export function useRun(runId: string | undefined) {
@@ -79,6 +86,9 @@ export function Run({ dealId }: { dealId: string }) {
   const base = v.result.scenarios[0]!;
   const metric = (k: string, s = base) => s.metrics.find((m) => m.key === k)!;
   const vt = verdictText(i, v.result.verdict, v.result.checks, solo);
+  const held = base.metrics.some((m) => m.key === "stated_value");
+  const headline = held ? HELD_HEADLINE : HEADLINE;
+  const stressKeys = held ? ["sizing_dscr", "dcr_after_refinance", "unrealized_equity_multiple"] : ["sizing_dscr", "equity_multiple", "profit_on_cost"];
   return (
     <>
       <DealHeader o={o} active="run" />
@@ -92,6 +102,7 @@ export function Run({ dealId }: { dealId: string }) {
       <section className="panel spread" aria-label="Verdict" style={{ padding: "28px 32px", alignItems: "flex-end", gap: 32 }}>
         <div className="stack" style={{ gap: 12, maxWidth: 760 }}>
           <div className="row"><VerdictBadge code={v.result.verdict.code} /><span className="label">{t("run.verdictLabel", { n: v.number, policy: v.policyVersion })}</span></div>
+          {POLICIES[v.policyVersion]?.draft && <p className="label">{t("run.draftPolicy")}</p>}
           <p className="h-display">{vt.headline}</p>
           <p className="muted" style={{ fontSize: 16 }}>{vt.explanation}</p>
         </div>
@@ -127,14 +138,14 @@ export function Run({ dealId }: { dealId: string }) {
           <div className="stack">
             <h2 className="h-section">{t("run.stresses")}</h2>
             <table className="tbl">
-              <thead><tr><th>{t("run.col.scenario")}</th><th className="r">{L.metric("sizing_dscr")}</th><th className="r">{L.metric("equity_multiple")}</th><th className="r">{L.metric("profit_on_cost")}</th></tr></thead>
+              <thead><tr><th>{t("run.col.scenario")}</th>{stressKeys.map((k) => <th key={k} className="r">{L.metric(k)}</th>)}</tr></thead>
               <tbody className="num">
                 {v.result.scenarios.map((s) => (
                   <tr key={s.key} className={s.key === "combined" ? "emph" : ""}>
                     <th scope="row" style={{ fontFamily: "var(--sans)", fontWeight: s.key === "base" || s.key === "combined" ? 600 : 400 }}>
                       {L.stress(s.key, s.label)}{s.key === "combined" && <span className="faint" style={{ fontWeight: 400 }}>{t("run.readByGates")}</span>}
                     </th>
-                    {["sizing_dscr", "equity_multiple", "profit_on_cost"].map((k) => { const m = metric(k, s); return <td key={k} className="r"><MetricValue {...m} /></td>; })}
+                    {stressKeys.map((k) => { const m = metric(k, s); return <td key={k} className="r"><MetricValue {...m} /></td>; })}
                   </tr>
                 ))}
               </tbody>
@@ -173,7 +184,7 @@ export function Run({ dealId }: { dealId: string }) {
             <h2 className="h-section">{t("run.keyFigures")}</h2>
             <table className="tbl">
               <tbody>
-                {HEADLINE.map((k) => {
+                {headline.map((k) => {
                   const m = metric(k);
                   return (
                     <tr key={k}>

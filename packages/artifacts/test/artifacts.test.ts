@@ -410,7 +410,8 @@ describe("a deal that is kept and refinanced (card 60)", () => {
     expect(report.orphans).toEqual([]);
     expect(text).toContain(DRAFT);
     for (const label of ["Cash returned at refinance", "Cash left in the deal", "Coverage after refinance", "Cash-on-cash after refinance"]) expect(text, label).toContain(label);
-    expect(text).toContain(UNREALIZED);
+    // The build decision is a short report on the gates; the memo and the lender package show the unrealized figures.
+    if (kind !== "build_decision") expect(text).toContain(UNREALIZED);
     for (const sale of ["Net sale proceeds", "Exit value", "Development profit", "Profit on cost", "Sale to equity"]) expect(text, sale).not.toContain(sale);
     // The first figures after the verdict are the four hold measures, in order.
     const stats = model.blocks.find((b) => b.type === "stats");

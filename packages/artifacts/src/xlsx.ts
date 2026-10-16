@@ -1,5 +1,5 @@
 import { FIELD_BY_KEY, placeLabel } from "@agir/contracts";
-import { confirmationLabel, notFoundSentence, type ArtifactInput } from "./model.ts";
+import { confirmationLabel, DRAFT_POLICY_LINE, notFoundSentence, type ArtifactInput } from "./model.ts";
 
 /**
  * The model export: every number of the run as a number, never as text, so an
@@ -26,6 +26,7 @@ export async function renderXlsx(x: ArtifactInput): Promise<Uint8Array> {
   summary.addRow(["Currency", x.deal.currency ?? "Not stated"]);
   summary.addRow([`Run ${x.run.runNumber}`, x.run.createdAt]);
   summary.addRow(["Engine", x.run.engineVersion, "Policy", x.run.policyVersion]);
+  if (x.policy.draft) summary.addRow([DRAFT_POLICY_LINE]);
   summary.addRow(["Input hash", x.run.inputHash]);
   summary.addRow(["Result hash", x.run.resultHash]);
   summary.addRow([]);
@@ -64,17 +65,19 @@ export async function renderXlsx(x: ArtifactInput): Promise<Uint8Array> {
   annual.columns.forEach((c) => (c.width = 18));
 
   const ledger = wb.addWorksheet("Monthly ledger");
-  head(ledger, ["Month", "Phase", "Cost draw", "Equity draw", "Debt draw", "Capitalized interest", "EGI", "Operating costs", "NOI", "Debt service", "Debt balance", "Refinance net", "Sale to equity"]);
+  // A held deal has no sale, so its ledger has no sale column.
+  const held = x.input.exit === "refinance_hold";
+  head(ledger, ["Month", "Phase", "Cost draw", "Equity draw", "Debt draw", "Capitalized interest", "EGI", "Operating costs", "NOI", "Debt service", "Debt balance", "Refinance net", ...(held ? [] : ["Sale to equity"])]);
   for (const m of r.ledger) {
-    const row = ledger.addRow([m.month, m.phase, m.costDraw, m.equityDraw, m.debtDraw, m.capitalizedInterest, m.egi, m.opex, m.noi, m.debtService, m.debtBalance, m.refinanceNet, m.saleNet]);
-    for (let c = 3; c <= 13; c++) row.getCell(c).numFmt = fmt("$");
+    const row = ledger.addRow([m.month, m.phase, m.costDraw, m.equityDraw, m.debtDraw, m.capitalizedInterest, m.egi, m.opex, m.noi, m.debtService, m.debtBalance, m.refinanceNet, ...(held ? [] : [m.saleNet])]);
+    for (let c = 3; c <= (held ? 12 : 13); c++) row.getCell(c).numFmt = fmt("$");
   }
   ledger.columns.forEach((c) => (c.width = 15));
 
   const flows = wb.addWorksheet("Equity flows");
   head(flows, ["Month", "Years from start", "Kind", "Amount"]);
   for (const f of r.equityFlows) {
-    const row = flows.addRow([f.month, f.t, f.kind, f.amount]);
+    const row = flows.addRow([f.month, f.t, f.kind === "unrealized" ? "Unrealized, not a sale" : f.kind, f.amount]);
     row.getCell(4).numFmt = fmt("$");
   }
 

@@ -52,7 +52,16 @@ export function runChecks(input: EngineInput, L: Ledger, policy: Policy, contrac
       actual: L.year1.noi,
     });
   }
-  if (L.wipeout) {
+  if (L.wipeout && input.exit === "refinance_hold") {
+    out.push({
+      key: "equity_wipeout",
+      kind: "bound",
+      severity: "error",
+      message: `The stated value of ${money(L.statedValue ?? 0)} does not cover the ${money(L.payoffAtSale)} of debt outstanding. Equity has no value at the end of the hold.`,
+      expected: L.payoffAtSale,
+      actual: L.statedValue ?? 0,
+    });
+  } else if (L.wipeout) {
     out.push({
       key: "equity_wipeout",
       kind: "bound",

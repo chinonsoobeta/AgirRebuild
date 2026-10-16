@@ -45,6 +45,7 @@ function labelFor(def: FieldDef, itemKey?: string | null) {
 const PROBLEM_FIELD: [RegExp, string][] = [
   [/^refinance month /, "refinance_month"],
   [/^give the refinance /, "refinance_amount"],
+  [/^A deal that is kept and refinanced /, "refinance_month"],
 ];
 
 export function assemble(rows: readonly AssumptionRow[]): { readiness: Readiness; input: EngineInput | null } {
@@ -212,6 +213,7 @@ export function assemble(rows: readonly AssumptionRow[]): { readiness: Readiness
           },
         }
       : {}),
+    ...(n("refinance_and_hold") === 1 ? { exit: "refinance_hold" as const } : {}),
     ...(has("lp_share_pct")
       ? { waterfall: { lpSharePct: n("lp_share_pct"), preferredReturnPct: n("preferred_return_pct"), gpPromotePct: n("gp_promote_pct") } }
       : {}),

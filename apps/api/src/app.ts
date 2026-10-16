@@ -1,7 +1,7 @@
 import { Hono, type Context } from "hono";
 import { getCookie, setCookie, deleteCookie } from "hono/cookie";
 import { z } from "zod";
-import { COUNTRIES, CURRENCIES, FIELDS, FIELD_GROUP_LABELS, METRICS, POLICY_V1, PROVINCE_CODES, REVIEW_MODES, type EngineInput } from "@agir/contracts";
+import { COUNTRIES, CURRENCIES, FIELDS, FIELD_GROUP_LABELS, METRICS, POLICIES, POLICY_V1, PROVINCE_CODES, REVIEW_MODES, type EngineInput, type Policy } from "@agir/contracts";
 import { asUser, type BlobStore, type Db } from "@agir/db";
 import { breakeven, DRIVERS, EngineInputError, explore, grid, tornado, type DriverKey, type Shock } from "@agir/engine";
 import { kindOf } from "@agir/extraction";
@@ -121,7 +121,7 @@ export function createApp({ db, store, secureCookies, demoSignIn = false }: AppD
   });
 
   app.get("/api/catalog", (c) =>
-    c.json({ fields: FIELDS, groups: FIELD_GROUP_LABELS, metrics: METRICS, policy: POLICY_V1 }),
+    c.json({ fields: FIELDS, groups: FIELD_GROUP_LABELS, metrics: METRICS, policy: POLICY_V1, policies: POLICIES }),
   );
 
   // ---- Workspaces -----------------------------------------------------------------
@@ -380,21 +380,29 @@ export function createApp({ db, store, secureCookies, demoSignIn = false }: AppD
   const shockSchema = z.object(Object.fromEntries(DRIVERS.map((d) => [d.key, z.number().finite().min(d.min).max(d.max).optional()]))) as z.ZodType<Shock>;
   const driverKey = z.enum(DRIVERS.map((d) => d.key as string) as [string, ...string[]]).transform((k) => k as DriverKey);
   const metricKey = z.enum(METRICS.map((m) => m.key) as [string, ...string[]]);
-  const runInput = async (c: Context<Env>): Promise<EngineInput> => {
-    const [r] = await as(c, (tx) => tx.query<{ input_snapshot: { input: EngineInput } }>(`select input_snapshot from runs where id = $1`, [c.req.param("id")]));
+  /** A stored run's input, and the policy that run was made under. */
+  const runInput = async (c: Context<Env>): Promise<EngineInput> => (await runInputAndPolicy(c)).input;
+  const runInputAndPolicy = async (c: Context<Env>): Promise<{ input: EngineInput; policy: Policy }> => {
+    const [r] = await as(c, (tx) => tx.query<{ input_snapshot: { input: EngineInput }; policy_version: string }>(`select input_snapshot, policy_version from runs where id = $1`, [c.req.param("id")]));
     if (!r) throw new HttpError(404, "Run not found");
-    return r.input_snapshot.input;
+    const policy = POLICIES[r.policy_version];
+    if (!policy) throw new HttpError(409, `This run was made under policy ${r.policy_version}, which this build does not have.`);
+    return { input: r.input_snapshot.input, policy };
   };
   app.get("/api/sensitivity/drivers", (c) => c.json(DRIVERS));
   app.post("/api/runs/:id/explore", async (c) => {
     const { shock } = z.object({ shock: shockSchema }).parse(await c.req.json());
-    return c.json({ scratch: true, ...explore(await runInput(c), POLICY_V1, shock) });
+    const { input, policy } = await runInputAndPolicy(c);
+    return c.json({ scratch: true, ...explore(input, policy, shock) });
   });
   app.post("/api/runs/:id/tornado", async (c) => {
     const { metric } = z.object({ metric: metricKey }).parse(await c.req.json());
     return c.json({ scratch: true, metric, ...tornado(await runInput(c), metric) });
   });
-  app.post("/api/runs/:id/breakeven", async (c) => c.json({ scratch: true, ...breakeven(await runInput(c), POLICY_V1) }));
+  app.post("/api/runs/:id/breakeven", async (c) => {
+    const { input, policy } = await runInputAndPolicy(c);
+    return c.json({ scratch: true, ...breakeven(input, policy) });
+  });
   app.post("/api/runs/:id/grid", async (c) => {
     const b = z.object({ metric: metricKey, x: driverKey, y: driverKey, steps: z.number().int().min(3).max(9).default(5) }).parse(await c.req.json());
     if (b.x === b.y) throw new HttpError(422, "Choose two different drivers.");

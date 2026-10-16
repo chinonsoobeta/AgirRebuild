@@ -790,7 +790,8 @@ describe("exit by refinancing and holding (card 60)", () => {
     expect(r.equityFlows.filter((f) => f.kind === ("sale" as string))).toEqual([]);
     const un = r.equityFlows.filter((f) => f.kind === ("unrealized" as string));
     expect(un).toHaveLength(1);
-    expect(un[0]).toMatchObject({ month: 35, t: 3, amount: 280_000 });
+    expect(un[0]).toMatchObject({ month: 35, t: 3 });
+    expect(un[0]!.amount).toBeCloseTo(280_000, 6);
     expect(r.ledger.every((row) => row.saleNet === 0)).toBe(true);
     expect(r.checks.map((c) => c.key)).not.toContain("equity_wipeout");
   });
@@ -813,10 +814,10 @@ describe("exit by refinancing and holding (card 60)", () => {
     const keys = r.scenarios[0]!.metrics.map((m) => m.key);
     expect(keys.slice(-HOLD_METRICS.length)).toEqual(HOLD_METRICS);
     expect(METRICS.map((m) => m.key).slice(-HOLD_METRICS.length)).toEqual(HOLD_METRICS);
-    expect(keys.slice(0, -HOLD_METRICS.length)).toEqual(METRICS.map((m) => m.key).slice(0, -HOLD_METRICS.length));
-    // Everything up to T is the same ledger as the sale of the same deal.
+    // Everything up to T is the same ledger as the sale of the same deal, with the same metrics in the same places.
     const { exit: _e, ...asSale } = byAmount();
     const sold = underwrite(asSale, POLICY_V1);
+    expect(keys.slice(0, -HOLD_METRICS.length)).toEqual(sold.scenarios[0]!.metrics.map((m) => m.key));
     expect(r.annual).toEqual(sold.annual);
     for (const k of ["total_development_cost", "required_equity", "stabilized_noi", "sizing_dscr", "contractual_dscr", "refinance_net_proceeds", "debt_yield", "cumulative_cash_shortfall"]) {
       expect(metric(r, k), k).toEqual(metric(sold, k));
