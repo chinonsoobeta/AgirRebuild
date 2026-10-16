@@ -1845,5 +1845,52 @@ describe("card 63: a person's decision stands through a later, unrelated reconci
     expect((await events(d, "exit_cap_rate_pct")).filter((e: any) => e.action === "reopened")).toHaveLength(1);
   });
   // card 63 rule 3 tests
+  // Rule 3: confirming a value no document states any more makes it the person's own.
+  const exitCapWaiting = async (w: string, name: string) => {
+    const d = await mkDeal(w, name);
+    await upload(d, "notes.txt", "Notes\nExit cap rate: 5.25%\n");
+    await act(alice, await byField(d, "exit_cap_rate_pct"), { action: "approve" });
+    await retire(d, "notes.txt");
+    expect(await byField(d, "exit_cap_rate_pct")).toMatchObject({ status: "needs_review", value: 5.25, sources: [] });
+    return d;
+  };
+
+  test("confirming a value whose document went, in solo review, records the person's own value, sponsor-stated, and it stays", async () => {
+    const d = await exitCapWaiting(sw, "Stands Confirm Solo");
+    await act(alice, await byField(d, "exit_cap_rate_pct"), { action: "approve", reason: "Confirmed with the lender" });
+    expect(await byField(d, "exit_cap_rate_pct")).toMatchObject({ status: "approved", value: 5.25, sponsorStated: true });
+    expect(await stored(d, "exit_cap_rate_pct")).toMatchObject({ source_kind: "analyst", reason: "Confirmed with the lender" });
+    const before = await stored(d, "exit_cap_rate_pct");
+    await unrelated(d, 1);
+    await unrelated(d, 2);
+    expect(await stored(d, "exit_cap_rate_pct")).toEqual(before);
+  });
+
+  test("confirming such a material value in team review waits for a second person, and then stands", async () => {
+    const d = await exitCapWaiting(tw, "Stands Confirm Team");
+    await act(alice, await byField(d, "exit_cap_rate_pct"), { action: "approve", reason: "Confirmed with the lender" });
+    expect(await byField(d, "exit_cap_rate_pct")).toMatchObject({ status: "awaiting_second_approval", pendingValue: 5.25 });
+    await act(bob, await byField(d, "exit_cap_rate_pct"), { action: "second_approve" });
+    expect(await byField(d, "exit_cap_rate_pct")).toMatchObject({ status: "approved", value: 5.25 });
+    const before = await stored(d, "exit_cap_rate_pct");
+    await unrelated(d, 1);
+    expect(await stored(d, "exit_cap_rate_pct")).toEqual(before);
+  });
+
+  test("confirming such a value that is not material in team review approves it at once, as the person's own", async () => {
+    const d = await waiting(tw, "Stands Confirm Team Plain");
+    await act(alice, await byField(d, "land_cost"), { action: "approve", reason: "Seen in the closing statement" });
+    expect(await byField(d, "land_cost")).toMatchObject({ status: "approved", value: 800000 });
+    expect(await stored(d, "land_cost")).toMatchObject({ source_kind: "analyst" });
+  });
+
+  test("a document that states another value reopens a confirmed value as a hand entry, naming it", async () => {
+    const d = await waiting(sw, "Stands Confirm Reopen");
+    await act(alice, await byField(d, "land_cost"), { action: "approve", reason: "Seen in the closing statement" });
+    await upload(d, "purchase.txt", "Purchase agreement\nLand cost: $850,000\n");
+    const a = await byField(d, "land_cost");
+    expect(a).toMatchObject({ status: "conflicting", value: 800000 });
+    expect(a.conflictValues).toEqual([{ value: 800000, documents: ["Entered by an analyst"] }, { value: 850000, documents: ["purchase.txt"] }]);
+  });
   // card 63 extension tests
 });
