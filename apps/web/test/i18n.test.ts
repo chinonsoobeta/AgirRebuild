@@ -255,7 +255,8 @@ describe("every sentence the engine's checks can produce has a French rendering"
     ["refinance and hold without a refinance", (d) => { d.exit = "refinance_hold"; }],
     ["LP share", (d) => { d.waterfall = { lpSharePct: 0, preferredReturnPct: 8, gpPromotePct: 20 }; }],
     ["preferred return", (d) => { d.waterfall = { lpSharePct: 90, preferredReturnPct: -1, gpPromotePct: 20 }; }],
-    ["GP promote", (d) => { d.waterfall = { lpSharePct: 90, preferredReturnPct: 8, gpPromotePct: 101 }; }],    ["property tax", (d) => { d.propertyTaxAnnual = -1; }],
+    ["GP promote", (d) => { d.waterfall = { lpSharePct: 90, preferredReturnPct: 8, gpPromotePct: 101 }; }],
+    ["property tax", (d) => { d.propertyTaxAnnual = -1; }],
     ["refinance insurance premium", (d) => { d.refinance = { month: 24, amount: 1_000, ratePct: 5, amortYears: 25, ioMonths: 0, insurancePremiumPct: 11 }; }],
   ];
   const EXTRA: [string, (d: EngineInput) => void][] = [
@@ -413,6 +414,12 @@ describe("card 61: Canadian cost lines and the insurance premium, in both langua
       expect(fr.L.absent(k), k).not.toBe(def.absentMeans);
     }
     expect(fr.L.help("property_tax_annual", null)).toMatch(/ratio des charges/);
+    // Audit: "redevances" and "droits" are plural, so the help and the meaning agree with them.
+    for (const k of ["development_charges", "land_transfer_tax"]) {
+      expect(fr.L.help(k, null), k).toBe("Si vos coûts indirects ou autres coûts les incluent déjà, ne les saisissez pas.");
+    }
+    expect(fr.L.absent("development_charges")).toBe("aucune redevance déclarée");
+    expect(fr.L.absent("land_transfer_tax")).toBe("aucun droit déclaré");
   });
 
   it("asks the quick-start questions in both languages, with a hint that says 0 is an answer", () => {
