@@ -1629,7 +1629,7 @@ function checkTextRaw(i: I18n, c: CheckLike, ltcCeiling: number): string {
 export type OverviewLike = {
   step: string;
   documents: { total: number; processing: number; failed: number };
-  review: { needsReview: number; conflicting: number; awaitingSecond: number; missing: number; impossible: number; status: string };
+  review: { approved: number; needsReview: number; conflicting: number; awaitingSecond: number; missing: number; impossible: number; status: string };
   run: { verdict: string; fresh: boolean } | null;
   decision: { decision: string } | null;
   reports: number;
@@ -1639,7 +1639,8 @@ export type OverviewLike = {
 export function dealStatus(i: I18n, o: OverviewLike, solo = false): { tone: "pass" | "review" | "stop" | "neutral"; text: string; next: string; blockedParts: string[] } {
   const { t, L } = i;
   const r = o.review;
-  if (o.documents.total === 0) return { tone: "neutral", text: t("status.noDocs"), next: t("next.upload"), blockedParts: [] };
+  // Documents are optional evidence: a deal with values and no documents is read from its values, as the server's overview does.
+  if (o.documents.total === 0 && r.approved + r.needsReview + r.conflicting + r.awaitingSecond === 0) return { tone: "neutral", text: t("status.noDocs"), next: t("next.upload"), blockedParts: [] };
   if (o.documents.processing > 0) {
     return {
       tone: "neutral",
