@@ -218,6 +218,9 @@ type AssumptionRowDb = {
   version: number;
 };
 
+/** What a settled value was when a label reopened it (card 58b), as the reopened event stores it. */
+type RestoreTo = { status: "approved" | "default_accepted"; value: number; reason: string | null; sources: AssumptionRowDb["sources"]; by_label: boolean };
+
 const same = (a: number | null, b: number | null) => a !== null && b !== null && Math.abs(a - b) <= 1e-9 * Math.max(1, Math.abs(a), Math.abs(b));
 
 /** What a reviewer sees of a row's sources, in an order that does not matter. */
@@ -290,12 +293,31 @@ export async function reconcileDeal(db: Db, dealId: string) {
     const byKey = new Map(existing.map((e) => [`${e.field_key}|${e.item_key}`, e]));
     const seen = new Set<string>();
     let changed = 0;
-    const log = async (id: string, action: string, from: string | null, to: string, fromV: number | null, toV: number | null, reason: string) => {
+    const log = async (id: string, action: string, from: string | null, to: string, fromV: number | null, toV: number | null, reason: string, restoreTo?: unknown) => {
       await tx.query(
-        `insert into assumption_events (assumption_id, deal_id, workspace_id, actor, action, from_status, to_status, from_value, to_value, reason)
-         values ($1,$2,$3,null,$4,$5,$6,$7,$8,$9)`,
-        [id, dealId, deal.workspace_id, action, from, to, fromV, toV, reason],
+        `insert into assumption_events (assumption_id, deal_id, workspace_id, actor, action, from_status, to_status, from_value, to_value, reason, restore_to)
+         values ($1,$2,$3,null,$4,$5,$6,$7,$8,$9,$10)`,
+        [id, dealId, deal.workspace_id, action, from, to, fromV, toV, reason, restoreTo === undefined ? null : JSON.stringify(restoreTo)],
       );
+    };
+    // A value a person's label reopened (card 58b) comes back when the label goes, if no person has acted on it since and
+    // nothing else disagrees. The latest reopen, and only if it recorded what the value was because of a label.
+    const restorable = new Map<string, RestoreTo>();
+    for (const r of await tx.query<{ assumption_id: string; restore_to: RestoreTo }>(
+      `select e.assumption_id, e.restore_to from assumption_events e join assumptions a on a.id = e.assumption_id
+       where a.deal_id = $1 and a.status = 'conflicting' and e.action = 'reopened' and e.restore_to is not null
+         and e.id = (select max(x.id) from assumption_events x where x.assumption_id = a.id and x.action = 'reopened')
+         and not exists (select 1 from assumption_events y where y.assumption_id = a.id and y.id > e.id and y.actor is not null)`,
+      [dealId],
+    )) if (r.restore_to.by_label) restorable.set(r.assumption_id, r.restore_to);
+    let restored = 0;
+    const restore = async (e: AssumptionRowDb, rt: RestoreTo, sources: unknown) => {
+      await tx.query(`update assumptions set status = $2, value = $3, reason = $4, sources = $5, conflict_values = null, version = version + 1, updated_at = now() where id = $1`, [
+        e.id, rt.status, rt.value, rt.reason, JSON.stringify(sources),
+      ]);
+      await log(e.id, "restored", "conflicting", rt.status, e.value, rt.value, `The label that disagreed was removed; the value is back as it was ${rt.status === "approved" ? "approved" : "accepted"}`);
+      restored++;
+      changed++;
     };
     // A proposal meets the existing row whose item name folds equal (task 60d); when several do, it meets none of them and readiness blocks the run.
     // A row with the proposal's own name comes first, whatever its status, so a value a person rejected stays rejected (task 60d audit).
@@ -336,6 +358,20 @@ export async function reconcileDeal(db: Db, dealId: string) {
       const agreesWithStanding =
         (p.status === "needs_review" && same(p.value, e.value)) ||
         (p.foreign.length > 0 && foreignKnown && p.values.length === 1 && same(p.values[0]!.value, e.value));
+      const rt = restorable.get(e.id);
+      if (rt && e.status === "conflicting") {
+        // The approved branch's test, against the value as it was settled.
+        const knownThen = rt.sources.map((x) => x.value);
+        const foreignKnownThen = p.foreign.every((f) => rt.sources.some((x) => x.unit_seen === f.unitSeen && same(x.value, f.value)));
+        const agreesThen =
+          (p.status === "needs_review" && same(p.value, rt.value)) ||
+          (p.foreign.length > 0 && foreignKnownThen && p.values.length === 1 && same(p.values[0]!.value, rt.value));
+        const nothingNewThen = e.source_kind !== "document" && foreignKnownThen && p.values.every((v) => knownThen.some((k) => same(k, v.value)));
+        if (agreesThen || nothingNewThen) {
+          await restore(e, rt, agreesThen ? sources : rt.sources);
+          continue;
+        }
+      }
       if (e.status === "needs_review" || e.status === "conflicting") {
         if (e.source_kind === "document") {
           // The currency reason is this function's own: set it while it holds, and clear it when it no longer does.
@@ -368,7 +404,13 @@ export async function reconcileDeal(db: Db, dealId: string) {
             `update assumptions set status = 'conflicting', sources = $2, conflict_values = $3, reason = coalesce($4, reason), version = version + 1, updated_at = now() where id = $1`,
             [e.id, JSON.stringify(sources), JSON.stringify(values), reason],
           );
-          await log(e.id, "reopened", e.status, "conflicting", e.value, null, reason ?? "A document states a different value");
+          // What the value was, for an Undo of the label that disagrees (card 58b): by_label when some disagreeing value rests only on labels.
+          const disagreeing = [...p.values.filter((v) => !same(v.value, e.value)).map((v) => v.sources), ...p.foreign.filter((f) => !(e.sources ?? []).some((x) => x.unit_seen === f.unitSeen && same(x.value, f.value))).map((f) => [f])];
+          const restoreTo: RestoreTo = {
+            status: e.status as RestoreTo["status"], value: e.value as number, reason: e.reason, sources: e.sources,
+            by_label: disagreeing.some((g) => g.length > 0 && g.every((x) => x.rule === "labelled")),
+          };
+          await log(e.id, "reopened", e.status, "conflicting", e.value, null, reason ?? "A document states a different value", restoreTo);
           changed++;
         }
       } else if (e.status === "rejected") {
@@ -377,6 +419,12 @@ export async function reconcileDeal(db: Db, dealId: string) {
     }
     for (const e of existing) {
       const key = `${e.field_key}|${e.item_key}`;
+      // No proposal for a hand entry or an accepted default: the label that disagreed went, and nothing else did (card 58b).
+      const rt = restorable.get(e.id);
+      if (rt && !seen.has(key) && e.status === "conflicting" && e.source_kind !== "document") {
+        await restore(e, rt, rt.sources);
+        continue;
+      }
       if (seen.has(key) || e.source_kind !== "document") continue;
       // A value whose every source was a model's suggestion leaves because the switch is off, not because a document went.
       const everyRule = (r: string) => !!e.sources?.length && e.sources.every((x) => (x as { rule?: string }).rule === r);
@@ -401,7 +449,7 @@ export async function reconcileDeal(db: Db, dealId: string) {
       deal.workspace_id,
       dealId,
       dealId,
-      JSON.stringify({ proposals: proposals.length, changed, ...(on ? { suggested: kept.length, dropped } : {}), ...(labelRows.length ? { labelled: labelled.length, labelDropped } : {}) }),
+      JSON.stringify({ proposals: proposals.length, changed, ...(restored ? { restored } : {}), ...(on ? { suggested: kept.length, dropped } : {}), ...(labelRows.length ? { labelled: labelled.length, labelDropped } : {}) }),
     ]);
   });
 }
