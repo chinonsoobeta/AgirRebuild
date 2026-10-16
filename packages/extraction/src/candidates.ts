@@ -232,7 +232,7 @@ function paragraphs(doc: NormalizedDocument, skip: Set<number>, scopes: Scope[],
   return out;
 }
 
-const ABBREVIATIONS = new Set(["ltd", "inc", "approx", "st", "ste", "no", "corp", "co", "cie", "ave", "dr", "mr", "mrs", "ms", "mme", "vs", "etc", "est", "apt", "blvd", "rev", "rév"]);
+const ABBREVIATIONS = new Set(["ltd", "inc", "approx", "incl", "excl", "st", "ste", "no", "corp", "co", "cie", "ave", "dr", "mr", "mrs", "ms", "mme", "vs", "etc", "est", "apt", "blvd", "rev", "rév"]);
 
 /** Split on . ! ? followed by a space and an upper-case letter or the end, never after a one-letter initial or an abbreviation; a ";" always ends a clause, so a label in one clause never labels a number in another. */
 function sentences(text: string): { text: string; start: number }[] {

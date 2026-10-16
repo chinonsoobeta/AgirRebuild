@@ -519,6 +519,12 @@ export const NEGATIVE_NOTE = "A negative figure that does not say it is a credit
 const CREDIT_WORD_RE = /(?:^|[^a-z])(?:credits?|credited|rebates?|refunds?|refunded|reimbursements?|reimbursed|remises?|remboursements?|rembourse|ristournes?|subvention deduite|subventions? (?:nette )?(?:deduite|qui reduit les couts)|aide financiere (?:deduite|qui reduit les couts)|grant applied)(?![a-z])/;
 // Credit words that are not a credit against the cost: a loan line, a rating, a loss allowance, a tax credit, a restoration.
 const NOT_CREDIT_RE = /(?:line|lines|letter|letters|facility|facilities|marge|ligne|lettre|facilite|carte|card|tax|taxe|impot|impots)\s+(?:of\s+|de\s+|d\s+)?credits?(?![a-z])|credits?\s+(?:facility|facilities|union|rating|check|checks|score|loss|losses|risk|agreement|committee|card|bureau|enhancement|insurance|line|lines|support|policy|quality|worthiness|de risque|d impot)|cooperative de credit|remises?\s+(?:en etat|a neuf|en forme|des cles|de cles|des plans|de prix)/;
+// A cost waived or exempted, and the words that make a figure what is paid after it. Folded text.
+export const WAIVED_NOTE = "Waived or exempt, so not what the deal pays; enter 0 if nothing is due";
+const WAIVED_RE = /(?:^|[^a-z])(?:waived|exempt|exempted|exemption|forgiven|not payable|exoneree?s?|exoneration|exemptee?s?|non exigibles?)(?![a-z])/;
+// "HST exempt" and "exempt from GST" say what tax a cost bears, not that the cost is waived.
+const SALES_TAX_EXEMPT_RE = /(?:^|[^a-z])(?:hst|gst|pst|qst|tps|tvq|tvh|tva|vat|sales tax|tax|taxes|taxe)[\s-]+(?:exempt|exempted|exemptee?s?|exoneree?s?)(?![a-z])|(?:^|[^a-z])(?:exempt|exempted|exemptee?s?|exoneree?s?)\s+(?:from|of|de|de la|des)\s+(?:hst|gst|pst|qst|tps|tvq|tvh|tva|vat|sales tax|tax|taxes|taxe)(?![a-z])/;
+const NET_OF_RE = /(?:^|[^a-z])(?:net of|after|less|minus|nette? de|nets de|apres|deduction faite)(?![a-z])/;
 // The budget lines a credit may be written against: it is read as the other costs, never as a reduction of one of these.
 const CREDITABLE = new Set(["land_cost", "hard_cost", "soft_cost", "contingency", "other_cost"]);
 
@@ -539,6 +545,11 @@ export function mapToken(rawLabel: string, t: NumberToken, opts: MapOptions = {}
   // A figure its field could never hold is shown, never read: nothing is flipped, rescaled or clamped.
   if (m.kind !== "field") return m;
   const def = FIELD_BY_KEY.get(m.fieldKey);
+  // A cost the city waived or exempted is not what the deal pays; $0 is, and so is a figure net of the exemption.
+  if (def?.group === "budget" && m.value !== 0) {
+    const words = foldText(`${rawLabel} ${opts.after ?? ""}`);
+    if (WAIVED_RE.test(words) && !NET_OF_RE.test(words) && (m.fieldKey === "land_transfer_tax" || !SALES_TAX_EXEMPT_RE.test(words))) return { kind: "ignored", reason: WAIVED_NOTE };
+  }
   return def && outsideBounds(def, m.value) ? { kind: "ignored", reason: `The figure is outside what ${def.label} can hold` } : m;
 }
 
