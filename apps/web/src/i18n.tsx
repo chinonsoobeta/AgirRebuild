@@ -1184,6 +1184,10 @@ const FR_REASONS: [RegExp, string | ((m: RegExpMatchArray) => string)][] = [
   [/^Agir could not read this file: (.+)$/, (m) => `Agir n'a pas pu lire ce fichier : ${m[1]}`],
   // API errors.
   [/^Your role in this workspace does not allow this action$/, "Votre rôle dans cet espace ne permet pas cette action"],
+  [/^The figure's unit \((.+)\) does not fit (.+)$/, (m) => `L'unité du chiffre (${m[1]}) ne convient pas à ${m[2]}`],
+  [/^The figure is outside what (.+) can hold$/, (m) => `Le chiffre est hors des limites de ${m[1]}`],
+  [/^The figure is no longer in the document$/, "Le chiffre n'est plus dans le document"],
+  [/^This field needs an item name$/, "Ce champ demande un nom d'élément"],
   [/^A reviewer is added by requesting Agir review$/, "Un réviseur est ajouté en demandant une révision Agir"],
   [/^This person is an Agir reviewer; their access is changed by requesting Agir review$/, "Cette personne fait partie de la révision Agir ; son accès se modifie en demandant une révision Agir"],
   [/^Review access lasts between 1 and 90 days$/, "L'accès de révision dure de 1 à 90 jours"],

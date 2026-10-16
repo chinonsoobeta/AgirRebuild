@@ -14,7 +14,7 @@ import {
 } from "@agir/contracts";
 import { assemble, canonicalJson, ENGINE_VERSION, replay, underwrite } from "@agir/engine";
 import type { Db } from "@agir/db";
-import { figureOrder, offeredIds, type SourcedCandidate } from "@agir/extraction";
+import { applyLabels, figureOrder, offeredIds, type SourcedCandidate } from "@agir/extraction";
 
 export const sha256 = (s: string) => createHash("sha256").update(s).digest("hex");
 export const POLICY_HASH = sha256(canonicalJson(POLICY_V1));
@@ -55,7 +55,7 @@ type AssumptionDb = {
   pending_value: number | null;
   source_kind: "document" | "analyst" | "default";
   /** unit_seen is the unit the document wrote; sources recorded before it was kept have none. */
-  sources: { document_id: string; document_name: string; value: number; location: string; raw: string; unit_seen?: string | null; context: string }[];
+  sources: { document_id: string; document_name: string; value: number; location: string; raw: string; unit_seen?: string | null; context: string; rule?: string; labelled_by?: string }[];
   conflict_values: { value: number; documents: string[] }[] | null;
   reason: string | null;
   decided_by: string | null;
@@ -94,9 +94,11 @@ export function sourceLabel(a: AssumptionDb): string {
   if (a.source_kind === "analyst") return `Entered by ${a.decided_by_name ?? "an analyst"}${a.reason ? `: ${a.reason}` : ""}`;
   const s = a.sources[0];
   if (!s) return "Approved";
+  // A person, not the document's own wording, said which input this figure is: a reader of the run must see that.
+  const labelled = a.sources.every((x) => x.rule === "labelled") ? ", labelled by a person" : "";
   // A figure the document gave in square metres was converted to square feet at entry: say so, with what it said.
   const converted = s.unit_seen?.startsWith("m2") || s.unit_seen?.startsWith("$/m2") ? `, converted from square metres ("${s.raw}")` : "";
-  return `${s.document_name}, ${s.location}${converted}`;
+  return `${s.document_name}, ${s.location}${converted}${labelled}`;
 }
 
 // ---- Deal overview ----------------------------------------------------------------
@@ -187,6 +189,17 @@ export async function dealOverview(tx: Db, dealId: string) {
 }
 
 // ---- Review ---------------------------------------------------------------------------
+
+/** Why the label boundary would drop this label for one of the document's figures, or null when it would keep it (task 58 audit). */
+export async function labelRefusal(tx: Db, documentId: string, label: { id: string; fieldKey: string; itemKey?: string }): Promise<string | null> {
+  const rows = await tx.query<{ document_id: string; document_name: string; raw: string; value: number | null; unit_seen: string | null; location: string; context: string; note: string | null }>(
+    `select c.document_id, d.name as document_name, c.raw, c.value, c.unit_seen, c.location, c.context, c.note
+     from candidates c join documents d on d.id = c.document_id where c.document_id = $1 and c.field_key is null`,
+    [documentId],
+  );
+  const figures = figureOrder(rows.map((r) => ({ fieldKey: null, itemKey: null, value: r.value, raw: r.raw, unitSeen: r.unit_seen, location: r.location, context: r.context, rule: "", documentId: r.document_id, documentName: r.document_name }) as SourcedCandidate));
+  return applyLabels(figures, [label]).dropped[0]?.why ?? null;
+}
 
 export async function reviewView(tx: Db, dealId: string) {
   const assumptions = await loadAssumptions(tx, dealId);

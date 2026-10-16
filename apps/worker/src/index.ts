@@ -44,8 +44,7 @@ const anthropicProvider: SuggestionProvider = async (request) => {
 };
 
 /** The figures that may be offered, in one order for the worker and for a reconcile, so their ids match. */
-const offeredOf = (cs: SourcedCandidate[]) =>
-  cs.filter(offerable).sort((a, b) => (a.location < b.location ? -1 : a.location > b.location ? 1 : 0) || (a.raw < b.raw ? -1 : a.raw > b.raw ? 1 : 0) || (a.context < b.context ? -1 : a.context > b.context ? 1 : 0) || a.value! - b.value!);
+const offeredOf = (cs: SourcedCandidate[]) => figureOrder(cs).filter(offerable);
 
 type SuggestionRow = { model: string | null; prompt_hash: string; request: SuggestRequest; response: unknown; stop_reason: string | null; outcome: "ok" | "refused" | "failed"; error?: { class: string; status: number | null } };
 
@@ -212,7 +211,7 @@ type AssumptionRowDb = {
   status: string;
   value: number | null;
   source_kind: string;
-  sources: { value: number; unit_seen?: string | null; document_id?: string; location?: string }[];
+  sources: { value: number; unit_seen?: string | null; document_id?: string; location?: string; labelled_by?: string }[];
   conflict_values: { value: number }[] | null;
   reason: string | null;
   version: number;
@@ -221,8 +220,8 @@ type AssumptionRowDb = {
 const same = (a: number | null, b: number | null) => a !== null && b !== null && Math.abs(a - b) <= 1e-9 * Math.max(1, Math.abs(a), Math.abs(b));
 
 /** What a reviewer sees of a row's sources, in an order that does not matter. */
-const sourceForm = (s: { value: number | null; unit_seen?: string | null; document_id?: string; location?: string }[]) =>
-  (s ?? []).map((x) => JSON.stringify([x.document_id ?? null, x.location ?? null, x.value, x.unit_seen ?? null])).sort();
+const sourceForm = (s: { value: number | null; unit_seen?: string | null; document_id?: string; location?: string; labelled_by?: string }[]) =>
+  (s ?? []).map((x) => JSON.stringify([x.document_id ?? null, x.location ?? null, x.value, x.unit_seen ?? null, x.labelled_by ?? null])).sort();
 const sameList = (a: unknown[], b: unknown[]) => a.length === b.length && a.every((x, i) => x === b[i]);
 const sameValues = (a: { value: number }[] | null, b: { value: number }[] | null) => {
   if (!a || !b) return a === b;
@@ -266,12 +265,12 @@ export async function reconcileDeal(db: Db, dealId: string) {
       ).map(toSourced),
     );
     // A person's label always applies, whatever the suggestions switch says, and is never dropped because the reader read the field.
-    const labelRows = await tx.query<{ figure_id: string; field_key: string; item_key: string }>(
-      `select l.figure_id, l.field_key, l.item_key from figure_labels l join documents d on d.id = l.document_id
+    const labelRows = await tx.query<{ figure_id: string; field_key: string; item_key: string; created_by: string }>(
+      `select l.figure_id, l.field_key, l.item_key, l.created_by from figure_labels l join documents d on d.id = l.document_id
        where l.deal_id = $1 and d.retired_at is null and d.stage = 'extracted' order by l.document_id, l.figure_id`,
       [dealId],
     );
-    const labels = labelRows.map((l) => ({ id: l.figure_id, fieldKey: l.field_key, itemKey: l.item_key }));
+    const labels = labelRows.map((l) => ({ id: l.figure_id, fieldKey: l.field_key, itemKey: l.item_key, by: l.created_by }));
     const { kept: labelled, dropped: labelDropped } = applyLabels(unlabelled, labels);
     if (on) {
       const stored = await tx.query<{ response: unknown[] }>(
@@ -310,6 +309,7 @@ export async function reconcileDeal(db: Db, dealId: string) {
         context: s.context,
         rule: s.rule,
         ...(s.note ? { note: s.note } : {}),
+        ...(s.labelledBy ? { labelled_by: s.labelledBy } : {}),
       }));
       const reason = p.reason;
       const conflictFromDocs = p.values.map((v) => ({ value: v.value, documents: [...new Set(v.sources.map((s) => s.documentName))] }));

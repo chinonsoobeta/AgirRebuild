@@ -7,7 +7,7 @@ import { breakeven, DRIVERS, EngineInputError, explore, grid, tornado, type Driv
 import { kindOf } from "@agir/extraction";
 import { MAX_UPLOAD_BYTES } from "@agir/worker";
 import { checkPassword, createSession, endSession, hashPassword, rateLimiter, SESSION_DAYS, userForSession } from "./auth.ts";
-import { auditPackage, createRun, dealOverview, HttpError, reviewView, runView } from "./services.ts";
+import { auditPackage, createRun, dealOverview, HttpError, labelRefusal, reviewView, runView } from "./services.ts";
 
 export type AppDeps = { db: Db; store: BlobStore; secureCookies: boolean; demoSignIn?: boolean };
 type Env = { Variables: { user: { id: string; email: string; name: string } } };
@@ -274,6 +274,8 @@ export function createApp({ db, store, secureCookies, demoSignIn = false }: AppD
     if (FIELDS.find((f) => f.key === b.fieldKey)!.itemized && !b.itemKey?.trim()) throw new HttpError(422, "This field needs an item name");
     await as(c, async (tx) => {
       await ownFigure(tx, c.req.param("id"), b.documentId);
+      const why = await labelRefusal(tx, b.documentId, { id: b.figureId, fieldKey: b.fieldKey, itemKey: b.itemKey });
+      if (why) throw new HttpError(422, why);
       await tx.query(`select fn_label_figure($1, $2, $3, $4)`, [b.documentId, b.figureId, b.fieldKey, b.itemKey ?? ""]);
     });
     return c.json({ ok: true });

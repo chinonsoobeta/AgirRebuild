@@ -2,7 +2,8 @@ import { FIELD_BY_KEY } from "@agir/contracts";
 import type { Candidate } from "./candidates.ts";
 import { canonicalItem, currencyOf, outsideBounds } from "./mapping.ts";
 
-export type SourcedCandidate = Candidate & { documentId: string; documentName: string };
+/** `labelledBy` is the person whose label put a figure here (task 58), so review can ask someone else to confirm it. */
+export type SourcedCandidate = Candidate & { documentId: string; documentName: string; labelledBy?: string };
 
 export type Proposal = {
   fieldKey: string;
@@ -163,7 +164,7 @@ export const figureOrder = (cs: readonly SourcedCandidate[]): SourcedCandidate[]
  */
 export function applyLabels(
   figures: readonly SourcedCandidate[],
-  labels: readonly { id: string; fieldKey: string; itemKey?: string | null }[],
+  labels: readonly { id: string; fieldKey: string; itemKey?: string | null; by?: string }[],
 ): { kept: SourcedCandidate[]; dropped: { id: string; why: string }[] } {
   const ids = offeredIds(figures);
   const kept: SourcedCandidate[] = [];
@@ -177,7 +178,10 @@ export function applyLabels(
     if (!def) { drop("The key is not in the catalog"); continue; }
     if (!def.extractable) { drop("This field is not read from documents"); continue; }
     const unit = seenUnit(fig.unitSeen);
-    if (unit !== null && !unitFits(def.unit, unit)) { drop(`The figure's unit (${fig.unitSeen}) does not fit ${def.unit}`); continue; }
+    // A plain dollar figure takes the basis of the money field a person names (a rent-roll cell under "Monthly rent" reads "$2,350");
+    // a figure written with its own basis ("a month", "per sf") must fit as it is.
+    const plainDollar = unit === "$" && def.unit.startsWith("$");
+    if (unit !== null && !plainDollar && !unitFits(def.unit, unit)) { drop(`The figure's unit (${fig.unitSeen}) does not fit ${def.unit}`); continue; }
     if (outsideBounds(def, fig.value!)) { drop(`The figure is outside what ${def.key} can hold`); continue; }
     let itemKey: string | null = null;
     if (def.itemized) {
@@ -185,7 +189,7 @@ export function applyLabels(
       if (!itemKey) { drop("This field needs an item name"); continue; }
       itemKey = canonicalItem(itemKey);
     }
-    kept.push({ ...fig, fieldKey: def.key, itemKey, rule: "labelled", note: LABELLED_NOTE });
+    kept.push({ ...fig, fieldKey: def.key, itemKey, rule: "labelled", note: LABELLED_NOTE, ...(l.by ? { labelledBy: l.by } : {}) });
   }
   return { kept, dropped };
 }
