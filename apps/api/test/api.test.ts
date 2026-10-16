@@ -1085,6 +1085,27 @@ describe("card 60d: a person's entry and a document meet in one row however the 
     expect(r.readiness.impossible.map((i: any) => i.label)).toContain("Retail and retail are one item written two ways");
     expect((await call(pat, "POST", `/api/deals/${d}/runs`)).status).toBeGreaterThanOrEqual(400);
   });
+
+  test("audit: a document's value a person rejected stays rejected, and does not reopen the person's own entry written another way", async () => {
+    // The person rejects the roll's 'retail' rent, then adds 'Retail' at the rent they know. The roll's figure meets its own rejected row, as before card 60d.
+    const d = await make("Fold Rejected");
+    await base(d);
+    expect((await call(pat, "PUT", `/api/deals/${d}/documents?name=roll.csv`, undefined, sheet(3200))).status).toBe(200);
+    await work();
+    for (const a of await retailRows(d)) {
+      expect(a.itemKey).toBe("retail");
+      expect((await call(pat, "POST", `/api/assumptions/${a.id}/review`, { action: "reject", reason: "The roll's retail rent is out of date", version: a.version })).status).toBe(200);
+    }
+    expect((await call(pat, "POST", `/api/deals/${d}/items`, { name: "Retail", unitCount: 2, rentMonthly: 3000, reason: "Signed leases, two shops" })).status).toBe(200);
+    // Any later document reconciles the deal again.
+    expect((await call(pat, "PUT", `/api/deals/${d}/documents?name=notes.txt`, undefined, new TextEncoder().encode("Site visit notes, nothing priced.\n"))).status).toBe(200);
+    await work();
+    const rows = (await retailRows(d)).map((a: any) => [a.fieldKey, a.itemKey, a.status, a.value]).sort();
+    expect(rows).toEqual([["unit_count", "Retail", "approved", 2], ["unit_count", "retail", "rejected", 2], ["unit_rent_monthly", "Retail", "approved", 3000], ["unit_rent_monthly", "retail", "rejected", 3200]]);
+    expect((await call(pat, "GET", `/api/deals/${d}/review`)).json.readiness.status).toBe("ready");
+    // 2BR: 4 x 2,000 x 12 = 96,000; Retail: 2 x 3,000 x 12 = 72,000.
+    expect(await gpr(d)).toBeCloseTo(168_000, 2);
+  });
 });
 
 describe("card 61: Canadian cost lines and a mortgage insurance premium are entered by a person", () => {
