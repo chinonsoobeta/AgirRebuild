@@ -1461,4 +1461,31 @@ describe("card 62: a deal is copied as a variant, in exactly the state of its so
     expect(b.status).toBe(200);
     expect(await runRow(b.json.id)).toEqual(await runRow(a.json.id));
   });
+
+  // Card 62 audit: a reconcile the source still has queued (after a document is read or retired, or a label changes) is the copy's too.
+  test("a copy taken while its source waits for a reconcile is reconciled as its source is", async () => {
+    const d = (await call(alice, "POST", `/api/workspaces/${qw}/deals`, { name: "Queued Fourplex", assetType: "Multifamily", location: "Halifax", province: "NS" })).json.id;
+    await upload(d, "notes.txt", "Notes\nSoft costs: $300,000\n");
+    await work();
+    const soft = await byField(d, "soft_cost");
+    expect((await call(alice, "POST", `/api/assumptions/${soft.id}/review`, { action: "approve", version: soft.version })).status).toBe(200);
+    // Retired, and read, with each reconcile still queued when the deal is copied.
+    const [notes] = (await call(alice, "GET", `/api/deals/${d}/documents`)).json;
+    expect((await call(alice, "POST", `/api/documents/${notes.id}/retire`)).status).toBe(200);
+    const retired = (await call(alice, "POST", `/api/deals/${d}/copy`, { name: "Queued Fourplex, retired" })).json.id;
+    await upload(d, "budget.txt", "Budget\nHard costs: $2,400,000\n");
+    // One job at a time until the budget is read; the reconcile its reading queued has not run.
+    const stage = async () => (await call(alice, "GET", `/api/deals/${d}/documents`)).json.find((x: any) => x.name === "budget.txt").stage;
+    while ((await stage()) !== "extracted") expect(await drain({ db, store }, 1)).toBe(1);
+    expect(await byField(d, "hard_cost")).toBeUndefined();
+    const read = (await call(alice, "POST", `/api/deals/${d}/copy`, { name: "Queued Fourplex, read" })).json.id;
+    await work();
+    for (const c of [retired, read]) {
+      const s = await byField(d, "soft_cost");
+      expect(await byField(c, "soft_cost"), c).toMatchObject({ status: s.status, value: s.value, sources: [] });
+    }
+    expect(await byField(d, "soft_cost")).toMatchObject({ status: "needs_review" });
+    expect(await byField(read, "hard_cost")).toMatchObject({ status: "needs_review", value: 2400000 });
+    expect(await hashOf(read)).toBe(await hashOf(d));
+  });
 });
