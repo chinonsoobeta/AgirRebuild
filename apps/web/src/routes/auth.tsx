@@ -57,7 +57,7 @@ export function Login() {
     setBusy(true);
     setError(null);
     try {
-      await api.post("/auth/login", { email: f.get("email"), password: f.get("password"), reviewMode: f.get("reviewMode") });
+      await api.post("/auth/login", { email: f.get("email"), password: f.get("password") });
       await qc.invalidateQueries();
       void navigate({ to: "/deals" });
     } catch (err) {
@@ -90,7 +90,7 @@ export function Signup() {
     const f = new FormData(e.currentTarget);
     setError(null);
     try {
-      await api.post("/auth/signup", { name: f.get("name"), email: f.get("email"), password: f.get("password") });
+      await api.post("/auth/signup", { name: f.get("name"), email: f.get("email"), password: f.get("password"), reviewMode: f.get("reviewMode") });
       await qc.invalidateQueries();
       void navigate({ to: "/deals" });
     } catch (err) {
