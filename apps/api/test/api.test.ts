@@ -1000,3 +1000,27 @@ describe("task 60c: a person adds a unit type or space that no document states",
     expect((await db.query<any>(`select 1 from assumptions where deal_id = $1 and item_key = 'Studio'`, [td2])).length).toBe(0);
   });
 });
+
+describe("audit of task 60c: a type written another way is the same type", () => {
+  test("a name that differs only in case or spacing is refused, naming the type the deal has", async () => {
+    const s = await signup("wren@example.com", "Wren Writer", "solo");
+    const w = (await call(s, "GET", "/api/me")).json.workspaces[0].id;
+    const d = (await call(s, "POST", `/api/workspaces/${w}/deals`, { name: "Spelling Check", assetType: "Mixed use", location: "Regina", province: "SK" })).json.id as string;
+    expect((await call(s, "POST", `/api/deals/${d}/items`, { name: "Office space", areaSf: 900, rentPsfAnnual: 22, reason: "Second-floor office, typed in" })).status).toBe(200);
+    for (const name of ["office space", "OFFICE   SPACE", " Office space "]) {
+      const r = await call(s, "POST", `/api/deals/${d}/items`, { name, areaSf: 900, rentPsfAnnual: 22, reason: "The same office written another way" });
+      expect(r.status, name).toBe(409);
+      expect(r.json.error, name).toBe("This deal already has Office space; change its values instead.");
+    }
+    const rows = await db.query<any>(`select distinct item_key from assumptions where deal_id = $1`, [d]);
+    expect(rows.map((x: any) => x.item_key)).toEqual(["Office space"]);
+  });
+
+  test("a name typed with extra spaces is stored with single spaces", async () => {
+    const s = await signup("yuki@example.com", "Yuki Spacer", "solo");
+    const w = (await call(s, "GET", "/api/me")).json.workspaces[0].id;
+    const d = (await call(s, "POST", `/api/workspaces/${w}/deals`, { name: "Space Check", assetType: "Retail", location: "Regina", province: "SK" })).json.id as string;
+    const r = await call(s, "POST", `/api/deals/${d}/items`, { name: "Corner   shop", areaSf: 700, rentPsfAnnual: 28, reason: "Corner unit, typed with extra spaces" });
+    expect(r.json.itemKey).toBe("Corner shop");
+  });
+});

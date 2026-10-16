@@ -388,3 +388,9 @@ describe("task 60c: adding a unit type or space on review", () => {
     expect(fr.t("review.addItem" as Key)).toBe("Ajouter un type de logement ou d'espace");
   });
 });
+
+describe("audit of task 60c: the refusal of a type the deal has, in French", () => {
+  it("is translated, keeping the type's name", () => {
+    expect(translateMessage("This deal already has 3BR; change its values instead.")).toBe("Ce projet a déjà 3BR ; modifiez plutôt ses valeurs.");
+  });
+});
