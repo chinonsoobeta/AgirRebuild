@@ -110,12 +110,14 @@ export type DealOverview = Awaited<ReturnType<typeof dealOverview>>;
 export async function dealOverview(tx: Db, dealId: string) {
   const [deal] = await tx.query<{
     id: string; workspace_id: string; name: string; asset_type: string; location: string;
-    currency: string | null; country: string | null; province: string | null; created_at: string;
+    currency: string | null; country: string | null; province: string | null; created_at: string; copied_from: string | null;
   }>(
-    `select id, workspace_id, name, asset_type, location, currency, country, province, created_at from deals where id = $1`,
+    `select id, workspace_id, name, asset_type, location, currency, country, province, created_at, copied_from from deals where id = $1`,
     [dealId],
   );
   if (!deal) throw new HttpError(404, "Deal not found");
+  // The source is named only when the caller can see it: the query runs under the caller's row-level security.
+  const [source] = deal.copied_from ? await tx.query<{ id: string; name: string }>(`select id, name from deals where id = $1`, [deal.copied_from]) : [];
   const docs = await tx.query<{ stage: string }>(`select stage from documents where deal_id = $1 and retired_at is null`, [dealId]);
   const assumptions = await loadAssumptions(tx, dealId);
   const { readiness } = readinessFor(assumptions);
@@ -178,8 +180,10 @@ export async function dealOverview(tx: Db, dealId: string) {
     status = { tone: decision.decision.startsWith("approve") ? "pass" : "stop", text: `Decided: ${decision.decision.replace(/_/g, " ")}` };
     next = (artifacts?.n ?? 0) > 0 ? "Share the reports" : "Generate the IC memo";
   }
+  const { copied_from: _copiedFrom, ...place } = deal;
   return {
-    deal,
+    deal: place,
+    copiedFrom: source ?? null,
     step,
     status,
     next,

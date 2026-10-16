@@ -1416,7 +1416,7 @@ describe("card 62: a deal is copied as a variant, in exactly the state of its so
 
   test("once the source is clear, a second copy runs to the same input and result hashes as the source", async () => {
     const land = await byField(src, "land_cost");
-    expect((await call(alice, "POST", `/api/assumptions/${land.id}/review`, { action: "resolve", value: 800000, reason: "The budget is the later document", version: land.version })).status).toBe(200);
+    expect((await call(alice, "POST", `/api/assumptions/${land.id}/review`, { action: "modify", value: 800000, reason: "The budget is the later document", version: land.version })).status).toBe(200);
     const senior = await byField(src, "senior_loan_amount");
     expect((await call(bob, "POST", `/api/assumptions/${senior.id}/review`, { action: "second_approve", version: senior.version })).status).toBe(200);
     const label = await byField(src, "other_cost");

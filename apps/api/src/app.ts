@@ -201,6 +201,13 @@ export function createApp({ db, store, secureCookies, demoSignIn = false }: AppD
     return c.json({ id: r!.id });
   });
 
+  // A variant: a copy in exactly the state of its source, which a person then changes (card 62).
+  app.post("/api/deals/:id/copy", async (c) => {
+    const { name } = z.object({ name: z.string().min(1).max(160) }).parse(await c.req.json());
+    const [r] = await as(c, (tx) => tx.query<{ id: string }>(`select fn_copy_deal($1, $2) as id`, [c.req.param("id"), name]));
+    return c.json({ id: r!.id });
+  });
+
   app.get("/api/deals/:id", async (c) => c.json(await as(c, (tx) => dealOverview(tx, c.req.param("id")))));
 
   // ---- Documents --------------------------------------------------------------------
