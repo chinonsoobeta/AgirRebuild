@@ -91,3 +91,80 @@ equity that does not cover the requirement. Any error-severity check rejects the
 sizing DSCR >= 1.20x and equity multiple >= 1.0x (combined stress). An error check rejects; an
 unmeasurable gate gives NOT_EVALUATED; more than two failures reject; one or two failures give
 APPROVE_WITH_CONDITIONS.
+
+## Exit by refinancing and holding
+
+Card 60, owner decision 2026-10-15: show both. A small rental builder usually builds, refinances and keeps
+the building, so that deal is judged on what it returns at the refinance and on the debt it carries, and
+also, labelled as unrealized, on a stated value. Draft: the policy for it needs credit sign-off.
+
+**The flag.** The field `refinance_and_hold` ("Keep and refinance (no sale)", unit flag, 0 or 1) is a modelling
+choice made in review, never read from a document. When it is 1, readiness sets `EngineInput.exit` to
+`"refinance_hold"`. When it is absent or 0 the key is omitted, so every sale deal's input hash is unchanged.
+In hold mode a refinance is required: with no refinance month the run is blocked and the problem points at
+`refinance_month`: "A deal that is kept and refinanced needs its refinance: the month, the amount or
+loan-to-value, the rate and the amortization." The refinance rules are otherwise the existing ones: the month
+falls from `S` to before `T`; an amount or a loan-to-value, not both; rate and amortization required.
+
+**What does not change.** Everything up to `T` is the same ledger: costs, funding, equity, operations, debt
+service, the refinance and the stresses. Hold mode changes only the end of the hold.
+
+**No sale leg.** `saleNet` is 0, there is no `sale` equity flow, and the non-recourse floor of the sale does not
+apply.
+
+**Stated value.** Final hold-year NOI / exit cap, with no selling costs. It is not meaningful when that NOI is
+not positive. It is a stated value, not a sale price: nothing is sold.
+
+**Unrealized flow.** One equity flow of the new kind `unrealized`, dated `(T + 1)/12`, equal to the stated
+value less all debt outstanding at `T` (senior and mezzanine balances), floored at 0. It is the only flow of that
+kind, and wherever flows are shown it is labelled "unrealized, not a sale". When the stated value is not
+meaningful there is no such flow. When the stated value does not cover the debt, the flow is 0 and the
+equity-wipeout check (an error) fires with its own message: "The stated value of X does not cover the Y of
+debt outstanding. Equity has no value at the end of the hold."
+
+**Contributions and distributions.** As for a sale: contributions are the negative equity flows, distributions
+the positive ones, so operating, refinance and unrealized flows all count in the multiple.
+
+**Hold metrics.** Appended to the metric catalog after the existing metrics, in this order, and computed in hold
+mode only. On a sale deal they are not added to the result at all, so a sale deal's result is byte for byte what
+it was before this section.
+
+| Key | Definition |
+|---|---|
+| `refinance_cash_returned` | New loan less the senior payoff at the refinance. Negative means cash was put in. |
+| `cash_left_in_deal` | Equity contributed to fund the deal (required equity) less cash returned at the refinance. 0 or below means all of the equity came back. Operating cash before the refinance is not counted as returned (open for the owner). |
+| `dcr_after_refinance` | NOI over the 12 months from the refinance month / the amortizing (sizing) debt service on all debt in force in those months. |
+| `cash_on_cash_after_refinance` | (NOI less the debt service actually due) over the 12 months from the refinance month / cash left in the deal. Not meaningful, with that reason, when cash left in the deal is 0 or below. |
+| `stated_value` | The stated value above. |
+| `unrealized_equity_multiple` | (operating + refinance + unrealized distributions) / contributions. |
+| `unrealized_equity_irr` | IRR of the dated flows including the unrealized flow. The roots rule of decision 3 applies: one root is a value, none or several is not meaningful. |
+
+**The 12 months from the refinance month** are months `R` to `R + 11`. If fewer than 12 months remain (the hold
+ends at `T`, so months `R` to `T` are available), the months that remain are used and scaled to a year (NOI and
+debt service each times 12 / months used), and the metric's reason says so.
+
+**Sale metrics in hold mode** are `NOT_APPLICABLE` with the reason "The deal is kept and refinanced, not sold.":
+`exit_value`, `net_sale_proceeds`, `development_profit`, `profit_on_cost`, `equity_multiple`, `equity_irr`,
+`sale_month`, `lp_irr`, `gp_irr` and `gp_promote`. Never 0. The waterfall on unrealized flows is a later card.
+Every other metric is computed as today from the same ledger.
+
+**Stresses.** The same six single shocks and the combined one, each a full re-run in hold mode. An exit-cap shock
+moves both the refinance loan, when it is sized by loan-to-value, and the stated value.
+
+**Policy.** `POLICY_V1` is unchanged, so its hash and the freshness of every existing run are unchanged. A
+registry maps each policy version to its policy, and hold mode uses `rental-hold-v1-draft`; every other deal uses
+`policy-v1`. The draft takes v1's stresses, loan-to-cost ceiling, base sizing floor, tolerance and source
+precedence, and has four gates. The thresholds are proposals for credit, not decisions:
+
+| Gate | Scenario | Threshold |
+|---|---|---|
+| development spread | base | >= 100 bps |
+| coverage after refinance (`dcr_after_refinance`) | base | >= 1.20x |
+| sizing DSCR | combined | >= 1.20x |
+| unrealized equity multiple | combined | >= 1.0x |
+
+The verdict rules are v1's: an error check rejects; an unmeasurable gate gives NOT_EVALUATED; more than two
+failures reject; one or two give APPROVE_WITH_CONDITIONS. A run records the policy version and hash it was made
+under, is fresh against that policy's own hash, and replays under it. Beside the verdict, the run screen and every
+artifact say "Draft policy, not signed by credit". A decision can still be recorded, and it names the policy
+version.
