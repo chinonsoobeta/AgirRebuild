@@ -4,7 +4,10 @@
 // but it never becomes an input.
 
 import { FIELD_BY_KEY, FIELDS, OUTPUT_LIKE_PHRASES, type FieldDef } from "@agir/contracts";
-import { codeOf, SF_PER_M2, unitTypesIn, wholeUnitType, type CurrencyCode, type NumberToken } from "@agir/numbers";
+import { canonicalItem, codeOf, parenType, SF_PER_M2, unitTypesIn, wholeUnitType, type CurrencyCode, type NumberToken } from "@agir/numbers";
+
+// canonicalItem and itemFold live in @agir/numbers so the engine can use the same fold.
+export { canonicalItem, itemFold } from "@agir/numbers";
 
 export type LabelUnit = "$" | "%" | "months" | "years" | "sf" | "m2" | "x" | null;
 
@@ -303,20 +306,6 @@ function endsWithPhrase(label: string, phrase: string): string | null {
   if (label === phrase) return "";
   if (label.endsWith(" " + phrase)) return label.slice(0, -phrase.length - 1).trim();
   return null;
-}
-
-/** The unit type written in parentheses ("End units (3 bed)"), if there is one. */
-function parenType(raw: string): string | null {
-  for (const m of raw.matchAll(/\(([^)]*)\)/g)) {
-    const t = wholeUnitType(m[1]!);
-    if (t) return t;
-  }
-  return null;
-}
-
-/** A unit type written in any of its ways is one name ("One-bed", "1BR", "1 chambre" are "1BR"); a name with more to it ("2-bed + den") is kept as written. */
-export function canonicalItem(name: string): string {
-  return wholeUnitType(name) ?? parenType(name) ?? name;
 }
 
 const HEADING_NAME_RE = /^(summary|sommaire|totals?|subtotal|type|types|average|overall)\b/;

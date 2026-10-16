@@ -236,6 +236,25 @@ export function wholeUnitType(text: string): string | null {
   return WHOLE_TYPE_RE.test(t) ? (unitTypesIn(t)[0] ?? null) : null;
 }
 
+/** The unit type written in parentheses ("End units (3 bed)"), if there is one. */
+export function parenType(raw: string): string | null {
+  for (const m of raw.matchAll(/\(([^)]*)\)/g)) {
+    const t = wholeUnitType(m[1]!);
+    if (t) return t;
+  }
+  return null;
+}
+
+/** A unit type written in any of its ways is one name ("One-bed", "1BR", "1 chambre" are "1BR"); a name with more to it ("2-bed + den") is kept as written. */
+export function canonicalItem(name: string): string {
+  return wholeUnitType(name) ?? parenType(name) ?? name;
+}
+
+/** Two item names are the same item when their folds are equal: canonical, single spaces, lower case. */
+export function itemFold(name: string): string {
+  return canonicalItem(name).replace(/\s+/g, " ").trim().toLowerCase();
+}
+
 // "m" is million only when it is not the m of m²: "$450 m²" is not $450,000,000.
 const SCALE_RE = /^\s?(billions?|bn|millions?|mm|mn|m(?!²)|thousands?|k)\b/i;
 // In a table cell nothing around the figure says it is money, so only the spellings that cannot be a metre or a millimetre count: "85 m" and "5 mm" are not millions.

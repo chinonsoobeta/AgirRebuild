@@ -1,6 +1,6 @@
 import { FIELD_BY_KEY } from "@agir/contracts";
 import type { Candidate } from "./candidates.ts";
-import { canonicalItem, currencyOf, outsideBounds } from "./mapping.ts";
+import { canonicalItem, currencyOf, itemFold, outsideBounds } from "./mapping.ts";
 
 /** `labelledBy` is the person whose label put a figure here (task 58), so review can ask someone else to confirm it. */
 export type SourcedCandidate = Candidate & { documentId: string; documentName: string; labelledBy?: string };
@@ -22,6 +22,13 @@ export type Proposal = {
 
 const same = (a: number, b: number) => Math.abs(a - b) <= 1e-9 * Math.max(1, Math.abs(a), Math.abs(b));
 
+/** Names that fold equal are one item; the group is named in the form most of its sources use, and on a tie the one that sorts first by code point ("Retail" before "retail"). */
+function groupForm(list: readonly SourcedCandidate[]): string {
+  const count = new Map<string, number>();
+  for (const c of list) count.set(c.itemKey ?? "", (count.get(c.itemKey ?? "") ?? 0) + 1);
+  return [...count].sort(([a, n], [b, m]) => m - n || (a < b ? -1 : a > b ? 1 : 0))[0]![0];
+}
+
 /**
  * Gather candidates from every live document into one proposal per field.
  * Agreement yields one value for review. Disagreement yields a conflict that
@@ -38,14 +45,15 @@ export function consolidate(candidates: readonly SourcedCandidate[], dealCurrenc
   const groups = new Map<string, SourcedCandidate[]>();
   for (const c of candidates) {
     if (!c.fieldKey || c.value === null) continue;
-    const k = `${c.fieldKey}|${c.itemKey ?? ""}`;
+    const k = `${c.fieldKey}|${itemFold(c.itemKey ?? "")}`;
     const list = groups.get(k) ?? [];
     list.push(c);
     groups.set(k, list);
   }
   const out: Proposal[] = [];
-  for (const [k, list] of groups) {
-    const [fieldKey, item] = k.split("|") as [string, string];
+  for (const list of groups.values()) {
+    const fieldKey = list[0]!.fieldKey!;
+    const item = groupForm(list);
     const values: Proposal["values"] = [];
     const foreign = list.filter(isForeign);
     for (const c of list.filter((x) => !isForeign(x))) {

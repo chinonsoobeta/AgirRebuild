@@ -4,7 +4,7 @@ import { z } from "zod";
 import { COUNTRIES, CURRENCIES, FIELDS, FIELD_GROUP_LABELS, METRICS, POLICIES, POLICY_V1, PROVINCE_CODES, REVIEW_MODES, type EngineInput, type Policy } from "@agir/contracts";
 import { asUser, type BlobStore, type Db } from "@agir/db";
 import { breakeven, DRIVERS, EngineInputError, explore, grid, tornado, type DriverKey, type Shock } from "@agir/engine";
-import { canonicalItem, kindOf } from "@agir/extraction";
+import { canonicalItem, itemFold, kindOf } from "@agir/extraction";
 import { MAX_UPLOAD_BYTES } from "@agir/worker";
 import { checkPassword, createSession, endSession, hashPassword, rateLimiter, SESSION_DAYS, userForSession } from "./auth.ts";
 import { auditPackage, createRun, dealOverview, HttpError, labelRefusal, reviewView, runView } from "./services.ts";
@@ -348,10 +348,8 @@ export function createApp({ db, store, secureCookies, demoSignIn = false }: AppD
     const name = canonicalItem(b.name.replace(/\s+/g, " "));
     const values: [string, number | undefined][] = [["unit_count", b.unitCount], ["unit_rent_monthly", b.rentMonthly], ["rentable_area_sf", b.areaSf], ["rent_psf_annual", b.rentPsfAnnual], ["item_occupancy_pct", b.occupancyPct]];
     await as(c, async (tx) => {
-      const [has] = await tx.query<{ item_key: string }>(
-        `select item_key from assumptions where deal_id = $1 and lower(regexp_replace(item_key, '\\s+', ' ', 'g')) = lower($2) and status <> 'rejected' limit 1`,
-        [c.req.param("id"), name],
-      );
+      const keys = await tx.query<{ item_key: string }>(`select distinct item_key from assumptions where deal_id = $1 and item_key <> '' and status <> 'rejected' order by item_key`, [c.req.param("id")]);
+      const has = keys.find((k) => itemFold(k.item_key) === itemFold(name));
       if (has) throw new HttpError(409, `This deal already has ${has.item_key}; change its values instead.`);
       for (const [fieldKey, value] of values) {
         if (value !== undefined) await tx.query(`select fn_enter_value($1, $2, $3, $4, $5)`, [c.req.param("id"), fieldKey, name, value, b.reason]);

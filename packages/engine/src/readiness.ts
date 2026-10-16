@@ -17,6 +17,7 @@ import {
   type ReadinessItem,
   type RevenueComponent,
 } from "@agir/contracts";
+import { itemFold } from "@agir/numbers";
 import { EngineInputError, validateInput } from "./validate.ts";
 
 export type AssumptionRow = {
@@ -55,9 +56,23 @@ export function assemble(rows: readonly AssumptionRow[]): { readiness: Readiness
   const impossible: ReadinessItem[] = [];
   const values = new Map<string, number>(); // "field" or "field|item" -> value
 
+  // One item written two ways (task 60d) is never counted twice: each form is named, and neither is read.
+  const forms = new Map<string, Set<string>>();
+  for (const r of rows) if (r.itemKey && r.status !== "rejected") forms.set(itemFold(r.itemKey), (forms.get(itemFold(r.itemKey)) ?? new Set()).add(r.itemKey));
+  const doubled = new Set<string>();
+  for (const names of forms.values()) {
+    if (names.size < 2) continue;
+    const [a, b] = [...names].sort();
+    for (const name of [...names].sort()) {
+      doubled.add(name);
+      const row = rows.find((r) => r.itemKey === name && r.status !== "rejected")!;
+      impossible.push({ fieldKey: row.fieldKey, itemKey: name, label: `${a} and ${b} are one item written two ways`, detail: "Reject the values of one, or enter them under one name." });
+    }
+  }
+
   const groups = new Map<string, AssumptionRow[]>();
   for (const r of rows) {
-    if (r.status === "rejected") continue;
+    if (r.status === "rejected" || (r.itemKey && doubled.has(r.itemKey))) continue;
     const k = r.itemKey ? `${r.fieldKey}|${r.itemKey}` : r.fieldKey;
     const list = groups.get(k) ?? [];
     list.push(r);
@@ -101,7 +116,7 @@ export function assemble(rows: readonly AssumptionRow[]): { readiness: Readiness
 
   // Component occupancy, when every component states one, stands in for the
   // deal-level stabilized occupancy.
-  const itemsWithRows = new Set(rows.filter((r) => r.itemKey && r.status !== "rejected").map((r) => r.itemKey!));
+  const itemsWithRows = new Set(rows.filter((r) => r.itemKey && r.status !== "rejected" && !doubled.has(r.itemKey)).map((r) => r.itemKey!));
   const everyItemHasOccupancy =
     itemsWithRows.size > 0 &&
     [...itemsWithRows].every((i) => rows.some((r) => r.fieldKey === "item_occupancy_pct" && r.itemKey === i && r.status !== "rejected"));
@@ -120,7 +135,7 @@ export function assemble(rows: readonly AssumptionRow[]): { readiness: Readiness
 
   // ---- Revenue components -----------------------------------------------------
   const itemKeys = new Set<string>();
-  for (const r of rows) if (r.itemKey && r.status !== "rejected") itemKeys.add(r.itemKey);
+  for (const r of rows) if (r.itemKey && r.status !== "rejected" && !doubled.has(r.itemKey)) itemKeys.add(r.itemKey);
   const revenue: RevenueComponent[] = [];
   if (itemKeys.size === 0) {
     missing.push({ fieldKey: "unit_count", label: "Revenue program (at least one unit type or space)" });

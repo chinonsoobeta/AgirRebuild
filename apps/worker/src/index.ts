@@ -5,6 +5,7 @@
 
 import Anthropic from "@anthropic-ai/sdk";
 import { FIELDS, FIELD_BY_KEY, POLICIES, type Currency, type EngineInput, type FieldUnit, type RunResult } from "@agir/contracts";
+import { itemFold } from "@agir/numbers";
 import { renderArtifact, RendererUnavailableError, type ArtifactInput } from "@agir/artifacts";
 import { sha256Hex, type BlobStore, type Db } from "@agir/db";
 import { applyLabels, applySuggestions, consolidate, extractCandidates, figureOrder, kindOf, offerable, offeredIds, parseDocument, withoutLabelled, type SourcedCandidate } from "@agir/extraction";
@@ -296,7 +297,12 @@ export async function reconcileDeal(db: Db, dealId: string) {
         [id, dealId, deal.workspace_id, action, from, to, fromV, toV, reason],
       );
     };
+    // A proposal meets the existing row whose item name folds equal (task 60d); when several do, it meets none of them and readiness blocks the run.
+    const folded = new Map<string, AssumptionRowDb[]>();
+    for (const e of existing.filter((x) => x.status !== "rejected")) folded.set(`${e.field_key}|${itemFold(e.item_key)}`, [...(folded.get(`${e.field_key}|${itemFold(e.item_key)}`) ?? []), e]);
     for (const p of proposals) {
+      const meets = folded.get(`${p.fieldKey}|${itemFold(p.itemKey ?? "")}`) ?? [];
+      if (meets.length === 1) p.itemKey = meets[0]!.item_key || null;
       const key = `${p.fieldKey}|${p.itemKey ?? ""}`;
       seen.add(key);
       const sources = p.sources.map((s) => ({
