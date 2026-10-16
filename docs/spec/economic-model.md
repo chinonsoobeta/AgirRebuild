@@ -175,8 +175,23 @@ Card 61. A small Canadian builder's budget has lines Agir could not name, and th
 that keeps most rentals alive carries an insurance premium that is added to the loan. This section adds them as
 values a person enters. **There are no defaults, no rates and no tables here**: every value is entered by a
 person, and the cited, dated tables (mortgage insurance terms, provincial land transfer tax, rebates) come later,
-from a person. The fields are never read from documents (`extractable: false`), so reading does not change. They
-appear in review under "Choices only you make", and the premium only once a refinance month is stated.
+from a person. Review offers the premium only once a refinance month is stated.
+
+**Reading (card 61b).** Development charges and land transfer tax are read from documents (`extractable: true`), into
+their own fields and no longer under other costs. Their aliases moved from `other_cost` ("development charges",
+"development cost charges", "DCCs", "DCs", "land transfer tax", "LTT", "taxe de bienvenue", "droits de mutation"), and
+"dcc", "redevance de developpement" and "welcome tax" were added. A document line then meets the value a person
+entered: an agreeing figure adds the document as a source, a disagreeing one reopens the entry as a named conflict,
+and the cost is counted once. When the label names both a longer and a shorter alias ("land transfer duty" and
+"land"), the longer one reads the figure. Two land transfer tax lines in one document (provincial and municipal) are
+a named conflict, not a sum, as two other-cost lines are; a person enters the total. When absent, these two appear
+under "Not found in the documents", not "Choices only you make". A deal read before this card proposes
+`development_charges` and no `other_cost` at its next reconcile, so the "source removed" rule applies to the old
+other-cost row and the new value waits for review.
+
+The other three stay unread (`extractable: false`) and appear under "Choices only you make". Property tax beside an
+operating-expense total would be counted twice the other way; a GST/HST figure "net of rebates" is not a line
+documents state reliably; and the premium is a lender's term chosen with the refinance, not a budget line.
 
 **The fields.** All are optional, 0 or more, and in dollars unless stated. Each is set on the engine input only
 when it has a value; an absent field is omitted, never `0` and never `undefined`, so a deal that states none of

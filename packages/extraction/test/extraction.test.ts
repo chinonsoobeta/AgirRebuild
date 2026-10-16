@@ -2211,13 +2211,13 @@ describe("totals and their parts", () => {
       expect(pick(read("All-in cost: $6,400,000", "Total project cost is $6,450,000"))).toEqual([["stated_total_cost", 6_400_000], ["stated_total_cost", 6_450_000]]);
       expect(pick(read("Interest reserve of $190,000 is held back."))).toEqual([["stated_interest_reserve", 190_000]]);
     });
-    test("government charges and taxes are other costs, never the land", () => {
-      expect(pick(read("Development charges: $120,000", "DCCs: $80,000", "Development cost charges: $60,000", "Permit levies: $12,000"))).toEqual([["other_cost", 120_000], ["other_cost", 80_000], ["other_cost", 60_000], ["other_cost", 12_000]]);
-      expect(pick(read("Land transfer tax: $45,000", "LTT: $46,000", "DCs: $9,000"))).toEqual([["other_cost", 45_000], ["other_cost", 46_000], ["other_cost", 9_000]]);
-      expect(pick(read("Taxe de bienvenue : 12 000 $", "Droits de mutation : 13 000 $"))).toEqual([["other_cost", 12_000], ["other_cost", 13_000]]);
-      expect(pick(read("Land transfer tax of $45,000 is due at closing."))).toEqual([["other_cost", 45_000]]);
+    test("government charges and taxes are their own cost lines (card 61b) or other costs, never the land", () => {
+      expect(pick(read("Development charges: $120,000", "DCCs: $80,000", "Development cost charges: $60,000", "Permit levies: $12,000"))).toEqual([["development_charges", 120_000], ["development_charges", 80_000], ["development_charges", 60_000], ["other_cost", 12_000]]);
+      expect(pick(read("Land transfer tax: $45,000", "LTT: $46,000", "DCs: $9,000"))).toEqual([["land_transfer_tax", 45_000], ["land_transfer_tax", 46_000], ["development_charges", 9_000]]);
+      expect(pick(read("Taxe de bienvenue : 12 000 $", "Droits de mutation : 13 000 $"))).toEqual([["land_transfer_tax", 12_000], ["land_transfer_tax", 13_000]]);
+      expect(pick(read("Land transfer tax of $45,000 is due at closing."))).toEqual([["land_transfer_tax", 45_000]]);
       const t = budget(["Item", "Amount"], ["Land", 485_000], ["Land transfer tax", 8_000], ["Development charges", 120_000]);
-      expect(pick(t)).toEqual([["land_cost", 485_000], ["other_cost", 128_000]]);
+      expect(pick(t)).toEqual([["land_cost", 485_000], ["land_transfer_tax", 8_000], ["development_charges", 120_000]]);
       // Negative: the land alone is still the land.
       expect(pick(read("Land: $485,000"))).toEqual([["land_cost", 485_000]]);
     });
@@ -2311,7 +2311,7 @@ describe("totals and their parts", () => {
       expect(pick(read("Hard costs, including site works and land transfer tax: $3,000,000"))).toEqual([["hard_cost", 3_000_000]]);
       expect(pick(read("Coûts indirects, comprenant les frais de développement et les droits de mutation : 450 000 $"))).toEqual([["soft_cost", 450_000]]);
       // Negative: without a budget field at its head the list is read as before.
-      expect(pick(read("Charges including development charges: $120,000"))).toEqual([["other_cost", 120_000]]);
+      expect(pick(read("Charges including development charges: $120,000"))).toEqual([["development_charges", 120_000]]);
     });
     test("a quote table with revision columns reads the latest column and shows the earlier", () => {
       const NOTE = "Superseded by a later revision of this quote";
@@ -4188,13 +4188,13 @@ describe("card 61b: development charges and land transfer tax are read into thei
     const r = read("Land: $800,000", "Land transfer duty: $20,000");
     expect(pick(r)).toEqual([["land_cost", 800_000], ["land_transfer_tax", 20_000]]);
     const proposals = consolidate(r.candidates.map((c) => ({ ...c, documentId: "d", documentName: "d" })));
-    expect(proposals.map((p) => [p.fieldKey, p.status])).toEqual([["land_cost", "needs_review"], ["land_transfer_tax", "needs_review"]]);
+    expect(proposals.map((p) => [p.fieldKey, p.status]).sort()).toEqual([["land_cost", "needs_review"], ["land_transfer_tax", "needs_review"]]);
   });
   test("beside an other costs line, development charges are their own value and nothing conflicts", () => {
     const r = read("Other costs: $50,000", "Development charges: $85,000");
     expect(pick(r)).toEqual([["other_cost", 50_000], ["development_charges", 85_000]]);
     const proposals = consolidate(r.candidates.map((c) => ({ ...c, documentId: "d", documentName: "d" })));
-    expect(proposals.map((p) => [p.fieldKey, p.status])).toEqual([["other_cost", "needs_review"], ["development_charges", "needs_review"]]);
+    expect(proposals.map((p) => [p.fieldKey, p.status]).sort()).toEqual([["development_charges", "needs_review"], ["other_cost", "needs_review"]]);
   });
   test("property tax and GST/HST net of rebates are still not read as any field", () => {
     expect(pick(read("Property tax: $12,000"))).toEqual([]);

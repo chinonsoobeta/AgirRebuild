@@ -438,7 +438,7 @@ describe("quick-start templates", () => {
     const choiceKeys = (r: Readiness) => r.choices.map((i) => i.fieldKey);
     const minimal = () => rowsFor("multiplex").filter((r) => !["other_cost", "other_income_annual"].includes(r.fieldKey));
     const add = (fieldKey: string, status: AssumptionStatus, valueNumeric: number | null) => ({ fieldKey, itemKey: null, status, valueNumeric });
-    const NOT_FOUND = ["other_cost", "variable_expense_pct", "other_income_annual", "rent_growth_pct", "expense_growth_pct", "senior_io_months", "min_dscr_covenant", "mezz_loan_amount", "equity_amount", "refinance_month", "lp_share_pct", "stated_total_cost", "stated_ltc_pct", "stated_interest_reserve"];
+    const NOT_FOUND = ["other_cost", "land_transfer_tax", "variable_expense_pct", "other_income_annual", "rent_growth_pct", "expense_growth_pct", "senior_io_months", "min_dscr_covenant", "mezz_loan_amount", "equity_amount", "refinance_month", "lp_share_pct", "stated_total_cost", "stated_ltc_pct", "stated_interest_reserve"];
 
     test("with none stated, every never-extracted optional flag is listed, with what the run treats it as", () => {
       const { readiness } = assemble(minimal());
