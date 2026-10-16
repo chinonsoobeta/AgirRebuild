@@ -510,6 +510,15 @@ describe("audit of card 58b: the audit trail says which values a reconcile put b
     expect(describeEvent(en, two)).toMatch(/^Updated the review queue from the documents\. Put back after a label was removed: Exit cap rate; /);
     expect(describeEvent(fr, two)).toMatch(/Rétablies après le retrait d'une étiquette\u00a0: Taux de capitalisation à la sortie\u00a0; /);
   });
+  it("says a document was removed when one reopened the value, and reads an entry without `by` as a label", () => {
+    const doc = ev({ proposals: 0, changed: 1, restored: 1, restored_values: [{ field: "exit_cap_rate_pct", item: "", by: "document" }] });
+    expect(describeEvent(en, doc)).toBe("Updated the review queue from the documents. Put back after a document was removed: Exit cap rate");
+    expect(describeEvent(fr, doc)).toBe("A mis à jour la file d'examen à partir des documents. Rétablie après le retrait d'un document\u00a0: Taux de capitalisation à la sortie");
+    const label = ev({ proposals: 0, changed: 1, restored: 1, restored_values: [{ field: "exit_cap_rate_pct", item: "", by: "label" }] });
+    expect(describeEvent(en, label)).toBe("Updated the review queue from the documents. Put back after a label was removed: Exit cap rate");
+    const both = ev({ proposals: 0, changed: 2, restored: 2, restored_values: [{ field: "exit_cap_rate_pct", item: "", by: "document" }, { field: "hold_years", item: "" }] });
+    expect(describeEvent(en, both)).toBe("Updated the review queue from the documents. Put back after a label was removed: Hold period. Put back after a document was removed: Exit cap rate");
+  });
   it("is unchanged when nothing was put back", () => {
     expect(describeEvent(en, ev({ proposals: 1, changed: 0 }))).toBe("Updated the review queue from the documents");
     expect(describeEvent(fr, ev({ proposals: 1, changed: 0 }))).toBe("A mis à jour la file d'examen à partir des documents");

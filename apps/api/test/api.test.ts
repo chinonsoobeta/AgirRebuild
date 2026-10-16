@@ -1892,5 +1892,41 @@ describe("card 63: a person's decision stands through a later, unrelated reconci
     expect(a).toMatchObject({ status: "conflicting", value: 800000 });
     expect(a.conflictValues).toEqual([{ value: 800000, documents: ["Entered by an analyst"] }, { value: 850000, documents: ["purchase.txt"] }]);
   });
-  // card 63 extension tests
+
+  // Extension of rule 4: put back after a document went.
+  const whole = async (d: string, k: string) =>
+    ((await db.query<any>(`select status, value, reason, sources, source_kind, decided_by, decided_at, second_approver, second_approved_at, conflict_values from assumptions where deal_id = $1 and field_key = $2`, [d, k])) as any[])[0];
+  const lastReconcile = async (d: string) => ((await db.query<any>(`select payload from audit_events where action = 'assumptions.reconciled' and deal_id = $1 order by seq desc limit 1`, [d])) as any[])[0].payload;
+
+  test("a value a document reopened comes back as it was when that document is retired, and the audit trail says why", async () => {
+    const d = await mkDeal(sw, "Stands Put Back");
+    await enter(d, "exit_cap_rate_pct", 5.5);
+    const before = await whole(d, "exit_cap_rate_pct");
+    await upload(d, "appraisal.txt", "Appraisal\nExit cap rate: 5.25%\n");
+    expect(await byField(d, "exit_cap_rate_pct")).toMatchObject({ status: "conflicting" });
+    await retire(d, "appraisal.txt");
+    expect(await whole(d, "exit_cap_rate_pct")).toEqual(before);
+    expect(await lastReconcile(d)).toMatchObject({ restored: 1, restored_values: [{ field: "exit_cap_rate_pct", item: "", by: "document" }] });
+    const [restored] = ((await db.query<any>(`select e.reason, e.actor from assumption_events e join assumptions a on a.id = e.assumption_id where a.deal_id = $1 and e.action = 'restored'`, [d])) as any[]);
+    expect(restored).toMatchObject({ actor: null, reason: "The document that disagreed was removed; the value is back as it was approved" });
+  });
+
+  test("a value a person rejected after a document reopened it stays rejected when that document is retired", async () => {
+    const d = await mkDeal(sw, "Stands Put Back Rejected");
+    await enter(d, "exit_cap_rate_pct", 5.5);
+    await upload(d, "appraisal.txt", "Appraisal\nExit cap rate: 5.25%\n");
+    await act(alice, await byField(d, "exit_cap_rate_pct"), { action: "reject", reason: "Neither is right" });
+    await retire(d, "appraisal.txt");
+    expect(await byField(d, "exit_cap_rate_pct")).toMatchObject({ status: "rejected" });
+    expect(((await db.query<any>(`select 1 from assumption_events e join assumptions a on a.id = e.assumption_id where a.deal_id = $1 and e.action = 'restored'`, [d])) as any[])).toHaveLength(0);
+  });
+
+  test("a value a label reopened is named as put back by a label", async () => {
+    const d = await mkDeal(sw, "Stands Put Back Label");
+    await upload(d, "notes.txt", "Notes\nGauge: 5.25%\n");
+    await enter(d, "exit_cap_rate_pct", 5.5);
+    await label(d, "5.25%", "exit_cap_rate_pct");
+    await unlabel(d, "5.25%");
+    expect(await lastReconcile(d)).toMatchObject({ restored_values: [{ field: "exit_cap_rate_pct", item: "", by: "label" }] });
+  });
 });
