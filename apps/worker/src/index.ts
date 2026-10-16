@@ -310,13 +310,13 @@ export async function reconcileDeal(db: Db, dealId: string) {
          and not exists (select 1 from assumption_events y where y.assumption_id = a.id and y.id > e.id and y.actor is not null)`,
       [dealId],
     )) if (r.restore_to.by_label) restorable.set(r.assumption_id, r.restore_to);
-    let restored = 0;
+    const restoredValues: { field: string; item: string }[] = [];
     const restore = async (e: AssumptionRowDb, rt: RestoreTo, sources: unknown) => {
       await tx.query(`update assumptions set status = $2, value = $3, reason = $4, sources = $5, conflict_values = null, version = version + 1, updated_at = now() where id = $1`, [
         e.id, rt.status, rt.value, rt.reason, JSON.stringify(sources),
       ]);
       await log(e.id, "restored", "conflicting", rt.status, e.value, rt.value, `The label that disagreed was removed; the value is back as it was ${rt.status === "approved" ? "approved" : "accepted"}`);
-      restored++;
+      restoredValues.push({ field: e.field_key, item: e.item_key });
       changed++;
     };
     // A proposal meets the existing row whose item name folds equal (task 60d); when several do, it meets none of them and readiness blocks the run.
@@ -449,7 +449,7 @@ export async function reconcileDeal(db: Db, dealId: string) {
       deal.workspace_id,
       dealId,
       dealId,
-      JSON.stringify({ proposals: proposals.length, changed, ...(restored ? { restored } : {}), ...(on ? { suggested: kept.length, dropped } : {}), ...(labelRows.length ? { labelled: labelled.length, labelDropped } : {}) }),
+      JSON.stringify({ proposals: proposals.length, changed, ...(restoredValues.length ? { restored: restoredValues.length, restored_values: restoredValues } : {}), ...(on ? { suggested: kept.length, dropped } : {}), ...(labelRows.length ? { labelled: labelled.length, labelDropped } : {}) }),
     ]);
   });
 }

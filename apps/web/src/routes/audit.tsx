@@ -4,7 +4,7 @@ import { api, type AuditEvent } from "../api";
 import { DealHeader, StatusTag, useDeal, useSession } from "../components/ui";
 import { useI18n, type I18n } from "../i18n";
 
-function describe(i: I18n, e: AuditEvent): string {
+export function describeEvent(i: I18n, e: AuditEvent): string {
   const p = e.payload ?? {};
   const fr = i.lang === "fr";
   const kind = (k: string) => (k === "ic_memo" ? i.t("reports.memo") : k === "lender_package" ? i.t("reports.lender") : k === "build_decision" ? i.t("reports.buildDecision") : i.t("reports.modelExport"));
@@ -18,7 +18,16 @@ function describe(i: I18n, e: AuditEvent): string {
     case "document.extracted": return fr ? `A lu un document : ${p.candidates} valeurs trouvées` : `Read a document: ${p.candidates} values found`;
     case "document.retired": return fr ? `A retiré ${p.name}` : `Removed ${p.name}`;
     case "document.retried": return fr ? "A relancé la lecture d'un document" : "Retried reading a document";
-    case "assumptions.reconciled": return fr ? "A mis à jour la file d'examen à partir des documents" : "Updated the review queue from the documents";
+    case "assumptions.reconciled": {
+      const done = fr ? "A mis à jour la file d'examen à partir des documents" : "Updated the review queue from the documents";
+      // Values a removed label had reopened, back as they were (card 58b): named, since no person approved them again.
+      const back: { field: string; item: string }[] = p.restored_values ?? [];
+      if (!back.length) return done;
+      const names = back.map((v) => i.L.field(v.field, v.item || null)).join(fr ? "\u00a0; " : "; ");
+      return fr
+        ? `${done}. ${back.length === 1 ? "Rétablie" : "Rétablies"} après le retrait d'une étiquette\u00a0: ${names}`
+        : `${done}. Put back after a label was removed: ${names}`;
+    }
     case "run.completed": return fr ? `A lancé l'analyse ${p.run_number} : ${i.L.verdict(p.verdict).toLowerCase()}` : `Ran underwriting: run ${p.run_number}, ${String(p.verdict).replace(/_/g, " ").toLowerCase()}`;
     case "decision.recorded":
       return fr
@@ -73,7 +82,7 @@ export function Audit({ dealId }: { dealId: string }) {
           {(events.data ?? []).map((e) => (
             <tr key={e.seq}>
               <td className="num faint">{e.seq}</td>
-              <td>{describe(i, e)}</td>
+              <td>{describeEvent(i, e)}</td>
               <td className="small muted">{e.actor ?? t("audit.worker")}</td>
               <td className="small muted">{f.date(e.created_at)}</td>
               <td className="num small faint">{e.hash.slice(0, 12)}</td>
