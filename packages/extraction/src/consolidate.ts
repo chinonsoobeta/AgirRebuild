@@ -97,6 +97,9 @@ const seenUnit = (u: string | null): string | null => {
 };
 const UNIT_SEEN: Record<string, string | null> = { "$": "$", "$/unit/mo": "$/mo", "$/sf/yr": "$/sf", "%": "%", months: "months", years: "years", x: "x", sf: "sf", units: null };
 
+/** A count is written bare or as "units", as the reader itself records it. */
+const unitFits = (fieldUnit: string, unit: string | null) => (fieldUnit === "units" ? unit === null || unit === "units" : fieldUnit in UNIT_SEEN && unit === UNIT_SEEN[fieldUnit]);
+
 /**
  * Cross the boundary a model's label suggestion must pass. A kept candidate is the offered figure itself:
  * only its fieldKey and itemKey come from the suggestion, and any other property of a suggestion is never read.
@@ -126,8 +129,7 @@ export function applySuggestions(
     if (!def) { drop("The key is not in the catalog"); continue; }
     if (!def.extractable) { drop("This field is not read from documents"); continue; }
     const unit = seenUnit(fig.unitSeen);
-    // A count is written bare or as "units", as the reader itself records it.
-    const fits = def.unit === "units" ? (unit === null || unit === "units") : def.unit in UNIT_SEEN && unit === UNIT_SEEN[def.unit];
+    const fits = unitFits(def.unit, unit);
     if (!fits) { drop(`The figure's unit (${fig.unitSeen ?? "none"}) does not fit ${def.unit}`); continue; }
     // The field's own bounds: a figure the field could never hold is not that field's figure.
     const v = fig.value!;
@@ -144,4 +146,55 @@ export function applySuggestions(
     kept.push({ ...fig, fieldKey: def.key, itemKey, rule: "suggested", note: SUGGESTED_NOTE });
   }
   return { kept, dropped };
+}
+
+export const LABELLED_NOTE = "Labelled by a person from the document; confirm it";
+
+/** Every unlabelled figure that has a value, in one order for the worker, the review and a reconcile, so their ids match. */
+export const figureOrder = (cs: readonly SourcedCandidate[]): SourcedCandidate[] =>
+  cs
+    .filter((c) => c.fieldKey === null && c.value !== null)
+    .sort((a, b) => (a.location < b.location ? -1 : a.location > b.location ? 1 : 0) || (a.raw < b.raw ? -1 : a.raw > b.raw ? 1 : 0) || (a.context < b.context ? -1 : a.context > b.context ? 1 : 0) || a.value! - b.value!);
+
+/**
+ * Cross the boundary a person's figure label must pass. `figures` is `figureOrder` of the deal's live documents; ids are `offeredIds` over it.
+ * Unlike a suggestion, a label is kept although the reader read the field (consolidate names the conflict), and any unlabelled figure may be
+ * labelled, even one the reader refused. A bare number takes the field's unit, because the person stated it.
+ */
+export function applyLabels(
+  figures: readonly SourcedCandidate[],
+  labels: readonly { id: string; fieldKey: string; itemKey?: string | null }[],
+): { kept: SourcedCandidate[]; dropped: { id: string; why: string }[] } {
+  const ids = offeredIds(figures);
+  const kept: SourcedCandidate[] = [];
+  const dropped: { id: string; why: string }[] = [];
+  for (const l of labels) {
+    const id = String(l.id);
+    const drop = (why: string) => dropped.push({ id, why });
+    const fig = figures[ids.indexOf(id)];
+    if (!fig) { drop("The figure is no longer in the document"); continue; }
+    const def = FIELD_BY_KEY.get(l.fieldKey);
+    if (!def) { drop("The key is not in the catalog"); continue; }
+    if (!def.extractable) { drop("This field is not read from documents"); continue; }
+    const unit = seenUnit(fig.unitSeen);
+    if (unit !== null && !unitFits(def.unit, unit)) { drop(`The figure's unit (${fig.unitSeen}) does not fit ${def.unit}`); continue; }
+    if (outsideBounds(def, fig.value!)) { drop(`The figure is outside what ${def.key} can hold`); continue; }
+    let itemKey: string | null = null;
+    if (def.itemized) {
+      itemKey = typeof l.itemKey === "string" ? l.itemKey.trim() : "";
+      if (!itemKey) { drop("This field needs an item name"); continue; }
+      itemKey = canonicalItem(itemKey);
+    }
+    kept.push({ ...fig, fieldKey: def.key, itemKey, rule: "labelled", note: LABELLED_NOTE });
+  }
+  return { kept, dropped };
+}
+
+/** A person's label beats a model's suggestion: drop the suggestions for figures a person labelled (rightly or not). */
+export function withoutLabelled<S extends { id: string }>(figures: readonly SourcedCandidate[], labels: readonly { id: string }[], suggestions: readonly S[]): S[] {
+  const labelled = new Set(labels.map((l) => figures[offeredIds(figures).indexOf(String(l.id))]).filter(Boolean));
+  const offered = figures.filter(offerable);
+  const offeredId = offeredIds(offered);
+  const gone = new Set(offered.flatMap((f, i) => (labelled.has(f) ? [offeredId[i]!] : [])));
+  return suggestions.filter((s) => !gone.has(String(s.id)));
 }

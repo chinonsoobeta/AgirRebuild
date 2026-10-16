@@ -14,6 +14,7 @@ import {
 } from "@agir/contracts";
 import { assemble, canonicalJson, ENGINE_VERSION, replay, underwrite } from "@agir/engine";
 import type { Db } from "@agir/db";
+import { figureOrder, offeredIds, type SourcedCandidate } from "@agir/extraction";
 
 export const sha256 = (s: string) => createHash("sha256").update(s).digest("hex");
 export const POLICY_HASH = sha256(canonicalJson(POLICY_V1));
@@ -190,13 +191,28 @@ export async function dealOverview(tx: Db, dealId: string) {
 export async function reviewView(tx: Db, dealId: string) {
   const assumptions = await loadAssumptions(tx, dealId);
   const { readiness } = readinessFor(assumptions);
-  const other = await tx.query<{ document_name: string; raw: string; value: number | null; location: string; context: string; note: string | null }>(
-    `select d.name as document_name, c.raw, c.value, c.location, c.context, c.note
+  const rows = await tx.query<{ id: string; document_id: string; document_name: string; raw: string; value: number | null; unit_seen: string | null; location: string; context: string; note: string | null }>(
+    `select c.id, c.document_id, d.name as document_name, c.raw, c.value, c.unit_seen, c.location, c.context, c.note
      from candidates c join documents d on d.id = c.document_id
      where c.deal_id = $1 and c.field_key is null and d.retired_at is null
      order by d.name, c.location`,
     [dealId],
   );
+  // The id a figure label names: the same one the worker's reconcile computes.
+  const figures = figureOrder(rows.map((r) => ({ fieldKey: null, itemKey: null, value: r.value, raw: r.raw, unitSeen: r.unit_seen, location: r.location, context: r.context, rule: "", documentId: r.document_id, documentName: r.document_name, rowId: r.id }) as SourcedCandidate));
+  const figureIds = new Map(offeredIds(figures).map((id, i) => [(figures[i] as SourcedCandidate & { rowId: string }).rowId, id]));
+  const labels = await tx.query<{ document_id: string; figure_id: string; field_key: string; item_key: string; by: string; created_at: string | Date }>(
+    `select l.document_id, l.figure_id, l.field_key, l.item_key, u.name as by, l.created_at from figure_labels l join users u on u.id = l.created_by where l.deal_id = $1`,
+    [dealId],
+  );
+  const other = rows.map((r) => {
+    const figureId = figureIds.get(r.id) ?? null;
+    const l = labels.find((x) => x.document_id === r.document_id && x.figure_id === figureId);
+    return {
+      documentId: r.document_id, document_name: r.document_name, raw: r.raw, value: r.value, location: r.location, context: r.context, note: r.note, figureId,
+      label: l ? { fieldKey: l.field_key, itemKey: l.item_key || null, by: l.by, at: l.created_at } : null,
+    };
+  });
   return {
     readiness,
     assumptions: assumptions.map((a) => {

@@ -619,7 +619,7 @@ describe("a person labels a figure Agir did not use (task 58)", () => {
     await work();
     expect((await byField("land_cost"))?.status ?? "rejected").toBe("rejected");
     expect((await row("$3,000")).label).toBeNull();
-    expect((await db.query<any>(`select id from audit_events where action = 'figure.unlabelled' and deal_id = $1`, [ld]))).toHaveLength(1);
+    expect((await db.query<any>(`select seq from audit_events where action = 'figure.unlabelled' and deal_id = $1`, [ld]))).toHaveLength(1);
   });
 
   test("a label whose figure is gone is dropped at reconcile, and the audit says so", async () => {

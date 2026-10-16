@@ -23,6 +23,7 @@ export const api = {
   get: <T>(p: string) => request<T>("GET", p),
   post: <T>(p: string, body?: unknown) => request<T>("POST", p, body ?? {}),
   upload: <T>(p: string, file: File) => request<T>("PUT", p, undefined, file),
+  del: <T>(p: string, body: unknown) => request<T>("DELETE", p, body),
 };
 
 // ---- Response shapes ---------------------------------------------------------------
@@ -66,7 +67,7 @@ export type Review = {
   assumptions: Assumption[];
   missing: (ReadinessItem & { unit: string; material: boolean; default: number | null; help: string | null; groupLabel: string })[];
   notFound: Review["missing"];
-  other: { document_name: string; raw: string; value: number | null; location: string; context: string; note: string | null }[];
+  other: { documentId: string; document_name: string; raw: string; value: number | null; location: string; context: string; note: string | null; figureId: string | null; label: { fieldKey: string; itemKey: string | null; by: string; at: string } | null }[];
 };
 export type Metric = { key: string; label: string; unit: string; value: number | null; status: string; reason?: string; formula: string };
 export type RunView = {

@@ -7,7 +7,7 @@ import Anthropic from "@anthropic-ai/sdk";
 import { FIELDS, FIELD_BY_KEY, POLICY_V1, type Currency, type EngineInput, type FieldUnit, type RunResult } from "@agir/contracts";
 import { renderArtifact, RendererUnavailableError, type ArtifactInput } from "@agir/artifacts";
 import { sha256Hex, type BlobStore, type Db } from "@agir/db";
-import { applySuggestions, consolidate, extractCandidates, kindOf, offerable, offeredIds, parseDocument, type SourcedCandidate } from "@agir/extraction";
+import { applyLabels, applySuggestions, consolidate, extractCandidates, figureOrder, kindOf, offerable, offeredIds, parseDocument, withoutLabelled, type SourcedCandidate } from "@agir/extraction";
 
 export const MAX_UPLOAD_BYTES = 75 * 1024 * 1024;
 
@@ -254,21 +254,35 @@ export async function reconcileDeal(db: Db, dealId: string) {
     const [{ label_suggestions: on } = { label_suggestions: false }] = await tx.query<{ label_suggestions: boolean }>(`select label_suggestions from workspaces where id = $1`, [deal.workspace_id]);
     let kept: SourcedCandidate[] = [];
     let dropped: { id: string; why: string }[] = [];
+    // Every unlabelled figure with a value, in the order the review used for the ids a person's label names.
+    const unlabelled = figureOrder(
+      (
+        await tx.query<(typeof rows)[number]>(
+          `select c.id, c.document_id, d.name as document_name, c.field_key, c.item_key, c.value, c.raw, c.unit_seen, c.location, c.context, c.rule, c.note
+           from candidates c join documents d on d.id = c.document_id
+           where c.deal_id = $1 and c.field_key is null and c.value is not null and d.retired_at is null and d.stage = 'extracted'`,
+          [dealId],
+        )
+      ).map(toSourced),
+    );
+    // A person's label always applies, whatever the suggestions switch says, and is never dropped because the reader read the field.
+    const labelRows = await tx.query<{ figure_id: string; field_key: string; item_key: string }>(
+      `select l.figure_id, l.field_key, l.item_key from figure_labels l join documents d on d.id = l.document_id
+       where l.deal_id = $1 and d.retired_at is null and d.stage = 'extracted' order by l.document_id, l.figure_id`,
+      [dealId],
+    );
+    const labels = labelRows.map((l) => ({ id: l.figure_id, fieldKey: l.field_key, itemKey: l.item_key }));
+    const { kept: labelled, dropped: labelDropped } = applyLabels(unlabelled, labels);
     if (on) {
-      const unlabelled = await tx.query<(typeof rows)[number]>(
-        `select c.id, c.document_id, d.name as document_name, c.field_key, c.item_key, c.value, c.raw, c.unit_seen, c.location, c.context, c.rule, c.note
-         from candidates c join documents d on d.id = c.document_id
-         where c.deal_id = $1 and c.field_key is null and c.value is not null and d.retired_at is null and d.stage = 'extracted'`,
-        [dealId],
-      );
       const stored = await tx.query<{ response: unknown[] }>(
         `select s.response from label_suggestions s join documents d on d.id = s.document_id
          where s.deal_id = $1 and s.outcome = 'ok' and d.retired_at is null and d.stage = 'extracted' order by s.document_id, s.created_at, s.id`,
         [dealId],
       );
-      ({ kept, dropped } = applySuggestions(sourced, offeredOf(unlabelled.map(toSourced)), stored.flatMap((r) => r.response as { id: string; fieldKey: string; itemKey?: string | null }[])));
+      const suggestions = withoutLabelled(unlabelled, labels, stored.flatMap((r) => r.response as { id: string; fieldKey: string; itemKey?: string | null }[]));
+      ({ kept, dropped } = applySuggestions(sourced, unlabelled.filter(offerable), suggestions));
     }
-    const proposals = consolidate([...sourced, ...kept], deal.currency);
+    const proposals = consolidate([...sourced, ...kept, ...labelled], deal.currency);
     const existing = await tx.query<AssumptionRowDb>(
       `select id, field_key, item_key, status, value, source_kind, sources, conflict_values, reason, version from assumptions where deal_id = $1 for update`,
       [dealId],
@@ -358,7 +372,8 @@ export async function reconcileDeal(db: Db, dealId: string) {
       const key = `${e.field_key}|${e.item_key}`;
       if (seen.has(key) || e.source_kind !== "document") continue;
       // A value whose every source was a model's suggestion leaves because the switch is off, not because a document went.
-      const gone = !on && e.sources?.length && e.sources.every((x) => (x as { rule?: string }).rule === "suggested") ? "Its label was a model's suggestion, and suggestions are now off" : "Its source document was removed";
+      const everyRule = (r: string) => !!e.sources?.length && e.sources.every((x) => (x as { rule?: string }).rule === r);
+      const gone = !on && everyRule("suggested") ? "Its label was a model's suggestion, and suggestions are now off" : everyRule("labelled") ? "The label a person gave its figure was removed" : "Its source document was removed";
       if (e.status === "needs_review" || e.status === "conflicting") {
         await tx.query(`update assumptions set status = 'rejected', sources = '[]', conflict_values = null, reason = $2, version = version + 1, updated_at = now() where id = $1`, [
           e.id,
@@ -379,7 +394,7 @@ export async function reconcileDeal(db: Db, dealId: string) {
       deal.workspace_id,
       dealId,
       dealId,
-      JSON.stringify({ proposals: proposals.length, changed, ...(on ? { suggested: kept.length, dropped } : {}) }),
+      JSON.stringify({ proposals: proposals.length, changed, ...(on ? { suggested: kept.length, dropped } : {}), ...(labelRows.length ? { labelled: labelled.length, labelDropped } : {}) }),
     ]);
   });
 }

@@ -262,6 +262,31 @@ export function createApp({ db, store, secureCookies, demoSignIn = false }: AppD
   });
 
   // ---- Review -----------------------------------------------------------------------
+  // A person labels a figure Agir did not use. The worker applies it at the next reconcile; the boundary re-checks unit, bounds and item.
+  const figureTarget = z.object({ documentId: z.string().uuid(), figureId: z.string().min(1).max(2000) });
+  const ownFigure = async (tx: Db, dealId: string, documentId: string) => {
+    if (!(await tx.query(`select 1 from documents where id = $1 and deal_id = $2`, [documentId, dealId])).length) throw new HttpError(404, "Document not found");
+  };
+  app.post("/api/deals/:id/figure-labels", async (c) => {
+    const b = figureTarget
+      .extend({ fieldKey: z.string().refine((k) => FIELDS.some((f) => f.key === k && f.extractable), "Not a field that is read from documents"), itemKey: z.string().max(120).optional() })
+      .parse(await c.req.json());
+    if (FIELDS.find((f) => f.key === b.fieldKey)!.itemized && !b.itemKey?.trim()) throw new HttpError(422, "This field needs an item name");
+    await as(c, async (tx) => {
+      await ownFigure(tx, c.req.param("id"), b.documentId);
+      await tx.query(`select fn_label_figure($1, $2, $3, $4)`, [b.documentId, b.figureId, b.fieldKey, b.itemKey ?? ""]);
+    });
+    return c.json({ ok: true });
+  });
+  app.delete("/api/deals/:id/figure-labels", async (c) => {
+    const b = figureTarget.parse(await c.req.json());
+    await as(c, async (tx) => {
+      await ownFigure(tx, c.req.param("id"), b.documentId);
+      await tx.query(`select fn_unlabel_figure($1, $2)`, [b.documentId, b.figureId]);
+    });
+    return c.json({ ok: true });
+  });
+
   app.get("/api/deals/:id/review", async (c) => c.json(await as(c, (tx) => reviewView(tx, c.req.param("id")))));
 
   app.post("/api/assumptions/:id/review", async (c) => {

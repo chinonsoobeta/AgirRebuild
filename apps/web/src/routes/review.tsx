@@ -1,5 +1,6 @@
 import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
 import { useState, type FormEvent, type ReactNode } from "react";
+import { FIELDS } from "@agir/contracts";
 import { SF_PER_M2 } from "@agir/numbers";
 import { api, type Assumption, type Review as ReviewData, type Source } from "../api";
 import { Banner, canEdit, DealHeader, ErrorText, Glossary, StatusTag, useDeal, useSession } from "../components/ui";
@@ -57,6 +58,43 @@ function ValueInput({ unit, id, defaultValue }: { unit: string; id: string; defa
   );
 }
 
+const LABELLABLE = FIELDS.filter((x) => x.extractable);
+
+/** A person's label for a figure Agir did not use: the field and, for an itemized field, the item. */
+function UseAs({ o, items, onSave, busy }: { o: ReviewData["other"][number]; items: string[]; onSave: (b: { documentId: string; figureId: string; fieldKey: string; itemKey?: string }) => void; busy: boolean }) {
+  const { t, L } = useI18n();
+  const [open, setOpen] = useState(false);
+  const [key, setKey] = useState("");
+  const def = LABELLABLE.find((x) => x.key === key);
+  if (!open) return <button className="btn quiet small" type="button" onClick={() => setOpen(true)}>{t("review.useAs")}</button>;
+  const list = `items-${o.figureId}`;
+  return (
+    <form
+      className="stack"
+      style={{ gap: 6 }}
+      onSubmit={(e) => {
+        e.preventDefault();
+        const item = String(new FormData(e.currentTarget).get("item") ?? "").trim();
+        onSave({ documentId: o.documentId, figureId: o.figureId!, fieldKey: key, ...(def?.itemized ? { itemKey: item } : {}) });
+      }}
+    >
+      <select aria-label={t("review.useAsField")} value={key} onChange={(e) => setKey(e.target.value)} required>
+        <option value="">{t("review.useAsPick")}</option>
+        {[...new Set(LABELLABLE.map((x) => x.group))].map((g) => (
+          <optgroup key={g} label={L.group(g)}>{LABELLABLE.filter((x) => x.group === g).map((x) => <option key={x.key} value={x.key}>{L.field(x.key)}</option>)}</optgroup>
+        ))}
+      </select>
+      {def?.itemized && (
+        <>
+          <input className="input" name="item" list={list} aria-label={t("review.useAsItem")} placeholder={t("review.useAsItem")} required autoComplete="off" />
+          <datalist id={list}>{items.map((i) => <option key={i} value={i} />)}</datalist>
+        </>
+      )}
+      <div className="row"><button className="btn small" type="submit" disabled={!key || busy}>{t("common.save")}</button><button className="btn quiet small" type="button" onClick={() => setOpen(false)}>{t("common.cancel")}</button></div>
+    </form>
+  );
+}
+
 export function Review({ dealId }: { dealId: string }) {
   const { t, f, L, msg, lang } = useI18n();
   const { me, role, solo } = useSession();
@@ -84,6 +122,15 @@ export function Review({ dealId }: { dealId: string }) {
       return refresh();
     },
   });
+  const [otherOpen, setOtherOpen] = useState(false);
+  const label = useMutation({
+    mutationFn: (b: { documentId: string; figureId: string; fieldKey: string; itemKey?: string }) => api.post(`/deals/${dealId}/figure-labels`, b),
+    onSuccess: () => refresh(),
+  });
+  const unlabel = useMutation({
+    mutationFn: (b: { documentId: string; figureId: string }) => api.del(`/deals/${dealId}/figure-labels`, b),
+    onSuccess: () => refresh(),
+  });
   const defaults = useMutation({ mutationFn: (fields: string[]) => api.post(`/deals/${dealId}/defaults`, { fields }), onSuccess: () => refresh() });
   const bulk = useMutation({
     mutationFn: async (items: Assumption[]) => {
@@ -106,6 +153,8 @@ export function Review({ dealId }: { dealId: string }) {
   const rejected = by("rejected");
   const total = conflicts.length + r.missing.length + pending.length + awaiting.length + approved.length;
   const focused = r.assumptions.find((a) => a.id === focus) ?? conflicts[0] ?? pending[0];
+  const unused = r.other.filter((o) => o.figureId && o.value !== null && !o.label).length;
+  const itemNames = [...new Set(r.assumptions.map((a) => a.itemKey).filter((i): i is string => !!i))];
   const defaultable = r.missing.filter((m) => m.default !== null);
   const docsBusy = deal.data.documents.processing > 0;
   const summary: string[] = t("review.summary", { c: conflicts.length, m: r.missing.length, r: pending.length + awaiting.length, a: approved.length });
@@ -274,6 +323,9 @@ export function Review({ dealId }: { dealId: string }) {
               </div>
               <p className="small muted">{t("review.missingBody", { defaults: defaultable.length > 0 })}</p>
               <ErrorText error={enter.error ?? defaults.error ?? formError} />
+              {unused > 0 && (
+                <p className="small muted">{t("review.unusedLine", { n: unused })} <a href="#unused-figures" onClick={() => setOtherOpen(true)}>{t("review.unusedLink")}</a></p>
+              )}
               {r.missing.map((m) => {
                 const id = `m-${m.fieldKey}-${m.itemKey ?? ""}`;
                 return entryForm(m, id,
@@ -398,14 +450,29 @@ export function Review({ dealId }: { dealId: string }) {
               </ul>
             </details>
           )}
-          <details style={{ borderTop: "1px solid var(--rule)", paddingTop: 16 }}>
+          <details id="unused-figures" style={{ borderTop: "1px solid var(--rule)", paddingTop: 16 }} open={otherOpen} onToggle={(e) => setOtherOpen(e.currentTarget.open)}>
             <summary>{t("review.other")} <span className="num faint" style={{ fontWeight: 400 }}>{r.other.length}</span></summary>
             <p className="small muted" style={{ marginTop: 8 }}>{t("review.otherBody")}</p>
+            <ErrorText error={label.error ?? unlabel.error} />
             <table className="tbl" style={{ marginTop: 12 }}>
               <thead><tr><th>{t("review.col.doc")}</th><th>{t("review.col.text")}</th><th>{t("review.col.whyNot")}</th></tr></thead>
               <tbody>
                 {r.other.map((o, n) => (
-                  <tr key={n}><td className="small">{o.document_name}<div className="faint">{msg(o.location)}</div></td><td className="small num">{o.context}</td><td className="small muted">{msg(o.note)}</td></tr>
+                  <tr key={n}>
+                    <td className="small">{o.document_name}<div className="faint">{msg(o.location)}</div></td>
+                    <td className="small num">{o.context}</td>
+                    <td className="small muted">
+                      {msg(o.note)}
+                      {o.label ? (
+                        <div className="stack" style={{ gap: 4 }}>
+                          <span style={{ fontWeight: 600 }}>{t("review.labelledAs", { field: L.field(o.label.fieldKey, o.label.itemKey), who: o.label.by })}</span>
+                          {editable && <button className="btn quiet small" type="button" disabled={unlabel.isPending} onClick={() => unlabel.mutate({ documentId: o.documentId, figureId: o.figureId! })}>{t("review.undo")}</button>}
+                        </div>
+                      ) : editable && o.figureId && o.value !== null ? (
+                        <UseAs o={o} items={itemNames} busy={label.isPending} onSave={(b) => label.mutate(b)} />
+                      ) : null}
+                    </td>
+                  </tr>
                 ))}
               </tbody>
             </table>
