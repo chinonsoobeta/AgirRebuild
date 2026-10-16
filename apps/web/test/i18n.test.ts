@@ -7,6 +7,7 @@ import { FIELDS } from "@agir/contracts";
 import { SF_PER_M2 } from "@agir/numbers";
 import { reviewWaiting } from "../src/components/ui.tsx";
 import { enteredInUnit, foreignIn } from "../src/routes/review.tsx";
+import { describeEvent } from "../src/routes/audit.tsx";
 import { build, checkText, dealStatus, translateMessage, verdictText, type Key } from "../src/i18n.tsx";
 
 describe("a run's source labels in French", () => {
@@ -494,5 +495,23 @@ describe("a deal's status line when it has values and no documents", () => {
     const st = dealStatus(en, overview({ missing: 13 }), true);
     expect(st.text).toBe("No documents yet");
     expect(st.next).toBe("Upload the deal documents");
+  });
+});
+
+describe("audit of card 58b: the audit trail says which values a reconcile put back", () => {
+  const ev = (payload: Record<string, unknown>) => ({ seq: 1, action: "assumptions.reconciled", entity: "deal", entity_id: null, payload, hash: "", created_at: "", actor: null });
+  const en = build("en", () => {});
+  const fr = build("fr", () => {});
+  it("names each value, in both languages", () => {
+    const one = ev({ proposals: 1, changed: 1, restored: 1, restored_values: [{ field: "exit_cap_rate_pct", item: "" }] });
+    expect(describeEvent(en, one)).toBe("Updated the review queue from the documents. Put back after a label was removed: Exit cap rate");
+    expect(describeEvent(fr, one)).toBe("A mis à jour la file d'examen à partir des documents. Rétablie après le retrait d'une étiquette\u00a0: Taux de capitalisation à la sortie");
+    const two = ev({ proposals: 2, changed: 2, restored: 2, restored_values: [{ field: "exit_cap_rate_pct", item: "" }, { field: "hold_years", item: "" }] });
+    expect(describeEvent(en, two)).toMatch(/^Updated the review queue from the documents\. Put back after a label was removed: Exit cap rate; /);
+    expect(describeEvent(fr, two)).toMatch(/Rétablies après le retrait d'une étiquette\u00a0: Taux de capitalisation à la sortie\u00a0; /);
+  });
+  it("is unchanged when nothing was put back", () => {
+    expect(describeEvent(en, ev({ proposals: 1, changed: 0 }))).toBe("Updated the review queue from the documents");
+    expect(describeEvent(fr, ev({ proposals: 1, changed: 0 }))).toBe("A mis à jour la file d'examen à partir des documents");
   });
 });

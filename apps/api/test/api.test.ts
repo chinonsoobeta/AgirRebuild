@@ -1671,4 +1671,16 @@ describe("card 58b: undoing a label puts back the value the label reopened, when
     // The source still has its label and its reopened value.
     expect(await settled(d, "exit_cap_rate_pct")).toMatchObject({ status: "conflicting" });
   });
+
+  test("audit of card 58b: the reconcile's audit entry names each value it put back", async () => {
+    const d = await mkDeal(sw, "Undo Audit");
+    await upload(d, "notes.txt", "Notes\nGauge: 5.25%\n");
+    await enter(d, "exit_cap_rate_pct", 5.5);
+    await label(d, "5.25%", "exit_cap_rate_pct");
+    expect(Object.keys(await reconciled(d))).not.toContain("restored_values");
+    await undo(d, "5.25%");
+    expect(await reconciled(d)).toMatchObject({ restored: 1, restored_values: [{ field: "exit_cap_rate_pct", item: "" }] });
+    await reconcileDeal(db, d);
+    expect(Object.keys(await reconciled(d))).not.toContain("restored_values");
+  });
 });
