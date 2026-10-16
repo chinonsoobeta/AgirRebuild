@@ -4,7 +4,7 @@ import { z } from "zod";
 import { COUNTRIES, CURRENCIES, FIELDS, FIELD_GROUP_LABELS, METRICS, POLICIES, POLICY_V1, PROVINCE_CODES, REVIEW_MODES, type EngineInput, type Policy } from "@agir/contracts";
 import { asUser, type BlobStore, type Db } from "@agir/db";
 import { breakeven, DRIVERS, EngineInputError, explore, grid, tornado, type DriverKey, type Shock } from "@agir/engine";
-import { kindOf } from "@agir/extraction";
+import { canonicalItem, kindOf } from "@agir/extraction";
 import { MAX_UPLOAD_BYTES } from "@agir/worker";
 import { checkPassword, createSession, endSession, hashPassword, rateLimiter, SESSION_DAYS, userForSession } from "./auth.ts";
 import { auditPackage, createRun, dealOverview, HttpError, labelRefusal, reviewView, runView } from "./services.ts";
@@ -326,6 +326,35 @@ export function createApp({ db, store, secureCookies, demoSignIn = false }: AppD
       tx.query(`select (a).status from (select fn_enter_value($1, $2, $3, $4, $5) a) x`, [c.req.param("id"), body.fieldKey, body.itemKey ?? null, body.value, body.reason]),
     );
     return c.json(r);
+  });
+
+  // A unit type or space no document states: every stated value goes through fn_enter_value in one transaction, so it is added whole or not at all.
+  app.post("/api/deals/:id/items", async (c) => {
+    const num = z.number().finite().optional();
+    const b = z
+      .object({
+        name: z.string().trim().min(1, "Name the unit type or space").max(60).refine((n) => !n.includes("|"), "A name cannot contain \"|\""),
+        unitCount: num,
+        rentMonthly: num,
+        areaSf: num,
+        rentPsfAnnual: num,
+        occupancyPct: num,
+        reason: z.string().max(2000),
+      })
+      .refine((x) => (x.unitCount !== undefined && x.rentMonthly !== undefined && x.areaSf === undefined && x.rentPsfAnnual === undefined)
+        || (x.areaSf !== undefined && x.rentPsfAnnual !== undefined && x.unitCount === undefined && x.rentMonthly === undefined), "Give either a count and a monthly rent, or an area and an annual rent per square foot")
+      .parse(await c.req.json());
+    const name = canonicalItem(b.name);
+    const values: [string, number | undefined][] = [["unit_count", b.unitCount], ["unit_rent_monthly", b.rentMonthly], ["rentable_area_sf", b.areaSf], ["rent_psf_annual", b.rentPsfAnnual], ["item_occupancy_pct", b.occupancyPct]];
+    await as(c, async (tx) => {
+      if ((await tx.query(`select 1 from assumptions where deal_id = $1 and item_key = $2 and status <> 'rejected'`, [c.req.param("id"), name])).length) {
+        throw new HttpError(409, `This deal already has ${name}; change its values instead.`);
+      }
+      for (const [fieldKey, value] of values) {
+        if (value !== undefined) await tx.query(`select fn_enter_value($1, $2, $3, $4, $5)`, [c.req.param("id"), fieldKey, name, value, b.reason]);
+      }
+    });
+    return c.json({ itemKey: name });
   });
 
   app.post("/api/deals/:id/defaults", async (c) => {

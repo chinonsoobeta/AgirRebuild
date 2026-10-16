@@ -942,8 +942,9 @@ describe("task 60c: a person adds a unit type or space that no document states",
     expect(mine.map((a: any) => [a.fieldKey, a.value, a.status]).sort()).toEqual([["unit_count", 2, "approved"], ["unit_rent_monthly", 2400, "approved"]]);
     const r = (await call(usr, "GET", `/api/deals/${ud}/review`)).json;
     expect(r.readiness.status).toBe("ready");
-    expect(r.readiness.revenue.map((x: any) => x.key).sort()).toEqual(["2BR", "3BR"]);
     expect((await gpr(usr, ud)) - before).toBeCloseTo(2 * 2400 * 12, 2);
+    const [{ snap }] = (await db.query<any>(`select input_snapshot as snap from runs where deal_id = $1 order by run_number desc limit 1`, [ud])) as [{ snap: any }];
+    expect(snap.input.revenue.map((x: any) => x.key).sort()).toEqual(["2BR", "3BR"]);
   });
 
   test("3-bed when 3BR exists is refused under the canonical name, and nothing is written", async () => {

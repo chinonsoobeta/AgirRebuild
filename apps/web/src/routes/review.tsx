@@ -39,7 +39,7 @@ export function enteredInUnit(unit: string, metric: boolean, value: number, reas
   return { value: unit === "sf" ? value * SF_PER_M2 : value / SF_PER_M2, reason: `${reason} (${lang === "fr" ? "saisi en" : "entered as"} ${typed} ${label})` };
 }
 
-function ValueInput({ unit, id, defaultValue, label }: { unit: string; id: string; defaultValue?: number | null; label: string }) {
+function ValueInput({ unit, id, defaultValue, label, prefix = "" }: { unit: string; id: string; defaultValue?: number | null; label: string; prefix?: string }) {
   const { t, f, lang } = useI18n();
   const [metric, setMetric] = useState(false);
   const suffix = f.suffix(unit);
@@ -57,9 +57,9 @@ function ValueInput({ unit, id, defaultValue, label }: { unit: string; id: strin
   return (
     <div className="input-affix" style={{ maxWidth: 320 }}>
       {unit === "$" && lang === "en" && <span>$</span>}
-      <input id={id} key={String(metric)} name="value" inputMode="decimal" defaultValue={shown} required autoComplete="off" />
+      <input id={id} key={String(metric)} name={`${prefix}value`} inputMode="decimal" defaultValue={shown} required autoComplete="off" />
       {metricUnit(unit) ? (
-        <select name="unit" aria-label={lang === "fr" ? "Unité" : "Unit"} value={metric ? "m2" : "sf"} onChange={(e) => setMetric(e.target.value === "m2")}>
+        <select name={`${prefix}unit`} aria-label={lang === "fr" ? "Unité" : "Unit"} value={metric ? "m2" : "sf"} onChange={(e) => setMetric(e.target.value === "m2")}>
           <option value="sf">{suffix}</option>
           <option value="m2">{unit === "sf" ? "m²" : lang === "fr" ? "$/m²/an" : "$/m²/yr"}</option>
         </select>
@@ -129,6 +129,15 @@ export function Review({ dealId }: { dealId: string }) {
     mutationFn: (b: { fieldKey: string; itemKey?: string | null; value: number; reason: string }) => api.post(`/deals/${dealId}/values`, b),
     onSuccess: () => {
       setEntering(null);
+      return refresh();
+    },
+  });
+  const [adding, setAdding] = useState(false);
+  const [perSf, setPerSf] = useState(false);
+  const addItem = useMutation({
+    mutationFn: (b: Record<string, string | number>) => api.post(`/deals/${dealId}/items`, b),
+    onSuccess: () => {
+      setAdding(false);
       return refresh();
     },
   });
@@ -218,6 +227,68 @@ export function Review({ dealId }: { dealId: string }) {
           <button className="btn small" type="submit" style={{ height: 44 }}>{t("common.save")}</button>
         </div>
       )}
+    </form>
+  );
+
+  // A unit type or space no document states: one request enters every value, so it is added whole or not at all.
+  const addItemForm = () => (
+    <form
+      className="stack"
+      style={{ gap: 12, paddingTop: 12 }}
+      onSubmit={(e) => {
+        e.preventDefault();
+        setFormError(null);
+        const fd = new FormData(e.currentTarget);
+        try {
+          const itemName = String(fd.get("name") ?? "").trim();
+          if (!itemName) throw new Error(t("qs.errName"));
+          if (itemName.includes("|")) throw new Error(t("qs.errPipe"));
+          const reason = String(fd.get("reason") ?? "").trim();
+          if (reason.length < 10) throw new Error(t("qs.errReason"));
+          const num = (k: string) => f.parse(fd.get(k));
+          const occ = String(fd.get("occ-value") ?? "").trim();
+          const body: Record<string, string | number> = { name: itemName, reason, ...(occ ? { occupancyPct: num("occ-value") } : {}) };
+          if (perSf) {
+            const area = enteredInUnit("sf", fd.get("area-unit") === "m2", num("area-value"), reason, lang);
+            const rent = enteredInUnit("$/sf/yr", fd.get("psf-unit") === "m2", num("psf-value"), area.reason, lang);
+            Object.assign(body, { areaSf: area.value, rentPsfAnnual: rent.value, reason: rent.reason });
+          } else {
+            Object.assign(body, { unitCount: num("count-value"), rentMonthly: num("rent-value") });
+          }
+          addItem.mutate(body);
+        } catch (err) {
+          setFormError(err);
+        }
+      }}
+    >
+      <div className="field"><label htmlFor="add-name">{t("review.addItemName")}</label><input className="input" id="add-name" name="name" maxLength={60} autoComplete="off" required /></div>
+      <div className="row" role="radiogroup" aria-label={t("review.addItem")} style={{ gap: 16 }}>
+        <label className="row" style={{ gap: 6 }}><input type="radio" name="basis" checked={!perSf} onChange={() => setPerSf(false)} />{t("review.addItemPerUnit")}</label>
+        <label className="row" style={{ gap: 6 }}><input type="radio" name="basis" checked={perSf} onChange={() => setPerSf(true)} />{t("review.addItemPerSf")}</label>
+      </div>
+      <div className="row" style={{ alignItems: "flex-start", gap: 12 }} key={String(perSf)}>
+        {perSf ? (
+          <>
+            <div className="field"><label htmlFor="add-area">{L.field("rentable_area_sf")}</label><ValueInput unit="sf" id="add-area" label={L.field("rentable_area_sf")} prefix="area-" /></div>
+            <div className="field"><label htmlFor="add-psf">{L.field("rent_psf_annual")}</label><ValueInput unit="$/sf/yr" id="add-psf" label={L.field("rent_psf_annual")} prefix="psf-" /></div>
+          </>
+        ) : (
+          <>
+            <div className="field"><label htmlFor="add-count">{t("qs.unitCount")}</label><ValueInput unit="units" id="add-count" label={t("qs.unitCount")} prefix="count-" /></div>
+            <div className="field"><label htmlFor="add-rent">{t("qs.unitRent")}</label><ValueInput unit="$/unit/mo" id="add-rent" label={t("qs.unitRent")} prefix="rent-" /></div>
+          </>
+        )}
+      </div>
+      <div className="field">
+        <label htmlFor="add-occ">{`${L.field("item_occupancy_pct")} (${t("qs.optional")})`}</label>
+        <div className="input-affix" style={{ maxWidth: 320 }}><input id="add-occ" name="occ-value" inputMode="decimal" autoComplete="off" /><span>{f.suffix("%")}</span></div>
+      </div>
+      <div className="row" style={{ alignItems: "flex-start" }}>
+        <input className="input grow" name="reason" aria-label={t("review.addItem")} placeholder={t("review.sourceHint")} minLength={10} required style={{ minWidth: 220, flexBasis: 240 }} />
+        <button className="btn small" type="submit" style={{ height: 44 }} disabled={addItem.isPending}>{t("common.save")}</button>
+        <button className="btn quiet small" type="button" style={{ height: 44 }} onClick={() => { setAdding(false); setFormError(null); }}>{t("common.cancel")}</button>
+      </div>
+      <ErrorText error={formError ?? addItem.error} />
     </form>
   );
 
@@ -472,6 +543,7 @@ export function Review({ dealId }: { dealId: string }) {
                 ))}
               </tbody>
             </table>
+            {editable && (adding ? addItemForm() : <button className="btn small" type="button" style={{ marginTop: 12 }} onClick={() => { setAdding(true); setFormError(null); }}>{t("review.addItem")}</button>)}
           </details>
           {rejected.length > 0 && (
             <details style={{ borderTop: "1px solid var(--rule)", paddingTop: 16 }}>
