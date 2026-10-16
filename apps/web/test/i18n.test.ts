@@ -117,6 +117,7 @@ describe("the quick start's gaps", () => {
     expect(reviewWaiting({ documents: docs(0), review: rev() })).toBe(true);
     expect(reviewWaiting({ documents: docs(0), review: rev({ approved: 12 }) })).toBe(false);
     expect(reviewWaiting({ documents: docs(0), review: rev({ awaitingSecond: 1 }) })).toBe(false);
+    expect(reviewWaiting({ documents: docs(0), review: rev({ needsReview: 1 }) })).toBe(false);
     expect(reviewWaiting({ documents: docs(2, 1), review: rev({ approved: 12 }) })).toBe(true);
     expect(reviewWaiting({ documents: docs(2), review: rev() })).toBe(false);
   });

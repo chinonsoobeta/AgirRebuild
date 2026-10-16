@@ -30,11 +30,11 @@ async function call(s: Session | null, method: string, path: string, body?: unkn
   }
   return { status: res.status, json, headers: res.headers };
 }
-async function signup(email: string, name: string): Promise<Session> {
+async function signup(email: string, name: string, reviewMode?: string): Promise<Session> {
   const res = await app.request("/api/auth/signup", {
     method: "POST",
     headers: { "x-agir": "1", "content-type": "application/json" },
-    body: JSON.stringify({ email, name, password: "correct horse battery" }),
+    body: JSON.stringify({ email, name, password: "correct horse battery", ...(reviewMode ? { reviewMode } : {}) }),
   });
   expect(res.status).toBe(200);
   return { cookie: res.headers.get("set-cookie")!.split(";")[0]! };
@@ -683,5 +683,76 @@ describe("audit of task 58: a label is checked when it is saved, and in team rev
     const a = await byField("senior_rate_pct");
     expect((await call(alice, "POST", `/api/assumptions/${a.id}/review`, { action: "approve", version: a.version })).status).toBe(200);
     expect(await byField("senior_rate_pct")).toMatchObject({ status: "approved", value: 6.1 });
+  });
+});
+
+describe("task 59: a person working alone is not blocked on day one", () => {
+  const modeOf = async (s: Session) => (await call(s, "GET", "/api/me")).json.workspaces[0];
+  const newDeal = async (s: Session, w: string, name: string) =>
+    (await call(s, "POST", `/api/workspaces/${w}/deals`, { name, assetType: "Multifamily", location: "Calgary", province: "AB" })).json.id as string;
+  const exitCap = async (s: Session, d: string) => (await call(s, "GET", `/api/deals/${d}/review`)).json.assumptions.find((a: any) => a.fieldKey === "exit_cap_rate_pct");
+  let sam: Session, tina: Session, sw: string, sd: string;
+
+  test("a sign-up that chooses solo gets a solo workspace, and the change is audited", async () => {
+    sam = await signup("sam@example.com", "Sam Solo", "solo");
+    const w = await modeOf(sam);
+    expect(w.review_mode).toBe("solo");
+    sw = w.id;
+    const ev = await db.query<any>(`select payload from audit_events where action = 'workspace.review_mode_changed' and workspace_id = $1`, [sw]);
+    expect(ev).toHaveLength(1);
+    expect(ev[0].payload).toMatchObject({ from: "team", to: "solo" });
+  });
+
+  test("a sign-up that chooses team keeps team review", async () => {
+    tina = await signup("tina@example.com", "Tina Team", "team");
+    expect((await modeOf(tina)).review_mode).toBe("team");
+    expect((await call(null, "POST", "/api/auth/signup", { email: "bad@example.com", name: "Bad", password: "correct horse battery", reviewMode: "both" })).status).toBe(422);
+  });
+
+  test("in a team workspace a material entry waits; after the switch to solo its author uses it as stated", async () => {
+    const tw = (await modeOf(tina)).id;
+    expect((await call(tina, "POST", `/api/workspaces/${tw}/members`, { email: "carol@example.com", role: "analyst" })).status).toBe(200);
+    const d = await newDeal(tina, tw, "Team Fourplex");
+    expect((await call(tina, "POST", `/api/deals/${d}/values`, { fieldKey: "exit_cap_rate_pct", value: 5.5, reason: "Broker opinion" })).json.status).toBe("awaiting_second_approval");
+    const a = await exitCap(tina, d);
+    expect(a.status).toBe("awaiting_second_approval");
+    // In team review it is refused, with a message that says so.
+    const refused = await call(tina, "POST", `/api/assumptions/${a.id}/review`, { action: "use_as_stated", version: a.version });
+    expect(refused.status).toBe(422);
+    expect(JSON.stringify(refused.json)).toMatch(/solo review/);
+    expect((await call(tina, "POST", `/api/workspaces/${tw}/review-mode`, { mode: "solo" })).status).toBe(200);
+    const b = await exitCap(tina, d);
+    expect(b.status).toBe("awaiting_second_approval");
+    // Another person cannot use it as stated.
+    expect((await call(carol, "POST", `/api/assumptions/${b.id}/review`, { action: "use_as_stated", version: b.version })).status).toBe(403);
+    const used = await call(tina, "POST", `/api/assumptions/${b.id}/review`, { action: "use_as_stated", version: b.version });
+    expect(used.status).toBe(200);
+    expect(await exitCap(tina, d)).toMatchObject({ status: "approved", value: 5.5, sponsorStated: true, secondApprover: null });
+    const [row] = await db.query<any>(`select source_kind, second_approver, pending_value from assumptions where id = $1`, [b.id]);
+    expect(row).toMatchObject({ source_kind: "analyst", second_approver: null, pending_value: null });
+    expect(await db.query(`select 1 from assumption_events where assumption_id = $1 and action = 'use_as_stated'`, [b.id])).toHaveLength(1);
+    expect(await db.query(`select 1 from audit_events where action = 'assumption.use_as_stated' and workspace_id = $1`, [tw])).toHaveLength(1);
+    // Once approved it is no longer waiting, so the action is refused.
+    expect((await call(tina, "POST", `/api/assumptions/${b.id}/review`, { action: "use_as_stated", version: used.json.version })).status).toBe(422);
+  });
+
+  test("a deal with approved values, a run and no documents is at the decision step, not at documents", async () => {
+    sd = await newDeal(sam, sw, "Fictional Fourplex");
+    const empty = (await call(sam, "GET", `/api/deals/${sd}`)).json;
+    expect(empty).toMatchObject({ step: "documents", next: "Upload the deal documents" });
+    const put = async (fieldKey: string, value: number, itemKey?: string) =>
+      expect((await call(sam, "POST", `/api/deals/${sd}/values`, { fieldKey, value, reason: "Quick start answer", ...(itemKey ? { itemKey } : {}) })).status).toBe(200);
+    await put("exit_cap_rate_pct", 5.5);
+    const partial = (await call(sam, "GET", `/api/deals/${sd}`)).json;
+    expect(partial.step).toBe("review");
+    expect((await call(sam, "GET", "/api/deals")).json.find((x: any) => x.deal.id === sd).step).toBe("review");
+    for (const [f, v, i] of [["land_cost", 800000], ["hard_cost", 2400000], ["soft_cost", 300000], ["contingency", 120000], ["construction_months", 12], ["lease_up_months", 6],
+      ["unit_count", 4, "Residential"], ["unit_rent_monthly", 2400, "Residential"], ["stabilized_occupancy_pct", 95], ["senior_loan_amount", 2000000], ["senior_rate_pct", 6], ["senior_amort_years", 30]] as [string, number, string?][]) await put(f, v, i);
+    expect((await call(sam, "POST", `/api/deals/${sd}/defaults`, { fields: ["hold_years", "selling_costs_pct", "expense_ratio_pct"] })).status).toBe(200);
+    expect((await call(sam, "POST", `/api/deals/${sd}/runs`)).status).toBe(200);
+    const o = (await call(sam, "GET", `/api/deals/${sd}`)).json;
+    expect(o).toMatchObject({ step: "decision", next: "Record the committee decision" });
+    expect(o.status.text).toMatch(/^Verdict: /);
+    expect((await call(sam, "GET", "/api/deals")).json.find((x: any) => x.deal.id === sd)).toMatchObject({ step: "decision", next: "Record the committee decision" });
   });
 });
