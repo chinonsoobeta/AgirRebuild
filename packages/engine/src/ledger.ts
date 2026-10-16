@@ -92,7 +92,8 @@ export type Ledger = {
   unrealizedLeg: number | null;
   /** A held deal only: the months from the refinance month (up to 12, fewer if the hold ends first). */
   afterRefinance: { months: number; noi: number; debtService: number; sizingDebtService: number } | null;
-  refinance: { month: number; newAmount: number; payoff: number; net: number } | null;
+  /** `net` is cash: the loan less the payoff. `premium` is the mortgage insurance added to the balance (0 when none is stated). */
+  refinance: { month: number; newAmount: number; payoff: number; net: number; premium: number } | null;
   sizingDsByYear: number[];
   contractualDsByYear: number[];
   seniorSizingYear1: number;
@@ -242,13 +243,18 @@ export function buildLedger(input: EngineInput): Ledger {
   // ---- Cost placement ------------------------------------------------------
   const b = input.budget;
   const y1Egi = stabilizedYear1Egi(input);
-  const fixedBase = input.fixedOpexAnnual ?? ((input.expenseRatioPct ?? 0) / 100) * y1Egi;
+  // Property tax is a fixed cost on top of the fixed part of decision 8; the expense stress never moves it.
+  const fixedBase = (input.fixedOpexAnnual ?? ((input.expenseRatioPct ?? 0) / 100) * y1Egi) + (input.propertyTaxAnnual ?? 0);
   const variableShare = (input.variableExpensePct ?? 0) / 100;
-  const costsBeforeFinancing = b.land + b.hard + b.soft + b.contingency + b.other;
+  // Entered cost lines (card 61): development charges and land transfer tax are paid with the land at month 0, GST/HST net in the last construction month.
+  const atLand = (b.developmentCharges ?? 0) + (b.landTransferTax ?? 0);
+  const gstHst = b.gstHstNet ?? 0;
+  const costsBeforeFinancing = b.land + b.hard + b.soft + b.contingency + b.other + atLand + gstHst;
   const spread = allocate(b.hard + b.soft + b.contingency + b.other, drawShares(C, input.sCurveDraws));
   const costByMonth: number[] = new Array(Math.max(S, 1)).fill(0);
-  costByMonth[0] = (costByMonth[0] ?? 0) + b.land;
+  costByMonth[0] = (costByMonth[0] ?? 0) + b.land + atLand;
   spread.forEach((amt, i) => (costByMonth[i] = (costByMonth[i] ?? 0) + amt));
+  costByMonth[Math.max(C - 1, 0)] = (costByMonth[Math.max(C - 1, 0)] ?? 0) + gstHst;
   // Fixed operating costs at year-1 levels in every lease-up month. With the ramp on they are already netted
   // against lease-up income (operationsAt), so they are charged here only when the ramp is off.
   const leaseupMonthly = !input.leaseUpRamp && input.leaseUpMonths > 0 ? fixedBase / 12 : 0;
@@ -340,19 +346,22 @@ export function buildLedger(input: EngineInput): Ledger {
         const newAmount = r.amount ?? ((r.ltvPct ?? 0) / 100) * value;
         const senior = live.find((l) => l.key === "senior");
         const payoff = senior ? senior.balance : 0;
+        // A mortgage insurance premium is capitalized: the balance is the loan plus the premium, but only the loan is cash.
+        const premium = (newAmount * (r.insurancePremiumPct ?? 0)) / 100;
+        const balance = newAmount + premium;
         const replacement: Live = {
           key: "senior",
-          balance: newAmount,
+          balance,
           ratePct: r.ratePct,
           amortMonths: r.amortYears * 12,
           amortStart: m + r.ioMonths,
           payment: null,
-          sizingPayment: levelPayment(newAmount, r.ratePct, r.amortYears * 12),
+          sizingPayment: levelPayment(balance, r.ratePct, r.amortYears * 12),
         };
         if (senior) live.splice(live.indexOf(senior), 1, replacement);
         else live.push(replacement);
         refinanceNet = newAmount - payoff;
-        refinance = { month: m, newAmount, payoff, net: refinanceNet };
+        refinance = { month: m, newAmount, payoff, net: refinanceNet, premium };
       }
       for (const l of live) {
         if (l.balance <= 0) continue;

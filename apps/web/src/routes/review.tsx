@@ -451,8 +451,9 @@ export function Review({ dealId }: { dealId: string }) {
                   <div key={id} className="stack" style={{ gap: 8, paddingTop: 12, borderTop: "1px solid var(--sunken)" }}>
                     <div className="spread">
                       <span>{t("review.choiceLine", { field: name(m), meaning: L.absent(m.fieldKey) })}</span>
-                      {editable && entering !== id && <button className="btn quiet small" type="button" onClick={() => setEntering(id)}>{t("review.choiceEnter")}</button>}
+                      {editable && entering !== id && <button className="btn quiet small" type="button" onClick={() => setEntering(id)}>{m.unit === "flag" ? t("review.choiceEnter") : t("review.notFoundEnter")}</button>}
                     </div>
+                    {L.help(m.fieldKey, m.help) && <span className="help">{L.help(m.fieldKey, m.help)}</span>}
                     {entering === id && entryForm(m, id, <span className="sr-only">{name(m)}</span>)}
                   </div>
                 );

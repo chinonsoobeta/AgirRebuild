@@ -157,6 +157,8 @@ export function computeMetrics(input: EngineInput, L: Ledger): ScenarioMetrics {
   }
   out.push(m("peak_equity", peak));
   out.push(L.refinance ? m("refinance_net_proceeds", L.refinance.net) : na("refinance_net_proceeds", "No refinance."));
+  // Added only when a premium is stated, so a result that has none is what it always was.
+  if (L.refinance && input.refinance?.insurancePremiumPct !== undefined) out.push(m("refinance_premium_added", L.refinance.premium));
   out.push(L.units > 0 ? m("cost_per_unit", tdc / L.units) : na("cost_per_unit", "The program has no dwelling units."));
 
   if (hold) {

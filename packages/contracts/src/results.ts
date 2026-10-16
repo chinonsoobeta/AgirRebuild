@@ -28,7 +28,17 @@ export type LoanTerms = {
 };
 
 export type EngineInput = {
-  budget: { land: number; hard: number; soft: number; contingency: number; other: number };
+  budget: {
+    land: number;
+    hard: number;
+    soft: number;
+    contingency: number;
+    other: number;
+    /** Entered cost lines (card 61), each present only when a person stated it; paid at month 0 (GST/HST net in the last construction month). */
+    developmentCharges?: number;
+    landTransferTax?: number;
+    gstHstNet?: number;
+  };
   revenue: RevenueComponent[];
   otherIncomeAnnual: number;
   constructionMonths: number;
@@ -38,6 +48,8 @@ export type EngineInput = {
   /** Decision 8: a single ratio is fixed dollars (share of year-1 EGI). */
   expenseRatioPct?: number;
   fixedOpexAnnual?: number;
+  /** A fixed operating cost on top of the fixed part of decision 8; present only when stated. */
+  propertyTaxAnnual?: number;
   variableExpensePct?: number;
   rentGrowthPct: number;
   expenseGrowthPct: number;
@@ -47,7 +59,7 @@ export type EngineInput = {
   sellingCostsPct: number;
   senior: LoanTerms;
   mezzanine?: LoanTerms;
-  refinance?: { month: number; amount?: number; ltvPct?: number; ratePct: number; amortYears: number; ioMonths: number };
+  refinance?: { month: number; amount?: number; ltvPct?: number; ratePct: number; amortYears: number; ioMonths: number; /** Added to the loan; present only when stated. */ insurancePremiumPct?: number };
   /** The deal is kept and refinanced, not sold. Set only when the flag is 1; absent otherwise, so a sale deal's input hashes as before. */
   exit?: "refinance_hold";
   waterfall?: { lpSharePct: number; preferredReturnPct: number; gpPromotePct: number };

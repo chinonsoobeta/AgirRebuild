@@ -17,9 +17,10 @@ const finite = (x: unknown): x is number => typeof x === "number" && Number.isFi
 export function validateInput(input: EngineInput): void {
   const p: string[] = [];
   const b = input.budget;
-  for (const k of ["land", "hard", "soft", "contingency", "other"] as const) {
+  // The entered lines (card 61) are checked only when present, and are never credits.
+  for (const k of ["land", "hard", "soft", "contingency", "other", ...(["developmentCharges", "landTransferTax", "gstHstNet"] as const).filter((x) => b[x] !== undefined)] as const) {
     // Only a credit may take other costs below 0.
-    if (!finite(b[k]) || (k !== "other" && b[k] < 0)) p.push(`budget ${k} must be a number of at least 0`);
+    if (!finite(b[k]) || (k !== "other" && (b[k] as number) < 0)) p.push(`budget ${k} must be a number of at least 0`);
   }
   if (finite(b.other) && b.other < 0) {
     if (b.land + b.hard + b.soft + b.contingency + b.other <= 0) p.push("a credit in other costs cannot take the total budget to 0 or below");
@@ -51,6 +52,7 @@ export function validateInput(input: EngineInput): void {
   const hasFixed = input.fixedOpexAnnual !== undefined;
   if (!hasRatio && !hasFixed) p.push("an expense ratio or fixed operating costs are required");
   if (hasRatio && hasFixed) p.push("give either an expense ratio or fixed operating costs, not both");
+  if (input.propertyTaxAnnual !== undefined && (!finite(input.propertyTaxAnnual) || input.propertyTaxAnnual < 0)) p.push("property tax must be a number of at least 0");
   if (!finite(input.exitCapPct) || input.exitCapPct <= 0) p.push("exit cap rate must be above 0");
   if (!finite(input.sellingCostsPct) || input.sellingCostsPct < 0 || input.sellingCostsPct >= 100) {
     p.push("selling costs must be from 0 to under 100 percent");
@@ -74,6 +76,9 @@ export function validateInput(input: EngineInput): void {
     const hasLtv = r.ltvPct !== undefined;
     if (hasAmount === hasLtv) p.push("give the refinance either a loan amount or a loan-to-value, not both or neither");
     loan("refinance loan", { amount: r.amount ?? 1, ratePct: r.ratePct, amortYears: r.amortYears, ioMonths: r.ioMonths });
+    if (r.insurancePremiumPct !== undefined && (!finite(r.insurancePremiumPct) || r.insurancePremiumPct < 0 || r.insurancePremiumPct > 10)) {
+      p.push("refinance insurance premium must be a number from 0 to 10");
+    }
   }
   if (input.exit === "refinance_hold" && !input.refinance) {
     p.push("A deal that is kept and refinanced needs its refinance: the month, the amount or loan-to-value, the rate and the amortization.");

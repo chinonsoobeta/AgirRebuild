@@ -1174,9 +1174,10 @@ describe("Canadian cost lines and a mortgage insurance premium, as entered value
       expect(draws(withLines())).toEqual([1_170_000, 100_000, 100_000, 100_000, 100_000, 130_000, 5_000, 5_000, 5_000]);
     });
     test("GST/HST net is paid at month 0 when there is no construction", () => {
-      // C = 0, L = 3: month 0 carries land 1,000,000 + hard 600,000 (spread over one month) + 50,000 + 20,000 + 30,000 = 1,700,000.
+      // C = 0, L = 3: month 0 carries land 1,000,000 + hard 600,000 (spread over one month) + 50,000 + 20,000 + 30,000 = 1,700,000,
+      // plus the first of three lease-up months of fixed costs, 60,000 / 12 = 5,000.
       const i = withLines({ constructionMonths: 0 });
-      expect(buildLedger(i).rows[0]!.costDraw).toBe(1_700_000);
+      expect(buildLedger(i).rows[0]!.costDraw).toBe(1_705_000);
       // With no lease-up either, everything is paid at month 0: total development cost is 1,700,000.
       expect(v(underwrite(withLines({ constructionMonths: 0, leaseUpMonths: 0 }), POLICY_V1), "total_development_cost")).toBeCloseTo(1_700_000, 6);
     });
@@ -1198,16 +1199,28 @@ describe("Canadian cost lines and a mortgage insurance premium, as entered value
       expect(v(b, "hard_and_soft_cost") - v(a, "hard_and_soft_cost")).toBeCloseTo(100_000, 6);
       expect(v(b, "required_equity")).toBeCloseTo(1_715_000, 6);
     });
-    test("with a loan they rise by their sum plus the extra interest they cause, funded equity first", () => {
+    test("with a loan they rise by their sum plus the change in interest they cause, funded equity first", () => {
+      // Equity pays first, so a cost paid at month 0 delays the loan's first draw and the interest on it can fall;
+      // the identity holds whichever way it moves: tdc(with) - tdc(without) = 100,000 + (interest(with) - interest(without)).
       const a = underwrite(plain(loaned), POLICY_V1);
       const b = underwrite(withLines(loaned), POLICY_V1);
-      const extraInterest = v(b, "capitalized_interest") - v(a, "capitalized_interest");
-      expect(extraInterest).toBeGreaterThan(0);
-      expect(v(b, "total_development_cost") - v(a, "total_development_cost")).toBeCloseTo(100_000 + extraInterest, 6);
-      // The 1,000,000 loan is a commitment either way; the extra cost is equity plus the interest on what the loan funds.
+      const change = v(b, "capitalized_interest") - v(a, "capitalized_interest");
+      expect(v(b, "total_development_cost") - v(a, "total_development_cost")).toBeCloseTo(100_000 + change, 6);
+      // The 1,000,000 loan is a commitment either way; equity covers the rest, so required equity rises by 100,000 plus that change.
+      expect(v(b, "required_equity") - v(a, "required_equity")).toBeCloseTo(100_000 + change, 2); // the funding solve is exact to half a cent
       const first = buildLedger(withLines(loaned)).rows[0]!;
       expect(first.equityDraw).toBeGreaterThan(0);
       expect(first.equityDraw + first.debtDraw).toBeCloseTo(1_170_000, 6);
+    });
+    test("when the loan funds everything, the lines cost the interest on them as well", () => {
+      // A 2,000,000 commitment is more than the deal needs, so equity is 0 and the extra 100,000 is borrowed: interest rises.
+      const big = { senior: { amount: 2_000_000, ratePct: 6, amortYears: 25, ioMonths: 0 } };
+      const a = underwrite(plain(big), POLICY_V1);
+      const b = underwrite(withLines(big), POLICY_V1);
+      const extra = v(b, "capitalized_interest") - v(a, "capitalized_interest");
+      expect(extra).toBeGreaterThan(0);
+      expect(v(b, "total_development_cost") - v(a, "total_development_cost")).toBeCloseTo(100_000 + extra, 6);
+      expect(v(b, "required_equity")).toBeCloseTo(0, 6);
     });
     test("an agreement check against a stated total cost uses total development cost, lines included", () => {
       const r = underwrite(withLines({ stated: { totalCost: 1_715_000 } }), POLICY_V1);

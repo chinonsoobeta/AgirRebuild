@@ -154,6 +154,7 @@ export function assemble(rows: readonly AssumptionRow[]): { readiness: Readiness
     refinance_amount: !has("refinance_month"),
     refinance_ltv_pct: !has("refinance_month"),
     refinance_io_months: !has("refinance_month"),
+    refinance_insurance_premium_pct: !has("refinance_month"),
     mezz_io_months: !positive("mezz_loan_amount"),
     senior_io_months: !positive("senior_loan_amount"),
     // Stand-ins for a present alternative.
@@ -177,7 +178,12 @@ export function assemble(rows: readonly AssumptionRow[]): { readiness: Readiness
   const v = (k: string) => values.get(k);
   const n = (k: string, fallback = 0) => values.get(k) ?? fallback;
   const input: EngineInput = {
-    budget: { land: n("land_cost"), hard: n("hard_cost"), soft: n("soft_cost"), contingency: n("contingency"), other: n("other_cost") },
+    budget: { land: n("land_cost"), hard: n("hard_cost"), soft: n("soft_cost"), contingency: n("contingency"), other: n("other_cost"),
+      // The entered cost lines are set only when stated, so an input that states none hashes as it always did.
+      ...(has("development_charges") ? { developmentCharges: n("development_charges") } : {}),
+      ...(has("land_transfer_tax") ? { landTransferTax: n("land_transfer_tax") } : {}),
+      ...(has("gst_hst_net") ? { gstHstNet: n("gst_hst_net") } : {}),
+    },
     revenue,
     otherIncomeAnnual: n("other_income_annual"),
     constructionMonths: n("construction_months"),
@@ -189,6 +195,7 @@ export function assemble(rows: readonly AssumptionRow[]): { readiness: Readiness
     ...(has("fixed_opex_annual")
       ? { fixedOpexAnnual: n("fixed_opex_annual") }
       : { expenseRatioPct: n("expense_ratio_pct") }),
+    ...(has("property_tax_annual") ? { propertyTaxAnnual: n("property_tax_annual") } : {}),
     ...(has("variable_expense_pct") ? { variableExpensePct: n("variable_expense_pct") } : {}),
     rentGrowthPct: n("rent_growth_pct"),
     expenseGrowthPct: n("expense_growth_pct"),
@@ -214,6 +221,7 @@ export function assemble(rows: readonly AssumptionRow[]): { readiness: Readiness
             ratePct: n("refinance_rate_pct"),
             amortYears: n("refinance_amort_years", 30),
             ioMonths: n("refinance_io_months"),
+            ...(has("refinance_insurance_premium_pct") ? { insurancePremiumPct: n("refinance_insurance_premium_pct") } : {}),
           },
         }
       : {}),

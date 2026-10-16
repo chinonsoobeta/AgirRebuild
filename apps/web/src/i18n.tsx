@@ -998,6 +998,8 @@ const FR_FIELDS: Record<string, string> = {
   refinance_and_hold: "Conserver et refinancer (sans vente)", refinance_io_months: "Période d'intérêts seulement (refinancement)", lp_share_pct: "Part des commanditaires", preferred_return_pct: "Rendement privilégié",
   gp_promote_pct: "Intéressement du commandité au-delà du rendement privilégié", stated_total_cost: "Coût total déclaré du projet",
   stated_ltc_pct: "Ratio prêt-coût déclaré", stated_interest_reserve: "Réserve d'intérêts déclarée",
+  development_charges: "Redevances de développement", land_transfer_tax: "Droits de mutation immobilière", gst_hst_net: "TPS/TVH nette des remboursements",
+  property_tax_annual: "Taxe foncière (par année)", refinance_insurance_premium_pct: "Prime d'assurance hypothécaire du refinancement",
 };
 const FR_HELP: Record<string, string> = {
   contingency: "Saisissez 0 si le budget n'en prévoit pas.",
@@ -1005,6 +1007,11 @@ const FR_HELP: Record<string, string> = {
   lease_up_months: "Saisissez 0 si l'actif est stabilisé dès la fin des travaux.",
   expense_ratio_pct: "Part du RBE de l'année 1, maintenue en dollars fixes et indexée selon la croissance des charges.",
   senior_loan_amount: "Saisissez 0 pour un projet financé entièrement par fonds propres.",
+  development_charges: "Si vos coûts indirects ou autres coûts l'incluent déjà, ne la saisissez pas.",
+  land_transfer_tax: "Si vos coûts indirects ou autres coûts l'incluent déjà, ne la saisissez pas.",
+  gst_hst_net: "Si vos coûts indirects ou autres coûts l'incluent déjà, ne la saisissez pas.",
+  property_tax_annual: "Ne la saisissez pas si votre ratio des charges ou vos charges d'exploitation fixes l'incluent déjà.",
+  refinance_insurance_premium_pct: "La prime est ajoutée au prêt de refinancement. Ne la saisissez pas s'il n'y a pas d'assurance hypothécaire.",
 };
 const FR_ABSENT: Record<string, string> = {
   other_cost: "aucun autre coût",
@@ -1029,6 +1036,11 @@ const FR_ABSENT: Record<string, string> = {
   refinance_ltv_pct: "établi selon le montant",
   refinance_io_months: "amortissement dès le refinancement",
   refinance_and_hold: "le projet est vendu à la fin de la détention",
+  development_charges: "aucune déclarée",
+  land_transfer_tax: "aucun déclaré",
+  gst_hst_net: "aucune déclarée",
+  property_tax_annual: "comprise dans les charges d'exploitation, ou aucune",
+  refinance_insurance_premium_pct: "aucune assurance hypothécaire",
   lp_share_pct: "aucun partage entre commanditaires et commandité",
   stated_total_cost: "rien à vérifier",
   stated_ltc_pct: "rien à vérifier",
@@ -1051,6 +1063,10 @@ const ASK: Record<string, [[string, string?], [string, string?]]> = {
   senior_loan_amount: [["How much will the lender advance?", "Enter 0 if you are not borrowing."], ["Quelle somme le prêteur avancera-t-il ?", "Saisissez 0 si vous n'empruntez pas."]],
   senior_rate_pct: [["What is the loan's interest rate?"], ["Quel est le taux d'intérêt du prêt ?"]],
   senior_amort_years: [["Over how many years is the loan paid down?"], ["Sur combien d'années le prêt est-il amorti ?"]],
+  development_charges: [["What will development charges (DCs or DCCs) cost?", "Enter 0 if there are none, or if your soft or other costs already include them."], ["Combien coûteront les redevances de développement ?", "Saisissez 0 s'il n'y en a pas, ou si vos coûts indirects ou autres coûts les incluent déjà."]],
+  property_tax_annual: [["What will property tax cost per year?", "Enter 0 if there is none, or if your expense ratio or fixed operating costs already include it."], ["Combien coûtera la taxe foncière par année ?", "Saisissez 0 s'il n'y en a pas, ou si votre ratio des charges ou vos charges d'exploitation fixes l'incluent déjà."]],
+  land_transfer_tax: [["What will land transfer tax cost?", "Leave blank if there is none, or if your soft or other costs already include it."], ["Combien coûteront les droits de mutation immobilière ?", "Laissez vide s'il n'y en a pas, ou si vos coûts indirects ou autres coûts les incluent déjà."]],
+  gst_hst_net: [["What will GST/HST cost, net of the rental rebates?", "Leave blank if there is none, or if your soft or other costs already include it."], ["Combien coûtera la TPS/TVH, nette des remboursements pour logement locatif ?", "Laissez vide s'il n'y en a pas, ou si vos coûts indirects ou autres coûts l'incluent déjà."]],
 };
 const GROUPS: Record<string, [string, string]> = {
   budget: ["Budget", "Budget"], revenue: ["Revenue", "Revenus"], timeline: ["Timeline", "Échéancier"], operations: ["Operations", "Exploitation"],
@@ -1090,6 +1106,7 @@ const FR_METRICS: Record<string, [string, string]> = {
   equity_irr: ["TRI des fonds propres", "taux qui annule la VAN des flux datés des fonds propres"],
   peak_equity: ["Fonds propres maximaux engagés", "plus grand apport net cumulé"],
   refinance_net_proceeds: ["Produit net du refinancement", "nouveau prêt - remboursement du solde du prêt principal"],
+  refinance_premium_added: ["Prime d'assurance hypothécaire ajoutée au prêt de refinancement", "montant du prêt de refinancement x prime en %"],
   cost_per_unit: ["Coût par logement", "coût total de développement / logements"],
   lp_irr: ["TRI des commanditaires", "TRI de la part des commanditaires après la cascade"],
   gp_irr: ["TRI du commandité", "TRI de la part du commandité après la cascade"],
@@ -1155,7 +1172,7 @@ const ASSETS: Record<string, string> = {
   Hospitality: "Hôtellerie", "Self storage": "Entreposage libre-service", Other: "Autre",
 };
 
-const BUDGET_LINES: Record<string, string> = { land: "terrain", hard: "coûts directs", soft: "coûts indirects", contingency: "provision pour imprévus", other: "autres coûts" };
+const BUDGET_LINES: Record<string, string> = { land: "terrain", hard: "coûts directs", soft: "coûts indirects", contingency: "provision pour imprévus", other: "autres coûts", developmentCharges: "redevances de développement", landTransferTax: "droits de mutation immobilière", gstHstNet: "TPS/TVH nette des remboursements" };
 const LOANS: Record<string, string> = { "senior loan": "prêt principal", "mezzanine loan": "prêt mezzanine", "refinance loan": "prêt de refinancement" };
 const frNum = (x: string) => Number(x).toLocaleString("fr-CA");
 const frPct = (x: string) => `${frNum(x)}\u00a0%`;
@@ -1261,7 +1278,9 @@ const FR_REASONS: [RegExp, string | ((m: RegExpMatchArray) => string)][] = [
   [/^The approved inputs changed while the run was being computed\. Run it again\.$/, "Les données approuvées ont changé pendant le calcul. Relancez l'analyse."],
   [/^Give the committee's reasoning/, "Indiquez les motifs du comité (au moins 10 caractères)"],
   // The engine's own checks (validateInput and readiness). Numbers in the sentence are written the French way.
-  [/^budget (land|hard|soft|contingency|other) must be a number of at least 0$/, (m) => `Le poste « ${BUDGET_LINES[m[1]!]} » du budget doit être un nombre positif ou nul`],
+  [/^budget (land|hard|soft|contingency|other|developmentCharges|landTransferTax|gstHstNet) must be a number of at least 0$/, (m) => `Le poste « ${BUDGET_LINES[m[1]!]} » du budget doit être un nombre positif ou nul`],
+  [/^property tax must be a number of at least 0$/, "La taxe foncière doit être un nombre positif ou nul"],
+  [/^refinance insurance premium must be a number from (\d+) to (\d+)$/, (m) => `La prime d'assurance du refinancement doit se situer entre ${frPct(m[1]!)} et ${frPct(m[2]!)}`],
   [/^a credit in other costs cannot take the total budget to 0 or below$/, "Un crédit dans les autres coûts ne peut pas ramener le budget total à 0 ou moins"],
   [/^a credit in other costs cannot be more than hard costs, soft costs and contingency together$/, "Un crédit dans les autres coûts ne peut pas dépasser l'ensemble des coûts directs, des coûts indirects et de la provision pour imprévus"],
   [/^A credit: reduces total cost$/, "Un crédit\u00a0: il réduit le coût total"],

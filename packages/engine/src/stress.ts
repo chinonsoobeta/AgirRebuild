@@ -17,6 +17,10 @@ export function applyStress(input: EngineInput, s: StressPreset): EngineInput {
       contingency: input.budget.contingency * cost,
       // A credit shrinks with the costs it offsets but never grows: an overrun never enlarges it.
       other: input.budget.other < 0 ? input.budget.other * Math.min(cost, 1) : input.budget.other * cost,
+      // The entered cost lines scale like every other cost, and only when stated.
+      ...(input.budget.developmentCharges !== undefined ? { developmentCharges: input.budget.developmentCharges * cost } : {}),
+      ...(input.budget.landTransferTax !== undefined ? { landTransferTax: input.budget.landTransferTax * cost } : {}),
+      ...(input.budget.gstHstNet !== undefined ? { gstHstNet: input.budget.gstHstNet * cost } : {}),
     },
     revenue: input.revenue.map((c) => ({
       ...c,

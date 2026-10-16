@@ -202,7 +202,7 @@ export function solveBreakeven(probe: Probe, N: number): { state: BreakevenState
 }
 
 function echoes(driver: DriverKey, before: EngineInput, after: EngineInput): BreakevenEcho[] {
-  const cost = (i: EngineInput) => i.budget.land + i.budget.hard + i.budget.soft + i.budget.contingency + i.budget.other;
+  const cost = (i: EngineInput) => i.budget.land + i.budget.hard + i.budget.soft + i.budget.contingency + i.budget.other + (i.budget.developmentCharges ?? 0) + (i.budget.landTransferTax ?? 0) + (i.budget.gstHstNet ?? 0);
   switch (driver) {
     case "rentPct":
       return after.revenue.flatMap((c, k): BreakevenEcho[] => {

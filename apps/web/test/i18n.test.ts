@@ -255,9 +255,11 @@ describe("every sentence the engine's checks can produce has a French rendering"
     ["refinance and hold without a refinance", (d) => { d.exit = "refinance_hold"; }],
     ["LP share", (d) => { d.waterfall = { lpSharePct: 0, preferredReturnPct: 8, gpPromotePct: 20 }; }],
     ["preferred return", (d) => { d.waterfall = { lpSharePct: 90, preferredReturnPct: -1, gpPromotePct: 20 }; }],
-    ["GP promote", (d) => { d.waterfall = { lpSharePct: 90, preferredReturnPct: 8, gpPromotePct: 101 }; }],
+    ["GP promote", (d) => { d.waterfall = { lpSharePct: 90, preferredReturnPct: 8, gpPromotePct: 101 }; }],    ["property tax", (d) => { d.propertyTaxAnnual = -1; }],
+    ["refinance insurance premium", (d) => { d.refinance = { month: 24, amount: 1_000, ratePct: 5, amortYears: 25, ioMonths: 0, insurancePremiumPct: 11 }; }],
   ];
   const EXTRA: [string, (d: EngineInput) => void][] = [
+    ["optional budget line", (d) => { d.budget.developmentCharges = -1; }],
     ["mezzanine loan", withLoan("mezzanine", { amount: -1 })],
     ["mezzanine rate", withLoan("mezzanine", { ratePct: -1 })],
     ["refinance loan", withLoan("refinance", { amortYears: 51 })],
@@ -434,7 +436,7 @@ describe("card 61: Canadian cost lines and the insurance premium, in both langua
   });
 
   it("renders the engine's new refusals in French", () => {
-    expect(translateMessage("budget developmentCharges must be a number of at least 0")).toBe("Le poste « Redevances de développement » du budget doit être un nombre positif ou nul");
+    expect(translateMessage("budget developmentCharges must be a number of at least 0")).toBe("Le poste « redevances de développement » du budget doit être un nombre positif ou nul");
     expect(translateMessage("budget landTransferTax must be a number of at least 0")).toMatch(/^Le poste « .+ » du budget doit être un nombre positif ou nul$/);
     expect(translateMessage("budget gstHstNet must be a number of at least 0")).toMatch(/^Le poste « .+ » du budget doit être un nombre positif ou nul$/);
     expect(translateMessage("property tax must be a number of at least 0")).toBe("La taxe foncière doit être un nombre positif ou nul");

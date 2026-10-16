@@ -45,6 +45,8 @@ export const METRICS: readonly MetricDef[] = [
   { key: "equity_irr", label: "Equity IRR", unit: "%", formula: "rate that sets the dated equity cash flows' NPV to zero", headline: 14 },
   { key: "peak_equity", label: "Peak equity outstanding", unit: "$", formula: "largest cumulative net contribution" },
   { key: "refinance_net_proceeds", label: "Refinance net proceeds", unit: "$", formula: "new loan - payoff of the senior balance" },
+  // Only when a premium is stated (card 61): never added to a result that has none.
+  { key: "refinance_premium_added", label: "Mortgage insurance premium added to the refinance loan", unit: "$", formula: "refinance loan amount x premium %" },
   { key: "cost_per_unit", label: "Cost per unit", unit: "$", formula: "total development cost / units", headline: 15 },
   { key: "lp_irr", label: "LP IRR", unit: "%", formula: "IRR of the LP's share after the waterfall" },
   { key: "gp_irr", label: "GP IRR", unit: "%", formula: "IRR of the GP's share after the waterfall" },

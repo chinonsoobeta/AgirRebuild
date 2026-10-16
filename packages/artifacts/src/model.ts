@@ -99,6 +99,10 @@ function sourcesAndUses(f: Formatter, x: ArtifactInput): Block {
   ];
   if (i.budget.other > 0) rows.push(["Other costs", f.input(i.budget.other, "$", "other_cost")]);
   else if (i.budget.other < 0) rows.push(["Other costs (credit)", f.input(i.budget.other, "$", "other_cost")]);
+  // The entered cost lines, each by name and only when a person stated it.
+  if (i.budget.developmentCharges !== undefined) rows.push(["Development charges", f.input(i.budget.developmentCharges, "$", "development_charges")]);
+  if (i.budget.landTransferTax !== undefined) rows.push(["Land transfer tax", f.input(i.budget.landTransferTax, "$", "land_transfer_tax")]);
+  if (i.budget.gstHstNet !== undefined) rows.push(["GST/HST net of rebates", f.input(i.budget.gstHstNet, "$", "gst_hst_net")]);
   if (x.result.scenarios[0]?.metrics.find((m) => m.key === "leaseup_operating_cost")?.status === "VALID") {
     rows.push(["Operating costs during lease-up", f.metric("base", "leaseup_operating_cost")]);
   }
@@ -136,7 +140,9 @@ function revenueProgram(f: Formatter, x: ArtifactInput): Block {
   };
 }
 
-function operations(f: Formatter): Block {
+function operations(f: Formatter, x: ArtifactInput): Block {
+  // Year-1 property tax is the entered amount: it has not yet grown.
+  const tax = x.input.propertyTaxAnnual;
   return {
     type: "table",
     caption: "Stabilized operations, year 1",
@@ -145,9 +151,10 @@ function operations(f: Formatter): Block {
       ["Gross potential rent", f.metric("base", "gross_potential_rent")],
       ["Effective gross income", f.metric("base", "effective_gross_income")],
       ["Operating expenses", f.metric("base", "operating_expenses")],
+      ...(tax !== undefined ? [["Property tax (fixed, within operating expenses)", f.input(tax, "$", "property_tax_annual")]] : []),
       ["Net operating income", f.metric("base", "stabilized_noi")],
     ],
-    strong: [3],
+    strong: [tax !== undefined ? 4 : 3],
   };
 }
 
@@ -402,7 +409,7 @@ export function buildModel(x: ArtifactInput): DocModel {
       blocks.push({ type: "paragraph", text: `${x.decision.decision.replace(/_/g, " ")}: ${f.ident(x.decision.rationale, "decision.rationale")}` });
       if (x.decision.conditions) blocks.push({ type: "paragraph", text: `Conditions: ${f.ident(x.decision.conditions, "decision.conditions")}` });
     }
-    blocks.push(sourcesAndUses(f, x), ...mezzAccrual(f, r), revenueProgram(f, x), operations(f), gates(f, r), stresses(f, r, held), annual(f, r, false));
+    blocks.push(sourcesAndUses(f, x), ...mezzAccrual(f, r), revenueProgram(f, x), operations(f, x), gates(f, r), stresses(f, r, held), annual(f, r, false));
     blocks.push({ type: "heading", text: "Checks" }, checks(f, r));
     blocks.push(...notFoundBlocks(x), inputsAppendix(f, x));
   } else if (x.kind === "build_decision") {
@@ -451,7 +458,11 @@ export function buildModel(x: ArtifactInput): DocModel {
       ["Break-even occupancy", f.metric("base", "break_even_occupancy")],
     );
     blocks.push({ type: "table", caption: "Debt and coverage", columns: [{ label: "Term" }, { label: "Value", numeric: true }], rows: debtRows });
-    blocks.push(sourcesAndUses(f, x), ...mezzAccrual(f, r), operations(f), annual(f, r, true), stresses(f, r, held));
+    // Beside the refinance loan: the premium is added to it, not paid in cash.
+    if (i.refinance?.insurancePremiumPct !== undefined) {
+      blocks.push({ type: "paragraph", text: `Mortgage insurance premium: ${f.input(i.refinance.insurancePremiumPct, "%", "refinance_insurance_premium_pct")} (${f.metric("base", "refinance_premium_added")} added to the loan)` });
+    }
+    blocks.push(sourcesAndUses(f, x), ...mezzAccrual(f, r), operations(f, x), annual(f, r, true), stresses(f, r, held));
     blocks.push({ type: "heading", text: "Checks" }, checks(f, r));
     blocks.push(...notFoundBlocks(x), inputsAppendix(f, x));
   }
