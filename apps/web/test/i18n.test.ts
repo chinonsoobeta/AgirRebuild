@@ -320,6 +320,13 @@ describe("the review card in French", () => {
     expect(show(fr, item)).toBe("Le mois du refinancement doit se situer entre la stabilisation (mois 32) et la vente (mois 91), avant celle-ci");
     expect(show(en, item)).toBe("Refinance month must fall from stabilization (month 32) to before the sale (month 91)");
   });
+
+  it("audit of task 60d: says in French that one item is written two ways, and what to do", () => {
+    const { readiness } = assemble([row("unit_count", "Retail", 2), row("unit_rent_monthly", "Retail", 3000), row("unit_count", "retail", 2), row("unit_rent_monthly", "retail", 3000)]);
+    const item = readiness.impossible.find((m) => m.itemKey === "retail")!;
+    expect(show(en, item)).toBe("Retail and retail are one item written two ways: Reject the values of one, or enter them under one name.");
+    expect(show(fr, item)).toBe("Retail et retail désignent un même élément écrit de deux façons\u00a0: rejetez les valeurs de l'un, ou saisissez-les sous un seul nom.");
+  });
 });
 
 describe("breakeven rows in both languages (task 38)", () => {
