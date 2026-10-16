@@ -1573,10 +1573,13 @@ describe("signs, explanatory parentheses and per-unit prices", () => {
       ["Refunded deposit: -$4,500", -4_500],
       ["Remboursement du dépôt : (4 500 $)", -4_500],
       ["Ristourne : -3 000 $", -3_000],
-      ["Less: GST rebate (6,200)", -6_200],
       ["Subvention déduite : (10 000 $)", -10_000],
       ["Credit on the land purchase: -$30,000", -30_000],
     ] as const) expect(costs(lines(line)), line).toEqual([["other_cost", value]]);
+    // Card 61d: a rebate of a sales tax is a sales tax line, not a credit to other costs (gst_hst_net is already net of rebates).
+    const gst = lines("Less: GST rebate (6,200)");
+    expect(costs(gst)).toEqual([]);
+    expect(gst.other.map((o) => o.note)).toContain("A sales tax line; enter GST/HST net of rebates, or label it");
   });
   test("in a budget table a credit row is a part like any other and subtracts", () => {
     const grid = (...rows: string[][]) => extractCandidates(doc([], [textGrid(["Line item", "Amount"], ...rows)]));

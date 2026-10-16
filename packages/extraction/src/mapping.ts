@@ -170,9 +170,9 @@ const BASIS_CUE_RE = /\b(?:credit underwriting|underwritten by the (?:lender|ban
 const ALL_ALIASES = [...new Set(FIELDS.flatMap((f) => f.aliases))].sort((a, b) => b.length - a.length);
 
 /** The label with every field alias that holds one of `words` taken out. */
-function without(text: string, words: RegExp): string {
+function without(text: string, words: RegExp, aliases: readonly string[] = ALL_ALIASES): string {
   let out = text;
-  for (const a of ALL_ALIASES) {
+  for (const a of aliases) {
     if (!words.test(a)) continue;
     const esc = a.replace(/[.*+?^${}()|[\]\\/]/g, "\\$&");
     out = out.replace(new RegExp(`(^|[^a-z0-9])${esc}(?=$|[^a-z0-9])`, "g"), "$1 ");
@@ -524,6 +524,22 @@ export const WAIVED_NOTE = "Waived or exempt, so not what the deal pays; enter 0
 const WAIVED_RE = /(?:^|[^a-z])(?:waived|exempt|exempted|exemption|forgiven|not payable|exoneree?s?|exoneration|exemptee?s?|non exigibles?)(?![a-z])/;
 // "HST exempt" and "exempt from GST" say what tax a cost bears, not that the cost is waived.
 const SALES_TAX_EXEMPT_RE = /(?:^|[^a-z])(?:hst|gst|pst|qst|tps|tvq|tvh|tva|vat|sales tax|tax|taxes|taxe)[\s-]+(?:exempt|exempted|exemptee?s?|exoneree?s?)(?![a-z])|(?:^|[^a-z])(?:exempt|exempted|exemptee?s?|exoneree?s?)\s+(?:from|of|de|de la|des)\s+(?:hst|gst|pst|qst|tps|tvq|tvh|tva|vat|sales tax|tax|taxes|taxe)(?![a-z])/;
+// Card 61d: a line about a tax, interest, a fee or a carrying cost is not the item it names. Folded text.
+export const SALES_TAX_NOTE = "A sales tax line; enter GST/HST net of rebates, or label it";
+export const INTEREST_NOTE = "Interest on this item, not the item; label it if it belongs to a cost line";
+export const CARRYING_NOTE = "A carrying cost; label it under the cost line it belongs to";
+const SALES_TAX_WORD = String.raw`(?:hst|gst|pst|qst|tps|tvq|tvh|sales tax|taxe de vente)`;
+const SALES_TAX_RE = new RegExp(String.raw`(?:^|[^a-z])${SALES_TAX_WORD}(?![a-z])`);
+// The tax as the basis of a cost: "incl. HST", "net of GST/HST", "HST extra".
+const SALES_TAX_BASIS_RE = new RegExp(String.raw`(?:^|[^a-z])(?:incl|including|includes|excl|excluding|before|after|net of|plus|with|without|inclus|incluant|avant|apres|sans|avec|hors)\s+(?:the\s+|of\s+|de\s+|la\s+|des\s+)?(?:(?:gst|pst|qst|hst)/)?${SALES_TAX_WORD}(?![a-z])|${SALES_TAX_WORD}\s+(?:included|extra|excluded|inclus\w*|en sus)(?![a-z])`);
+const INTEREST_WORD_RE = /(?:^|[^a-z])(?:interests?|interets?)(?![a-z])/;
+const FEE_WORD_RE = /(?:^|[^a-z])(?:fees?|frais)(?![a-z])/;
+const INTEREST_ONLY_RE = /interest[- ]only|interets? seulement/g;
+const CARRYING_RE = /(?:^|[^a-z])(?:insurance|assurances?|utilities|services publics|property taxes?|taxes|taxe fonciere|taxes foncieres|carrying costs?|holding costs?|couts? de portage)(?![a-z])/;
+const TAXES_BASIS_RE = /(?:^|[^a-z])taxes\s+(?:included|extra|inclus\w*|en sus)(?![a-z])/;
+const TRANSFER_TAX_RE = /(?:land|property) transfer taxes?/g;
+const INTEREST_FEE_FIELDS = new Set(["land_cost", "hard_cost", "soft_cost", "contingency", "development_charges", "land_transfer_tax", "senior_loan_amount", "mezz_loan_amount", "refinance_amount"]);
+const CARRYING_FIELDS = new Set(["land_cost", "hard_cost", "soft_cost", "contingency", "development_charges", "land_transfer_tax"]);
 const NET_OF_RE = /(?:^|[^a-z])(?:net of|after|less|minus|nette? de|nets de|apres|deduction faite)(?![a-z])/;
 // The budget lines a credit may be written against: it is read as the other costs, never as a reduction of one of these.
 const CREDITABLE = new Set(["land_cost", "hard_cost", "soft_cost", "contingency", "other_cost"]);
@@ -541,10 +557,24 @@ export const SUPERSEDED_LABEL_NOTE = "An earlier figure, named old or original b
  * a negative figure that does not say so is refused. Nothing is inferred from a sign, and no sign is flipped.
  */
 export function mapToken(rawLabel: string, t: NumberToken, opts: MapOptions = {}): Mapped {
+  // A sales tax line, or a rebate of one, is refused before any credit rule reads it; a cost that only states its tax basis is read.
+  const folded = foldText(rawLabel);
+  if (t.value !== null && (t.unit === "$" || t.currency || t.unit === null) && SALES_TAX_RE.test(folded) && !SALES_TAX_BASIS_RE.test(folded.replace(/[^a-z0-9/]+/g, " ")) && !SALES_TAX_EXEMPT_RE.test(folded)) return { kind: "ignored", reason: SALES_TAX_NOTE };
   const m = mapSigned(rawLabel, t, opts);
   // A figure its field could never hold is shown, never read: nothing is flipped, rescaled or clamped.
   if (m.kind !== "field") return m;
   const def = FIELD_BY_KEY.get(m.fieldKey);
+  // Interest, a fee or a carrying cost named after an item is not the item. A word inside the matched field's own alias, or in a list of what the head covers, is that field's.
+  if (def && m.itemKey === null && def.unit === "$" && (INTEREST_FEE_FIELDS.has(def.key) || CARRYING_FIELDS.has(def.key))) {
+    let label = normalizeLabel(rawLabel).label;
+    const cover = COVER_LIST_RE.exec(label);
+    if (cover && cover.index > 0 && BUDGET_NAME_RE.test(label.slice(0, cover.index))) label = label.slice(0, cover.index);
+    const own = (re: RegExp) => without(label.replace(INTEREST_ONLY_RE, " "), re, def.aliases);
+    if (INTEREST_FEE_FIELDS.has(def.key) && INTEREST_WORD_RE.test(own(INTEREST_WORD_RE))) return { kind: "ignored", reason: INTEREST_NOTE };
+    if (INTEREST_FEE_FIELDS.has(def.key) && FEE_WORD_RE.test(own(FEE_WORD_RE))) return { kind: "ignored", reason: "A fee or premium, not an input" };
+    const carrying = label.replace(TRANSFER_TAX_RE, " ");
+    if (CARRYING_FIELDS.has(def.key) && CARRYING_RE.test(without(carrying, CARRYING_RE, def.aliases)) && !TAXES_BASIS_RE.test(carrying)) return { kind: "ignored", reason: CARRYING_NOTE };
+  }
   // A cost the city waived or exempted is not what the deal pays; $0 is, and so is a figure net of the exemption.
   if (def?.group === "budget" && m.value !== 0) {
     const words = foldText(`${rawLabel} ${opts.after ?? ""}`);
