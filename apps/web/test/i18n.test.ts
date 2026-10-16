@@ -170,6 +170,24 @@ describe("the quick start's gaps", () => {
     expect(build("fr", () => {}).t("review.notFound")).toBe("Introuvable dans les documents");
   });
 
+  it("offers the choices only a person makes, and a flag as yes or no, in both languages", () => {
+    const en = build("en", () => {});
+    const fr = build("fr", () => {});
+    expect(en.t("review.choices")).toBe("Choices only you make");
+    expect(fr.t("review.choices")).toBe("Choix qui vous reviennent");
+    expect(en.t("review.choicesBody")).toBe("Agir never reads these from documents. If you leave one, the run uses what it says.");
+    expect(fr.t("review.choicesBody")).not.toBe(en.t("review.choicesBody"));
+    expect(en.t("review.choiceLine", { field: "X", meaning: "Y" })).toBe("X: not stated. The run treats this as: Y.");
+    expect(fr.t("review.choiceLine", { field: "X", meaning: "Y" })).toContain("Y");
+    expect(fr.t("review.choiceLine", { field: "X", meaning: "Y" })).not.toBe(en.t("review.choiceLine", { field: "X", meaning: "Y" }));
+    expect(en.t("review.choiceEnter")).toBe("Make this choice");
+    expect(fr.t("review.choiceEnter")).toBe("Faire ce choix");
+    expect([en.t("common.yes"), en.t("common.no"), fr.t("common.yes"), fr.t("common.no")]).toEqual(["Yes", "No", "Oui", "Non"]);
+    // A flag chosen as yes or no is posted as 1 or 0.
+    expect([en.f.parse("1"), en.f.parse("0"), fr.f.parse("1"), fr.f.parse("0")]).toEqual([1, 0, 1, 0]);
+    expect(enteredInUnit("flag", false, 1, "because", "en")).toEqual({ value: 1, reason: "because" });
+  });
+
   it("converts an area or a rent entered in square metres, and records it", () => {
     const a = enteredInUnit("sf", true, 870, "from the plans", "en");
     expect(a.value).toBeCloseTo(870 * SF_PER_M2, 9);

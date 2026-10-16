@@ -866,3 +866,48 @@ describe("card 60: a deal that is kept and refinanced runs under its own policy"
     expect((await call(hal, "GET", `/api/runs/${r.json.id}/audit-package`)).json.validation.status).toBe("passed");
   });
 });
+
+describe("task 60b: a choice only a person makes is offered on review and entered like any value", () => {
+  let cw: string, cd: string, tw: string, td: string, cora: Session, tess: Session;
+  const review = async (s: Session, d: string) => (await call(s, "GET", `/api/deals/${d}/review`)).json;
+  const make = async (s: Session, w: string, name: string) =>
+    (await call(s, "POST", `/api/workspaces/${w}/deals`, { name, assetType: "Multifamily", location: "Calgary", province: "AB" })).json.id as string;
+
+  test("the review payload lists the choices with unit and help, apart from what was not found", async () => {
+    cora = await signup("cora@example.com", "Cora Chooser", "solo");
+    cw = (await call(cora, "GET", "/api/me")).json.workspaces[0].id;
+    cd = await make(cora, cw, "Choice Fourplex");
+    const r = await review(cora, cd);
+    const by = new Map<string, any>(r.choices.map((c: any) => [c.fieldKey, c]));
+    expect([...by.keys()]).toEqual(expect.arrayContaining(["lease_up_ramp", "s_curve_draws", "refinance_and_hold"]));
+    expect(by.get("lease_up_ramp")).toMatchObject({ unit: "flag", material: false, detail: "no income before stabilization", groupLabel: expect.any(String) });
+    expect(by.get("refinance_and_hold")).toMatchObject({ unit: "flag", material: true, help: expect.any(String) });
+    for (const c of r.choices) expect(r.notFound.map((n: any) => n.fieldKey)).not.toContain(c.fieldKey);
+    expect(r.readiness.choices.map((c: any) => c.fieldKey)).toEqual(r.choices.map((c: any) => c.fieldKey));
+  });
+
+  test("in solo review, lease_up_ramp = 1 with a reason is approved and leaves the list", async () => {
+    const e = await call(cora, "POST", `/api/deals/${cd}/values`, { fieldKey: "lease_up_ramp", value: 1, reason: "We credit lease-up income" });
+    expect(e.status).toBe(200);
+    expect(e.json.status).toBe("approved");
+    const r = await review(cora, cd);
+    expect(r.assumptions.find((a: any) => a.fieldKey === "lease_up_ramp")).toMatchObject({ status: "approved", value: 1, unit: "flag" });
+    expect(r.choices.map((c: any) => c.fieldKey)).not.toContain("lease_up_ramp");
+  });
+
+  test("a value other than 0 or 1 is refused", async () => {
+    expect((await call(cora, "POST", `/api/deals/${cd}/values`, { fieldKey: "s_curve_draws", value: 2, reason: "Not a yes or no" })).status).toBeGreaterThanOrEqual(400);
+  });
+
+  test("in team review, refinance_and_hold (material) waits for a second person; a run keeps choices out of its snapshot", async () => {
+    tess = await signup("tess@example.com", "Tess Team", "team");
+    tw = (await call(tess, "GET", "/api/me")).json.workspaces[0].id;
+    td = await make(tess, tw, "Team Choice");
+    const e = await call(tess, "POST", `/api/deals/${td}/values`, { fieldKey: "refinance_and_hold", value: 1, reason: "We keep and refinance" });
+    expect(e.json.status).toBe("awaiting_second_approval");
+    const r = await review(tess, td);
+    expect(r.choices.map((c: any) => c.fieldKey)).not.toContain("refinance_and_hold");
+    const [{ snap }] = (await db.query<{ snap: Record<string, unknown> }>(`select input_snapshot as snap from runs where id = $1`, [run])) as [{ snap: Record<string, unknown> }];
+    expect(Object.keys(snap).sort()).toEqual(["assumptions", "input", "notFound"]);
+  });
+});

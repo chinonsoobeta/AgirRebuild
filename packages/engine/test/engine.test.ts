@@ -412,6 +412,49 @@ describe("quick-start templates", () => {
     });
   });
 
+  // Task 60b: a choice only a person makes (never extracted) is offered, apart from the lines that were not found.
+  describe("choices only a person makes", () => {
+    const choiceKeys = (r: Readiness) => r.choices.map((i) => i.fieldKey);
+    const minimal = () => rowsFor("multiplex").filter((r) => !["other_cost", "other_income_annual"].includes(r.fieldKey));
+    const add = (fieldKey: string, status: AssumptionStatus, valueNumeric: number | null) => ({ fieldKey, itemKey: null, status, valueNumeric });
+    const NOT_FOUND = ["other_cost", "variable_expense_pct", "other_income_annual", "rent_growth_pct", "expense_growth_pct", "senior_io_months", "min_dscr_covenant", "mezz_loan_amount", "equity_amount", "refinance_month", "lp_share_pct", "stated_total_cost", "stated_ltc_pct", "stated_interest_reserve"];
+
+    test("with none stated, every never-extracted optional flag is listed, with what the run treats it as", () => {
+      const { readiness } = assemble(minimal());
+      expect(choiceKeys(readiness)).toEqual(expect.arrayContaining(["lease_up_ramp", "s_curve_draws", "refinance_and_hold"]));
+      const by = new Map(readiness.choices.map((i) => [i.fieldKey, i]));
+      expect(by.get("lease_up_ramp")).toMatchObject({ label: "Credit income during lease-up", detail: "no income before stabilization" });
+      expect(by.get("refinance_and_hold")).toMatchObject({ detail: "the deal is sold at the end of the hold" });
+      for (const k of choiceKeys(readiness)) {
+        const d = FIELD_BY_KEY.get(k)!;
+        expect(d.extractable, k).toBe(false);
+        expect(d.itemized, k).toBeFalsy();
+        expect(d.required, k).toBe(false);
+      }
+    });
+
+    test("none of them is in notFound, and notFound is what it was", () => {
+      const { readiness } = assemble(minimal());
+      expect(readiness.notFound.map((i) => i.fieldKey)).toEqual(NOT_FOUND);
+      for (const k of choiceKeys(readiness)) expect(readiness.notFound.map((i) => i.fieldKey)).not.toContain(k);
+    });
+
+    test("a stated, pending or conflicting choice leaves the list", () => {
+      for (const status of ["approved", "needs_review", "conflicting"] as const) {
+        expect(choiceKeys(assemble([...minimal(), add("lease_up_ramp", status, status === "conflicting" ? null : 1)]).readiness), status).not.toContain("lease_up_ramp");
+      }
+      expect(choiceKeys(assemble([...minimal(), add("lease_up_ramp", "approved", 0)]).readiness)).not.toContain("lease_up_ramp");
+      expect(choiceKeys(assemble([...minimal(), add("lease_up_ramp", "approved", 1)]).readiness)).toContain("s_curve_draws");
+    });
+
+    test("a blocked deal still lists them, and they never block a run or change the input", () => {
+      expect(choiceKeys(assemble([add("land_cost", "approved", 100)]).readiness)).toContain("s_curve_draws");
+      const a = assemble(minimal());
+      expect(a.readiness.status).toBe("ready");
+      expect(a.input).not.toBeNull();
+    });
+  });
+
   // Readiness runs the engine's own cross-field rules, so "ready" means the engine will accept the input.
   describe("a refinance the engine would refuse", () => {
     const withRefi = (fields: Record<string, number>) => [
