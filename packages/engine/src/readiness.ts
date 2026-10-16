@@ -56,18 +56,16 @@ export function assemble(rows: readonly AssumptionRow[]): { readiness: Readiness
   const impossible: ReadinessItem[] = [];
   const values = new Map<string, number>(); // "field" or "field|item" -> value
 
-  // One item written two ways (task 60d) is never counted twice: each form is named, and neither is read.
+  // One item written two ways (task 60d) is never counted twice: one line names every form, and none is read.
   const forms = new Map<string, Set<string>>();
   for (const r of rows) if (r.itemKey && r.status !== "rejected") forms.set(itemFold(r.itemKey), (forms.get(itemFold(r.itemKey)) ?? new Set()).add(r.itemKey));
   const doubled = new Set<string>();
   for (const names of forms.values()) {
     if (names.size < 2) continue;
     const [a, b] = [...names].sort();
-    for (const name of [...names].sort()) {
-      doubled.add(name);
-      const row = rows.find((r) => r.itemKey === name && r.status !== "rejected")!;
-      impossible.push({ fieldKey: row.fieldKey, itemKey: name, label: `${a} and ${b} are one item written two ways`, detail: "Reject the values of one, or enter them under one name." });
-    }
+    for (const name of names) doubled.add(name);
+    const row = rows.find((r) => r.itemKey === a && r.status !== "rejected")!;
+    impossible.push({ fieldKey: row.fieldKey, itemKey: a, label: `${a} and ${b} are one item written two ways`, detail: "Reject the values of one, or enter them under one name." });
   }
 
   const groups = new Map<string, AssumptionRow[]>();

@@ -160,7 +160,7 @@ export async function dealOverview(tx: Db, dealId: string) {
       counts.missing && `${counts.missing} missing`,
       counts.needsReview && `${counts.needsReview} to review`,
       counts.awaitingSecond && `${counts.awaitingSecond} awaiting a second approver`,
-      counts.impossible && `${counts.impossible} out of range`,
+      counts.impossible && `${counts.impossible} to correct`,
     ].filter(Boolean);
     status = { tone: counts.conflicting || counts.missing || counts.impossible ? "stop" : "review", text: `Blocked · ${parts.join(", ")}` };
     next = counts.conflicting ? `Resolve ${counts.conflicting} conflict${counts.conflicting === 1 ? "" : "s"}` : counts.missing ? `Enter ${counts.missing} missing input${counts.missing === 1 ? "" : "s"}` : "Review the extracted values";
