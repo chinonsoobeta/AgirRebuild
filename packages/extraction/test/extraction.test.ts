@@ -4500,6 +4500,16 @@ describe("every figure in a table is used or shown (task 65)", () => {
     expect(read(d)).toEqual([]);
   });
 
+  test("audit of card 65: a unit type's digit is not a figure, and a later figure that names a field says so", () => {
+    // A later "1-bed" or "2 BR" is a unit type, not the figure 1 or 2. (A row's first figure is shown as before task 65.)
+    expect(shown(grid("Units", [["Unit A", "$1,950", "1-bed"]])).map((s) => s[0])).not.toContain("C1");
+    expect(shown(grid("Units", [["Unit B", "$2,150", "2 BR"]])).map((s) => s[0])).not.toContain("C1");
+    // Nothing was read from the row, and 5.50% would be the exit cap rate: it is not "No field matches this label".
+    const d = grid("Assumptions", [["Exit cap rate", "TBD 2026", "5.50%"]]);
+    expect(read(d)).toEqual([]);
+    expect(shown(d)).toContainEqual(["C1", 5.5, "A later figure in this row; Agir reads one figure per row. Label it if it is the one to use"]);
+  });
+
   test("a row of years is not shown beyond what it was", () => {
     expect(shown(grid("Forecast", [["Year", "2025", "2026", "2027"]])).map((s) => s[0])).toEqual(["B1"]);
     expect(shown(grid("Forecast", [["Forecast for the first years"], ["2025", "2026", "2027"]]))).toEqual([]);
