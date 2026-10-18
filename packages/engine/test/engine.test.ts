@@ -4,7 +4,7 @@ import { FIELDS, FIELD_BY_KEY, METRICS, POLICIES, POLICY_V1, RENTAL_HOLD_INSURED
 import { createHash } from "node:crypto";
 import { readFileSync, readdirSync } from "node:fs";
 import { join } from "node:path";
-import { allocate, applyStress, assemble, buildLedger, canonicalJson, gateSpecs, irrRoots, levelPayment, underwrite, validateInput, EngineInputError } from "../src/index.ts";
+import { allocate, applyStress, assemble, buildLedger, canonicalJson, gateSpecs, grid, irrRoots, levelPayment, tornado, underwrite, validateInput, EngineInputError } from "../src/index.ts";
 import { allEquityDeal, developmentDeal } from "./fixtures.ts";
 
 const metric = (r: RunResult, key: string, scenario = "base") =>
@@ -848,6 +848,20 @@ describe("exit by refinancing and holding (card 60)", () => {
         expect(v(run, "sizing_dscr_year1")).toBeCloseTo(100_000 / (600_000 / amort), 9);
         expect(v(run, "senior_dscr_year1")).toBeCloseTo(100_000 / (600_000 / amort), 9);
       }
+    });
+
+    // Audit of card 72: the tornado and grid use the run's policy, and a delay that needs the absent amortization is not computable, never a crash.
+    test("audit of card 72: the tornado and grid size on the run's policy and survive absent amortization", () => {
+      const v3 = POLICIES["rental-hold-insured-v3-draft"]!;
+      const run = underwrite(ioDeal(undefined), v3);
+      const t = tornado(ioDeal(undefined), "senior_dscr_year1", v3);
+      expect(t.base).toBe(v(run, "senior_dscr_year1"));
+      expect(tornado(ioDeal(30), "senior_dscr_year1", v3).base).toBe(t.base);
+      // A longer construction moves the refinance past the IO period, so the loan would amortize on terms nobody stated.
+      expect(t.rows.find((r) => r.driver === "constructionMonths")!.high).toBeNull();
+      const g = grid(ioDeal(undefined), "senior_dscr_year1", "rentPct", "constructionMonths", 3, v3);
+      expect(g.cells[1]![1]).toBe(t.base);
+      expect(g.cells[2]!.every((c) => c === null)).toBe(true);
     });
 
     test("when IO ends before refinance every metric stays the same as insured v2", () => {

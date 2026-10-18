@@ -418,7 +418,6 @@ export function createApp({ db, store, secureCookies, demoSignIn = false }: AppD
   const driverKey = z.enum(DRIVERS.map((d) => d.key as string) as [string, ...string[]]).transform((k) => k as DriverKey);
   const metricKey = z.enum(METRICS.map((m) => m.key) as [string, ...string[]]);
   /** A stored run's input, and the policy that run was made under. */
-  const runInput = async (c: Context<Env>): Promise<EngineInput> => (await runInputAndPolicy(c)).input;
   const runInputAndPolicy = async (c: Context<Env>): Promise<{ input: EngineInput; policy: Policy }> => {
     const [r] = await as(c, (tx) => tx.query<{ input_snapshot: { input: EngineInput }; policy_version: string }>(`select input_snapshot, policy_version from runs where id = $1`, [c.req.param("id")]));
     if (!r) throw new HttpError(404, "Run not found");
@@ -434,7 +433,8 @@ export function createApp({ db, store, secureCookies, demoSignIn = false }: AppD
   });
   app.post("/api/runs/:id/tornado", async (c) => {
     const { metric } = z.object({ metric: metricKey }).parse(await c.req.json());
-    return c.json({ scratch: true, metric, ...tornado(await runInput(c), metric) });
+    const { input, policy } = await runInputAndPolicy(c);
+    return c.json({ scratch: true, metric, ...tornado(input, metric, policy) });
   });
   app.post("/api/runs/:id/breakeven", async (c) => {
     const { input, policy } = await runInputAndPolicy(c);
@@ -443,7 +443,8 @@ export function createApp({ db, store, secureCookies, demoSignIn = false }: AppD
   app.post("/api/runs/:id/grid", async (c) => {
     const b = z.object({ metric: metricKey, x: driverKey, y: driverKey, steps: z.number().int().min(3).max(9).default(5) }).parse(await c.req.json());
     if (b.x === b.y) throw new HttpError(422, "Choose two different drivers.");
-    return c.json({ scratch: true, metric: b.metric, ...grid(await runInput(c), b.metric, b.x, b.y, b.steps) });
+    const { input, policy } = await runInputAndPolicy(c);
+    return c.json({ scratch: true, metric: b.metric, ...grid(input, b.metric, b.x, b.y, b.steps, policy) });
   });
 
   app.get("/api/runs/:id/audit-package", async (c) => {

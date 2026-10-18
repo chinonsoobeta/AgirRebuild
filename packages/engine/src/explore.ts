@@ -5,7 +5,7 @@
 
 import type { EngineInput, Metric, Policy, RunResult } from "@agir/contracts";
 import { runChecks } from "./checks.ts";
-import { buildLedger } from "./ledger.ts";
+import { buildLedger, MissingSeniorAmortizationError } from "./ledger.ts";
 import { computeMetrics } from "./metrics.ts";
 import { applyStress } from "./stress.ts";
 import { underwrite } from "./underwrite.ts";
@@ -108,14 +108,30 @@ export function explore(input: EngineInput, policy: Policy, shock: Shock): Explo
   return rest;
 }
 
+/**
+ * One base-case metric under the run's policy: null when not VALID, or when the shock makes the senior amortize on an
+ * amortization nobody stated (a delay that moves the refinance past the IO period); undefined for an unknown metric.
+ */
+function metricOf(input: EngineInput, metricKey: string, policy?: Policy): number | null | undefined {
+  let metrics: Metric[];
+  try {
+    metrics = baseMetrics(input, policy?.seniorIoSizingToRefinance);
+  } catch (e) {
+    if (e instanceof MissingSeniorAmortizationError) return null;
+    throw e;
+  }
+  const m = metrics.find((x) => x.key === metricKey);
+  return m === undefined ? undefined : m.status === "VALID" ? m.value : null;
+}
+
 export type TornadoRow = { driver: DriverKey; label: string; low: number | null; high: number | null; lowShock: number; highShock: number };
 
 /** Each driver swung down and up by its tornado swing, everything else held. */
-export function tornado(input: EngineInput, metricKey: string): { base: number | null; rows: TornadoRow[] } {
+export function tornado(input: EngineInput, metricKey: string, policy?: Policy): { base: number | null; rows: TornadoRow[] } {
   const value = (i: EngineInput) => {
-    const m = baseMetrics(i).find((x) => x.key === metricKey);
-    if (!m) throw new Error(`Unknown metric "${metricKey}"`);
-    return m.status === "VALID" ? m.value : null;
+    const m = metricOf(i, metricKey, policy);
+    if (m === undefined) throw new Error(`Unknown metric "${metricKey}"`);
+    return m;
   };
   const base = value(input);
   const rows = DRIVERS.map((d) => ({
@@ -132,7 +148,7 @@ export function tornado(input: EngineInput, metricKey: string): { base: number |
 }
 
 /** A grid of one metric over two drivers, each at `steps` evenly spaced values. */
-export function grid(input: EngineInput, metricKey: string, x: DriverKey, y: DriverKey, steps = 5) {
+export function grid(input: EngineInput, metricKey: string, x: DriverKey, y: DriverKey, steps = 5, policy?: Policy) {
   if (x === y) throw new Error("Choose two different drivers");
   const dx = DRIVER_BY_KEY.get(x)!;
   const dy = DRIVER_BY_KEY.get(y)!;
@@ -142,8 +158,7 @@ export function grid(input: EngineInput, metricKey: string, x: DriverKey, y: Dri
   const ys = axis(dy);
   const cells = ys.map((yv) =>
     xs.map((xv) => {
-      const m = baseMetrics(shockInput(input, { [x]: xv, [y]: yv })).find((z) => z.key === metricKey)!;
-      return m.status === "VALID" ? m.value : null;
+      return metricOf(shockInput(input, { [x]: xv, [y]: yv }), metricKey, policy) ?? null;
     }),
   );
   return { x, y, xs, ys, cells };
