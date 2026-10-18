@@ -3,7 +3,7 @@ import type { EngineInput, ReadinessItem } from "@agir/contracts";
 import { assemble, validateInput, EngineInputError } from "../../../packages/engine/src/index.ts";
 import validateSource from "../../../packages/engine/src/validate.ts?raw";
 import { allEquityDeal } from "../../../packages/engine/test/fixtures.ts";
-import { FIELDS, METRICS } from "@agir/contracts";
+import { FIELDS, METRICS, POLICIES } from "@agir/contracts";
 import { SF_PER_M2 } from "@agir/numbers";
 import { reviewWaiting } from "../src/components/ui.tsx";
 import { approvable, enteredInUnit, foreignIn, keepsWithReason } from "../src/routes/review.tsx";
@@ -734,5 +734,18 @@ describe("the run screen for a deal that sells its units (task 79)", () => {
     }
     expect(en.t("run.saleCashFlows" as Key)).toBe("A deal that sells its units has no years of operations. Each month's costs, loans and closings are in the Excel export.");
     expect(en.t("explore.saleUnavailable" as Key)).toBe("Trying changes is not yet available for a deal that sells its units.");
+  });
+});
+
+describe("every gate and every policy's stresses have French names", () => {
+  const fr = build("fr", () => {});
+  const policies = Object.values(POLICIES);
+  // A policy without gateKeys uses v1's five (verdict.ts V1_GATE_KEYS).
+  const v1Gates = ["equity_multiple", "profit_on_cost", "development_spread", "stressed_sizing_dscr", "stressed_equity_multiple"];
+  it.each([...new Set(policies.flatMap((p) => p.gateKeys ?? v1Gates))])("gate %s", (key) => {
+    expect(fr.L.gate(key, "\u0000")).not.toBe("\u0000");
+  });
+  it.each(policies.flatMap((p) => p.stresses.map((s) => [p.version, s.key] as const)))("%s stress %s", (_v, key) => {
+    expect(fr.L.stress(key, "\u0000")).not.toBe("\u0000");
   });
 });

@@ -1214,6 +1214,13 @@ const STRESS: Record<string, [string, string]> = {
   occupancy: ["Occupancy -5 pts", "Occupation -5 pts"],
   expense: ["Operating costs +5 pts", "Charges d'exploitation +5 pts"],
   combined: ["Combined", "Combiné"],
+  // Selling the units (card 77).
+  prices: ["Prices -10%", "Prix -10 %"],
+  absorption: ["Absorption -30%", "Rythme de vente -30 %"],
+  costs: ["Costs +10%", "Coûts +10 %"],
+  rates: ["Interest rates +100 bps", "Taux d'intérêt +100 pb"],
+  construction: ["Construction +6 months", "Construction +6 mois"],
+  presales: ["Presales -15 pts", "Préventes -15 pts"],
 };
 const GATES: Record<string, [string, string]> = {
   equity_multiple: ["Equity multiple", "Multiple des fonds propres"],
@@ -1223,6 +1230,9 @@ const GATES: Record<string, [string, string]> = {
   stressed_equity_multiple: ["Equity multiple, combined stress", "Multiple des fonds propres, stress combiné"],
   dcr_after_refinance: ["Coverage after refinance (DCR)", "Couverture après refinancement (RCSD)"],
   stressed_unrealized_equity_multiple: ["Equity multiple (unrealized, not a sale), combined stress", "Multiple des fonds propres (non réalisé, pas une vente), stress combiné"],
+  profit_on_cost_for_sale: ["Profit on cost, units sold", "Profit sur coût, logements vendus"],
+  margin_on_revenue: ["Margin on sales revenue", "Marge sur le revenu des ventes"],
+  stressed_profit_on_cost_for_sale: ["Profit on cost, units sold, combined stress", "Profit sur coût, logements vendus, stress combiné"],
 };
 const DRIVERS_L: Record<string, [string, string]> = {
   exitCapBps: ["Exit cap rate", "Taux de sortie"],
