@@ -41,7 +41,7 @@ export type Scope = "senior" | "mezzanine" | "refinance";
 const SCOPE_WORDS: Record<Scope, RegExp> = {
   mezzanine: /\b(mezzanine|mezz|second mortgage|2nd mortgage|second charge|second[- ]ranking|second[- ]position|junior|subordinate loan|deuxieme rang|deuxieme hypotheque|pret de second rang|second rang|(?:mic|mortgage investment corporation) (?:second|2nd)|private second|(?<=\b(?:mortgages?|loans?|charges?|lenders?|hypotheques?|prets?)\b.{0,80})(?:the\s+)?second(?=\s*(?:is\b|:|\$))|^\s*second\s*$|preteur prive de second rang)\b/,
   refinance: /\b(take-?out|take out|refinanc\w*|permanent loan|permanent financing|exit financing|long[- ]term mortgage|pret permanent|financement permanent|financement de sortie|permanent (?:mortgage|debt|facility|lender)|permanent (?=(?:io|interest|amorti[sz]\w*|repayment|rate|term)\b)|conversion (?:rate|coupon)|converts? to (?:(?:an?|the) )?(?:\$|\d|(?:[a-z-]+ ){0,2}(?:loan|mortgage|debt|financing|facility|rate))|term[- ]out|hypotheque permanente|pret a terme|reprise(?!\s+(?:des?\s+|du\s+|de la\s+)?(?:travaux|chantier|construction|possession|bail|baux|terrain)))\b/,
-  senior: /\b(senior|construction loan|first mortgage|premier rang|pret de construction)\b/,
+  senior: /\b(senior|construction (?:loan|facility)|first mortgage|premier rang|pret de construction)\b/,
 };
 const TERM_SHEET_RE = /\b(term sheet|feuille de modalites)\b/;
 const foldText = (t: string) => t.toLowerCase().normalize("NFD").replace(/[\u0300-\u036f]/g, "").replace(/[’']/g, " ");
@@ -74,12 +74,18 @@ const SCOPE_FIELD: Record<Exclude<Scope, "senior">, Record<string, string>> = {
 export const LTV_BASIS = String.raw`(?:of|de|du)\s+(?:the\s+|la\s+|l['’\s]+)?(?:(?:lender|bank|preteur|banque)['’\s]+s?\s*)?(?:valuation|appraised value|appraisal|valeur\s+(?:etablie|determinee|fixee|evaluee)\s+par\s+(?:le\s+)?(?:preteur|banque)|valeur\s+d['’\s]+evaluation|valeur\s+evaluee)`;
 const LTV_BASIS_AFTER_RE = new RegExp(String.raw`^\s*${LTV_BASIS}(?![a-z0-9]|\s+(?:of|at|is|was|de|a)?\s*[$\d])`);
 const LTV_RE = /\b(loan to value|loan-to-value|ltv|ratio pret valeur|ratio pret-valeur|rpv)\b/;
-const BARE_AMOUNT_RE = /^(amount|montant|principal)$/;
+const BARE_AMOUNT_RE = /^(amount|facility amount|loan amount|principal|montant|montant du pret)$/;
 const REPAY_RE = /\b(repa\w+|refinanc\w*|take-?out|rembours\w+)\b/;
 const FUNDING_RE = /\b(fund\w*|repa\w+|clos\w*|advance\w*|draw\w*|financement|remboursement|prise de possession)\b/;
 const CAP_RE = /\b(cap rate|capitali[sz]ation rate|taux de capitalisation)\b/;
 const EXIT_RE = /\b(sell|sale|sold|exit|reversion|disposition|sortie|vente|vendre|vendrons|vendons|revente)\b/;
 const VALUE_RE = /\b(value|valeur)\b/;
+
+/** An explicitly named exit cap-rate label; valuation can qualify this input, but a stated value cannot. */
+export function isExitCapLabel(raw: string): boolean {
+  const label = normalizeLabel(raw).label;
+  return CAP_RE.test(label) && /\b(exit|terminal|reversion|sortie)\b/.test(label) && !VALUE_RE.test(label);
+}
 
 // A yearly rent, a per-unit or per-area label, and the rent figures they refuse.
 const ANNUAL_RE = /\b(annual|annually|yearly|per year|a year|each year|annuel|annuelle|par an|par annee)\b|\/\s?(yr|year|an|annee)\b/;
@@ -396,6 +402,8 @@ export type MapOptions = {
   prose?: boolean;
   /** The loan the document or section is about; a label that names its own loan overrides it. Default senior. */
   scope?: Scope;
+  /** A line has an explicit senior-loan heading, rather than a table's default senior scope. */
+  seniorHeading?: boolean;
   /** A budget table's row: "Other" names a cost here. */
   budget?: boolean;
   /** The sentence the label came from, for words about a sale that sit outside the label. */
@@ -493,14 +501,13 @@ const SHARE_TO_RE = /^\s*(?:to|aux)\s+(?:the\s+|our\s+|les\s+|nos\s+)?(?:partner
 const CAP_AFTER_RE = /^\s*cap\b(?!\s+(?:of|on)\b)/;
 // A promote tier from the second up.
 const LATER_TIER_RE = /\b(?:tier\s*(?:[2-9]|ii|iii|iv|two|three|four)|(?:2nd|3rd|[4-9]th|second|third|fourth)\s+tier|palier\s*(?:[2-9]|ii|iii|iv|deux|trois|quatre)|(?:[2-9]e|[2-9]eme|deuxieme|troisieme|quatrieme)\s+palier)\b/;
-const VACANCY_RE = /\b(vacancy(?! rate)|(?<!taux de )vacance|inoccupation)\b/;
+const VACANCY_RE = /\b(vacancy|vacance|inoccupation)\b/;
 // A duration labelled by the words right after it: "16 months to build", "huit mois pour louer".
 const BUILD_AFTER_RE = /^\s*to build\b/;
 const LEASE_AFTER_RE = /^\s*(?:to lease(?: up)?|pour louer)\b/;
 // A figure about the market, not the deal.
 const MARKET_RE = /\b(market|submarket|sub-market|city|area|zone|neighbou?rhood|region|cmhc|average|avg|comparables?|comps?|marche|secteur|quartier|schl|moyenne|moyen)\b/;
 const MARKET_NOTE = "A market statistic, not the deal's assumption";
-const NOT_STABILIZED_RE = /\b(lease[- ]?up|opening|ouverture|absorption|mise en location|during|pendant|initial|current|currently|today|actual|actuel\w*|existing|as of|en date du)\b/;
 
 /** A "Yes"/"Oui"/"True" (1) or "No"/"Non"/"False" (0) answer, however many words follow, beside the label of a flag field; anything else reads no flag. */
 export function flagRead(rawLabel: string, answer: string): { fieldKey: string; value: 0 | 1 } | null {
@@ -688,9 +695,13 @@ function mapLabel(rawLabel: string, t: NumberToken, opts: MapOptions = {}): Mapp
   // A budget field at the head of a label and a list of what it covers: the head names the figure, the list never does.
   const cover = COVER_LIST_RE.exec(label);
   if (cover && cover.index > 0 && BUDGET_NAME_RE.test(label.slice(0, cover.index))) label = label.slice(0, cover.index).trim();
-  const output = OUTPUT_LIKE_PHRASES.find((p) => hasPhrase(label, p));
+  const output = OUTPUT_LIKE_PHRASES.find((p) => hasPhrase(label, p) && !(p === "valuation" && isExitCapLabel(rawLabel)));
   if (output) return { kind: "ignored", reason: `"${rawLabel.trim()}" is an output figure, which is never taken as an input` };
   if (t.value === null) return { kind: "ignored", reason: t.refusal ?? "The number could not be read without guessing" };
+  // Appraisal cost items are shown separately; only a stated operating-cost total is read.
+  const costItem = /^(property tax(?:es)?|insurance|utilities|repairs(?: and |\s*\/\s*)maintenance)$/.test(label);
+  const managementItem = label === "management" && (/\($/.test(rawLabel.trim()) || /^\s*\(/.test(t.raw));
+  if ((!opts.budget && costItem) || (managementItem && t.unit === "%")) return { kind: "ignored", reason: "An itemized operating cost: enter the total as fixed operating costs on Review." };
   if (COMBINED_RESERVE_RE.test(foldText(rawLabel).replace(/\s+/g, " "))) return { kind: "ignored", reason: "A combined figure; the interest reserve is not stated alone" };
   // Mortgage insurance remains a manual input; its premium is shown with the Review instruction.
   if (t.unit === "%" && MORTGAGE_INSURANCE_RE.test(label) && /\b(?:premiums?|primes?|insurance|assurance)\b/.test(label)) return { kind: "ignored", reason: "Mortgage insurance premium: enter it on Review as the refinance mortgage insurance premium" };
@@ -754,12 +765,11 @@ function mapLabel(rawLabel: string, t: NumberToken, opts: MapOptions = {}): Mapp
     const m = key && asField(FIELD_BY_KEY.get(key)!);
     if (m) return m;
   }
-  // A vacancy percentage states the stabilized occupancy as its complement; one tied to lease-up, opening or today is not the stabilized figure.
-  if (VACANCY_RE.test(label) && (t.unit === "%" || (t.unit === null && labelUnit === "%")) && t.value >= 0 && t.value <= 100) {
+  // Vacancy is shown for manual entry; the reader never derives occupancy from it.
+  if (VACANCY_RE.test(label) && (t.unit === "%" || (t.unit === null && labelUnit === "%"))) {
     const clause = `${label} ${normalizeLabel((opts.after ?? "").split(/[,;.]/)[0] ?? "").label}`;
     if (MARKET_RE.test(clause)) return { kind: "ignored", reason: MARKET_NOTE };
-    if (NOT_STABILIZED_RE.test(clause)) return { kind: "ignored", reason: "A vacancy during lease-up, at opening or today is not the stabilized occupancy" };
-    return { kind: "field", fieldKey: "stabilized_occupancy_pct", itemKey: null, value: Number((100 - t.value).toFixed(10)), unitSeen: "% vacancy" };
+    return { kind: "ignored", reason: "A vacancy rate: enter occupancy (100% less vacancy) on Review." };
   }
 
   // A cap rate is the exit rate only when the sentence is about a sale; alone it may be the going-in rate.
@@ -768,19 +778,20 @@ function mapLabel(rawLabel: string, t: NumberToken, opts: MapOptions = {}): Mapp
     // A sale that already happened ("the duplex next door sold at a 4.9% cap") is a comparable, not this deal's exit.
     if (/\b(?:sold|traded|vendue?s?)\b/.test(foldText(rawLabel.split(/[.;]/).pop() ?? ""))) return { kind: "ignored", reason: "A completed sale's cap rate, not this deal's exit" };
     if (EXIT_RE.test(ctx) && VALUE_RE.test(ctx)) return { kind: "ignored", reason: "This sentence names a value as well as a cap rate; the figure is not taken as an input" };
-    if (EXIT_RE.test(ctx)) return asField(FIELD_BY_KEY.get("exit_cap_rate_pct")!) ?? { kind: "unmapped" };
+    if (isExitCapLabel(rawLabel) || EXIT_RE.test(ctx)) return asField(FIELD_BY_KEY.get("exit_cap_rate_pct")!) ?? { kind: "unmapped" };
     return { kind: "ignored", reason: "A cap rate with no word about a sale or an exit may be the going-in rate; enter it by hand if it is the exit rate" };
   }
   // The month a loan is repaid or refinanced ("repaid at month 26"), whichever loan the section is about.
   const ordinalMonth = t.unit === "months" && (/^\d+$/.test(t.raw) || /^\d+(e|er|eme)\s+mois/i.test(t.raw));
   if (ordinalMonth && REPAY_RE.test(label)) return asField(FIELD_BY_KEY.get("refinance_month")!) ?? { kind: "unmapped" };
+  // Bare amounts need a stated loan scope; the implicit senior default alone is not enough.
+  if ((scope !== "senior" || opts.seniorHeading) && BARE_AMOUNT_RE.test(label)) return asField(scoped("senior_loan_amount")) ?? { kind: "unmapped" };
   if (scope !== "senior") {
     // Under the mezzanine or refinance loan: a loan-to-value, a bare amount or the month the loan funds are the scope's own.
     if (LTV_RE.test(label)) {
       if (scope === "refinance") return asField(FIELD_BY_KEY.get("refinance_ltv_pct")!) ?? { kind: "unmapped" };
       return { kind: "ignored", reason: "The mezzanine loan has no loan-to-value field; the figure is not given to the senior loan" };
     }
-    if (BARE_AMOUNT_RE.test(label)) return asField(scoped("senior_loan_amount")) ?? { kind: "unmapped" };
     if (scope === "refinance" && ordinalMonth && FUNDING_RE.test(label)) return asField(FIELD_BY_KEY.get("refinance_month")!) ?? { kind: "unmapped" };
   }
 

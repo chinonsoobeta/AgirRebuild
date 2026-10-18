@@ -2481,7 +2481,7 @@ describe("durations after the number, revisions in a sentence, percent cells, va
       expect(r.candidates, line).toEqual([]);
       expect(r.other[0]?.note, line).toBe("A market statistic, not the deal's assumption");
     }
-    expect(pick(read("Vacancy allowance 3%"))).toEqual([["stabilized_occupancy_pct", 97]]);
+    expect(pick(read("Vacancy allowance 3%"))).toEqual([]);
   });
 
   test("goes from X to Y is a revision: Y is read and X is shown as replaced", () => {
@@ -2518,7 +2518,7 @@ describe("durations after the number, revisions in a sentence, percent cells, va
     const d = await workbook([["Stabilized occupancy", 0.975, "0.0%"], ["Operating expenses (% of EGI)", 0.38, "0%"], ["Exit cap rate", 0.055, "0.00%"], ["Vacancy allowance", 0.03, "0.0%"]]);
     expect(d.tables[0]!.rows.map((r) => r[1]!.text)).toEqual(["97.5%", "38%", "5.5%", "3%"]);
     const r = extractCandidates(d);
-    expect(pick(r)).toEqual([["stabilized_occupancy_pct", 97.5], ["expense_ratio_pct", 38], ["exit_cap_rate_pct", 5.5], ["stabilized_occupancy_pct", 97]]);
+    expect(pick(r)).toEqual([["stabilized_occupancy_pct", 97.5], ["expense_ratio_pct", 38], ["exit_cap_rate_pct", 5.5]]);
     expect(r.candidates[0]!.raw).toContain("0.975");
   });
   test("negative: a cell that is not percent-formatted is unchanged", async () => {
@@ -4911,5 +4911,9 @@ describe("four inputs a person still types (task 73)", () => {
     expect(pick(r)).toEqual([]);
     expect(r.other.map((o) => [o.value, o.note])).toEqual([23700, 7600, 10800, 9400, 3].map((v) => [v, ITEM]));
     expect(pick(read(...lines, "Total operating expenses: $58,900"))).toEqual([["fixed_opex_annual", 58900]]);
+    const table = extractCandidates({ ...doc(), tables: [{ name: "Invented appraisal expenses", rows: [
+      ["Property tax", "$23,700"], ["Insurance", "$7,600"], ["Utilities", "$10,800"], ["Caretaking", "$1,500"], ["Total operating expenses", "$58,900"],
+    ].map((row, i) => row.map((text, j) => ({ text, ref: `${"AB"[j]}${i + 1}` }))) }] });
+    expect(pick(table)).toEqual([["fixed_opex_annual", 58900]]);
   });
 });
