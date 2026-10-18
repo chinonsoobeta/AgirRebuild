@@ -361,12 +361,14 @@ function rangeEnds(text: string, tokens: NumberToken[]): Set<number> {
     const before = text.slice(0, a.start);
     const lead = /\b(from|de|d['’])\s*$/i.test(before);
     const same = a.unit === b.unit && a.currency === b.currency;
-    const open = same || (a.unit === null && !a.currency);
+    const monthIndex = /\b(?:months?|mois)\s*$/i.test(before) && !a.currency && !b.currency && (a.unit === null || a.unit === "months") && (b.unit === null || b.unit === "months");
+    const open = same || (a.unit === null && !a.currency) || monthIndex;
     // "5 - 7": the tokenizer read the dash as the second number's minus sign.
     const spaced = /^\s+[-–—]\s*$/.test(between) || (/^[-−]/.test(b.raw) && /^\s+$/.test(between));
     const isRange =
       (/^[-–—]$/.test(between) && open) ||
       (spaced && open) ||
+      (/^\s+through\s*$/i.test(between) && monthIndex) ||
       (/^\s+(to|à)\s*$/i.test(between) && (open || lead)) ||
       (/^\s+(and|et)\s*$/i.test(between) && /\b(between|entre)\s*$/i.test(before));
     if (isRange) {
@@ -756,6 +758,15 @@ function readSentence(sentence: { text: string; start: number }, para0: Paragrap
     // The base of a share ("of hard costs" after "4%") names nothing for the figures after it.
     const afterShare = isMoney(t) && shares.some(([, end]) => t.start >= end);
     const label = shares.reduce((l, [a, b]) => (b > from && a < t.start ? l.slice(0, Math.max(a - from, 0)) + " ".repeat(Math.min(b, t.start) - Math.max(a, from)) + l.slice(Math.min(b, t.start) - from) : l), text.slice(from, t.start));
+    const afterFigure = text.slice(t.end, tokens[i + 1]?.start ?? text.length);
+    // A building or schedule total is not the monthly rent of one unit.
+    const rentWords = fold(label);
+    const monthlyTotal = /\b(?:(?:total|gross) monthly rent|rent roll totals|loyer mensuel total|loyers mensuels totaux)\b/.test(rentWords) || (/\bproduces\b/.test(rentWords) && /^\s+of monthly rent\b/.test(fold(afterFigure)));
+    if (isMoney(t) && monthlyTotal && !/\b(?:per (?:unit|suite|door|home)|each|par (?:unite|logement))\b/.test(`${rentWords} ${fold(afterFigure)}`)) {
+      other(t, "line:prose", "A total of all units' rents, not a rent per unit");
+      from = t.end;
+      return;
+    }
     let opts: MapOptions = { prose: true, scope: para.scope, context: text, quote, after: text.slice(t.end) };
     let usedLabel = totalLabels.get(t) ?? label;
     if (loanSentence) {
@@ -829,6 +840,8 @@ function readSentence(sentence: { text: string; start: number }, para0: Paragrap
       other(t, "line:prose", AS_IS_NOTE);
       return;
     }
+    // A loan noun attached to this amount overrides equity words left before it.
+    if (mapped.kind === "field" && mapped.fieldKey === "equity_amount" && /^\s*(?:(?:of|de|du|the|un|une)\s+)*(?:construction\s+)?(?:facility|loan|mortgage|pret|financement)\b/.test(fold(afterFigure))) mapped = { kind: "unmapped" };
     carry = named && mapped.kind === "field" && isMoney(t) ? { scope: named, at: i } : null;
     lastRead = mapped.kind === "field" && isMoney(t) ? { label: usedLabel, key: mapped.fieldKey, t } : null;
     record(result, mapped, t, { raw: t.raw, location: where, context, rule: "line:prose" });
@@ -999,7 +1012,7 @@ const BASIS_UNSTATED = "The rent's basis (per month, per year or per square foot
 
 const ROLL_FIELDS = new Set(["unit_count", "rentable_area_sf", "unit_rent_monthly", "rent_psf_annual", "item_occupancy_pct", "stabilized_occupancy_pct"]);
 const SUITE_RULE = "table:rent-roll-suite";
-const SUITE_ID_RE = /^(?:(?:suite|unit|apt|apartment|no\.?|#|logement|app\.?)\s*)?\d{1,4}[A-Za-z]?$|^(?:suite|unit|apt|apartment|logement|app\.?)\s+[A-Za-z]$/i;
+const SUITE_ID_RE = /^(?:(?:suite|unit|apt|apartment|no\.?|#|logement|app\.?)\s*)?\d{1,4}[A-Za-z]?$|^(?:suite|unit|apt|apartment|logement|app\.?)\s+[A-Za-z]$|^[A-Za-z]{1,2}-?\d{1,4}$/i;
 const ROLL_SUMMARY_NOTE = "A rent roll's summary row is not an assumption";
 const SUMMARY_LABEL_RE = /\b(occupancy|occupation|occupied|average|avg|moyen\w*)\b/;
 const STABILIZED_LABEL_RE = /\b(stabili[sz]ed|stabilis\w*|projected|pro forma|projet\w*)\b/;

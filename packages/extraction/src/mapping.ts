@@ -155,6 +155,7 @@ const BUDGET_NAME_RE = new RegExp(`\\b(${FIELDS.filter((f) => f.group === "budge
 // The interest reserve joined with a fee, cost or charge ("lender fees and interest reserve", "interest reserve + financing fees").
 const COMBINED_RESERVE_RE = /(?:\b(?:interest reserve|reserve d\W?interets?)\s*(?:and|&|\+|et|plus)\s+(?:\w+\s+){0,3}?(?:fees?|costs?|charges?|frais|couts?)\b|\b(?:fees?|costs?|charges?|frais|couts?)\s*(?:and|&|\+|et|plus)\s+(?:\w+\s+){0,2}?(?:interest reserve|reserve d\W?interets?)\b)/;
 const FEE_RE = /\b(fees?|frais|honoraires|premiums?|prime d assurance)\b/;
+const MORTGAGE_INSURANCE_RE = /\b(?:mortgage insurance|cmhc|mli|sagen|canada guaranty|assurance hypothecaire|schl)\b/;
 // A tenant improvement allowance is a landlord's contribution to the tenant's fit-out, never a rent: the words may stand in the label, the clause before the figure, or right after it.
 // A bare "allowance" or "allocation" refuses only a rent-shaped figure: an interest-only allowance in months or a budget allowance in dollars is that line's own figure.
 const TI_WORDS = String.raw`(?:ti|tis|tenant (?:improvements?|allowances?)|ameliorations? locatives?|amenagements? du locataire)`;
@@ -691,6 +692,8 @@ function mapLabel(rawLabel: string, t: NumberToken, opts: MapOptions = {}): Mapp
   if (output) return { kind: "ignored", reason: `"${rawLabel.trim()}" is an output figure, which is never taken as an input` };
   if (t.value === null) return { kind: "ignored", reason: t.refusal ?? "The number could not be read without guessing" };
   if (COMBINED_RESERVE_RE.test(foldText(rawLabel).replace(/\s+/g, " "))) return { kind: "ignored", reason: "A combined figure; the interest reserve is not stated alone" };
+  // Mortgage insurance remains a manual input; its premium is shown with the Review instruction.
+  if (t.unit === "%" && MORTGAGE_INSURANCE_RE.test(label) && /\b(?:premiums?|primes?|insurance|assurance)\b/.test(label)) return { kind: "ignored", reason: "Mortgage insurance premium: enter it on Review as the refinance mortgage insurance premium" };
   const lender = lenderFigure(rawLabel, t, opts);
   if (lender) return { kind: "ignored", reason: lender };
   // Unless the figure's own clause names the preferred return ("a preferred return of 8% to the investors").
