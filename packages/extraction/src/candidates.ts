@@ -420,6 +420,7 @@ function clauseItem(text: string, t: NumberToken, lead: string | null = null): M
 }
 
 const SHARE_NOTE = "A share of another figure, not that figure";
+const LATER_FIGURE_NOTE = "A later figure in this row; Agir reads one figure per row. Label it if it is the one to use";
 const PER_UNIT_NOTE = "A per-door share of a cost, not the line's total; enter the total";
 const STRUCK_NOTE = "Struck through in the document; the figure written in its place replaces it";
 const PER_UNIT_REFUSED_NOTE = "The line's first figure is a price per unit; this number is not stated as its total";
@@ -1651,10 +1652,11 @@ function fromTable(table0: Table, result: ExtractionResult, notes: string[] = []
         }
         // Each figure after the one the label used or showed is shown, never read (task 65); a row of years adds none.
         const rest = (from: Cell, note: string | null) => {
-          const later = after.slice(after.indexOf(from) + 1).flatMap((c) => { const x = cellToken(c, result.format); return x ? [{ c, x }] : []; });
+          // A unit type's digit ("1-bed", "2 BR") is not a figure.
+          const later = after.slice(after.indexOf(from) + 1).flatMap((c) => { const x = wholeUnitType(c.text) ? null : cellToken(c, result.format); return x ? [{ c, x }] : []; });
           if (later.length === 0 || after.every((c) => { const x = cellToken(c, result.format); return !x || isYearToken(x); })) return;
           for (const { c, x } of later) {
-            const own = note ?? (() => { const m = mapToken(relative ? labelCell.text.replace(BLOCK_RELATIVE_RE, "") : labelCell.text, x, { scope, ahead: c.text.slice(0, x.start), after: c.text.slice(x.end), quote: quoteDocs.has(result) }); return m.kind === "ignored" ? m.reason : "No field matches this label"; })();
+            const own = note ?? (() => { const m = mapToken(relative ? labelCell.text.replace(BLOCK_RELATIVE_RE, "") : labelCell.text, x, { scope, ahead: c.text.slice(0, x.start), after: c.text.slice(x.end), quote: quoteDocs.has(result) }); return m.kind === "ignored" ? m.reason : m.kind === "field" ? LATER_FIGURE_NOTE : "No field matches this label"; })();
             result.other.push({ fieldKey: null, itemKey: null, value: x.value, raw: x.raw, unitSeen: x.unit, location: c.ref, context: rowContext(table.name, cat, row, labelCell, c), rule: "table:label-value", note: own });
           }
         };
