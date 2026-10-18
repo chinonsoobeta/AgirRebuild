@@ -4816,6 +4816,15 @@ describe("an equity reimbursement is not equity, and plan types stay distinct (t
     expect(shown(doc(sentence))).toEqual([]);
   });
 
+  // Audit of card 71: "return" as a noun or a yield, and "remaining" not said of equity, are not a return of equity.
+  test.each([
+    "The sponsor targets an 18% return on equity of $660,000.",
+    "Equity of $660,000 should return 1.9x over the hold.",
+    "The remaining $660,000 of equity is funded by the limited partner at closing.",
+  ])("audit of card 71: contributed equity stays readable: %s", (sentence) => {
+    expect(read(doc(sentence))).toEqual([["equity_amount", null, 660000]]);
+  });
+
   test("a contribution stays readable beside a returned amount in the same clause", () => {
     const d = doc("We contribute CAD 660000 of sponsor equity alongside CAD 440000 returned to the equity partners at refinance.");
     expect(read(d)).toEqual([["equity_amount", null, 660000]]);

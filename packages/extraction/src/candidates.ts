@@ -586,13 +586,14 @@ function readSentence(sentence: { text: string; start: number }, para0: Paragrap
   const years = tokens.filter((t) => isYear(text, tokens, t));
   for (const t of years) other(t, "line:prose", "This is a year, not an amount");
   tokens = tokens.filter((t) => !years.includes(t));
-  // Returned equity and the equity retained afterward are not the amount contributed.
+  // Returned equity and the equity retained afterward are not the amount contributed. "Return on equity", a return as a yield
+  // ("to return 1.9x") and "the remaining $X of equity" are not a return of equity (card 71 audit).
   const returnedEquity = tokens.filter((t, i) => {
     if (!isMoney(t)) return false;
     const start = tokens[i - 1]?.end ?? 0;
     const end = tokens[i + 1]?.start ?? text.length;
     const clause = fold(clauseAround(text.slice(start, end), { ...t, start: t.start - start, end: t.end - start }));
-    return /\b(?:equity|fonds propres|capitaux propres)\b/.test(clause) && /\b(?:reimburs\w*|repay\w*|repaid|return(?:s|ed|ing)?|distribu\w*|cash(?:es|ed|ing)?[- ]outs?|tak(?:e[sn]?|ing)[- ]out|took[- ]out|leaving|left in|remaining|retain(?:s|ed|ing)?|rembours\w*|remet\w*|restants?|laissant)\b/.test(clause);
+    return /\b(?:equity|fonds propres|capitaux propres)\b/.test(clause) && /\b(?:reimburs\w*|repay\w*|repaid|return(?:s|ed|ing)?(?!\s+on\b)\s+(?:\S+\s+){0,3}?(?:to|of|equity|capital)|distribu\w*|cash(?:es|ed|ing)?[- ]outs?|tak(?:e[sn]?|ing)[- ]out|took[- ]out|leaving|left in|remaining (?:\w+ )?equity|retain(?:s|ed|ing)?|rembours\w*|remet\w*|restants?|laissant)\b/.test(clause);
   });
   for (const t of returnedEquity) other(t, "line:prose", "Equity returned or left in after a refinance, not the equity contributed");
   tokens = tokens.filter((t) => !returnedEquity.includes(t));
