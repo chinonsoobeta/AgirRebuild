@@ -1703,7 +1703,7 @@ function fromTable(table0: Table, result: ExtractionResult, notes: string[] = []
             result.other.push({ ...base, fieldKey: null, itemKey: null, value: t.value, unitSeen: t.unit, note: PER_UNIT_NOTE });
             const field = mapped.fieldKey;
             const item = mapped.itemKey;
-            const lineCell = after.slice(after.indexOf(cell) + 1).find((c) => {
+            const lineCell: Cell | undefined = after.slice(after.indexOf(cell) + 1).find((c) => {
               const x = wholeUnitType(c.text) ? null : cellToken(c, result.format);
               if (!x || x.value === null || perUnit(c.text, x) || isDeposit(c.text, x)) return false;
               const m = mapToken(relative ? labelCell.text.replace(BLOCK_RELATIVE_RE, "") : labelCell.text, x, { scope, ahead: c.text.slice(0, x.start), after: c.text.slice(x.end), quote: quoteDocs.has(result) });
