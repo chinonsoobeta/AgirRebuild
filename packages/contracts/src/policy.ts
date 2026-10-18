@@ -3,8 +3,8 @@
 //
 // maxLtcPct is provisional: it awaits credit sign-off (plan task S4).
 //
-// A deal that is kept and refinanced runs under rental-hold-v1-draft (card 60), a draft whose thresholds are
-// proposals for credit. POLICY_V1 is never edited for it: its hash keeps every existing run fresh.
+// A held deal runs under rental-hold-v1-draft (card 60), or rental-hold-insured-v1-draft when insured.
+// Both drafts propose thresholds for credit. POLICY_V1 is never edited for them: existing runs keep their hash.
 
 import type { EngineInput } from "./results.ts";
 
@@ -91,13 +91,24 @@ export const RENTAL_HOLD_V1_DRAFT: Policy = {
   gateKeys: ["development_spread", "dcr_after_refinance", "stressed_sizing_dscr", "stressed_unrealized_equity_multiple"],
 };
 
+/** For a held deal whose refinance is insured (a premium is stated). Draft, like the policy it copies. */
+export const RENTAL_HOLD_INSURED_V1_DRAFT: Policy = {
+  ...RENTAL_HOLD_V1_DRAFT,
+  version: "rental-hold-insured-v1-draft",
+  gates: { ...RENTAL_HOLD_V1_DRAFT.gates, dcrAfterRefinanceMin: 1.1 },
+};
+
 /** Every policy a run can have been made under, by version. A new policy is added, never edited. */
 export const POLICIES: Readonly<Record<string, Policy>> = {
   [POLICY_V1.version]: POLICY_V1,
   [RENTAL_HOLD_V1_DRAFT.version]: RENTAL_HOLD_V1_DRAFT,
+  [RENTAL_HOLD_INSURED_V1_DRAFT.version]: RENTAL_HOLD_INSURED_V1_DRAFT,
 };
 
-/** The policy that fits a deal: a held deal gets the draft, every other deal v1. */
+/** A held deal gets the insured draft for a positive premium, otherwise the conventional draft. Every other deal gets v1. */
 export function policyFor(input: EngineInput): Policy {
-  return input.exit === "refinance_hold" ? RENTAL_HOLD_V1_DRAFT : POLICY_V1;
+  if (input.exit !== "refinance_hold") return POLICY_V1;
+  // A stated premium identifies an insured refinance; there is no financing-type field.
+  const premium = input.refinance?.insurancePremiumPct;
+  return typeof premium === "number" && premium > 0 ? RENTAL_HOLD_INSURED_V1_DRAFT : RENTAL_HOLD_V1_DRAFT;
 }

@@ -457,6 +457,8 @@ export function buildModel(x: ArtifactInput): DocModel {
       ["Cumulative cash shortfall after stabilization", f.metric("base", "cumulative_cash_shortfall")],
       ["Break-even occupancy", f.metric("base", "break_even_occupancy")],
     );
+    const refinanceDcr = r.verdict.gates.find((g) => g.key === "dcr_after_refinance");
+    if (refinanceDcr) debtRows.push(["Coverage after refinance (DCR), minimum", f.run(refinanceDcr.threshold, refinanceDcr.unit, "gate.dcr_after_refinance.threshold")]);
     blocks.push({ type: "table", caption: "Debt and coverage", columns: [{ label: "Term" }, { label: "Value", numeric: true }], rows: debtRows });
     // Beside the refinance loan: the premium is added to it, not paid in cash.
     if (i.refinance?.insurancePremiumPct !== undefined) {
