@@ -3,7 +3,7 @@ import type { EngineInput, ReadinessItem } from "@agir/contracts";
 import { assemble, validateInput, EngineInputError } from "../../../packages/engine/src/index.ts";
 import validateSource from "../../../packages/engine/src/validate.ts?raw";
 import { allEquityDeal } from "../../../packages/engine/test/fixtures.ts";
-import { FIELDS } from "@agir/contracts";
+import { FIELDS, METRICS } from "@agir/contracts";
 import { SF_PER_M2 } from "@agir/numbers";
 import { reviewWaiting } from "../src/components/ui.tsx";
 import { approvable, enteredInUnit, foreignIn, keepsWithReason } from "../src/routes/review.tsx";
@@ -706,5 +706,33 @@ describe("setting up unit sales in English and French (task 78)", () => {
       expect(checkText(fr, check)).toContain(fr.f.value(c.actual, c.key === "presale_threshold_unmet" ? "%" : "$"));
       if (c.expected !== undefined) expect(checkText(fr, check)).toContain(fr.f.value(c.expected, "%"));
     }
+  });
+});
+
+
+describe("the run screen for a deal that sells its units (task 79)", () => {
+  const en = build("en", () => {});
+  const fr = build("fr", () => {});
+  it.each(METRICS.map((m) => [m.key] as const))("%s has a French label and formula", (key) => {
+    expect(fr.L.metric(key), key).not.toBe(key);
+    expect(fr.L.formula(key), key).toBeTruthy();
+  });
+  it("sale metric wording contains no untranslated English", () => {
+    const sale = METRICS.slice(METRICS.findIndex((m) => m.key === "gross_sales_revenue"), METRICS.findIndex((m) => m.key === "refinance_cash_returned"));
+    expect(sale).toHaveLength(16);
+    for (const m of sale) {
+      expect(fr.L.metric(m.key), m.key).not.toBe(en.L.metric(m.key));
+      expect(fr.L.formula(m.key), m.key).not.toBe(en.L.formula(m.key));
+      expect(`${fr.L.metric(m.key)} ${fr.L.formula(m.key)}`, m.key).not.toMatch(/\b(must|needs|give|the|and|between|required|from|to|least|above|under|months|years|units|sale|sales|carry|closing|completion|price|equity|interest)\b/i);
+    }
+  });
+  it("explains the missing operating years and unavailable exploration in both languages", () => {
+    for (const key of ["run.saleCashFlows", "explore.saleUnavailable"] as Key[]) {
+      expect(en.t(key), key).not.toBe(key);
+      expect(fr.t(key), key).not.toBe(key);
+      expect(fr.t(key), key).not.toBe(en.t(key));
+    }
+    expect(en.t("run.saleCashFlows" as Key)).toBe("A deal that sells its units has no years of operations. Each month's costs, loans and closings are in the Excel export.");
+    expect(en.t("explore.saleUnavailable" as Key)).toBe("Trying changes is not yet available for a deal that sells its units.");
   });
 });

@@ -133,7 +133,7 @@ describe("selling the units (task 77)", () => {
   test("rental-only metrics are not applicable and the new metrics never enter rental results", () => {
     const rental = run(allEquityDeal());
     const sale = run(small());
-    const shared = ["total_development_cost", "equity_multiple", "equity_irr", "peak_equity"];
+    const shared = ["total_development_cost", "equity_multiple", "equity_irr", "peak_equity", "loan_to_cost", "required_equity", "cost_per_unit"];
     for (const m of rental.scenarios[0]!.metrics.filter((m) => !shared.includes(m.key))) expect(value(sale, m.key)).toMatchObject({ status: "NOT_APPLICABLE", value: null, reason: "The units are sold; there is no rental income." });
     expect(rental.scenarios[0]!.metrics.some((m) => m.key === "gross_sales_revenue")).toBe(false);
     expect(sale.ledger.every((r) => r.egi === 0 && r.noi === 0)).toBe(true);
@@ -167,5 +167,53 @@ describe("selling the units (task 77)", () => {
     expect(value(r, "equity_distributed").value).toBeCloseTo(5, 9);
     expect(value(r, "equity_distributed", "prices").value).toBe(0);
     expect(engine.buildForSaleLedger(engine.applyStress(input, contracts.FOR_SALE_DRAFT.stresses[0]!)).values.ending_mezz_balance).toBeCloseTo(2.5, 9);
+  });
+});
+
+
+describe("the run screen for a deal that sells its units (task 79)", () => {
+  test.each(["kestrel-row-townhomes", "alder-court-condo"])("%s measures financing and cost per unit in every scenario", (slug) => {
+    const d = (JSON.parse(readFileSync(new URL(`../../../oracles/for-sale/${slug}.outcome.json`, import.meta.url), "utf8")) as Oracle).inputs;
+    const result = run(fromOracle(d));
+    const commitments = d.senior_commitment + d.mezz_commitment;
+    const units = d.unit_types.reduce((n, u) => n + u.units, 0);
+    const shared = ["total_development_cost", "equity_multiple", "equity_irr", "peak_equity", "loan_to_cost", "required_equity", "cost_per_unit"];
+    const rentalOnly = run(allEquityDeal()).scenarios[0]!.metrics.filter((m) => !shared.includes(m.key)).map((m) => m.key);
+    for (const scenario of result.scenarios) {
+      const tdc = value(result, "total_development_cost", scenario.key).value!;
+      for (const [key, expected] of [["loan_to_cost", commitments / tdc * 100], ["required_equity", tdc - commitments], ["cost_per_unit", tdc / units]] as const) {
+        expect(value(result, key, scenario.key)).toMatchObject({ status: "VALID", value: expected });
+      }
+      for (const key of rentalOnly) expect(value(result, key, scenario.key)).toMatchObject({ status: "NOT_APPLICABLE", value: null, reason: "The units are sold; there is no rental income." });
+    }
+  });
+  test("zero development cost follows the rental denominator rule", () => {
+    const result = run({ ...small(), budget: { land: 0, hard: 0, soft: 0, contingency: 0, other: 0 }, senior: { amount: 0, ratePct: 0, ioMonths: 0 }, mezzanine: undefined });
+    expect(value(result, "loan_to_cost")).toMatchObject({ status: "NOT_MEANINGFUL", value: null, reason: "Total development cost is zero." });
+    expect(value(result, "required_equity")).toMatchObject({ status: "VALID", value: 0 });
+    expect(value(result, "cost_per_unit")).toMatchObject({ status: "VALID", value: 0 });
+  });
+  test.each([
+    ["gross_sales_revenue", "Gross sales revenue", "units × sale price, every unit type"],
+    ["net_sales_revenue", "Net sales revenue", "gross sales revenue − sales commission"],
+    ["interest_before_completion", "Interest during construction", "interest on the loans before completion, whoever pays it"],
+    ["interest_after_completion", "Interest after completion", "interest added to the loans from completion until they are repaid"],
+    ["carry_total", "Carrying costs of unsold units", "carry per unit per month × units completed and not yet closed"],
+    ["development_profit_for_sale", "Development profit (units sold)", "net sales revenue − total development cost − carrying costs − interest after completion"],
+    ["profit_on_cost_for_sale", "Profit on cost (units sold)", "development profit / (total development cost + carrying costs + interest after completion)"],
+    ["margin_on_revenue", "Margin on sales revenue", "development profit / net sales revenue"],
+    ["equity_contributed", "Equity put in", "every equity payment, carrying costs included"],
+    ["equity_distributed", "Equity returned", "sale proceeds left after the loans are repaid"],
+    ["completion_month", "Completion (month)", "the construction period"],
+    ["sellout_month", "Last closing (month)", "the month the last unit closes"],
+    ["sellout_years", "Time to sell out", "(last closing month + 1) / 12"],
+    ["deposits_held_at_completion", "Buyer deposits in trust at completion", "presold units × average price × deposit %; held in trust, never used for costs"],
+    ["senior_balance_at_completion", "Senior loan balance at completion", "drawn senior debt plus its interest at completion"],
+    ["mezz_balance_at_completion", "Mezzanine balance at completion", "drawn mezzanine debt plus its interest at completion"],
+  ] as const)("%s has the specified label and formula", (key, label, formula) => {
+    expect(contracts.METRIC_BY_KEY.get(key)).toMatchObject({ label, formula });
+  });
+  test("no two catalog metrics share a label", () => {
+    expect(new Set(contracts.METRICS.map((m) => m.label)).size).toBe(contracts.METRICS.length);
   });
 });
