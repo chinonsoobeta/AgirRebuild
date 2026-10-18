@@ -542,6 +542,67 @@ describe("tables written as lines of text, and what a table's rows mean", () => 
     const one = extractCandidates(lines("Plan Count Area (sf) Rent per month", "Corner 1 700 $1,900"));
     expect(one.candidates.find((c) => c.fieldKey === "rentable_area_sf")).toMatchObject({ value: 700 });
   });
+  describe("a unit-by-unit rent roll is read (task 66)", () => {
+    const suites: [string, string, number, string][] = [
+      ["101", "1 bed", 620, "$1,450"], ["102", "1 bed", 620, "$1,450"], ["103", "1 bed", 620, "$1,475"], ["104", "1 bed", 620, "$1,475"],
+      ["201", "2 bed", 880, "$1,795"], ["202", "2 bed", 880, "$1,795"], ["203", "2 bed", 880, "$1,825"], ["204", "2 bed", 880, "$1,825"],
+      ["301", "3 bed", 1040, "$2,150"], ["302", "3 bed", 1040, "$2,150"],
+    ];
+    const roll = (header: string[], withSize = true) =>
+      tableDoc(grid(header, ...suites.map(([u, t, a, r]) => (withSize ? [u, t, a, r] : [u, t, r])), withSize ? ["Total", "", 8080, "$17,390"] : ["Total", "", "$17,390"]));
+    const byItem = (r: ReturnType<typeof extractCandidates>, key: string) => r.candidates.filter((c) => c.fieldKey === key).map((c) => [c.itemKey, c.value]);
+    const checkMix = (r: ReturnType<typeof extractCandidates>) => {
+      expect(byItem(r, "unit_count")).toEqual([["1BR", 4], ["2BR", 4], ["3BR", 2]]);
+      expect(r.candidates.filter((c) => c.fieldKey === "unit_count").every((c) => c.rule === "table:rent-roll-suite")).toBe(true);
+      expect(byItem(r, "unit_rent_monthly")).toEqual([["3BR", 2150]]);
+      expect(r.other.filter((o) => o.note?.includes("different amounts")).map((o) => o.value)).toEqual([1450, 1450, 1475, 1475, 1795, 1795, 1825, 1825]);
+    };
+    test("suite rows with a size in sq ft are grouped by type: counts, summed areas, one rent only where every suite agrees", () => {
+      const r = extractCandidates(roll(["Unit", "Type", "Size (sq ft)", "Projected rent / month"]));
+      checkMix(r);
+      expect(byItem(r, "rentable_area_sf")).toEqual([["1BR", 2480], ["2BR", 3520], ["3BR", 2080]]);
+    });
+    test("a roll with no size column is read the same way", () => {
+      const r = extractCandidates(roll(["Unit", "Type", "Monthly rent"], false));
+      checkMix(r);
+      expect(byItem(r, "rentable_area_sf")).toEqual([]);
+    });
+    test("sq. ft., sqft, pi ca and pieds carres name the area column", () => {
+      for (const head of ["Size (sq. ft.)", "Sqft", "Area (square feet)", "Superficie (pi ca)", "Pi²", "Surface (pieds carrés)", "Square foot"]) {
+        const r = extractCandidates(tableDoc(grid(["Unit", "Type", head, "Rent per month"], ["101", "1 bed", 620, "$1,450"], ["102", "1 bed", 620, "$1,450"])));
+        expect([head, byItem(r, "rentable_area_sf")]).toEqual([head, [["1BR", 1240]]]);
+        expect([head, byItem(r, "unit_rent_monthly")]).toEqual([head, [["1BR", 1450]]]);
+      }
+      // "Size" alone is not an area.
+      const plain = extractCandidates(tableDoc(grid(["Unit", "Type", "Size", "Rent per month"], ["101", "1 bed", 620, "$1,450"], ["102", "1 bed", 620, "$1,450"])));
+      expect(byItem(plain, "rentable_area_sf")).toEqual([]);
+    });
+    test("/month, /mo., /mth, per mo, a month and / mois say the rent is monthly; a per-sf or yearly header still wins", () => {
+      for (const head of ["Rent/month", "Rent ($/mo.)", "Rent / mth", "Rent per mo", "Rent a month", "Loyer / mois"]) {
+        const r = extractCandidates(tableDoc(grid(["Unit", "Type", "Area (sf)", head], ["101", "1 bed", 620, "$1,450"], ["102", "1 bed", 620, "$1,450"])));
+        expect([head, byItem(r, "unit_rent_monthly")]).toEqual([head, [["1BR", 1450]]]);
+      }
+      const psf = extractCandidates(tableDoc(grid(["Unit", "Type", "Area (sf)", "Rent ($/sf/yr)"], ["101", "1 bed", 620, "$24"], ["102", "1 bed", 620, "$24"])));
+      expect(byItem(psf, "unit_rent_monthly")).toEqual([]);
+      expect(byItem(psf, "rent_psf_annual")).toEqual([["1BR", 24]]);
+      const yearly = extractCandidates(tableDoc(grid(["Unit", "Type", "Area (sf)", "Annual rent / unit"], ["101", "1 bed", 620, "$17,400"], ["102", "1 bed", 620, "$17,400"])));
+      expect(byItem(yearly, "unit_rent_monthly")).toEqual([["1BR", 1450]]);
+    });
+    test("Apt, No., Unit # and the French suite columns count as a suite column", () => {
+      for (const [suite, type, rent] of [["Apt", "Type", "Monthly rent"], ["No.", "Unit type", "Monthly rent"], ["Unit #", "Type", "Monthly rent"], ["App.", "Type de logement", "Loyer mensuel"], ["Logement", "Type", "Loyer / mois"]]) {
+        const r = extractCandidates(tableDoc(grid([suite!, type!, rent!], ["101", "1 bed", "$1,450"], ["102", "1 bed", "$1,450"])));
+        expect([suite, byItem(r, "unit_count"), byItem(r, "unit_rent_monthly")]).toEqual([suite, [["1BR", 2]], [["1BR", 1450]]]);
+      }
+    });
+    test("a type and a rent column only is a table of comparable rents, not a roll", () => {
+      const r = extractCandidates(tableDoc(grid(["Type", "Asking rent"], ["1 bed", "$1,650"], ["2 bed", "$2,050"], ["3 bed", "$2,450"])));
+      expect(byItem(r, "unit_count")).toEqual([]);
+    });
+    test("a roll of unit types with counts is read as before", () => {
+      const r = extractCandidates(tableDoc(grid(["Type", "Units", "Area (sf)", "Monthly rent"], ["1 bed", 4, 620, "$1,450"], ["2 bed", 4, 880, "$1,795"])));
+      expect(pick(r)).toEqual([["unit_count", "1BR", 4], ["unit_rent_monthly", "1BR", 1450], ["rentable_area_sf", "1BR", 2480], ["unit_count", "2BR", 4], ["unit_rent_monthly", "2BR", 1795], ["rentable_area_sf", "2BR", 3520]]);
+    });
+  });
   test("a per-suite roll is one item per type, ignores the status words after the numbers and skips the total", () => {
     const r = extractCandidates(lines("Suite Type Units Monthly rent Status", "Suite 12 Bachelor 1 $1,100 vacant", "Suite 14 Bachelor 1 $1,125 leased 2026", "Total 2 $2,225"));
     expect(pick(r)).toEqual([["unit_count", "Bachelor", 2]]);
