@@ -32,6 +32,10 @@ function Quote({ s, currency }: { s: Source; currency: string | null | undefined
 const metricUnit = (unit: string) => unit === "sf" || unit === "$/sf/yr";
 
 /** A value typed in square metres becomes square feet (rent per m² becomes rent per sf) before it is posted, and the reason records what was typed. */
+/** A document value no document states any more (card 63): kept only as the person's own value, with a reason, and never by Approve all. */
+export const keepsWithReason = (a: Pick<Assumption, "sourceKind" | "sources">) => a.sourceKind === "document" && a.sources.length === 0;
+export const approvable = <A extends Pick<Assumption, "sourceKind" | "sources">>(rows: A[]) => rows.filter((a) => !keepsWithReason(a));
+
 export function enteredInUnit(unit: string, metric: boolean, value: number, reason: string, lang: Lang): { value: number; reason: string } {
   if (!metric || !metricUnit(unit)) return { value, reason };
   const typed = lang === "fr" ? String(value).replace(".", ",") : String(value);
@@ -114,6 +118,7 @@ export function Review({ dealId }: { dealId: string }) {
   const review = useQuery({ queryKey: ["review", dealId], queryFn: () => api.get<ReviewData>(`/deals/${dealId}/review`) });
   const [focus, setFocus] = useState<string | null>(null);
   const [editing, setEditing] = useState<string | null>(null);
+  const [keeping, setKeeping] = useState<string | null>(null);
   const [entering, setEntering] = useState<string | null>(null);
   const [picked, setPicked] = useState<Record<string, number>>({});
   const [formError, setFormError] = useState<unknown>(null);
@@ -178,6 +183,22 @@ export function Review({ dealId }: { dealId: string }) {
   const docsBusy = deal.data.documents.processing > 0;
   const summary: string[] = t("review.summary", { c: conflicts.length, m: r.missing.length, r: pending.length + awaiting.length, a: approved.length });
 
+  const keepForm = (a: Assumption) => (
+    <form
+      className="stack"
+      style={{ gap: 10, paddingTop: 4, textAlign: "left", whiteSpace: "normal" }}
+      onSubmit={(e: FormEvent<HTMLFormElement>) => {
+        e.preventDefault();
+        act.mutate({ id: a.id, action: "approve", reason: String(new FormData(e.currentTarget).get("reason")).trim(), version: a.version });
+        setKeeping(null);
+      }}
+    >
+      <p className="help">{t("review.keepHint")}</p>
+      <div className="field"><label htmlFor={`k-${a.id}`}>{t("review.why")}</label><input className="input" id={`k-${a.id}`} name="reason" minLength={10} required placeholder={t("review.whyHint")} /></div>
+      {a.material && <p className="help row" style={{ gap: 6 }}><I.Lock />{t(solo ? "review.materialNoteSolo" : "review.materialNote")}</p>}
+      <div className="row"><button className="btn primary small" type="submit">{t("review.keep").replace("…", "")}</button><button className="btn quiet small" type="button" onClick={() => setKeeping(null)}>{t("common.cancel")}</button></div>
+    </form>
+  );
   const modifyForm = (a: Assumption) => (
     <form
       className="stack"
@@ -489,9 +510,9 @@ export function Review({ dealId }: { dealId: string }) {
             <div className="stack" style={{ gap: 12 }}>
               <div className="spread">
                 <h2 className="h-section">{t("review.needsReview")} <span className="num faint" style={{ fontWeight: 400 }}>{pending.length}</span></h2>
-                {editable && pending.length > 1 && (
-                  <button className="btn small" type="button" disabled={bulk.isPending} onClick={() => { if (confirm(t("review.approveAllConfirm", { n: pending.length }))) bulk.mutate(pending); }}>
-                    {t("review.approveAll", { n: pending.length })}
+                {editable && approvable(pending).length > 1 && (
+                  <button className="btn small" type="button" disabled={bulk.isPending} onClick={() => { if (confirm(t("review.approveAllConfirm", { n: approvable(pending).length }))) bulk.mutate(approvable(pending)); }}>
+                    {t("review.approveAll", { n: approvable(pending).length })}
                   </button>
                 )}
               </div>
@@ -507,9 +528,13 @@ export function Review({ dealId }: { dealId: string }) {
                         {editable &&
                           (editing === a.id ? (
                             modifyForm(a)
+                          ) : keeping === a.id ? (
+                            keepForm(a)
                           ) : (
                             <>
-                              <button className="btn small" type="button" onClick={(e) => { e.stopPropagation(); act.mutate({ id: a.id, action: "approve", version: a.version }); }}>{t("review.approve")}</button>{" "}
+                              {keepsWithReason(a)
+                                ? <button className="btn small" type="button" onClick={(e) => { e.stopPropagation(); setKeeping(a.id); }}>{t("review.keep")}</button>
+                                : <button className="btn small" type="button" onClick={(e) => { e.stopPropagation(); act.mutate({ id: a.id, action: "approve", version: a.version }); }}>{t("review.approve")}</button>}{" "}
                               <button className="btn quiet small" type="button" onClick={(e) => { e.stopPropagation(); setEditing(a.id); }}>{t("review.edit")}</button>
                               <button className="btn quiet small" type="button" onClick={(e) => { e.stopPropagation(); act.mutate({ id: a.id, action: "reject", reason: t("review.rejectedInReview"), version: a.version }); }}>{t("review.reject")}</button>
                             </>

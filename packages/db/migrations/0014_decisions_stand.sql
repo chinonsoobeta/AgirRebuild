@@ -26,7 +26,11 @@ begin
     if a.status <> 'needs_review' then raise exception 'Only a value that needs review can be approved' using errcode = '22023'; end if;
     perform agir_check_value(a.field_key, a.value);
     if a.source_kind = 'document' and jsonb_array_length(coalesce(a.sources, '[]'::jsonb)) = 0 then
-      -- No document states this value any more: the person is the only evidence, so it is their own value, as a hand entry is.
+      -- No document states this value any more: the person is the only evidence, so it is their own value, as a hand entry is,
+      -- and like a hand entry it needs a written reason.
+      if p_reason is null or length(trim(p_reason)) < 10 then
+        raise exception 'No document states this value any more; to keep it, say why (at least 10 characters)' using errcode = '22023';
+      end if;
       if v_material and v_team then
         update assumptions set status = 'awaiting_second_approval', pending_value = a.value, source_kind = 'analyst', decided_by = agir_uid(), decided_at = now(),
           second_approver = null, second_approved_at = null, reason = p_reason, version = version + 1, updated_at = now() where id = a.id returning * into a;
