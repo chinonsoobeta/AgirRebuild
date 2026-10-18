@@ -1325,6 +1325,11 @@ function fromBudget(table: Table, headerRow: number, roles: BudgetRoles, result:
       result.other.push({ fieldKey: null, itemKey: null, value: t.value, raw: t.raw, unitSeen: t.unit, location: amountCell.ref, context: `${table.name}: ${labelCell.text}`, rule: "table:budget", note: NOT_PART_NOTE });
       continue;
     }
+    // An amount whose own cell says it is per door is a share, not the line: it is shown and never read, summed or totalled.
+    if (perUnit(amountCell.text, t)) {
+      result.other.push({ fieldKey: null, itemKey: null, value: t.value, raw: t.raw, unitSeen: t.unit, location: amountCell.ref, context: `${table.name}: ${labelCell.text}`, rule: "table:budget", note: PER_UNIT_NOTE });
+      continue;
+    }
     // A row in a budget sheet that is not money ("Loan-to-cost | 70%") is a label and value.
     if (t.unit !== null && t.unit !== "$") {
       push(result, labelCell.text, t, amountCell.ref, `${table.name}: ${labelCell.text} ${amountCell.text}`, "table:label-value", { scope });
@@ -1698,8 +1703,8 @@ function fromTable(table0: Table, result: ExtractionResult, notes: string[] = []
             rest(cell, AS_IS_NOTE);
             break;
           }
-          // A budget figure whose own cell says it is per door is a share, not the line: the next cell for the same line is read instead (task 68).
-          if (mapped.kind === "field" && BUDGET_LINES.has(mapped.fieldKey) && perUnit(cell.text, t)) {
+          // A budget or financing figure whose own cell says it is per door is a share, not the line: the next cell for the same line is read instead (task 68).
+          if (mapped.kind === "field" && PER_UNIT_FIELDS.has(mapped.fieldKey) && perUnit(cell.text, t)) {
             result.other.push({ ...base, fieldKey: null, itemKey: null, value: t.value, unitSeen: t.unit, note: PER_UNIT_NOTE });
             const field = mapped.fieldKey;
             const item = mapped.itemKey;
