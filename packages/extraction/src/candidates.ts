@@ -1023,6 +1023,8 @@ function suiteItem(parts: string[]): { type: string; suite: boolean } {
   const ids = parts.filter((p) => SUITE_ID_RE.test(p));
   const named = parts.filter((p) => !SUITE_ID_RE.test(p));
   if (ids.length > 0 && named.length > 0) return { type: canonicalItem(named.join(" ").replace(/\s+/g, " ")), suite: true };
+  // Every cell id-shaped ("101 | A1"): the suite column leads the row, so the last cell is the plan type (card 69 audit).
+  if (parts.length > 1 && named.length === 0) return { type: canonicalItem(parts[parts.length - 1]!), suite: true };
   const one = parts.join(" ").replace(/\s+/g, " ").trim();
   // A leading number is a suite number unless the type needs it ("1 chambre", "2 bed").
   const lead = /^(?:(?:suite|unit|apt|apartment|no\.?|#|logement|app\.?)\s*)?\d{1,4}[A-Za-z]?\s+(\S.*)$/i.exec(one);

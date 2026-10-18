@@ -694,6 +694,8 @@ function mapLabel(rawLabel: string, t: NumberToken, opts: MapOptions = {}): Mapp
   if (COMBINED_RESERVE_RE.test(foldText(rawLabel).replace(/\s+/g, " "))) return { kind: "ignored", reason: "A combined figure; the interest reserve is not stated alone" };
   // Mortgage insurance remains a manual input; its premium is shown with the Review instruction.
   if (t.unit === "%" && MORTGAGE_INSURANCE_RE.test(label) && /\b(?:premiums?|primes?|insurance|assurance)\b/.test(label)) return { kind: "ignored", reason: "Mortgage insurance premium: enter it on Review as the refinance mortgage insurance premium" };
+  // A building's total monthly rent is not the rent of one unit (card 69 audit; the prose path has its own rule).
+  if (t.unit !== "%" && /\b(?:(?:total|gross|aggregate) monthly rents?|loyers? mensuels? totaux?|loyer mensuel total)\b/.test(label)) return { kind: "ignored", reason: "A total of all units' rents, not a rent per unit" };
   const lender = lenderFigure(rawLabel, t, opts);
   if (lender) return { kind: "ignored", reason: lender };
   // Unless the figure's own clause names the preferred return ("a preferred return of 8% to the investors").
