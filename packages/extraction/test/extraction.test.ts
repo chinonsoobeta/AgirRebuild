@@ -1245,7 +1245,7 @@ describe("reading safety: a figure that may be the wrong one is shown, never use
       expect(pick(read("Interest reserve: $200,000"))).toEqual([["stated_interest_reserve", 200_000]]);
     });
     test("a second field named after a colon's figure labels its own figure", () => {
-      expect(pick(read("Rent monthly: $1,400 per unit and a vacancy of 5%."))).toEqual([["unit_rent_monthly", 1_400]]);
+      expect(pick(read("Rent monthly: $1,400 per unit and a vacancy of 5%."))).toEqual([["unit_rent_monthly", 1_400], ["stabilized_occupancy_pct", 95]]);
       // negative: a part the colon's budget line includes is not read as a line of its own
       const inside = read("Construction cost: $3,100,000, which includes a contingency of $200,000.");
       expect(pick(inside)).toEqual([["hard_cost", 3_100_000]]);
@@ -2481,7 +2481,7 @@ describe("durations after the number, revisions in a sentence, percent cells, va
       expect(r.candidates, line).toEqual([]);
       expect(r.other[0]?.note, line).toBe("A market statistic, not the deal's assumption");
     }
-    expect(pick(read("Vacancy allowance 3%"))).toEqual([]);
+    expect(pick(read("Vacancy allowance 3%"))).toEqual([["stabilized_occupancy_pct", 97]]);
   });
 
   test("goes from X to Y is a revision: Y is read and X is shown as replaced", () => {
@@ -2518,7 +2518,7 @@ describe("durations after the number, revisions in a sentence, percent cells, va
     const d = await workbook([["Stabilized occupancy", 0.975, "0.0%"], ["Operating expenses (% of EGI)", 0.38, "0%"], ["Exit cap rate", 0.055, "0.00%"], ["Vacancy allowance", 0.03, "0.0%"]]);
     expect(d.tables[0]!.rows.map((r) => r[1]!.text)).toEqual(["97.5%", "38%", "5.5%", "3%"]);
     const r = extractCandidates(d);
-    expect(pick(r)).toEqual([["stabilized_occupancy_pct", 97.5], ["expense_ratio_pct", 38], ["exit_cap_rate_pct", 5.5]]);
+    expect(pick(r)).toEqual([["stabilized_occupancy_pct", 97.5], ["expense_ratio_pct", 38], ["exit_cap_rate_pct", 5.5], ["stabilized_occupancy_pct", 97]]);
     expect(r.candidates[0]!.raw).toContain("0.975");
   });
   test("negative: a cell that is not percent-formatted is unchanged", async () => {
@@ -2526,11 +2526,11 @@ describe("durations after the number, revisions in a sentence, percent cells, va
     expect(d.tables[0]!.rows.map((r) => r[1]!.text)).toEqual(["95", "14", "0.5"]);
   });
 
-  test("a vacancy percentage is shown for manual occupancy entry (task 73)", () => {
-    for (const line of ["Vacancy allowance 3%", "Vacancy and credit loss: 5%", "Taux d'inoccupation 2,5 %", "Vacance : 4 %"]) {
+  test("a vacancy percentage is the stabilized occupancy's complement, and says so", () => {
+    for (const [line, occ] of [["Vacancy allowance 3%", 97], ["Vacancy and credit loss: 5%", 95], ["Taux d'inoccupation 2,5 %", 97.5], ["Vacance : 4 %", 96]] as const) {
       const r = read(line);
-      expect(pick(r), line).toEqual([]);
-      expect(r.other[0]!.note, line).toBe("A vacancy rate: enter occupancy (100% less vacancy) on Review.");
+      expect(pick(r), line).toEqual([["stabilized_occupancy_pct", occ]]);
+      expect(r.candidates[0]!.unitSeen, line).toMatch(/vacan|inoccup/i);
     }
   });
   test("negative: vacancy during lease-up, at opening or today is not the stabilized figure", () => {
@@ -4863,7 +4863,6 @@ describe("four inputs a person still types (task 73)", () => {
   });
   const read = (...text: string[]) => extractCandidates(doc(...text));
   const pick = (r: ReturnType<typeof read>) => r.candidates.map((c) => [c.fieldKey, c.value]);
-  const VACANCY = "A vacancy rate: enter occupancy (100% less vacancy) on Review.";
   const ITEM = "An itemized operating cost: enter the total as fixed operating costs on Review.";
   const GOING = "A cap rate with no word about a sale or an exit may be the going-in rate; enter it by hand if it is the exit rate";
 
@@ -4892,10 +4891,12 @@ describe("four inputs a person still types (task 73)", () => {
   test.each(["Stabilized occupancy: 96%", "Occupancy at stabilization of 96%", "We assume 96% occupancy once leased up.", "Taux d'occupation stabilisé : 96 %", "The building is assumed to be 96% occupied."])("C: explicit occupancy already reads: %s", (line) => {
     expect(pick(read(line))).toEqual([["stabilized_occupancy_pct", 96]]);
   });
-  test.each(["Stabilized vacancy: 4%", "Vacancy rate: 4%"])("C: %s is shown without deriving occupancy", (line) => {
-    const r = read(line);
-    expect(pick(r)).toEqual([]);
-    expect(r.other).toMatchObject([{ value: 4, note: VACANCY }]);
+  // Audit of card 73: a stated stabilized vacancy keeps the existing complement rule (it is stated, and its source says vacancy); "vacancy rate" alone stays unread.
+  test("C: a stabilized vacancy reads as occupancy, from the vacancy it states", () => {
+    const r = read("Stabilized vacancy: 4%");
+    expect(pick(r)).toEqual([["stabilized_occupancy_pct", 96]]);
+    expect(r.candidates[0]!.unitSeen).toBe("% vacancy");
+    expect(read("Vacancy rate: 4%").other).toMatchObject([{ value: 4, note: "No field matches this label" }]);
   });
   test.each([
     ["Property tax: $23,700", 23700], ["Insurance: $7,600", 7600], ["Utilities: $10,800", 10800],

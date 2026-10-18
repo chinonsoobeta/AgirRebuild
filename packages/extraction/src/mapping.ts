@@ -501,13 +501,14 @@ const SHARE_TO_RE = /^\s*(?:to|aux)\s+(?:the\s+|our\s+|les\s+|nos\s+)?(?:partner
 const CAP_AFTER_RE = /^\s*cap\b(?!\s+(?:of|on)\b)/;
 // A promote tier from the second up.
 const LATER_TIER_RE = /\b(?:tier\s*(?:[2-9]|ii|iii|iv|two|three|four)|(?:2nd|3rd|[4-9]th|second|third|fourth)\s+tier|palier\s*(?:[2-9]|ii|iii|iv|deux|trois|quatre)|(?:[2-9]e|[2-9]eme|deuxieme|troisieme|quatrieme)\s+palier)\b/;
-const VACANCY_RE = /\b(vacancy|vacance|inoccupation)\b/;
+const VACANCY_RE = /\b(vacancy(?! rate)|(?<!taux de )vacance|inoccupation)\b/;
 // A duration labelled by the words right after it: "16 months to build", "huit mois pour louer".
 const BUILD_AFTER_RE = /^\s*to build\b/;
 const LEASE_AFTER_RE = /^\s*(?:to lease(?: up)?|pour louer)\b/;
 // A figure about the market, not the deal.
 const MARKET_RE = /\b(market|submarket|sub-market|city|area|zone|neighbou?rhood|region|cmhc|average|avg|comparables?|comps?|marche|secteur|quartier|schl|moyenne|moyen)\b/;
 const MARKET_NOTE = "A market statistic, not the deal's assumption";
+const NOT_STABILIZED_RE = /\b(lease[- ]?up|opening|ouverture|absorption|mise en location|during|pendant|initial|current|currently|today|actual|actuel\w*|existing|as of|en date du)\b/;
 
 /** A "Yes"/"Oui"/"True" (1) or "No"/"Non"/"False" (0) answer, however many words follow, beside the label of a flag field; anything else reads no flag. */
 export function flagRead(rawLabel: string, answer: string): { fieldKey: string; value: 0 | 1 } | null {
@@ -765,11 +766,12 @@ function mapLabel(rawLabel: string, t: NumberToken, opts: MapOptions = {}): Mapp
     const m = key && asField(FIELD_BY_KEY.get(key)!);
     if (m) return m;
   }
-  // Vacancy is shown for manual entry; the reader never derives occupancy from it.
-  if (VACANCY_RE.test(label) && (t.unit === "%" || (t.unit === null && labelUnit === "%"))) {
+  // A vacancy percentage states the stabilized occupancy as its complement; one tied to lease-up, opening or today is not the stabilized figure.
+  if (VACANCY_RE.test(label) && (t.unit === "%" || (t.unit === null && labelUnit === "%")) && t.value >= 0 && t.value <= 100) {
     const clause = `${label} ${normalizeLabel((opts.after ?? "").split(/[,;.]/)[0] ?? "").label}`;
     if (MARKET_RE.test(clause)) return { kind: "ignored", reason: MARKET_NOTE };
-    return { kind: "ignored", reason: "A vacancy rate: enter occupancy (100% less vacancy) on Review." };
+    if (NOT_STABILIZED_RE.test(clause)) return { kind: "ignored", reason: "A vacancy during lease-up, at opening or today is not the stabilized occupancy" };
+    return { kind: "field", fieldKey: "stabilized_occupancy_pct", itemKey: null, value: Number((100 - t.value).toFixed(10)), unitSeen: "% vacancy" };
   }
 
   // A cap rate is the exit rate only when the sentence is about a sale; alone it may be the going-in rate.
