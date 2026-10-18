@@ -1,6 +1,6 @@
 import { describe, expect, test } from "vitest";
 import fc from "fast-check";
-import { FIELDS, FIELD_BY_KEY, METRICS, POLICIES, POLICY_V1, RENTAL_HOLD_V1_DRAFT, TEMPLATES, policyFor, type AssumptionStatus, type EngineInput, type Readiness, type RunResult } from "@agir/contracts";
+import { FIELDS, FIELD_BY_KEY, METRICS, POLICIES, POLICY_V1, RENTAL_HOLD_INSURED_V1_DRAFT, RENTAL_HOLD_V1_DRAFT, TEMPLATES, policyFor, type AssumptionStatus, type EngineInput, type Readiness, type RunResult } from "@agir/contracts";
 import { createHash } from "node:crypto";
 import { readFileSync, readdirSync } from "node:fs";
 import { join } from "node:path";
@@ -995,6 +995,53 @@ describe("exit by refinancing and holding (card 60)", () => {
   });
 
   describe("policy", () => {
+    test.each([
+      ["a held deal with premium 4", { ...byAmount(), refinance: { ...byAmount().refinance!, insurancePremiumPct: 4 } }, "rental-hold-insured-v1-draft"],
+      ["a held deal without a premium", byAmount(), "rental-hold-v1-draft"],
+      ["a held deal with premium 0", { ...byAmount(), refinance: { ...byAmount().refinance!, insurancePremiumPct: 0 } }, "rental-hold-v1-draft"],
+      ["a held deal without refinance", { ...byAmount(), refinance: undefined }, "rental-hold-v1-draft"],
+      ["a sale deal with premium 4", { ...byAmount(), exit: undefined, refinance: { ...byAmount().refinance!, insurancePremiumPct: 4 } }, "policy-v1"],
+    ] as const)("policyFor selects the policy for %s (task 67)", (_label, input, version) => {
+      expect(policyFor(input).version).toBe(version);
+    });
+
+    test("the insured draft changes only its version and refinance DCR floor, and is registered (task 67)", () => {
+      expect(RENTAL_HOLD_INSURED_V1_DRAFT).toEqual({
+        ...RENTAL_HOLD_V1_DRAFT,
+        version: "rental-hold-insured-v1-draft",
+        gates: { ...RENTAL_HOLD_V1_DRAFT.gates, dcrAfterRefinanceMin: 1.1 },
+      });
+      expect(POLICIES["rental-hold-insured-v1-draft"]).toBe(RENTAL_HOLD_INSURED_V1_DRAFT);
+    });
+
+    test("both existing policy hashes remain pinned to the pre-change baseline (task 67)", () => {
+      expect(sha(POLICY_V1)).toBe("9f95780101a9ecfe6444c47dd319c1cb8d77251d60700a1a4dde1733055296b9");
+      expect(sha(RENTAL_HOLD_V1_DRAFT)).toBe("ee784c397f15c4fcc4257fd5c32592dd0177aef5320ee67b398d9bda1193a66b");
+    });
+
+    test("the insured refinance clears its DCR gate while the same conventional refinance fails (task 67)", () => {
+      const base = byAmount();
+      // Tuned only rentMonthly from 1,000 to 560: NOI = 47,200. With premium 4%, DCR = 47,200 / 41,600 = 1.1346153846;
+      // without the premium, DCR = 47,200 / 40,000 = 1.18. Both are strictly between 1.10 and 1.20.
+      const conventional: EngineInput = { ...base, revenue: base.revenue.map((r) => ({ ...r, rentMonthly: 560 })) };
+      const insured: EngineInput = { ...conventional, refinance: { ...conventional.refinance!, insurancePremiumPct: 4 } };
+      const insuredRun = underwrite(insured, policyFor(insured));
+      const conventionalRun = underwrite(conventional, policyFor(conventional));
+      const insuredDcr = v(insuredRun, "dcr_after_refinance");
+      const conventionalDcr = v(conventionalRun, "dcr_after_refinance");
+      expect(insuredDcr).toBeCloseTo(47_200 / 41_600, 9);
+      expect(conventionalDcr).toBeCloseTo(1.18, 9);
+      for (const dcr of [insuredDcr, conventionalDcr]) {
+        expect(dcr).toBeGreaterThan(1.1);
+        expect(dcr).toBeLessThan(1.2);
+      }
+      expect(conventionalDcr).toBeGreaterThanOrEqual(insuredDcr);
+      expect(insuredRun.policyVersion).toBe("rental-hold-insured-v1-draft");
+      expect(insuredRun.verdict.gates.find((g) => g.key === "dcr_after_refinance")).toMatchObject({ threshold: 1.1, status: "passed" });
+      expect(conventionalRun.policyVersion).toBe("rental-hold-v1-draft");
+      expect(conventionalRun.verdict.gates.find((g) => g.key === "dcr_after_refinance")).toMatchObject({ threshold: 1.2, status: "failed" });
+    });
+
     test("policy v1 is byte for byte what it was: its hash is pinned and it has no draft key", () => {
       expect(sha(POLICY_V1)).toBe(POLICY_V1_HASH);
       expect("draft" in POLICY_V1).toBe(false);

@@ -10,7 +10,7 @@ import { documentBytes, loadOracle } from "@agir/testkit";
 import { createApp } from "../src/app.ts";
 import { POLICY_V1, RENTAL_HOLD_V1_DRAFT } from "@agir/contracts";
 import { canonicalJson } from "@agir/engine";
-import { sha256, sourceLabel } from "../src/services.ts";
+import { POLICY_HASHES, sha256, sourceLabel } from "../src/services.ts";
 
 let db: Db;
 let app: ReturnType<typeof createApp>;
@@ -866,6 +866,34 @@ describe("card 60: a deal that is kept and refinanced runs under its own policy"
     expect(maple).toMatchObject({ policy_version: "policy-v1", policy_hash: "9f95780101a9ecfe6444c47dd319c1cb8d77251d60700a1a4dde1733055296b9" });
     expect((await call(hal, "GET", `/api/runs/${r.json.id}/audit-package`)).json.validation.status).toBe("passed");
   });
+
+  test("an insured held run stores its own policy and hash, replays, and renders its artifacts (task 67)", async () => {
+    hal = await signup("fictional-insured-67@example.com", "Fictional Insured Owner", "solo");
+    const workspace = (await call(hal, "GET", "/api/me")).json.workspaces[0].id;
+    const insuredDeal = (await call(hal, "POST", `/api/workspaces/${workspace}/deals`, { name: "Fictional Insured Fourplex", assetType: "Multifamily", location: "Invented Township", province: "AB" })).json.id;
+    await fill(insuredDeal, true);
+    await put(insuredDeal, "refinance_insurance_premium_pct", 4);
+    const r = await call(hal, "POST", `/api/deals/${insuredDeal}/runs`);
+    expect(r.status).toBe(200);
+    const insuredRun = r.json.id;
+    const view = (await call(hal, "GET", `/api/runs/${insuredRun}`)).json;
+    expect(view).toMatchObject({ policyVersion: "rental-hold-insured-v1-draft", fresh: true, staleReasons: [] });
+    const [row] = await db.query<any>(`select policy_version, policy_hash from runs where id = $1`, [insuredRun]);
+    expect(row).toMatchObject({ policy_version: "rental-hold-insured-v1-draft", policy_hash: POLICY_HASHES["rental-hold-insured-v1-draft"] });
+    expect((await call(hal, "GET", `/api/runs/${insuredRun}/audit-package`)).json.validation.status).toBe("passed");
+    const body = view.result.verdict.code === "APPROVE"
+      ? { decision: "approve", rationale: "Fictional policy-selection test" }
+      : view.result.verdict.code === "APPROVE_WITH_CONDITIONS"
+        ? { decision: "approve_with_conditions", rationale: "Fictional policy-selection test", conditions: "Confirm fictional refinance terms" }
+        : { decision: "reject", rationale: "Fictional policy-selection test" };
+    expect((await call(hal, "POST", `/api/runs/${insuredRun}/decision`, body)).status).toBe(200);
+    for (const [kind, format] of [["ic_memo", "docx"], ["lender_package", "docx"], ["model_export", "xlsx"]]) {
+      expect((await call(hal, "POST", `/api/runs/${insuredRun}/artifacts`, { kind, format })).status).toBe(200);
+    }
+    await work();
+    const artifacts = (await call(hal, "GET", `/api/deals/${insuredDeal}/artifacts`)).json;
+    expect(artifacts.map((a: any) => a.status)).toEqual(["ready", "ready", "ready"]);
+  }, 120_000);
 });
 
 describe("task 60b: a choice only a person makes is offered on review and entered like any value", () => {

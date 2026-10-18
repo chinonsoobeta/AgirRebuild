@@ -458,6 +458,45 @@ describe("a deal that is kept and refinanced (card 60)", () => {
     expect(stats && stats.type === "stats" ? stats.items.slice(0, 4).map((i) => i.label) : []).toEqual(["Cash returned at refinance", "Cash left in the deal", "Coverage after refinance (DCR)", "Cash-on-cash after refinance"]);
   });
 
+  test.each(["ic_memo", "lender_package", "model_export"] as const)("the insured %s shows its policy, 1.10x gate and draft label with clean provenance (task 67)", async (kind) => {
+    const x = holdInput(kind);
+    x.deal = { ...x.deal, name: "Fictional Insured Rental", location: "Invented Township" };
+    x.input = { ...x.input, refinance: { ...x.input.refinance!, insurancePremiumPct: 4 } };
+    x.policy = policyFor(x.input);
+    x.result = underwrite(x.input, x.policy);
+    x.run = { ...x.run, policyVersion: x.policy.version, policyHash: createHash("sha256").update(canonicalJson(x.policy)).digest("hex") };
+    if (kind === "model_export") {
+      const out = await renderArtifact(x, "xlsx");
+      expect(out.provenance.orphans).toEqual([]);
+      expect(out.provenance.pass).toBe(true);
+      const ExcelJS = (await import("exceljs")).default;
+      const wb = new ExcelJS.Workbook();
+      await wb.xlsx.load(Buffer.from(out.bytes) as never);
+      const summary = wb.getWorksheet("Summary")!;
+      const cells: string[] = [];
+      let threshold: import("exceljs").Cell | undefined;
+      summary.eachRow((row) => {
+        row.eachCell((cell) => cells.push(String(cell.value)));
+        if (row.getCell(1).value === "Coverage after refinance (DCR)") threshold = row.getCell(3);
+      });
+      expect(cells).toContain("rental-hold-insured-v1-draft");
+      expect(cells).toContain(DRAFT);
+      expect(threshold?.value).toBe(1.1);
+      expect(threshold?.numFmt).toBe('0.00"x"');
+    } else {
+      const out = await renderArtifact(x, "html");
+      const text = visibleText(new TextDecoder().decode(out.bytes));
+      expect(out.provenance.orphans).toEqual([]);
+      expect(out.provenance.pass).toBe(true);
+      expect(text).toContain("rental-hold-insured-v1-draft");
+      expect(text).toContain(DRAFT);
+      const model = buildModel(x);
+      const table = model.blocks.find((b) => b.type === "table" && b.caption === (kind === "ic_memo" ? "Committee gates" : "Debt and coverage"));
+      const label = kind === "ic_memo" ? "Coverage after refinance (DCR)" : "Coverage after refinance (DCR), minimum";
+      expect(table && table.type === "table" ? table.rows.find((r) => r[0] === label)?.[1] : undefined).toBe(kind === "ic_memo" ? "at least 1.10x" : "1.10x");
+    }
+  });
+
   test("a sale deal's reports do not mention a draft policy, and still show the sale", () => {
     for (const kind of ["ic_memo", "lender_package"] as const) {
       const { text } = textOf(mapleInput(kind));
