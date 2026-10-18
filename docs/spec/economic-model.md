@@ -262,3 +262,69 @@ applying, and the apartment template also asks, as optional questions, for land 
 **Open for the owner.** When development charges are paid (permit or occupancy) and whether some are deferred;
 whether the cost stress should scale them; whether a premium on an insured construction loan is needed now (not
 in this card); and the cited tables that will replace entered values.
+
+## Selling the units (townhomes and small condos)
+
+**Status: specified, not built.** Owner decisions 2026-10-15 (the model) and 2026-10-18 (rules Q1 to Q5 below).
+The reference workbooks `kestrel-row-townhomes.xlsx` (8 townhomes, Ontario, 50% presold) and
+`alder-court-condo.xlsx` (30-unit condo, BC, 70% presold, 4-month closing lag) implement this section; they become
+oracles once a person completes each workbook's "Hand check" sheet. No engine code is written before that.
+
+**Mode.** A flag `sell_units` ("Sell the units (no rental)") sets `exit = "for_sale"`. It excludes
+`refinance_and_hold`; both together block the run. Rent, occupancy, expense, growth, exit cap, selling cost,
+lease-up and refinance fields are out of use; if any is stated the run is blocked with a named problem.
+
+**Inputs** (entered by a person, no defaults): `unit_count` and `unit_sale_price` per unit type, the price net
+of GST/HST and any rebate the builder keeps; `presold_units_pct`; `deposit_pct`; `absorption_units_per_month`;
+`sales_commission_pct`; `closing_lag_months` (0 for a freehold townhome); `unsold_carry_monthly` per unit;
+optionally `senior_presale_threshold_pct`.
+
+**Time and costs.** Construction is `[0, C)`; completion is month `C`. Costs and funding before `C` are as for
+a rental deal. After `C` there is no operating income: interest on every tranche is capitalized with no
+commitment limit ("interest after completion"), and carry is paid by equity as a contribution.
+
+**Sales and closings.**
+- *Q3, presold units:* `floor(total units × presold_units_pct / 100)`. They all close at `C + closing_lag_months`.
+- *Q4, absorption:* the remaining units start selling in month `C`; cumulative units sold by the end of month
+  `C + k` = `min(unsold, floor(absorption_units_per_month × (k + 1) + 1e-9))`, and each month's sales are the
+  difference from the month before. Units stay whole when the rate is fractional.
+- A unit sold in month `s` closes in month `s + closing_lag_months`. `E`, the sell-out month, is the last closing.
+- *Q2, price:* every closing is priced at the deal's average price (gross sales revenue ÷ total units), so the
+  order in which unit types sell does not matter. Net proceeds = units closing × average price × (1 − commission).
+  They repay senior (with its capitalized interest), then mezzanine; the rest goes to equity.
+- *Q1, carry:* each month, `unsold_carry_monthly × units completed and not yet closed at the start of the month`,
+  presold units waiting to close included.
+- Deposits are held in trust and never fund costs (decision 1). They change no cash flow and are reported only,
+  as `deposits_held_at_completion` = presold units × average price × deposit %.
+
+**Lender's presale condition.** When `senior_presale_threshold_pct` is stated and `presold_units_pct` is below it,
+an error check fires ("The construction loan needs X% presold; Y% is stated.") and the verdict is REJECT.
+*Q5:* the condition is tested on base inputs only; in a stress, lower presales change timing and add no error.
+
+**Equity flows.** Contributions are dated `m / 12`, distributions from closings in month `m` at `(m + 1) / 12`.
+IRR follows the roots rule (decision 3): exactly one sign change gives a value, otherwise "not meaningful".
+Carry paid after the first closings can give several sign changes; this is a property of the deal, and IRR is
+not a gate. Equity multiple = distributions ÷ contributions. Peak equity = the largest cumulative contributions
+less distributions.
+
+**Metrics** (for-sale mode only, so rental results are unchanged byte for byte): `gross_sales_revenue`,
+`net_sales_revenue`, `interest_after_completion`, `carry_total`, `development_profit_for_sale` (net sales
+revenue − total development cost − carry − interest after completion), `profit_on_cost_for_sale` (profit ÷
+(total development cost + carry + interest after completion)), `margin_on_revenue` (profit ÷ net sales
+revenue), `peak_equity`, `sellout_month`, `deposits_held_at_completion`, `equity_multiple`, `equity_irr`.
+NOI, rent, occupancy, coverage, exit value, development spread, yield on cost and break-even occupancy are
+`NOT_APPLICABLE` ("The units are sold; there is no rental income."), never 0.
+
+**Stresses**, each a full re-run with debt commitments unchanged: prices −10%; absorption × 0.70; land, hard,
+soft and contingency +10%; rates +1 point; construction +6 months; presales −15 points (not below 0); and all
+six combined.
+
+**Policy.** `for-sale-draft`, labelled "Draft policy, not signed by credit", editable until credit signs (like
+the held drafts). Gates: profit on cost ≥ 15% (base); margin on revenue ≥ 12% (base); profit on cost ≥ 0%
+(combined); equity multiple ≥ 1.0x (combined). The verdict rules are v1's: an error rejects; any gate that
+cannot be measured makes the verdict NOT_EVALUATED; more than two failures reject; one or two give
+APPROVE_WITH_CONDITIONS.
+
+**Open for a later card.** The workbooks solve equity so the debt is exactly drawn at completion; the engine
+funds equity first from a stated or derived amount. The for-sale card must show the two agree on both
+reference deals, or name the difference for the owner.
