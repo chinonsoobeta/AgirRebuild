@@ -108,6 +108,12 @@ describe("setting up a deal that sells its units (task 78)", () => {
     expect(input!.budget).toMatchObject({ developmentCharges: 100, landTransferTax: 200, gstHstNet: 300 });
     expect(input!.forSale).not.toHaveProperty("presaleThresholdPct");
   });
+  test("a stated S-curve reaches the sale input, because construction draws are shared", () => {
+    const { readiness, input } = assemble([...rowsFor(), row("s_curve_draws", 1)]);
+    expect(readiness.status).toBe("ready");
+    expect(input!.sCurveDraws).toBe(true);
+    expect(assemble(rowsFor()).input!.sCurveDraws).toBe(false);
+  });
   test("names a missing price and missing unit types", () => {
     const item = oracle().inputs.unit_types[0]!.name;
     expect(assemble(rowsFor().filter((r) => !(r.fieldKey === "unit_sale_price" && r.itemKey === item))).readiness.missing)

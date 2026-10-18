@@ -152,7 +152,7 @@ export function QuickStart({ dealId }: { dealId: string }) {
                     <div className="field"><label htmlFor={`name-${n}`}>{t("qs.unitType")}</label><input className="input" id={`name-${n}`} name={`name-${n}`} maxLength={60} autoComplete="off" /></div>
                     <div className="field"><label htmlFor={`unit_count-${n}`}>{t("qs.unitCount")}</label>{input(`unit_count-${n}`, "unit_count")}</div>
                     {tpl.sells
-                      ? <div className="field"><label htmlFor={`unit_sale_price-${n}`}>{t("qs.unitSalePrice")}</label><span className="help">{L.help("unit_sale_price", null)}</span>{input(`unit_sale_price-${n}`, "unit_sale_price")}</div>
+                      ? <div className="field"><label htmlFor={`unit_sale_price-${n}`}>{t("qs.unitSalePrice")}</label><span className="help">{L.help("unit_sale_price", FIELD_BY_KEY.get("unit_sale_price")!.help ?? null)}</span>{input(`unit_sale_price-${n}`, "unit_sale_price")}</div>
                       : <div className="field"><label htmlFor={`unit_rent_monthly-${n}`}>{t("qs.unitRent")}</label>{input(`unit_rent_monthly-${n}`, "unit_rent_monthly")}</div>}
                     {types.length > 1 && <button className="btn quiet small" type="button" onClick={() => setTypes(types.filter((x) => x !== n))}>{t("qs.removeType")}</button>}
                   </div>

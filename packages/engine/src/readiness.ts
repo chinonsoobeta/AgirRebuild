@@ -256,7 +256,8 @@ export function assemble(rows: readonly AssumptionRow[]): { readiness: Readiness
     rentGrowthPct: 0,
     expenseGrowthPct: 0,
     leaseUpRamp: false,
-    sCurveDraws: false,
+    // Construction draws are shared with the rental ledger, so a stated S-curve is read here too.
+    sCurveDraws: n("s_curve_draws") === 1,
     otherIncomeAnnual: 0,
     forSale: { units: saleUnits, presoldPct: n("presold_units_pct"), depositPct: n("deposit_pct"), absorptionPerMonth: n("absorption_units_per_month"),
       commissionPct: n("sales_commission_pct"), closingLagMonths: n("closing_lag_months"), carryMonthly: n("unsold_carry_monthly"),
