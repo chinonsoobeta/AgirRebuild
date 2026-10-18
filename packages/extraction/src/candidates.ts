@@ -1659,17 +1659,26 @@ function fromTable(table0: Table, result: ExtractionResult, notes: string[] = []
           result.candidates.push({ fieldKey: flag.fieldKey, itemKey: null, value: flag.value, raw: answer.text, unitSeen: "flag", location: answer.ref, context: `${table.name}: ${labelCell.text} ${answer.text}`.slice(0, 240), rule: "table:label-value" });
           return;
         }
+        // The note for a figure the row's label does not read: why the label does not fit it.
+        const laterNote = (c: Cell, x: NumberToken): string => {
+          const m = mapToken(relative ? labelCell.text.replace(BLOCK_RELATIVE_RE, "") : labelCell.text, x, { scope, ahead: c.text.slice(0, x.start), after: c.text.slice(x.end), quote: quoteDocs.has(result) });
+          return m.kind === "ignored" ? m.reason : m.kind === "field" ? LATER_FIGURE_NOTE : "No field matches this label";
+        };
         // Each figure after the one the label used or showed is shown, never read (task 65); a row of years adds none.
         const rest = (from: Cell, note: string | null) => {
           // A unit type's digit ("1-bed", "2 BR") is not a figure.
           const later = after.slice(after.indexOf(from) + 1).flatMap((c) => { const x = wholeUnitType(c.text) ? null : cellToken(c, result.format); return x ? [{ c, x }] : []; });
           if (later.length === 0 || after.every((c) => { const x = cellToken(c, result.format); return !x || isYearToken(x); })) return;
           for (const { c, x } of later) {
-            const own = note ?? (() => { const m = mapToken(relative ? labelCell.text.replace(BLOCK_RELATIVE_RE, "") : labelCell.text, x, { scope, ahead: c.text.slice(0, x.start), after: c.text.slice(x.end), quote: quoteDocs.has(result) }); return m.kind === "ignored" ? m.reason : m.kind === "field" ? LATER_FIGURE_NOTE : "No field matches this label"; })();
+            const own = note ?? laterNote(c, x);
             result.other.push({ fieldKey: null, itemKey: null, value: x.value, raw: x.raw, unitSeen: x.unit, location: c.ref, context: rowContext(table.name, cat, row, labelCell, c), rule: "table:label-value", note: own });
           }
         };
+        // The cell a per-unit budget figure hands the line to (task 68): skipped to, once the cells before it are shown.
+        let skipTo: Cell | null = null;
         for (const cell of after) {
+          if (skipTo && cell !== skipTo) continue;
+          skipTo = null;
           const t = cellToken(cell, result.format);
           if (!t) continue;
           const base = { raw: t.raw, location: cell.ref, context: rowContext(table.name, cat, row, labelCell, cell), rule: "table:label-value" };
@@ -1688,6 +1697,28 @@ function fromTable(table0: Table, result: ExtractionResult, notes: string[] = []
             result.other.push({ ...base, fieldKey: null, itemKey: null, value: t.value, unitSeen: t.unit, note: AS_IS_NOTE });
             rest(cell, AS_IS_NOTE);
             break;
+          }
+          // A budget figure whose own cell says it is per door is a share, not the line: the next cell for the same line is read instead (task 68).
+          if (mapped.kind === "field" && BUDGET_LINES.has(mapped.fieldKey) && perUnit(cell.text, t)) {
+            result.other.push({ ...base, fieldKey: null, itemKey: null, value: t.value, unitSeen: t.unit, note: PER_UNIT_NOTE });
+            const field = mapped.fieldKey;
+            const item = mapped.itemKey;
+            const lineCell = after.slice(after.indexOf(cell) + 1).find((c) => {
+              const x = wholeUnitType(c.text) ? null : cellToken(c, result.format);
+              if (!x || x.value === null || perUnit(c.text, x) || isDeposit(c.text, x)) return false;
+              const m = mapToken(relative ? labelCell.text.replace(BLOCK_RELATIVE_RE, "") : labelCell.text, x, { scope, ahead: c.text.slice(0, x.start), after: c.text.slice(x.end), quote: quoteDocs.has(result) });
+              return m.kind === "field" && m.fieldKey === field && m.itemKey === item;
+            });
+            if (!lineCell) {
+              rest(cell, null);
+              break;
+            }
+            for (const c of after.slice(after.indexOf(cell) + 1, after.indexOf(lineCell))) {
+              const x = wholeUnitType(c.text) ? null : cellToken(c, result.format);
+              if (x) result.other.push({ fieldKey: null, itemKey: null, value: x.value, raw: x.raw, unitSeen: x.unit, location: c.ref, context: rowContext(table.name, cat, row, labelCell, c), rule: "table:label-value", note: laterNote(c, x) });
+            }
+            skipTo = lineCell;
+            continue;
           }
           record(result, mapped, t, base);
           rest(cell, mapped.kind === "field" ? "Another figure in this row was used" : null);
