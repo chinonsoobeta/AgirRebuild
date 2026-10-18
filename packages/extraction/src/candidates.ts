@@ -913,7 +913,9 @@ function rentRollRoles(header: Cell[]): Roles | null {
   const roles: Roles = { item: [], psfHeader: false, rentBasis: null, areaM2: false, rentPerM2: false, areaTotal: false };
   const heads = header.map((c) => headerOf(c).trim());
   const suiteAt = heads.findIndex((h) => SUITE_COL_RE.test(h));
-  const bySuite = suiteAt >= 0 && heads.some((h) => TYPE_COL_RE.test(h));
+  // The suite column leads the row, before the type: after it, "No." or "Unit #" is a count of the type's units.
+  const typeAt = heads.findIndex((h) => TYPE_COL_RE.test(h));
+  const bySuite = suiteAt >= 0 && typeAt > suiteAt;
   header.forEach((c, i) => {
     const h = headerOf(c);
     if (!h) return;
