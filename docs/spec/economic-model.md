@@ -325,6 +325,4 @@ the held drafts). Gates: profit on cost ≥ 15% (base); margin on revenue ≥ 12
 cannot be measured makes the verdict NOT_EVALUATED; more than two failures reject; one or two give
 APPROVE_WITH_CONDITIONS.
 
-**Open for a later card.** The workbooks solve equity so the debt is exactly drawn at completion; the engine
-funds equity first from a stated or derived amount. The for-sale card must show the two agree on both
-reference deals, or name the difference for the owner.
+Construction cost placement and the equity solve are shared by the rental and for-sale ledgers. With `S = C`, both checked reference deals agree with the workbooks within their stated tolerances; the engine retains its existing half-cent convergence criterion rather than the workbook's fixed 30 iterations.
