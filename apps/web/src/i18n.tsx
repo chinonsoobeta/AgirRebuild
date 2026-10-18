@@ -1215,6 +1215,13 @@ const frNum = (x: string) => Number(x).toLocaleString("fr-CA");
 const frPct = (x: string) => `${frNum(x)}\u00a0%`;
 
 // ---- Messages produced by the engine and the API, in French ----------------------------------
+const SALE_SHARES: Record<string, string> = {
+  "presold share": "La part prévendue",
+  deposit: "Le dépôt",
+  "sales commission": "La commission de vente",
+  "lender's presale threshold": "Le seuil de prévente du prêteur",
+};
+
 const FR_REASONS: [RegExp, string | ((m: RegExpMatchArray) => string)][] = [
   [/^The inputs do not give this a meaningful value\.$/, "Les données ne permettent pas d'en tirer une valeur significative."],
   [/^Total development cost is zero\.$/, "Le coût total de développement est nul."],
@@ -1346,6 +1353,19 @@ const FR_REASONS: [RegExp, string | ((m: RegExpMatchArray) => string)][] = [
   [/^LP share must be above (\d+) and below (\d+)$/, (m) => `La part des commanditaires doit être supérieure à ${frPct(m[1]!)} et inférieure à ${frPct(m[2]!)}`],
   [/^preferred return must be at least (\d+)$/, (m) => `Le rendement privilégié doit être d'au moins ${frPct(m[1]!)}`],
   [/^GP promote must be from (\d+) to (\d+)$/, (m) => `L'intéressement du commandité doit être de ${frPct(m[1]!)} à ${frPct(m[2]!)}`],
+  // Selling the units (card 77).
+  [/^unit sale details apply only to a deal that sells its units$/, "Les données de vente des unités ne s'appliquent qu'à un projet qui vend ses unités"],
+  [/^a deal that sells its units cannot state rents$/, "Un projet qui vend ses unités ne peut pas déclarer de loyers"],
+  [/^a deal that sells its units cannot have a refinance$/, "Un projet qui vend ses unités ne peut pas comporter de refinancement"],
+  [/^a deal that sells its units cannot have a lease-up period$/, "Un projet qui vend ses unités ne peut pas comporter de période de location"],
+  [/^a deal that sells its units needs its sale details$/, "Un projet qui vend ses unités exige ses données de vente"],
+  [/^a deal that sells its units needs at least one unit type$/, "Un projet qui vend ses unités exige au moins un type d'unité"],
+  [/^unit type "(.+)" needs a whole unit count above 0$/, (m) => `Le type d'unité « ${m[1]} » exige un nombre entier d'unités supérieur à 0`],
+  [/^unit type "(.+)" needs a sale price of at least 0$/, (m) => `Le type d'unité « ${m[1]} » exige un prix de vente d'au moins 0\u00a0$`],
+  [/^(presold share|deposit|sales commission|lender's presale threshold) must be between (\d+) and (\d+)$/, (m) => `${SALE_SHARES[m[1]!]} doit se situer entre ${frPct(m[2]!)} et ${frPct(m[3]!)}`],
+  [/^sales pace must be above 0 units per month$/, "Le rythme de vente doit être supérieur à 0 unité par mois"],
+  [/^months from completion to first closing must be a whole number of at least 0$/, "Le délai entre l'achèvement et la première conclusion de vente doit être un nombre entier de mois, d'au moins 0"],
+  [/^carry per unsold unit must be at least 0$/, "Les frais de possession par unité non vendue doivent être d'au moins 0\u00a0$"],
   // The reasons readiness gives for a value that cannot be used.
   [/^not a number$/, "n'est pas un nombre"],
   [/^below the minimum of (-?[\d.]+)$/, (m) => `inférieur au minimum de ${frNum(m[1]!)}`],

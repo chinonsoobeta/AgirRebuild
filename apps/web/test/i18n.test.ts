@@ -227,12 +227,19 @@ describe("every sentence the engine's checks can produce has a French rendering"
   };
   const rev = (c: Partial<EngineInput["revenue"][number]>) => (d: EngineInput) => { d.revenue = [{ ...d.revenue[0]!, ...c }]; };
   const perSf = { basis: "per_sf" as const, areaSf: 1000, rentPsfAnnual: 30 };
+  const saleDetails = () => ({ units: [{ key: "th", label: "Townhome", units: 4, price: 500_000 }], presoldPct: 50, depositPct: 10, absorptionPerMonth: 1, commissionPct: 4, closingLagMonths: 1, carryMonthly: 100 });
+  const sells = (change: (d: EngineInput) => void = () => {}) => (d: EngineInput) => {
+    d.exit = "for_sale"; d.revenue = []; d.leaseUpMonths = 0; d.forSale = saleDetails();
+    change(d);
+  };
+  const sale = (c: Partial<NonNullable<EngineInput["forSale"]>>) => sells((d) => { d.forSale = { ...d.forSale!, ...c }; });
 
   // One entry per `p.push(` in validate.ts, in the order it is written.
   const SITES: [string, (d: EngineInput) => void][] = [
     ["budget", (d) => { d.budget.land = -1; }],
     ["credit takes the total to 0", (d) => { d.budget = { land: 0, hard: 100, soft: 0, contingency: 0, other: -100 }; }],
     ["credit exceeds the construction costs", (d) => { d.budget = { land: 1_000, hard: 100, soft: 0, contingency: 0, other: -200 }; }],
+    ["sale details on a rental deal", (d) => { d.forSale = saleDetails(); }],
     ["no revenue", (d) => { d.revenue = []; }],
     ["unit count", rev({ units: 0 })],
     ["monthly rent", rev({ rentMonthly: -1 })],
@@ -259,6 +266,20 @@ describe("every sentence the engine's checks can produce has a French rendering"
     ["GP promote", (d) => { d.waterfall = { lpSharePct: 90, preferredReturnPct: 8, gpPromotePct: 101 }; }],
     ["property tax", (d) => { d.propertyTaxAnnual = -1; }],
     ["refinance insurance premium", (d) => { d.refinance = { month: 24, amount: 1_000, ratePct: 5, amortYears: 25, ioMonths: 0, insurancePremiumPct: 11 }; }],
+    ["a sale deal with rents", sells((d) => { d.revenue = allEquityDeal().revenue; })],
+    ["a sale deal with a refinance", sells((d) => { d.refinance = { month: 24, amount: 1_000, ratePct: 5, amortYears: 25, ioMonths: 0 }; })],
+    ["a sale deal with lease-up", sells((d) => { d.leaseUpMonths = 2; })],
+    ["a sale deal's construction months", sells((d) => { d.constructionMonths = 121; })],
+    ["a sale deal's loan amount", sells(withLoan("senior", { amount: -1 }))],
+    ["a sale deal's loan rate", sells(withLoan("senior", { ratePct: -1 }))],
+    ["a sale deal without sale details", sells((d) => { delete d.forSale; })],
+    ["no unit type", sale({ units: [] })],
+    ["unit type count", sale({ units: [{ key: "th", label: "Townhome", units: 1.5, price: 1 }] })],
+    ["unit type price", sale({ units: [{ key: "th", label: "Townhome", units: 1, price: -1 }] })],
+    ["sale shares", sale({ presoldPct: 101, depositPct: -1, commissionPct: 101, presaleThresholdPct: 101 })],
+    ["sales pace", sale({ absorptionPerMonth: 0 })],
+    ["closing lag", sale({ closingLagMonths: 0.5 })],
+    ["carry", sale({ carryMonthly: -1 })],
   ];
   const EXTRA: [string, (d: EngineInput) => void][] = [
     ["optional budget line", (d) => { d.budget.developmentCharges = -1; }],
@@ -267,6 +288,8 @@ describe("every sentence the engine's checks can produce has a French rendering"
     ["refinance loan", withLoan("refinance", { amortYears: 51 })],
     ["refinance loan IO", withLoan("refinance", { ioMonths: 601 })],
     ["component named by key", (d) => { d.revenue = [{ ...d.revenue[0]!, label: "", key: "2BR", units: 0 }]; }],
+    ["a sale deal's mezzanine", sells(withLoan("mezzanine", { amount: -1, ratePct: -1 }))],
+    ["unit type named by key", sale({ units: [{ key: "TH-A", label: "", units: 0, price: -1 }] })],
   ];
 
   it("the table has a case for every p.push in validate.ts", () => {

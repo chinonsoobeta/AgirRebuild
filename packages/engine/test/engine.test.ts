@@ -884,8 +884,8 @@ describe("exit by refinancing and holding (card 60)", () => {
       expect(policyFor(input).version).toBe(version);
     });
 
-    test("this build has policy v1 (pinned) and the two held drafts", () => {
-      expect(Object.keys(POLICIES)).toEqual(["policy-v1", "rental-hold-draft", "rental-hold-insured-draft"]);
+    test("this build has policy v1 (pinned), the two held drafts and the for-sale draft", () => {
+      expect(Object.keys(POLICIES)).toEqual(["policy-v1", "rental-hold-draft", "rental-hold-insured-draft", "for-sale-draft"]);
       expect(sha(POLICIES["policy-v1"])).toBe("9f95780101a9ecfe6444c47dd319c1cb8d77251d60700a1a4dde1733055296b9");
     });
 

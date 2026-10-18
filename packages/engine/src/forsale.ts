@@ -128,7 +128,7 @@ function forSaleMetrics(L: ForSaleLedger) {
   return { metrics, roots };
 }
 
-/** For-sale checks use each scenario's funding and remaining debt; only base tests the lender's presale condition. */
+/** Checks read the base case only, as for rental deals; a stress shows in its metrics and gates. */
 export function underwriteForSale(input: EngineInput, policy: Policy, engineVersion: string): RunResult {
   const base = buildForSaleLedger(input);
   const baseMetrics = forSaleMetrics(base);
@@ -143,7 +143,6 @@ export function underwriteForSale(input: EngineInput, policy: Policy, engineVers
   for (const stress of policy.stresses) {
     const L = buildForSaleLedger(applyStress(input, stress));
     scenarios.push({ key: stress.key, label: stress.label, metrics: forSaleMetrics(L).metrics });
-    checkLedger(L, stress.label);
   }
   const f = input.forSale!;
   if (f.presaleThresholdPct !== undefined && f.presoldPct < f.presaleThresholdPct) checks.push({ key: "presale_threshold_unmet", kind: "bound", severity: "error",

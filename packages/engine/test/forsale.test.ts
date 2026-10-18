@@ -37,7 +37,16 @@ describe("selling the units (task 77)", () => {
     const result = run(input);
     expect(result.verdict.code).toBe(oracle.verdict);
     for (const [scenario, expected] of Object.entries({ base: oracle.base, ...oracle.stresses })) {
+      const stressed = scenario === "base" ? input : engine.applyStress(input, contracts.FOR_SALE_DRAFT.stresses.find((s) => s.key === scenario)!);
+      const L = engine.buildForSaleLedger(stressed);
       for (const [key, wanted] of Object.entries(expected)) {
+        // The workbook's self-checks are ledger diagnostics, not catalog metrics: compare them on the ledger.
+        if (!contracts.METRIC_BY_KEY.has(key)) {
+          const counted = ["funding_converged", "profit_reconciliation_pass", "flow_sign_changes", "closing_units_check"].includes(key);
+          expect(L.values[key], `${slug} ${scenario} ${key}`).toBeDefined();
+          expect(Math.abs(L.values[key]! - Number(wanted)), `${slug} ${scenario} ${key}`).toBeLessThanOrEqual(counted ? 0 : oracle.tolerance.money);
+          continue;
+        }
         const got = value(result, key, scenario);
         expect(got, `${slug} ${scenario} ${key}`).toBeDefined();
         if (wanted === "not meaningful") expect(got).toMatchObject({ value: null, status: "NOT_MEANINGFUL" });
@@ -47,8 +56,6 @@ describe("selling the units (task 77)", () => {
           expect(Math.abs(got.value! - Number(wanted)), `${slug} ${scenario} ${key}: engine ${got.value}, file ${wanted}`).toBeLessThanOrEqual(tolerance);
         }
       }
-      const stressed = scenario === "base" ? input : engine.applyStress(input, contracts.FOR_SALE_DRAFT.stresses.find((s) => s.key === scenario)!);
-      const L = engine.buildForSaleLedger(stressed);
       expect(L.closings.map((n, m) => [m, n]).filter(([, n]) => n! > 0)).toEqual(oracle.closings[scenario]);
     }
     const gateKeys = ["profit_on_cost_for_sale", "margin_on_revenue", "stressed_profit_on_cost_for_sale", "stressed_equity_multiple"];
@@ -67,12 +74,12 @@ describe("selling the units (task 77)", () => {
     expect(contracts.policyFor({ ...developmentDeal(), exit: "refinance_hold", refinance: { month: 36, amount: 1, ratePct: 1, amortYears: 30, ioMonths: 0, insurancePremiumPct: 4 } })).toBe(contracts.RENTAL_HOLD_INSURED_DRAFT);
   });
   test.each([
-    ["revenue", (d: EngineInput) => ({ ...d, revenue: allEquityDeal().revenue })],
-    ["refinance", (d: EngineInput) => ({ ...d, refinance: { month: 2, amount: 1, ratePct: 1, amortYears: 30, ioMonths: 0 } })],
-    ["lease-up", (d: EngineInput) => ({ ...d, leaseUpMonths: 1 })],
-    ["forSale", (d: EngineInput) => ({ ...d, exit: undefined })],
-    ["forSale", (d: EngineInput) => ({ ...d, forSale: undefined })],
-  ] as const)("rejects the incompatible %s combination by name", (name, change) => {
+    ["cannot state rents", (d: EngineInput) => ({ ...d, revenue: allEquityDeal().revenue })],
+    ["cannot have a refinance", (d: EngineInput) => ({ ...d, refinance: { month: 2, amount: 1, ratePct: 1, amortYears: 30, ioMonths: 0 } })],
+    ["cannot have a lease-up period", (d: EngineInput) => ({ ...d, leaseUpMonths: 1 })],
+    ["apply only to a deal that sells its units", (d: EngineInput) => ({ ...d, exit: undefined })],
+    ["needs its sale details", (d: EngineInput) => ({ ...d, forSale: undefined })],
+  ] as const)("rejects an incompatible combination: %s", (name, change) => {
     expect(() => engine.validateInput(change(small()))).toThrow(new RegExp(name));
   });
   test("Q1: carry includes presold units waiting for closing", () => {
@@ -149,5 +156,16 @@ describe("selling the units (task 77)", () => {
       const input = inputs[pin.name as keyof typeof inputs];
       expect({ name: pin.name, input: sha(input), ledger: sha(engine.buildLedger(input)), result: sha(run(input)) }).toEqual(pin);
     }
+  });
+  // Audit: checks read the base case only. Costs 100 (land 60, hard 40), debt 70 at 0%, one presold unit at 75:
+  // the base repays 70 of 75; prices -10% leave 67.50, so 2.50 of debt is unpaid in that stress, shown in its metrics.
+  test("debt left unpaid only under a stress is not an error check", () => {
+    const input: EngineInput = { ...small(), forSale: { ...small().forSale!, units: [{ key: "A", label: "A", units: 1, price: 75 }],
+      presoldPct: 100, absorptionPerMonth: 1, commissionPct: 0, closingLagMonths: 0, carryMonthly: 0 } };
+    const r = run(input);
+    expect(r.checks.map((c) => c.key)).not.toContain("for_sale_debt_unpaid");
+    expect(value(r, "equity_distributed").value).toBeCloseTo(5, 9);
+    expect(value(r, "equity_distributed", "prices").value).toBe(0);
+    expect(engine.buildForSaleLedger(engine.applyStress(input, contracts.FOR_SALE_DRAFT.stresses[0]!)).values.ending_mezz_balance).toBeCloseTo(2.5, 9);
   });
 });

@@ -32,7 +32,7 @@ export function validateInput(input: EngineInput): void {
     if (p.length > 0) throw new EngineInputError(p);
     return;
   }
-  if (input.forSale !== undefined) p.push("forSale is only allowed when exit is for_sale");
+  if (input.forSale !== undefined) p.push("unit sale details apply only to a deal that sells its units");
   if (input.revenue.length === 0) p.push("at least one revenue component is required");
   for (const c of input.revenue) {
     const name = `revenue component "${c.label || c.key}"`;
@@ -98,12 +98,11 @@ export function validateInput(input: EngineInput): void {
   if (p.length > 0) throw new EngineInputError(p);
 }
 
-
 /** For-sale inputs use construction funding and sale drivers, never rental assumptions. */
 function validateForSale(input: EngineInput, p: string[]) {
-  if (input.revenue.length > 0) p.push("for-sale revenue must be empty; the units are sold, not rented");
-  if (input.refinance !== undefined) p.push("for-sale input cannot have a refinance");
-  if (input.leaseUpMonths !== 0) p.push("for-sale input cannot have lease-up months");
+  if (input.revenue.length > 0) p.push("a deal that sells its units cannot state rents");
+  if (input.refinance !== undefined) p.push("a deal that sells its units cannot have a refinance");
+  if (input.leaseUpMonths !== 0) p.push("a deal that sells its units cannot have a lease-up period");
   if (!finite(input.constructionMonths) || !Number.isInteger(input.constructionMonths) || input.constructionMonths < 0 || input.constructionMonths > 120) p.push("construction months must be a whole number from 0 to 120");
   for (const [name, loan] of [["senior", input.senior], ["mezzanine", input.mezzanine]] as const) {
     if (!loan) continue;
@@ -111,17 +110,16 @@ function validateForSale(input: EngineInput, p: string[]) {
     if (!finite(loan.ratePct) || loan.ratePct < 0) p.push(`${name} loan rate must be at least 0`);
   }
   const f = input.forSale;
-  if (!f) { p.push("forSale is required when exit is for_sale"); return; }
-  if (!Array.isArray(f.units) || f.units.length === 0) p.push("forSale needs at least one unit type");
+  if (!f) { p.push("a deal that sells its units needs its sale details"); return; }
+  if (!Array.isArray(f.units) || f.units.length === 0) p.push("a deal that sells its units needs at least one unit type");
   else for (const u of f.units) {
-    if (!finite(u.units) || !Number.isInteger(u.units) || u.units <= 0) p.push(`forSale unit type "${u.label || u.key}" needs a whole unit count above 0`);
-    if (!finite(u.price) || u.price < 0) p.push(`forSale unit type "${u.label || u.key}" price must be at least 0`);
+    if (!finite(u.units) || !Number.isInteger(u.units) || u.units <= 0) p.push(`unit type "${u.label || u.key}" needs a whole unit count above 0`);
+    if (!finite(u.price) || u.price < 0) p.push(`unit type "${u.label || u.key}" needs a sale price of at least 0`);
   }
-  for (const key of ["presoldPct", "depositPct", "commissionPct", ...(f.presaleThresholdPct === undefined ? [] : ["presaleThresholdPct"])] as const) {
-    const n = f[key as "presoldPct" | "depositPct" | "commissionPct" | "presaleThresholdPct"];
-    if (!finite(n) || n < 0 || n > 100) p.push(`forSale ${key} must be between 0 and 100`);
-  }
-  if (!finite(f.absorptionPerMonth) || f.absorptionPerMonth <= 0) p.push("forSale absorptionPerMonth must be above 0");
-  if (!finite(f.closingLagMonths) || !Number.isInteger(f.closingLagMonths) || f.closingLagMonths < 0) p.push("forSale closingLagMonths must be a whole number of at least 0");
-  if (!finite(f.carryMonthly) || f.carryMonthly < 0) p.push("forSale carryMonthly must be at least 0");
+  const shares = [["presold share", f.presoldPct], ["deposit", f.depositPct], ["sales commission", f.commissionPct],
+    ...(f.presaleThresholdPct === undefined ? [] : [["lender's presale threshold", f.presaleThresholdPct] as const])] as const;
+  for (const [label, n] of shares) if (!finite(n) || n < 0 || n > 100) p.push(`${label} must be between 0 and 100`);
+  if (!finite(f.absorptionPerMonth) || f.absorptionPerMonth <= 0) p.push("sales pace must be above 0 units per month");
+  if (!finite(f.closingLagMonths) || !Number.isInteger(f.closingLagMonths) || f.closingLagMonths < 0) p.push("months from completion to first closing must be a whole number of at least 0");
+  if (!finite(f.carryMonthly) || f.carryMonthly < 0) p.push("carry per unsold unit must be at least 0");
 }

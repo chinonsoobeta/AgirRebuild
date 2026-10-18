@@ -125,9 +125,9 @@ export const FOR_SALE_DRAFT: Policy = {
 /** The policies of this build, by version. A run made under any other version, or an earlier edit of a draft, replays under the policy it stored. */
 export const POLICIES: Readonly<Record<string, Policy>> = {
   [POLICY_V1.version]: POLICY_V1,
-  [FOR_SALE_DRAFT.version]: FOR_SALE_DRAFT,
   [RENTAL_HOLD_DRAFT.version]: RENTAL_HOLD_DRAFT,
   [RENTAL_HOLD_INSURED_DRAFT.version]: RENTAL_HOLD_INSURED_DRAFT,
+  [FOR_SALE_DRAFT.version]: FOR_SALE_DRAFT,
 };
 
 /** The policy a stored run was made under: the copy it stored, else (a run made before runs stored it) this build's policy of that version. */
