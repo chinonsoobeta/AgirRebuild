@@ -215,8 +215,14 @@ export const FIELD_GROUP_LABELS: Record<FieldGroup, string> = {
 // Structure only; the wording lives in the web i18n. Each answer is entered through fn_enter_value
 // and the named defaults are accepted explicitly through fn_accept_defaults, never applied silently.
 
-export type TemplateQuestion = { field: string; item?: string; optional?: true; repeatable?: true; zeroAllowed?: true; skipsIfZero?: string[] };
+export type TemplateQuestion = { field: string; item?: string; optional?: true; repeatable?: true; zeroAllowed?: true; skipsIfZero?: string[]; heldOnly?: true };
 export type Template = { key: "multiplex" | "apartment"; minUnits: number; maxUnits: number; questions: TemplateQuestion[]; defaults: string[] };
+
+/** A held senior loan uses no amortization when it stays interest-only until the stated refinance. */
+export function heldSeniorAmortUnused(get: (key: string) => number | undefined): boolean {
+  const month = get("refinance_month");
+  return get("refinance_and_hold") === 1 && month !== undefined && (get("senior_io_months") ?? 0) >= month;
+}
 
 const q = (field: string, o: Omit<TemplateQuestion, "field"> = {}): TemplateQuestion => ({ field, ...o });
 const DEFAULTS = ["hold_years", "selling_costs_pct", "expense_ratio_pct"];
@@ -224,6 +230,16 @@ const loan = [
   q("senior_loan_amount", { zeroAllowed: true, skipsIfZero: ["senior_rate_pct", "senior_amort_years"] }),
   q("senior_rate_pct"),
   q("senior_amort_years"),
+];
+const held = [
+  q("senior_io_months", { heldOnly: true, zeroAllowed: true }),
+  q("refinance_month", { heldOnly: true }),
+  q("refinance_amount", { heldOnly: true, optional: true }),
+  q("refinance_ltv_pct", { heldOnly: true, optional: true }),
+  q("refinance_rate_pct", { heldOnly: true }),
+  q("refinance_amort_years", { heldOnly: true }),
+  q("refinance_io_months", { heldOnly: true, optional: true }),
+  q("refinance_insurance_premium_pct", { heldOnly: true, optional: true }),
 ];
 const timeline = [q("construction_months", { zeroAllowed: true }), q("lease_up_months", { zeroAllowed: true })];
 
@@ -233,11 +249,12 @@ export const TEMPLATES: readonly Template[] = [
     minUnits: 2,
     maxUnits: 4,
     questions: [
+      q("refinance_and_hold", { optional: true }),
       q("land_cost"), q("hard_cost"), q("soft_cost"), q("contingency", { zeroAllowed: true }), q("development_charges", { zeroAllowed: true }),
       q("property_tax_annual", { zeroAllowed: true }),
       ...timeline,
       q("unit_count", { item: "Residential" }), q("unit_rent_monthly", { item: "Residential" }),
-      q("stabilized_occupancy_pct"), q("exit_cap_rate_pct"), ...loan,
+      q("stabilized_occupancy_pct"), q("exit_cap_rate_pct"), ...loan, ...held,
     ],
     defaults: DEFAULTS,
   },
@@ -246,12 +263,13 @@ export const TEMPLATES: readonly Template[] = [
     minUnits: 5,
     maxUnits: 30,
     questions: [
+      q("refinance_and_hold", { optional: true }),
       q("land_cost"), q("hard_cost"), q("soft_cost"), q("contingency", { zeroAllowed: true }), q("other_cost", { optional: true }),
       q("development_charges", { zeroAllowed: true }), q("land_transfer_tax", { optional: true }), q("gst_hst_net", { optional: true }),
       q("property_tax_annual", { zeroAllowed: true }),
       ...timeline,
       q("unit_count", { repeatable: true }), q("unit_rent_monthly", { repeatable: true }),
-      q("stabilized_occupancy_pct"), q("other_income_annual", { optional: true }), q("exit_cap_rate_pct"), ...loan,
+      q("stabilized_occupancy_pct"), q("other_income_annual", { optional: true }), q("exit_cap_rate_pct"), ...loan, ...held,
     ],
     defaults: DEFAULTS,
   },

@@ -371,7 +371,7 @@ describe("quick-start templates", () => {
         expect(input).not.toBeNull();
         const policy = policyFor(input!);
         expect(policy.version).toBe(premium === undefined ? "rental-hold-draft" : "rental-hold-insured-draft");
-        expect(["GO", "WATCH", "REJECT"]).toContain(underwrite(input!, policy).verdict.code);
+        expect(contracts.VERDICT_CODES).toContain(underwrite(input!, policy).verdict.code);
       }
     });
     test.each(TEMPLATES.map((t) => [t.key] as const))("%s can size the held refinance by loan-to-value", (key) => {

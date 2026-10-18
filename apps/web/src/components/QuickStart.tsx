@@ -1,7 +1,7 @@
 import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
 import { Link } from "@tanstack/react-router";
 import { useState, type FormEvent } from "react";
-import { FIELDS, FIELD_BY_KEY, TEMPLATES } from "@agir/contracts";
+import { FIELDS, FIELD_BY_KEY, TEMPLATES, heldSeniorAmortUnused } from "@agir/contracts";
 import { api, ApiError, type Review } from "../api";
 import { Banner, ErrorText } from "./ui";
 import { useI18n } from "../i18n";
@@ -13,6 +13,8 @@ export function QuickStart({ dealId }: { dealId: string }) {
   const { t, f, L } = useI18n();
   const qc = useQueryClient();
   const [key, setKey] = useState(TEMPLATES[0]!.key);
+  const [held, setHeld] = useState(false);
+  const [amortUnused, setAmortUnused] = useState(false);
   const [types, setTypes] = useState([0]);
   const [next, setNext] = useState(1);
   const [formError, setFormError] = useState<unknown>(null);
@@ -46,6 +48,14 @@ export function QuickStart({ dealId }: { dealId: string }) {
     }
     return v;
   };
+  const unusedSeniorAmort = (fd: FormData) => heldSeniorAmortUnused((field) => {
+    const raw = String(fd.get(field) ?? "").trim();
+    return raw ? f.parse(raw) : undefined;
+  });
+  const updateAmortUnused = (form: HTMLFormElement) => {
+    try { setAmortUnused(unusedSeniorAmort(new FormData(form))); }
+    catch { setAmortUnused(false); }
+  };
   const submit = (e: FormEvent<HTMLFormElement>) => {
     e.preventDefault();
     setFormError(null);
@@ -60,12 +70,17 @@ export function QuickStart({ dealId }: { dealId: string }) {
         if (names.some((n) => n.includes("|"))) throw new Error(t("qs.errPipe"));
         if (new Set(names).size !== names.length) throw new Error(t("qs.errDup"));
       }
+      if (held && Boolean(String(fd.get("refinance_amount") ?? "").trim()) === Boolean(String(fd.get("refinance_ltv_pct") ?? "").trim())) {
+        throw new Error(t("qs.errRefinance"));
+      }
+      const skipAmort = unusedSeniorAmort(fd);
       const entries: Entry[] = [];
       let units = 0;
       let skip: string[] = [];
       for (const q of tpl.questions) {
         const label = L.field(q.field);
-        if (skip.includes(q.field)) continue;
+        if (skip.includes(q.field) || (q.heldOnly && !held) || (q.field === "refinance_and_hold" && !held) ||
+          (q.field === "senior_amort_years" && skipAmort)) continue;
         if (q.repeatable) {
           types.forEach((n, i) => {
             const v = number(fd, `${q.field}-${n}`, q.field, `${label} (${names[i]})`);
@@ -90,13 +105,14 @@ export function QuickStart({ dealId }: { dealId: string }) {
   if (save.isSuccess) return <Banner tone="neutral" title={t("qs.done")}><Link className="btn primary small" to="/deals/$dealId/review" params={{ dealId }}>{t("qs.next")}</Link></Banner>;
   if (!review.data || (review.data.assumptions.length > 0 && !save.isPending && !save.isError)) return null;
 
-  const hidden = FIELDS.filter((d) => d.required === false && d.absentMeans && !tpl.questions.some((q) => q.field === d.key));
+  const hidden = FIELDS.filter((d) => d.required === false && d.absentMeans && !tpl.questions.some((q) => q.field === d.key && (!q.heldOnly || held)));
   const input = (name: string, field: string, optional?: boolean) => {
     const unit = FIELD_BY_KEY.get(field)!.unit;
     return (
       <div className="input-affix" style={{ maxWidth: 320 }}>
         {unit === "$" && <span>$</span>}
-        <input id={name} name={name} inputMode="decimal" autoComplete="off" required={!optional} />
+        <input id={name} name={name} inputMode="decimal" autoComplete="off" required={!optional}
+          onChange={field === "senior_io_months" || field === "refinance_month" ? (e) => updateAmortUnused(e.currentTarget.form!) : undefined} />
         {unit !== "$" && f.suffix(unit) && <span>{f.suffix(unit)}</span>}
       </div>
     );
@@ -108,12 +124,21 @@ export function QuickStart({ dealId }: { dealId: string }) {
       <p className="small muted">{t("qs.intro")}</p>
       <div className="field">
         <label htmlFor="qs-template">{t("qs.template")}</label>
-        <select id="qs-template" className="input" value={key} onChange={(e) => setKey(e.target.value as typeof key)}>
+        <select id="qs-template" className="input" value={key} onChange={(e) => { setKey(e.target.value as typeof key); setAmortUnused(false); }}>
           {TEMPLATES.map((x) => <option key={x.key} value={x.key}>{t(`qs.t.${x.key}`)}</option>)}
         </select>
       </div>
       <div className="stack" style={{ gap: 14 }} key={key}>
-        {tpl.questions.map((q) => {
+        {tpl.questions.filter((q) => !q.heldOnly || held).map((q) => {
+          if (q.field === "refinance_and_hold") return (
+            <div key={q.field} className="field">
+              <label htmlFor={q.field} style={{ fontWeight: 600 }}>{L.ask(q.field)[0]}</label>
+              <select id={q.field} name={q.field} className="input" value={held ? "1" : ""} onChange={(e) => { setHeld(e.target.value === "1"); updateAmortUnused(e.currentTarget.form!); }}>
+                <option value="">{t("qs.sell")}</option>
+                <option value="1">{t("qs.keep")}</option>
+              </select>
+            </div>
+          );
           if (q.repeatable) {
             return q.field === "unit_count" ? (
               <div key={q.field} className="stack" style={{ gap: 12 }}>
@@ -130,11 +155,12 @@ export function QuickStart({ dealId }: { dealId: string }) {
             ) : null;
           }
           const [label, hint] = L.ask(q.field);
+          const unused = q.field === "senior_amort_years" && amortUnused;
           return (
             <div key={q.field} className="field">
-              <label htmlFor={q.field} style={{ fontWeight: 600 }}>{q.optional ? `${label} (${t("qs.optional")})` : label}</label>
+              <label htmlFor={q.field} style={{ fontWeight: 600 }}>{unused ? `${label} (${t("qs.amortUnused")})` : q.optional ? `${label} (${t("qs.optional")})` : label}</label>
               {hint && <span className="help">{hint}</span>}
-              {input(q.field, q.field, q.optional)}
+              {input(q.field, q.field, q.optional || unused)}
             </div>
           );
         })}
