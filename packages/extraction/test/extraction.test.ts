@@ -4591,3 +4591,43 @@ describe("every figure in a table is used or shown (task 65)", () => {
     expect(vanished(grid("Forecast", [["Year", "2025", "2026", "2027"]]))).toEqual([]);
   });
 });
+
+describe("a per-unit amount in a table cell is not the line's total (task 68)", () => {
+  const PER_UNIT = "A per-door share of a cost, not the line's total; enter the total";
+  const grid = (name: string, rows: string[][]): NormalizedDocument => ({
+    kind: "pdf",
+    lines: [],
+    tables: [{ name, rows: rows.map((r, i) => r.map((text, j) => ({ text, ref: `${"ABCDEF"[j]}${i + 1}` }))) } as Table],
+    pageCount: 1,
+    needsOcr: false,
+    fullText: "Amounts such as 1,234,567 are written with commas.",
+  });
+  const read = (d: NormalizedDocument) => extractCandidates(d).candidates.map((c) => [c.fieldKey, c.itemKey, c.value, c.location]);
+  const shown = (d: NormalizedDocument) => extractCandidates(d).other.map((o) => [o.location, o.value, o.note]);
+
+  test("a per-unit budget cell is refused and shown with the per-door note", () => {
+    const d = grid("Budget", [["Hard costs", "$400,000 per unit"]]);
+    expect(read(d)).toEqual([]);
+    expect(shown(d)).toEqual([["B1", 400000, PER_UNIT]]);
+  });
+
+  test("a later cell for the same line is read, and the per-unit one is shown", () => {
+    const d = grid("Budget", [["Hard costs", "$400,000 per unit", "$3,200,000"]]);
+    expect(read(d)).toEqual([["hard_cost", null, 3200000, "C1"]]);
+    expect(shown(d)).toEqual([["B1", 400000, PER_UNIT]]);
+  });
+
+  test("a French per-unit cell is refused", () => {
+    const d = grid("Budget", [["Soft costs", "45 000 $ par logement"]]);
+    expect(read(d)).toEqual([]);
+  });
+
+  test("a rent per unit per month and a plain total are as before", () => {
+    const rent = grid("Assumptions", [["Rent", "$1,450 per unit per month"]]);
+    expect(read(rent).length).toBe(1);
+    expect(read(rent)[0]![2]).toBe(1450);
+    const plain = grid("Budget", [["Hard costs", "$3,200,000"]]);
+    expect(read(plain)).toEqual([["hard_cost", null, 3200000, "B1"]]);
+    expect(shown(plain)).toEqual([]);
+  });
+});
