@@ -1,3 +1,5 @@
+import { readdirSync, readFileSync, statSync } from "node:fs";
+import { join } from "node:path";
 import { describe, expect, it } from "vitest";
 import type { EngineInput, ReadinessItem } from "@agir/contracts";
 import { assemble, validateInput, EngineInputError } from "../../../packages/engine/src/index.ts";
@@ -542,5 +544,85 @@ describe("audit of card 63: a value no document states any more is kept only wit
     }
     expect(build("en", () => {}).t("review.keep" as Key)).toBe("Keep…");
     expect(build("fr", () => {}).t("review.keep" as Key)).toBe("Conserver…");
+  });
+});
+
+describe("card 58c: every audit action has a sentence in both languages", () => {
+  const en = build("en", () => {});
+  const fr = build("fr", () => {});
+  const ev = (action: string, payload: Record<string, unknown> = {}) => ({ seq: 1, action, entity: "x", entity_id: null, payload, hash: "", created_at: "", actor: null });
+  const say = (action: string, payload?: Record<string, unknown>) => [describeEvent(en, ev(action, payload)), describeEvent(fr, ev(action, payload))];
+
+  it("says a label, and removing one", () => {
+    expect(say("figure.labelled", { field: "exit_cap_rate_pct", item: "" }))
+      .toEqual(["Labelled a figure as Exit cap rate", "A étiqueté un chiffre comme Taux de capitalisation à la sortie"]);
+    expect(say("figure.unlabelled")).toEqual(["Removed a figure's label", "A retiré l'étiquette d'un chiffre"]);
+  });
+  it("says a copy, from both ends", () => {
+    expect(say("deal.copied", { name: "Fourplex, variant" })).toEqual(["Copied as Fourplex, variant", "A copié comme Fourplex, variant"]);
+    expect(say("deal.created_as_copy", { name: "Fourplex" })).toEqual(["Created as a copy of Fourplex", "A créé comme copie de Fourplex"]);
+  });
+  it("says the old and new setting in words", () => {
+    expect(describeEvent(en, ev("workspace.review_mode_changed", { from: "solo", to: "team" }))).toMatch(/solo.*team/i);
+    expect(describeEvent(fr, ev("workspace.review_mode_changed", { from: "solo", to: "team" }))).toMatch(/solo.*équipe/i);
+    expect(describeEvent(en, ev("workspace.label_suggestions_changed", { from: false, to: true }))).toMatch(/off.*on/i);
+    expect(describeEvent(fr, ev("workspace.label_suggestions_changed", { from: false, to: true }))).toMatch(/désactiv.*activ/i);
+  });
+  it("says a reviewer was invited, and that a suggestion step failed", () => {
+    expect(say("review.granted", { expires_at: "2026-10-20T00:00:00Z" })).not.toContain("review.granted");
+    expect(say("document.suggestions_failed", { class: "APIError", status: 529 })).not.toContain("document.suggestions_failed");
+  });
+  it("says an assumption action as a word, with the colon as each language writes it", () => {
+    const p = { field: "exit_cap_rate_pct", item: "", to_value: 5.5, reason: "Broker opinion of value" };
+    const words: Record<string, [string, string]> = {
+      enter: ["Entered", "Valeur saisie"], approve: ["Approved", "Approuvée"], resolve: ["Resolved", "Conflit résolu"], modify: ["Modified", "Valeur modifiée"],
+      second_approve: ["Confirmed by a second approver", "Confirmée par un second approbateur"], reject: ["Rejected", "Rejetée"], reopen: ["Reopened", "Rouverte"],
+      accept_default: ["Default accepted", "Valeur par défaut acceptée"], override_pending_second_approval: ["Override waiting for a second approver", "Dérogation en attente"],
+      copied: ["Copied", "Copiée"],
+    };
+    for (const [a, [e, f]] of Object.entries(words)) {
+      const [english, french] = say(`assumption.${a}`, p);
+      expect(english, a).toMatch(new RegExp(`^${e}: Exit cap rate = `));
+      expect(french, a).toMatch(new RegExp(`^${f} : Taux de capitalisation à la sortie = `));
+    }
+  });
+  it("still prints the key of an action it has no sentence for", () => {
+    expect(say("something.new")).toEqual(["something.new", "something.new"]);
+  });
+
+  // Every action name the code can write: a new one without a sentence fails here.
+  const files = (dir: string): string[] =>
+    readdirSync(dir).flatMap((n) => {
+      const p = join(dir, n);
+      if (n === "node_modules" || n === "test") return [];
+      return statSync(p).isDirectory() ? files(p) : /\.(sql|ts|tsx)$/.test(n) ? [p] : [];
+    });
+  const root = join(__dirname, "../../..");
+  const sources = [
+    join(root, "packages/db/migrations"),
+    ...readdirSync(join(root, "apps")).map((a) => join(root, "apps", a, "src")),
+    ...readdirSync(join(root, "packages")).map((a) => join(root, "packages", a, "src")),
+  ].filter((d) => { try { return statSync(d).isDirectory(); } catch { return false; } }).flatMap(files);
+  const written = (() => {
+    const out = new Set<string>();
+    for (const f of sources) {
+      const text = readFileSync(f, "utf8");
+      for (const m of text.matchAll(/agir_audit\(\s*[^,()]+,\s*[^,()]+,\s*'([a-z_.]+)'/g)) out.add(m[1]!);
+      for (const m of text.matchAll(/[^_a-zA-Z.]audit\(\s*db,[^,]+,[^,]+,\s*"([a-z_.]+)"/g)) out.add(m[1]!);
+      // 'assumption.' || p_action: the action names a review function or the log is given.
+      for (const m of text.matchAll(/agir_log_assumption\([^,]+,\s*'([a-z_]+)'/g)) out.add(`assumption.${m[1]}`);
+      for (const m of text.matchAll(/p_action = '([a-z_]+)'/g)) out.add(`assumption.${m[1]}`);
+    }
+    return [...out].sort();
+  })();
+  it("finds the actions the code writes", () => {
+    for (const a of ["deal.created", "figure.labelled", "assumptions.reconciled", "document.suggestions_failed", "document.extracted", "assumption.approve", "assumption.copied", "assumption.enter"]) expect(written, a).toContain(a);
+  });
+  it("gives each of them a sentence, not the key, in both languages", () => {
+    for (const a of written) {
+      const [english, french] = say(a, { field: "exit_cap_rate_pct", item: "", name: "x", from: "solo", to: "team" });
+      expect(english, a).not.toBe(a);
+      expect(french, a).not.toBe(a);
+    }
   });
 });

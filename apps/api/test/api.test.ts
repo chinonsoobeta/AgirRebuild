@@ -2,7 +2,8 @@ import { beforeAll, describe, expect, test } from "vitest";
 import { mkdtempSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
-import { fileStore, migrate, openPglite, type Db } from "@agir/db";
+import { randomUUID } from "node:crypto";
+import { asUser, fileStore, migrate, openPglite, type Db } from "@agir/db";
 import Anthropic from "@anthropic-ai/sdk";
 import { drain, reconcileDeal, type SuggestRequest, type SuggestReply } from "@agir/worker";
 import { documentBytes, loadOracle } from "@agir/testkit";
@@ -1943,5 +1944,64 @@ describe("card 63: a person's decision stands through a later, unrelated reconci
     await label(d, "5.25%", "exit_cap_rate_pct");
     await unlabel(d, "5.25%");
     expect(await lastReconcile(d)).toMatchObject({ restored_values: [{ field: "exit_cap_rate_pct", item: "", by: "label" }] });
+  });
+});
+
+describe("card 58c: the deal overview says while a reconcile is still to run", () => {
+  let sw: string, d: string;
+  const updating = async () => (await call(alice, "GET", `/api/deals/${d}`)).json.updating;
+  const review = async () => (await call(alice, "GET", `/api/deals/${d}/review`)).json;
+
+  test("a deal with nothing queued is not updating", async () => {
+    sw = (await call(alice, "POST", "/api/workspaces", { name: "Updating solo", reviewMode: "solo" })).json.id;
+    d = (await call(alice, "POST", `/api/workspaces/${sw}/deals`, { name: "Updating Fourplex", assetType: "Multifamily", location: "Regina", province: "SK" })).json.id;
+    expect(await updating()).toBe(false);
+    expect((await call(alice, "PUT", `/api/deals/${d}/documents?name=notes.txt`, undefined, new TextEncoder().encode("Notes\nGauge: 5.25%\n"))).status).toBe(200);
+    expect(await updating()).toBe(true);
+    await work();
+    expect(await updating()).toBe(false);
+  });
+
+  test("it is true after a label is saved and before the worker has run, and false after", async () => {
+    const f = (await review()).other.find((o: any) => o.raw === "5.25%");
+    expect((await call(alice, "POST", `/api/deals/${d}/figure-labels`, { documentId: f.documentId, figureId: f.figureId, fieldKey: "exit_cap_rate_pct" })).status).toBe(200);
+    expect(await updating()).toBe(true);
+    await work();
+    expect(await updating()).toBe(false);
+    expect((await call(alice, "DELETE", `/api/deals/${d}/figure-labels`, { documentId: f.documentId, figureId: f.figureId })).status).toBe(200);
+    expect(await updating()).toBe(true);
+    await work();
+    expect(await updating()).toBe(false);
+  });
+
+  test("it is true after a document is retired and before the worker has run, and false after", async () => {
+    const doc = (await call(alice, "GET", `/api/deals/${d}/documents`)).json.find((x: any) => x.name === "notes.txt");
+    expect((await call(alice, "POST", `/api/documents/${doc.id}/retire`)).status).toBe(200);
+    expect(await updating()).toBe(true);
+    await work();
+    expect(await updating()).toBe(false);
+  });
+
+  test("it is true while the job is running, and a finished or dead job does not count", async () => {
+    await db.query(`insert into jobs (kind, payload, status) values ('reconcile_deal', jsonb_build_object('deal_id', $1::text), 'running')`, [d]);
+    expect(await updating()).toBe(true);
+    await db.query(`update jobs set status = 'dead' where payload->>'deal_id' = $1 and status = 'running'`, [d]);
+    expect(await updating()).toBe(false);
+    await db.query(`insert into jobs (kind, payload, status) values ('reconcile_deal', jsonb_build_object('deal_id', $1::text), 'done')`, [d]);
+    await db.query(`insert into jobs (kind, payload) values ('reconcile_deal', jsonb_build_object('deal_id', $1::text))`, [randomUUID()]);
+    expect(await updating()).toBe(false);
+  });
+
+  test("a person outside the workspace cannot ask whether another workspace's deal is updating", async () => {
+    await db.query(`insert into jobs (kind, payload) values ('reconcile_deal', jsonb_build_object('deal_id', $1::text))`, [d]);
+    await signup("erin@example.com", "Erin Outsider", "solo");
+    const [erin] = await db.query<{ id: string }>(`select id from users where email = 'erin@example.com'`);
+    const [alicia] = await db.query<{ id: string }>(`select id from users where email = 'alice@example.com'`);
+    const ask = (u: string) => asUser(db, u, (tx) => tx.query<{ u: boolean }>(`select fn_deal_updating($1::uuid) as u`, [d]));
+    await expect(ask(erin!.id)).rejects.toThrow();
+    expect((await ask(alicia!.id))[0]!.u).toBe(true);
+    // The app role still cannot read the queue itself.
+    await expect(asUser(db, alicia!.id, (tx) => tx.query(`select * from jobs`))).rejects.toThrow();
+    await work();
   });
 });
