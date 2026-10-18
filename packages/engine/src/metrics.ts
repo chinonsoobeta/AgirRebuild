@@ -4,7 +4,7 @@ import { irrRoots } from "./irr.ts";
 import { ratio, sum } from "./math.ts";
 import { runWaterfall } from "./waterfall.ts";
 
-function m(key: string, value: number | null, status?: MetricStatus, reason?: string): Metric {
+export function m(key: string, value: number | null, status?: MetricStatus, reason?: string): Metric {
   const def = METRIC_BY_KEY.get(key);
   if (!def) throw new Error(`metric "${key}" is not in the catalog`);
   const valid = value !== null && Number.isFinite(value) && (status === undefined || status === "VALID");

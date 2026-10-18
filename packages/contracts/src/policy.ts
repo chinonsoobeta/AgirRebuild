@@ -18,6 +18,10 @@ export type StressPreset = {
   rentPct?: number;
   occupancyPts?: number;
   expensePts?: number;
+  pricePct?: number;
+  absorptionPct?: number;
+  presalesPts?: number;
+  constructionMonths?: number;
 };
 
 export const STRESSES: readonly StressPreset[] = [
@@ -100,9 +104,28 @@ export const RENTAL_HOLD_INSURED_DRAFT: Policy = {
   baseSizingDscrFloor: 1.1,
 };
 
+/** Selling units: the owner's seven shocks and four proposed credit gates. */
+export const FOR_SALE_DRAFT: Policy = {
+  ...SHARED,
+  version: "for-sale-draft",
+  draft: true,
+  gates: { profitOnCostForSaleMinPct: 15, marginOnRevenueMinPct: 12, stressedProfitOnCostForSaleMinPct: 0, stressedEquityMultipleMin: 1 },
+  gateKeys: ["profit_on_cost_for_sale", "margin_on_revenue", "stressed_profit_on_cost_for_sale", "stressed_equity_multiple"],
+  stresses: [
+    { key: "prices", label: "Prices -10%", pricePct: -10 },
+    { key: "absorption", label: "Absorption -30%", absorptionPct: -30 },
+    { key: "costs", label: "Costs +10%", costPct: 10 },
+    { key: "rates", label: "Interest rates +100 bps", rateBps: 100 },
+    { key: "construction", label: "Construction +6 months", constructionMonths: 6 },
+    { key: "presales", label: "Presales -15 pts", presalesPts: -15 },
+    { key: "combined", label: "Combined", pricePct: -10, absorptionPct: -30, costPct: 10, rateBps: 100, constructionMonths: 6, presalesPts: -15 },
+  ],
+};
+
 /** The policies of this build, by version. A run made under any other version, or an earlier edit of a draft, replays under the policy it stored. */
 export const POLICIES: Readonly<Record<string, Policy>> = {
   [POLICY_V1.version]: POLICY_V1,
+  [FOR_SALE_DRAFT.version]: FOR_SALE_DRAFT,
   [RENTAL_HOLD_DRAFT.version]: RENTAL_HOLD_DRAFT,
   [RENTAL_HOLD_INSURED_DRAFT.version]: RENTAL_HOLD_INSURED_DRAFT,
 };
@@ -114,6 +137,7 @@ export function runPolicy(snapshot: { policy?: Policy }, version: string): Polic
 
 /** A held run gets the insured draft for a positive premium, otherwise the conventional draft. Every other deal gets v1. */
 export function policyFor(input: EngineInput): Policy {
+  if (input.exit === "for_sale") return FOR_SALE_DRAFT;
   if (input.exit !== "refinance_hold") return POLICY_V1;
   // A stated premium identifies an insured refinance; there is no financing-type field.
   const premium = input.refinance?.insurancePremiumPct;

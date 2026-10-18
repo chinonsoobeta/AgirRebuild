@@ -16,6 +16,9 @@ export type GateSpec = { key: string; label: string; scenario: string; metricKey
 
 /** Every gate any policy can use: where it reads, and the name of its threshold in the policy. */
 const GATE_CATALOG: Record<string, Omit<GateSpec, "threshold"> & { threshold: string }> = {
+  profit_on_cost_for_sale: { key: "profit_on_cost_for_sale", label: "Profit on cost, units sold", scenario: "base", metricKey: "profit_on_cost_for_sale", threshold: "profitOnCostForSaleMinPct" },
+  margin_on_revenue: { key: "margin_on_revenue", label: "Margin on sales revenue", scenario: "base", metricKey: "margin_on_revenue", threshold: "marginOnRevenueMinPct" },
+  stressed_profit_on_cost_for_sale: { key: "stressed_profit_on_cost_for_sale", label: "Profit on cost, units sold, combined stress", scenario: "combined", metricKey: "profit_on_cost_for_sale", threshold: "stressedProfitOnCostForSaleMinPct" },
   equity_multiple: { key: "equity_multiple", label: "Equity multiple", scenario: "base", metricKey: "equity_multiple", threshold: "equityMultipleMin" },
   profit_on_cost: { key: "profit_on_cost", label: "Profit on cost", scenario: "base", metricKey: "profit_on_cost", threshold: "profitOnCostMinPct" },
   development_spread: { key: "development_spread", label: "Development spread", scenario: "base", metricKey: "development_spread", threshold: "developmentSpreadMinBps" },

@@ -234,6 +234,55 @@ function simulateConstruction(input: EngineInput, S: number, costByMonth: number
   };
 }
 
+/** Cost placement shared by rental construction and construction for sale. */
+export function placeConstructionCosts(input: EngineInput, S: number) {
+  const C = input.constructionMonths;
+  const b = input.budget;
+  // Entered cost lines (card 61): development charges and land transfer tax are paid with the land at month 0, GST/HST net in the last construction month.
+  const atLand = (b.developmentCharges ?? 0) + (b.landTransferTax ?? 0);
+  const gstHst = b.gstHstNet ?? 0;
+  const costsBeforeFinancing = b.land + b.hard + b.soft + b.contingency + b.other + atLand + gstHst;
+  const spread = allocate(b.hard + b.soft + b.contingency + b.other, drawShares(C, input.sCurveDraws));
+  const costByMonth: number[] = new Array(Math.max(S, 1)).fill(0);
+  costByMonth[0] = (costByMonth[0] ?? 0) + b.land + atLand;
+  spread.forEach((amt, i) => (costByMonth[i] = (costByMonth[i] ?? 0) + amt));
+  costByMonth[Math.max(C - 1, 0)] = (costByMonth[Math.max(C - 1, 0)] ?? 0) + gstHst;
+  return { costByMonth, costsBeforeFinancing };
+}
+
+/** The same equity-first construction solve for both exit models. */
+export function fundConstruction(input: EngineInput, S: number, costByMonth: number[], costsBeforeFinancing: number) {
+  // ---- Solve required equity so the debt is exactly fully drawn at S --------
+  const stack = tranches(input);
+  const commitments = sum(stack.map((t) => t.terms.amount));
+  let equityBudget = Math.max(0, costsBeforeFinancing - commitments);
+  let sim = simulateConstruction(input, Math.max(S, 1), costByMonth, equityBudget);
+  let converged = false;
+  let iterationDelta = 0;
+  for (let i = 0; i < 200; i++) {
+    const gap = sim.equityOverrun - sim.unusedCommitment;
+    // An overrun and unused commitment must not both remain: that is a gap of zero reached the wrong way.
+    if (Math.abs(gap) < 0.005 && Math.min(sim.equityOverrun, sim.unusedCommitment) < 0.005) {
+      converged = true;
+      break;
+    }
+    const next = Math.max(0, equityBudget + gap);
+    if (next === 0 && equityBudget === 0) {
+      converged = true; // debt alone covers everything; equity cannot go below zero
+      break;
+    }
+    iterationDelta = Math.abs(next - equityBudget);
+    equityBudget = next;
+    sim = simulateConstruction(input, Math.max(S, 1), costByMonth, equityBudget);
+  }
+  const capitalizedInterest = sum(sim.capitalizedInterest) + sum(sim.interestPaidByEquity);
+  const tdc = costsBeforeFinancing + capitalizedInterest;
+  const equityContributed = sum(sim.equityDraw);
+  const drawnDebtAtS = sim.balances.mezzanine + sim.balances.senior;
+
+  return { sim, commitments, converged, capitalizedInterest, tdc, equityContributed, drawnDebtAtS, equityBudget, iterationDelta };
+}
+
 export class MissingSeniorAmortizationError extends Error {
   constructor() {
     super("Senior amortization is required for an amortizing cash or sizing payment.");
@@ -248,51 +297,20 @@ export function buildLedger(input: EngineInput): Ledger {
   const months = T + 1;
 
   // ---- Cost placement ------------------------------------------------------
-  const b = input.budget;
   const y1Egi = stabilizedYear1Egi(input);
   // Property tax is a fixed cost on top of the fixed part of decision 8; the expense stress never moves it.
   const fixedBase = (input.fixedOpexAnnual ?? ((input.expenseRatioPct ?? 0) / 100) * y1Egi) + (input.propertyTaxAnnual ?? 0);
   const variableShare = (input.variableExpensePct ?? 0) / 100;
-  // Entered cost lines (card 61): development charges and land transfer tax are paid with the land at month 0, GST/HST net in the last construction month.
-  const atLand = (b.developmentCharges ?? 0) + (b.landTransferTax ?? 0);
-  const gstHst = b.gstHstNet ?? 0;
-  const costsBeforeFinancing = b.land + b.hard + b.soft + b.contingency + b.other + atLand + gstHst;
-  const spread = allocate(b.hard + b.soft + b.contingency + b.other, drawShares(C, input.sCurveDraws));
-  const costByMonth: number[] = new Array(Math.max(S, 1)).fill(0);
-  costByMonth[0] = (costByMonth[0] ?? 0) + b.land + atLand;
-  spread.forEach((amt, i) => (costByMonth[i] = (costByMonth[i] ?? 0) + amt));
-  costByMonth[Math.max(C - 1, 0)] = (costByMonth[Math.max(C - 1, 0)] ?? 0) + gstHst;
+  const { costsBeforeFinancing, costByMonth } = placeConstructionCosts(input, S);
   // Fixed operating costs at year-1 levels in every lease-up month. With the ramp on they are already netted
   // against lease-up income (operationsAt), so they are charged here only when the ramp is off.
   const leaseupMonthly = !input.leaseUpRamp && input.leaseUpMonths > 0 ? fixedBase / 12 : 0;
   for (let m = C; m < S && leaseupMonthly > 0; m++) costByMonth[m] = (costByMonth[m] ?? 0) + leaseupMonthly;
   const leaseupOperatingCost = leaseupMonthly * (leaseupMonthly > 0 ? input.leaseUpMonths : 0);
 
-  // ---- Solve required equity so the debt is exactly fully drawn at S --------
   const stack = tranches(input);
-  const commitments = sum(stack.map((t) => t.terms.amount));
-  let equityBudget = Math.max(0, costsBeforeFinancing + leaseupOperatingCost - commitments);
-  let sim = simulateConstruction(input, Math.max(S, 1), costByMonth, equityBudget);
-  let converged = false;
-  for (let i = 0; i < 200; i++) {
-    const gap = sim.equityOverrun - sim.unusedCommitment;
-    // An overrun and unused commitment must not both remain: that is a gap of zero reached the wrong way.
-    if (Math.abs(gap) < 0.005 && Math.min(sim.equityOverrun, sim.unusedCommitment) < 0.005) {
-      converged = true;
-      break;
-    }
-    const next = Math.max(0, equityBudget + gap);
-    if (next === 0 && equityBudget === 0) {
-      converged = true; // debt alone covers everything; equity cannot go below zero
-      break;
-    }
-    equityBudget = next;
-    sim = simulateConstruction(input, Math.max(S, 1), costByMonth, equityBudget);
-  }
-  const capitalizedInterest = sum(sim.capitalizedInterest) + sum(sim.interestPaidByEquity);
-  const tdc = costsBeforeFinancing + leaseupOperatingCost + capitalizedInterest;
-  const equityContributed = sum(sim.equityDraw);
-  const drawnDebtAtS = sim.balances.mezzanine + sim.balances.senior;
+  const { sim, commitments, converged, capitalizedInterest, tdc, equityContributed, drawnDebtAtS } =
+    fundConstruction(input, S, costByMonth, costsBeforeFinancing + leaseupOperatingCost);
 
   // ---- Operations ------------------------------------------------------------
 

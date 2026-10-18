@@ -27,6 +27,12 @@ export function validateInput(input: EngineInput): void {
     // The credit is spread with hard, soft and contingency: a bigger one would make a month's construction spend negative.
     if (b.hard + b.soft + b.contingency + b.other < 0) p.push("a credit in other costs cannot be more than hard costs, soft costs and contingency together");
   }
+  if (input.exit === "for_sale") {
+    validateForSale(input, p);
+    if (p.length > 0) throw new EngineInputError(p);
+    return;
+  }
+  if (input.forSale !== undefined) p.push("forSale is only allowed when exit is for_sale");
   if (input.revenue.length === 0) p.push("at least one revenue component is required");
   for (const c of input.revenue) {
     const name = `revenue component "${c.label || c.key}"`;
@@ -90,4 +96,32 @@ export function validateInput(input: EngineInput): void {
     if (!finite(w.gpPromotePct) || w.gpPromotePct < 0 || w.gpPromotePct > 100) p.push("GP promote must be from 0 to 100");
   }
   if (p.length > 0) throw new EngineInputError(p);
+}
+
+
+/** For-sale inputs use construction funding and sale drivers, never rental assumptions. */
+function validateForSale(input: EngineInput, p: string[]) {
+  if (input.revenue.length > 0) p.push("for-sale revenue must be empty; the units are sold, not rented");
+  if (input.refinance !== undefined) p.push("for-sale input cannot have a refinance");
+  if (input.leaseUpMonths !== 0) p.push("for-sale input cannot have lease-up months");
+  if (!finite(input.constructionMonths) || !Number.isInteger(input.constructionMonths) || input.constructionMonths < 0 || input.constructionMonths > 120) p.push("construction months must be a whole number from 0 to 120");
+  for (const [name, loan] of [["senior", input.senior], ["mezzanine", input.mezzanine]] as const) {
+    if (!loan) continue;
+    if (!finite(loan.amount) || loan.amount < 0) p.push(`${name} loan amount must be at least 0`);
+    if (!finite(loan.ratePct) || loan.ratePct < 0) p.push(`${name} loan rate must be at least 0`);
+  }
+  const f = input.forSale;
+  if (!f) { p.push("forSale is required when exit is for_sale"); return; }
+  if (!Array.isArray(f.units) || f.units.length === 0) p.push("forSale needs at least one unit type");
+  else for (const u of f.units) {
+    if (!finite(u.units) || !Number.isInteger(u.units) || u.units <= 0) p.push(`forSale unit type "${u.label || u.key}" needs a whole unit count above 0`);
+    if (!finite(u.price) || u.price < 0) p.push(`forSale unit type "${u.label || u.key}" price must be at least 0`);
+  }
+  for (const key of ["presoldPct", "depositPct", "commissionPct", ...(f.presaleThresholdPct === undefined ? [] : ["presaleThresholdPct"])] as const) {
+    const n = f[key as "presoldPct" | "depositPct" | "commissionPct" | "presaleThresholdPct"];
+    if (!finite(n) || n < 0 || n > 100) p.push(`forSale ${key} must be between 0 and 100`);
+  }
+  if (!finite(f.absorptionPerMonth) || f.absorptionPerMonth <= 0) p.push("forSale absorptionPerMonth must be above 0");
+  if (!finite(f.closingLagMonths) || !Number.isInteger(f.closingLagMonths) || f.closingLagMonths < 0) p.push("forSale closingLagMonths must be a whole number of at least 0");
+  if (!finite(f.carryMonthly) || f.carryMonthly < 0) p.push("forSale carryMonthly must be at least 0");
 }

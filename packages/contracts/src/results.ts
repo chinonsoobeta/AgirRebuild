@@ -61,7 +61,18 @@ export type EngineInput = {
   mezzanine?: LoanTerms;
   refinance?: { month: number; amount?: number; ltvPct?: number; ratePct: number; amortYears: number; ioMonths: number; /** Added to the loan; present only when stated. */ insurancePremiumPct?: number };
   /** The deal is kept and refinanced, not sold. Set only when the flag is 1; absent otherwise, so a sale deal's input hashes as before. */
-  exit?: "refinance_hold";
+  exit?: "refinance_hold" | "for_sale";
+  /** Present exactly when units are sold individually, with no rental operations. */
+  forSale?: {
+    units: { key: string; label: string; units: number; price: number }[];
+    presoldPct: number;
+    depositPct: number;
+    absorptionPerMonth: number;
+    commissionPct: number;
+    closingLagMonths: number;
+    carryMonthly: number;
+    presaleThresholdPct?: number;
+  };
   waterfall?: { lpSharePct: number; preferredReturnPct: number; gpPromotePct: number };
   stated: {
     equity?: number;

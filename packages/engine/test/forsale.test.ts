@@ -101,6 +101,7 @@ describe("selling the units (task 77)", () => {
     expect(value(run(small()), "sellout_month").value).toBe(4);
   });
   test("Q5: the lender's presale condition is base-only and includes equality", () => {
+    // Base 50% meets 50%; 49% is one point short. The -15-point stress is not a lender retest.
     const d = small();
     expect(run(d).checks.some((c) => c.key === "presale_threshold_unmet")).toBe(false);
     expect(contracts.FOR_SALE_DRAFT.stresses.find((s) => s.key === "presales")).toMatchObject({ presalesPts: -15 });
@@ -116,7 +117,9 @@ describe("selling the units (task 77)", () => {
   test("unpaid debt rejects without negative distributions", () => {
     const d = small(); d.forSale!.units = d.forSale!.units.map((u) => ({ ...u, price: 1 }));
     const r = run(d);
-    expect(r.checks.find((c) => c.key === "for_sale_debt_unpaid")).toMatchObject({ severity: "error", actual: 70 - 3 * 0.9 });
+    const unpaid = r.checks.find((c) => c.key === "for_sale_debt_unpaid")!;
+    expect(unpaid).toMatchObject({ severity: "error" });
+    expect(unpaid.actual).toBeCloseTo(70 - 3 * 0.9, 10);
     expect(r.verdict.code).toBe("REJECT");
     expect(r.equityFlows.filter((f) => f.kind === "sale").every((f) => f.amount >= 0)).toBe(true);
   });

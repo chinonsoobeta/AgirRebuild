@@ -1,7 +1,7 @@
 // The metric catalog: every figure the engine reports, declared once. Each
 // metric is a projection of the one monthly ledger; nothing else computes it.
 
-export type MetricUnit = "$" | "%" | "x" | "bps" | "count" | "months";
+export type MetricUnit = "$" | "%" | "x" | "bps" | "count" | "months" | "years";
 
 export type MetricDef = {
   key: string;
@@ -61,6 +61,35 @@ export const METRICS: readonly MetricDef[] = [
   { key: "stated_value", label: "Stated value (unrealized, not a sale)", unit: "$", formula: "final hold-year NOI / exit cap rate, no selling costs" },
   { key: "unrealized_equity_multiple", label: "Equity multiple (unrealized, not a sale)", unit: "x", formula: "(operating + refinance + unrealized distributions) / contributions" },
   { key: "unrealized_equity_irr", label: "Equity IRR (unrealized, not a sale)", unit: "%", formula: "rate that sets the dated equity cash flows' NPV to zero, with the unrealized flow" },
+  // Selling units only (card 77): never appended to a rental result.
+  {"key": "gross_sales_revenue", "label": "Gross sales revenue", "unit": "$", "formula": "Total units times weighted average price."},
+  {"key": "net_sales_revenue", "label": "Net sales revenue", "unit": "$", "formula": "Gross sales less commission."},
+  {"key": "interest_before_completion", "label": "Interest before completion", "unit": "$", "formula": "Mezzanine and senior opening-balance interest for months 0 through C-1, including equity-paid interest."},
+  {"key": "interest_after_completion", "label": "Interest after completion", "unit": "$", "formula": "Mezzanine and senior opening-balance interest for months C through E."},
+  {"key": "carry_total", "label": "Carry total", "unit": "$", "formula": "Sum of carry paid by equity."},
+  {"key": "development_profit_for_sale", "label": "Development profit for sale", "unit": "$", "formula": "Net sales - TDC - carry - interest after completion."},
+  {"key": "profit_on_cost_for_sale", "label": "Profit on cost for sale", "unit": "%", "formula": "Profit / (TDC + carry + interest after completion) times 100. Percent units."},
+  {"key": "margin_on_revenue", "label": "Margin on revenue", "unit": "%", "formula": "Profit / net sales times 100. Percent units."},
+  {"key": "equity_contributed", "label": "Equity contributed", "unit": "$", "formula": "Sum of equity cost draws + senior interest paid by equity + overruns + carry."},
+  {"key": "equity_distributed", "label": "Equity distributed", "unit": "$", "formula": "Sum of closing proceeds after senior and mezzanine repayments."},
+  {"key": "completion_month", "label": "Completion month", "unit": "months", "formula": "Construction period C."},
+  {"key": "sellout_month", "label": "Sellout month", "unit": "months", "formula": "Last closing month E."},
+  {"key": "sellout_years", "label": "Sellout years", "unit": "years", "formula": "(E + 1) / 12."},
+  {"key": "deposits_held_at_completion", "label": "Deposits held at completion", "unit": "$", "formula": "Presold whole units times average price times deposit percentage / 100. Trust only; no cash-flow effect."},
+  {"key": "senior_balance_at_completion", "label": "Senior balance at completion", "unit": "$", "formula": "Senior opening balance in month C."},
+  {"key": "mezz_balance_at_completion", "label": "Mezz balance at completion", "unit": "$", "formula": "Mezzanine opening balance in month C."},
+  {"key": "unused_commitment_at_completion", "label": "Unused commitment at completion", "unit": "$", "formula": "Unused senior + mezzanine commitments immediately before month C."},
+  {"key": "equity_overrun", "label": "Equity overrun", "unit": "$", "formula": "Sum of equity cost overruns before completion."},
+  {"key": "required_equity_budget", "label": "Required equity budget", "unit": "$", "formula": "Final visible iteration budget. Cost draws use this budget; senior interest paid by equity is a separate contribution."},
+  {"key": "iteration_delta", "label": "Iteration delta", "unit": "$", "formula": "Absolute difference between budgets in iterations 29 and 30."},
+  {"key": "funding_converged", "label": "Funding converged", "unit": "count", "formula": "Unused commitment, equity overrun and iteration delta are each below $0.005."},
+  {"key": "profit_reconciliation_difference", "label": "Profit reconciliation difference", "unit": "$", "formula": "Equity distributed - equity contributed - development profit."},
+  {"key": "profit_reconciliation_pass", "label": "Profit reconciliation pass", "unit": "count", "formula": "Absolute reconciliation difference is at most $0.01."},
+  {"key": "flow_sign_changes", "label": "Flow sign changes", "unit": "count", "formula": "Count changes of sign in the dated monthly net equity series, ignoring zero flows."},
+  {"key": "ending_senior_balance", "label": "Ending senior balance", "unit": "$", "formula": "Senior debt after final closings."},
+  {"key": "ending_mezz_balance", "label": "Ending mezz balance", "unit": "$", "formula": "Mezzanine debt after final closings."},
+  {"key": "closing_units_check", "label": "Closing units check", "unit": "count", "formula": "Total units closed - total units. Must equal zero."},
+  {"key": "cost_allocation_check", "label": "Cost allocation check", "unit": "$", "formula": "Sum of allocated construction costs - hard - soft - contingency. Must be within floating-point precision."},
 ];
 
 export const METRIC_BY_KEY: ReadonlyMap<string, MetricDef> = new Map(METRICS.map((m) => [m.key, m]));

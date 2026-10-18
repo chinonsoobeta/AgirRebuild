@@ -4,6 +4,7 @@ import { computeMetrics } from "./metrics.ts";
 import { runChecks } from "./checks.ts";
 import { computeVerdict } from "./verdict.ts";
 import { applyStress } from "./stress.ts";
+import { underwriteForSale } from "./forsale.ts";
 import { validateInput } from "./validate.ts";
 
 export const ENGINE_VERSION = "1.0.0";
@@ -15,6 +16,7 @@ export const ENGINE_VERSION = "1.0.0";
  */
 export function underwrite(input: EngineInput, policy: Policy): RunResult {
   validateInput(input);
+  if (input.exit === "for_sale") return underwriteForSale(input, policy, ENGINE_VERSION);
   let base: Ledger;
   try {
     base = buildLedger(input);
