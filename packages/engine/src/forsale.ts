@@ -112,8 +112,14 @@ export function buildForSaleLedger(input: EngineInput): ForSaleLedger {
   } };
 }
 
-function forSaleMetrics(L: ForSaleLedger) {
+function forSaleMetrics(input: EngineInput, L: ForSaleLedger) {
   const v: Record<string, number | null> = { ...L.values };
+  const commitments = input.senior.amount + (input.mezzanine?.amount ?? 0);
+  const units = sum(input.forSale!.units.map((u) => u.units));
+  const ltc = ratio(commitments, v.total_development_cost!);
+  v.loan_to_cost = ltc === null ? null : ltc * 100;
+  v.required_equity = v.total_development_cost! - commitments;
+  v.cost_per_unit = units > 0 ? v.total_development_cost! / units : null;
   const cost = v.total_development_cost! + v.carry_total! + v.interest_after_completion!;
   const poc = ratio(v.development_profit_for_sale!, cost);
   const margin = ratio(v.development_profit_for_sale!, v.net_sales_revenue!);
@@ -122,16 +128,19 @@ function forSaleMetrics(L: ForSaleLedger) {
   v.equity_multiple = ratio(v.equity_distributed!, v.equity_contributed!);
   const roots = irrRoots(L.equityFlows);
   v.equity_irr = v.flow_sign_changes === 1 && roots.length === 1 ? roots[0]! * 100 : null;
-  const metrics = METRICS.map((def) => !Object.hasOwn(v, def.key)
-    ? m(def.key, null, "NOT_APPLICABLE", "The units are sold; there is no rental income.")
-    : m(def.key, v[def.key]!, undefined, def.key === "equity_irr" ? `The dated net equity flows have ${v.flow_sign_changes} sign changes and ${roots.length} IRR roots; exactly one of each is required.` : undefined));
+  const metrics = METRICS.map((def) => {
+    if (!Object.hasOwn(v, def.key)) return m(def.key, null, "NOT_APPLICABLE", "The units are sold; there is no rental income.");
+    if (def.key === "loan_to_cost" && ltc === null) return m(def.key, null, "NOT_MEANINGFUL", "Total development cost is zero.");
+    if (def.key === "cost_per_unit" && units <= 0) return m(def.key, null, "NOT_APPLICABLE", "The program has no dwelling units.");
+    return m(def.key, v[def.key]!, undefined, def.key === "equity_irr" ? `The dated net equity flows have ${v.flow_sign_changes} sign changes and ${roots.length} IRR roots; exactly one of each is required.` : undefined);
+  });
   return { metrics, roots };
 }
 
 /** Checks read the base case only, as for rental deals; a stress shows in its metrics and gates. */
 export function underwriteForSale(input: EngineInput, policy: Policy, engineVersion: string): RunResult {
   const base = buildForSaleLedger(input);
-  const baseMetrics = forSaleMetrics(base);
+  const baseMetrics = forSaleMetrics(input, base);
   const scenarios: ScenarioResult[] = [{ key: "base", label: "Base case", metrics: baseMetrics.metrics }];
   const checks: Check[] = [];
   const checkLedger = (L: ForSaleLedger, label: string) => {
@@ -141,8 +150,9 @@ export function underwriteForSale(input: EngineInput, policy: Policy, engineVers
   };
   checkLedger(base, "Base case");
   for (const stress of policy.stresses) {
-    const L = buildForSaleLedger(applyStress(input, stress));
-    scenarios.push({ key: stress.key, label: stress.label, metrics: forSaleMetrics(L).metrics });
+    const stressed = applyStress(input, stress);
+    const L = buildForSaleLedger(stressed);
+    scenarios.push({ key: stress.key, label: stress.label, metrics: forSaleMetrics(stressed, L).metrics });
   }
   const f = input.forSale!;
   if (f.presaleThresholdPct !== undefined && f.presoldPct < f.presaleThresholdPct) checks.push({ key: "presale_threshold_unmet", kind: "bound", severity: "error",

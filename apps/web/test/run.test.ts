@@ -6,6 +6,7 @@ import { underwrite } from "../../../packages/engine/src/index.ts";
 import { allEquityDeal, developmentDeal } from "../../../packages/engine/test/fixtures.ts";
 import * as runScreen from "../src/routes/run.tsx";
 import { Explore } from "../src/routes/explore.tsx";
+import { build } from "../src/i18n.tsx";
 
 const queryState = vi.hoisted(() => ({ run: undefined as unknown, options: [] as { queryKey: unknown[]; enabled?: boolean }[] }));
 vi.mock("@tanstack/react-query", () => ({
@@ -22,7 +23,8 @@ vi.mock("../src/components/ui", async (original) => {
   return {
     ...ui,
     DealHeader: () => createElement("header", null, "Deal header"),
-    useDeal: () => ({ data: { run: { id: "sale-run", number: 1 } } }),
+    useDeal: () => ({ data: { run: { id: "sale-run", number: 1 }, documents: { total: 0, processing: 0, failed: 0 },
+      review: { status: "ready", approved: 1, needsReview: 0, conflicting: 0, awaitingSecond: 0, missing: 0, impossible: 0 } } }),
     useSession: () => ({ solo: true }),
   };
 });
@@ -69,6 +71,16 @@ describe("the run screen for a deal that sells its units (task 79)", () => {
         "loan_to_cost", "required_equity", "debt_yield", "sizing_dscr", "contractual_dscr", "cost_per_unit"],
       stressKeys: ["sizing_dscr", "dcr_after_refinance", "unrealized_equity_multiple"],
     });
+  });
+  it.each([["sale", sale], ["rental", rental], ["held", held]] as const)("%s keeps the appropriate annual section and explore link", (mode, result) => {
+    queryState.run = { id: "sale-run", number: 1, result, fresh: true, staleReasons: [], inputs: [],
+      policyVersion: result.policyVersion, policyDraft: true, engineVersion: result.engineVersion,
+      createdAt: "2026-10-18T00:00:00Z", createdBy: null, inputHash: "input-hash", resultHash: "result-hash", signed: "development key" };
+    const html = renderToStaticMarkup(createElement(runScreen.Run, { dealId: mode }));
+    const i = build("en", () => {});
+    expect(html.includes(i.t("run.annual"))).toBe(mode !== "sale");
+    expect(html.includes(`<a>${i.t("run.explore")}</a>`)).toBe(mode !== "sale");
+    expect(html.includes("A deal that sells its units has no years of operations.")).toBe(mode === "sale");
   });
   it("a sale's explore route renders only its header and explanation and disables every sensitivity query", () => {
     queryState.run = { result: sale };

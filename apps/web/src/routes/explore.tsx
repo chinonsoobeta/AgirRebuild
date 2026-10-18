@@ -5,7 +5,7 @@ import { api, type Metric, type RunView } from "../api";
 import { Banner, DealHeader, ErrorText, MetricValue, useDeal, useSession, VerdictBadge } from "../components/ui";
 import * as I from "../components/icons";
 import { checkText, useI18n, verdictText } from "../i18n";
-import { GateOutcome, useRun } from "./run";
+import { GateOutcome, layoutFor, useRun } from "./run";
 
 type Driver = { key: string; label: string; unit: "bps" | "%" | "pts" | "months"; min: number; max: number; step: number; swing: number; direction: 1 | -1 };
 type Exploration = { scenarios: RunView["result"]["scenarios"]; verdict: RunView["result"]["verdict"]; checks: RunView["result"]["checks"] };
@@ -35,20 +35,22 @@ export function Explore({ dealId }: { dealId: string }) {
   const deal = useDeal(dealId);
   const runId = deal.data?.run?.id;
   const run = useRun(runId);
-  const drivers = useQuery({ queryKey: ["drivers"], queryFn: () => api.get<Driver[]>("/sensitivity/drivers"), staleTime: Infinity });
+  const sale = run.data ? layoutFor(run.data.result.scenarios[0]!.metrics).sale : false;
+  const canExplore = Boolean(run.data) && !sale;
+  const drivers = useQuery({ queryKey: ["drivers"], queryFn: () => api.get<Driver[]>("/sensitivity/drivers"), staleTime: Infinity, enabled: canExplore });
   const [shock, setShock] = useState<Record<string, number>>({});
   const debounced = useDebounced(shock, 250);
   const explored = useQuery({
     queryKey: ["explore", runId, debounced],
     queryFn: () => api.post<Exploration>(`/runs/${runId}/explore`, { shock: debounced }),
-    enabled: Boolean(runId),
+    enabled: canExplore,
     placeholderData: (prev) => prev,
   });
   const [tMetric, setTMetric] = useState("equity_multiple");
-  const tornado = useQuery({ queryKey: ["tornado", runId, tMetric], queryFn: () => api.post<Tornado>(`/runs/${runId}/tornado`, { metric: tMetric }), enabled: Boolean(runId) });
-  const breakeven = useQuery({ queryKey: ["breakeven", runId], queryFn: () => api.post<Breakeven>(`/runs/${runId}/breakeven`, {}), enabled: Boolean(runId) });
+  const tornado = useQuery({ queryKey: ["tornado", runId, tMetric], queryFn: () => api.post<Tornado>(`/runs/${runId}/tornado`, { metric: tMetric }), enabled: canExplore });
+  const breakeven = useQuery({ queryKey: ["breakeven", runId], queryFn: () => api.post<Breakeven>(`/runs/${runId}/breakeven`, {}), enabled: canExplore });
   const [g, setG] = useState({ metric: "sizing_dscr", x: "rateBps", y: "rentPct" });
-  const grid = useQuery({ queryKey: ["grid", runId, g], queryFn: () => api.post<Grid>(`/runs/${runId}/grid`, { ...g, steps: 5 }), enabled: Boolean(runId) && g.x !== g.y, placeholderData: (prev) => prev });
+  const grid = useQuery({ queryKey: ["grid", runId, g], queryFn: () => api.post<Grid>(`/runs/${runId}/grid`, { ...g, steps: 5 }), enabled: canExplore && g.x !== g.y, placeholderData: (prev) => prev });
 
   if (!deal.data) return <p className="muted">{t("common.loading")}</p>;
   if (!runId) {
@@ -59,6 +61,12 @@ export function Explore({ dealId }: { dealId: string }) {
       </>
     );
   }
+  if (sale) return (
+    <>
+      <DealHeader o={deal.data} active="run" />
+      <p className="muted">{t("explore.saleUnavailable")}</p>
+    </>
+  );
   const runData = run.data;
   const metricOf = (scenarios: Exploration["scenarios"] | undefined, key: string) => scenarios?.[0]?.metrics.find((m) => m.key === key);
   const unitOf = (key: string) => metricOf(runData?.result.scenarios, key)?.unit ?? "x";

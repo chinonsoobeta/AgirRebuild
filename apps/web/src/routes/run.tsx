@@ -19,6 +19,21 @@ const HELD_HEADLINE = [
   "loan_to_cost", "required_equity", "debt_yield", "sizing_dscr", "contractual_dscr", "cost_per_unit",
 ];
 
+const SALE_HEADLINE = [
+  "total_development_cost", "interest_before_completion", "gross_sales_revenue", "net_sales_revenue", "carry_total", "interest_after_completion",
+  "development_profit_for_sale", "profit_on_cost_for_sale", "margin_on_revenue", "loan_to_cost", "required_equity", "peak_equity", "equity_multiple",
+  "equity_irr", "deposits_held_at_completion", "completion_month", "sellout_month", "cost_per_unit",
+];
+
+export function layoutFor(metrics: readonly Pick<Metric, "key">[]) {
+  if (metrics.some((m) => m.key === "gross_sales_revenue")) {
+    return { sale: true, headline: SALE_HEADLINE, stressKeys: ["profit_on_cost_for_sale", "margin_on_revenue", "equity_multiple"] };
+  }
+  const held = metrics.some((m) => m.key === "stated_value");
+  return { sale: false, headline: held ? HELD_HEADLINE : HEADLINE,
+    stressKeys: held ? ["sizing_dscr", "dcr_after_refinance", "unrealized_equity_multiple"] : ["sizing_dscr", "equity_multiple", "profit_on_cost"] };
+}
+
 export function useRun(runId: string | undefined) {
   return useQuery({ queryKey: ["run", runId], queryFn: () => api.get<RunView>(`/runs/${runId}`), enabled: Boolean(runId) });
 }
@@ -86,9 +101,7 @@ export function Run({ dealId }: { dealId: string }) {
   const base = v.result.scenarios[0]!;
   const metric = (k: string, s = base) => s.metrics.find((m) => m.key === k)!;
   const vt = verdictText(i, v.result.verdict, v.result.checks, solo);
-  const held = base.metrics.some((m) => m.key === "stated_value");
-  const headline = held ? HELD_HEADLINE : HEADLINE;
-  const stressKeys = held ? ["sizing_dscr", "dcr_after_refinance", "unrealized_equity_multiple"] : ["sizing_dscr", "equity_multiple", "profit_on_cost"];
+  const { sale, headline, stressKeys } = layoutFor(base.metrics);
   return (
     <>
       <DealHeader o={o} active="run" />
@@ -107,7 +120,7 @@ export function Run({ dealId }: { dealId: string }) {
           <p className="muted" style={{ fontSize: 16 }}>{vt.explanation}</p>
         </div>
         <div className="row">
-          <Link to="/deals/$dealId/explore" params={{ dealId }} className="btn quiet">{t("run.explore")}</Link>
+          {!sale && <Link to="/deals/$dealId/explore" params={{ dealId }} className="btn quiet">{t("run.explore")}</Link>}
           <Link to="/deals/$dealId/reports" params={{ dealId }} className="btn">{t("run.memo")}</Link>
           <Link to="/deals/$dealId/decision" params={{ dealId }} className="btn primary">{t("run.decide")}</Link>
         </div>
@@ -152,7 +165,7 @@ export function Run({ dealId }: { dealId: string }) {
             </table>
           </div>
 
-          <div className="stack">
+          {sale ? <p className="muted">{t("run.saleCashFlows")}</p> : <div className="stack">
             <h2 className="h-section">{t("run.annual")}</h2>
             <table className="tbl">
               <thead><tr><th>{t("run.col.period")}</th><th className="r">{t("run.col.egi")}</th><th className="r">{t("run.col.opex")}</th><th className="r">{t("run.col.noi")}</th><th className="r">{t("run.col.ds")}</th><th className="r">{t("run.col.cf")}</th></tr></thead>
@@ -165,7 +178,7 @@ export function Run({ dealId }: { dealId: string }) {
                 ))}
               </tbody>
             </table>
-          </div>
+          </div>}
 
           {trace && (
             <div className="stack">
