@@ -4,7 +4,7 @@
 // the language: 51,962,556 and 6.45% in English, 51 962 556 $ and 6,45 % in French.
 
 import { createContext, useContext, useMemo, useState, type ReactNode } from "react";
-import { CURRENCY_NAMES, FIELD_BY_KEY, METRIC_BY_KEY, placeLabel, type Currency, type ReadinessItem } from "@agir/contracts";
+import { CURRENCY_NAMES, FIELDS, FIELD_BY_KEY, METRIC_BY_KEY, placeLabel, type Currency, type ReadinessItem } from "@agir/contracts";
 
 export type Lang = "en" | "fr";
 
@@ -206,6 +206,11 @@ const EN = {
   "qs.template": "What are you building?",
   "qs.t.multiplex": "Multiplex rental (2–4 units)",
   "qs.t.apartment": "Small apartment (5–30 units)",
+  "qs.t.townhomes": "Townhomes for sale (2–30 units)",
+  "qs.saleLine": "These units are sold, not rented.",
+  "qs.unitSalePrice": "Sale price per unit",
+  "qs.doneSales": "Your answers are saved.",
+  "qs.saleGstQuestion": "What will GST/HST cost, net of rebates?",
   "qs.optional": "optional",
   "qs.sell": "Sell it",
   "qs.keep": "Keep it and refinance",
@@ -708,6 +713,11 @@ const FR: Record<Key, Entry> = {
   "qs.template": "Que construisez-vous ?",
   "qs.t.multiplex": "Multiplex locatif (2–4 logements)",
   "qs.t.apartment": "Petit immeuble d'appartements (5–30 logements)",
+  "qs.t.townhomes": "Maisons en rangée à vendre (2 à 30 logements)",
+  "qs.saleLine": "Ces logements sont vendus, et non loués.",
+  "qs.unitSalePrice": "Prix de vente par logement",
+  "qs.doneSales": "Vos réponses sont enregistrées.",
+  "qs.saleGstQuestion": "Combien coûtera la TPS/TVH, nette des remboursements ?",
   "qs.optional": "facultatif",
   "qs.sell": "Le vendre",
   "qs.keep": "Le conserver et le refinancer",
@@ -1011,6 +1021,10 @@ const FR: Record<Key, Entry> = {
 
 // ---- Catalog labels in French ------------------------------------------------------------
 const FR_FIELDS: Record<string, string> = {
+  sell_units: "Vendre les logements (sans location)", unit_sale_price: "Prix de vente par logement", presold_units_pct: "Logements prévendus",
+  deposit_pct: "Dépôt de l'acheteur", absorption_units_per_month: "Rythme de vente (logements par mois)", sales_commission_pct: "Commission de vente",
+  closing_lag_months: "Mois entre l'achèvement et la première conclusion de vente", unsold_carry_monthly: "Frais de possession par logement non vendu par mois",
+  senior_presale_threshold_pct: "Seuil de préventes du prêteur",
   land_cost: "Coût du terrain", hard_cost: "Coûts directs", soft_cost: "Coûts indirects", contingency: "Provision pour imprévus", other_cost: "Autres coûts",
   unit_count: "Logements", unit_rent_monthly: "Loyer par logement par mois", rentable_area_sf: "Superficie locative", rent_psf_annual: "Loyer par pi² par an",
   item_occupancy_pct: "Occupation de la composante", construction_months: "Durée de construction", lease_up_months: "Période de location",
@@ -1030,6 +1044,7 @@ const FR_FIELDS: Record<string, string> = {
   property_tax_annual: "Taxe foncière (par année)", refinance_insurance_premium_pct: "Prime d'assurance hypothécaire du refinancement",
 };
 const FR_HELP: Record<string, string> = {
+  unit_sale_price: "Net de TPS/TVH et de tout remboursement conservé par le constructeur.",
   contingency: "Saisissez 0 si le budget n'en prévoit pas.",
   other_cost: "Saisissez un vrai crédit (remise, remboursement) sous forme de montant négatif, avec le motif.",
   lease_up_months: "Saisissez 0 si l'actif est stabilisé dès la fin des travaux.",
@@ -1042,6 +1057,8 @@ const FR_HELP: Record<string, string> = {
   refinance_insurance_premium_pct: "La prime est ajoutée au prêt de refinancement. Ne la saisissez pas s'il n'y a pas d'assurance hypothécaire.",
 };
 const FR_ABSENT: Record<string, string> = {
+  sell_units: "les logements sont loués",
+  senior_presale_threshold_pct: "aucune condition de préventes déclarée",
   other_cost: "aucun autre coût",
   unit_rent_monthly: "le loyer est au pied carré",
   rentable_area_sf: "le loyer est par logement",
@@ -1076,6 +1093,15 @@ const FR_ABSENT: Record<string, string> = {
 };
 // Quick-start questions: [question, hint] in English and in French, by field key.
 const ASK: Record<string, [[string, string?], [string, string?]]> = {
+  sell_units: [["Will you sell the units instead of renting them?"], ["Vendrez-vous les logements au lieu de les louer ?"]],
+  unit_sale_price: [["What is the sale price per unit?", "Net of GST/HST and any rebate the builder keeps."], ["Quel est le prix de vente par logement ?", "Net de TPS/TVH et de tout remboursement conservé par le constructeur."]],
+  presold_units_pct: [["What percentage of units is presold?", "Enter 0 if none are presold."], ["Quel pourcentage des logements est prévendu ?", "Saisissez 0 si aucun n'est prévendu."]],
+  deposit_pct: [["What percentage of the price is the buyer's deposit?", "Enter 0 if there is no deposit. Deposits stay in trust and do not fund costs."], ["Quel pourcentage du prix représente le dépôt de l'acheteur ?", "Saisissez 0 s'il n'y a pas de dépôt. Les dépôts restent en fiducie et ne financent pas les coûts."]],
+  absorption_units_per_month: [["How many units will sell per month?", "A fraction is allowed, such as 0.5 for one unit every two months."], ["Combien de logements seront vendus par mois ?", "Une fraction est permise, comme 0,5 pour un logement tous les deux mois."]],
+  sales_commission_pct: [["What percentage of sales pays the commission?", "Enter 0 if there is no commission."], ["Quel pourcentage des ventes paie la commission ?", "Saisissez 0 s'il n'y a pas de commission."]],
+  closing_lag_months: [["How many months from completion to the first closing?", "Enter 0 for a freehold townhome that closes at completion."], ["Combien de mois entre l'achèvement et la première conclusion de vente ?", "Saisissez 0 pour une maison en rangée en pleine propriété dont la vente est conclue à l'achèvement."]],
+  unsold_carry_monthly: [["What will each unsold unit cost to carry per month?", "Enter 0 if there are no carrying costs."], ["Quels seront les frais de possession mensuels par logement non vendu ?", "Saisissez 0 s'il n'y a pas de frais de possession."]],
+  senior_presale_threshold_pct: [["What percentage of units must be presold for the loan?", "Leave blank if no presale condition is stated."], ["Quel pourcentage des logements doit être prévendu pour le prêt ?", "Laissez vide si aucune condition de préventes n'est déclarée."]],
   land_cost: [["What did you pay, or will you pay, for the land?", "Include the purchase price only; closing costs go in soft costs."], ["Combien avez-vous payé, ou paierez-vous, pour le terrain ?", "Le prix d'achat seulement ; les frais de clôture vont dans les coûts indirects."]],
   hard_cost: [["What will construction cost?", "Labour and materials, from your builder's quote or estimate."], ["Combien coûteront les travaux de construction ?", "Main-d'œuvre et matériaux, selon la soumission ou l'estimation de l'entrepreneur."]],
   soft_cost: [["What will design, permits, fees and legal cost?", "Everything that is not land or construction."], ["Combien coûteront la conception, les permis, les frais et les services juridiques ?", "Tout ce qui n'est ni le terrain ni la construction."]],
@@ -1106,6 +1132,7 @@ const ASK: Record<string, [[string, string?], [string, string?]]> = {
   gst_hst_net: [["What will GST/HST cost, net of the rental rebates?", "Leave blank if there is none, or if your soft or other costs already include it."], ["Combien coûtera la TPS/TVH, nette des remboursements pour logement locatif ?", "Laissez vide s'il n'y en a pas, ou si vos coûts indirects ou autres coûts l'incluent déjà."]],
 };
 const GROUPS: Record<string, [string, string]> = {
+  sale: ["Unit sales", "Ventes des unités"],
   budget: ["Budget", "Budget"], revenue: ["Revenue", "Revenus"], timeline: ["Timeline", "Échéancier"], operations: ["Operations", "Exploitation"],
   exit: ["Exit", "Sortie"], senior: ["Senior loan", "Prêt principal"], mezzanine: ["Mezzanine loan", "Prêt mezzanine"], equity: ["Equity", "Fonds propres"],
   refinance: ["Refinance", "Refinancement"], waterfall: ["LP/GP split", "Partage commanditaires-commandité"], stated: ["Stated figures (checks)", "Chiffres déclarés (contrôles)"],
@@ -1366,6 +1393,12 @@ const FR_REASONS: [RegExp, string | ((m: RegExpMatchArray) => string)][] = [
   [/^sales pace must be above 0 units per month$/, "Le rythme de vente doit être supérieur à 0 unité par mois"],
   [/^months from completion to first closing must be a whole number of at least 0$/, "Le délai entre l'achèvement et la première conclusion de vente doit être un nombre entier de mois, d'au moins 0"],
   [/^carry per unsold unit must be at least 0$/, "Les frais de possession par unité non vendue doivent être d'au moins 0\u00a0$"],
+  // Sale readiness (card 78).
+  [/^Sell the units and keep and refinance cannot both be chosen$/, "La vente des logements et leur conservation avec refinancement ne peuvent pas être choisies ensemble"],
+  [/^Unit types \(at least one, with a count and a sale price\)$/, "Types de logements (au moins un, avec un nombre et un prix de vente)"],
+  [/^Sale price per unit \((.+)\)$/, (m) => `Prix de vente par logement (${m[1]})`],
+  [/^(.+) does not apply when the units are sold$/, (m) => `${FR_FIELDS[FIELDS.find((f) => f.label === m[1])?.key ?? ""] ?? m[1]} ne s'applique pas lorsque les logements sont vendus`],
+  [/^(.+) applies only when the units are sold$/, (m) => `${FR_FIELDS[FIELDS.find((f) => f.label === m[1])?.key ?? ""] ?? m[1]} ne s'applique que lorsque les logements sont vendus`],
   // The reasons readiness gives for a value that cannot be used.
   [/^not a number$/, "n'est pas un nombre"],
   [/^below the minimum of (-?[\d.]+)$/, (m) => `inférieur au minimum de ${frNum(m[1]!)}`],
@@ -1659,6 +1692,10 @@ function checkTextRaw(i: I18n, c: CheckLike, ltcCeiling: number): string {
       return `Le produit net de la vente, ${$(a)}, ne rembourse pas les ${$(e)} de dette en cours. Les fonds propres sont anéantis à la sortie.`;
     case "mezz_interest_accrued":
       return `Des intérêts de ${$(a)} sur la mezzanine s'ajoutent à son solde une fois son engagement de ${$(e)} utilisé ; le solde de la mezzanine à la stabilisation est de ${$((e ?? NaN) + (a ?? NaN))}.`;
+    case "presale_threshold_unmet":
+      return `Le prêt de construction exige ${pct(e)} de logements prévendus ; ${pct(a)} sont déclarés.`;
+    case "for_sale_debt_unpaid":
+      return `Scénario de base : une dette de ${$(a)} reste à rembourser après la dernière conclusion de vente.`;
     case "funding_not_converged":
       return "Les fonds propres requis n'ont pas pu être déterminés ; le plan de financement est incohérent.";
     case "sources_cover_uses":

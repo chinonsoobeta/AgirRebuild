@@ -28,7 +28,8 @@ export type FieldGroup =
   | "equity"
   | "refinance"
   | "waterfall"
-  | "stated";
+  | "stated"
+  | "sale";
 
 /** Which way is "more conservative" when two documents disagree. */
 export type ConservativeDirection = "max" | "min" | null;
@@ -75,6 +76,17 @@ export const FIELDS: readonly FieldDef[] = [
   { key: "development_charges", label: "Development charges", group: "budget", unit: "$", required: false, absentMeans: "none stated", material: false, conservative: "max", min: 0, extractable: true, help: "If your soft or other costs already include it, leave this out.", aliases: ["development charges", "development charge", "development cost charges", "dev charges", "dccs", "dcc", "dcs", "redevances de developpement", "redevance de developpement", "redevances d amenagement"] },
   { key: "land_transfer_tax", label: "Land transfer tax", group: "budget", unit: "$", required: false, absentMeans: "none stated", material: false, conservative: "max", min: 0, extractable: true, help: "If your soft or other costs already include it, leave this out.", aliases: ["land transfer tax", "land transfer duty", "ltt", "property transfer tax", "welcome tax", "taxe de bienvenue", "droits de mutation", "droits de mutation immobiliere", "droits de cession fonciere"] },
   { key: "gst_hst_net", label: "GST/HST net of rebates", group: "budget", unit: "$", required: false, absentMeans: "none stated", material: false, conservative: "max", min: 0, extractable: false, help: "If your soft or other costs already include it, leave this out.", aliases: ["gst hst net", "net gst hst", "gst net of rebates", "tps tvh nette", "tps tvh nette des remboursements"] },
+
+  // ---- Unit sales (entered by a person) -----------------------------------
+  { key: "sell_units", label: "Sell the units (no rental)", group: "sale", unit: "flag", required: false, absentMeans: "the units are rented", material: true, conservative: null, min: 0, max: 1, integer: true, extractable: false, aliases: [] },
+  { key: "unit_sale_price", label: "Sale price per unit", group: "sale", unit: "$", itemized: true, required: false, material: true, conservative: "min", min: 0, extractable: false, aliases: [], help: "Net of GST/HST and any rebate the builder keeps." },
+  { key: "presold_units_pct", label: "Presold units", group: "sale", unit: "%", required: "sell_units", material: false, conservative: "min", ...pct, extractable: false, aliases: [] },
+  { key: "deposit_pct", label: "Buyer deposit", group: "sale", unit: "%", required: "sell_units", material: false, conservative: null, ...pct, extractable: false, aliases: [] },
+  { key: "absorption_units_per_month", label: "Sales pace (units per month)", group: "sale", unit: "units", required: "sell_units", material: false, conservative: "min", min: 0.01, extractable: false, aliases: [] },
+  { key: "sales_commission_pct", label: "Sales commission", group: "sale", unit: "%", required: "sell_units", material: false, conservative: "max", ...pct, extractable: false, aliases: [] },
+  { key: "closing_lag_months", label: "Months from completion to first closing", group: "sale", unit: "months", required: "sell_units", material: false, conservative: "max", min: 0, max: 60, integer: true, extractable: false, aliases: [] },
+  { key: "unsold_carry_monthly", label: "Carry per unsold unit per month", group: "sale", unit: "$", required: "sell_units", material: false, conservative: "max", min: 0, extractable: false, aliases: [] },
+  { key: "senior_presale_threshold_pct", label: "Lender's presale threshold", group: "sale", unit: "%", required: false, absentMeans: "no presale condition stated", material: true, conservative: "max", ...pct, extractable: false, aliases: [] },
 
   // ---- Revenue (itemized per component) -----------------------------------
   { key: "unit_count", label: "Units", group: "revenue", unit: "units", itemized: true, required: true, material: false, conservative: "min", min: 0, integer: true, extractable: true, aliases: ["units", "unit count", "number of units", "# units", "count", "nombre de logements", "nombre d unites", "logements", "unites", "appartements"] },
@@ -139,6 +151,17 @@ export const FIELDS: readonly FieldDef[] = [
   { key: "stated_total_cost", label: "Stated total project cost", group: "stated", unit: "$", required: false, absentMeans: "nothing to check against", material: true, conservative: null, min: 0, extractable: true, aliases: ["total project cost", "total development cost", "tdc", "total cost", "project cost", "all-in cost", "cout du projet", "cout total du projet", "cout total reconnu"] },
   { key: "stated_ltc_pct", label: "Stated loan-to-cost", group: "stated", unit: "%", required: false, absentMeans: "nothing to check against", material: false, conservative: null, ...pct, extractable: true, aliases: ["loan to cost", "loan-to-cost", "ltc"] },
   { key: "stated_interest_reserve", label: "Stated interest reserve", group: "stated", unit: "$", required: false, absentMeans: "nothing to check against", material: false, conservative: null, min: 0, extractable: true, aliases: ["interest reserve", "financing costs", "financing interest", "capitalized interest", "construction interest", "capitalized interest reserve", "capitalised interest reserve", "reserve d interets", "reserve d interet"] },
+];
+
+/** Fields not read by the sale ledger or its shared construction funding. */
+export const RENTAL_ONLY_FIELDS: readonly string[] = [
+  "unit_rent_monthly", "rentable_area_sf", "rent_psf_annual", "item_occupancy_pct", "lease_up_months", "hold_years",
+  "stabilized_occupancy_pct", "expense_ratio_pct", "fixed_opex_annual", "property_tax_annual", "variable_expense_pct",
+  "other_income_annual", "rent_growth_pct", "expense_growth_pct", "lease_up_ramp", "exit_cap_rate_pct", "selling_costs_pct",
+  "min_dscr_covenant", "refinance_month", "refinance_amount", "refinance_ltv_pct", "refinance_rate_pct", "refinance_amort_years",
+  "refinance_io_months", "refinance_insurance_premium_pct", "refinance_and_hold", "lp_share_pct", "preferred_return_pct", "gp_promote_pct",
+  "senior_amort_years", "senior_io_months", "mezz_amort_years", "mezz_io_months",
+  "equity_amount", "stated_total_cost", "stated_ltc_pct", "stated_interest_reserve",
 ];
 
 export const FIELD_BY_KEY: ReadonlyMap<string, FieldDef> = new Map(FIELDS.map((f) => [f.key, f]));
@@ -209,6 +232,7 @@ export const FIELD_GROUP_LABELS: Record<FieldGroup, string> = {
   refinance: "Refinance",
   waterfall: "LP/GP split",
   stated: "Stated figures (checks)",
+  sale: "Unit sales",
 };
 
 // ---- Quick-start templates ------------------------------------------------------------------
@@ -216,7 +240,8 @@ export const FIELD_GROUP_LABELS: Record<FieldGroup, string> = {
 // and the named defaults are accepted explicitly through fn_accept_defaults, never applied silently.
 
 export type TemplateQuestion = { field: string; item?: string; optional?: true; repeatable?: true; zeroAllowed?: true; skipsIfZero?: string[]; heldOnly?: true };
-export type Template = { key: "multiplex" | "apartment"; minUnits: number; maxUnits: number; questions: TemplateQuestion[]; defaults: string[] };
+export type Template = { minUnits: number; maxUnits: number; questions: TemplateQuestion[]; defaults: string[] } &
+  ({ key: "multiplex" | "apartment"; sells?: false } | { key: "townhomes"; sells: true });
 
 /** A held senior loan uses no amortization when it stays interest-only until the stated refinance. */
 export function heldSeniorAmortUnused(get: (key: string) => number | undefined): boolean {
@@ -272,5 +297,21 @@ export const TEMPLATES: readonly Template[] = [
       q("stabilized_occupancy_pct"), q("other_income_annual", { optional: true }), q("exit_cap_rate_pct"), ...loan, ...held,
     ],
     defaults: DEFAULTS,
+  },
+  {
+    key: "townhomes",
+    sells: true,
+    minUnits: 2,
+    maxUnits: 30,
+    questions: [
+      q("land_cost"), q("hard_cost"), q("soft_cost"), q("contingency", { zeroAllowed: true }), q("other_cost", { optional: true }),
+      q("development_charges", { zeroAllowed: true }), q("land_transfer_tax", { optional: true }), q("gst_hst_net", { optional: true }),
+      q("construction_months"), q("unit_count", { repeatable: true }), q("unit_sale_price", { repeatable: true }),
+      q("presold_units_pct", { zeroAllowed: true }), q("deposit_pct", { zeroAllowed: true }), q("absorption_units_per_month"),
+      q("sales_commission_pct", { zeroAllowed: true }), q("closing_lag_months", { zeroAllowed: true }), q("unsold_carry_monthly", { zeroAllowed: true }),
+      q("senior_loan_amount", { zeroAllowed: true, skipsIfZero: ["senior_rate_pct", "senior_presale_threshold_pct"] }),
+      q("senior_rate_pct"), q("senior_presale_threshold_pct", { optional: true }),
+    ],
+    defaults: [],
   },
 ];

@@ -1,7 +1,7 @@
 import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
 import { Link } from "@tanstack/react-router";
 import { useState, type FormEvent } from "react";
-import { FIELDS, FIELD_BY_KEY, TEMPLATES, heldSeniorAmortUnused } from "@agir/contracts";
+import { FIELDS, FIELD_BY_KEY, RENTAL_ONLY_FIELDS, TEMPLATES, heldSeniorAmortUnused } from "@agir/contracts";
 import { api, ApiError, type Review } from "../api";
 import { Banner, ErrorText } from "./ui";
 import { useI18n } from "../i18n";
@@ -14,6 +14,7 @@ export function QuickStart({ dealId }: { dealId: string }) {
   const qc = useQueryClient();
   const [key, setKey] = useState(TEMPLATES[0]!.key);
   const [held, setHeld] = useState(false);
+  const [saleNoLoan, setSaleNoLoan] = useState(false);
   const [amortUnused, setAmortUnused] = useState(false);
   const [types, setTypes] = useState([0]);
   const [next, setNext] = useState(1);
@@ -34,7 +35,7 @@ export function QuickStart({ dealId }: { dealId: string }) {
           if (!(err instanceof ApiError && err.status === 409)) throw err;
         }
       }
-      await api.post(`/deals/${dealId}/defaults`, { fields: tpl.defaults });
+      if (tpl.defaults.length > 0) await api.post(`/deals/${dealId}/defaults`, { fields: tpl.defaults });
     },
     onSuccess: () => Promise.all([qc.invalidateQueries({ queryKey: reviewQ }), qc.invalidateQueries({ queryKey: ["deal", dealId] })]),
   });
@@ -63,18 +64,18 @@ export function QuickStart({ dealId }: { dealId: string }) {
     try {
       const reason = String(fd.get("reason") ?? "").trim();
       if (reason.length < 10) throw new Error(t("qs.errReason"));
-      if (!fd.get("accept")) throw new Error(t("qs.errAccept"));
+      if (tpl.defaults.length > 0 && !fd.get("accept")) throw new Error(t("qs.errAccept"));
       const names = types.map((n) => String(fd.get(`name-${n}`) ?? "").trim());
-      if (key === "apartment") {
+      if (tpl.questions.some((q) => q.repeatable)) {
         if (names.some((n) => !n)) throw new Error(t("qs.errName"));
         if (names.some((n) => n.includes("|"))) throw new Error(t("qs.errPipe"));
         if (new Set(names).size !== names.length) throw new Error(t("qs.errDup"));
       }
-      if (held && Boolean(String(fd.get("refinance_amount") ?? "").trim()) === Boolean(String(fd.get("refinance_ltv_pct") ?? "").trim())) {
+      if (!tpl.sells && held && Boolean(String(fd.get("refinance_amount") ?? "").trim()) === Boolean(String(fd.get("refinance_ltv_pct") ?? "").trim())) {
         throw new Error(t("qs.errRefinance"));
       }
       const skipAmort = unusedSeniorAmort(fd);
-      const entries: Entry[] = [];
+      const entries: Entry[] = tpl.sells ? [{ fieldKey: "sell_units", itemKey: null, value: 1 }] : [];
       let units = 0;
       let skip: string[] = [];
       for (const q of tpl.questions) {
@@ -102,17 +103,20 @@ export function QuickStart({ dealId }: { dealId: string }) {
     }
   };
 
-  if (save.isSuccess) return <Banner tone="neutral" title={t("qs.done")}><Link className="btn primary small" to="/deals/$dealId/review" params={{ dealId }}>{t("qs.next")}</Link></Banner>;
+  if (save.isSuccess) return <Banner tone="neutral" title={t(tpl.sells ? "qs.doneSales" : "qs.done")}><Link className="btn primary small" to="/deals/$dealId/review" params={{ dealId }}>{t("qs.next")}</Link></Banner>;
   if (!review.data || (review.data.assumptions.length > 0 && !save.isPending && !save.isError)) return null;
 
-  const hidden = FIELDS.filter((d) => d.required === false && d.absentMeans && !tpl.questions.some((q) => q.field === d.key && (!q.heldOnly || held)));
+  const hidden = FIELDS.filter((d) => (tpl.sells ? !RENTAL_ONLY_FIELDS.includes(d.key) && d.key !== "sell_units" : d.group !== "sale") && d.required === false && d.absentMeans && !tpl.questions.some((q) => q.field === d.key && (!q.heldOnly || held)));
   const input = (name: string, field: string, optional?: boolean) => {
     const unit = FIELD_BY_KEY.get(field)!.unit;
     return (
       <div className="input-affix" style={{ maxWidth: 320 }}>
         {unit === "$" && <span>$</span>}
         <input id={name} name={name} inputMode="decimal" autoComplete="off" required={!optional}
-          onChange={field === "senior_io_months" || field === "refinance_month" ? (e) => updateAmortUnused(e.currentTarget.form!) : undefined} />
+          onChange={tpl.sells && field === "senior_loan_amount" ? (e) => {
+            try { setSaleNoLoan(f.parse(e.currentTarget.value) === 0); }
+            catch { setSaleNoLoan(false); }
+          } : field === "senior_io_months" || field === "refinance_month" ? (e) => updateAmortUnused(e.currentTarget.form!) : undefined} />
         {unit !== "$" && f.suffix(unit) && <span>{f.suffix(unit)}</span>}
       </div>
     );
@@ -124,12 +128,13 @@ export function QuickStart({ dealId }: { dealId: string }) {
       <p className="small muted">{t("qs.intro")}</p>
       <div className="field">
         <label htmlFor="qs-template">{t("qs.template")}</label>
-        <select id="qs-template" className="input" value={key} onChange={(e) => { setKey(e.target.value as typeof key); setAmortUnused(false); }}>
+        <select id="qs-template" className="input" value={key} onChange={(e) => { setKey(e.target.value as typeof key); setAmortUnused(false); setSaleNoLoan(false); }}>
           {TEMPLATES.map((x) => <option key={x.key} value={x.key}>{t(`qs.t.${x.key}`)}</option>)}
         </select>
       </div>
+      {tpl.sells && <p className="small muted">{t("qs.saleLine")}</p>}
       <div className="stack" style={{ gap: 14 }} key={key}>
-        {tpl.questions.filter((q) => !q.heldOnly || held).map((q) => {
+        {tpl.questions.filter((q) => (!q.heldOnly || held) && !(tpl.sells && saleNoLoan && (q.field === "senior_rate_pct" || q.field === "senior_presale_threshold_pct"))).map((q) => {
           if (q.field === "refinance_and_hold") return (
             <div key={q.field} className="field">
               <label htmlFor={q.field} style={{ fontWeight: 600 }}>{L.ask(q.field)[0]}</label>
@@ -146,7 +151,9 @@ export function QuickStart({ dealId }: { dealId: string }) {
                   <div key={n} className="row" style={{ alignItems: "flex-end", gap: 12 }}>
                     <div className="field"><label htmlFor={`name-${n}`}>{t("qs.unitType")}</label><input className="input" id={`name-${n}`} name={`name-${n}`} maxLength={60} autoComplete="off" /></div>
                     <div className="field"><label htmlFor={`unit_count-${n}`}>{t("qs.unitCount")}</label>{input(`unit_count-${n}`, "unit_count")}</div>
-                    <div className="field"><label htmlFor={`unit_rent_monthly-${n}`}>{t("qs.unitRent")}</label>{input(`unit_rent_monthly-${n}`, "unit_rent_monthly")}</div>
+                    {tpl.sells
+                      ? <div className="field"><label htmlFor={`unit_sale_price-${n}`}>{t("qs.unitSalePrice")}</label><span className="help">{L.help("unit_sale_price", null)}</span>{input(`unit_sale_price-${n}`, "unit_sale_price")}</div>
+                      : <div className="field"><label htmlFor={`unit_rent_monthly-${n}`}>{t("qs.unitRent")}</label>{input(`unit_rent_monthly-${n}`, "unit_rent_monthly")}</div>}
                     {types.length > 1 && <button className="btn quiet small" type="button" onClick={() => setTypes(types.filter((x) => x !== n))}>{t("qs.removeType")}</button>}
                   </div>
                 ))}
@@ -155,10 +162,11 @@ export function QuickStart({ dealId }: { dealId: string }) {
             ) : null;
           }
           const [label, hint] = L.ask(q.field);
+          const question = tpl.sells && q.field === "gst_hst_net" ? t("qs.saleGstQuestion") : label;
           const unused = q.field === "senior_amort_years" && amortUnused;
           return (
             <div key={q.field} className="field">
-              <label htmlFor={q.field} style={{ fontWeight: 600 }}>{unused ? `${label} (${t("qs.amortUnused")})` : q.optional ? `${label} (${t("qs.optional")})` : label}</label>
+              <label htmlFor={q.field} style={{ fontWeight: 600 }}>{unused ? `${question} (${t("qs.amortUnused")})` : q.optional ? `${question} (${t("qs.optional")})` : question}</label>
               {hint && <span className="help">{hint}</span>}
               {input(q.field, q.field, q.optional || unused)}
             </div>
@@ -169,14 +177,14 @@ export function QuickStart({ dealId }: { dealId: string }) {
         <label htmlFor="qs-reason">{t("qs.reason")}</label>
         <input className="input" id="qs-reason" name="reason" defaultValue={t("qs.reasonDefault")} minLength={10} required />
       </div>
-      <div className="panel stack" style={{ gap: 8 }}>
+      {tpl.defaults.length > 0 && <div className="panel stack" style={{ gap: 8 }}>
         <strong>{t("qs.defaultsTitle")}</strong>
         <p className="small muted">{t("qs.defaultsBody")}</p>
         <ul className="small" style={{ margin: 0, paddingLeft: 20 }}>
           {tpl.defaults.map((d) => <li key={d}>{t("qs.defaultLine", { label: L.field(d), value: f.value(FIELD_BY_KEY.get(d)!.default!, FIELD_BY_KEY.get(d)!.unit) })}</li>)}
         </ul>
         <label className="row" style={{ gap: 8 }}><input type="checkbox" name="accept" />{t("qs.accept")}</label>
-      </div>
+      </div>}
       <details>
         <summary>{t("qs.hidden")}</summary>
         <ul className="small muted" style={{ paddingLeft: 20 }}>{hidden.map((d) => <li key={d.key}>{t("qs.hiddenLine", { label: L.field(d.key), means: L.absent(d.key) })}</li>)}</ul>

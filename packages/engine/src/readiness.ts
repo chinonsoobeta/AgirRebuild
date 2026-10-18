@@ -10,6 +10,7 @@ import {
   ENGINE_READABLE_STATUSES,
   FIELDS,
   FIELD_BY_KEY,
+  RENTAL_ONLY_FIELDS,
   heldSeniorAmortUnused,
   type AssumptionStatus,
   type EngineInput,
@@ -45,6 +46,16 @@ function labelFor(def: FieldDef, itemKey?: string | null) {
 // The cross-field rules live in validateInput and are not repeated here. Its sentences are shown as they are; this only
 // names the field a person should look at, when the sentence is about one.
 const PROBLEM_FIELD: [RegExp, string][] = [
+  [/^unit type .+ needs a whole unit count/, "unit_count"],
+  [/^unit type .+ needs a sale price/, "unit_sale_price"],
+  [/^a deal that sells its units needs at least one unit type/, "unit_count"],
+  [/^presold share /, "presold_units_pct"],
+  [/^deposit /, "deposit_pct"],
+  [/^sales commission /, "sales_commission_pct"],
+  [/^lender's presale threshold /, "senior_presale_threshold_pct"],
+  [/^sales pace /, "absorption_units_per_month"],
+  [/^months from completion to first closing /, "closing_lag_months"],
+  [/^carry per unsold unit /, "unsold_carry_monthly"],
   [/^refinance month /, "refinance_month"],
   [/^give the refinance /, "refinance_amount"],
   [/^A deal that is kept and refinanced /, "refinance_month"],
@@ -107,6 +118,24 @@ export function assemble(rows: readonly AssumptionRow[]): { readiness: Readiness
     values.set(k, v);
   }
 
+  const selling = values.get("sell_units") === 1;
+  const bothModes = selling && values.get("refinance_and_hold") === 1;
+  if (bothModes) impossible.push({ fieldKey: "sell_units", label: "Sell the units and keep and refinance cannot both be chosen" });
+  for (const [k, list] of groups) {
+    const [fieldKey, itemKey] = k.split("|") as [string, string | undefined];
+    const def = FIELD_BY_KEY.get(fieldKey);
+    if (!def || !list.some(readable) || conflicting.some((x) => x.fieldKey === fieldKey && x.itemKey === itemKey)) continue;
+    if (bothModes && fieldKey === "refinance_and_hold") continue;
+    const label = selling && RENTAL_ONLY_FIELDS.includes(fieldKey) ? `${def.label} does not apply when the units are sold`
+      : !selling && def.group === "sale" && fieldKey !== "sell_units" ? `${def.label} applies only when the units are sold` : null;
+    if (label) {
+      // An out-of-mode value is unusable regardless of its numeric bounds. Name that problem once.
+      const prior = impossible.findIndex((x) => x.fieldKey === fieldKey && x.itemKey === itemKey);
+      if (prior !== -1) impossible.splice(prior, 1);
+      impossible.push({ fieldKey, ...(itemKey ? { itemKey } : {}), label });
+    }
+  }
+  const inMode = (def: FieldDef) => selling ? !RENTAL_ONLY_FIELDS.includes(def.key) : def.group !== "sale";
   const has = (key: string) => values.has(key);
   const isBlockedKey = (key: string) =>
     conflicting.some((c) => c.fieldKey === key && !c.itemKey) ||
@@ -121,7 +150,7 @@ export function assemble(rows: readonly AssumptionRow[]): { readiness: Readiness
     [...itemsWithRows].every((i) => rows.some((r) => r.fieldKey === "item_occupancy_pct" && r.itemKey === i && r.status !== "rejected"));
 
   for (const def of FIELDS) {
-    if (def.itemized || has(def.key) || isBlockedKey(def.key)) continue;
+    if (!inMode(def) || def.itemized || has(def.key) || isBlockedKey(def.key)) continue;
     if (def.key === "stabilized_occupancy_pct" && everyItemHasOccupancy) continue;
     let required = false;
     if (def.required === true) required = true;
@@ -138,29 +167,42 @@ export function assemble(rows: readonly AssumptionRow[]): { readiness: Readiness
   const itemKeys = new Set<string>();
   for (const r of rows) if (r.itemKey && r.status !== "rejected" && !doubled.has(r.itemKey)) itemKeys.add(r.itemKey);
   const revenue: RevenueComponent[] = [];
-  if (itemKeys.size === 0) {
-    missing.push({ fieldKey: "unit_count", label: "Revenue program (at least one unit type or space)" });
-  }
-  for (const item of [...itemKeys].sort()) {
-    const get = (f: string) => values.get(`${f}|${item}`);
-    const blocked = (f: string) =>
-      [...conflicting, ...pending, ...impossible].some((c) => c.fieldKey === f && c.itemKey === item);
-    const rentMonthly = get("unit_rent_monthly");
-    const psf = get("rent_psf_annual");
-    const area = get("rentable_area_sf");
-    const units = get("unit_count");
-    const occ = get("item_occupancy_pct");
-    const anyBlocked = ["unit_count", "unit_rent_monthly", "rent_psf_annual", "rentable_area_sf", "item_occupancy_pct"].some(blocked);
-    if (anyBlocked) continue;
-    if (rentMonthly !== undefined) {
-      if (units === undefined) missing.push({ fieldKey: "unit_count", itemKey: item, label: `Units (${item})` });
-      else revenue.push({ key: item, label: item, basis: "per_unit", units, rentMonthly, ...(occ !== undefined ? { occupancyPct: occ } : {}) });
-    } else if (psf !== undefined || area !== undefined) {
-      if (area === undefined) missing.push({ fieldKey: "rentable_area_sf", itemKey: item, label: `Rentable area (${item})` });
-      else if (psf === undefined) missing.push({ fieldKey: "rent_psf_annual", itemKey: item, label: `Rent per SF (${item})` });
-      else revenue.push({ key: item, label: item, basis: "per_sf", units: units ?? 0, areaSf: area, rentPsfAnnual: psf, ...(occ !== undefined ? { occupancyPct: occ } : {}) });
-    } else {
-      missing.push({ fieldKey: "unit_rent_monthly", itemKey: item, label: `Rent (${item})` });
+  const saleUnits: NonNullable<EngineInput["forSale"]>["units"] = [];
+  if (selling) {
+    if (itemKeys.size === 0) missing.push({ fieldKey: "unit_count", label: "Unit types (at least one, with a count and a sale price)" });
+    for (const item of [...itemKeys].sort()) {
+      const blocked = (field: string) => [...conflicting, ...pending, ...impossible].some((x) => x.fieldKey === field && x.itemKey === item);
+      const units = values.get(`unit_count|${item}`);
+      const price = values.get(`unit_sale_price|${item}`);
+      if (units === undefined && !blocked("unit_count")) missing.push({ fieldKey: "unit_count", itemKey: item, label: `Units (${item})` });
+      if (price === undefined && !blocked("unit_sale_price")) missing.push({ fieldKey: "unit_sale_price", itemKey: item, label: `Sale price per unit (${item})` });
+      if (units !== undefined && price !== undefined) saleUnits.push({ key: item, label: item, units, price });
+    }
+  } else {
+    if (itemKeys.size === 0) {
+      missing.push({ fieldKey: "unit_count", label: "Revenue program (at least one unit type or space)" });
+    }
+    for (const item of [...itemKeys].sort()) {
+      const get = (f: string) => values.get(`${f}|${item}`);
+      const blocked = (f: string) =>
+        [...conflicting, ...pending, ...impossible].some((c) => c.fieldKey === f && c.itemKey === item);
+      const rentMonthly = get("unit_rent_monthly");
+      const psf = get("rent_psf_annual");
+      const area = get("rentable_area_sf");
+      const units = get("unit_count");
+      const occ = get("item_occupancy_pct");
+      const anyBlocked = ["unit_count", "unit_rent_monthly", "rent_psf_annual", "rentable_area_sf", "item_occupancy_pct"].some(blocked);
+      if (anyBlocked) continue;
+      if (rentMonthly !== undefined) {
+        if (units === undefined) missing.push({ fieldKey: "unit_count", itemKey: item, label: `Units (${item})` });
+        else revenue.push({ key: item, label: item, basis: "per_unit", units, rentMonthly, ...(occ !== undefined ? { occupancyPct: occ } : {}) });
+      } else if (psf !== undefined || area !== undefined) {
+        if (area === undefined) missing.push({ fieldKey: "rentable_area_sf", itemKey: item, label: `Rentable area (${item})` });
+        else if (psf === undefined) missing.push({ fieldKey: "rent_psf_annual", itemKey: item, label: `Rent per SF (${item})` });
+        else revenue.push({ key: item, label: item, basis: "per_sf", units: units ?? 0, areaSf: area, rentPsfAnnual: psf, ...(occ !== undefined ? { occupancyPct: occ } : {}) });
+      } else {
+        missing.push({ fieldKey: "unit_rent_monthly", itemKey: item, label: `Rent (${item})` });
+      }
     }
   }
 
@@ -179,11 +221,11 @@ export function assemble(rows: readonly AssumptionRow[]): { readiness: Readiness
   if (has("refinance_ltv_pct")) parentAbsent.refinance_amount = true;
   if (has("refinance_amount")) parentAbsent.refinance_ltv_pct = true;
   const notFound: ReadinessItem[] = FIELDS.filter(
-    (d) => !d.itemized && d.extractable && d.required === false && d.absentMeans && !has(d.key) && !isBlockedKey(d.key) && !parentAbsent[d.key],
+    (d) => inMode(d) && !d.itemized && d.extractable && d.required === false && d.absentMeans && !has(d.key) && !isBlockedKey(d.key) && !parentAbsent[d.key],
   ).map((d) => ({ fieldKey: d.key, label: d.label, detail: d.absentMeans! }));
   // Choices: the same test for the fields no document is ever read for. Only a person states them.
   const choices: ReadinessItem[] = FIELDS.filter(
-    (d) => !d.itemized && !d.extractable && d.required === false && d.absentMeans && !has(d.key) && !isBlockedKey(d.key) && !parentAbsent[d.key],
+    (d) => inMode(d) && !d.itemized && !d.extractable && d.required === false && d.absentMeans && !has(d.key) && !isBlockedKey(d.key) && !parentAbsent[d.key],
   ).map((d) => ({ fieldKey: d.key, label: d.label, detail: d.absentMeans! }));
 
   const defaultable = missing.map((m) => m.fieldKey).filter((k) => FIELD_BY_KEY.get(k)?.default !== undefined);
@@ -193,7 +235,34 @@ export function assemble(rows: readonly AssumptionRow[]): { readiness: Readiness
 
   const v = (k: string) => values.get(k);
   const n = (k: string, fallback = 0) => values.get(k) ?? fallback;
-  const input: EngineInput = {
+  const input: EngineInput = selling ? {
+    budget: { land: n("land_cost"), hard: n("hard_cost"), soft: n("soft_cost"), contingency: n("contingency"), other: n("other_cost"),
+      ...(has("development_charges") ? { developmentCharges: n("development_charges") } : {}),
+      ...(has("land_transfer_tax") ? { landTransferTax: n("land_transfer_tax") } : {}),
+      ...(has("gst_hst_net") ? { gstHstNet: n("gst_hst_net") } : {}),
+    },
+    constructionMonths: n("construction_months"),
+    senior: { amount: n("senior_loan_amount"), ratePct: n("senior_rate_pct"), ioMonths: 0 },
+    ...(n("mezz_loan_amount") > 0 ? { mezzanine: { amount: n("mezz_loan_amount"), ratePct: n("mezz_rate_pct"), amortYears: 30, ioMonths: 0 } } : {}),
+    stated: {},
+    exit: "for_sale",
+    revenue: [],
+    leaseUpMonths: 0,
+    holdYears: 0,
+    stabilizedOccupancyPct: 0,
+    expenseRatioPct: 0,
+    exitCapPct: 0,
+    sellingCostsPct: 0,
+    rentGrowthPct: 0,
+    expenseGrowthPct: 0,
+    leaseUpRamp: false,
+    sCurveDraws: false,
+    otherIncomeAnnual: 0,
+    forSale: { units: saleUnits, presoldPct: n("presold_units_pct"), depositPct: n("deposit_pct"), absorptionPerMonth: n("absorption_units_per_month"),
+      commissionPct: n("sales_commission_pct"), closingLagMonths: n("closing_lag_months"), carryMonthly: n("unsold_carry_monthly"),
+      ...(has("senior_presale_threshold_pct") ? { presaleThresholdPct: n("senior_presale_threshold_pct") } : {}),
+    },
+  } : {
     budget: { land: n("land_cost"), hard: n("hard_cost"), soft: n("soft_cost"), contingency: n("contingency"), other: n("other_cost"),
       // The entered cost lines are set only when stated, so an input that states none hashes as it always did.
       ...(has("development_charges") ? { developmentCharges: n("development_charges") } : {}),

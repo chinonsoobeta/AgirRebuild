@@ -70,17 +70,22 @@ describe("setting up a deal that sells its units (task 78)", () => {
       { fieldKey: "sell_units", label: "Sell the units and keep and refinance cannot both be chosen" },
     ]);
   });
-  test.each(rentalOnly)("a readable rental field blocks a sale: %s", (key) => {
+  test.each(contracts.RENTAL_ONLY_FIELDS)("a readable rental field blocks a sale: %s", (key) => {
     const def = FIELD_BY_KEY.get(key)!;
-    const { readiness, input } = assemble([...rowsFor(), row(key, Math.max(def.min ?? 0, 1), def.itemized ? oracle().inputs.unit_types[0]!.name : null)]);
+    const { readiness, input } = assemble([...rowsFor(), row(key, key === "refinance_and_hold" ? 0 : Math.max(def.min ?? 0, 1), def.itemized ? oracle().inputs.unit_types[0]!.name : null)]);
     expect(input).toBeNull();
-    expect(readiness.impossible).toContainEqual(expect.objectContaining({ fieldKey: key, label: key === "refinance_and_hold"
-      ? "Sell the units and keep and refinance cannot both be chosen" : `${def.label} does not apply when the units are sold` }));
+    expect(readiness.impossible).toContainEqual(expect.objectContaining({ fieldKey: key, label: `${def.label} does not apply when the units are sold` }));
   });
   test.each(saleFields.filter((key) => key !== "sell_units"))("a readable sale field blocks a rental: %s", (key) => {
     const def = FIELD_BY_KEY.get(key)!;
     expect(assemble([...rentalRows(), row(key, Math.max(def.min ?? 0, 1), def.itemized ? "A" : null)]).readiness.impossible)
       .toContainEqual(expect.objectContaining({ fieldKey: key, label: `${def.label} applies only when the units are sold` }));
+  });
+  test("an out-of-mode readable value names its mode problem even outside its bounds", () => {
+    expect(assemble([...rowsFor(), row("property_tax_annual", -1)]).readiness.impossible)
+      .toEqual([{ fieldKey: "property_tax_annual", label: "Property tax (per year) does not apply when the units are sold" }]);
+    expect(assemble([...rentalRows(), row("deposit_pct", 101)]).readiness.impossible)
+      .toEqual([{ fieldKey: "deposit_pct", label: "Buyer deposit applies only when the units are sold" }]);
   });
   test.each(["needs_review", "awaiting_second_approval", "conflicting", "rejected"] as const)("rental rows retain their review rules: %s", (status) => {
     const { readiness } = assemble([...rowsFor(), { ...row("property_tax_annual", 0), status }]);
@@ -95,6 +100,13 @@ describe("setting up a deal that sells its units (task 78)", () => {
     expect([...rental.readiness.notFound, ...rental.readiness.choices].some((x) => saleFields.includes(x.fieldKey))).toBe(false);
     const sale = assemble(rowsFor());
     expect([...sale.readiness.notFound, ...sale.readiness.choices].some((x) => rentalOnly.includes(x.fieldKey))).toBe(false);
+  });
+  test("optional cost lines are retained, while the absent presale condition is omitted", () => {
+    const rows = rowsFor().filter((r) => r.fieldKey !== "senior_presale_threshold_pct");
+    const { readiness, input } = assemble([...rows, row("development_charges", 100), row("land_transfer_tax", 200), row("gst_hst_net", 300)]);
+    expect(readiness.status).toBe("ready");
+    expect(input!.budget).toMatchObject({ developmentCharges: 100, landTransferTax: 200, gstHstNet: 300 });
+    expect(input!.forSale).not.toHaveProperty("presaleThresholdPct");
   });
   test("names a missing price and missing unit types", () => {
     const item = oracle().inputs.unit_types[0]!.name;
