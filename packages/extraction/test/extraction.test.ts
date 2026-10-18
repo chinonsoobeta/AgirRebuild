@@ -4426,7 +4426,8 @@ describe("every figure in a table is used or shown (task 65)", () => {
     tables: [{ name, rows: rows.map((r, i) => r.map((text, j) => ({ text, ref: `${"ABCDEF"[j]}${i + 1}` }))) } as Table],
     pageCount: 1,
     needsOcr: false,
-    fullText: "",
+    // Thousands written with commas elsewhere in the document, so "1,950" is read as 1950.
+    fullText: "Amounts such as 1,234,567 are written with commas.",
   });
   /** Every table cell that holds a money figure, a percent or a number of 1,000 or more (not a year) and is in no candidate's or shown figure's location. */
   const vanished = (d: NormalizedDocument): string[] => {
@@ -4490,6 +4491,13 @@ describe("every figure in a table is used or shown (task 65)", () => {
       ["unit_rent_monthly", "2BR", 1850, "D3"],
     ]);
     expect(shown(roll)).toEqual([["C4", 1440, "A rent roll's summary row is not an assumption"], ["D4", 3300, "A rent roll's summary row is not an assumption"]]);
+  });
+
+  test("a budget row's other columns are shown, never read", () => {
+    const d = grid("Budget", [["Category", "Item", "Amount", "$ per unit", "% of total"], ["Hard", "Framing", "$1,000,000", "$100,000", "25%"]]);
+    expect(vanished(d)).toEqual([]);
+    expect(shown(d).filter((s) => s[2] === "Another column of this budget row; not read")).toEqual([["D2", 100000, "Another column of this budget row; not read"], ["E2", 25, "Another column of this budget row; not read"]]);
+    expect(read(d)).toEqual([]);
   });
 
   test("a row of years is not shown beyond what it was", () => {

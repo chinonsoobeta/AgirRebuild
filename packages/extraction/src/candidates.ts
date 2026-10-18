@@ -33,6 +33,11 @@ const closesUses = (label: string, read: Iterable<string>) => {
   return BARE_TOTAL_RE.test(fold(label)) && !keys.has("stated_total_cost") && [...keys].filter((k) => BUDGET_FIELDS.has(k)).length >= 2;
 };
 
+/** A whole year written as a bare number (1900 to 2100): the header of a row of years, not an amount. */
+function isYearToken(t: NumberToken): boolean {
+  return t.value !== null && t.unit === null && !t.currency && Number.isInteger(t.value) && t.value >= 1900 && t.value <= 2100;
+}
+
 function cellToken(cell: Cell, format: DocumentFormat): NumberToken | null {
   if (cell.number !== undefined) {
     return {
@@ -1033,7 +1038,15 @@ function fromRentRoll(table: Table, headerRow: number, roles: Roles, result: Ext
     const row = table.rows[r]!;
     const itemParts = roles.item.map((i) => row[i]?.text ?? "").filter(Boolean);
     const itemText = itemParts.join(" ").trim();
-    if (!itemText || itemParts.some((p) => TOTAL_RE.test(p))) continue;
+    if (!itemText) continue;
+    // The roll's total row: its figures are shown, never read.
+    if (itemParts.some((p) => TOTAL_RE.test(p))) {
+      for (const [i, cell] of row.entries()) {
+        const t = roles.item.includes(i) ? null : cellToken(cell, result.format);
+        if (t) result.other.push({ fieldKey: null, itemKey: null, value: t.value, raw: t.raw, unitSeen: t.unit, location: cell.ref, context: `${table.name}: ${itemText}`, rule: "table:rent-roll", note: ROLL_SUMMARY_NOTE });
+      }
+      continue;
+    }
     // A summary row of the roll (an occupancy, an average) is not an assumption.
     if (SUMMARY_LABEL_RE.test(fold(itemText)) && !STABILIZED_LABEL_RE.test(fold(itemText))) {
       const cell = row.find((c, i) => !roles.item.includes(i) && (c.number !== undefined || /\d/.test(c.text)));
@@ -1275,12 +1288,24 @@ function fromBudget(table: Table, headerRow: number, roles: BudgetRoles, result:
     const row = table.rows[r]!;
     const labelCell = row[roles.label];
     const amountCell = row[roles.amount];
-    if (!labelCell?.text || !amountCell) continue;
+    if (!amountCell) continue;
+    // A row with no label cell shows its amount, with the row's text cells as its context; it is never summed or totalled.
+    if (!labelCell?.text) {
+      const t = cellToken(amountCell, result.format);
+      if (t && !isYearToken(t)) result.other.push({ fieldKey: null, itemKey: null, value: t.value, raw: t.raw, unitSeen: t.unit, location: amountCell.ref, context: `${table.name}: ${row.filter((c) => c.number === undefined && c.text.trim()).map((c) => c.text.trim()).join(" ")}`.slice(0, 240), rule: "table:budget", note: "No budget line matches this label" });
+      continue;
+    }
     // The amounts of other revisions, or of columns whose order is not told, are shown and never read.
     for (const c of [...(roles.others ?? []), ...(roles.ambiguous ? [roles.amount] : [])]) {
       const cell = row[c];
       const o = cell && cellToken(cell, result.format);
       if (cell && o) result.other.push({ fieldKey: null, itemKey: null, value: o.value, raw: o.raw, unitSeen: o.unit, location: cell.ref, context: `${table.name}: ${labelCell.text}`, rule: "table:budget", note: roles.ambiguous ? "Several amount columns; choose one" : SUPERSEDED_NOTE });
+    }
+    // The figures of the row's other columns (a "$ per unit" or "% of total" column) are shown, never read.
+    for (const [c, cell] of row.entries()) {
+      if (c === roles.label || c === roles.amount || (roles.others ?? []).includes(c)) continue;
+      const o = cellToken(cell, result.format);
+      if (o && !isYearToken(o)) result.other.push({ fieldKey: null, itemKey: null, value: o.value, raw: o.raw, unitSeen: o.unit, location: cell.ref, context: `${table.name}: ${labelCell.text}`, rule: "table:budget", note: "Another column of this budget row; not read" });
     }
     if (roles.ambiguous) continue;
     const t = cellToken(amountCell, result.format);
@@ -1624,6 +1649,15 @@ function fromTable(table0: Table, result: ExtractionResult, notes: string[] = []
           result.candidates.push({ fieldKey: flag.fieldKey, itemKey: null, value: flag.value, raw: answer.text, unitSeen: "flag", location: answer.ref, context: `${table.name}: ${labelCell.text} ${answer.text}`.slice(0, 240), rule: "table:label-value" });
           return;
         }
+        // Each figure after the one the label used or showed is shown, never read (task 65); a row of years adds none.
+        const rest = (from: Cell, note: string | null) => {
+          const later = after.slice(after.indexOf(from) + 1).flatMap((c) => { const x = cellToken(c, result.format); return x ? [{ c, x }] : []; });
+          if (later.length === 0 || after.every((c) => { const x = cellToken(c, result.format); return !x || isYearToken(x); })) return;
+          for (const { c, x } of later) {
+            const own = note ?? (() => { const m = mapToken(relative ? labelCell.text.replace(BLOCK_RELATIVE_RE, "") : labelCell.text, x, { scope, ahead: c.text.slice(0, x.start), after: c.text.slice(x.end), quote: quoteDocs.has(result) }); return m.kind === "ignored" ? m.reason : "No field matches this label"; })();
+            result.other.push({ fieldKey: null, itemKey: null, value: x.value, raw: x.raw, unitSeen: x.unit, location: c.ref, context: rowContext(table.name, cat, row, labelCell, c), rule: "table:label-value", note: own });
+          }
+        };
         for (const cell of after) {
           const t = cellToken(cell, result.format);
           if (!t) continue;
@@ -1636,13 +1670,16 @@ function fromTable(table0: Table, result: ExtractionResult, notes: string[] = []
           // Under a rent roll, a row that restates the roll (a count, an area, a rent, an occupancy) is a summary, not an assumption.
           if (rollSeen && mapped.kind === "field" && ROLL_FIELDS.has(mapped.fieldKey) && !STABILIZED_LABEL_RE.test(label)) {
             result.other.push({ ...base, fieldKey: null, itemKey: null, value: t.value, unitSeen: t.unit, note: ROLL_SUMMARY_NOTE });
+            rest(cell, ROLL_SUMMARY_NOTE);
             break;
           }
           if (mapped.kind === "field" && REVENUE_FIELDS.has(mapped.fieldKey) && asIs(labelCell.text)) {
             result.other.push({ ...base, fieldKey: null, itemKey: null, value: t.value, unitSeen: t.unit, note: AS_IS_NOTE });
+            rest(cell, AS_IS_NOTE);
             break;
           }
           record(result, mapped, t, base);
+          rest(cell, mapped.kind === "field" ? "Another figure in this row was used" : null);
           if (mapped.kind === "field") read.add(mapped.fieldKey);
           if (TOTAL_RE.test(labelCell.text)) {
             const def = mapped.kind === "field" ? FIELD_BY_KEY.get(mapped.fieldKey) : undefined;
