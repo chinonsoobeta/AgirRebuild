@@ -4661,6 +4661,16 @@ describe("Moncton end-to-end reading faults (task 69)", () => {
   const read = (d: NormalizedDocument) => extractCandidates(d).candidates.map((c) => [c.fieldKey, c.itemKey, c.value]);
   const shown = (d: NormalizedDocument) => extractCandidates(d).other.map((o) => [o.value, o.note]);
 
+  test("audit of card 69: a plan type shaped like a suite id stays the type, and a labelled total monthly rent is not a unit rent", () => {
+    const roll = grid([["Unit", "Type", "Monthly rent"], ["101", "A1", "1,900"], ["102", "A1", "1,900"], ["201", "B2", "2,300"]]);
+    expect(read(roll)).toEqual([["unit_count", "A1", 2], ["unit_rent_monthly", "A1", 1900], ["unit_count", "B2", 1], ["unit_rent_monthly", "B2", 2300]]);
+    for (const line of ["Total monthly rent: $19,475", "Gross monthly rent: $19,475", "Loyer mensuel total : 19 475 $"]) {
+      expect(read(doc(line)).filter((c) => c[0] === "unit_rent_monthly")).toEqual([]);
+      expect(shown(doc(line))).toContainEqual([19475, "A total of all units' rents, not a rent per unit"]);
+    }
+    expect(read(doc("Rent per unit: $1,450"))).toEqual([["unit_rent_monthly", "All units", 1450]]);
+  });
+
   test("A: building monthly rent totals are shown rather than read as a unit rent", () => {
     for (const sentence of [
       "The completed rental schedule produces CAD 21,840 of monthly rent, or CAD 262,080 annually.",
