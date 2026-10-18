@@ -294,6 +294,8 @@ describe("stresses move returns the right way", () => {
   });
 });
 
+const RENTAL_TEMPLATES = TEMPLATES.filter((t) => !t.sells);
+
 describe("quick-start templates", () => {
   // A fourplex in Edmonton; every other answer is a plain, plausible number.
   const answer: Record<string, number> = {
@@ -317,7 +319,7 @@ describe("quick-start templates", () => {
     return rows;
   };
 
-  test.each(TEMPLATES.map((t) => [t.key] as const))("%s asks only real fields and defaults exactly the fields that carry one", (key) => {
+  test.each(RENTAL_TEMPLATES.map((t) => [t.key] as const))("%s asks only real fields and defaults exactly the fields that carry one", (key) => {
     const t = TEMPLATES.find((x) => x.key === key)!;
     for (const q of t.questions) {
       const def = FIELD_BY_KEY.get(q.field);
@@ -330,7 +332,7 @@ describe("quick-start templates", () => {
     expect(t.minUnits).toBeLessThan(t.maxUnits);
   });
 
-  test.each(TEMPLATES.map((t) => [t.key] as const))("%s answers leave nothing missing, with or without a loan", (key) => {
+  test.each(RENTAL_TEMPLATES.map((t) => [t.key] as const))("%s answers leave nothing missing, with or without a loan", (key) => {
     for (const loan of [1_500_000, 0]) {
       const { readiness, input } = assemble(rowsFor(key, loan));
       expect(readiness, `${key} loan ${loan}`).toMatchObject({ status: "ready", missing: [], conflicting: [], pending: [], impossible: [] });
@@ -352,20 +354,20 @@ describe("quick-start templates", () => {
         })),
       ];
     };
-    test.each(TEMPLATES.map((t) => [t.key] as const))("%s is ready without unused senior amortization", (key) => {
+    test.each(RENTAL_TEMPLATES.map((t) => [t.key] as const))("%s is ready without unused senior amortization", (key) => {
       const { readiness, input } = assemble(heldRowsFor(key));
       expect(readiness).toMatchObject({ status: "ready", missing: [], conflicting: [], pending: [], impossible: [] });
       expect(input!.exit).toBe("refinance_hold");
       expect(input!.senior).not.toHaveProperty("amortYears");
     });
-    test.each(TEMPLATES.map((t) => [t.key] as const))("%s requires amortization when IO ends before refinance", (key) => {
+    test.each(RENTAL_TEMPLATES.map((t) => [t.key] as const))("%s requires amortization when IO ends before refinance", (key) => {
       const rows = heldRowsFor(key, { senior_io_months: 17 });
       expect(assemble(rows).readiness.missing.map((m) => m.fieldKey)).toEqual(["senior_amort_years"]);
       const result = assemble([...rows, { fieldKey: "senior_amort_years", itemKey: null, status: "approved", valueNumeric: 30 }]);
       expect(result.readiness.status).toBe("ready");
       expect(result.input!.exit).toBe("refinance_hold");
     });
-    test.each(TEMPLATES.map((t) => [t.key] as const))("%s runs with the conventional and insured held policies", (key) => {
+    test.each(RENTAL_TEMPLATES.map((t) => [t.key] as const))("%s runs with the conventional and insured held policies", (key) => {
       for (const premium of [undefined, 4]) {
         const { input } = assemble(heldRowsFor(key, { refinance_insurance_premium_pct: premium }));
         expect(input).not.toBeNull();
@@ -374,14 +376,14 @@ describe("quick-start templates", () => {
         expect(contracts.VERDICT_CODES).toContain(underwrite(input!, policy).verdict.code);
       }
     });
-    test.each(TEMPLATES.map((t) => [t.key] as const))("%s can size the held refinance by loan-to-value", (key) => {
+    test.each(RENTAL_TEMPLATES.map((t) => [t.key] as const))("%s can size the held refinance by loan-to-value", (key) => {
       const { readiness, input } = assemble(heldRowsFor(key, { refinance_amount: undefined, refinance_ltv_pct: 70 }));
       expect(readiness).toMatchObject({ status: "ready", missing: [] });
       expect(input!.exit).toBe("refinance_hold");
       expect(input!.refinance).toMatchObject({ ltvPct: 70 });
       expect(input!.refinance).not.toHaveProperty("amount");
     });
-    test.each(TEMPLATES.map((t) => [t.key] as const))("%s asks usable held fields in the specified order", (key) => {
+    test.each(RENTAL_TEMPLATES.map((t) => [t.key] as const))("%s asks usable held fields in the specified order", (key) => {
       const t = TEMPLATES.find((x) => x.key === key)!;
       expect(t.questions[0]!.field).toBe("refinance_and_hold");
       const held = t.questions.filter((q) => q.heldOnly);
@@ -1656,7 +1658,7 @@ describe("Canadian cost lines and a mortgage insurance premium, as entered value
 
   describe("the quick start", () => {
     test("both templates ask for development charges and property tax per year, and 0 is allowed", () => {
-      for (const t of TEMPLATES) {
+      for (const t of RENTAL_TEMPLATES) {
         for (const k of ["development_charges", "property_tax_annual"]) {
           const q = t.questions.find((x) => x.field === k);
           expect(q, `${t.key} ${k}`).toMatchObject({ zeroAllowed: true });

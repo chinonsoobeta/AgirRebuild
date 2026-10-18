@@ -660,3 +660,51 @@ describe("the held quick start's wording (task 75)", () => {
     expect(fr.L.ask("refinance_insurance_premium_pct")[1]).toMatch(/SCHL.*vide.*aucune assurance/);
   });
 });
+
+
+describe("setting up unit sales in English and French (task 78)", () => {
+  const en = build("en", () => {});
+  const fr = build("fr", () => {});
+  const keys = ["sell_units", "unit_sale_price", "presold_units_pct", "deposit_pct", "absorption_units_per_month", "sales_commission_pct", "closing_lag_months", "unsold_carry_monthly", "senior_presale_threshold_pct"];
+  it("translates every field, question, help line, absence and group", () => {
+    expect(fr.L.group("sale")).toBe("Ventes des unités");
+    expect(en.L.group("sale")).toBe("Unit sales");
+    for (const key of keys) {
+      expect(fr.L.field(key), key).not.toBe(key);
+      expect(fr.L.field(key), key).not.toBe(en.L.field(key));
+      expect(fr.L.ask(key)[0], key).not.toBe(en.L.ask(key)[0]);
+      const def = FIELDS.find((f) => f.key === key)!;
+      if (def.absentMeans) expect(fr.L.absent(key)).not.toBe(en.L.absent(key));
+      if (def.help) expect(fr.L.help(key, def.help)).not.toBe(en.L.help(key, def.help));
+    }
+    for (const key of ["qs.t.townhomes", "qs.saleLine", "qs.unitSalePrice", "qs.doneSales", "qs.saleGstQuestion"] as Key[]) {
+      expect(en.t(key), key).not.toBe(key);
+      expect(fr.t(key), key).not.toBe(key);
+      expect(fr.t(key), key).not.toBe(en.t(key));
+    }
+    expect(en.L.ask("closing_lag_months")[1]).toMatch(/0.*freehold/);
+    expect(fr.L.ask("closing_lag_months")[1]).toMatch(/0.*pleine propriété/);
+  });
+  it("translates the mode refusals and the unit-type missing item", () => {
+    const sentences = ["Sell the units and keep and refinance cannot both be chosen", "Unit types (at least one, with a count and a sale price)", "Sale price per unit (3BR)",
+      ...FIELDS.filter((f) => keys.includes(f.key)).map((f) => `${f.label} applies only when the units are sold`),
+      ...FIELDS.filter((f) => !keys.includes(f.key)).map((f) => `${f.label} does not apply when the units are sold`)];
+    for (const sentence of sentences) {
+      expect(fr.msg(sentence), sentence).not.toBe(sentence);
+      expect(fr.msg(sentence), sentence).not.toMatch(/\b(must|needs|give|the|and|between|required|from|to|least|above|under|months|years)\b/);
+    }
+  });
+  it("uses the expected and actual values in sale checks", () => {
+    for (const c of [
+      { key: "presale_threshold_unmet", message: "The construction loan needs 60% presold; 40% is stated.", expected: 60, actual: 40 },
+      { key: "for_sale_debt_unpaid", message: "Base case: $1234.50 of debt remains after the last closing.", actual: 1234.5 },
+    ]) {
+      const check = { ...c, kind: "bound", severity: "error" };
+      expect(checkText(en, check)).toBe(c.message);
+      expect(checkText(fr, check)).not.toBe(c.message);
+      expect(checkText(fr, check)).not.toMatch(/\b(must|needs|give|the|and|between|required|from|to|least|above|under|months|years)\b/);
+      expect(checkText(fr, check)).toContain(fr.f.value(c.actual, c.key === "presale_threshold_unmet" ? "%" : "$"));
+      if (c.expected !== undefined) expect(checkText(fr, check)).toContain(fr.f.value(c.expected, "%"));
+    }
+  });
+});
