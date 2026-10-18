@@ -4642,3 +4642,100 @@ describe("a per-unit amount in a table cell is not the line's total (task 68)", 
     expect(shown(plain)).toEqual([]);
   });
 });
+
+
+describe("Moncton end-to-end reading faults (task 69)", () => {
+  const doc = (...text: string[]): NormalizedDocument => ({
+    kind: "pdf",
+    lines: text.map((t, i) => ({ text: t, location: `page 1, line ${i + 1}` })),
+    tables: [],
+    pageCount: 1,
+    needsOcr: false,
+    fullText: text.join("\n"),
+  });
+  const grid = (rows: string[][]): NormalizedDocument => ({
+    ...doc("Amounts such as 1,234,567 use comma grouping."),
+    lines: [],
+    tables: [{ name: "Invented rental schedule", rows: rows.map((r, i) => r.map((text, j) => ({ text, ref: `${"ABCD"[j]}${i + 1}` }))) } as Table],
+  });
+  const read = (d: NormalizedDocument) => extractCandidates(d).candidates.map((c) => [c.fieldKey, c.itemKey, c.value]);
+  const shown = (d: NormalizedDocument) => extractCandidates(d).other.map((o) => [o.value, o.note]);
+
+  test("A: building monthly rent totals are shown rather than read as a unit rent", () => {
+    for (const sentence of [
+      "The completed rental schedule produces CAD 21,840 of monthly rent, or CAD 262,080 annually.",
+      "We forecast total monthly rent of $21,840.",
+      "The building earns gross monthly rent of $21,840.",
+      "Our rent roll totals $21,840 per month.",
+      "Le loyer mensuel total atteint 21 840 $.",
+      "Les loyers mensuels totaux atteignent 21 840 $.",
+    ]) {
+      const d = doc(sentence);
+      expect(read(d).filter((c) => c[0] === "unit_rent_monthly"), sentence).toEqual([]);
+      expect(shown(d), sentence).toContainEqual([21840, "A total of all units' rents, not a rent per unit"]);
+    }
+    expect(read(doc("Each one-bedroom rents for $1,530 per month."))).toContainEqual(["unit_rent_monthly", "1BR", 1530]);
+    expect(read(doc("Rent per unit: $1,530"))).toContainEqual(["unit_rent_monthly", "All units", 1530]);
+  });
+
+  test("B: equity words do not govern the following loan amount", () => {
+    for (const noun of ["construction facility", "construction loan", "facility", "loan", "mortgage", "prêt", "financement"]) {
+      const d = doc(`We will contribute CAD 630,000 of sponsor equity beside a CAD 1,920,000 ${noun}.`);
+      expect(read(d).filter((c) => c[0] === "equity_amount"), noun).toEqual([["equity_amount", null, 630000]]);
+      const loan = extractCandidates(d);
+      expect(loan.candidates.some((c) => c.fieldKey === "senior_loan_amount" && c.value === 1920000) || loan.other.some((o) => o.value === 1920000 && o.note === "No field matches this label"), noun).toBe(true);
+    }
+    expect(read(doc("Sponsor equity: $630,000"))).toEqual([["equity_amount", null, 630000]]);
+  });
+
+  test("C: month ranges are indices while separately stated periods remain durations", () => {
+    for (const sentence of [
+      "Construction uses project months 2 through 14 while lease-up uses months 15 through 21.",
+      "Construction uses project months 2 to 14 while lease-up uses months 15 to 21.",
+      "Lease-up occupies month 15–21.",
+      "La mise en location couvre les mois 15 à 21.",
+    ]) {
+      const d = doc(sentence, "Lease-up: 7 months", "Construction period of 13 months");
+      expect(read(d).filter((c) => c[0] === "lease_up_months" || c[0] === "construction_months"), sentence).toEqual([["lease_up_months", null, 7], ["construction_months", null, 13]]);
+      for (const value of sentence.includes("Construction") ? [2, 14, 15, 21] : [15, 21]) {
+        expect(shown(d), sentence).toContainEqual([value, "A range is not a value; enter the figure to use"]);
+      }
+    }
+  });
+
+  test("D: letter-prefixed suite ids group by type without treating unit types as ids", () => {
+    const rows = [
+      ["Suite", "Type", "Size (sq ft)", "Monthly rent"],
+      ["F01", "1-bed", "600", "1680"], ["B12", "1-bed", "615", "1680"],
+      ["PH2", "2-bed", "830", "2070"], ["A-101", "2-bed", "845", "2070"], ["G-3", "2-bed", "860", "2070"],
+      ["TOTAL", "", "3750", "9570"],
+    ];
+    expect(read(grid(rows))).toEqual([
+      ["unit_count", "1BR", 2], ["rentable_area_sf", "1BR", 1215], ["unit_rent_monthly", "1BR", 1680],
+      ["unit_count", "2BR", 3], ["rentable_area_sf", "2BR", 2535], ["unit_rent_monthly", "2BR", 2070],
+    ]);
+    const differing = rows.map((r) => [...r]);
+    differing[2]![3] = "1695";
+    differing[6]![3] = "9585";
+    expect(read(grid(differing)).filter((c) => c[0] === "unit_count")).toEqual([["unit_count", "1BR", 2], ["unit_count", "2BR", 3]]);
+    expect(read(grid(differing)).filter((c) => c[0] === "unit_rent_monthly")).toEqual([["unit_rent_monthly", "2BR", 2070]]);
+    expect(shown(grid(differing))).toContainEqual([1680, "Suites of this type rent at different amounts; enter the rent to use"]);
+    expect(shown(grid(differing))).toContainEqual([1695, "Suites of this type rent at different amounts; enter the rent to use"]);
+    for (const type of ["2BR", "1-bed", "3 ch.", "Studio", "4½", "Bach"]) {
+      const counts = read(grid([["Type", "Units", "Rent"], [type, "4", "1930"]])).filter((c) => c[0] === "unit_count");
+      expect(counts, type).toHaveLength(1);
+      expect(counts[0]![2], type).toBe(4);
+    }
+  });
+
+  test("E: mortgage insurance premiums direct manual entry while lender fees keep their note", () => {
+    for (const label of ["Mortgage insurance premium", "CMHC mortgage insurance premium", "MLI premium", "Sagen premium", "Canada Guaranty premium", "Prime d'assurance hypothécaire", "Prime SCHL"]) {
+      const d = doc(`${label}: 3.80% of the base refinance amount`);
+      expect(read(d), label).toEqual([]);
+      expect(shown(d), label).toEqual([[3.8, "Mortgage insurance premium: enter it on Review as the refinance mortgage insurance premium"]]);
+    }
+    const fee = doc("Lender fee: 1.25%");
+    expect(read(fee)).toEqual([]);
+    expect(shown(fee)).toEqual([[1.25, "A fee or premium, not an input"]]);
+  });
+});
