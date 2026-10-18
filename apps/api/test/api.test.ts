@@ -803,11 +803,11 @@ describe("card 60: a deal that is kept and refinanced runs under its own policy"
     expect(r.status).toBe(200);
     holdRun = r.json.id;
     const view = (await call(hal, "GET", `/api/runs/${holdRun}`)).json;
-    expect(view).toMatchObject({ policyVersion: "rental-hold-v1-draft", fresh: true, staleReasons: [] });
+    expect(view).toMatchObject({ policyVersion: "rental-hold-v2-draft", fresh: true, staleReasons: [] });
     expect(view.result.verdict.gates).toHaveLength(4);
     expect(view.result.scenarios[0].metrics.some((m: any) => m.key === "refinance_cash_returned")).toBe(true);
     const [row] = await db.query<any>(`select policy_version, policy_hash from runs where id = $1`, [holdRun]);
-    expect(row).toMatchObject({ policy_version: "rental-hold-v1-draft", policy_hash: sha(RENTAL_HOLD_V1_DRAFT) });
+    expect(row).toMatchObject({ policy_version: "rental-hold-v2-draft", policy_hash: POLICY_HASHES["rental-hold-v2-draft"] });
     expect(row.policy_hash).not.toBe(sha(POLICY_V1));
     expect((await call(hal, "GET", `/api/deals/${hd}`)).json.status.text).toMatch(/^Verdict: /);
     const overview = (await call(hal, "GET", `/api/deals/${hd}`)).json;
@@ -822,7 +822,7 @@ describe("card 60: a deal that is kept and refinanced runs under its own policy"
 
   test("the sensitivity routes use the run's own policy", async () => {
     const e = (await call(hal, "POST", `/api/runs/${holdRun}/explore`, { shock: {} })).json;
-    expect(e.policyVersion).toBe("rental-hold-v1-draft");
+    expect(e.policyVersion).toBe("rental-hold-v2-draft");
     expect(e.verdict.gates).toHaveLength(4);
     const b = await call(hal, "POST", `/api/runs/${holdRun}/breakeven`, {});
     expect(b.status).toBe(200);
@@ -867,6 +867,23 @@ describe("card 60: a deal that is kept and refinanced runs under its own policy"
     expect((await call(hal, "GET", `/api/runs/${r.json.id}/audit-package`)).json.validation.status).toBe("passed");
   });
 
+  test.each([
+    [0, "rental-hold-v2-draft"],
+    [4, "rental-hold-insured-v3-draft"],
+  ] as const)("a held run with premium %s stores its IO-sizing policy (task 72)", async (premium, version) => {
+    hal ??= await signup("fictional-io-72@example.com", "Fictional IO Owner", "solo");
+    const workspace = (await call(hal, "GET", "/api/me")).json.workspaces[0].id;
+    const id = (await call(hal, "POST", `/api/workspaces/${workspace}/deals`, { name: "Fictional IO Lantern Rental", assetType: "Multifamily", location: "Invented Borough", province: "AB" })).json.id;
+    await fill(id, true);
+    await put(id, "senior_io_months", 24);
+    if (premium > 0) await put(id, "refinance_insurance_premium_pct", premium);
+    const run = await call(hal, "POST", `/api/deals/${id}/runs`);
+    expect(run.status).toBe(200);
+    const [row] = await db.query<any>(`select policy_version, policy_hash from runs where id = $1`, [run.json.id]);
+    expect(row).toMatchObject({ policy_version: version, policy_hash: POLICY_HASHES[version] });
+    expect((await call(hal, "GET", `/api/runs/${run.json.id}/audit-package`)).json.validation.status).toBe("passed");
+  });
+
   test("an insured held run stores insured v2 (task 70)", async () => {
     hal ??= await signup("fictional-insured-70@example.com", "Fictional Card Seventy Owner", "solo");
     const workspace = (await call(hal, "GET", "/api/me")).json.workspaces[0].id;
@@ -876,7 +893,7 @@ describe("card 60: a deal that is kept and refinanced runs under its own policy"
     const run = await call(hal, "POST", `/api/deals/${id}/runs`);
     expect(run.status).toBe(200);
     const [row] = await db.query<any>(`select policy_version, policy_hash from runs where id = $1`, [run.json.id]);
-    expect(row).toMatchObject({ policy_version: "rental-hold-insured-v2-draft", policy_hash: POLICY_HASHES["rental-hold-insured-v2-draft"] });
+    expect(row).toMatchObject({ policy_version: "rental-hold-insured-v3-draft", policy_hash: POLICY_HASHES["rental-hold-insured-v3-draft"] });
   });
 
   test("an insured held run stores its own policy and hash, replays, and renders its artifacts (task 67)", async () => {
@@ -889,9 +906,9 @@ describe("card 60: a deal that is kept and refinanced runs under its own policy"
     expect(r.status).toBe(200);
     const insuredRun = r.json.id;
     const view = (await call(hal, "GET", `/api/runs/${insuredRun}`)).json;
-    expect(view).toMatchObject({ policyVersion: "rental-hold-insured-v2-draft", fresh: true, staleReasons: [] });
+    expect(view).toMatchObject({ policyVersion: "rental-hold-insured-v3-draft", fresh: true, staleReasons: [] });
     const [row] = await db.query<any>(`select policy_version, policy_hash from runs where id = $1`, [insuredRun]);
-    expect(row).toMatchObject({ policy_version: "rental-hold-insured-v2-draft", policy_hash: POLICY_HASHES["rental-hold-insured-v2-draft"] });
+    expect(row).toMatchObject({ policy_version: "rental-hold-insured-v3-draft", policy_hash: POLICY_HASHES["rental-hold-insured-v3-draft"] });
     expect((await call(hal, "GET", `/api/runs/${insuredRun}/audit-package`)).json.validation.status).toBe("passed");
     const body = view.result.verdict.code === "APPROVE"
       ? { decision: "approve", rationale: "Fictional policy-selection test" }

@@ -463,7 +463,7 @@ describe("a deal that is kept and refinanced (card 60)", () => {
 
     test("the table names the shared move before both loan rates and explains it in the footnote", () => {
       const x = rateInput();
-      expect(x.policy.version).toBe("rental-hold-v1-draft");
+      expect(x.policy.version).toBe("rental-hold-v2-draft");
       expect(x.input.refinance?.insurancePremiumPct).toBeUndefined();
       expect(x.result.verdict.gates.find((g) => g.key === "dcr_after_refinance")).toMatchObject({ status: "failed", threshold: 1.2 });
       const dcr = x.result.scenarios[0]!.metrics.find((m) => m.key === "dcr_after_refinance")!.value!;
@@ -562,7 +562,7 @@ describe("a deal that is kept and refinanced (card 60)", () => {
         row.eachCell((cell) => cells.push(String(cell.value)));
         if (row.getCell(1).value === "Coverage after refinance (DCR)") threshold = row.getCell(3);
       });
-      expect(cells).toContain("rental-hold-insured-v2-draft");
+      expect(cells).toContain("rental-hold-insured-v3-draft");
       expect(cells).toContain(DRAFT);
       expect(threshold?.value).toBe(1.1);
       expect(threshold?.numFmt).toBe('0.00"x"');
@@ -571,7 +571,7 @@ describe("a deal that is kept and refinanced (card 60)", () => {
       const text = visibleText(new TextDecoder().decode(out.bytes));
       expect(out.provenance.orphans).toEqual([]);
       expect(out.provenance.pass).toBe(true);
-      expect(text).toContain("rental-hold-insured-v2-draft");
+      expect(text).toContain("rental-hold-insured-v3-draft");
       expect(text).toContain(DRAFT);
       const model = buildModel(x);
       const table = model.blocks.find((b) => b.type === "table" && b.caption === (kind === "ic_memo" ? "Committee gates" : "Debt and coverage"));
