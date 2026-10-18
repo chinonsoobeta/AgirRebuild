@@ -336,6 +336,7 @@ function changeTheAnswer(f: Formatter, x: ArtifactInput): Block[] {
   if (x.run.policyHash !== createHash("sha256").update(canonicalJson(x.policy)).digest("hex")) return [heading, { type: "paragraph", muted: true, text: "Not shown: this run was made under a different policy." }];
   const { rows } = breakeven(x.input, x.policy);
   const body: string[][] = [];
+  let ratesTogether = false;
   for (const g of failing) {
     const needs = f.run(g.threshold, g.unit, `gate.${g.key}.threshold`);
     const has = g.actual === null ? "Not measured" : f.run(g.actual, g.unit, `gate.${g.key}.actual`);
@@ -355,9 +356,14 @@ function changeTheAnswer(f: Formatter, x: ArtifactInput): Block[] {
         add([`Rent, all ${f.ident(String(row.to.length), `breakeven.${g.key}.rent.count`)} unit types (same share)`, "\u2014", `+${f.run(row.shock, "%", `breakeven.${g.key}.rent.shock`)}`]);
         continue;
       }
+      const allRates = row.driver === "rateBps" && row.to.length > 1;
+      if (allRates) {
+        add([`Loan interest rates, all ${f.ident(String(row.to.length), `breakeven.${g.key}.rate.count`)} together (same move)`, "\u2014", `${row.shock! > 0 ? "+" : ""}${f.run(row.shock, "bps", `breakeven.${g.key}.rate.shock`)}`]);
+        ratesTogether = true;
+      }
       for (const e of row.to) {
         const ref = `breakeven.${g.key}.${e.key}${e.item ? "|" + e.item : ""}`;
-        const name = e.item ? `${ECHO_NAME[e.key]}, ${e.item}` : ECHO_NAME[e.key];
+        const name = (e.item ? `${ECHO_NAME[e.key]}, ${e.item}` : ECHO_NAME[e.key]) + (allRates ? ", in the same move" : "");
         const unit = ECHO_UNIT[e.unit];
         const [dir, step] = PASSING_ROUND[e.key](e.unit);
         add([f.ident(name, `${ref}.label`), f.run(e.from, unit, `${ref}.from`), f.derived(roundToward(e.to, dir, step), unit, `${dir > 0 ? "ceil" : "floor"}(${ref}.to, ${step})`)]);
@@ -371,7 +377,7 @@ function changeTheAnswer(f: Formatter, x: ArtifactInput): Block[] {
       columns: [{ label: "Gate" }, { label: "Needs", numeric: true }, { label: "This run", numeric: true }, { label: "Input moved" }, { label: "In this run", numeric: true }, { label: "Passes at", numeric: true }],
       rows: body,
     },
-    { type: "paragraph", muted: true, text: "One input is moved at a time. Everything else is held." },
+    { type: "paragraph", muted: true, text: "One input is moved at a time. Everything else is held." + (ratesTogether ? " Loan interest rates move together by the same amount." : "") },
   ];
 }
 
