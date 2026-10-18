@@ -129,7 +129,11 @@ export function Review({ dealId }: { dealId: string }) {
   const [entering, setEntering] = useState<string | null>(null);
   const [picked, setPicked] = useState<Record<string, number>>({});
   const [formError, setFormError] = useState<unknown>(null);
-  const refresh = () => Promise.all([qc.invalidateQueries({ queryKey: ["review", dealId] }), qc.invalidateQueries({ queryKey: ["deal", dealId] })]);
+  // The deal first: if it says no reconcile is waiting, the review read after it is already current; if one is, the effect above reads it again when it is done.
+  const refresh = async () => {
+    await qc.invalidateQueries({ queryKey: ["deal", dealId] });
+    await qc.invalidateQueries({ queryKey: ["review", dealId] });
+  };
   const act = useMutation({
     mutationFn: (b: { id: string; action: string; value?: number | null; reason?: string | null; version?: number }) => api.post(`/assumptions/${b.id}/review`, b),
     onSuccess: () => {
