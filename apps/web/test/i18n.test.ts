@@ -615,3 +615,25 @@ describe("card 58c: every audit action has a sentence in both languages", () => 
     }
   });
 });
+
+
+describe("the held quick start's wording (task 75)", () => {
+  const en = build("en", () => {});
+  const fr = build("fr", () => {});
+  it("translates the exit choices, unused amortization and refinance choice error", () => {
+    for (const key of ["qs.sell", "qs.keep", "qs.amortUnused", "qs.errRefinance"] as Key[]) {
+      expect(en.t(key), key).not.toBe(key);
+      expect(fr.t(key), key).not.toBe(key);
+      expect(fr.t(key), key).not.toBe(en.t(key));
+    }
+    expect(en.t("qs.errRefinance" as Key)).toBe("Give the refinance loan amount or its loan-to-value, not both.");
+  });
+  it("asks every held question in both languages and explains the optional insurance", () => {
+    for (const key of ["refinance_and_hold", "senior_io_months", "refinance_month", "refinance_amount", "refinance_ltv_pct", "refinance_rate_pct", "refinance_amort_years", "refinance_io_months", "refinance_insurance_premium_pct"]) {
+      expect(en.L.ask(key)[0], key).not.toBe(en.L.field(key));
+      expect(fr.L.ask(key)[0], key).not.toBe(en.L.ask(key)[0]);
+    }
+    expect(en.L.ask("refinance_insurance_premium_pct")[1]).toMatch(/CMHC.*blank.*no mortgage insurance/);
+    expect(fr.L.ask("refinance_insurance_premium_pct")[1]).toMatch(/SCHL.*vide.*aucune assurance/);
+  });
+});

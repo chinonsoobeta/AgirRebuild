@@ -1,5 +1,6 @@
 import { describe, expect, test } from "vitest";
 import fc from "fast-check";
+import * as contracts from "@agir/contracts";
 import { FIELDS, FIELD_BY_KEY, METRICS, POLICIES, POLICY_V1, RENTAL_HOLD_INSURED_DRAFT, RENTAL_HOLD_DRAFT, TEMPLATES, policyFor, type AssumptionStatus, type EngineInput, type Readiness, type RunResult } from "@agir/contracts";
 import { createHash } from "node:crypto";
 import { readFileSync, readdirSync } from "node:fs";
@@ -308,7 +309,7 @@ describe("quick-start templates", () => {
     const add = (fieldKey: string, itemKey: string | null, v: number, status: AssumptionStatus = "approved") => rows.push({ fieldKey, itemKey, status, valueNumeric: v });
     const skipped = new Set(loan === 0 ? t.questions.find((q) => q.skipsIfZero)!.skipsIfZero : []);
     for (const q of t.questions) {
-      if (skipped.has(q.field)) continue;
+      if (skipped.has(q.field) || !Object.hasOwn(answer, q.field)) continue;
       if (q.repeatable) for (const item of ["1BR", "2BR"]) add(q.field, item, q.field === "unit_count" ? 3 : answer[q.field]!);
       else add(q.field, q.item ?? null, q.field === "senior_loan_amount" ? loan : answer[q.field]!);
     }
@@ -335,6 +336,75 @@ describe("quick-start templates", () => {
       expect(readiness, `${key} loan ${loan}`).toMatchObject({ status: "ready", missing: [], conflicting: [], pending: [], impossible: [] });
       expect(input).not.toBeNull();
     }
+  });
+
+  describe("kept and refinanced (task 75)", () => {
+    const heldFields = ["senior_io_months", "refinance_month", "refinance_amount", "refinance_ltv_pct", "refinance_rate_pct", "refinance_amort_years", "refinance_io_months", "refinance_insurance_premium_pct"];
+    const heldRowsFor = (key: "multiplex" | "apartment", changes: Record<string, number | undefined> = {}) => {
+      const values: Record<string, number | undefined> = {
+        refinance_and_hold: 1, senior_io_months: 18, refinance_month: 18, refinance_amount: 1_600_000,
+        refinance_rate_pct: 4.8, refinance_amort_years: 30, ...changes,
+      };
+      const t = TEMPLATES.find((x) => x.key === key)!;
+      return [...rowsFor(key).filter((r) => r.fieldKey !== "senior_amort_years"),
+        ...t.questions.filter((q) => Object.hasOwn(values, q.field) && values[q.field] !== undefined).map((q) => ({
+          fieldKey: q.field, itemKey: null, status: "approved" as const, valueNumeric: values[q.field]!,
+        })),
+      ];
+    };
+    test.each(TEMPLATES.map((t) => [t.key] as const))("%s is ready without unused senior amortization", (key) => {
+      const { readiness, input } = assemble(heldRowsFor(key));
+      expect(readiness).toMatchObject({ status: "ready", missing: [], conflicting: [], pending: [], impossible: [] });
+      expect(input!.exit).toBe("refinance_hold");
+      expect(input!.senior).not.toHaveProperty("amortYears");
+    });
+    test.each(TEMPLATES.map((t) => [t.key] as const))("%s requires amortization when IO ends before refinance", (key) => {
+      const rows = heldRowsFor(key, { senior_io_months: 17 });
+      expect(assemble(rows).readiness.missing.map((m) => m.fieldKey)).toEqual(["senior_amort_years"]);
+      const result = assemble([...rows, { fieldKey: "senior_amort_years", itemKey: null, status: "approved", valueNumeric: 30 }]);
+      expect(result.readiness.status).toBe("ready");
+      expect(result.input!.exit).toBe("refinance_hold");
+    });
+    test.each(TEMPLATES.map((t) => [t.key] as const))("%s runs with the conventional and insured held policies", (key) => {
+      for (const premium of [undefined, 4]) {
+        const { input } = assemble(heldRowsFor(key, { refinance_insurance_premium_pct: premium }));
+        expect(input).not.toBeNull();
+        const policy = policyFor(input!);
+        expect(policy.version).toBe(premium === undefined ? "rental-hold-draft" : "rental-hold-insured-draft");
+        expect(["GO", "WATCH", "REJECT"]).toContain(underwrite(input!, policy).verdict.code);
+      }
+    });
+    test.each(TEMPLATES.map((t) => [t.key] as const))("%s can size the held refinance by loan-to-value", (key) => {
+      const { readiness, input } = assemble(heldRowsFor(key, { refinance_amount: undefined, refinance_ltv_pct: 70 }));
+      expect(readiness).toMatchObject({ status: "ready", missing: [] });
+      expect(input!.exit).toBe("refinance_hold");
+      expect(input!.refinance).toMatchObject({ ltvPct: 70 });
+      expect(input!.refinance).not.toHaveProperty("amount");
+    });
+    test.each(TEMPLATES.map((t) => [t.key] as const))("%s asks usable held fields in the specified order", (key) => {
+      const t = TEMPLATES.find((x) => x.key === key)!;
+      expect(t.questions[0]!.field).toBe("refinance_and_hold");
+      const held = t.questions.filter((q) => q.heldOnly);
+      expect(held.map((q) => q.field)).toEqual(heldFields);
+      expect(t.questions.indexOf(held[0]!)).toBeGreaterThan(t.questions.findIndex((q) => q.field === "senior_amort_years"));
+      for (const q of held) {
+        const def = FIELD_BY_KEY.get(q.field)!;
+        expect(def, q.field).toBeDefined();
+        expect(def.required === false || def.required === "refinance_month", q.field).toBe(true);
+      }
+      for (const field of ["refinance_amount", "refinance_ltv_pct", "refinance_io_months", "refinance_insurance_premium_pct"]) {
+        expect(held.find((q) => q.field === field)).toMatchObject({ optional: true });
+      }
+      expect(held[0]).toMatchObject({ zeroAllowed: true });
+    });
+    test.each([
+      [{ senior_io_months: 18, refinance_month: 18 }, false],
+      [{ refinance_and_hold: 1, senior_io_months: 18 }, false],
+      [{ refinance_and_hold: 1, senior_io_months: 18, refinance_month: 18 }, true],
+      [{ refinance_and_hold: 1, senior_io_months: 17, refinance_month: 18 }, false],
+    ] as [Record<string, number>, boolean][])("shares the amortization rule for %j", (values, expected) => {
+      expect(contracts.heldSeniorAmortUnused((key) => values[key])).toBe(expected);
+    });
   });
 
   // Readiness never blocks it. These figures are a weak deal (the engine's own equity_wipeout check
