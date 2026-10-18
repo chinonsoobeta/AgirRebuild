@@ -603,6 +603,15 @@ describe("tables written as lines of text, and what a table's rows mean", () => 
       const r = extractCandidates(tableDoc(grid(["Type", "Asking rent"], ["1 bed", "$1,650"], ["2 bed", "$2,050"], ["3 bed", "$2,450"])));
       expect(byItem(r, "unit_count")).toEqual([]);
     });
+    test("audit of card 66: a count column after the type column is not a suite column, so no type is counted one per row", () => {
+      for (const [type, count, rent] of [["Type", "No.", "Monthly rent"], ["Unit type", "Unit #", "Rent / month"], ["Type", "Unit", "Monthly rent"]]) {
+        const r = extractCandidates(tableDoc(grid([type!, count!, rent!], ["1 bed", 4, "$1,450"], ["2 bed", 6, "$1,850"])));
+        expect([count, byItem(r, "unit_count").filter(([, n]) => n === 1)]).toEqual([count, []]);
+      }
+      // A suite column first is still a roll.
+      const r = extractCandidates(tableDoc(grid(["No.", "Type", "Rent per month"], ["1", "1 bed", "$1,450"], ["2", "1 bed", "$1,450"])));
+      expect(byItem(r, "unit_count")).toEqual([["1BR", 2]]);
+    });
     test("a roll of unit types with counts is read as before", () => {
       const r = extractCandidates(tableDoc(grid(["Type", "Units", "Area (sf)", "Monthly rent"], ["1 bed", 4, 620, "$1,450"], ["2 bed", 4, 880, "$1,795"])));
       expect(pick(r)).toEqual([["unit_count", "1BR", 4], ["unit_rent_monthly", "1BR", 1450], ["rentable_area_sf", "1BR", 2480], ["unit_count", "2BR", 4], ["unit_rent_monthly", "2BR", 1795], ["rentable_area_sf", "2BR", 3520]]);
