@@ -3,8 +3,8 @@
 //
 // maxLtcPct is provisional: it awaits credit sign-off (plan task S4).
 //
-// A held deal runs under rental-hold-v1-draft (card 60), or rental-hold-insured-v1-draft when insured.
-// Both drafts propose thresholds for credit. POLICY_V1 is never edited for them: existing runs keep their hash.
+// A new held deal runs under rental-hold-v1-draft (card 60), or rental-hold-insured-v2-draft when insured.
+// The drafts propose thresholds for credit. Earlier policies are retained unchanged: existing runs keep their hash.
 
 import type { EngineInput } from "./results.ts";
 
@@ -98,17 +98,25 @@ export const RENTAL_HOLD_INSURED_V1_DRAFT: Policy = {
   gates: { ...RENTAL_HOLD_V1_DRAFT.gates, dcrAfterRefinanceMin: 1.1 },
 };
 
-/** Every policy a run can have been made under, by version. A new policy is added, never edited. */
+/** Insured held deals use the same 1.10x base sizing warning floor as their refinance DCR gate (owner decision 2026-10-17). */
+export const RENTAL_HOLD_INSURED_V2_DRAFT: Policy = {
+  ...RENTAL_HOLD_INSURED_V1_DRAFT,
+  version: "rental-hold-insured-v2-draft",
+  baseSizingDscrFloor: 1.1,
+};
+
+/** Every policy a run can have been made under, by version. A new policy is added, never edited; earlier versions remain for stored runs and replay. */
 export const POLICIES: Readonly<Record<string, Policy>> = {
   [POLICY_V1.version]: POLICY_V1,
   [RENTAL_HOLD_V1_DRAFT.version]: RENTAL_HOLD_V1_DRAFT,
   [RENTAL_HOLD_INSURED_V1_DRAFT.version]: RENTAL_HOLD_INSURED_V1_DRAFT,
+  [RENTAL_HOLD_INSURED_V2_DRAFT.version]: RENTAL_HOLD_INSURED_V2_DRAFT,
 };
 
-/** A held deal gets the insured draft for a positive premium, otherwise the conventional draft. Every other deal gets v1. */
+/** A new held run gets insured v2 for a positive premium, otherwise the conventional draft. Every other deal gets v1; insured v1 stays registered for earlier runs. */
 export function policyFor(input: EngineInput): Policy {
   if (input.exit !== "refinance_hold") return POLICY_V1;
   // A stated premium identifies an insured refinance; there is no financing-type field.
   const premium = input.refinance?.insurancePremiumPct;
-  return typeof premium === "number" && premium > 0 ? RENTAL_HOLD_INSURED_V1_DRAFT : RENTAL_HOLD_V1_DRAFT;
+  return typeof premium === "number" && premium > 0 ? RENTAL_HOLD_INSURED_V2_DRAFT : RENTAL_HOLD_V1_DRAFT;
 }

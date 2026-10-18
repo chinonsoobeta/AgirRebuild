@@ -153,16 +153,18 @@ moves both the refinance loan, when it is sized by loan-to-value, and the stated
 
 **Policy.** `POLICY_V1` is unchanged, so its hash and the freshness of every existing run are unchanged. A
 registry maps each policy version to its policy; every sale deal uses `policy-v1`. Owner decision 2026-10-17:
-held deals use a DCR-after-refinance floor of 1.10x under `rental-hold-insured-v1-draft` when a stated refinance
-insurance premium is above zero, and 1.20x under `rental-hold-v1-draft` otherwise (conventional).
-Both floors are draft thresholds awaiting credit sign-off. Both drafts take v1's stresses, loan-to-cost ceiling,
-base sizing floor, tolerance and source precedence, and have four gates. The thresholds are proposals for credit,
-not decisions:
+new held runs use a DCR-after-refinance floor of 1.10x under `rental-hold-insured-v2-draft` when a stated refinance
+insurance premium is above zero, and 1.20x under `rental-hold-v1-draft` otherwise (conventional). The insured v2
+base-case sizing warning floor is also 1.10x; the conventional floor remains 1.20x. Insured v1 remains registered
+unchanged for earlier runs and replay. These are draft thresholds awaiting credit sign-off. Both current drafts
+take v1's stresses, loan-to-cost ceiling, tolerance and source precedence, and have four gates. The thresholds
+are proposals for credit, not decisions:
 
-| Gate | Scenario | Threshold |
+| Gate or warning | Scenario | Threshold |
 |---|---|---|
 | development spread | base | >= 100 bps |
 | coverage after refinance (`dcr_after_refinance`) | base | >= 1.10x insured; >= 1.20x conventional |
+| base-case sizing warning (not a gate) | base | below 1.10x insured; below 1.20x conventional |
 | sizing DSCR | combined | >= 1.20x |
 | unrealized equity multiple | combined | >= 1.0x |
 
