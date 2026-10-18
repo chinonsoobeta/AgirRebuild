@@ -4816,6 +4816,12 @@ describe("an equity reimbursement is not equity, and plan types stay distinct (t
     expect(shown(doc(sentence))).toEqual([]);
   });
 
+  test("a contribution stays readable beside a returned amount in the same clause", () => {
+    const d = doc("We contribute CAD 660000 of sponsor equity alongside CAD 440000 returned to the equity partners at refinance.");
+    expect(read(d)).toEqual([["equity_amount", null, 660000]]);
+    expect(shown(d)).toEqual([[440000, NOTE]]);
+  });
+
   test.each(["Units", "Count", "Number", "Nombre de logements"])("digit-ending plans stay distinct with the count column %s", (count) => {
     const d = grid([["Plan", count, "Monthly rent"], ["A1", "5", "1870"], ["A2", "2", "1980"], ["B2", "7", "2290"]]);
     expect(read(d)).toEqual([

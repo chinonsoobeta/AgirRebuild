@@ -586,6 +586,17 @@ function readSentence(sentence: { text: string; start: number }, para0: Paragrap
   const years = tokens.filter((t) => isYear(text, tokens, t));
   for (const t of years) other(t, "line:prose", "This is a year, not an amount");
   tokens = tokens.filter((t) => !years.includes(t));
+  // Returned equity and the equity retained afterward are not the amount contributed.
+  const returnedEquity = tokens.filter((t, i) => {
+    if (!isMoney(t)) return false;
+    const start = tokens[i - 1]?.end ?? 0;
+    const end = tokens[i + 1]?.start ?? text.length;
+    const clause = fold(clauseAround(text.slice(start, end), { ...t, start: t.start - start, end: t.end - start }));
+    return /\b(?:equity|fonds propres|capitaux propres)\b/.test(clause) && /\b(?:reimburs\w*|repay\w*|repaid|return(?:s|ed|ing)?|distribu\w*|cash(?:es|ed|ing)?[- ]outs?|tak(?:e[sn]?|ing)[- ]out|took[- ]out|leaving|left in|remaining|retain(?:s|ed|ing)?|rembours\w*|remet\w*|restants?|laissant)\b/.test(clause);
+  });
+  for (const t of returnedEquity) other(t, "line:prose", "Equity returned or left in after a refinance, not the equity contributed");
+  tokens = tokens.filter((t) => !returnedEquity.includes(t));
+  if (tokens.length === 0) return;
   // A figure the sentence says is replaced by another is shown, not read.
   const folded = fold(text);
   const replacing = /\b(replaces?|replacing|supersedes?|remplace(?:nt)?)\b/.exec(folded);
@@ -1019,7 +1030,7 @@ const STABILIZED_LABEL_RE = /\b(stabili[sz]ed|stabilis\w*|projected|pro forma|pr
 const DIFFERENT_RENTS_NOTE = "Suites of this type rent at different amounts; enter the rent to use";
 
 /** A rent-roll row's item as the unit type, and whether the row is one suite of it (a suite number or code beside or before the type). */
-function suiteItem(parts: string[]): { type: string; suite: boolean } {
+function suiteItem(parts: string[], hasUnitCount: boolean): { type: string; suite: boolean } {
   const ids = parts.filter((p) => SUITE_ID_RE.test(p));
   const named = parts.filter((p) => !SUITE_ID_RE.test(p));
   if (ids.length > 0 && named.length > 0) return { type: canonicalItem(named.join(" ").replace(/\s+/g, " ")), suite: true };
@@ -1029,9 +1040,9 @@ function suiteItem(parts: string[]): { type: string; suite: boolean } {
   // A leading number is a suite number unless the type needs it ("1 chambre", "2 bed").
   const lead = /^(?:(?:suite|unit|apt|apartment|no\.?|#|logement|app\.?)\s*)?\d{1,4}[A-Za-z]?\s+(\S.*)$/i.exec(one);
   if (parts.length === 1 && lead && unitTypesIn(lead[1]!).join() === unitTypesIn(one).join()) return { type: canonicalItem(lead[1]!), suite: true };
-  // "TH-1", "TH-2": suites of the type "TH".
+  // "TH-1", "TH-2": suites of the type "TH" only without a unit-count column; otherwise the code names the type.
   const code = /^([A-Za-z]{1,4})[-\s]?\d{1,3}$/.exec(one);
-  if (parts.length === 1 && code) return { type: code[1]!.toUpperCase(), suite: true };
+  if (!hasUnitCount && parts.length === 1 && code) return { type: code[1]!.toUpperCase(), suite: true };
   return { type: canonicalItem(one), suite: false };
 }
 
@@ -1055,7 +1066,7 @@ function fromRentRoll(table: Table, headerRow: number, roles: Roles, result: Ext
     return first && use.every((n) => n.basis === first) ? first : null;
   };
   // With no unit-count column, a row is one suite when it carries a suite number or code, or its type repeats; suites are grouped by type below.
-  const typeOf = (row: Cell[]) => suiteItem(roles.item.map((i) => row[i]?.text ?? "").filter(Boolean));
+  const typeOf = (row: Cell[]) => suiteItem(roles.item.map((i) => row[i]?.text ?? "").filter(Boolean), roles.units !== undefined);
   const repeats = new Map<string, number>();
   for (const row of body) if (row.some((c) => c.text)) repeats.set(typeOf(row).type, (repeats.get(typeOf(row).type) ?? 0) + 1);
   const suiteRows: { type: string; ref: string; cands: Candidate[] }[] = [];
