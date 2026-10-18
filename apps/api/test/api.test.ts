@@ -868,7 +868,7 @@ describe("card 60: a deal that is kept and refinanced runs under its own policy"
   });
 
   test("an insured held run stores its own policy and hash, replays, and renders its artifacts (task 67)", async () => {
-    hal = await signup("fictional-insured-67@example.com", "Fictional Insured Owner", "solo");
+    hal ??= await signup("fictional-insured-67@example.com", "Fictional Insured Owner", "solo");
     const workspace = (await call(hal, "GET", "/api/me")).json.workspaces[0].id;
     const insuredDeal = (await call(hal, "POST", `/api/workspaces/${workspace}/deals`, { name: "Fictional Insured Fourplex", assetType: "Multifamily", location: "Invented Township", province: "AB" })).json.id;
     await fill(insuredDeal, true);
