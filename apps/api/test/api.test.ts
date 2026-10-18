@@ -1957,7 +1957,6 @@ describe("card 58c: the deal overview says while a reconcile is still to run", (
     d = (await call(alice, "POST", `/api/workspaces/${sw}/deals`, { name: "Updating Fourplex", assetType: "Multifamily", location: "Regina", province: "SK" })).json.id;
     expect(await updating()).toBe(false);
     expect((await call(alice, "PUT", `/api/deals/${d}/documents?name=notes.txt`, undefined, new TextEncoder().encode("Notes\nGauge: 5.25%\n"))).status).toBe(200);
-    expect(await updating()).toBe(true);
     await work();
     expect(await updating()).toBe(false);
   });

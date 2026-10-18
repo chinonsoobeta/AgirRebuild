@@ -563,8 +563,8 @@ describe("card 58c: every audit action has a sentence in both languages", () => 
     expect(say("deal.created_as_copy", { name: "Fourplex" })).toEqual(["Created as a copy of Fourplex", "A créé comme copie de Fourplex"]);
   });
   it("says the old and new setting in words", () => {
-    expect(describeEvent(en, ev("workspace.review_mode_changed", { from: "solo", to: "team" }))).toMatch(/solo.*team/i);
-    expect(describeEvent(fr, ev("workspace.review_mode_changed", { from: "solo", to: "team" }))).toMatch(/solo.*équipe/i);
+    expect(describeEvent(en, ev("workspace.review_mode_changed", { from: "solo", to: "team" }))).toMatch(/Solo review.*Team review/);
+    expect(describeEvent(fr, ev("workspace.review_mode_changed", { from: "solo", to: "team" }))).toMatch(/individuel.*équipe/i);
     expect(describeEvent(en, ev("workspace.label_suggestions_changed", { from: false, to: true }))).toMatch(/off.*on/i);
     expect(describeEvent(fr, ev("workspace.label_suggestions_changed", { from: false, to: true }))).toMatch(/désactiv.*activ/i);
   });
@@ -620,7 +620,7 @@ describe("card 58c: every audit action has a sentence in both languages", () => 
   });
   it("gives each of them a sentence, not the key, in both languages", () => {
     for (const a of written) {
-      const [english, french] = say(a, { field: "exit_cap_rate_pct", item: "", name: "x", from: "solo", to: "team" });
+      const [english, french] = say(a, { field: "exit_cap_rate_pct", item: "", name: "x", from: "solo", to: "team", verdict: "go", decision: "proceed", kind: "ic_memo", format: "pdf", run_number: 1, reason: "x", candidates: 1 });
       expect(english, a).not.toBe(a);
       expect(french, a).not.toBe(a);
     }

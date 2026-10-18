@@ -141,6 +141,8 @@ export async function dealOverview(tx: Db, dealId: string) {
   const [artifacts] = latest
     ? await tx.query<{ n: number }>(`select count(*)::int as n from artifacts where run_id = $1 and status = 'ready'`, [latest.id])
     : [{ n: 0 }];
+  // A label, an Undo, a retired document or a switch queues a reconcile; until the worker has run it the review is behind (card 58c).
+  const [{ updating }] = (await tx.query<{ updating: boolean }>(`select fn_deal_updating($1) as updating`, [dealId])) as [{ updating: boolean }];
   const processing = docs.filter((d) => ["uploaded", "checking", "reading", "extracting"].includes(d.stage)).length;
   const failed = docs.filter((d) => d.stage === "rejected" || d.stage === "read_failed").length;
 
@@ -188,6 +190,7 @@ export async function dealOverview(tx: Db, dealId: string) {
     status,
     next,
     documents: { total: docs.length, processing, failed },
+    updating,
     review: { ...counts, status: readiness.status },
     run: latest ? { id: latest.id, number: latest.run_number, verdict: latest.verdict_code, fresh, createdAt: latest.created_at } : null,
     decision: decision ?? null,

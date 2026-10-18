@@ -41,6 +41,22 @@ export function describeEvent(i: I18n, e: AuditEvent): string {
     case "artifact.ready": return fr ? `A diffusé : ${kind(p.kind)} (${p.format})` : `Released a ${String(p.kind).replace(/_/g, " ")} (${p.format})`;
     case "artifact.blocked": return fr ? "A bloqué un rapport : chiffres sans source" : "Blocked a report: figures without a source";
     case "workspace.created": return fr ? "A créé l'espace de travail" : "Created the workspace";
+    case "figure.labelled": return fr ? `A étiqueté un chiffre comme ${field()}` : `Labelled a figure as ${field()}`;
+    case "figure.unlabelled": return fr ? "A retiré l'étiquette d'un chiffre" : "Removed a figure's label";
+    case "deal.copied": return fr ? `A copié comme ${p.name}` : `Copied as ${p.name}`;
+    case "deal.created_as_copy": return fr ? `A créé comme copie de ${p.name}` : `Created as a copy of ${p.name}`;
+    case "workspace.review_mode_changed": {
+      const mode = (m: string) => i.t(m === "team" ? "settings.mode.team" : "settings.mode.solo");
+      return fr ? `A changé le mode d'examen : ${mode(p.from)} → ${mode(p.to)}` : `Changed the review mode: ${mode(p.from)} to ${mode(p.to)}`;
+    }
+    case "workspace.label_suggestions_changed": {
+      const on = (b: boolean) => (fr ? (b ? "activées" : "désactivées") : b ? "on" : "off");
+      return fr ? `A changé les suggestions de libellés : ${on(p.from)} → ${on(p.to)}` : `Changed label suggestions: ${on(p.from)} to ${on(p.to)}`;
+    }
+    case "review.granted":
+      return fr ? `A donné accès à un réviseur${p.expires_at ? ` jusqu'au ${i.f.date(p.expires_at)}` : ""}` : `Gave a reviewer access${p.expires_at ? ` until ${i.f.date(p.expires_at)}` : ""}`;
+    case "document.suggestions_failed":
+      return fr ? "Les suggestions de libellés d'un modèle ont échoué pour un document ; les valeurs lues restent" : "A model's label suggestions failed for a document; the values read stand";
     case "member.added": return fr ? `A ajouté une personne (${i.L.role(p.role)})` : `Added a person (${p.role})`;
     default:
       if (e.action.startsWith("assumption.")) {
@@ -48,12 +64,18 @@ export function describeEvent(i: I18n, e: AuditEvent): string {
         const FR_ACT: Record<string, string> = {
           approve: "Approuvée", resolve: "Conflit résolu", modify: "Valeur modifiée", second_approve: "Confirmée par un second approbateur", reject: "Rejetée",
           reopen: "Rouverte", enter: "Valeur saisie", accept_default: "Valeur par défaut acceptée", override_pending_second_approval: "Dérogation en attente",
+          copied: "Copiée", use_as_stated: "Utilisée telle qu'énoncée", needs_second_approver: "Second approbateur requis",
         };
-        const verb = fr ? FR_ACT[action] ?? action : action.replace(/_/g, " ");
+        const EN_ACT: Record<string, string> = {
+          enter: "Entered", approve: "Approved", resolve: "Resolved", modify: "Modified", second_approve: "Confirmed by a second approver", reject: "Rejected",
+          reopen: "Reopened", accept_default: "Default accepted", override_pending_second_approval: "Override waiting for a second approver", copied: "Copied",
+          use_as_stated: "Used as stated", needs_second_approver: "Needs a second approver",
+        };
+        const verb = fr ? FR_ACT[action] ?? action : EN_ACT[action] ?? action.replace(/_/g, " ");
         const n = Number(p.to_value);
         const shown = p.to_value === null || p.to_value === undefined ? null : Number.isFinite(n) ? i.f.value(n, FIELD_BY_KEY.get(p.field)?.unit ?? "count") : String(p.to_value);
         const val = shown === null ? "" : ` = ${shown}`;
-        return `${verb} : ${field()}${val}${p.reason ? ` (${i.msg(p.reason)})` : ""}`;
+        return `${verb}${fr ? " :" : ":"} ${field()}${val}${p.reason ? ` (${i.msg(p.reason)})` : ""}`;
       }
       return e.action;
   }

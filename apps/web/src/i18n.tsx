@@ -166,6 +166,7 @@ const EN = {
   "docs.candidates": "Values found are only candidates. Nothing reaches underwriting until someone approves it in Review.",
 
   "review.stillReading": "Documents are still being read.",
+  "review.updating": "Updating the review from your documents…",
   "review.stillReadingBody": "Values will appear here as each one finishes.",
   "review.suggested": "Suggested label, please confirm",
   "review.useAs": "Use as…",
@@ -657,6 +658,7 @@ const FR: Record<Key, Entry> = {
   "docs.candidates": "Les valeurs trouvées ne sont que des candidates. Rien n'entre dans l'analyse avant d'avoir été approuvé à l'étape Examen.",
 
   "review.stillReading": "Des documents sont encore en lecture.",
+  "review.updating": "Mise à jour de l'examen à partir de vos documents…",
   "review.stillReadingBody": "Les valeurs apparaîtront ici à mesure que chaque document est terminé.",
   "review.suggested": "Libellé suggéré, à confirmer",
   "review.useAs": "Utiliser comme…",

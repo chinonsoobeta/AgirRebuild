@@ -287,6 +287,6 @@ export function useDeal(dealId: string, poll = false) {
   return useQuery({
     queryKey: ["deal", dealId],
     queryFn: () => api.get<DealOverview>(`/deals/${dealId}`),
-    refetchInterval: (q) => (poll || (q.state.data?.documents.processing ?? 0) > 0 ? 1500 : false),
+    refetchInterval: (q) => (poll || (q.state.data?.documents.processing ?? 0) > 0 || q.state.data?.updating ? 1500 : false),
   });
 }

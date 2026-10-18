@@ -46,6 +46,8 @@ export type DealOverview = {
   status: { tone: Tone; text: string };
   next: string;
   documents: { total: number; processing: number; failed: number };
+  /** A reconcile for this deal is queued or running: the review is behind its documents (card 58c). */
+  updating: boolean;
   review: { approved: number; needsReview: number; conflicting: number; awaitingSecond: number; missing: number; impossible: number; status: "ready" | "blocked" };
   run: { id: string; number: number; verdict: string; fresh: boolean; createdAt: string } | null;
   decision: { decision: string; created_at: string } | null;

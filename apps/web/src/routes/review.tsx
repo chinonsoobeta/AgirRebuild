@@ -1,5 +1,5 @@
 import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
-import { useState, type FormEvent, type ReactNode } from "react";
+import { useEffect, useRef, useState, type FormEvent, type ReactNode } from "react";
 import { FIELDS } from "@agir/contracts";
 import { SF_PER_M2 } from "@agir/numbers";
 import { api, type Assumption, type Review as ReviewData, type Source } from "../api";
@@ -116,6 +116,13 @@ export function Review({ dealId }: { dealId: string }) {
   const deal = useDeal(dealId);
   const dealCurrency = deal.data?.deal.currency;
   const review = useQuery({ queryKey: ["review", dealId], queryFn: () => api.get<ReviewData>(`/deals/${dealId}/review`) });
+  // The worker reconciles a moment after a label, an Undo or a retired document; when it has, the review is read again.
+  const updating = deal.data?.updating ?? false;
+  const wasUpdating = useRef(false);
+  useEffect(() => {
+    if (wasUpdating.current && !updating) void qc.invalidateQueries({ queryKey: ["review", dealId] });
+    wasUpdating.current = updating;
+  }, [updating, qc, dealId]);
   const [focus, setFocus] = useState<string | null>(null);
   const [editing, setEditing] = useState<string | null>(null);
   const [keeping, setKeeping] = useState<string | null>(null);
@@ -325,6 +332,7 @@ export function Review({ dealId }: { dealId: string }) {
     <>
       <DealHeader o={deal.data} active="review" />
       {docsBusy && <Banner tone="neutral" title={t("review.stillReading")}>{t("review.stillReadingBody")}</Banner>}
+      {updating && <p className="small muted" role="status">{t("review.updating")}</p>}
       <Glossary />
       <div className="side">
         <div className="stack" style={{ gap: 24 }}>
