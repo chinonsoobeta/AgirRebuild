@@ -1893,6 +1893,21 @@ describe("card 63: a person's decision stands through a later, unrelated reconci
     expect(a.conflictValues).toEqual([{ value: 800000, documents: ["Entered by an analyst"] }, { value: 850000, documents: ["purchase.txt"] }]);
   });
 
+  test("audit of card 63: keeping a value no document states needs a written reason, as any hand entry does", async () => {
+    const d = await exitCapWaiting(sw, "Stands Confirm No Reason");
+    const a = await byField(d, "exit_cap_rate_pct");
+    for (const reason of [undefined, "", "ok"]) {
+      const r = await call(alice, "POST", `/api/assumptions/${a.id}/review`, { version: a.version, action: "approve", ...(reason === undefined ? {} : { reason }) });
+      expect(r.status, String(reason)).toBe(422);
+    }
+    expect(await stored(d, "exit_cap_rate_pct")).toMatchObject({ status: "needs_review", source_kind: "document", version: a.version });
+    // A value its document still states is approved with no reason, as before.
+    const d2 = await mkDeal(sw, "Stands Approve Plain");
+    await upload(d2, "notes.txt", "Notes\nExit cap rate: 5.25%\n");
+    await act(alice, await byField(d2, "exit_cap_rate_pct"), { action: "approve" });
+    expect(await byField(d2, "exit_cap_rate_pct")).toMatchObject({ status: "approved" });
+  });
+
   // Extension of rule 4: put back after a document went.
   const whole = async (d: string, k: string) =>
     ((await db.query<any>(`select status, value, reason, sources, source_kind, decided_by, decided_at, second_approver, second_approved_at, conflict_values from assumptions where deal_id = $1 and field_key = $2`, [d, k])) as any[])[0];

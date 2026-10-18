@@ -6,7 +6,7 @@ import { allEquityDeal } from "../../../packages/engine/test/fixtures.ts";
 import { FIELDS } from "@agir/contracts";
 import { SF_PER_M2 } from "@agir/numbers";
 import { reviewWaiting } from "../src/components/ui.tsx";
-import { enteredInUnit, foreignIn } from "../src/routes/review.tsx";
+import { approvable, enteredInUnit, foreignIn, keepsWithReason } from "../src/routes/review.tsx";
 import { describeEvent } from "../src/routes/audit.tsx";
 import { build, checkText, dealStatus, translateMessage, verdictText, type Key } from "../src/i18n.tsx";
 
@@ -522,5 +522,25 @@ describe("audit of card 58b: the audit trail says which values a reconcile put b
   it("is unchanged when nothing was put back", () => {
     expect(describeEvent(en, ev({ proposals: 1, changed: 0 }))).toBe("Updated the review queue from the documents");
     expect(describeEvent(fr, ev({ proposals: 1, changed: 0 }))).toBe("A mis à jour la file d'examen à partir des documents");
+  });
+});
+
+describe("audit of card 63: a value no document states any more is kept only with a reason", () => {
+  const row = (sources: unknown[], sourceKind = "document") => ({ id: "x", status: "needs_review", sourceKind, sources }) as any;
+  it("asks for a reason on a document value with no sources, and not otherwise", () => {
+    expect(keepsWithReason(row([]))).toBe(true);
+    expect(keepsWithReason(row([{ document_name: "notes.txt" }]))).toBe(false);
+  });
+  it("leaves such a value out of Approve all", () => {
+    const rows = [row([]), row([{ document_name: "a.txt" }]), row([{ document_name: "b.txt" }])];
+    expect(approvable(rows)).toEqual([rows[1], rows[2]]);
+  });
+  it("says so in English and French", () => {
+    for (const lang of ["en", "fr"] as const) {
+      const t = build(lang, () => {}).t;
+      for (const k of ["review.keep", "review.keepHint"] as Key[]) expect(typeof t(k), `${lang} ${k}`).toBe("string");
+    }
+    expect(build("en", () => {}).t("review.keep" as Key)).toBe("Keep…");
+    expect(build("fr", () => {}).t("review.keep" as Key)).toBe("Conserver…");
   });
 });
