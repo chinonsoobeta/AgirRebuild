@@ -1,0 +1,655 @@
+{
+  "slug": "alder-court-condo",
+  "policy": "for-sale-v1-draft",
+  "builtBy": "Codex (GPT-6; exact serving version not exposed)",
+  "builtOn": "2026-10-17",
+  "inputs": {
+    "slug": "alder-court-condo",
+    "name": "Alder Court",
+    "tenure": "30-unit condo",
+    "location": "Fictional town in British Columbia",
+    "unit_types": [
+      {
+        "name": "1-bed",
+        "units": 12,
+        "price": 520000
+      },
+      {
+        "name": "2-bed",
+        "units": 14,
+        "price": 710000
+      },
+      {
+        "name": "3-bed",
+        "units": 4,
+        "price": 940000
+      }
+    ],
+    "land": 3600000,
+    "hard": 9800000,
+    "soft": 1900000,
+    "contingency": 490000,
+    "construction_months": 22,
+    "presold_units_pct": 70,
+    "deposit_pct": 15,
+    "absorption_units_per_month": 2,
+    "sales_commission_pct": 3.5,
+    "closing_lag_months": 4,
+    "unsold_carry_monthly": 450,
+    "senior_commitment": 11500000,
+    "senior_rate_pct": 7.5,
+    "mezz_commitment": 1500000,
+    "mezz_rate_pct": 12,
+    "senior_presale_threshold_pct": 60
+  },
+  "base": {
+    "gross_sales_revenue": 19940000,
+    "net_sales_revenue": 19242100,
+    "total_development_cost": 16775316.9930094,
+    "interest_before_completion": 985316.993009385,
+    "interest_after_completion": 456333.898652158,
+    "carry_total": 74700,
+    "development_profit_for_sale": 1935749.10833846,
+    "profit_on_cost_for_sale": 11.1851950792881,
+    "margin_on_revenue": 10.0599680301966,
+    "equity_contributed": 3537853.56734411,
+    "equity_distributed": 5473602.67568257,
+    "peak_equity": 3530653.56734411,
+    "equity_multiple": 1.54715354140325,
+    "equity_irr": 20.2249569815849,
+    "completion_month": 22,
+    "sellout_month": 30,
+    "sellout_years": 2.58333333333333,
+    "deposits_held_at_completion": 2093700,
+    "senior_balance_at_completion": 11500000,
+    "mezz_balance_at_completion": 1812163.4256653,
+    "unused_commitment_at_completion": 0,
+    "equity_overrun": 0,
+    "required_equity_budget": 3463153.56734411,
+    "iteration_delta": 0,
+    "funding_converged": 1,
+    "profit_reconciliation_difference": 0,
+    "profit_reconciliation_pass": 1,
+    "flow_sign_changes": 1,
+    "ending_senior_balance": 0,
+    "ending_mezz_balance": 0,
+    "closing_units_check": 0,
+    "cost_allocation_check": 0
+  },
+  "stresses": {
+    "prices": {
+      "gross_sales_revenue": 17946000,
+      "net_sales_revenue": 17317890,
+      "total_development_cost": 16775316.9930094,
+      "interest_before_completion": 985316.993009385,
+      "interest_after_completion": 461248.381895333,
+      "carry_total": 74700,
+      "development_profit_for_sale": 6624.62509528268,
+      "profit_on_cost_for_sale": 0.0382677115266575,
+      "margin_on_revenue": 0.0382530729510505,
+      "equity_contributed": 3537853.56734411,
+      "equity_distributed": 3544478.1924394,
+      "peak_equity": 3533803.56734411,
+      "equity_multiple": 1.00187249838615,
+      "equity_irr": 0.0775699942910251,
+      "completion_month": 22,
+      "sellout_month": 30,
+      "sellout_years": 2.58333333333333,
+      "deposits_held_at_completion": 1884330,
+      "senior_balance_at_completion": 11500000,
+      "mezz_balance_at_completion": 1812163.4256653,
+      "unused_commitment_at_completion": 0,
+      "equity_overrun": 0,
+      "required_equity_budget": 3463153.56734411,
+      "iteration_delta": 0,
+      "funding_converged": 1,
+      "profit_reconciliation_difference": -9.31322574615479e-10,
+      "profit_reconciliation_pass": 1,
+      "flow_sign_changes": 1,
+      "ending_senior_balance": 0,
+      "ending_mezz_balance": 0,
+      "closing_units_check": 0,
+      "cost_allocation_check": 0
+    },
+    "absorption": {
+      "gross_sales_revenue": 19940000,
+      "net_sales_revenue": 19242100,
+      "total_development_cost": 16775316.9930094,
+      "interest_before_completion": 985316.993009385,
+      "interest_after_completion": 456333.898652158,
+      "carry_total": 79650,
+      "development_profit_for_sale": 1930799.10833846,
+      "profit_on_cost_for_sale": 11.1534027420694,
+      "margin_on_revenue": 10.034243187274,
+      "equity_contributed": 3542803.56734411,
+      "equity_distributed": 5473602.67568257,
+      "peak_equity": 3530653.56734411,
+      "equity_multiple": 1.54499186072173,
+      "equity_irr": 19.2334115007568,
+      "completion_month": 22,
+      "sellout_month": 32,
+      "sellout_years": 2.75,
+      "deposits_held_at_completion": 2093700,
+      "senior_balance_at_completion": 11500000,
+      "mezz_balance_at_completion": 1812163.4256653,
+      "unused_commitment_at_completion": 0,
+      "equity_overrun": 0,
+      "required_equity_budget": 3463153.56734411,
+      "iteration_delta": 0,
+      "funding_converged": 1,
+      "profit_reconciliation_difference": 0,
+      "profit_reconciliation_pass": 1,
+      "flow_sign_changes": 1,
+      "ending_senior_balance": 0,
+      "ending_mezz_balance": 0,
+      "closing_units_check": 0,
+      "cost_allocation_check": 0
+    },
+    "costs": {
+      "gross_sales_revenue": 19940000,
+      "net_sales_revenue": 19242100,
+      "total_development_cost": 18264892.8450346,
+      "interest_before_completion": 895892.845034628,
+      "interest_after_completion": 454512.494086563,
+      "carry_total": 74700,
+      "development_profit_for_sale": 447994.660878808,
+      "profit_on_cost_for_sale": 2.38369772221228,
+      "margin_on_revenue": 2.32820046085827,
+      "equity_contributed": 5063136.19797523,
+      "equity_distributed": 5511130.85885404,
+      "peak_equity": 5055936.19797523,
+      "equity_multiple": 1.08848165314177,
+      "equity_irr": 3.6434357348864,
+      "completion_month": 22,
+      "sellout_month": 30,
+      "sellout_years": 2.58333333333333,
+      "deposits_held_at_completion": 2093700,
+      "senior_balance_at_completion": 11500000,
+      "mezz_balance_at_completion": 1776456.6470594,
+      "unused_commitment_at_completion": 0,
+      "equity_overrun": 0,
+      "required_equity_budget": 4988436.19797523,
+      "iteration_delta": 0,
+      "funding_converged": 1,
+      "profit_reconciliation_difference": 0,
+      "profit_reconciliation_pass": 1,
+      "flow_sign_changes": 1,
+      "ending_senior_balance": 0,
+      "ending_mezz_balance": 0,
+      "closing_units_check": 0,
+      "cost_allocation_check": 0
+    },
+    "rates": {
+      "gross_sales_revenue": 19940000,
+      "net_sales_revenue": 19242100,
+      "total_development_cost": 16883285.2558406,
+      "interest_before_completion": 1093285.25584062,
+      "interest_after_completion": 514995.669286695,
+      "carry_total": 74700,
+      "development_profit_for_sale": 1769119.07487269,
+      "profit_on_cost_for_sale": 10.1248841422849,
+      "margin_on_revenue": 9.19400208331048,
+      "equity_contributed": 3617201.38382808,
+      "equity_distributed": 5386320.45870076,
+      "peak_equity": 3610001.38382808,
+      "equity_multiple": 1.48908503761558,
+      "equity_irr": 18.2752126057403,
+      "completion_month": 22,
+      "sellout_month": 30,
+      "sellout_years": 2.58333333333333,
+      "deposits_held_at_completion": 2093700,
+      "senior_balance_at_completion": 11500000,
+      "mezz_balance_at_completion": 1840783.87201256,
+      "unused_commitment_at_completion": 0,
+      "equity_overrun": 0,
+      "required_equity_budget": 3542501.38382808,
+      "iteration_delta": 0,
+      "funding_converged": 1,
+      "profit_reconciliation_difference": -7.45058059692383e-09,
+      "profit_reconciliation_pass": 1,
+      "flow_sign_changes": 1,
+      "ending_senior_balance": 0,
+      "ending_mezz_balance": 0,
+      "closing_units_check": 0,
+      "cost_allocation_check": 0
+    },
+    "construction": {
+      "gross_sales_revenue": 19940000,
+      "net_sales_revenue": 19242100,
+      "total_development_cost": 17043087.8284048,
+      "interest_before_completion": 1253087.82840483,
+      "interest_after_completion": 461049.193572563,
+      "carry_total": 74700,
+      "development_profit_for_sale": 1663262.97802261,
+      "profit_on_cost_for_sale": 9.46173501661782,
+      "margin_on_revenue": 8.64387451485343,
+      "equity_contributed": 3713185.85560696,
+      "equity_distributed": 5376448.83362957,
+      "peak_equity": 3705985.85560696,
+      "equity_multiple": 1.4479342114026,
+      "equity_irr": 13.7919363201135,
+      "completion_month": 28,
+      "sellout_month": 36,
+      "sellout_years": 3.08333333333333,
+      "deposits_held_at_completion": 2093700,
+      "senior_balance_at_completion": 11500000,
+      "mezz_balance_at_completion": 1904601.97279787,
+      "unused_commitment_at_completion": 0,
+      "equity_overrun": 0,
+      "required_equity_budget": 3638485.85560696,
+      "iteration_delta": 0,
+      "funding_converged": 1,
+      "profit_reconciliation_difference": 0,
+      "profit_reconciliation_pass": 1,
+      "flow_sign_changes": 1,
+      "ending_senior_balance": 0,
+      "ending_mezz_balance": 0,
+      "closing_units_check": 0,
+      "cost_allocation_check": 0
+    },
+    "presales": {
+      "gross_sales_revenue": 19940000,
+      "net_sales_revenue": 19242100,
+      "total_development_cost": 16775316.9930094,
+      "interest_before_completion": 985316.993009385,
+      "interest_after_completion": 486986.070810392,
+      "carry_total": 86400,
+      "development_profit_for_sale": 1893396.93618022,
+      "profit_on_cost_for_sale": 10.9137664597468,
+      "margin_on_revenue": 9.83986641884318,
+      "equity_contributed": 3549553.56734411,
+      "equity_distributed": 5442950.50352434,
+      "peak_equity": 3540553.56734411,
+      "equity_multiple": 1.53341833001183,
+      "equity_irr": 18.1037467191129,
+      "completion_month": 22,
+      "sellout_month": 32,
+      "sellout_years": 2.75,
+      "deposits_held_at_completion": 1595200,
+      "senior_balance_at_completion": 11500000,
+      "mezz_balance_at_completion": 1812163.4256653,
+      "unused_commitment_at_completion": 0,
+      "equity_overrun": 0,
+      "required_equity_budget": 3463153.56734411,
+      "iteration_delta": 0,
+      "funding_converged": 1,
+      "profit_reconciliation_difference": 0,
+      "profit_reconciliation_pass": 1,
+      "flow_sign_changes": 1,
+      "ending_senior_balance": 0,
+      "ending_mezz_balance": 0,
+      "closing_units_check": 0,
+      "cost_allocation_check": 0
+    },
+    "combined": {
+      "gross_sales_revenue": 17946000,
+      "net_sales_revenue": 17317890,
+      "total_development_cost": 18633640.2228784,
+      "interest_before_completion": 1264640.22287844,
+      "interest_after_completion": 643552.510048105,
+      "carry_total": 97650,
+      "development_profit_for_sale": -2056952.73292655,
+      "profit_on_cost_for_sale": -10.6166164096437,
+      "margin_on_revenue": -11.8776174980124,
+      "equity_contributed": 5330030.42530913,
+      "equity_distributed": 3273077.69238259,
+      "peak_equity": 5325530.42530913,
+      "equity_multiple": 0.614082365616657,
+      "equity_irr": -13.6558219425281,
+      "completion_month": 28,
+      "sellout_month": 41,
+      "sellout_years": 3.5,
+      "deposits_held_at_completion": 1435680,
+      "senior_balance_at_completion": 11500000,
+      "mezz_balance_at_completion": 1901259.79756934,
+      "unused_commitment_at_completion": 0,
+      "equity_overrun": 0,
+      "required_equity_budget": 5232380.42530913,
+      "iteration_delta": 0,
+      "funding_converged": 1,
+      "profit_reconciliation_difference": 0,
+      "profit_reconciliation_pass": 1,
+      "flow_sign_changes": 1,
+      "ending_senior_balance": 0,
+      "ending_mezz_balance": 0,
+      "closing_units_check": 0,
+      "cost_allocation_check": 0
+    }
+  },
+  "closings": {
+    "base": [
+      [
+        26,
+        23
+      ],
+      [
+        27,
+        2
+      ],
+      [
+        28,
+        2
+      ],
+      [
+        29,
+        2
+      ],
+      [
+        30,
+        1
+      ]
+    ],
+    "prices": [
+      [
+        26,
+        23
+      ],
+      [
+        27,
+        2
+      ],
+      [
+        28,
+        2
+      ],
+      [
+        29,
+        2
+      ],
+      [
+        30,
+        1
+      ]
+    ],
+    "absorption": [
+      [
+        26,
+        22
+      ],
+      [
+        27,
+        1
+      ],
+      [
+        28,
+        2
+      ],
+      [
+        29,
+        1
+      ],
+      [
+        30,
+        2
+      ],
+      [
+        31,
+        1
+      ],
+      [
+        32,
+        1
+      ]
+    ],
+    "costs": [
+      [
+        26,
+        23
+      ],
+      [
+        27,
+        2
+      ],
+      [
+        28,
+        2
+      ],
+      [
+        29,
+        2
+      ],
+      [
+        30,
+        1
+      ]
+    ],
+    "rates": [
+      [
+        26,
+        23
+      ],
+      [
+        27,
+        2
+      ],
+      [
+        28,
+        2
+      ],
+      [
+        29,
+        2
+      ],
+      [
+        30,
+        1
+      ]
+    ],
+    "construction": [
+      [
+        32,
+        23
+      ],
+      [
+        33,
+        2
+      ],
+      [
+        34,
+        2
+      ],
+      [
+        35,
+        2
+      ],
+      [
+        36,
+        1
+      ]
+    ],
+    "presales": [
+      [
+        26,
+        18
+      ],
+      [
+        27,
+        2
+      ],
+      [
+        28,
+        2
+      ],
+      [
+        29,
+        2
+      ],
+      [
+        30,
+        2
+      ],
+      [
+        31,
+        2
+      ],
+      [
+        32,
+        2
+      ]
+    ],
+    "combined": [
+      [
+        32,
+        17
+      ],
+      [
+        33,
+        1
+      ],
+      [
+        34,
+        2
+      ],
+      [
+        35,
+        1
+      ],
+      [
+        36,
+        2
+      ],
+      [
+        37,
+        1
+      ],
+      [
+        38,
+        1
+      ],
+      [
+        39,
+        2
+      ],
+      [
+        40,
+        1
+      ],
+      [
+        41,
+        2
+      ]
+    ]
+  },
+  "gates": [
+    {
+      "key": "profit_on_cost_base",
+      "scenario": "base",
+      "threshold": 15,
+      "value": 11.1851950792881,
+      "pass": false
+    },
+    {
+      "key": "margin_on_revenue_base",
+      "scenario": "base",
+      "threshold": 12,
+      "value": 10.0599680301966,
+      "pass": false
+    },
+    {
+      "key": "profit_on_cost_combined",
+      "scenario": "combined",
+      "threshold": 0,
+      "value": -10.6166164096437,
+      "pass": false
+    },
+    {
+      "key": "equity_multiple_combined",
+      "scenario": "combined",
+      "threshold": 1,
+      "value": 0.614082365616657,
+      "pass": false
+    }
+  ],
+  "verdict": "REJECT",
+  "errors": [],
+  "tolerance": {
+    "money": 1.0,
+    "percent": 0.01,
+    "multiple": 0.001
+  },
+  "openQuestions": [
+    {
+      "id": "Q1",
+      "topic": "Carry for presold units",
+      "ruleUsed": "Use the proposed rule: carry includes every completed unit not closed at the start of the month, including presold units.",
+      "affects": [
+        "carry_total",
+        "equity_contributed",
+        "development_profit_for_sale",
+        "equity_irr"
+      ]
+    },
+    {
+      "id": "Q2",
+      "topic": "Unit price and sale order",
+      "ruleUsed": "Use the proposed rule: price every closing at total gross revenue divided by total units.",
+      "affects": [
+        "net_sales_revenue",
+        "equity_distributed",
+        "equity_irr"
+      ]
+    },
+    {
+      "id": "Q3",
+      "topic": "Presale rounding",
+      "ruleUsed": "Use the proposed rule: floor(total units times presold percentage divided by 100).",
+      "affects": [
+        "deposits_held_at_completion",
+        "sellout_month",
+        "carry_total"
+      ]
+    },
+    {
+      "id": "Q4",
+      "topic": "Fractional absorption",
+      "ruleUsed": "Use the proposed rule: cumulative unsold sales = min(unsold, floor(absorption times elapsed selling months + 1e-9)); take monthly differences.",
+      "affects": [
+        "sellout_month",
+        "interest_after_completion",
+        "carry_total",
+        "equity_irr"
+      ]
+    },
+    {
+      "id": "Q5",
+      "topic": "Lender presale condition under stress",
+      "ruleUsed": "Use the proposed rule: test the lender threshold on base inputs only. Stressed presales change timing without a new lender rejection.",
+      "affects": [
+        "verdict"
+      ]
+    },
+    {
+      "id": "Q6",
+      "topic": "Deal A development-charge wording",
+      "ruleUsed": "The general rule excludes a separate development-charge cost line, but Deal A says its soft-cost total includes development charges. Retain the explicit $520,000 total without adding or subtracting an unspecified amount. This conflict cannot be split into components from the supplied inputs.",
+      "affects": [
+        "total_development_cost",
+        "development_profit_for_sale"
+      ]
+    },
+    {
+      "id": "Q7",
+      "topic": "IRR with multiple/no sign changes",
+      "ruleUsed": "Use the specified rule: not meaningful unless exactly one nonzero sign change. Counts: {\"absorption\": 1, \"base\": 1, \"combined\": 1, \"construction\": 1, \"costs\": 1, \"presales\": 1, \"prices\": 1, \"rates\": 1}",
+      "affects": [
+        "equity_irr"
+      ]
+    },
+    {
+      "id": "Q8",
+      "topic": "Unmeasurable-gate final verdict",
+      "ruleUsed": "OPEN if encountered: no final verdict rule for unmeasurable gates with no failures. All current gates are measurable.",
+      "affects": [
+        "verdict"
+      ]
+    },
+    {
+      "id": "Q9",
+      "topic": "Exact model version",
+      "ruleUsed": "Exact serving version is not exposed; builtBy identifies Codex / GPT-6 and discloses this limit.",
+      "affects": [
+        "builtBy"
+      ]
+    }
+  ]
+}
