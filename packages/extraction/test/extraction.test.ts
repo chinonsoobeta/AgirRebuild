@@ -1245,7 +1245,7 @@ describe("reading safety: a figure that may be the wrong one is shown, never use
       expect(pick(read("Interest reserve: $200,000"))).toEqual([["stated_interest_reserve", 200_000]]);
     });
     test("a second field named after a colon's figure labels its own figure", () => {
-      expect(pick(read("Rent monthly: $1,400 per unit and a vacancy of 5%."))).toEqual([["unit_rent_monthly", 1_400], ["stabilized_occupancy_pct", 95]]);
+      expect(pick(read("Rent monthly: $1,400 per unit and a vacancy of 5%."))).toEqual([["unit_rent_monthly", 1_400]]);
       // negative: a part the colon's budget line includes is not read as a line of its own
       const inside = read("Construction cost: $3,100,000, which includes a contingency of $200,000.");
       expect(pick(inside)).toEqual([["hard_cost", 3_100_000]]);
@@ -2526,11 +2526,11 @@ describe("durations after the number, revisions in a sentence, percent cells, va
     expect(d.tables[0]!.rows.map((r) => r[1]!.text)).toEqual(["95", "14", "0.5"]);
   });
 
-  test("a vacancy percentage is the stabilized occupancy's complement, and says so", () => {
-    for (const [line, occ] of [["Vacancy allowance 3%", 97], ["Vacancy and credit loss: 5%", 95], ["Taux d'inoccupation 2,5 %", 97.5], ["Vacance : 4 %", 96]] as const) {
+  test("a vacancy percentage is shown for manual occupancy entry (task 73)", () => {
+    for (const line of ["Vacancy allowance 3%", "Vacancy and credit loss: 5%", "Taux d'inoccupation 2,5 %", "Vacance : 4 %"]) {
       const r = read(line);
-      expect(pick(r), line).toEqual([["stabilized_occupancy_pct", occ]]);
-      expect(r.candidates[0]!.unitSeen, line).toMatch(/vacan|inoccup/i);
+      expect(pick(r), line).toEqual([]);
+      expect(r.other[0]!.note, line).toBe("A vacancy rate: enter occupancy (100% less vacancy) on Review.");
     }
   });
   test("negative: vacancy during lease-up, at opening or today is not the stabilized figure", () => {
@@ -4852,5 +4852,64 @@ describe("an equity reimbursement is not equity, and plan types stay distinct (t
 
   test("a bedroom type with an explicit count keeps that count", () => {
     expect(read(grid([["Type", "Units", "Rent"], ["2BR", "4", "1920"]]))).toEqual([["unit_count", "2BR", 4], ["unit_rent_monthly", "2BR", 1920]]);
+  });
+});
+
+
+describe("four inputs a person still types (task 73)", () => {
+  const doc = (...text: string[]): NormalizedDocument => ({
+    kind: "pdf", lines: text.map((text, i) => ({ text, location: `page 1, line ${i + 1}` })),
+    tables: [], pageCount: 1, needsOcr: false, fullText: text.join("\n"),
+  });
+  const read = (...text: string[]) => extractCandidates(doc(...text));
+  const pick = (r: ReturnType<typeof read>) => r.candidates.map((c) => [c.fieldKey, c.value]);
+  const VACANCY = "A vacancy rate: enter occupancy (100% less vacancy) on Review.";
+  const ITEM = "An itemized operating cost: enter the total as fixed operating costs on Review.";
+  const GOING = "A cap rate with no word about a sale or an exit may be the going-in rate; enter it by hand if it is the exit rate";
+
+  test.each(["Amount", "Facility amount", "Loan amount", "Principal", "Montant", "Montant du prêt"])("A: %s follows the senior and take-out headings", (label) => {
+    expect(pick(read("Construction facility", `${label}: $1,780,000`, "Rate: 6.25%", "Interest-only: 16 months", "Take-out loan", `${label}: $2,130,000`))).toEqual([
+      ["senior_loan_amount", 1780000], ["senior_rate_pct", 6.25], ["senior_io_months", 16], ["refinance_amount", 2130000],
+    ]);
+  });
+  test("A: Amount without a loan heading stays unmatched", () => {
+    const r = read("Amount: $62,000");
+    expect(pick(r)).toEqual([]);
+    expect(r.other).toMatchObject([{ value: 62000, note: "No field matches this label" }]);
+  });
+  test.each(["Exit / valuation cap rate", "Exit or valuation cap rate", "Terminal / valuation cap rate", "Reversion / valuation cap rate", "Taux de capitalisation de sortie / valuation"])("B: %s names the exit assumption", (label) => {
+    expect(pick(read(`${label}: 5.40%`))).toEqual([["exit_cap_rate_pct", 5.4]]);
+  });
+  test.each([
+    ["Going-in cap rate", GOING],
+    ["Valuation cap rate", 'This sentence names an output figure ("valuation"), which is never taken as an input'],
+    ["Capitalization rate (appraisal)", GOING],
+  ])("B: %s keeps its refusal", (label, note) => {
+    const r = read(`${label}: 5.10%`);
+    expect(pick(r)).toEqual([]);
+    expect(r.other).toMatchObject([{ value: 5.1, note }]);
+  });
+  test.each(["Stabilized occupancy: 96%", "Occupancy at stabilization of 96%", "We assume 96% occupancy once leased up.", "Taux d'occupation stabilisé : 96 %", "The building is assumed to be 96% occupied."])("C: explicit occupancy already reads: %s", (line) => {
+    expect(pick(read(line))).toEqual([["stabilized_occupancy_pct", 96]]);
+  });
+  test.each(["Stabilized vacancy: 4%", "Vacancy rate: 4%"])("C: %s is shown without deriving occupancy", (line) => {
+    const r = read(line);
+    expect(pick(r)).toEqual([]);
+    expect(r.other).toMatchObject([{ value: 4, note: VACANCY }]);
+  });
+  test.each([
+    ["Property tax: $23,700", 23700], ["Insurance: $7,600", 7600], ["Utilities: $10,800", 10800],
+    ["Repairs and maintenance: $9,400", 9400], ["Management (3% of EGI)", 3],
+  ] as const)("D: %s is shown as an item, never a total", (line, value) => {
+    const r = read("Appraisal operating costs", line);
+    expect(pick(r)).toEqual([]);
+    expect(r.other).toMatchObject([{ value, note: ITEM }]);
+  });
+  test("D: an appraisal list is not summed, and a stated total still reads", () => {
+    const lines = ["Property tax: $23,700", "Insurance: $7,600", "Utilities: $10,800", "Repairs and maintenance: $9,400", "Management (3% of EGI)"];
+    const r = read("Appraisal operating costs", ...lines);
+    expect(pick(r)).toEqual([]);
+    expect(r.other.map((o) => [o.value, o.note])).toEqual([23700, 7600, 10800, 9400, 3].map((v) => [v, ITEM]));
+    expect(pick(read(...lines, "Total operating expenses: $58,900"))).toEqual([["fixed_opex_annual", 58900]]);
   });
 });
