@@ -1,7 +1,7 @@
 import { Link } from "@tanstack/react-router";
 import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
 import { useState } from "react";
-import { FIELD_BY_KEY, POLICIES } from "@agir/contracts";
+import { FIELD_BY_KEY } from "@agir/contracts";
 import { api, type Metric, type RunView } from "../api";
 import { Banner, canEdit, DealHeader, ErrorText, Glossary, MetricValue, StatusTag, useDeal, useSession, VerdictBadge } from "../components/ui";
 import * as I from "../components/icons";
@@ -102,7 +102,7 @@ export function Run({ dealId }: { dealId: string }) {
       <section className="panel spread" aria-label="Verdict" style={{ padding: "28px 32px", alignItems: "flex-end", gap: 32 }}>
         <div className="stack" style={{ gap: 12, maxWidth: 760 }}>
           <div className="row"><VerdictBadge code={v.result.verdict.code} /><span className="label">{t("run.verdictLabel", { n: v.number, policy: v.policyVersion })}</span></div>
-          {POLICIES[v.policyVersion]?.draft && <p className="label">{t("run.draftPolicy")}</p>}
+          {v.policyDraft && <p className="label">{t("run.draftPolicy")}</p>}
           <p className="h-display">{vt.headline}</p>
           <p className="muted" style={{ fontSize: 16 }}>{vt.explanation}</p>
         </div>

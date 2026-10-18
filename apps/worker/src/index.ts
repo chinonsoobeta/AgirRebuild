@@ -4,7 +4,7 @@
 // letter. It runs as the trusted service principal.
 
 import Anthropic from "@anthropic-ai/sdk";
-import { FIELDS, FIELD_BY_KEY, POLICIES, type Currency, type EngineInput, type FieldUnit, type RunResult } from "@agir/contracts";
+import { FIELDS, FIELD_BY_KEY, runPolicy, type Currency, type Policy, type EngineInput, type FieldUnit, type RunResult } from "@agir/contracts";
 import { itemFold } from "@agir/numbers";
 import { renderArtifact, RendererUnavailableError, type ArtifactInput } from "@agir/artifacts";
 import { sha256Hex, type BlobStore, type Db } from "@agir/db";
@@ -488,7 +488,7 @@ async function renderJob(deps: WorkerDeps, artifactId: string) {
   if (!a) return;
   const [run] = await db.query<{
     id: string; run_number: number; created_at: string | Date; engine_version: string; policy_version: string; policy_hash: string;
-    input_hash: string; result_hash: string; result: RunResult; input_snapshot: { input: EngineInput; assumptions: ArtifactInput["assumptions"]; notFound?: ArtifactInput["notFound"] };
+    input_hash: string; result_hash: string; result: RunResult; input_snapshot: { input: EngineInput; policy?: Policy; assumptions: ArtifactInput["assumptions"]; notFound?: ArtifactInput["notFound"] };
   }>(`select * from runs where id = $1`, [a.run_id]);
   const [deal] = await db.query<{ name: string; asset_type: string; location: string; currency: Currency | null; province: string | null }>(
     `select name, asset_type, location, currency, province from deals where id = $1`,
@@ -499,8 +499,8 @@ async function renderJob(deps: WorkerDeps, artifactId: string) {
     [a.run_id],
   );
   if (!run || !deal) return;
-  // The policy the run was made under, by its stored version: a held deal is not read under v1.
-  const policy = POLICIES[run.policy_version];
+  // The policy the run was made under, as it stored it: a held deal is not read under v1, nor under a later edit of its draft.
+  const policy = runPolicy(run.input_snapshot, run.policy_version);
   if (!policy) {
     await db.query(`update artifacts set status = 'failed', error = $2, updated_at = now() where id = $1`, [a.id, `This run was made under policy ${run.policy_version}, which this build does not have.`]);
     return;

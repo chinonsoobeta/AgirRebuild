@@ -17,7 +17,7 @@ export function underwrite(input: EngineInput, policy: Policy): RunResult {
   validateInput(input);
   let base: Ledger;
   try {
-    base = buildLedger(input, policy.seniorIoSizingToRefinance);
+    base = buildLedger(input);
   } catch (e) {
     if (!(e instanceof MissingSeniorAmortizationError)) throw e;
     const checks: Check[] = [{ key: "senior_amortization_missing", kind: "bound", severity: "error", message: e.message }];
@@ -29,7 +29,7 @@ export function underwrite(input: EngineInput, policy: Policy): RunResult {
   const scenarios: ScenarioResult[] = [{ key: "base", label: "Base case", metrics: baseMetrics.metrics }];
   for (const s of policy.stresses) {
     const stressed = applyStress(input, s);
-    const ledger = buildLedger(stressed, policy.seniorIoSizingToRefinance);
+    const ledger = buildLedger(stressed);
     scenarios.push({ key: s.key, label: s.label, metrics: computeMetrics(stressed, ledger).metrics });
   }
   const contractual = baseMetrics.metrics.find((m) => m.key === "contractual_dscr");

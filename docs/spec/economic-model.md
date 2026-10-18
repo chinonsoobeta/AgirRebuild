@@ -73,12 +73,12 @@ senior balance; the new loan is sized by amount or by LTV on forward 12-month NO
 **Coverage (decision 1).** Sizing debt service is the level amortizing payment on each tranche's
 sized principal while it is in force. Sizing DSCR = weakest hold year of NOI / sizing debt
 service; the gate reads it under combined stress. Contractual DSCR uses debt service actually due.
-Owner decision 2026-10-17 (card 72): under `rental-hold-v2-draft` and `rental-hold-insured-v3-draft`,
-a held deal's senior loan uses its monthly interest-only payment for sizing until refinance when
-`senior.ioMonths >= refinance.month`. Senior amortization is then optional and omitted from the input
-when not stated. If an amortizing cash or sizing payment needs missing senior amortization, the run
-returns an error check and REJECT without computing payment figures. Earlier policies retain amortizing
-sizing, and sale deals, mezzanine and refinance-loan sizing, and cash debt service are unchanged.
+Owner decision 2026-10-17 (card 72): a held deal's senior loan uses its monthly interest-only payment
+for sizing until refinance when `senior.ioMonths >= refinance.month`. This is the held-deal rule itself,
+not a policy option. Senior amortization is then optional and omitted from the input when not stated.
+If an amortizing cash or sizing payment needs missing senior amortization, the run returns an error check
+and REJECT without computing payment figures. Sale deals, mezzanine and refinance-loan sizing, and cash
+debt service are unchanged.
 Zero debt service retains the existing null-coverage convention.
 
 **Exit.** Exit value = final hold-year NOI / exit cap; not meaningful when NOI is not positive.
@@ -159,26 +159,27 @@ Every other metric is computed as today from the same ledger.
 moves both the refinance loan, when it is sized by loan-to-value, and the stated value.
 
 **Policy.** `POLICY_V1` is unchanged, so its hash and the freshness of every existing run are unchanged. A
-registry maps each policy version to its policy; every sale deal uses `policy-v1`. Owner decision 2026-10-17:
-new held runs use a DCR-after-refinance floor of 1.10x under `rental-hold-insured-v3-draft` when a stated refinance
-insurance premium is above zero, and 1.20x under `rental-hold-v2-draft` otherwise (conventional). The insured v3
-base-case sizing warning floor is also 1.10x; the conventional floor remains 1.20x. All earlier policies
-remain registered unchanged for earlier runs and replay. Both new drafts enable `seniorIoSizingToRefinance`
-as described above. These are draft thresholds awaiting credit sign-off. Both current drafts take v1's
-stresses, loan-to-cost ceiling, tolerance and source precedence, and have four gates. The thresholds
-are proposals for credit, not decisions:
+registry maps each policy version to its policy; every sale deal uses `policy-v1`. Held deals use one of two
+drafts (consolidation, owner decision 2026-10-18): `rental-hold-insured-draft` when a stated refinance
+insurance premium is above zero, with a DCR-after-refinance floor and a base-case sizing warning floor of
+1.10x, and `rental-hold-draft` otherwise (conventional), with 1.20x for both. A signed policy is frozen; a
+draft is edited in place until credit signs it. Every run stores the policy it ran under in its input
+snapshot. Replay, the sensitivity routes and the worker use that stored copy, and replay checks that its
+hash is the run's `policy_hash`. A run whose draft has since been edited is stale ("The policy thresholds
+changed after this run."), never unreplayable. Both drafts take v1's stresses, loan-to-cost ceiling,
+tolerance and source precedence, and have four gates. The thresholds are proposals for credit, not decisions:
 
 | Gate or warning | Scenario | Threshold |
 |---|---|---|
 | development spread | base | >= 100 bps |
 | coverage after refinance (`dcr_after_refinance`) | base | >= 1.10x insured; >= 1.20x conventional |
 | base-case sizing warning (not a gate) | base | below 1.10x insured; below 1.20x conventional |
-| sizing DSCR (senior IO through refinance when eligible under the new drafts) | combined | >= 1.20x |
+| sizing DSCR (senior IO through refinance when eligible) | combined | >= 1.20x |
 | unrealized equity multiple | combined | >= 1.0x |
 
 The verdict rules are v1's: an error check rejects; an unmeasurable gate gives NOT_EVALUATED; more than two
-failures reject; one or two give APPROVE_WITH_CONDITIONS. A run records the policy version and hash it was made
-under, is fresh against that policy's own hash, and replays under it. Beside the verdict, the run screen and every
+failures reject; one or two give APPROVE_WITH_CONDITIONS. A run records the policy, its version and hash it was made
+under, is fresh against the current hash of that version, and replays under its stored policy. Beside the verdict, the run screen and every
 artifact say "Draft policy, not signed by credit". A decision can still be recorded, and it names the policy
 version.
 

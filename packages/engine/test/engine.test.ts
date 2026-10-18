@@ -1,6 +1,6 @@
 import { describe, expect, test } from "vitest";
 import fc from "fast-check";
-import { FIELDS, FIELD_BY_KEY, METRICS, POLICIES, POLICY_V1, RENTAL_HOLD_INSURED_V1_DRAFT, RENTAL_HOLD_V1_DRAFT, TEMPLATES, policyFor, type AssumptionStatus, type EngineInput, type Readiness, type RunResult } from "@agir/contracts";
+import { FIELDS, FIELD_BY_KEY, METRICS, POLICIES, POLICY_V1, RENTAL_HOLD_INSURED_DRAFT, RENTAL_HOLD_DRAFT, TEMPLATES, policyFor, type AssumptionStatus, type EngineInput, type Readiness, type RunResult } from "@agir/contracts";
 import { createHash } from "node:crypto";
 import { readFileSync, readdirSync } from "node:fs";
 import { join } from "node:path";
@@ -801,33 +801,26 @@ describe("exit by refinancing and holding (card 60)", () => {
   const npv = (rate: number, flows: [number, number][]) => flows.reduce((a, [t, amt]) => a + amt / Math.pow(1 + rate, t), 0);
 
   describe("an interest-only construction loan is sized on what it pays (task 72)", () => {
-    const insuredV2 = POLICIES["rental-hold-insured-v2-draft"]!;
+    const insured = POLICIES["rental-hold-insured-draft"]!;
     const ioDeal = (amortYears?: number, ratePct = 6): EngineInput => {
       const base = byAmount();
       return { ...base, senior: { amount: 600_000, ratePct, ioMonths: 12, ...(amortYears === undefined ? {} : { amortYears }) }, refinance: { ...base.refinance!, insurancePremiumPct: 4 } };
     };
     test.each([
-      ["conventional hold", byAmount(), "rental-hold-v2-draft"],
-      ["insured hold", ioDeal(30), "rental-hold-insured-v3-draft"],
+      ["conventional hold", byAmount(), "rental-hold-draft"],
+      ["insured hold", ioDeal(30), "rental-hold-insured-draft"],
       ["sale", { ...ioDeal(30), exit: undefined }, "policy-v1"],
     ] as const)("policyFor selects %s", (_name, input, version) => {
       expect(policyFor(input).version).toBe(version);
     });
 
-    test("the four earlier hashes stay pinned and both new drafts are registered", () => {
+    test("this build has policy v1 (pinned) and the two held drafts", () => {
+      expect(Object.keys(POLICIES)).toEqual(["policy-v1", "rental-hold-draft", "rental-hold-insured-draft"]);
       expect(sha(POLICIES["policy-v1"])).toBe("9f95780101a9ecfe6444c47dd319c1cb8d77251d60700a1a4dde1733055296b9");
-      expect(sha(POLICIES["rental-hold-v1-draft"])).toBe("ee784c397f15c4fcc4257fd5c32592dd0177aef5320ee67b398d9bda1193a66b");
-      expect(sha(POLICIES["rental-hold-insured-v1-draft"])).toBe("afce1692a3ba170e7710633494b94242f4ef3ea754ef061ec2196a08ee1ad748");
-      expect(sha(insuredV2)).toBe("71824f74ce9c0adca378d29e4db64563addbcf7e8e4ec0426f87e84dc0a06120");
-      expect(POLICIES["rental-hold-v2-draft"]).toEqual({ ...RENTAL_HOLD_V1_DRAFT, version: "rental-hold-v2-draft", seniorIoSizingToRefinance: true });
-      expect(POLICIES["rental-hold-insured-v3-draft"]).toEqual({ ...insuredV2, version: "rental-hold-insured-v3-draft", seniorIoSizingToRefinance: true });
     });
 
     test.each([6, 0])("every scenario, gate and check is invariant to 20/30/40/absent amortization at senior rate %s", (rate) => {
-      const runs = [20, 30, 40, undefined].map((amort) => {
-        const input = ioDeal(amort, rate);
-        return underwrite(input, POLICIES["rental-hold-insured-v3-draft"]!);
-      });
+      const runs = [20, 30, 40, undefined].map((amort) => underwrite(ioDeal(amort, rate), insured));
       for (const run of runs.slice(1)) {
         expect(run.scenarios).toEqual(runs[0]!.scenarios);
         expect(run.verdict.gates).toEqual(runs[0]!.verdict.gates);
@@ -842,45 +835,35 @@ describe("exit by refinancing and holding (card 60)", () => {
       expect(runs[0]!.checks.some((c) => c.severity === "error")).toBe(false);
     });
 
-    test("insured v2 retains the zero-rate fixture's 3.33x / 5.00x / 6.67x sizing on replay", () => {
-      for (const amort of [20, 30, 40]) {
-        const run = underwrite(ioDeal(amort, 0), insuredV2);
-        expect(v(run, "sizing_dscr_year1")).toBeCloseTo(100_000 / (600_000 / amort), 9);
-        expect(v(run, "senior_dscr_year1")).toBeCloseTo(100_000 / (600_000 / amort), 9);
-      }
-    });
-
-    // Audit of card 72: the tornado and grid use the run's policy, and a delay that needs the absent amortization is not computable, never a crash.
-    test("audit of card 72: the tornado and grid size on the run's policy and survive absent amortization", () => {
-      const v3 = POLICIES["rental-hold-insured-v3-draft"]!;
-      const run = underwrite(ioDeal(undefined), v3);
-      const t = tornado(ioDeal(undefined), "senior_dscr_year1", v3);
+    // Audit of card 72: a delay that needs the absent amortization is not computable in the tornado and grid, never a crash.
+    test("audit of card 72: the tornado and grid size like the run and survive absent amortization", () => {
+      const run = underwrite(ioDeal(undefined), insured);
+      const t = tornado(ioDeal(undefined), "senior_dscr_year1");
       expect(t.base).toBe(v(run, "senior_dscr_year1"));
-      expect(tornado(ioDeal(30), "senior_dscr_year1", v3).base).toBe(t.base);
+      expect(tornado(ioDeal(30), "senior_dscr_year1").base).toBe(t.base);
       // A longer construction moves the refinance past the IO period, so the loan would amortize on terms nobody stated.
       expect(t.rows.find((r) => r.driver === "constructionMonths")!.high).toBeNull();
-      const g = grid(ioDeal(undefined), "senior_dscr_year1", "rentPct", "constructionMonths", 3, v3);
+      const g = grid(ioDeal(undefined), "senior_dscr_year1", "rentPct", "constructionMonths", 3);
       expect(g.cells[1]![1]).toBe(t.base);
       expect(g.cells[2]!.every((c) => c === null)).toBe(true);
     });
 
-    test("when IO ends before refinance every metric stays the same as insured v2", () => {
+    test("when IO ends before refinance the senior is sized on its amortizing payment", () => {
       const input = ioDeal(30);
       input.senior.ioMonths = 11;
-      expect(underwrite(input, POLICIES["rental-hold-insured-v3-draft"]!).scenarios).toEqual(underwrite(input, insuredV2).scenarios);
+      expect(v(underwrite(input, insured), "senior_dscr_year1")).toBeCloseTo(100_000 / (levelPayment(600_000, 6, 360) * 12), 9);
     });
 
-    test.each(["IO ends early", "old policy"])("missing amortization rejects with an error check: %s", (kind) => {
+    test("missing amortization that the ledger needs rejects with an error check", () => {
       const input = ioDeal();
-      if (kind === "IO ends early") input.senior.ioMonths = 11;
-      const policy = kind === "old policy" ? insuredV2 : POLICIES["rental-hold-insured-v3-draft"]!;
-      const run = underwrite(input, policy);
+      input.senior.ioMonths = 11;
+      const run = underwrite(input, insured);
       expect(run.verdict.code).toBe("REJECT");
       expect(run.checks).toContainEqual(expect.objectContaining({ key: "senior_amortization_missing", severity: "error" }));
       expect(run.scenarios.flatMap((s) => s.metrics).every((m) => m.value === null || Number.isFinite(m.value))).toBe(true);
     });
 
-    test("a sale with IO through refinance still uses the old amortizing sizing in every scenario", () => {
+    test("a sale with IO through refinance still uses the amortizing sizing in every scenario", () => {
       const input = { ...ioDeal(20), exit: undefined };
       const run = underwrite(input, policyFor(input));
       expect(run).toEqual(underwrite(input, POLICY_V1));
@@ -888,16 +871,13 @@ describe("exit by refinancing and holding (card 60)", () => {
     });
   });
 
-  describe("insured base-case floor and optional interest-only amortization (task 70)", () => {
-    test("insured v2 is selected and registered while the three earlier policy hashes stay unchanged", () => {
+  describe("insured base-case floor (task 70)", () => {
+    test("the insured draft is selected for a premium, and its gate and warning floors are 1.10x", () => {
       const base = byAmount();
       const input = { ...base, refinance: { ...base.refinance!, insurancePremiumPct: 4 } };
-      expect(policyFor(input).version).toBe("rental-hold-insured-v3-draft");
-      expect(POLICIES["rental-hold-insured-v2-draft"]).toEqual({ ...RENTAL_HOLD_INSURED_V1_DRAFT, version: "rental-hold-insured-v2-draft", baseSizingDscrFloor: 1.1 });
-      expect(POLICIES["rental-hold-insured-v1-draft"]).toBe(RENTAL_HOLD_INSURED_V1_DRAFT);
-      expect(sha(POLICY_V1)).toBe("9f95780101a9ecfe6444c47dd319c1cb8d77251d60700a1a4dde1733055296b9");
-      expect(sha(RENTAL_HOLD_V1_DRAFT)).toBe("ee784c397f15c4fcc4257fd5c32592dd0177aef5320ee67b398d9bda1193a66b");
-      expect(sha(RENTAL_HOLD_INSURED_V1_DRAFT)).toBe("afce1692a3ba170e7710633494b94242f4ef3ea754ef061ec2196a08ee1ad748");
+      expect(policyFor(input)).toBe(RENTAL_HOLD_INSURED_DRAFT);
+      expect(RENTAL_HOLD_INSURED_DRAFT.baseSizingDscrFloor).toBe(1.1);
+      expect(RENTAL_HOLD_INSURED_DRAFT.gates.dcrAfterRefinanceMin).toBe(1.1);
     });
 
     test("base sizing between 1.10x and 1.20x warns only on the conventional held deal", () => {
@@ -912,30 +892,6 @@ describe("exit by refinancing and holding (card 60)", () => {
       }
       expect(insuredRun.checks.some((c) => c.key === "base_sizing_dscr")).toBe(false);
       expect(conventionalRun.checks.find((c) => c.key === "base_sizing_dscr")).toMatchObject({ severity: "warning", expected: 1.2, message: expect.stringContaining("under the 1.20x floor") });
-    });
-
-    test("step 2a: year-one sizing depends on senior amortization during IO, so optional amortization is deferred", () => {
-      const base = byAmount();
-      const runs = [20, 30, 40].map((amortYears) => {
-        const input = { ...base, senior: { ...base.senior, ioMonths: base.refinance!.month, amortYears } };
-        const run = underwrite(input, POLICIES["rental-hold-insured-v2-draft"]!);
-        return { scenarios: run.scenarios, gates: run.verdict.gates, checks: run.checks };
-      });
-      // The failed invariance proof is in the tests-first commit. Part 2 is not implemented:
-      // sizingPayment still uses amortization before refinance, even when cash payments are interest-only.
-      const dependent = ["sizing_dscr_year1", "senior_dscr_year1"];
-      for (const run of runs.slice(1)) {
-        for (const [i, scenario] of run.scenarios.entries()) {
-          const baseline = runs[0]!.scenarios[i]!;
-          expect(scenario.metrics.filter((m, j) => m.value !== baseline.metrics[j]!.value).map((m) => m.key)).toEqual(dependent);
-          expect(scenario.metrics.filter((m) => !dependent.includes(m.key))).toEqual(baseline.metrics.filter((m) => !dependent.includes(m.key)));
-        }
-        expect(run.gates).toEqual(runs[0]!.gates);
-        expect(run.checks).toEqual(runs[0]!.checks);
-      }
-      for (const [i, run] of runs.entries()) {
-        for (const key of dependent) expect(run.scenarios[0]!.metrics.find((m) => m.key === key)!.value).toBeCloseTo([10 / 3, 5, 20 / 3][i]!, 9);
-      }
     });
   });
 
@@ -1113,7 +1069,7 @@ describe("exit by refinancing and holding (card 60)", () => {
       const { readiness, input } = assemble(rows({ ...refi, refinance_and_hold: 1 }));
       expect(readiness.status).toBe("ready");
       expect(input!.exit).toBe("refinance_hold");
-      expect(policyFor(input!).version).toBe("rental-hold-v2-draft");
+      expect(policyFor(input!).version).toBe("rental-hold-draft");
     });
 
     test("with the flag at 0 or absent the key is absent, so the input hashes as before", () => {
@@ -1147,27 +1103,23 @@ describe("exit by refinancing and holding (card 60)", () => {
 
   describe("policy", () => {
     test.each([
-      ["a held deal with premium 4", { ...byAmount(), refinance: { ...byAmount().refinance!, insurancePremiumPct: 4 } }, "rental-hold-insured-v3-draft"],
-      ["a held deal without a premium", byAmount(), "rental-hold-v2-draft"],
-      ["a held deal with premium 0", { ...byAmount(), refinance: { ...byAmount().refinance!, insurancePremiumPct: 0 } }, "rental-hold-v2-draft"],
-      ["a held deal without refinance", { ...byAmount(), refinance: undefined }, "rental-hold-v2-draft"],
+      ["a held deal with premium 4", { ...byAmount(), refinance: { ...byAmount().refinance!, insurancePremiumPct: 4 } }, "rental-hold-insured-draft"],
+      ["a held deal without a premium", byAmount(), "rental-hold-draft"],
+      ["a held deal with premium 0", { ...byAmount(), refinance: { ...byAmount().refinance!, insurancePremiumPct: 0 } }, "rental-hold-draft"],
+      ["a held deal without refinance", { ...byAmount(), refinance: undefined }, "rental-hold-draft"],
       ["a sale deal with premium 4", { ...byAmount(), exit: undefined, refinance: { ...byAmount().refinance!, insurancePremiumPct: 4 } }, "policy-v1"],
     ] as const)("policyFor selects the policy for %s (task 67)", (_label, input, version) => {
       expect(policyFor(input).version).toBe(version);
     });
 
-    test("the insured draft changes only its version and refinance DCR floor, and is registered (task 67)", () => {
-      expect(RENTAL_HOLD_INSURED_V1_DRAFT).toEqual({
-        ...RENTAL_HOLD_V1_DRAFT,
-        version: "rental-hold-insured-v1-draft",
-        gates: { ...RENTAL_HOLD_V1_DRAFT.gates, dcrAfterRefinanceMin: 1.1 },
+    test("the insured draft changes only its version and its two 1.10x floors, and is registered (task 67)", () => {
+      expect(RENTAL_HOLD_INSURED_DRAFT).toEqual({
+        ...RENTAL_HOLD_DRAFT,
+        version: "rental-hold-insured-draft",
+        gates: { ...RENTAL_HOLD_DRAFT.gates, dcrAfterRefinanceMin: 1.1 },
+        baseSizingDscrFloor: 1.1,
       });
-      expect(POLICIES["rental-hold-insured-v1-draft"]).toBe(RENTAL_HOLD_INSURED_V1_DRAFT);
-    });
-
-    test("both existing policy hashes remain pinned to the pre-change baseline (task 67)", () => {
-      expect(sha(POLICY_V1)).toBe("9f95780101a9ecfe6444c47dd319c1cb8d77251d60700a1a4dde1733055296b9");
-      expect(sha(RENTAL_HOLD_V1_DRAFT)).toBe("ee784c397f15c4fcc4257fd5c32592dd0177aef5320ee67b398d9bda1193a66b");
+      expect(POLICIES["rental-hold-insured-draft"]).toBe(RENTAL_HOLD_INSURED_DRAFT);
     });
 
     test("the insured refinance clears its DCR gate while the same conventional refinance fails (task 67)", () => {
@@ -1187,9 +1139,9 @@ describe("exit by refinancing and holding (card 60)", () => {
         expect(dcr).toBeLessThan(1.2);
       }
       expect(conventionalDcr).toBeGreaterThanOrEqual(insuredDcr);
-      expect(insuredRun.policyVersion).toBe("rental-hold-insured-v3-draft");
+      expect(insuredRun.policyVersion).toBe("rental-hold-insured-draft");
       expect(insuredRun.verdict.gates.find((g) => g.key === "dcr_after_refinance")).toMatchObject({ threshold: 1.1, status: "passed" });
-      expect(conventionalRun.policyVersion).toBe("rental-hold-v2-draft");
+      expect(conventionalRun.policyVersion).toBe("rental-hold-draft");
       expect(conventionalRun.verdict.gates.find((g) => g.key === "dcr_after_refinance")).toMatchObject({ threshold: 1.2, status: "failed" });
     });
 
@@ -1200,12 +1152,12 @@ describe("exit by refinancing and holding (card 60)", () => {
     });
 
     test("the draft takes v1's rules and has four gates, with proposed thresholds", () => {
-      expect(RENTAL_HOLD_V1_DRAFT.version).toBe("rental-hold-v1-draft");
-      expect(RENTAL_HOLD_V1_DRAFT.draft).toBe(true);
+      expect(RENTAL_HOLD_DRAFT.version).toBe("rental-hold-draft");
+      expect(RENTAL_HOLD_DRAFT.draft).toBe(true);
       for (const k of ["stresses", "maxLtcPct", "baseSizingDscrFloor", "maxFailedGatesForConditions", "agreementTolerancePct", "sourcePrecedence"] as const) {
-        expect(RENTAL_HOLD_V1_DRAFT[k], k).toEqual(POLICY_V1[k]);
+        expect(RENTAL_HOLD_DRAFT[k], k).toEqual(POLICY_V1[k]);
       }
-      expect(gateSpecs(RENTAL_HOLD_V1_DRAFT).map((g) => [g.metricKey, g.scenario, g.threshold])).toEqual([
+      expect(gateSpecs(RENTAL_HOLD_DRAFT).map((g) => [g.metricKey, g.scenario, g.threshold])).toEqual([
         ["development_spread", "base", 100],
         ["dcr_after_refinance", "base", 1.2],
         ["sizing_dscr", "combined", 1.2],
@@ -1215,21 +1167,21 @@ describe("exit by refinancing and holding (card 60)", () => {
     });
 
     test("audit of task 60: an unrealized gate says so, and cash left is measured on required equity, as the spec says", () => {
-      expect(gateSpecs(RENTAL_HOLD_V1_DRAFT).find((g) => g.metricKey === "unrealized_equity_multiple")!.label).toMatch(/unrealized, not a sale/);
+      expect(gateSpecs(RENTAL_HOLD_DRAFT).find((g) => g.metricKey === "unrealized_equity_multiple")!.label).toMatch(/unrealized, not a sale/);
       expect(METRICS.find((m) => m.key === "cash_left_in_deal")!.formula).toMatch(/^required equity - cash returned at refinance/);
     });
 
     test("the registry maps each version to its policy, and hold mode gets the draft", () => {
       expect(POLICIES["policy-v1"]).toBe(POLICY_V1);
-      expect(POLICIES["rental-hold-v1-draft"]).toBe(RENTAL_HOLD_V1_DRAFT);
-      expect(policyFor(byAmount())).toBe(POLICIES["rental-hold-v2-draft"]);
+      expect(POLICIES["rental-hold-draft"]).toBe(RENTAL_HOLD_DRAFT);
+      expect(policyFor(byAmount())).toBe(POLICIES["rental-hold-draft"]);
       const { exit: _e, ...sale } = byAmount();
       expect(policyFor(sale)).toBe(POLICY_V1);
     });
 
     test("a hold deal runs under the draft with four gates; a sale deal under policy-v1 with five", () => {
       const hold = underwrite(byAmount(), policyFor(byAmount()));
-      expect(hold.policyVersion).toBe("rental-hold-v2-draft");
+      expect(hold.policyVersion).toBe("rental-hold-draft");
       expect(hold.verdict.gates).toHaveLength(4);
       expect(hold.verdict.gates.find((g) => g.metricKey === "dcr_after_refinance")).toMatchObject({ scenario: "base", threshold: 1.2, status: "passed", unit: "x" });
       const sale = underwrite(developmentDeal(), policyFor(developmentDeal()));

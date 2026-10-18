@@ -95,8 +95,8 @@ function shockWithin(input: EngineInput, shock: Shock, limits: Partial<Record<Dr
 }
 
 /** Base-case metrics only: one ledger, no stresses. Fast enough for charts. */
-export function baseMetrics(input: EngineInput, seniorIoSizingToRefinance = false): Metric[] {
-  return computeMetrics(input, buildLedger(input, seniorIoSizingToRefinance)).metrics;
+export function baseMetrics(input: EngineInput): Metric[] {
+  return computeMetrics(input, buildLedger(input)).metrics;
 }
 
 export type Exploration = Omit<RunResult, "ledger" | "equityFlows">;
@@ -109,13 +109,13 @@ export function explore(input: EngineInput, policy: Policy, shock: Shock): Explo
 }
 
 /**
- * One base-case metric under the run's policy: null when not VALID, or when the shock makes the senior amortize on an
+ * One base-case metric: null when not VALID, or when the shock makes the senior amortize on an
  * amortization nobody stated (a delay that moves the refinance past the IO period); undefined for an unknown metric.
  */
-function metricOf(input: EngineInput, metricKey: string, policy?: Policy): number | null | undefined {
+function metricOf(input: EngineInput, metricKey: string): number | null | undefined {
   let metrics: Metric[];
   try {
-    metrics = baseMetrics(input, policy?.seniorIoSizingToRefinance);
+    metrics = baseMetrics(input);
   } catch (e) {
     if (e instanceof MissingSeniorAmortizationError) return null;
     throw e;
@@ -127,9 +127,9 @@ function metricOf(input: EngineInput, metricKey: string, policy?: Policy): numbe
 export type TornadoRow = { driver: DriverKey; label: string; low: number | null; high: number | null; lowShock: number; highShock: number };
 
 /** Each driver swung down and up by its tornado swing, everything else held. */
-export function tornado(input: EngineInput, metricKey: string, policy?: Policy): { base: number | null; rows: TornadoRow[] } {
+export function tornado(input: EngineInput, metricKey: string): { base: number | null; rows: TornadoRow[] } {
   const value = (i: EngineInput) => {
-    const m = metricOf(i, metricKey, policy);
+    const m = metricOf(i, metricKey);
     if (m === undefined) throw new Error(`Unknown metric "${metricKey}"`);
     return m;
   };
@@ -148,7 +148,7 @@ export function tornado(input: EngineInput, metricKey: string, policy?: Policy):
 }
 
 /** A grid of one metric over two drivers, each at `steps` evenly spaced values. */
-export function grid(input: EngineInput, metricKey: string, x: DriverKey, y: DriverKey, steps = 5, policy?: Policy) {
+export function grid(input: EngineInput, metricKey: string, x: DriverKey, y: DriverKey, steps = 5) {
   if (x === y) throw new Error("Choose two different drivers");
   const dx = DRIVER_BY_KEY.get(x)!;
   const dy = DRIVER_BY_KEY.get(y)!;
@@ -158,7 +158,7 @@ export function grid(input: EngineInput, metricKey: string, x: DriverKey, y: Dri
   const ys = axis(dy);
   const cells = ys.map((yv) =>
     xs.map((xv) => {
-      return metricOf(shockInput(input, { [x]: xv, [y]: yv }), metricKey, policy) ?? null;
+      return metricOf(shockInput(input, { [x]: xv, [y]: yv }), metricKey) ?? null;
     }),
   );
   return { x, y, xs, ys, cells };
@@ -250,7 +250,7 @@ function gateMetric(input: EngineInput, policy: Policy, spec: GateSpec): Metric 
   try {
     // A move the engine would refuse (validateInput throws) never counts as passing.
     validateInput(input);
-    return baseMetrics(stress ? applyStress(input, stress) : input, policy.seniorIoSizingToRefinance).find((m) => m.key === spec.metricKey);
+    return baseMetrics(stress ? applyStress(input, stress) : input).find((m) => m.key === spec.metricKey);
   } catch {
     return undefined;
   }
@@ -259,7 +259,7 @@ function gateMetric(input: EngineInput, policy: Policy, spec: GateSpec): Metric 
 /** Rows for every failing gate and each of five drivers, and the error-severity checks that no gate can offset. */
 export function breakeven(input: EngineInput, policy: Policy, specs: GateSpec[] = gateSpecs(policy)): { rows: BreakevenRow[]; hardFails: string[] } {
   validateInput(input);
-  const base = buildLedger(input, policy.seniorIoSizingToRefinance);
+  const base = buildLedger(input);
   const contractual = computeMetrics(input, base).metrics.find((m) => m.key === "contractual_dscr");
   const hardFails = runChecks(input, base, policy, contractual?.status === "VALID" ? contractual.value : null)
     .filter((c) => c.severity === "error")

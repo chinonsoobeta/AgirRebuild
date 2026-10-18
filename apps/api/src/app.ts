@@ -1,7 +1,7 @@
 import { Hono, type Context } from "hono";
 import { getCookie, setCookie, deleteCookie } from "hono/cookie";
 import { z } from "zod";
-import { COUNTRIES, CURRENCIES, FIELDS, FIELD_GROUP_LABELS, METRICS, POLICIES, POLICY_V1, PROVINCE_CODES, REVIEW_MODES, type EngineInput, type Policy } from "@agir/contracts";
+import { COUNTRIES, CURRENCIES, FIELDS, FIELD_GROUP_LABELS, METRICS, POLICIES, POLICY_V1, PROVINCE_CODES, REVIEW_MODES, runPolicy, type EngineInput, type Policy } from "@agir/contracts";
 import { asUser, type BlobStore, type Db } from "@agir/db";
 import { breakeven, DRIVERS, EngineInputError, explore, grid, tornado, type DriverKey, type Shock } from "@agir/engine";
 import { canonicalItem, itemFold, kindOf } from "@agir/extraction";
@@ -419,9 +419,9 @@ export function createApp({ db, store, secureCookies, demoSignIn = false }: AppD
   const metricKey = z.enum(METRICS.map((m) => m.key) as [string, ...string[]]);
   /** A stored run's input, and the policy that run was made under. */
   const runInputAndPolicy = async (c: Context<Env>): Promise<{ input: EngineInput; policy: Policy }> => {
-    const [r] = await as(c, (tx) => tx.query<{ input_snapshot: { input: EngineInput }; policy_version: string }>(`select input_snapshot, policy_version from runs where id = $1`, [c.req.param("id")]));
+    const [r] = await as(c, (tx) => tx.query<{ input_snapshot: { input: EngineInput; policy?: Policy }; policy_version: string }>(`select input_snapshot, policy_version from runs where id = $1`, [c.req.param("id")]));
     if (!r) throw new HttpError(404, "Run not found");
-    const policy = POLICIES[r.policy_version];
+    const policy = runPolicy(r.input_snapshot, r.policy_version);
     if (!policy) throw new HttpError(409, `This run was made under policy ${r.policy_version}, which this build does not have.`);
     return { input: r.input_snapshot.input, policy };
   };
@@ -433,8 +433,8 @@ export function createApp({ db, store, secureCookies, demoSignIn = false }: AppD
   });
   app.post("/api/runs/:id/tornado", async (c) => {
     const { metric } = z.object({ metric: metricKey }).parse(await c.req.json());
-    const { input, policy } = await runInputAndPolicy(c);
-    return c.json({ scratch: true, metric, ...tornado(input, metric, policy) });
+    const { input } = await runInputAndPolicy(c);
+    return c.json({ scratch: true, metric, ...tornado(input, metric) });
   });
   app.post("/api/runs/:id/breakeven", async (c) => {
     const { input, policy } = await runInputAndPolicy(c);
@@ -443,8 +443,8 @@ export function createApp({ db, store, secureCookies, demoSignIn = false }: AppD
   app.post("/api/runs/:id/grid", async (c) => {
     const b = z.object({ metric: metricKey, x: driverKey, y: driverKey, steps: z.number().int().min(3).max(9).default(5) }).parse(await c.req.json());
     if (b.x === b.y) throw new HttpError(422, "Choose two different drivers.");
-    const { input, policy } = await runInputAndPolicy(c);
-    return c.json({ scratch: true, metric: b.metric, ...grid(input, b.metric, b.x, b.y, b.steps, policy) });
+    const { input } = await runInputAndPolicy(c);
+    return c.json({ scratch: true, metric: b.metric, ...grid(input, b.metric, b.x, b.y, b.steps) });
   });
 
   app.get("/api/runs/:id/audit-package", async (c) => {

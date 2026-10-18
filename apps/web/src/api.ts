@@ -75,7 +75,7 @@ export type Review = {
 };
 export type Metric = { key: string; label: string; unit: string; value: number | null; status: string; reason?: string; formula: string };
 export type RunView = {
-  id: string; dealId: string; number: number; createdAt: string; createdBy: string | null; engineVersion: string; policyVersion: string;
+  id: string; dealId: string; number: number; createdAt: string; createdBy: string | null; engineVersion: string; policyVersion: string; policyDraft: boolean;
   inputHash: string; resultHash: string; signed: string; fresh: boolean; staleReasons: string[]; isLatest: boolean;
   result: {
     scenarios: { key: string; label: string; metrics: Metric[] }[];

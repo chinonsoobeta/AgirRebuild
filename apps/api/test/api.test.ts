@@ -8,7 +8,7 @@ import Anthropic from "@anthropic-ai/sdk";
 import { drain, reconcileDeal, type SuggestRequest, type SuggestReply } from "@agir/worker";
 import { documentBytes, loadOracle } from "@agir/testkit";
 import { createApp } from "../src/app.ts";
-import { POLICY_V1, RENTAL_HOLD_V1_DRAFT } from "@agir/contracts";
+import { POLICIES, POLICY_V1, RENTAL_HOLD_DRAFT, type Policy } from "@agir/contracts";
 import { canonicalJson } from "@agir/engine";
 import { POLICY_HASHES, sha256, sourceLabel } from "../src/services.ts";
 
@@ -803,11 +803,11 @@ describe("card 60: a deal that is kept and refinanced runs under its own policy"
     expect(r.status).toBe(200);
     holdRun = r.json.id;
     const view = (await call(hal, "GET", `/api/runs/${holdRun}`)).json;
-    expect(view).toMatchObject({ policyVersion: "rental-hold-v2-draft", fresh: true, staleReasons: [] });
+    expect(view).toMatchObject({ policyVersion: "rental-hold-draft", fresh: true, staleReasons: [] });
     expect(view.result.verdict.gates).toHaveLength(4);
     expect(view.result.scenarios[0].metrics.some((m: any) => m.key === "refinance_cash_returned")).toBe(true);
     const [row] = await db.query<any>(`select policy_version, policy_hash from runs where id = $1`, [holdRun]);
-    expect(row).toMatchObject({ policy_version: "rental-hold-v2-draft", policy_hash: POLICY_HASHES["rental-hold-v2-draft"] });
+    expect(row).toMatchObject({ policy_version: "rental-hold-draft", policy_hash: POLICY_HASHES["rental-hold-draft"] });
     expect(row.policy_hash).not.toBe(sha(POLICY_V1));
     expect((await call(hal, "GET", `/api/deals/${hd}`)).json.status.text).toMatch(/^Verdict: /);
     const overview = (await call(hal, "GET", `/api/deals/${hd}`)).json;
@@ -822,17 +822,40 @@ describe("card 60: a deal that is kept and refinanced runs under its own policy"
 
   test("the sensitivity routes use the run's own policy", async () => {
     const e = (await call(hal, "POST", `/api/runs/${holdRun}/explore`, { shock: {} })).json;
-    expect(e.policyVersion).toBe("rental-hold-v2-draft");
+    expect(e.policyVersion).toBe("rental-hold-draft");
     expect(e.verdict.gates).toHaveLength(4);
     const b = await call(hal, "POST", `/api/runs/${holdRun}/breakeven`, {});
     expect(b.status).toBe(200);
+  });
+
+  // Consolidation: drafts are edited in place, so a run keeps the policy it ran under and replays under that copy.
+  test("after its draft is edited, a run replays and explores under its stored policy, and is stale", async () => {
+    const [{ snap }] = await db.query<any>(`select input_snapshot as snap from runs where id = $1`, [holdRun]);
+    expect(snap.policy).toEqual(POLICIES["rental-hold-draft"]);
+    const registry = POLICIES as Record<string, Policy>;
+    const hashes = POLICY_HASHES as Record<string, string>;
+    const [original, originalHash] = [registry["rental-hold-draft"]!, hashes["rental-hold-draft"]!];
+    // The draft as a later build might edit it: a stricter refinance DCR floor.
+    const edited = { ...original, gates: { ...original.gates, dcrAfterRefinanceMin: 9 } };
+    registry["rental-hold-draft"] = edited;
+    hashes["rental-hold-draft"] = sha(edited);
+    try {
+      const view = (await call(hal, "GET", `/api/runs/${holdRun}`)).json;
+      expect(view).toMatchObject({ policyDraft: true, fresh: false, staleReasons: ["The policy thresholds changed after this run."] });
+      expect((await call(hal, "GET", `/api/runs/${holdRun}/audit-package`)).json.validation.status).toBe("passed");
+      const e = (await call(hal, "POST", `/api/runs/${holdRun}/explore`, { shock: {} })).json;
+      expect(e.verdict.gates.find((g: any) => g.metricKey === "dcr_after_refinance").threshold).toBe(1.2);
+    } finally {
+      registry["rental-hold-draft"] = original;
+      hashes["rental-hold-draft"] = originalHash;
+    }
   });
 
   test("the catalog exposes the registry so the web can label a draft policy", async () => {
     const cat = (await call(hal, "GET", "/api/catalog")).json;
     expect(cat.policy.version).toBe("policy-v1");
     expect(cat.policies["policy-v1"].draft).toBeUndefined();
-    expect(cat.policies["rental-hold-v1-draft"].draft).toBe(true);
+    expect(cat.policies["rental-hold-draft"].draft).toBe(true);
   });
 
   test("a decision can be recorded on a draft policy run, and the artifacts carry the draft line", async () => {
@@ -868,8 +891,8 @@ describe("card 60: a deal that is kept and refinanced runs under its own policy"
   });
 
   test.each([
-    [0, "rental-hold-v2-draft"],
-    [4, "rental-hold-insured-v3-draft"],
+    [0, "rental-hold-draft"],
+    [4, "rental-hold-insured-draft"],
   ] as const)("a held run with premium %s stores its IO-sizing policy (task 72)", async (premium, version) => {
     hal ??= await signup("fictional-io-72@example.com", "Fictional IO Owner", "solo");
     const workspace = (await call(hal, "GET", "/api/me")).json.workspaces[0].id;
@@ -893,7 +916,7 @@ describe("card 60: a deal that is kept and refinanced runs under its own policy"
     const run = await call(hal, "POST", `/api/deals/${id}/runs`);
     expect(run.status).toBe(200);
     const [row] = await db.query<any>(`select policy_version, policy_hash from runs where id = $1`, [run.json.id]);
-    expect(row).toMatchObject({ policy_version: "rental-hold-insured-v3-draft", policy_hash: POLICY_HASHES["rental-hold-insured-v3-draft"] });
+    expect(row).toMatchObject({ policy_version: "rental-hold-insured-draft", policy_hash: POLICY_HASHES["rental-hold-insured-draft"] });
   });
 
   test("an insured held run stores its own policy and hash, replays, and renders its artifacts (task 67)", async () => {
@@ -906,9 +929,9 @@ describe("card 60: a deal that is kept and refinanced runs under its own policy"
     expect(r.status).toBe(200);
     const insuredRun = r.json.id;
     const view = (await call(hal, "GET", `/api/runs/${insuredRun}`)).json;
-    expect(view).toMatchObject({ policyVersion: "rental-hold-insured-v3-draft", fresh: true, staleReasons: [] });
+    expect(view).toMatchObject({ policyVersion: "rental-hold-insured-draft", fresh: true, staleReasons: [] });
     const [row] = await db.query<any>(`select policy_version, policy_hash from runs where id = $1`, [insuredRun]);
-    expect(row).toMatchObject({ policy_version: "rental-hold-insured-v3-draft", policy_hash: POLICY_HASHES["rental-hold-insured-v3-draft"] });
+    expect(row).toMatchObject({ policy_version: "rental-hold-insured-draft", policy_hash: POLICY_HASHES["rental-hold-insured-draft"] });
     expect((await call(hal, "GET", `/api/runs/${insuredRun}/audit-package`)).json.validation.status).toBe("passed");
     const body = view.result.verdict.code === "APPROVE"
       ? { decision: "approve", rationale: "Fictional policy-selection test" }
@@ -967,7 +990,7 @@ describe("task 60b: a choice only a person makes is offered on review and entere
     const r = await review(tess, td);
     expect(r.choices.map((c: any) => c.fieldKey)).not.toContain("refinance_and_hold");
     const [{ snap }] = (await db.query<{ snap: Record<string, unknown> }>(`select input_snapshot as snap from runs where id = $1`, [run])) as [{ snap: Record<string, unknown> }];
-    expect(Object.keys(snap).sort()).toEqual(["assumptions", "input", "notFound"]);
+    expect(Object.keys(snap).sort()).toEqual(["assumptions", "input", "notFound", "policy"]);
   });
 });
 

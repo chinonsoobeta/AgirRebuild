@@ -25,8 +25,8 @@
 //           payment over the amortization term on the balance at that moment.
 // Sizing    Decision 1: sizing debt service is the level amortizing payment on
 //           each tranche's sized principal (its balance at S, or the refinance
-//           amount), for every month the tranche is in force. A flagged held
-//           policy instead sizes the senior on interest when IO lasts to refinance.
+//           amount), for every month the tranche is in force. A held deal's
+//           senior that stays IO until the refinance is sized on its interest.
 // Refinance At the start of month R the senior balance is paid off and replaced.
 // Sale      Exit value = final hold-year NOI / exit cap. Debt is paid off at T.
 //           The non-recourse floor applies to the sale leg only.
@@ -240,7 +240,7 @@ export class MissingSeniorAmortizationError extends Error {
   }
 }
 
-export function buildLedger(input: EngineInput, seniorIoSizingToRefinance = false): Ledger {
+export function buildLedger(input: EngineInput): Ledger {
   const C = input.constructionMonths;
   const S = C + input.leaseUpMonths;
   const H = input.holdYears;
@@ -308,7 +308,8 @@ export function buildLedger(input: EngineInput, seniorIoSizingToRefinance = fals
   };
   const live: Live[] = stack.map((t) => {
     const balance = sim.balances[t.key];
-    const ioSizing = t.key === "senior" && seniorIoSizingToRefinance && input.exit === "refinance_hold" &&
+    // A held deal's senior that stays interest-only until the refinance repays it is sized on what it pays (owner decision 2026-10-17).
+    const ioSizing = t.key === "senior" && input.exit === "refinance_hold" &&
       input.refinance !== undefined && input.senior.ioMonths >= input.refinance.month;
     const amortMonths = t.terms.amortYears === undefined ? undefined : t.terms.amortYears * 12;
     if (balance > 0 && !ioSizing && amortMonths === undefined) throw new MissingSeniorAmortizationError();

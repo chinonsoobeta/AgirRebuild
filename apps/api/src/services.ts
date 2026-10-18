@@ -7,6 +7,8 @@ import {
   FIELD_BY_KEY,
   FIELD_GROUP_LABELS,
   POLICIES,
+  runPolicy,
+  type Policy,
   policyFor,
   type AssumptionStatus,
   type EngineInput,
@@ -318,7 +320,8 @@ export async function createRun(tx: Db, dealId: string) {
     engine_version: ENGINE_VERSION,
     policy_version: policy.version,
     policy_hash: POLICY_HASHES[policy.version],
-    input_snapshot: { input, assumptions: used, notFound: readiness.notFound },
+    // The policy itself is stored, so the run replays and renders under it after a draft is edited.
+    input_snapshot: { input, policy, assumptions: used, notFound: readiness.notFound },
     input_hash: inputHash,
     assumptions_hash: h,
     result,
@@ -337,7 +340,7 @@ export async function runView(tx: Db, runId: string) {
   const [run] = await tx.query<{
     id: string; deal_id: string; run_number: number; engine_version: string; policy_version: string; policy_hash: string;
     input_hash: string; result_hash: string; assumptions_hash: string; verdict_code: string; signature: string; created_at: string;
-    created_by_name: string | null; result: RunResult; input_snapshot: { input: EngineInput; assumptions: unknown[] };
+    created_by_name: string | null; result: RunResult; input_snapshot: { input: EngineInput; policy?: Policy; assumptions: unknown[] };
   }>(
     `select r.*, u.name as created_by_name from runs r left join users u on u.id = r.created_by where r.id = $1`,
     [runId],
@@ -362,6 +365,7 @@ export async function runView(tx: Db, runId: string) {
     createdBy: run.created_by_name,
     engineVersion: run.engine_version,
     policyVersion: run.policy_version,
+    policyDraft: runPolicy(run.input_snapshot, run.policy_version)?.draft === true,
     inputHash: run.input_hash,
     resultHash: run.result_hash,
     signed: run.signature.startsWith("dev-unsafe:") ? "development key" : "production key",
@@ -378,7 +382,7 @@ export async function runView(tx: Db, runId: string) {
 export async function auditPackage(tx: Db, runId: string) {
   const [run] = await tx.query<{
     id: string; deal_id: string; run_number: number; engine_version: string; policy_version: string; policy_hash: string; input_hash: string;
-    result_hash: string; signature: string; result: RunResult; input_snapshot: { input: EngineInput; assumptions: unknown[] }; created_at: string;
+    result_hash: string; signature: string; result: RunResult; input_snapshot: { input: EngineInput; policy?: Policy; assumptions: unknown[] }; created_at: string;
   }>(`select * from runs where id = $1`, [runId]);
   if (!run) throw new HttpError(404, "Run not found");
   const [deal] = await tx.query(`select id, name, asset_type, location, currency, country, province from deals where id = $1`, [run.deal_id]);
@@ -393,7 +397,10 @@ export async function auditPackage(tx: Db, runId: string) {
   check("signature", verifySignature(run.signature, run.input_hash, run.result_hash, run.engine_version, run.policy_hash), "The run signature verifies.");
   let replayed = false;
   try {
-    replayed = sha256(canonicalJson(replay(run.engine_version, run.input_snapshot.input, POLICIES[run.policy_version]!))) === run.result_hash;
+    const policy = runPolicy(run.input_snapshot, run.policy_version);
+    // The policy replayed must be the one the run's hash and signature name.
+    replayed = policy !== undefined && sha256(canonicalJson(policy)) === run.policy_hash &&
+      sha256(canonicalJson(replay(run.engine_version, run.input_snapshot.input, policy))) === run.result_hash;
   } catch {
     replayed = false;
   }
