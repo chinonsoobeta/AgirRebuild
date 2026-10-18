@@ -1,12 +1,13 @@
 import { describe, expect, test } from "vitest";
 import { FIELD_BY_KEY, POLICY_V1, policyFor, type EngineInput } from "@agir/contracts";
 import { createHash } from "node:crypto";
+import { readFileSync } from "node:fs";
 import { assemble, canonicalJson, ENGINE_VERSION, underwrite, type AssumptionRow } from "@agir/engine";
 import { consolidate, extractCandidates, type SourcedCandidate } from "@agir/extraction";
 import { loadOracle } from "@agir/testkit";
-import { developmentDeal } from "../../engine/test/fixtures.ts";
+import { allEquityDeal, developmentDeal } from "../../engine/test/fixtures.ts";
 import { roundToward } from "../src/model.ts";
-import { buildModel, htmlToPdf, RendererUnavailableError, renderArtifact, renderHtml, verifyProvenance, visibleText, type ArtifactInput } from "../src/index.ts";
+import { buildModel, htmlToPdf, RendererUnavailableError, renderArtifact, renderHtml, verifyProvenance, visibleText, formatValue, type ArtifactInput } from "../src/index.ts";
 
 function mapleInput(kind: ArtifactInput["kind"]): ArtifactInput {
   const deal = loadOracle("maple-heights");
@@ -605,4 +606,171 @@ describe("a deal that is kept and refinanced (card 60)", () => {
     expect(kinds.filter((c) => /unrealized/i.test(c))[0]).toMatch(/unrealized, not a sale/i);
     expect(kinds).not.toContain("sale");
   });
+  describe("the reports for a deal that sells its units (task 80)", () => {
+    test.each([["ic_memo", "29531862e11b0510111895565f213a8c2d4975d8f2fe79d694e646e4f056f404"], ["build_decision", "d605a268e8b161c97f6b79a3855f06c93aa3bc3f9a7b0e283b8671c0c8a4b98f"], ["lender_package", "4cf6ef2277600502cf073624101fc3988664370849ef77e986513ebe66afb08a"]] as const)("the existing held %s text is byte-identical", (kind, hash) => {
+      expect(createHash("sha256").update(textOf(holdInput(kind)).text).digest("hex")).toBe(hash);
+    });
+  });
+
+});
+
+type OracleInputs = { unit_types: { name: string; units: number; price: number }[]; land: number; hard: number; soft: number; contingency: number; construction_months: number; presold_units_pct: number; deposit_pct: number; absorption_units_per_month: number; sales_commission_pct: number; closing_lag_months: number; unsold_carry_monthly: number; senior_commitment: number; senior_rate_pct: number; mezz_commitment: number; mezz_rate_pct: number; senior_presale_threshold_pct: number };
+const fromOracle = (d: OracleInputs): EngineInput => ({
+  ...allEquityDeal(), budget: { land: d.land, hard: d.hard, soft: d.soft, contingency: d.contingency, other: 0 },
+  revenue: [], constructionMonths: d.construction_months, leaseUpMonths: 0, exit: "for_sale",
+  senior: { amount: d.senior_commitment, ratePct: d.senior_rate_pct, ioMonths: 0 },
+  ...(d.mezz_commitment > 0 ? { mezzanine: { amount: d.mezz_commitment, ratePct: d.mezz_rate_pct, amortYears: 30, ioMonths: 0 } } : {}),
+  forSale: { units: d.unit_types.map((u, i) => ({ key: String(i), label: u.name, units: u.units, price: u.price })),
+    presoldPct: d.presold_units_pct, depositPct: d.deposit_pct, absorptionPerMonth: d.absorption_units_per_month,
+    commissionPct: d.sales_commission_pct, closingLagMonths: d.closing_lag_months, carryMonthly: d.unsold_carry_monthly,
+    presaleThresholdPct: d.senior_presale_threshold_pct },
+});
+
+const SALE_KINDS = ["ic_memo", "build_decision", "lender_package"] as const;
+const SALE_SLUGS = ["kestrel-row-townhomes", "alder-court-condo"] as const;
+const SALE_OPERATIONS = "A deal that sells its units has no years of operations. Each month's costs, loans and closings are in the Excel export.";
+const SALE_CHANGE = "What would change the answer is not yet available for a deal that sells its units.";
+function saleInput(slug: typeof SALE_SLUGS[number], kind: ArtifactInput["kind"]): ArtifactInput {
+  const d = (JSON.parse(readFileSync(new URL(`../../../oracles/for-sale/${slug}.outcome.json`, import.meta.url), "utf8")) as { inputs: OracleInputs }).inputs;
+  const input = fromOracle(d);
+  const policy = policyFor(input);
+  const result = underwrite(input, policy);
+  const scalars: Record<string, number> = { sell_units: 1, land_cost: d.land, hard_cost: d.hard, soft_cost: d.soft, contingency: d.contingency,
+    other_cost: 0, construction_months: d.construction_months, s_curve_draws: 0, senior_loan_amount: d.senior_commitment, senior_rate_pct: d.senior_rate_pct,
+    presold_units_pct: d.presold_units_pct, deposit_pct: d.deposit_pct, absorption_units_per_month: d.absorption_units_per_month,
+    sales_commission_pct: d.sales_commission_pct, closing_lag_months: d.closing_lag_months, unsold_carry_monthly: d.unsold_carry_monthly,
+    senior_presale_threshold_pct: d.senior_presale_threshold_pct,
+    ...(d.mezz_commitment > 0 ? { mezz_loan_amount: d.mezz_commitment, mezz_rate_pct: d.mezz_rate_pct } : {}),
+  };
+  const assumption = (fieldKey: string, value: number, itemKey: string | null = null): ArtifactInput["assumptions"][number] => ({
+    fieldKey, itemKey, value, label: FIELD_BY_KEY.get(fieldKey)!.label, unit: FIELD_BY_KEY.get(fieldKey)!.unit,
+    sourceKind: "analyst", source: "Stated in the oracle inputs",
+  });
+  return { kind, deal: { name: slug === "kestrel-row-townhomes" ? "Kestrel Row" : "Alder Court", assetType: "Units for sale", location: "Fictional town", currency: "CAD", province: slug === "kestrel-row-townhomes" ? "ON" : "BC" },
+    run: { id: "sale", runNumber: 1, createdAt: "2026-10-18T12:00:00.000Z", engineVersion: result.engineVersion, policyVersion: policy.version,
+      policyHash: createHash("sha256").update(canonicalJson(policy)).digest("hex"), inputHash: "a".repeat(64), resultHash: "b".repeat(64) },
+    input, result, policy, decision: null,
+    assumptions: [...Object.entries(scalars).map(([k, v]) => assumption(k, v)), ...input.forSale!.units.flatMap((u) => [assumption("unit_count", u.units, u.key), assumption("unit_sale_price", u.price, u.key)])],
+  };
+}
+const saleTable = (model: ReturnType<typeof buildModel>, caption: string) => {
+  const t = model.blocks.find((b) => b.type === "table" && b.caption === caption);
+  if (!t || t.type !== "table") throw new Error(`Missing table: ${caption}`);
+  return t;
+};
+
+describe("the reports for a deal that sells its units (task 80)", () => {
+  test.each([["ic_memo", "fa9dd2f818ca58ba1500ec30db01d5171229546e8828b96d74e9f0138bf93812"], ["build_decision", "c49c28c5eafee7e5d6eb89704d4b04584c7887ecbf5d51bd33160417cf83d17e"], ["lender_package", "5f81e68b930e8735a4036eba356bad6242bc1e05cdaa3ca89a84a69f47dd208c"]] as const)("the existing Maple Heights %s text is byte-identical", (kind, hash) => {
+    expect(createHash("sha256").update(visibleText(renderHtml(buildModel(mapleInput(kind))))).digest("hex")).toBe(hash);
+  });
+  test.each(SALE_SLUGS.flatMap((slug) => SALE_KINDS.map((kind) => [slug, kind] as const)))("%s %s has provenance, sale stats and stresses without rental sections", (slug, kind) => {
+    const x = saleInput(slug, kind);
+    const model = buildModel(x);
+    const text = visibleText(renderHtml(model));
+    expect(verifyProvenance(text, model.formatter.manifest)).toMatchObject({ pass: true, orphans: [] });
+    expect(text).not.toMatch(/DSCR|Debt yield|Break-even occupancy|Capitalized interest|\brent\b/i);
+    const captions = model.blocks.flatMap((b) => b.type === "table" ? [b.caption] : []);
+    for (const caption of ["Revenue program", "Operations", "Stabilized operations, year 1", "Annual cash flows"]) expect(captions).not.toContain(caption);
+    expect(saleTable(model, "Stresses (each a full re-run of the model)").columns.map((c) => c.label)).toEqual(["Scenario", "Profit on cost (units sold)", "Margin on sales revenue", "Equity multiple"]);
+    const stats = model.blocks.find((b) => b.type === "stats");
+    expect(stats?.type === "stats" ? stats.items.map((i) => i.label) : []).toEqual(kind === "ic_memo"
+      ? ["Total cost", "Profit on cost (units sold)", "Margin on sales revenue", "Equity multiple", "Equity IRR"]
+      : kind === "build_decision" ? ["Profit on cost (units sold)", "Margin on sales revenue", "Equity multiple"] : []);
+    if (kind !== "build_decision") {
+      const keys = ["gross_sales_revenue", "net_sales_revenue", "carry_total", "interest_after_completion", "development_profit_for_sale", "profit_on_cost_for_sale", "margin_on_revenue", "sellout_month", "sellout_years", "deposits_held_at_completion", "senior_balance_at_completion", ...(x.input.mezzanine ? ["mezz_balance_at_completion"] : [])];
+      expect(saleTable(model, "Sale results").rows).toEqual(keys.map((key) => {
+        const m = x.result.scenarios[0]!.metrics.find((m) => m.key === key)!;
+        return [m.label, formatValue(m.value!, m.unit)];
+      }));
+      const units = saleTable(model, "Unit sales");
+      expect(units.rows.slice(0, x.input.forSale!.units.length)).toEqual(x.input.forSale!.units.map((u) => [u.label, `${formatValue(u.units, "units")} units`, formatValue(u.price, "$")]));
+      for (const u of x.input.forSale!.units) expect(model.formatter.manifest).toEqual(expect.arrayContaining([
+        { text: u.label, ref: `ident:forSale.${u.key}.label` }, { text: formatValue(u.units, "units"), ref: `input:unit_count|${u.key}` }, { text: formatValue(u.price, "$"), ref: `input:unit_sale_price|${u.key}` },
+      ]));
+      expect(units.rows.some((r) => r[0] === FIELD_BY_KEY.get("senior_presale_threshold_pct")!.label)).toBe(true);
+      expect(model.blocks).toContainEqual({ type: "paragraph", muted: true, text: SALE_OPERATIONS });
+    }
+  });
+  test("Kestrel sources equal uses without a balancing row", () => {
+    const x = saleInput("kestrel-row-townhomes", "ic_memo");
+    const m = (key: string) => x.result.scenarios[0]!.metrics.find((m) => m.key === key)!.value!;
+    expect(Math.abs(m("required_equity") + x.input.senior.amount + (x.input.mezzanine?.amount ?? 0) - m("total_development_cost"))).toBeLessThanOrEqual(1);
+    expect(saleTable(buildModel(x), "Sources and uses").rows).toEqual([
+      ["Land", "$900,000"], ["Hard costs", "$3,200,000"], ["Soft costs", "$520,000"], ["Contingency", "$160,000"],
+      ["Interest during construction", formatValue(m("interest_before_completion"), "$")], ["Total uses", formatValue(m("total_development_cost"), "$")],
+      ["Senior loan", "$3,300,000"], ["Equity", formatValue(m("required_equity"), "$")], ["Total sources", formatValue(m("total_development_cost"), "$")],
+    ]);
+  });
+  test("the lender's presale rows appear exactly when the condition is stated, with no amortization or IO rows", () => {
+    for (const stated of [true, false]) {
+      const x = saleInput("alder-court-condo", "lender_package");
+      if (!stated) { delete x.input.forSale!.presaleThresholdPct; x.assumptions = x.assumptions.filter((a) => a.fieldKey !== "senior_presale_threshold_pct"); }
+      const model = buildModel(x);
+      for (const caption of ["Unit sales", "Debt"]) expect(saleTable(model, caption).rows.some((r) => r[0] === FIELD_BY_KEY.get("senior_presale_threshold_pct")!.label)).toBe(stated);
+      const terms = saleTable(model, "Debt").rows;
+      expect(terms.flat().join(" ")).not.toMatch(/amortization|interest-only|DSCR/i);
+      for (const key of ["loan_to_cost", "interest_after_completion", "senior_balance_at_completion", "mezz_balance_at_completion"]) {
+        const m = x.result.scenarios[0]!.metrics.find((m) => m.key === key)!;
+        expect(terms).toContainEqual([m.label, formatValue(m.value!, m.unit)]);
+      }
+      if (stated) {
+        const index = terms.findIndex((r) => r[0] === FIELD_BY_KEY.get("senior_presale_threshold_pct")!.label);
+        expect(terms[index + 1]).toEqual([FIELD_BY_KEY.get("presold_units_pct")!.label, formatValue(x.input.forSale!.presoldPct, "%")]);
+      }
+    }
+  });
+  test("Alder's rejected build decision shows stresses, ranks by failed gates then profit on cost, and has no break-even table", () => {
+    const x = saleInput("alder-court-condo", "build_decision");
+    expect(x.result.verdict.code).toBe("REJECT");
+    for (const tie of [false, true]) {
+      const result = tie ? { ...x.result, verdict: { ...x.result.verdict, gates: x.result.verdict.gates.map((g) => ({ ...g, status: "passed" as const })) } } : x.result;
+      const count = (key: string) => result.verdict.gates.filter((g) => g.scenario === key && g.status === "failed").length;
+      const poc = (key: string) => result.scenarios.find((s) => s.key === key)!.metrics.find((m) => m.key === "profit_on_cost_for_sale")!.value!;
+      const weakest = result.scenarios.filter((s) => s.key !== "base").sort((a, b) => count(b.key) - count(a.key) || poc(a.key) - poc(b.key))[0]!;
+      const model = buildModel({ ...x, result });
+      const paragraph = model.blocks.find((b) => b.type === "paragraph" && b.text.startsWith("Weakest stress:"));
+      expect(paragraph?.type === "paragraph" ? paragraph.text : "").toMatch(new RegExp(`^Weakest stress: ${weakest.label.replace(/[.*+?^${}()|[\]\\]/g, "\\$&")}`));
+      expect(paragraph?.type === "paragraph" ? paragraph.text : "").toContain(`Its profit on cost: ${formatValue(poc(weakest.key), "%")}.`);
+      expect(model.blocks).toContainEqual({ type: "paragraph", muted: true, text: SALE_CHANGE });
+      expect(model.blocks.some((b) => b.type === "table" && b.columns.some((c) => c.label === "Input moved"))).toBe(false);
+      expect(saleTable(model, "Stresses (each a full re-run of the model)").rows).toHaveLength(result.scenarios.length);
+    }
+  });
+  test("the sale workbook has the specified sheets, ledger columns, numeric money and metric omission note", async () => {
+    const x = saleInput("kestrel-row-townhomes", "model_export");
+    const out = await renderArtifact(x, "xlsx");
+    const ExcelJS = (await import("exceljs")).default;
+    const wb = new ExcelJS.Workbook();
+    await wb.xlsx.load(Buffer.from(out.bytes) as never);
+    expect(wb.getWorksheet("Annual")).toBeUndefined();
+    for (const name of ["Summary", "Metrics", "Equity flows", "Inputs", "Checks"]) expect(wb.getWorksheet(name)).toBeDefined();
+    const ledger = wb.getWorksheet("Monthly ledger")!;
+    expect((ledger.getRow(1).values as string[]).slice(1)).toEqual(["Month", "Phase", "Cost draw", "Equity draw", "Debt draw", "Capitalized interest", "Loan repayment", "Debt balance", "Sale to equity"]);
+    expect(ledger.rowCount).toBe(x.result.ledger.length + 1);
+    let distributed = 0;
+    ledger.eachRow((row, n) => {
+      if (n === 1) return;
+      for (let col = 3; col <= 9; col++) { expect(typeof row.getCell(col).value).toBe("number"); expect(row.getCell(col).numFmt).toContain('$'); }
+      distributed += Number(row.getCell(9).value);
+      expect([row.getCell(6).value, row.getCell(7).value, row.getCell(9).value]).toEqual([x.result.ledger[n - 2]!.capitalizedInterest, x.result.ledger[n - 2]!.debtService, x.result.ledger[n - 2]!.saleNet]);
+    });
+    expect(Math.abs(distributed - x.result.scenarios[0]!.metrics.find((m) => m.key === "equity_distributed")!.value!)).toBeLessThanOrEqual(1);
+    const metrics = wb.getWorksheet("Metrics")!;
+    expect(String(metrics.getRow(2).getCell(1).value)).toContain("The units are sold; there is no rental income.");
+    const metricLabels: unknown[] = [];
+    metrics.eachRow((row, n) => { if (n > 2) metricLabels.push(row.getCell(1).value); });
+    const kept = x.result.scenarios[0]!.metrics.filter((m) => !(m.status === "NOT_APPLICABLE" && m.reason === "The units are sold; there is no rental income."));
+    expect(metricLabels).toEqual(kept.map((m) => m.label));
+  });
+  test.each(SALE_SLUGS.flatMap((slug) => SALE_KINDS.map((kind) => [slug, kind] as const)))("%s %s renders Word, PDF and Excel", async (slug, kind) => {
+    const x = saleInput(slug, kind);
+    for (const format of ["docx", "xlsx", "pdf"] as const) {
+      let out;
+      try { out = await renderArtifact(x, format); }
+      catch (e) { if (format === "pdf" && e instanceof RendererUnavailableError) continue; throw e; }
+      expect(out.provenance).toMatchObject({ pass: true, orphans: [] });
+      expect(out.bytes.byteLength).toBeGreaterThan(1_000);
+      if (format === "pdf") expect(new TextDecoder().decode(out.bytes.slice(0, 5))).toBe("%PDF-");
+    }
+  }, 60_000);
 });
