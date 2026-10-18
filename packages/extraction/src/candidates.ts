@@ -883,7 +883,7 @@ type Roles = {
 const headerOf = (c: Cell) => c.text.toLowerCase().replace(/²/g, "2").normalize("NFD").replace(/[̀-ͯ]/g, "");
 const M2_RE = /\b(m2|sq\.? ?m|sqm|square met(re|er)s?)\b/;
 const PER_M2_RE = /(psm|\/\s?(m2|sq\.? ?m|sqm)\b|(per|au|par) (m2|sq\.? ?m|sqm|square met(re|er))\b)/;
-const MONTHLY_RE = /\b(monthly|per month|mensuel(le)?|par mois|mois)\b|\/\s?mo\b/;
+const MONTHLY_RE = /\b(monthly|per month|per mo|a month|mensuel(le)?|par mois|mois)\b|\/\s?(mo|mth|month)\b/;
 const ANNUAL_RE = /\b(annual|yearly|annuel(le)?|per year|per annum|par annee|par an)\b|\/\s?yr\b/;
 
 type RentRole = "units" | "item" | "rent" | "basis" | "area" | "occupancy";
@@ -900,17 +900,24 @@ function rentRole(h: string): RentRole | null {
   if (/\b(units|unit count|count|#|doors|suites|homes|logements|unites|appartements)\b/.test(h)) return "units";
   if ((/\b(rent|loyer)\b/.test(h) || isPlainRentLabel(h)) && !/basis/.test(h)) return "rent";
   if (/basis/.test(h)) return "basis";
-  if (/\b(area|sf|nrsf|rsf|gla|square feet|superficie|surface|pi2)\b/.test(h) || M2_RE.test(h)) return "area";
+  if (/\b(area|sf|nrsf|rsf|gla|square feet|superficie|surface|pi2|sqft|sq\.? ?ft|square foot|pi\.? ?ca|pieds? carres?)\b/.test(h) || M2_RE.test(h)) return "area";
   if (/occupancy|occupation|occ\b/.test(h)) return "occupancy";
   return null;
 }
 
+// A suite-by-suite roll names each suite in a suite column and its type in a type column; it needs no count or area column (task 66).
+const SUITE_COL_RE = /^(?:(?:unit|suite|apt|apartment|app)\.?(?:\s*(?:#|no\.?|number))?|no\.?|logement)$/;
+const TYPE_COL_RE = /^(?:(?:unit\s*)?type|type de logement)$/;
+
 function rentRollRoles(header: Cell[]): Roles | null {
   const roles: Roles = { item: [], psfHeader: false, rentBasis: null, areaM2: false, rentPerM2: false, areaTotal: false };
+  const heads = header.map((c) => headerOf(c).trim());
+  const suiteAt = heads.findIndex((h) => SUITE_COL_RE.test(h));
+  const bySuite = suiteAt >= 0 && heads.some((h) => TYPE_COL_RE.test(h));
   header.forEach((c, i) => {
     const h = headerOf(c);
     if (!h) return;
-    const role = rentRole(h);
+    const role = bySuite && i === suiteAt ? "item" : rentRole(h);
     if (role === "units") roles.units = i;
     else if (role === "item") roles.item.push(i);
     else if (role === "rent") {
@@ -925,7 +932,7 @@ function rentRollRoles(header: Cell[]): Roles | null {
       roles.areaTotal = /\b(total|totale|gla)\b/.test(h);
     } else if (role === "occupancy") roles.occupancy = i;
   });
-  return roles.item.length > 0 && roles.rent !== undefined && (roles.units !== undefined || roles.area !== undefined) ? roles : null;
+  return roles.item.length > 0 && roles.rent !== undefined && (roles.units !== undefined || roles.area !== undefined || bySuite) ? roles : null;
 }
 
 const BUDGET_LABEL_RE = /\b(line\s*items?|description|category|items?|cost\s*items?|use|poste|libelle|designation|categorie|rubrique)\b/;
@@ -990,7 +997,7 @@ const BASIS_UNSTATED = "The rent's basis (per month, per year or per square foot
 
 const ROLL_FIELDS = new Set(["unit_count", "rentable_area_sf", "unit_rent_monthly", "rent_psf_annual", "item_occupancy_pct", "stabilized_occupancy_pct"]);
 const SUITE_RULE = "table:rent-roll-suite";
-const SUITE_ID_RE = /^(?:(?:suite|unit|apt|apartment|no\.?|#|logement|app\.?)\s*)?\d{1,4}[A-Za-z]?$/i;
+const SUITE_ID_RE = /^(?:(?:suite|unit|apt|apartment|no\.?|#|logement|app\.?)\s*)?\d{1,4}[A-Za-z]?$|^(?:suite|unit|apt|apartment|logement|app\.?)\s+[A-Za-z]$/i;
 const ROLL_SUMMARY_NOTE = "A rent roll's summary row is not an assumption";
 const SUMMARY_LABEL_RE = /\b(occupancy|occupation|occupied|average|avg|moyen\w*)\b/;
 const STABILIZED_LABEL_RE = /\b(stabili[sz]ed|stabilis\w*|projected|pro forma|projet\w*)\b/;

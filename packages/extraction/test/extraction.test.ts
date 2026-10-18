@@ -594,6 +594,11 @@ describe("tables written as lines of text, and what a table's rows mean", () => 
         expect([suite, byItem(r, "unit_count"), byItem(r, "unit_rent_monthly")]).toEqual([suite, [["1BR", 2]], [["1BR", 1450]]]);
       }
     });
+    test("suites named by a letter (Unit A, Unit B) are suites of their type", () => {
+      const r = extractCandidates(tableDoc(grid(["Unit", "Type", "Beds", "Monthly rent"], ["Unit A", "1-bed", 1, "$1,950"], ["Unit B", "1-bed", 1, "$1,950"], ["Unit C", "2-bed", 2, "$2,500"])));
+      expect(byItem(r, "unit_count")).toEqual([["1BR", 2], ["2BR", 1]]);
+      expect(byItem(r, "unit_rent_monthly")).toEqual([["1BR", 1950], ["2BR", 2500]]);
+    });
     test("a type and a rent column only is a table of comparable rents, not a roll", () => {
       const r = extractCandidates(tableDoc(grid(["Type", "Asking rent"], ["1 bed", "$1,650"], ["2 bed", "$2,050"], ["3 bed", "$2,450"])));
       expect(byItem(r, "unit_count")).toEqual([]);
