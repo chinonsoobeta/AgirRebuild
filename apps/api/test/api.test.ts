@@ -1993,8 +1993,7 @@ describe("card 58c: the deal overview says while a reconcile is still to run", (
 
   test("a person outside the workspace cannot ask whether another workspace's deal is updating", async () => {
     await db.query(`insert into jobs (kind, payload) values ('reconcile_deal', jsonb_build_object('deal_id', $1::text))`, [d]);
-    await signup("erin@example.com", "Erin Outsider", "solo");
-    const [erin] = await db.query<{ id: string }>(`select id from users where email = 'erin@example.com'`);
+    const [erin] = await db.query<{ id: string }>(`select id from users where email = 'carol@example.com'`);
     const [alicia] = await db.query<{ id: string }>(`select id from users where email = 'alice@example.com'`);
     const ask = (u: string) => asUser(db, u, (tx) => tx.query<{ u: boolean }>(`select fn_deal_updating($1::uuid) as u`, [d]));
     await expect(ask(erin!.id)).rejects.toThrow();

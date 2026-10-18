@@ -1,5 +1,3 @@
-import { readdirSync, readFileSync, statSync } from "node:fs";
-import { join } from "node:path";
 import { describe, expect, it } from "vitest";
 import type { EngineInput, ReadinessItem } from "@agir/contracts";
 import { assemble, validateInput, EngineInputError } from "../../../packages/engine/src/index.ts";
@@ -591,22 +589,13 @@ describe("card 58c: every audit action has a sentence in both languages", () => 
   });
 
   // Every action name the code can write: a new one without a sentence fails here.
-  const files = (dir: string): string[] =>
-    readdirSync(dir).flatMap((n) => {
-      const p = join(dir, n);
-      if (n === "node_modules" || n === "test") return [];
-      return statSync(p).isDirectory() ? files(p) : /\.(sql|ts|tsx)$/.test(n) ? [p] : [];
-    });
-  const root = join(__dirname, "../../..");
-  const sources = [
-    join(root, "packages/db/migrations"),
-    ...readdirSync(join(root, "apps")).map((a) => join(root, "apps", a, "src")),
-    ...readdirSync(join(root, "packages")).map((a) => join(root, "packages", a, "src")),
-  ].filter((d) => { try { return statSync(d).isDirectory(); } catch { return false; } }).flatMap(files);
+  const sources = Object.values({
+    ...import.meta.glob("../../../packages/db/migrations/*.sql", { query: "?raw", import: "default", eager: true }),
+    ...import.meta.glob(["../../../apps/*/src/**/*.{ts,tsx}", "../../../packages/*/src/**/*.ts"], { query: "?raw", import: "default", eager: true }),
+  }) as string[];
   const written = (() => {
     const out = new Set<string>();
-    for (const f of sources) {
-      const text = readFileSync(f, "utf8");
+    for (const text of sources) {
       for (const m of text.matchAll(/agir_audit\(\s*[^,()]+,\s*[^,()]+,\s*'([a-z_.]+)'/g)) out.add(m[1]!);
       for (const m of text.matchAll(/[^_a-zA-Z.]audit\(\s*db,[^,]+,[^,]+,\s*"([a-z_.]+)"/g)) out.add(m[1]!);
       // 'assumption.' || p_action: the action names a review function or the log is given.
