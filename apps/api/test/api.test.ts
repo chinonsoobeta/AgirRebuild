@@ -867,6 +867,18 @@ describe("card 60: a deal that is kept and refinanced runs under its own policy"
     expect((await call(hal, "GET", `/api/runs/${r.json.id}/audit-package`)).json.validation.status).toBe("passed");
   });
 
+  test("an insured held run stores insured v2 (task 70)", async () => {
+    hal ??= await signup("fictional-insured-70@example.com", "Fictional Card Seventy Owner", "solo");
+    const workspace = (await call(hal, "GET", "/api/me")).json.workspaces[0].id;
+    const id = (await call(hal, "POST", `/api/workspaces/${workspace}/deals`, { name: "Fictional Juniper Lantern Rental", assetType: "Multifamily", location: "Invented Borough", province: "AB" })).json.id;
+    await fill(id, true);
+    await put(id, "refinance_insurance_premium_pct", 4);
+    const run = await call(hal, "POST", `/api/deals/${id}/runs`);
+    expect(run.status).toBe(200);
+    const [row] = await db.query<any>(`select policy_version, policy_hash from runs where id = $1`, [run.json.id]);
+    expect(row).toMatchObject({ policy_version: "rental-hold-insured-v2-draft", policy_hash: POLICY_HASHES["rental-hold-insured-v2-draft"] });
+  });
+
   test("an insured held run stores its own policy and hash, replays, and renders its artifacts (task 67)", async () => {
     hal ??= await signup("fictional-insured-67@example.com", "Fictional Insured Owner", "solo");
     const workspace = (await call(hal, "GET", "/api/me")).json.workspaces[0].id;
@@ -877,9 +889,9 @@ describe("card 60: a deal that is kept and refinanced runs under its own policy"
     expect(r.status).toBe(200);
     const insuredRun = r.json.id;
     const view = (await call(hal, "GET", `/api/runs/${insuredRun}`)).json;
-    expect(view).toMatchObject({ policyVersion: "rental-hold-insured-v1-draft", fresh: true, staleReasons: [] });
+    expect(view).toMatchObject({ policyVersion: "rental-hold-insured-v2-draft", fresh: true, staleReasons: [] });
     const [row] = await db.query<any>(`select policy_version, policy_hash from runs where id = $1`, [insuredRun]);
-    expect(row).toMatchObject({ policy_version: "rental-hold-insured-v1-draft", policy_hash: POLICY_HASHES["rental-hold-insured-v1-draft"] });
+    expect(row).toMatchObject({ policy_version: "rental-hold-insured-v2-draft", policy_hash: POLICY_HASHES["rental-hold-insured-v2-draft"] });
     expect((await call(hal, "GET", `/api/runs/${insuredRun}/audit-package`)).json.validation.status).toBe("passed");
     const body = view.result.verdict.code === "APPROVE"
       ? { decision: "approve", rationale: "Fictional policy-selection test" }

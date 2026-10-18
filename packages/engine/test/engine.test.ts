@@ -800,6 +800,44 @@ describe("exit by refinancing and holding (card 60)", () => {
   const byLtv = () => rental({ month: 12, ltvPct: 75, ratePct: 0, amortYears: 20, ioMonths: 0 });
   const npv = (rate: number, flows: [number, number][]) => flows.reduce((a, [t, amt]) => a + amt / Math.pow(1 + rate, t), 0);
 
+  describe("insured base-case floor and optional interest-only amortization (task 70)", () => {
+    test("insured v2 is selected and registered while the three earlier policy hashes stay unchanged", () => {
+      const base = byAmount();
+      const input = { ...base, refinance: { ...base.refinance!, insurancePremiumPct: 4 } };
+      expect(policyFor(input).version).toBe("rental-hold-insured-v2-draft");
+      expect(POLICIES["rental-hold-insured-v2-draft"]).toEqual({ ...RENTAL_HOLD_INSURED_V1_DRAFT, version: "rental-hold-insured-v2-draft", baseSizingDscrFloor: 1.1 });
+      expect(POLICIES["rental-hold-insured-v1-draft"]).toBe(RENTAL_HOLD_INSURED_V1_DRAFT);
+      expect(sha(POLICY_V1)).toBe("9f95780101a9ecfe6444c47dd319c1cb8d77251d60700a1a4dde1733055296b9");
+      expect(sha(RENTAL_HOLD_V1_DRAFT)).toBe("ee784c397f15c4fcc4257fd5c32592dd0177aef5320ee67b398d9bda1193a66b");
+      expect(sha(RENTAL_HOLD_INSURED_V1_DRAFT)).toBe("afce1692a3ba170e7710633494b94242f4ef3ea754ef061ec2196a08ee1ad748");
+    });
+
+    test("base sizing between 1.10x and 1.20x warns only on the conventional held deal", () => {
+      const base = byAmount();
+      const conventional: EngineInput = { ...base, refinance: { ...base.refinance!, month: 0 }, revenue: base.revenue.map((r) => ({ ...r, rentMonthly: 560 })) };
+      const insured: EngineInput = { ...conventional, refinance: { ...conventional.refinance!, insurancePremiumPct: 4 } };
+      const insuredRun = underwrite(insured, policyFor(insured));
+      const conventionalRun = underwrite(conventional, policyFor(conventional));
+      for (const run of [insuredRun, conventionalRun]) {
+        expect(v(run, "sizing_dscr")).toBeGreaterThan(1.1);
+        expect(v(run, "sizing_dscr")).toBeLessThan(1.2);
+      }
+      expect(insuredRun.checks.some((c) => c.key === "base_sizing_dscr")).toBe(false);
+      expect(conventionalRun.checks.find((c) => c.key === "base_sizing_dscr")).toMatchObject({ severity: "warning", expected: 1.2, message: expect.stringContaining("under the 1.20x floor") });
+    });
+
+    test("step 2a: every scenario metric, gate and check is invariant while senior IO reaches refinance", () => {
+      const base = byAmount();
+      const runs = [20, 30, 40].map((amortYears) => {
+        const input = { ...base, senior: { ...base.senior, ioMonths: base.refinance!.month, amortYears } };
+        const run = underwrite(input, policyFor(input));
+        return { scenarios: run.scenarios, gates: run.verdict.gates, checks: run.checks };
+      });
+      expect.soft(runs[1], "30 years versus 20 years").toEqual(runs[0]);
+      expect.soft(runs[2], "40 years versus 20 years").toEqual(runs[0]);
+    });
+  });
+
   test("a refinance by amount: every hold metric equals its hand computation", () => {
     const r = underwrite(byAmount(), policyFor(byAmount()));
     // Senior balance at month 12 (twelve payments of 2,500 made in months 0 to 11): 600,000 - 30,000 = 570,000.
@@ -996,7 +1034,7 @@ describe("exit by refinancing and holding (card 60)", () => {
 
   describe("policy", () => {
     test.each([
-      ["a held deal with premium 4", { ...byAmount(), refinance: { ...byAmount().refinance!, insurancePremiumPct: 4 } }, "rental-hold-insured-v1-draft"],
+      ["a held deal with premium 4", { ...byAmount(), refinance: { ...byAmount().refinance!, insurancePremiumPct: 4 } }, "rental-hold-insured-v2-draft"],
       ["a held deal without a premium", byAmount(), "rental-hold-v1-draft"],
       ["a held deal with premium 0", { ...byAmount(), refinance: { ...byAmount().refinance!, insurancePremiumPct: 0 } }, "rental-hold-v1-draft"],
       ["a held deal without refinance", { ...byAmount(), refinance: undefined }, "rental-hold-v1-draft"],
@@ -1036,7 +1074,7 @@ describe("exit by refinancing and holding (card 60)", () => {
         expect(dcr).toBeLessThan(1.2);
       }
       expect(conventionalDcr).toBeGreaterThanOrEqual(insuredDcr);
-      expect(insuredRun.policyVersion).toBe("rental-hold-insured-v1-draft");
+      expect(insuredRun.policyVersion).toBe("rental-hold-insured-v2-draft");
       expect(insuredRun.verdict.gates.find((g) => g.key === "dcr_after_refinance")).toMatchObject({ threshold: 1.1, status: "passed" });
       expect(conventionalRun.policyVersion).toBe("rental-hold-v1-draft");
       expect(conventionalRun.verdict.gates.find((g) => g.key === "dcr_after_refinance")).toMatchObject({ threshold: 1.2, status: "failed" });
