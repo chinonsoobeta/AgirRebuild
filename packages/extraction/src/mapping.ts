@@ -556,6 +556,70 @@ export const SCENARIO_SHEET_RE = /\b(?:downside|upside|sensitivit\w*|sensibilite
 export const SCENARIO_SHEET_NOTE = "A scenario sheet, not the deal's base case";
 export const SUPERSEDED_LABEL_NOTE = "An earlier figure, named old or original by its own label; a later figure for the line replaces it";
 
+// Card 61c. Folded text.
+export const DEPOSIT_NOTE = "A deposit or an amount already paid, not a budget line";
+export const TWO_LINES_NOTE = "Two budget lines in one figure; enter each, or label it";
+export const REBATE_NOTE = "A rebate or credit; enter it as a negative other cost if it reduces the cost";
+const PAID_SO_FAR_RE = /(?:^|[^a-z])(?:(?<!up )to date|so far|a ce jour|jusqu a present|deja (?:paye|depense|verse)e?s?)(?![a-z])/;
+const PAID_SO_FAR_AFTER_RE = /^[\s,;(-]*(?:(?:paid|spent|incurred|payee?s?|depensee?s?)\s+)?(?:(?<!up )to date|so far|a ce jour|jusqu a present)(?![a-z])/;
+// A credit word does not make the figure a credit when the label says it is net of, or before, it.
+const BASIS_OF_CREDIT_RE = /(?:^|[^a-z])(?:net of|after|less|minus|before|without|excluding|excl|nette? de|nets de|apres|avant|sans|hors|deduction faite)(?![a-z])/;
+const JOINER_RE = /\s*[&+/]\s*|\s+(?:and|plus|et)\s+/;
+const HAS_JOINER_RE = /[&+/]|\s(?:and|plus|et)\s/;
+const JOINED_ALIASES = [...new Set(FIELDS.flatMap((f) => f.aliases))].filter((a) => HAS_JOINER_RE.test(a)).sort((a, b) => b.length - a.length);
+const SHARED_NOUN_RE = /^(?:costs?|couts?|frais|expenses?|depenses|charges?)$/;
+// The price of the land is a land line, though no alias says so alone.
+const PURCHASE_PRICE_RE = /^(?:the\s+)?(?:land\s+)?(?:purchase|acquisition)\s+price$|^prix\s+d\s+(?:achat|acquisition)(?:\s+du\s+terrain)?$/;
+const LINE_PROBE: NumberToken = { raw: "1000000", start: 0, end: 7, value: 1_000_000, currency: true, currencyCode: null, unit: "$", scaled: false };
+const LINE_FIELDS = new Set(FIELDS.filter((f) => f.group === "budget" && f.key !== "gst_hst_net").map((f) => f.key));
+
+/** The budget field a phrase names alone; null when it names none. */
+function lineOf(phrase: string): string | null {
+  const p = phrase.replace(/\u0001/g, " ").trim();
+  if (PURCHASE_PRICE_RE.test(p)) return "land_cost";
+  const m = p ? mapLabel(p, LINE_PROBE, { prose: true, budget: true }) : null;
+  return m && m.kind === "field" && m.itemKey === null && LINE_FIELDS.has(m.fieldKey) ? m.fieldKey : null;
+}
+
+/** Whether a label names two different budget fields joined by "and", "plus", "&", "+", "/" or "et", the first borrowing the second's noun ("hard and soft costs"). */
+function twoLines(folded: string): boolean {
+  let text = folded.replace(/\([^)]*\)/g, " ");
+  const cover = COVER_LIST_RE.exec(text);
+  if (cover && cover.index > 0) text = text.slice(0, cover.index);
+  // An alias that holds a joiner ("design and permits") is one phrase.
+  for (const a of JOINED_ALIASES) text = text.replace(new RegExp(`(^|[^a-z0-9])${a.replace(/[.*+?^${}()|[\]\\/]/g, "\\$&")}(?=$|[^a-z0-9])`, "g"), (_, lead: string) => lead + a.replace(/ /g, "\u0001"));
+  const parts = text.split(JOINER_RE).map((x) => x.trim()).filter(Boolean);
+  if (parts.length < 2) return false;
+  const words = parts.map((x) => x.replace(/\u0001/g, " ").split(/\s+/));
+  const keys = parts.map((p, i) => {
+    const own = lineOf(p);
+    if (own) return own;
+    // "Hard and soft costs", "coûts directs et indirects": the noun of another part completes this one.
+    for (const [j, w] of words.entries()) {
+      if (j === i) continue;
+      const tail = w[w.length - 1]!;
+      const head = w[0]!;
+      const done = (SHARED_NOUN_RE.test(tail) ? lineOf(`${p} ${tail}`) : null) ?? (SHARED_NOUN_RE.test(head) ? lineOf(`${head} ${p}`) : null);
+      if (done) return done;
+    }
+    return null;
+  });
+  return new Set(keys.filter((k) => k !== null)).size >= 2;
+}
+
+/** The note for a budget label that is not one budget line's figure; null when it is. */
+function budgetShapeNote(rawLabel: string, after: string, value: number): string | null {
+  const folded = foldText(rawLabel);
+  let label = folded;
+  const cover = COVER_LIST_RE.exec(label);
+  if (cover && cover.index > 0) label = label.slice(0, cover.index);
+  if (PAID_SO_FAR_RE.test(label) || PAID_SO_FAR_AFTER_RE.test(foldText(after))) return DEPOSIT_NOTE;
+  if (twoLines(folded)) return TWO_LINES_NOTE;
+  // A positive rebate; not one when the label is a line of credit, a tax credit, a figure net of the rebate, or a sales tax line.
+  if (value >= 0 && CREDIT_WORD_RE.test(label) && !NOT_CREDIT_RE.test(label) && !BASIS_OF_CREDIT_RE.test(label) && !SALES_TAX_RE.test(label)) return REBATE_NOTE;
+  return null;
+}
+
 /**
  * A negative other cost is read only when its own label says it is a credit (then it is the other costs, with a note);
  * a negative figure that does not say so is refused. Nothing is inferred from a sign, and no sign is flipped.
@@ -579,6 +643,11 @@ export function mapToken(rawLabel: string, t: NumberToken, opts: MapOptions = {}
     if (INTEREST_FEE_FIELDS.has(def.key) && def.key !== "soft_cost" && fee.test(own(fee))) return { kind: "ignored", reason: "A fee or premium, not an input" };
     const carrying = label.replace(TRANSFER_TAX_RE, " ");
     if (CARRYING_FIELDS.has(def.key) && CARRYING_RE.test(without(carrying, CARRYING_RE, def.aliases)) && !TAXES_BASIS_RE.test(carrying)) return { kind: "ignored", reason: CARRYING_NOTE };
+  }
+  // Card 61c: a budget label that is two lines, a rebate, or an amount paid so far is shown, never read as the line it names.
+  if (def?.group === "budget" && m.itemKey === null) {
+    const shape = budgetShapeNote(rawLabel, opts.after ?? "", m.value);
+    if (shape) return { kind: "ignored", reason: shape };
   }
   // A cost the city waived or exempted is not what the deal pays; $0 is, and so is a figure net of the exemption.
   if (def?.group === "budget" && m.value !== 0) {
