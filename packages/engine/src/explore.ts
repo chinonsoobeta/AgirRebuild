@@ -95,8 +95,8 @@ function shockWithin(input: EngineInput, shock: Shock, limits: Partial<Record<Dr
 }
 
 /** Base-case metrics only: one ledger, no stresses. Fast enough for charts. */
-export function baseMetrics(input: EngineInput): Metric[] {
-  return computeMetrics(input, buildLedger(input)).metrics;
+export function baseMetrics(input: EngineInput, seniorIoSizingToRefinance = false): Metric[] {
+  return computeMetrics(input, buildLedger(input, seniorIoSizingToRefinance)).metrics;
 }
 
 export type Exploration = Omit<RunResult, "ledger" | "equityFlows">;
@@ -235,7 +235,7 @@ function gateMetric(input: EngineInput, policy: Policy, spec: GateSpec): Metric 
   try {
     // A move the engine would refuse (validateInput throws) never counts as passing.
     validateInput(input);
-    return baseMetrics(stress ? applyStress(input, stress) : input).find((m) => m.key === spec.metricKey);
+    return baseMetrics(stress ? applyStress(input, stress) : input, policy.seniorIoSizingToRefinance).find((m) => m.key === spec.metricKey);
   } catch {
     return undefined;
   }
@@ -244,7 +244,7 @@ function gateMetric(input: EngineInput, policy: Policy, spec: GateSpec): Metric 
 /** Rows for every failing gate and each of five drivers, and the error-severity checks that no gate can offset. */
 export function breakeven(input: EngineInput, policy: Policy, specs: GateSpec[] = gateSpecs(policy)): { rows: BreakevenRow[]; hardFails: string[] } {
   validateInput(input);
-  const base = buildLedger(input);
+  const base = buildLedger(input, policy.seniorIoSizingToRefinance);
   const contractual = computeMetrics(input, base).metrics.find((m) => m.key === "contractual_dscr");
   const hardFails = runChecks(input, base, policy, contractual?.status === "VALID" ? contractual.value : null)
     .filter((c) => c.severity === "error")

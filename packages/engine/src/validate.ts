@@ -57,15 +57,15 @@ export function validateInput(input: EngineInput): void {
   if (!finite(input.sellingCostsPct) || input.sellingCostsPct < 0 || input.sellingCostsPct >= 100) {
     p.push("selling costs must be from 0 to under 100 percent");
   }
-  const loan = (name: string, l: { amount: number; ratePct: number; amortYears: number; ioMonths: number }) => {
+  const loan = (name: string, l: { amount: number; ratePct: number; amortYears?: number; ioMonths: number }, optionalAmort = false) => {
     if (!finite(l.amount) || l.amount < 0) p.push(`${name} amount must be at least 0`);
     if (l.amount > 0) {
       if (!finite(l.ratePct) || l.ratePct < 0) p.push(`${name} rate must be at least 0`);
-      if (!intIn(l.amortYears, 1, 50)) p.push(`${name} amortization must be 1 to 50 years`);
+      if (!(optionalAmort && l.amortYears === undefined) && !intIn(l.amortYears!, 1, 50)) p.push(`${name} amortization must be 1 to 50 years`);
       if (!intIn(l.ioMonths, 0, 600)) p.push(`${name} interest-only months must be 0 to 600`);
     }
   };
-  loan("senior loan", input.senior);
+  loan("senior loan", input.senior, true);
   if (input.mezzanine) loan("mezzanine loan", input.mezzanine);
   const S = input.constructionMonths + input.leaseUpMonths;
   const T = S + 12 * input.holdYears - 1;

@@ -837,7 +837,8 @@ describe("exit by refinancing and holding (card 60)", () => {
       const noi = input.revenue[0]!.units * input.revenue[0]!.rentMonthly! * 12 - input.fixedOpexAnnual!;
       const interest = input.senior.amount * input.senior.ratePct / 100 / 12;
       // The original zero-rate fixture has no interest due: preserve the existing null-ratio convention.
-      expect(v(runs[0]!, "senior_dscr_year1")).toEqual(interest === 0 ? null : noi / (12 * interest));
+      if (interest === 0) expect(v(runs[0]!, "senior_dscr_year1")).toBeNull();
+      else expect(v(runs[0]!, "senior_dscr_year1")).toBeCloseTo(noi / (12 * interest), 9);
       expect(runs[0]!.checks.some((c) => c.severity === "error")).toBe(false);
     });
 

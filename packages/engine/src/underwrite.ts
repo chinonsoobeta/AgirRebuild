@@ -1,5 +1,5 @@
-import type { EngineInput, Policy, RunResult, ScenarioResult } from "@agir/contracts";
-import { buildLedger } from "./ledger.ts";
+import type { Check, EngineInput, Policy, RunResult, ScenarioResult } from "@agir/contracts";
+import { buildLedger, MissingSeniorAmortizationError, type Ledger } from "./ledger.ts";
 import { computeMetrics } from "./metrics.ts";
 import { runChecks } from "./checks.ts";
 import { computeVerdict } from "./verdict.ts";
@@ -15,12 +15,21 @@ export const ENGINE_VERSION = "1.0.0";
  */
 export function underwrite(input: EngineInput, policy: Policy): RunResult {
   validateInput(input);
-  const base = buildLedger(input);
+  let base: Ledger;
+  try {
+    base = buildLedger(input, policy.seniorIoSizingToRefinance);
+  } catch (e) {
+    if (!(e instanceof MissingSeniorAmortizationError)) throw e;
+    const checks: Check[] = [{ key: "senior_amortization_missing", kind: "bound", severity: "error", message: e.message }];
+    const scenarios: ScenarioResult[] = [{ key: "base", label: "Base case", metrics: [] }];
+    return { engineVersion: ENGINE_VERSION, policyVersion: policy.version, scenarios, checks,
+      verdict: computeVerdict(scenarios, checks, policy), annual: [], equityFlows: [], ledger: [], irrRoots: [], warnings: [] };
+  }
   const baseMetrics = computeMetrics(input, base);
   const scenarios: ScenarioResult[] = [{ key: "base", label: "Base case", metrics: baseMetrics.metrics }];
   for (const s of policy.stresses) {
     const stressed = applyStress(input, s);
-    const ledger = buildLedger(stressed);
+    const ledger = buildLedger(stressed, policy.seniorIoSizingToRefinance);
     scenarios.push({ key: s.key, label: s.label, metrics: computeMetrics(stressed, ledger).metrics });
   }
   const contractual = baseMetrics.metrics.find((m) => m.key === "contractual_dscr");

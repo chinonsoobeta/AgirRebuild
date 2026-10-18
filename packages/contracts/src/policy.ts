@@ -3,7 +3,7 @@
 //
 // maxLtcPct is provisional: it awaits credit sign-off (plan task S4).
 //
-// A new held deal runs under rental-hold-v1-draft (card 60), or rental-hold-insured-v2-draft when insured.
+// A new held deal runs under rental-hold-v2-draft, or rental-hold-insured-v3-draft when insured.
 // The drafts propose thresholds for credit. Earlier policies are retained unchanged: existing runs keep their hash.
 
 import type { EngineInput } from "./results.ts";
@@ -65,6 +65,8 @@ export type Policy = {
   version: string;
   /** A draft: its thresholds are proposals that credit has not signed. */
   draft?: true;
+  /** Size an IO senior loan on interest until the held deal refinances it. */
+  seniorIoSizingToRefinance?: boolean;
   gates: Readonly<Record<string, number>>;
   gateKeys?: readonly string[];
   maxLtcPct: number;
@@ -105,18 +107,33 @@ export const RENTAL_HOLD_INSURED_V2_DRAFT: Policy = {
   baseSizingDscrFloor: 1.1,
 };
 
+/** Held deals size the senior on interest when it stays IO until refinance (owner decision 2026-10-17). */
+export const RENTAL_HOLD_V2_DRAFT: Policy = {
+  ...RENTAL_HOLD_V1_DRAFT,
+  version: "rental-hold-v2-draft",
+  seniorIoSizingToRefinance: true,
+};
+
+export const RENTAL_HOLD_INSURED_V3_DRAFT: Policy = {
+  ...RENTAL_HOLD_INSURED_V2_DRAFT,
+  version: "rental-hold-insured-v3-draft",
+  seniorIoSizingToRefinance: true,
+};
+
 /** Every policy a run can have been made under, by version. A new policy is added, never edited; earlier versions remain for stored runs and replay. */
 export const POLICIES: Readonly<Record<string, Policy>> = {
   [POLICY_V1.version]: POLICY_V1,
   [RENTAL_HOLD_V1_DRAFT.version]: RENTAL_HOLD_V1_DRAFT,
   [RENTAL_HOLD_INSURED_V1_DRAFT.version]: RENTAL_HOLD_INSURED_V1_DRAFT,
   [RENTAL_HOLD_INSURED_V2_DRAFT.version]: RENTAL_HOLD_INSURED_V2_DRAFT,
+  [RENTAL_HOLD_V2_DRAFT.version]: RENTAL_HOLD_V2_DRAFT,
+  [RENTAL_HOLD_INSURED_V3_DRAFT.version]: RENTAL_HOLD_INSURED_V3_DRAFT,
 };
 
-/** A new held run gets insured v2 for a positive premium, otherwise the conventional draft. Every other deal gets v1; insured v1 stays registered for earlier runs. */
+/** A new held run gets insured v3 for a positive premium, otherwise conventional v2. Earlier versions stay registered for replay. */
 export function policyFor(input: EngineInput): Policy {
   if (input.exit !== "refinance_hold") return POLICY_V1;
   // A stated premium identifies an insured refinance; there is no financing-type field.
   const premium = input.refinance?.insurancePremiumPct;
-  return typeof premium === "number" && premium > 0 ? RENTAL_HOLD_INSURED_V2_DRAFT : RENTAL_HOLD_V1_DRAFT;
+  return typeof premium === "number" && premium > 0 ? RENTAL_HOLD_INSURED_V3_DRAFT : RENTAL_HOLD_V2_DRAFT;
 }

@@ -447,7 +447,7 @@ export function buildModel(x: ArtifactInput): DocModel {
       debtRows.push(
         ["Senior loan", f.input(i.senior.amount, "$", "senior_loan_amount")],
         ["Senior rate", f.input(i.senior.ratePct, "%", "senior_rate_pct")],
-        ["Amortization", f.input(i.senior.amortYears, "years", "senior_amort_years")],
+        ...(i.senior.amortYears === undefined ? [] : [["Amortization", f.input(i.senior.amortYears, "years", "senior_amort_years")]]),
         ["Interest-only period", f.input(i.senior.ioMonths, "months", "senior_io_months")],
       );
     }

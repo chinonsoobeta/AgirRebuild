@@ -128,6 +128,9 @@ export function assemble(rows: readonly AssumptionRow[]): { readiness: Readiness
       if (def.required.startsWith("!")) required = !has(def.required.slice(1)) && !isBlockedKey(def.required.slice(1));
       else required = (values.get(def.required) ?? 0) > 0;
     }
+    // A held senior that stays IO until refinance never uses its amortization.
+    if (def.key === "senior_amort_years" && values.get("refinance_and_hold") === 1 && has("refinance_month") &&
+      (values.get("senior_io_months") ?? 0) >= values.get("refinance_month")!) required = false;
     if (required) missing.push({ fieldKey: def.key, label: def.label });
   }
 
@@ -219,7 +222,7 @@ export function assemble(rows: readonly AssumptionRow[]): { readiness: Readiness
     senior: {
       amount: n("senior_loan_amount"),
       ratePct: n("senior_rate_pct"),
-      amortYears: n("senior_amort_years", 30),
+      ...(has("senior_amort_years") ? { amortYears: n("senior_amort_years") } : {}),
       ioMonths: n("senior_io_months"),
     },
     ...(n("mezz_loan_amount") > 0

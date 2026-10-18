@@ -57,7 +57,7 @@ export type EngineInput = {
   sCurveDraws: boolean;
   exitCapPct: number;
   sellingCostsPct: number;
-  senior: LoanTerms;
+  senior: Omit<LoanTerms, "amortYears"> & { amortYears?: number };
   mezzanine?: LoanTerms;
   refinance?: { month: number; amount?: number; ltvPct?: number; ratePct: number; amortYears: number; ioMonths: number; /** Added to the loan; present only when stated. */ insurancePremiumPct?: number };
   /** The deal is kept and refinanced, not sold. Set only when the flag is 1; absent otherwise, so a sale deal's input hashes as before. */

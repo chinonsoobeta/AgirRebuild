@@ -25,7 +25,8 @@
 //           payment over the amortization term on the balance at that moment.
 // Sizing    Decision 1: sizing debt service is the level amortizing payment on
 //           each tranche's sized principal (its balance at S, or the refinance
-//           amount), for every month the tranche is in force.
+//           amount), for every month the tranche is in force. A flagged held
+//           policy instead sizes the senior on interest when IO lasts to refinance.
 // Refinance At the start of month R the senior balance is paid off and replaced.
 // Sale      Exit value = final hold-year NOI / exit cap. Debt is paid off at T.
 //           The non-recourse floor applies to the sale leg only.
@@ -37,7 +38,7 @@
 //           a refinance at t = R/12; the sale (or, for a held deal, the
 //           unrealized flow) at t = (T + 1)/12.
 
-import type { AnnualRow, EngineInput, EquityFlow, LedgerRow, LoanTerms } from "@agir/contracts";
+import type { AnnualRow, EngineInput, EquityFlow, LedgerRow } from "@agir/contracts";
 import { allocate, drawShares, levelPayment, sum } from "./math.ts";
 
 type TrancheKey = "mezzanine" | "senior";
@@ -137,8 +138,8 @@ function stabilizedYear1Egi(input: EngineInput): number {
   return egi;
 }
 
-function tranches(input: EngineInput): { key: TrancheKey; terms: LoanTerms }[] {
-  const out: { key: TrancheKey; terms: LoanTerms }[] = [];
+function tranches(input: EngineInput): { key: TrancheKey; terms: EngineInput["senior"] }[] {
+  const out: { key: TrancheKey; terms: EngineInput["senior"] }[] = [];
   if (input.mezzanine && input.mezzanine.amount > 0) out.push({ key: "mezzanine", terms: input.mezzanine });
   if (input.senior.amount > 0) out.push({ key: "senior", terms: input.senior });
   return out;
@@ -233,7 +234,13 @@ function simulateConstruction(input: EngineInput, S: number, costByMonth: number
   };
 }
 
-export function buildLedger(input: EngineInput): Ledger {
+export class MissingSeniorAmortizationError extends Error {
+  constructor() {
+    super("Senior amortization is required for an amortizing cash or sizing payment.");
+  }
+}
+
+export function buildLedger(input: EngineInput, seniorIoSizingToRefinance = false): Ledger {
   const C = input.constructionMonths;
   const S = C + input.leaseUpMonths;
   const H = input.holdYears;
@@ -294,21 +301,25 @@ export function buildLedger(input: EngineInput): Ledger {
     key: TrancheKey;
     balance: number;
     ratePct: number;
-    amortMonths: number;
+    amortMonths: number | undefined;
     amortStart: number;
     payment: number | null;
     sizingPayment: number;
   };
   const live: Live[] = stack.map((t) => {
     const balance = sim.balances[t.key];
+    const ioSizing = t.key === "senior" && seniorIoSizingToRefinance && input.exit === "refinance_hold" &&
+      input.refinance !== undefined && input.senior.ioMonths >= input.refinance.month;
+    const amortMonths = t.terms.amortYears === undefined ? undefined : t.terms.amortYears * 12;
+    if (balance > 0 && !ioSizing && amortMonths === undefined) throw new MissingSeniorAmortizationError();
     return {
       key: t.key,
       balance,
       ratePct: t.terms.ratePct,
-      amortMonths: t.terms.amortYears * 12,
+      amortMonths,
       amortStart: Math.max(S, t.terms.ioMonths),
       payment: null,
-      sizingPayment: levelPayment(balance, t.terms.ratePct, t.terms.amortYears * 12),
+      sizingPayment: ioSizing ? balance * t.terms.ratePct / 100 / 12 : levelPayment(balance, t.terms.ratePct, amortMonths!),
     };
   });
 
@@ -370,6 +381,7 @@ export function buildLedger(input: EngineInput): Ledger {
         if (m < l.amortStart) {
           paid = interest;
         } else {
+          if (l.amortMonths === undefined) throw new MissingSeniorAmortizationError();
           if (l.payment === null) l.payment = levelPayment(l.balance, l.ratePct, l.amortMonths);
           const principal = Math.min(l.balance, l.payment - interest);
           l.balance -= principal;
