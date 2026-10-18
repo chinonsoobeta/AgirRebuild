@@ -4347,3 +4347,74 @@ describe("audit of card 61d: a tax basis, a soft-cost fee and the French 'frais'
     }
   });
 });
+
+describe("card 61c: a budget line that is two lines, a rebate, or an amount paid so far is shown, not read", () => {
+  const doc = (...text: string[]): NormalizedDocument => ({
+    kind: "pdf",
+    lines: text.map((t, i) => ({ text: t, location: `page 1, line ${i + 1}` })),
+    tables: [],
+    pageCount: 1,
+    needsOcr: false,
+    fullText: text.join("\n"),
+  });
+  const read = (...text: string[]) => extractCandidates(doc(...text));
+  const pick = (r: ReturnType<typeof extractCandidates>) => r.candidates.map((c) => [c.fieldKey, c.value]);
+  const TWO_NOTE = "Two budget lines in one figure; enter each, or label it";
+  const REBATE_NOTE = "A rebate or credit; enter it as a negative other cost if it reduces the cost";
+  const PAID_NOTE = "A deposit or an amount already paid, not a budget line";
+  const refused = (lines: string[], note: string) => {
+    for (const line of lines) {
+      const r = read(line);
+      expect(pick(r), line).toEqual([]);
+      expect(r.other.map((o) => o.note), line).toContain(note);
+    }
+  };
+
+  test("a label that names two budget fields is two lines, not the longer one", () => {
+    refused(
+      [
+        "Hard and soft costs: $3,300,000",
+        "Land and hard costs: $4,100,000",
+        "Land and land transfer tax: $820,000",
+        "Purchase price plus land transfer tax: $820,000",
+        "Soft costs and development charges: $385,000",
+        "Hard costs & soft costs: $3,300,000",
+        "Hard/soft costs: $3,300,000",
+        "Land + hard costs: $4,100,000",
+        "Coûts directs et indirects : 3 300 000 $",
+      ],
+      TWO_NOTE,
+    );
+  });
+  test("an alias with a joiner, a list of what a head covers, and a pair with one field are read as before", () => {
+    expect(pick(read("Design and permits: $90,000"))).toEqual([["soft_cost", 90_000]]);
+    expect(pick(read("Soft costs, including permits and development charges: $300,000"))).toEqual([["soft_cost", 300_000]]);
+    expect(pick(read("Land and closing costs: $820,000"))).toEqual([["land_cost", 820_000]]);
+    expect(pick(read("Hard costs and construction costs: $3,000,000"))).toEqual([["hard_cost", 3_000_000]]);
+  });
+  test("a rebate, refund or credit stated as a positive figure is shown with the rebate note", () => {
+    refused(["LTT rebate: $4,000", "Development charges rebate: $10,000", "Other costs rebate: $4,000", "Remboursement des droits de mutation : 4 000 $"], REBATE_NOTE);
+  });
+  test("a negative credit, a line of credit and a figure net of a rebate are read as before", () => {
+    expect(pick(read("Other costs credit: -$4,000"))).toEqual([["other_cost", -4_000]]);
+    expect(pick(read("Line of credit: $500,000"))).toEqual([]);
+    expect(pick(read("Development charges, net of the rental rebate: $40,000"))).toEqual([["development_charges", 40_000]]);
+  });
+  test("an amount paid so far is shown with the paid note, not read as the line's budget", () => {
+    refused(["Hard costs spent to date: $1,000,000", "Soft costs paid to date: $100,000", "Dev charges paid to date: $40,000", "Coûts indirects payés à ce jour : 100 000 $"], PAID_NOTE);
+  });
+  test("budget to date and cost to complete are read as they were", () => {
+    expect(pick(read("Budget to date: $1,000,000"))).toEqual([]);
+    expect(pick(read("Cost to complete: $1,000,000"))).toEqual([]);
+  });
+  test("in a budget table a row that names two lines is not summed and the land is read alone", () => {
+    const row = (label: string, amount: string, n: number) => [{ text: label, ref: `A${n}` }, { text: amount, ref: `B${n}` }];
+    const table = {
+      name: "Budget",
+      rows: [[{ text: "Line item", ref: "A1" }, { text: "Amount", ref: "B1" }], row("Hard and soft costs", "$3,300,000", 2), row("Land", "$640,000", 3)],
+    } as Table;
+    const r = extractCandidates({ ...doc(), tables: [table] });
+    expect(pick(r)).toEqual([["land_cost", 640_000]]);
+    expect(r.other.map((o) => [o.value, o.note])).toContainEqual([3_300_000, TWO_NOTE]);
+  });
+});
