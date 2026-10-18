@@ -445,6 +445,89 @@ describe("a deal that is kept and refinanced (card 60)", () => {
     return { model, text, report: verifyProvenance(text, model.formatter.manifest) };
   };
 
+  describe("a break-even that moves every loan rate at once says so (task 64)", () => {
+    function rateInput(): ArtifactInput {
+      const x = holdInput("build_decision");
+      // Tuned only refinance.ratePct from 5.00% to 5.25%: DCR = 1.1608499518x, below the conventional 1.20x floor.
+      const input: EngineInput = { ...x.input, refinance: { ...x.input.refinance!, ratePct: 5.25 } };
+      return { ...x, deal: { ...x.deal, name: "Fictional Shared-Rate Rental", location: "Invented Township" }, input, result: underwrite(input, x.policy) };
+    }
+    const gateRows = (x: ArtifactInput) => {
+      const table = buildModel(x).blocks.find((b) => b.type === "table" && b.columns[3]?.label === "Input moved");
+      let gate = "";
+      return table && table.type === "table" ? table.rows.filter((r) => {
+        gate = r[0] || gate;
+        return gate === "Coverage after refinance (DCR)";
+      }) : [];
+    };
+
+    test("the table names the shared move before both loan rates and explains it in the footnote", () => {
+      const x = rateInput();
+      expect(x.policy.version).toBe("rental-hold-v1-draft");
+      expect(x.input.refinance?.insurancePremiumPct).toBeUndefined();
+      expect(x.result.verdict.gates.find((g) => g.key === "dcr_after_refinance")).toMatchObject({ status: "failed", threshold: 1.2 });
+      const dcr = x.result.scenarios[0]!.metrics.find((m) => m.key === "dcr_after_refinance")!.value!;
+      expect(dcr).toBeGreaterThan(1);
+      expect(dcr).toBeLessThan(1.2);
+      const rows = gateRows(x);
+      const start = rows.findIndex((r) => r[3] === "Loan interest rates, all 2 together (same move)");
+      expect(start).toBeGreaterThanOrEqual(0);
+      expect(rows.slice(start, start + 3).map((r) => r.slice(3))).toEqual([
+        ["Loan interest rates, all 2 together (same move)", "—", "-30 bps"],
+        ["Senior loan rate, in the same move", "6.00%", "5.70%"],
+        ["Refinance rate, in the same move", "5.25%", "4.95%"],
+      ]);
+      const { model, text } = textOf(x);
+      expect(text).toContain("One input is moved at a time. Everything else is held. Loan interest rates move together by the same amount.");
+      expect(model.formatter.manifest).toEqual(expect.arrayContaining([
+        { text: "2", ref: "ident:breakeven.dcr_after_refinance.rate.count" },
+        { text: "-30 bps", ref: "run:breakeven.dcr_after_refinance.rate.shock" },
+        { text: "Senior loan rate, in the same move", ref: "ident:breakeven.dcr_after_refinance.senior_rate.label" },
+        { text: "Refinance rate, in the same move", ref: "ident:breakeven.dcr_after_refinance.refinance_rate.label" },
+      ]));
+    });
+
+    test("both printed rates together pass; the senior printed rate alone still fails", () => {
+      const x = rateInput();
+      const rows = gateRows(x);
+      const senior = Number(rows.find((r) => r[3]!.startsWith("Senior loan rate"))![5]!.replace("%", ""));
+      const refinance = Number(rows.find((r) => r[3]!.startsWith("Refinance rate"))![5]!.replace("%", ""));
+      const seniorOnly: EngineInput = { ...x.input, senior: { ...x.input.senior, ratePct: senior } };
+      const together: EngineInput = { ...seniorOnly, refinance: { ...x.input.refinance!, ratePct: refinance } };
+      const gate = (input: EngineInput) => underwrite(input, x.policy).verdict.gates.find((g) => g.key === "dcr_after_refinance")!;
+      expect(gate(together).status).toBe("passed");
+      expect(gate(seniorOnly).status).toBe("failed");
+      expect(gate(seniorOnly).actual).toBeCloseTo(gate(x.input).actual!, 9);
+    });
+
+    test("a single loan keeps its existing rate label, rows and footnote", () => {
+      const x = rateInput();
+      const input = developmentDeal();
+      const policy = policyFor(input);
+      const one: ArtifactInput = { ...x, input, policy, result: underwrite(input, policy), run: { ...x.run, policyVersion: policy.version, policyHash: createHash("sha256").update(canonicalJson(policy)).digest("hex") } };
+      const { model, text, report } = textOf(one);
+      const table = model.blocks.find((b) => b.type === "table" && b.columns[3]?.label === "Input moved");
+      const rates = table && table.type === "table" ? table.rows.filter((r) => r[3] === "Senior loan rate") : [];
+      expect(rates.map((r) => r.slice(3))).toEqual([
+        ["Senior loan rate", "6.00%", "5.40%"],
+        ["Senior loan rate", "6.00%", "2.02%"],
+      ]);
+      expect(text).toContain("One input is moved at a time. Everything else is held.");
+      expect(text).not.toContain("Loan interest rates move together by the same amount.");
+      expect(text).not.toContain(", in the same move");
+      expect(report.orphans).toEqual([]);
+    });
+
+    test.each(["build_decision", "ic_memo", "lender_package", "model_export"] as const)("the shared-rate deal's %s has no orphan numbers", async (kind) => {
+      const x = { ...rateInput(), kind };
+      expect(textOf(x).report.orphans).toEqual([]);
+      const out = await renderArtifact(x, kind === "model_export" ? "xlsx" : "docx");
+      expect(out.provenance.orphans).toEqual([]);
+      expect(out.provenance.pass).toBe(true);
+      expect(out.bytes.length).toBeGreaterThan(0);
+    });
+  });
+
   test.each(["ic_memo", "lender_package", "build_decision"] as const)("the %s says the policy is a draft, leads with the hold measures, and shows no sale", (kind) => {
     const { model, text, report } = textOf(holdInput(kind));
     expect(report.orphans).toEqual([]);
