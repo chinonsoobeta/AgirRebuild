@@ -4749,3 +4749,93 @@ describe("Moncton end-to-end reading faults (task 69)", () => {
     expect(shown(fee)).toEqual([[1.25, "A fee or premium, not an input"]]);
   });
 });
+
+
+describe("an equity reimbursement is not equity, and plan types stay distinct (task 71)", () => {
+  const NOTE = "Equity returned or left in after a refinance, not the equity contributed";
+  const doc = (...text: string[]): NormalizedDocument => ({
+    kind: "pdf",
+    lines: text.map((t, i) => ({ text: t, location: `page 1, line ${i + 1}` })),
+    tables: [],
+    pageCount: 1,
+    needsOcr: false,
+    fullText: text.join("\n"),
+  });
+  const grid = (rows: string[][]): NormalizedDocument => ({
+    ...doc("Amounts use comma groups such as 1,234,567."),
+    lines: [],
+    tables: [{ name: "Invented plan schedule", rows: rows.map((r, i) => r.map((text, j) => ({ text, ref: `${"ABCD"[j]}${i + 1}` }))) } as Table],
+  });
+  const read = (d: NormalizedDocument) => extractCandidates(d).candidates.map((c) => [c.fieldKey, c.itemKey, c.value]);
+  const shown = (d: NormalizedDocument) => extractCandidates(d).other.map((o) => [o.value, o.note]);
+
+  test.each([
+    ...["will reimburse", "reimburses", "reimbursed", "is reimbursing", "will repay", "repays", "repaid", "is repaying", "will return", "returns", "returned", "is returning", "will distribute", "distributes", "distributed", "is distributing"].map((verb) => `CAD 285,000 ${verb} sponsor equity after refinancing.`),
+    "Refinance proceeds of $285,000 are returned to the equity partners at closing.",
+    ...["cash out", "cashed out", "are cashing out"].map((verb) => `We ${verb} CAD 285,000 of sponsor equity at refinance.`),
+    "The sponsor cashes out CAD 285,000 of equity at refinance.",
+    "The sponsor receives a CAD 285,000 cash-out of equity at refinancing.",
+    ...["take out", "took out", "have taken out", "are taking out"].map((verb) => `We ${verb} CAD 285,000 of sponsor equity at refinance.`),
+    "The sponsor takes out CAD 285,000 of equity at refinance.",
+    "Le refinancement permet de rembourser 285 000 $ de capitaux propres.",
+    "Le remboursement des capitaux propres atteint 285 000 $ au refinancement.",
+    "Le promoteur va remettre 285 000 $ de capitaux propres aux partenaires.",
+    "Le refinancement va distribuer 285 000 $ de capitaux propres.",
+  ])("returned equity is shown: %s", (sentence) => {
+    const d = doc(sentence);
+    expect(read(d)).toEqual([]);
+    expect(shown(d)).toEqual([[285000, NOTE]]);
+  });
+
+  test.each([
+    "Equity left in the property after refinance is CAD 195,000.",
+    "After refinancing, CAD 195,000 of sponsor equity is retained.",
+    "The remaining equity after refinance is CAD 195,000.",
+    "Les capitaux propres restants atteignent 195 000 $ après le refinancement.",
+  ])("retained equity is shown: %s", (sentence) => {
+    const d = doc(sentence);
+    expect(read(d)).toEqual([]);
+    expect(shown(d)).toEqual([[195000, NOTE]]);
+  });
+
+  test.each([
+    "The balance of CAD 440,000 will reimburse sponsor equity after refinancing, leaving CAD 220,000 of original equity invested.",
+    "Le remboursement des capitaux propres atteint 440 000 $, laissant 220 000 $ de capitaux propres.",
+  ])("returned and retained equity do not conflict with contributed equity: %s", (sentence) => {
+    const d = doc("Sponsor equity: $660,000", sentence);
+    expect(read(d)).toEqual([["equity_amount", null, 660000]]);
+    expect(shown(d)).toEqual([[440000, NOTE], [220000, NOTE]]);
+  });
+
+  test.each([
+    "We plan to contribute CAD 660,000 of sponsor equity.",
+    "Sponsor equity: $660,000",
+    "Equity of $660,000 is contributed at closing.",
+  ])("contributed equity remains readable: %s", (sentence) => {
+    expect(read(doc(sentence))).toEqual([["equity_amount", null, 660000]]);
+    expect(shown(doc(sentence))).toEqual([]);
+  });
+
+  test.each(["Units", "Count", "Number", "Nombre de logements"])("digit-ending plans stay distinct with the count column %s", (count) => {
+    const d = grid([["Plan", count, "Monthly rent"], ["A1", "5", "1870"], ["A2", "2", "1980"], ["B2", "7", "2290"]]);
+    expect(read(d)).toEqual([
+      ["unit_count", "A1", 5], ["unit_rent_monthly", "A1", 1870],
+      ["unit_count", "A2", 2], ["unit_rent_monthly", "A2", 1980],
+      ["unit_count", "B2", 7], ["unit_rent_monthly", "B2", 2290],
+    ]);
+  });
+
+  test("TH codes in an area-column roll with no count column still group as suites", () => {
+    const d = grid([["Unit", "Area (sf)", "Rent per month"], ["TH-7", "710", "2470"], ["TH-8", "710", "2470"], ["TH-9", "750", "2470"]]);
+    expect(read(d)).toEqual([["unit_count", "TH", 3], ["rentable_area_sf", "TH", 2170], ["unit_rent_monthly", "TH", 2470]]);
+  });
+
+  test("a separate suite and digit-ending plan column still group by plan", () => {
+    const d = grid([["Unit", "Type", "Monthly rent"], ["111", "A1", "1870"], ["112", "A1", "1870"], ["211", "B2", "2290"]]);
+    expect(read(d)).toEqual([["unit_count", "A1", 2], ["unit_rent_monthly", "A1", 1870], ["unit_count", "B2", 1], ["unit_rent_monthly", "B2", 2290]]);
+  });
+
+  test("a bedroom type with an explicit count keeps that count", () => {
+    expect(read(grid([["Type", "Units", "Rent"], ["2BR", "4", "1920"]]))).toEqual([["unit_count", "2BR", 4], ["unit_rent_monthly", "2BR", 1920]]);
+  });
+});
