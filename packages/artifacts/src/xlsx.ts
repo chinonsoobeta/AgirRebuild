@@ -12,6 +12,7 @@ export async function renderXlsx(x: ArtifactInput): Promise<Uint8Array> {
   wb.creator = "Agir";
   wb.created = new Date(x.run.createdAt);
   const r = x.result;
+  const sale = x.input.exit === "for_sale";
   const fmt = (unit: string) => (unit === "$" ? '"$"#,##0;[Red]-"$"#,##0' : unit === "%" ? '0.00"%"' : unit === "x" ? '0.00"x"' : unit === "bps" ? '0" bps"' : "#,##0");
   const head = (ws: import("exceljs").Worksheet, cols: string[]) => {
     const row = ws.addRow(cols);
@@ -42,7 +43,9 @@ export async function renderXlsx(x: ArtifactInput): Promise<Uint8Array> {
 
   const metrics = wb.addWorksheet("Metrics");
   head(metrics, ["Metric", "Unit", ...r.scenarios.map((s) => s.label), "Formula"]);
+  if (sale) metrics.addRow(["Metrics marked not applicable are omitted: The units are sold; there is no rental income."]);
   for (const m of r.scenarios[0]!.metrics) {
+    if (sale && m.status === "NOT_APPLICABLE" && m.reason === "The units are sold; there is no rental income.") continue;
     const row = metrics.addRow([
       m.label,
       m.unit,
@@ -56,21 +59,23 @@ export async function renderXlsx(x: ArtifactInput): Promise<Uint8Array> {
   }
   metrics.columns.forEach((c, i) => (c.width = i === 0 ? 34 : 16));
 
-  const annual = wb.addWorksheet("Annual");
-  head(annual, ["Year", "GPR", "EGI", "Operating costs", "NOI", "Debt service", "Sizing debt service", "Cash flow"]);
-  for (const y of r.annual) {
-    const row = annual.addRow([y.year === 0 ? "Before stabilization" : y.year, y.gpr, y.egi, y.opex, y.noi, y.debtService, y.sizingDebtService, y.cashFlow]);
-    for (let c = 2; c <= 8; c++) row.getCell(c).numFmt = fmt("$");
+  if (!sale) {
+    const annual = wb.addWorksheet("Annual");
+    head(annual, ["Year", "GPR", "EGI", "Operating costs", "NOI", "Debt service", "Sizing debt service", "Cash flow"]);
+    for (const y of r.annual) {
+      const row = annual.addRow([y.year === 0 ? "Before stabilization" : y.year, y.gpr, y.egi, y.opex, y.noi, y.debtService, y.sizingDebtService, y.cashFlow]);
+      for (let c = 2; c <= 8; c++) row.getCell(c).numFmt = fmt("$");
+    }
+    annual.columns.forEach((c) => (c.width = 18));
   }
-  annual.columns.forEach((c) => (c.width = 18));
 
   const ledger = wb.addWorksheet("Monthly ledger");
   // A held deal has no sale, so its ledger has no sale column.
   const held = x.input.exit === "refinance_hold";
-  head(ledger, ["Month", "Phase", "Cost draw", "Equity draw", "Debt draw", "Capitalized interest", "EGI", "Operating costs", "NOI", "Debt service", "Debt balance", "Refinance net", ...(held ? [] : ["Sale to equity"])]);
+  head(ledger, sale ? ["Month", "Phase", "Cost draw", "Equity draw", "Debt draw", "Capitalized interest", "Loan repayment", "Debt balance", "Sale to equity"] : ["Month", "Phase", "Cost draw", "Equity draw", "Debt draw", "Capitalized interest", "EGI", "Operating costs", "NOI", "Debt service", "Debt balance", "Refinance net", ...(held ? [] : ["Sale to equity"])]);
   for (const m of r.ledger) {
-    const row = ledger.addRow([m.month, m.phase, m.costDraw, m.equityDraw, m.debtDraw, m.capitalizedInterest, m.egi, m.opex, m.noi, m.debtService, m.debtBalance, m.refinanceNet, ...(held ? [] : [m.saleNet])]);
-    for (let c = 3; c <= (held ? 12 : 13); c++) row.getCell(c).numFmt = fmt("$");
+    const row = ledger.addRow(sale ? [m.month, m.phase, m.costDraw, m.equityDraw, m.debtDraw, m.capitalizedInterest, m.debtService, m.debtBalance, m.saleNet] : [m.month, m.phase, m.costDraw, m.equityDraw, m.debtDraw, m.capitalizedInterest, m.egi, m.opex, m.noi, m.debtService, m.debtBalance, m.refinanceNet, ...(held ? [] : [m.saleNet])]);
+    for (let c = 3; c <= (sale ? 9 : held ? 12 : 13); c++) row.getCell(c).numFmt = fmt("$");
   }
   ledger.columns.forEach((c) => (c.width = 15));
 

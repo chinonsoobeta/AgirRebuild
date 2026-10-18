@@ -103,10 +103,10 @@ function sourcesAndUses(f: Formatter, x: ArtifactInput): Block {
   if (i.budget.developmentCharges !== undefined) rows.push(["Development charges", f.input(i.budget.developmentCharges, "$", "development_charges")]);
   if (i.budget.landTransferTax !== undefined) rows.push(["Land transfer tax", f.input(i.budget.landTransferTax, "$", "land_transfer_tax")]);
   if (i.budget.gstHstNet !== undefined) rows.push(["GST/HST net of rebates", f.input(i.budget.gstHstNet, "$", "gst_hst_net")]);
-  if (x.result.scenarios[0]?.metrics.find((m) => m.key === "leaseup_operating_cost")?.status === "VALID") {
+  if (!isSale(x) && x.result.scenarios[0]?.metrics.find((m) => m.key === "leaseup_operating_cost")?.status === "VALID") {
     rows.push(["Operating costs during lease-up", f.metric("base", "leaseup_operating_cost")]);
   }
-  rows.push(["Capitalized interest", f.metric("base", "capitalized_interest")]);
+  rows.push(isSale(x) ? ["Interest during construction", f.metric("base", "interest_before_completion")] : ["Capitalized interest", f.metric("base", "capitalized_interest")]);
   rows.push(["Total uses", f.metric("base", "total_development_cost")]);
   const usesEnd = rows.length - 1;
   if (i.senior.amount > 0) rows.push(["Senior loan", f.input(i.senior.amount, "$", "senior_loan_amount")]);
@@ -161,6 +161,7 @@ function operations(f: Formatter, x: ArtifactInput): Block {
 export const DRAFT_POLICY_LINE = "Draft policy, not signed by credit";
 
 /** A deal kept and refinanced has no sale: its reports lead with the hold measures and show the unrealized ones under their label. */
+const isSale = (x: ArtifactInput) => x.input.exit === "for_sale";
 const isHeld = (x: ArtifactInput) => x.input.exit === "refinance_hold";
 
 /** Under a draft policy, said once beside the verdict. */
@@ -174,6 +175,38 @@ function heldStats(f: Formatter, unrealized = true): { label: string; value: str
   const hold = ["refinance_cash_returned", "cash_left_in_deal", "dcr_after_refinance", "cash_on_cash_after_refinance"].map(item);
   return unrealized ? [...hold, ...["unrealized_equity_multiple", "unrealized_equity_irr", "stated_value"].map(item)] : hold;
 }
+
+function saleStats(f: Formatter, full = true): { label: string; value: string }[] {
+  const keys = full ? ["total_development_cost", "profit_on_cost_for_sale", "margin_on_revenue", "equity_multiple", "equity_irr"]
+    : ["profit_on_cost_for_sale", "margin_on_revenue", "equity_multiple"];
+  return keys.map((key) => ({ label: key === "total_development_cost" ? "Total cost" : f.metricOf("base", key).label, value: f.metric("base", key) }));
+}
+
+function unitSales(f: Formatter, x: ArtifactInput): Block {
+  const sale = x.input.forSale!;
+  const rows = sale.units.map((u) => [f.ident(u.label, `forSale.${u.key}.label`), f.input(u.units, "units", `unit_count|${u.key}`) + " units", f.input(u.price, "$", `unit_sale_price|${u.key}`)]);
+  const field = (key: string, value: number, unit: Parameters<Formatter["input"]>[1], suffix = "") => [FIELD_BY_KEY.get(key)!.label, f.input(value, unit, key) + suffix, ""];
+  rows.push(
+    field("presold_units_pct", sale.presoldPct, "%"),
+    field("deposit_pct", sale.depositPct, "%"),
+    field("absorption_units_per_month", sale.absorptionPerMonth, "units", " units per month"),
+    field("sales_commission_pct", sale.commissionPct, "%"),
+    field("closing_lag_months", sale.closingLagMonths, "months"),
+    field("unsold_carry_monthly", sale.carryMonthly, "$"),
+  );
+  if (sale.presaleThresholdPct !== undefined) rows.push(field("senior_presale_threshold_pct", sale.presaleThresholdPct, "%"));
+  return { type: "table", caption: "Unit sales", columns: [{ label: "Unit type or field" }, { label: "Count or value", numeric: true }, { label: "Sale price per unit", numeric: true }], rows };
+}
+
+function saleResults(f: Formatter, x: ArtifactInput): Block {
+  const keys = ["gross_sales_revenue", "net_sales_revenue", "carry_total", "interest_after_completion", "development_profit_for_sale", "profit_on_cost_for_sale",
+    "margin_on_revenue", "sellout_month", "sellout_years", "deposits_held_at_completion", "senior_balance_at_completion",
+    ...(x.input.mezzanine && x.input.mezzanine.amount > 0 ? ["mezz_balance_at_completion"] : [])];
+  return { type: "table", caption: "Sale results", columns: [{ label: "Figure" }, { label: "Value", numeric: true }],
+    rows: keys.map((key) => [f.metricOf("base", key).label, f.metric("base", key)]) };
+}
+
+const SALE_OPERATIONS: Block = { type: "paragraph", muted: true, text: "A deal that sells its units has no years of operations. Each month's costs, loans and closings are in the Excel export." };
 
 function gates(f: Formatter, r: RunResult): Block {
   const label = { passed: "Passes", failed: "Fails", not_applicable: "Not applicable", not_evaluated: "Not evaluated" } as const;
@@ -190,9 +223,9 @@ function gates(f: Formatter, r: RunResult): Block {
   };
 }
 
-function stresses(f: Formatter, r: RunResult, held = false): Block {
+function stresses(f: Formatter, r: RunResult, held = false, sale = false): Block {
   // A held deal has no sale, so its stress table reads coverage after the refinance and the unrealized multiple instead.
-  const read = held ? ["sizing_dscr", "dcr_after_refinance", "unrealized_equity_multiple"] : ["sizing_dscr", "equity_multiple", "profit_on_cost"];
+  const read = sale ? ["profit_on_cost_for_sale", "margin_on_revenue", "equity_multiple"] : held ? ["sizing_dscr", "dcr_after_refinance", "unrealized_equity_multiple"] : ["sizing_dscr", "equity_multiple", "profit_on_cost"];
   return {
     type: "table",
     caption: "Stresses (each a full re-run of the model)",
@@ -310,11 +343,12 @@ export function roundToward(value: number, dir: 1 | -1, step: number): number {
 }
 
 /** The stress with the most failed gates; a tie goes to the lower stressed sizing DSCR. One sentence, from the stored gates. */
-function weakestStress(f: Formatter, r: RunResult): Block[] {
+function weakestStress(f: Formatter, r: RunResult, sale = false): Block[] {
+  const metricKey = sale ? "profit_on_cost_for_sale" : "sizing_dscr";
   const stresses = r.scenarios.filter((s) => s.key !== "base");
   const failed = (key: string) => r.verdict.gates.filter((g) => g.scenario === key && g.status === "failed");
   const dscr = (key: string) => {
-    const m = r.scenarios.find((s) => s.key === key)?.metrics.find((k) => k.key === "sizing_dscr");
+    const m = r.scenarios.find((s) => s.key === key)?.metrics.find((k) => k.key === metricKey);
     return m?.status === "VALID" && m.value !== null ? m.value : Infinity;
   };
   const w = [...stresses].sort((a, b) => failed(b.key).length - failed(a.key).length || (dscr(a.key) < dscr(b.key) ? -1 : dscr(a.key) > dscr(b.key) ? 1 : 0))[0];
@@ -323,7 +357,7 @@ function weakestStress(f: Formatter, r: RunResult): Block[] {
   const fails = gates.length
     ? `It fails ${f.ident(String(gates.length), "stress.failedGates")} ${gates.length === 1 ? "gate" : "gates"}: ${gates.map((g) => g.label).join("; ")}.`
     : "It fails no gate.";
-  return [{ type: "paragraph", text: `Weakest stress: ${f.ident(w.label, `policy.stress.${w.key}`)}. ${fails} Its sizing DSCR: ${f.metric(w.key, "sizing_dscr")}.` }];
+  return [{ type: "paragraph", text: `Weakest stress: ${f.ident(w.label, `policy.stress.${w.key}`)}. ${fails} Its ${sale ? "profit on cost" : "sizing DSCR"}: ${f.metric(w.key, metricKey)}.` }];
 }
 
 /** For each failing gate, the one input that would make it pass, from `breakeven()` over the run's stored input and policy. */
@@ -394,12 +428,13 @@ export function buildModel(x: ArtifactInput): DocModel {
     explanation: f.text(r.verdict.explanation, "verdict.explanation"),
   };
   const blocks: Block[] = [];
-  const held = isHeld(x);
+  const sale = isSale(x);
+  const held = !sale && isHeld(x);
   if (x.kind === "ic_memo") {
     blocks.push(verdict, ...draftLine(x), ...sponsorStatedBlocks(f, x));
     blocks.push({
       type: "stats",
-      items: held
+      items: sale ? saleStats(f) : held
         ? heldStats(f)
         : [
             { label: "Total cost", value: f.metric("base", "total_development_cost") },
@@ -415,14 +450,14 @@ export function buildModel(x: ArtifactInput): DocModel {
       blocks.push({ type: "paragraph", text: `${x.decision.decision.replace(/_/g, " ")}: ${f.ident(x.decision.rationale, "decision.rationale")}` });
       if (x.decision.conditions) blocks.push({ type: "paragraph", text: `Conditions: ${f.ident(x.decision.conditions, "decision.conditions")}` });
     }
-    blocks.push(sourcesAndUses(f, x), ...mezzAccrual(f, r), revenueProgram(f, x), operations(f, x), gates(f, r), stresses(f, r, held), annual(f, r, false));
+    blocks.push(sourcesAndUses(f, x), ...mezzAccrual(f, r), ...(sale ? [unitSales(f, x), saleResults(f, x), SALE_OPERATIONS] : [revenueProgram(f, x), operations(f, x)]), gates(f, r), stresses(f, r, held, sale), ...(sale ? [] : [annual(f, r, false)]));
     blocks.push({ type: "heading", text: "Checks" }, checks(f, r));
     blocks.push(...notFoundBlocks(x), inputsAppendix(f, x));
   } else if (x.kind === "build_decision") {
     blocks.push(verdict, ...draftLine(x), ...sponsorStatedBlocks(f, x));
     blocks.push({
       type: "stats",
-      items: held
+      items: sale ? saleStats(f, false) : held
         ? [
             ...heldStats(f, false),
             { label: "Yield on cost", value: f.metric("base", "yield_on_cost") },
@@ -434,9 +469,9 @@ export function buildModel(x: ArtifactInput): DocModel {
             { label: "Equity multiple", value: f.metric("base", "equity_multiple") },
           ],
     });
-    blocks.push(...weakestStress(f, r));
+    blocks.push(...weakestStress(f, r, sale));
     // An approved deal has no gate to move; its stresses stand in for the section.
-    blocks.push(...(r.verdict.code === "APPROVE" ? [stresses(f, r, held)] : changeTheAnswer(f, x)));
+    blocks.push(...(sale ? [stresses(f, r, held, true), { type: "paragraph" as const, muted: true, text: "What would change the answer is not yet available for a deal that sells its units." }] : r.verdict.code === "APPROVE" ? [stresses(f, r, held)] : changeTheAnswer(f, x)));
     blocks.push(...notFoundBlocks(x), { type: "paragraph", muted: true, text: "Every input and its source is listed in the IC memo and the lender package." });
   } else {
     blocks.push(verdict, ...draftLine(x), ...sponsorStatedBlocks(f, x));
@@ -447,15 +482,25 @@ export function buildModel(x: ArtifactInput): DocModel {
       debtRows.push(
         ["Senior loan", f.input(i.senior.amount, "$", "senior_loan_amount")],
         ["Senior rate", f.input(i.senior.ratePct, "%", "senior_rate_pct")],
-        ...(i.senior.amortYears === undefined ? [] : [["Amortization", f.input(i.senior.amortYears, "years", "senior_amort_years")]]),
-        ["Interest-only period", f.input(i.senior.ioMonths, "months", "senior_io_months")],
+        ...(sale ? [] : [
+          ...(i.senior.amortYears === undefined ? [] : [["Amortization", f.input(i.senior.amortYears, "years", "senior_amort_years")]]),
+          ["Interest-only period", f.input(i.senior.ioMonths, "months", "senior_io_months")],
+        ]),
       );
     }
     if (i.mezzanine && i.mezzanine.amount > 0) {
       debtRows.push(["Mezzanine loan", f.input(i.mezzanine.amount, "$", "mezz_loan_amount")], ["Mezzanine rate", f.input(i.mezzanine.ratePct, "%", "mezz_rate_pct")], ["Mezzanine interest accrued above commitment", f.metric("base", "mezz_interest_accrued")]);
     }
-    debtRows.push(
-      ["Loan to cost", f.metric("base", "loan_to_cost")],
+    debtRows.push(["Loan to cost", f.metric("base", "loan_to_cost")]);
+    if (sale) {
+      if (i.forSale!.presaleThresholdPct !== undefined) debtRows.push(
+        [FIELD_BY_KEY.get("senior_presale_threshold_pct")!.label, f.input(i.forSale!.presaleThresholdPct, "%", "senior_presale_threshold_pct")],
+        [FIELD_BY_KEY.get("presold_units_pct")!.label, f.input(i.forSale!.presoldPct, "%", "presold_units_pct")],
+      );
+      for (const key of ["interest_after_completion", "senior_balance_at_completion", ...(i.mezzanine && i.mezzanine.amount > 0 ? ["mezz_balance_at_completion"] : [])]) {
+        debtRows.push([f.metricOf("base", key).label, f.metric("base", key)]);
+      }
+    } else debtRows.push(
       ["Debt yield", f.metric("base", "debt_yield")],
       ["Sizing DSCR (weakest year)", f.metric("base", "sizing_dscr")],
       ["Contractual DSCR (weakest year)", f.metric("base", "contractual_dscr")],
@@ -465,12 +510,12 @@ export function buildModel(x: ArtifactInput): DocModel {
     );
     const refinanceDcr = r.verdict.gates.find((g) => g.key === "dcr_after_refinance");
     if (refinanceDcr) debtRows.push(["Coverage after refinance (DCR), minimum", f.run(refinanceDcr.threshold, refinanceDcr.unit, "gate.dcr_after_refinance.threshold")]);
-    blocks.push({ type: "table", caption: "Debt and coverage", columns: [{ label: "Term" }, { label: "Value", numeric: true }], rows: debtRows });
+    blocks.push({ type: "table", caption: sale ? "Debt" : "Debt and coverage", columns: [{ label: "Term" }, { label: "Value", numeric: true }], rows: debtRows });
     // Beside the refinance loan: the premium is added to it, not paid in cash.
     if (i.refinance?.insurancePremiumPct !== undefined) {
       blocks.push({ type: "paragraph", text: `Mortgage insurance premium: ${f.input(i.refinance.insurancePremiumPct, "%", "refinance_insurance_premium_pct")} (${f.metric("base", "refinance_premium_added")} added to the loan)` });
     }
-    blocks.push(sourcesAndUses(f, x), ...mezzAccrual(f, r), operations(f, x), annual(f, r, true), stresses(f, r, held));
+    blocks.push(sourcesAndUses(f, x), ...mezzAccrual(f, r), ...(sale ? [unitSales(f, x), saleResults(f, x), SALE_OPERATIONS] : [operations(f, x), annual(f, r, true)]), stresses(f, r, held, sale));
     blocks.push({ type: "heading", text: "Checks" }, checks(f, r));
     blocks.push(...notFoundBlocks(x), inputsAppendix(f, x));
   }

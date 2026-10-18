@@ -729,7 +729,7 @@ describe("the reports for a deal that sells its units (task 80)", () => {
       const weakest = result.scenarios.filter((s) => s.key !== "base").sort((a, b) => count(b.key) - count(a.key) || poc(a.key) - poc(b.key))[0]!;
       const model = buildModel({ ...x, result });
       const paragraph = model.blocks.find((b) => b.type === "paragraph" && b.text.startsWith("Weakest stress:"));
-      expect(paragraph?.type === "paragraph" ? paragraph.text : "").toMatch(new RegExp(`^Weakest stress: ${weakest.label.replace(/[.*+?^${}()|[\]\\]/g, "\\$&")}`));
+      expect(paragraph?.type === "paragraph" && paragraph.text.startsWith(`Weakest stress: ${weakest.label}.`)).toBe(true);
       expect(paragraph?.type === "paragraph" ? paragraph.text : "").toContain(`Its profit on cost: ${formatValue(poc(weakest.key), "%")}.`);
       expect(model.blocks).toContainEqual({ type: "paragraph", muted: true, text: SALE_CHANGE });
       expect(model.blocks.some((b) => b.type === "table" && b.columns.some((c) => c.label === "Input moved"))).toBe(false);
