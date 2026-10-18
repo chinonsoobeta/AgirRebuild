@@ -4418,3 +4418,83 @@ describe("card 61c: a budget line that is two lines, a rebate, or an amount paid
     expect(r.other.map((o) => [o.value, o.note])).toContainEqual([3_300_000, TWO_NOTE]);
   });
 });
+
+describe("every figure in a table is used or shown (task 65)", () => {
+  const grid = (name: string, rows: string[][]): NormalizedDocument => ({
+    kind: "pdf",
+    lines: [],
+    tables: [{ name, rows: rows.map((r, i) => r.map((text, j) => ({ text, ref: `${"ABCDEF"[j]}${i + 1}` }))) } as Table],
+    pageCount: 1,
+    needsOcr: false,
+    fullText: "",
+  });
+  /** Every table cell that holds a money figure, a percent or a number of 1,000 or more (not a year) and is in no candidate's or shown figure's location. */
+  const vanished = (d: NormalizedDocument): string[] => {
+    const r = extractCandidates(d);
+    const seen = new Set([...r.candidates, ...r.other].flatMap((c) => c.location.split(", ")));
+    const holdsFigure = (text: string) => {
+      const nums = (text.match(/\d[\d,]*(?:\.\d+)?/g) ?? []).map((n) => Number(n.replace(/,/g, "")));
+      if (nums.length === 0) return false;
+      if (/[$%]/.test(text)) return true;
+      return nums.some((n) => n >= 1000 && !(Number.isInteger(n) && n >= 1900 && n <= 2100));
+    };
+    return d.tables.flatMap((t) => t.rows.flat()).filter((c) => holdsFigure(c.text) && !seen.has(c.ref)).map((c) => c.ref);
+  };
+  const shown = (d: NormalizedDocument) => extractCandidates(d).other.map((o) => [o.location, o.value, o.note]);
+  const read = (d: NormalizedDocument) => extractCandidates(d).candidates.map((c) => [c.fieldKey, c.itemKey, c.value, c.location]);
+
+  test("a plain row shows every figure after the first, with the row's own note", () => {
+    const size = grid("Suites", [["101", "1 bed", "620", "$1,450"]]);
+    expect(vanished(size)).toEqual([]);
+    expect(shown(size)).toEqual([["C1", 620, "No field matches this label"], ["D1", 1450, "No field matches this label"]]);
+    expect(read(size)).toEqual([]);
+    const annual = grid("Units", [["Unit A", "1-bed", "1", "1,950", "23,400"]]);
+    expect(vanished(annual)).toEqual([]);
+    expect(shown(annual).map((s) => [s[0], s[1]])).toEqual([["B1", 1], ["C1", 1], ["D1", 1950], ["E1", 23400]]);
+    expect(read(annual)).toEqual([]);
+    const types = grid("Rents", [["Asking per suite", "$1,650", "$2,050", "$2,450"]]);
+    expect(vanished(types)).toEqual([]);
+    expect(shown(types)).toEqual([["B1", 1650, "No field matches this label"], ["C1", 2050, "No field matches this label"], ["D1", 2450, "No field matches this label"]]);
+    expect(read(types)).toEqual([]);
+  });
+
+  test("a figure after one that was read is shown as another figure in the row", () => {
+    const d = grid("Assumptions", [["Rent growth", "2%", "3%", "3.5%"]]);
+    expect(read(d)).toEqual([["rent_growth_pct", null, 2, "B1"]]);
+    expect(shown(d)).toEqual([["C1", 3, "Another figure in this row was used"], ["D1", 3.5, "Another figure in this row was used"]]);
+    expect(vanished(d)).toEqual([]);
+  });
+
+  test("a budget row with an empty label cell is shown, never summed or totalled", () => {
+    const named = grid("Budget", [["Category", "Item", "Amount"], ["Hard", "Framing", "$1,000,000"], ["Total project cost", "", "$4,101,500"]]);
+    expect(vanished(named)).toEqual([]);
+    expect(shown(named)).toContainEqual(["C3", 4101500, "No budget line matches this label"]);
+    expect(extractCandidates(named).other.find((o) => o.location === "C3")!.context).toContain("Total project cost");
+    expect(read(named)).toEqual([]);
+    const beside = grid("Budget", [["Item", "Category", "Amount"], ["Framing", "Hard", "$1,000,000"], ["", "Total contract", "$2,148,500"]]);
+    expect(vanished(beside)).toEqual([]);
+    expect(shown(beside)).toContainEqual(["C3", 2148500, "No budget line matches this label"]);
+    expect(extractCandidates(beside).other.find((o) => o.location === "C3")!.context).toContain("Total contract");
+    expect(read(beside)).toEqual([]);
+  });
+
+  test("a rent roll's total row is shown with the summary note; its suite numbers are not shown", () => {
+    const roll = grid("Roll", [["Suite", "Type", "Area (sf)", "Monthly rent"], ["101", "1 bed", "620", "$1,450"], ["102", "2 bed", "820", "$1,850"], ["Total", "", "1,440", "$3,300"]]);
+    expect(vanished(roll)).toEqual([]);
+    expect(read(roll)).toEqual([
+      ["unit_count", "1BR", 1, "A2"],
+      ["rentable_area_sf", "1BR", 620, "C2"],
+      ["unit_rent_monthly", "1BR", 1450, "D2"],
+      ["unit_count", "2BR", 1, "A3"],
+      ["rentable_area_sf", "2BR", 820, "C3"],
+      ["unit_rent_monthly", "2BR", 1850, "D3"],
+    ]);
+    expect(shown(roll)).toEqual([["C4", 1440, "A rent roll's summary row is not an assumption"], ["D4", 3300, "A rent roll's summary row is not an assumption"]]);
+  });
+
+  test("a row of years is not shown beyond what it was", () => {
+    expect(shown(grid("Forecast", [["Year", "2025", "2026", "2027"]])).map((s) => s[0])).toEqual(["B1"]);
+    expect(shown(grid("Forecast", [["Forecast for the first years"], ["2025", "2026", "2027"]]))).toEqual([]);
+    expect(vanished(grid("Forecast", [["Year", "2025", "2026", "2027"]]))).toEqual([]);
+  });
+});
