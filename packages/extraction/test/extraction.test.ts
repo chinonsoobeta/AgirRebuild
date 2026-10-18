@@ -4605,6 +4605,17 @@ describe("a per-unit amount in a table cell is not the line's total (task 68)", 
   const read = (d: NormalizedDocument) => extractCandidates(d).candidates.map((c) => [c.fieldKey, c.itemKey, c.value, c.location]);
   const shown = (d: NormalizedDocument) => extractCandidates(d).other.map((o) => [o.location, o.value, o.note]);
 
+  test("audit of card 68: a budget table's per-unit amount and a per-unit loan cell are not the total", () => {
+    const budget = grid("Budget", [["Line item", "Amount"], ["Land", "$900,000"], ["Hard costs", "$400,000 per unit"], ["Soft costs", "$520,000"]]);
+    expect(read(budget).map((c) => [c[0], c[2]])).toEqual([["land_cost", 900000], ["soft_cost", 520000]]);
+    expect(shown(budget)).toContainEqual(["B3", 400000, PER_UNIT]);
+    const door = grid("Budget", [["Line item", "Amount"], ["Land", "$900,000"], ["Hard costs", "$400,000 / door"]]);
+    expect(read(door).map((c) => c[0])).toEqual(["land_cost"]);
+    const loan = grid("Financing", [["Senior loan", "$350,000 per unit"]]);
+    expect(read(loan)).toEqual([]);
+    expect(shown(loan)).toEqual([["B1", 350000, PER_UNIT]]);
+  });
+
   test("a per-unit budget cell is refused and shown with the per-door note", () => {
     const d = grid("Budget", [["Hard costs", "$400,000 per unit"]]);
     expect(read(d)).toEqual([]);
