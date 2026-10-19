@@ -2369,6 +2369,26 @@ describe("share links (task 86a)", () => {
   });
 });
 
+describe("malformed path ids (task 90a)", () => {
+  test("Postgres uuid errors answer a safe 404 without logging; parsed ids still answer 422", async () => {
+    const log = vi.spyOn(console, "error").mockImplementation(() => {});
+    try {
+      for (const [method, path, body] of [
+        ["GET", "/api/deals/none/share-links"],
+        ["POST", "/api/artifacts/none/share-links", { term: "7d" }],
+        ["GET", "/api/deals/none"],
+        ["GET", "/api/runs/none"],
+      ] as const) {
+        const response = await call(alice, method, path, body);
+        expect(response.status, path).toBe(404);
+        expect(response.json, path).toEqual({ error: "Not found." });
+      }
+      expect(log).not.toHaveBeenCalled();
+      expect((await call(alice, "DELETE", "/api/workspaces/none/logo")).status).toBe(422);
+    } finally { log.mockRestore(); }
+  });
+});
+
 describe("clients see and confirm only their own deals (task 89a)", () => {
   let cw: string, dealA: string, dealB: string, runA: string, runB: string, artifactA: string;
   let dana: Session, erin: Session, frank: Session, gus: Session;
