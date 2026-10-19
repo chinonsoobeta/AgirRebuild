@@ -21,12 +21,15 @@ async function createWorkspace(tx: Db, name: string, reviewMode?: string): Promi
   return r!.id;
 }
 
+const INVITE_GONE = "This invitation is not available. It may have been used, revoked or expired.";
+
 const PG_STATUS: Record<string, number> = { "42501": 403, "28000": 401, P0002: 404, "22023": 422, "23505": 409, "40001": 409, "23514": 422 };
 
 export function createApp({ db, store, secureCookies, demoSignIn = false }: AppDeps) {
   const app = new Hono<Env>();
   const authLimit = rateLimiter(20, 60_000);
   const shareLimit = rateLimiter(60, 60_000);
+  const inviteLimit = rateLimiter(60, 60_000);
   const fileResponse = async (a: { kind: string; format: string; storage_key: string | null; run_number: number; deal: string }, inline: boolean) => {
     const bytes = await store.get(a.storage_key!);
     const mime = { pdf: "application/pdf", docx: "application/vnd.openxmlformats-officedocument.wordprocessingml.document", xlsx: "application/vnd.openxmlformats-officedocument.spreadsheetml.sheet" }[a.format] ?? "application/octet-stream";
@@ -42,18 +45,21 @@ export function createApp({ db, store, secureCookies, demoSignIn = false }: AppD
     if (err instanceof z.ZodError) return c.json({ error: "Some fields are missing or not valid.", issues: err.issues }, 422);
     const code = (err as { code?: string }).code;
     if (code && PG_STATUS[code]) return c.json({ error: err.message }, PG_STATUS[code] as 400);
-    const shared = c.req.path.startsWith("/api/share/");
+    const shared = c.req.path.startsWith("/api/share/") || c.req.path.startsWith("/api/invite/");
     console.error(JSON.stringify({ at: new Date().toISOString(), event: "api.error", path: shared ? "/api/share/…" : c.req.path, error: shared ? "Shared link request failed" : err.message }));
     return c.json({ error: "Something went wrong on our side. It has been logged." }, 500);
   });
 
-  app.use("/api/share/*", async (c, next) => {
-    if (shareLimit(c.req.header("x-forwarded-for") ?? "local")) await next();
-    else c.res = c.json({ error: "Too many requests. Wait a minute." }, 429);
-    c.header("cache-control", "no-store");
-    c.header("referrer-policy", "no-referrer");
-    c.header("x-robots-tag", "noindex");
-  });
+  // Shared links and invitations carry a secret in the path: rate-limited, never cached, never sent on as a referrer.
+  for (const [prefix, limit] of [["/api/share/*", shareLimit], ["/api/invite/*", inviteLimit]] as const) {
+    app.use(prefix, async (c, next) => {
+      if (limit(c.req.header("x-forwarded-for") ?? "local")) await next();
+      else c.res = c.json({ error: "Too many requests. Wait a minute." }, 429);
+      c.header("cache-control", "no-store");
+      c.header("referrer-policy", "no-referrer");
+      c.header("x-robots-tag", "noindex");
+    });
+  }
 
   // Mutations must carry a custom header, which a cross-site form cannot send.
   app.use("/api/*", async (c, next) => {
@@ -74,11 +80,27 @@ export function createApp({ db, store, secureCookies, demoSignIn = false }: AppD
   app.post("/api/auth/signup", async (c) => {
     if (!authLimit(c.req.header("x-forwarded-for") ?? "local")) return c.json({ error: "Too many attempts. Wait a minute." }, 429);
     const body = z
-      .object({ email: z.string().email(), name: z.string().min(1).max(120), password: z.string().min(10, "Use at least 10 characters").max(200), reviewMode: z.enum(REVIEW_MODES).optional() })
+      .object({ email: z.string().email(), name: z.string().min(1).max(120), password: z.string().min(10, "Use at least 10 characters").max(200), reviewMode: z.enum(REVIEW_MODES).optional(),
+        invite: z.string().min(1).max(200).optional() })
       .parse(await c.req.json());
     const email = body.email.toLowerCase();
     const [exists] = await db.query(`select 1 from users where email = $1`, [email]);
     if (exists) return c.json({ error: "An account with that email already exists." }, 409);
+    // Through an invitation (card 89): a client of one deal, with no workspace of its own, in one transaction.
+    if (body.invite) {
+      const hash = sha256(body.invite);
+      const [live] = await db.query(`select * from fn_peek_client_invite($1)`, [hash]);
+      if (!live) return c.json({ error: INVITE_GONE }, 404);
+      const passwordHash = await hashPassword(body.password);
+      const userId = await db.transaction(async (tx) => {
+        const [u] = await tx.query<{ id: string }>(`insert into users (email, name, password_hash) values ($1, $2, $3) returning id`, [email, body.name, passwordHash]);
+        const [used] = await tx.query<{ deal: string | null }>(`select fn_use_client_invite($1, $2) as deal`, [hash, u!.id]);
+        if (!used?.deal) throw new HttpError(404, INVITE_GONE);
+        return u!.id;
+      });
+      setCookie(c, COOKIE, await createSession(db, userId), cookieOpts);
+      return c.json({ ok: true });
+    }
     const [u] = await db.query<{ id: string }>(`insert into users (email, name, password_hash) values ($1, $2, $3) returning id`, [
       email,
       body.name,
@@ -133,6 +155,11 @@ export function createApp({ db, store, secureCookies, demoSignIn = false }: AppD
       });
     });
   }
+
+  app.get("/api/invite/:secret", async (c) => {
+    const [live] = await db.query<{ workspace: string; deal: string }>(`select * from fn_peek_client_invite($1)`, [sha256(c.req.param("secret"))]);
+    return live ? c.json(live) : c.json({ error: INVITE_GONE }, 404);
+  });
 
   // Everything below needs a session.
   app.use("/api/*", async (c, next) => {
@@ -591,6 +618,30 @@ export function createApp({ db, store, secureCookies, demoSignIn = false }: AppD
   app.post("/api/share-links/:id/revoke", async (c) => {
     await as(c, (tx) => tx.query(`select fn_revoke_share_link($1)`, [c.req.param("id")]));
     return c.json({ ok: true });
+  });
+
+  // ---- Client invitations (card 89): the link is shown once; only its hash is stored. ----------------
+  app.post("/api/deals/:id/invites", async (c) => {
+    const secret = randomBytes(32).toString("base64url");
+    const [made] = await as(c, (tx) => tx.query<{ id: string }>(`select fn_create_client_invite($1, $2) as id`, [c.req.param("id"), sha256(secret)]));
+    return c.json({ id: made!.id, url: `/i/${secret}` });
+  });
+
+  app.get("/api/deals/:id/invites", async (c) => c.json(await as(c, (tx) => tx.query(
+    `select i.id, i.created_at, i.expires_at, maker.name as created_by, i.used_at, client.name as used_by, i.revoked_at, revoker.name as revoked_by
+      from client_invites i left join users maker on maker.id = i.created_by left join users client on client.id = i.used_by
+      left join users revoker on revoker.id = i.revoked_by where i.deal_id = $1 order by i.created_at desc`, [c.req.param("id")]))));
+
+  app.post("/api/invites/:id/revoke", async (c) => {
+    await as(c, (tx) => tx.query(`select fn_revoke_client_invite($1)`, [c.req.param("id")]));
+    return c.json({ ok: true });
+  });
+
+  // A signed-in person joins through an invitation; staff of that workspace are refused (409).
+  app.post("/api/invite/:secret/accept", async (c) => {
+    const [used] = await db.transaction((tx) =>
+      tx.query<{ deal: string | null }>(`select fn_use_client_invite($1, $2) as deal`, [sha256(c.req.param("secret")), c.get("user").id]));
+    return used?.deal ? c.json({ ok: true, dealId: used.deal }) : c.json({ error: INVITE_GONE }, 404);
   });
 
   // ---- Audit ------------------------------------------------------------------------------
