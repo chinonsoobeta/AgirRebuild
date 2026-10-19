@@ -681,7 +681,8 @@ export function buildModel(x: ArtifactInput): DocModel {
   // Every amount prints with "$"; the deal says once which dollar that is.
   const currency = x.deal.currency ? `All amounts in ${CURRENCY_NAMES[x.deal.currency][0]} (${x.deal.currency})` : "Currency not stated";
   const logo = x.kind === "lender_package" ? x.broker?.logo : undefined;
-  const scale = logo ? Math.min(1, 48 / logo.height) : 1;
+  // At most 48 px high and 240 px wide, keeping its aspect.
+  const scale = logo ? Math.min(1, 48 / logo.height, 240 / logo.width) : 1;
   return {
     ...(logo ? { brand: { preparedBy: `Prepared by ${f.ident(x.broker!.name, "broker.name")}`,
       logo: { ...logo, width: Math.max(1, Math.round(logo.width * scale)), height: Math.round(logo.height * scale) } } } : {}),

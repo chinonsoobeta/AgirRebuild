@@ -206,11 +206,12 @@ export function createApp({ db, store, secureCookies, demoSignIn = false, trustP
     const [m] = await as(c, (tx) => tx.query<{ role: string }>(`select role from workspace_members where workspace_id = $1 and user_id = agir_uid()`, [ws]));
     if (m?.role !== "owner") return c.json({ error: "Only the workspace owner can change its logo." }, 403);
     if (Number(c.req.header("content-length") ?? 0) > LOGO_MAX_BYTES) return c.json({ error: "The image is larger than 500 KB." }, 413);
-    const bytes = new Uint8Array(await c.req.arrayBuffer());
-    if (bytes.byteLength > LOGO_MAX_BYTES) return c.json({ error: "The image is larger than 500 KB." }, 413);
+    const bytes = await readCapped(c.req.raw.body, LOGO_MAX_BYTES);
+    if (!bytes) return c.json({ error: "The image is larger than 500 KB." }, 413);
     const image = imageInfo(bytes);
     if (image === "unknown") return c.json({ error: "Upload a PNG or JPEG image." }, 415);
-    if (image === "unreadable") return c.json({ error: "The image's width and height could not be read." }, 422);
+    if (image === "unreadable") return c.json({ error: "The image could not be read: its width and height are missing or the file is incomplete." }, 422);
+    if (image.width > LOGO_MAX_SIDE || image.height > LOGO_MAX_SIDE) return c.json({ error: "The image is larger than 4,096 pixels on a side." }, 422);
     const put = await store.put(bytes);
     await as(c, (tx) => tx.query(`select fn_set_logo($1, $2, $3, $4, $5)`, [ws, put.key, image.mime, image.width, image.height]));
     return c.json(image);
@@ -699,16 +700,43 @@ export function createApp({ db, store, secureCookies, demoSignIn = false, trustP
 }
 
 const LOGO_MAX_BYTES = 500 * 1024;
+const LOGO_MAX_SIDE = 4096;
+const PNG_IEND = [0, 0, 0, 0, 0x49, 0x45, 0x4e, 0x44, 0xae, 0x42, 0x60, 0x82];
 
-/** A logo's type from its first bytes (never its name), and its size from the PNG IHDR chunk or the JPEG start-of-frame marker. */
+/** Reads a request body up to `max` bytes; past that it stops reading and cancels the rest (null). */
+async function readCapped(body: ReadableStream<Uint8Array> | null, max: number): Promise<Uint8Array | null> {
+  if (!body) return new Uint8Array();
+  const reader = body.getReader();
+  const chunks: Uint8Array[] = [];
+  let size = 0;
+  for (;;) {
+    const { done, value } = await reader.read();
+    if (done) break;
+    size += value.byteLength;
+    if (size > max) { await reader.cancel(); return null; }
+    chunks.push(value);
+  }
+  const out = new Uint8Array(size);
+  let at = 0;
+  for (const c of chunks) { out.set(c, at); at += c.byteLength; }
+  return out;
+}
+
+/**
+ * A logo's type from its first bytes (never its name), and its size from the PNG IHDR chunk or the JPEG start-of-frame marker.
+ * The file must also end as its format does (the PNG IEND chunk, the JPEG end-of-image marker), so a header alone is refused.
+ * This is not a decoder: a whole file with damaged image data still passes.
+ */
 export function imageInfo(b: Uint8Array): { mime: "image/png" | "image/jpeg"; width: number; height: number } | "unknown" | "unreadable" {
   const dv = new DataView(b.buffer, b.byteOffset, b.byteLength);
   const sized = (mime: "image/png" | "image/jpeg", width: number, height: number) => (width > 0 && height > 0 ? { mime, width, height } : "unreadable" as const);
   if (b.length >= 8 && [0x89, 0x50, 0x4e, 0x47, 0x0d, 0x0a, 0x1a, 0x0a].every((x, i) => b[i] === x)) {
-    if (b.length < 24 || String.fromCharCode(...b.slice(12, 16)) !== "IHDR") return "unreadable";
+    if (b.length < 45 || dv.getUint32(8) !== 13 || String.fromCharCode(...b.slice(12, 16)) !== "IHDR") return "unreadable";
+    if (!PNG_IEND.every((x, i) => b[b.length - 12 + i] === x)) return "unreadable";
     return sized("image/png", dv.getUint32(16), dv.getUint32(20));
   }
   if (b.length >= 3 && b[0] === 0xff && b[1] === 0xd8 && b[2] === 0xff) {
+    if (b[b.length - 2] !== 0xff || b[b.length - 1] !== 0xd9) return "unreadable";
     let i = 2;
     while (i + 4 <= b.length) {
       if (b[i] !== 0xff) return "unreadable";

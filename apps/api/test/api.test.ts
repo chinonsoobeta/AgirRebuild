@@ -2725,7 +2725,7 @@ describe("the broker's logo (task 89d)", () => {
     expect((await upload(alice, whole.slice(0, 24))).status).toBe(422);
     expect((await upload(alice, whole.slice(0, -12))).status).toBe(422);
     expect((await upload(alice, jpeg(10, 10).slice(0, -2))).status).toBe(422);
-    for (const [w, h] of [[4097, 1], [1, 4097]]) {
+    for (const [w, h] of [[4097, 1], [1, 4097]] as const) {
       const r = await upload(alice, png(w, h));
       expect(r.status, `${w}x${h}`).toBe(422);
       expect(r.json.error).toBe("The image is larger than 4,096 pixels on a side.");
