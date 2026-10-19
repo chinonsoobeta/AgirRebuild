@@ -3,7 +3,7 @@ import { readFileSync } from "node:fs";
 import { createHash } from "node:crypto";
 import * as contracts from "@agir/contracts";
 import { FIELDS, FIELD_BY_KEY, TEMPLATES, policyFor, type EngineInput } from "@agir/contracts";
-import { assemble, canonicalJson, underwrite, type AssumptionRow } from "../src/index.ts";
+import { irrRoots, runWaterfall, validateInput, assemble, canonicalJson, underwrite, type AssumptionRow } from "../src/index.ts";
 import { allEquityDeal, developmentDeal } from "./fixtures.ts";
 import { fundConstruction, placeConstructionCosts } from "../src/ledger.ts";
 
@@ -24,7 +24,7 @@ const rentalOnly = [
   "stabilized_occupancy_pct", "expense_ratio_pct", "fixed_opex_annual", "property_tax_annual", "variable_expense_pct",
   "other_income_annual", "rent_growth_pct", "expense_growth_pct", "lease_up_ramp", "exit_cap_rate_pct", "selling_costs_pct",
   "min_dscr_covenant", "refinance_month", "refinance_amount", "refinance_ltv_pct", "refinance_rate_pct", "refinance_amort_years",
-  "refinance_io_months", "refinance_insurance_premium_pct", "refinance_and_hold", "lp_share_pct", "preferred_return_pct", "gp_promote_pct",
+  "refinance_io_months", "refinance_insurance_premium_pct", "refinance_and_hold",
   "senior_amort_years", "senior_io_months", "mezz_amort_years", "mezz_io_months",
 ];
 const requiredSale = ["presold_units_pct", "deposit_pct", "absorption_units_per_month", "sales_commission_pct", "closing_lag_months", "unsold_carry_monthly"];
@@ -356,5 +356,79 @@ describe("a sale checks the figures a person states (task 81)", () => {
   test.each([false, true])("the populated rental/held fixture keeps its exact checks array: held=%s", (held) => {
     const input = checkFixture(held);
     expect(underwrite(input, policyFor(input)).checks).toEqual(held ? CHECK_PINS.held : CHECK_PINS.rental);
+  });
+});
+
+describe("a deal that sells its units can have partners (task 84c)", () => {
+  const split = { lpSharePct: 90, preferredReturnPct: 8, gpPromotePct: 20 };
+  const sha = (x: unknown) => createHash("sha256").update(canonicalJson(x)).digest("hex");
+  const totals = (flows: { amount: number }[]) => ({
+    contributed: -flows.filter((f) => f.amount < 0).reduce((n, f) => n + f.amount, 0),
+    distributed: flows.filter((f) => f.amount > 0).reduce((n, f) => n + f.amount, 0),
+  });
+  test("Kestrel reads the three stated partner fields exactly as the rental path", () => {
+    const { input, readiness } = assemble([...rowsFor(), row("lp_share_pct", 90), row("preferred_return_pct", 8), row("gp_promote_pct", 20)]);
+    expect(readiness.status).toBe("ready");
+    expect(input!.waterfall).toEqual(split);
+  });
+  test("unstated Kestrel retains its input hash and has no waterfall key", () => {
+    const { input } = assemble(rowsFor());
+    expect(input).not.toHaveProperty("waterfall");
+    expect(sha(input)).toBe("6da97ac4e573322f49634e2a7bd90236f7ba07554f9e40ff452118009c13c1b2");
+  });
+  test.each(["kestrel-row-townhomes", "alder-court-condo"])("%s uses the same hand waterfall and conserves contributed and distributed cash", (slug) => {
+    const input = { ...fromOracle(oracle(slug).inputs), waterfall: split };
+    const result = underwrite(input, policyFor(input));
+    const w = runWaterfall(result.equityFlows, split);
+    const metric = (key: string) => result.scenarios[0]!.metrics.find((m) => m.key === key)!;
+    expect(metric("lp_irr")).toMatchObject({ status: "VALID", value: irrRoots(w.lp)[0]! * 100 });
+    expect(metric("gp_irr")).toMatchObject({ status: "VALID", value: irrRoots(w.gp)[0]! * 100 });
+    expect(metric("gp_promote")).toMatchObject({ status: "VALID", value: w.promote });
+    const lp = totals(w.lp), gp = totals(w.gp), deal = totals(result.equityFlows);
+    expect(Math.abs(lp.contributed + gp.contributed - deal.contributed)).toBeLessThanOrEqual(1);
+    expect(Math.abs(lp.distributed + gp.distributed - deal.distributed)).toBeLessThanOrEqual(1);
+    for (const stress of policyFor(input).stresses) {
+      const scenario = result.scenarios.find((s) => s.key === stress.key)!;
+      expect(scenario.metrics.find((m) => m.key === "lp_irr")!.status).not.toBe("NOT_APPLICABLE");
+    }
+  });
+  test("with no promote or preferred return both partners earn the equity IRR", () => {
+    const input = { ...fromOracle(oracle().inputs), waterfall: { ...split, preferredReturnPct: 0, gpPromotePct: 0 } };
+    const result = underwrite(input, policyFor(input));
+    for (const scenario of result.scenarios) {
+      const value = (key: string) => scenario.metrics.find((m) => m.key === key)!.value!;
+      expect(Math.abs(value("lp_irr") - value("equity_irr"))).toBeLessThanOrEqual(1e-9);
+      expect(Math.abs(value("gp_irr") - value("equity_irr"))).toBeLessThanOrEqual(1e-9);
+    }
+  });
+  test.each(["kestrel-row-townhomes", "alder-court-condo"] as const)("%s preserves its unstated result hash and every non-partner metric and gate", (slug) => {
+    const input = fromOracle(oracle(slug).inputs);
+    const base = underwrite(input, policyFor(input));
+    expect(sha(base)).toBe({"kestrel-row-townhomes": "c134f47403e76744613c5afd7b3aca6860e7026021a8c4e2a3079091d1ddf60b", "alder-court-condo": "ddee2c68ac11fd646230ca70c21f8a8efda35f0914bc664a89118c4dff296df4"}[slug]);
+    const result = underwrite({ ...input, waterfall: split }, policyFor(input));
+    const rest = (r: typeof result) => r.scenarios.map((s) => ({ ...s, metrics: s.metrics.filter((m) => !["lp_irr", "gp_irr", "gp_promote"].includes(m.key)) }));
+    expect(rest(result)).toEqual(rest(base));
+    expect(result.verdict.gates).toEqual(base.verdict.gates);
+  });
+  test("an invalid sale LP share is refused with the unchanged rental message", () => {
+    const waterfall = { ...split, lpSharePct: 101 };
+    expect(() => validateInput({ ...fromOracle(oracle().inputs), waterfall })).toThrow("LP share must be above 0 and below 100");
+    expect(() => validateInput({ ...developmentDeal(), waterfall })).toThrow("LP share must be above 0 and below 100");
+  });
+  test("no contributions gives the rental not-meaningful reason for all partner metrics", () => {
+    const input: EngineInput = { ...fromOracle(oracle().inputs), waterfall: split, constructionMonths: 0,
+      budget: { land: 0, hard: 0, soft: 0, contingency: 0, other: 0 }, senior: { amount: 0, ratePct: 0, ioMonths: 0 },
+      forSale: { ...fromOracle(oracle().inputs).forSale!, carryMonthly: 0 } };
+    const result = underwrite(input, policyFor(input));
+    for (const key of ["lp_irr", "gp_irr", "gp_promote"]) expect(result.scenarios[0]!.metrics.find((m) => m.key === key))
+      .toMatchObject({ status: "NOT_MEANINGFUL", value: null, reason: "Deal returns are not meaningful." });
+  });
+  test("partner flows with no single IRR use the rental reasons", () => {
+    const input = { ...fromOracle(oracle().inputs), waterfall: split };
+    input.forSale = { ...input.forSale!, units: input.forSale!.units.map((u) => ({ ...u, price: 0 })) };
+    const result = underwrite(input, policyFor(input));
+    for (const [key, reason] of [["lp_irr", "The LP cash flows have no single IRR."], ["gp_irr", "The GP cash flows have no single IRR."]]) {
+      expect(result.scenarios[0]!.metrics.find((m) => m.key === key)).toMatchObject({ status: "NOT_MEANINGFUL", value: null, reason });
+    }
   });
 });
