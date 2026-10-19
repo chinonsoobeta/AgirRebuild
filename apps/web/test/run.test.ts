@@ -243,7 +243,7 @@ describe("share links on the web (task 86b)", () => {
   const link = (id: string, expires_at: string | null, revoked_at: string | null = null) => ({ id, artifact_id: "ready", kind: "ic_memo", format: "pdf",
     run_number: 1, term: expires_at ? "7d" : "none", expires_at, created_at: "2026-10-19T12:00:00Z", created_by: "Alice Analyst",
     revoked_at, revoked_by: revoked_at ? "Bob Approver" : null, openings: 3, last_opened_at: "2026-10-19T13:00:00Z" });
-  const render = (element = createElement(Reports, { dealId: "links" })) => {
+  const render = (element: Parameters<typeof renderToStaticMarkup>[0] = createElement(Reports, { dealId: "links" })) => {
     queryState.index = 0; queryState.nodes = [];
     return renderToStaticMarkup(element).replaceAll(queryState.secret, "[redacted]");
   };
