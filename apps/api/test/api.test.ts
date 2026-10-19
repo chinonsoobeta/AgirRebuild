@@ -2890,3 +2890,22 @@ describe("card 93b scanned uploads", () => {
     expect(a.sources[0]).toMatchObject({ ocr: true, rule: "line:prose" });
   }, 60_000);
 });
+
+
+describe("card 93c artifact language", () => {
+  test("stores and renders French, audits its language, lists it and names the download", async () => {
+    const made = await call(alice, "POST", `/api/runs/${run}/artifacts`, { kind: "ic_memo", format: "docx", lang: "fr" });
+    expect(made.status).toBe(200);
+    await work();
+    const [row] = await db.query(`select lang, status from artifacts where id = $1`, [made.json.id]);
+    expect(row).toMatchObject({ lang: "fr", status: "ready" });
+    const [event] = await db.query(`select payload from audit_events where entity_id = $1 and action = 'artifact.requested'`, [made.json.id]);
+    expect(event!.payload).toMatchObject({ lang: "fr" });
+    expect((await call(alice, "GET", `/api/deals/${deal}/artifacts`)).json.find((a: any) => a.id === made.json.id).lang).toBe("fr");
+    const file = await app.request(`/api/artifacts/${made.json.id}/file`, { headers: { cookie: alice.cookie } });
+    expect(file.headers.get("content-disposition")).toMatch(/-fr\.docx/);
+  });
+  test("refuses a French model export explicitly", async () => {
+    expect(await call(alice, "POST", `/api/runs/${run}/artifacts`, { kind: "model_export", format: "xlsx", lang: "fr" })).toMatchObject({ status: 422, json: { error: "The model export is in English only for now." } });
+  });
+});

@@ -314,6 +314,17 @@ describe("share links on the web (task 86b)", () => {
     expect(buttons.length).toBe(1);
     expect(Boolean(buttons[0]!.props.disabled)).toBe(false);
   });
+  it("card 93c: requests the interface language, keeps Excel English, and labels French drafts", async () => {
+    queryState.lang = "fr";
+    queryState.run = { result: rental };
+    queryState.artifacts = [{ ...artifact("french", "ready"), lang: "fr" }];
+    expect(render()).toContain("Français, traduction provisoire");
+    const make = queryState.nodes.filter((n) => n.tag === "button" && n.props.className === "btn" && n.props.type === "button");
+    for (const b of make) await b.props.onClick();
+    const bodies = vi.mocked(api.post).mock.calls.filter(([path]) => path.endsWith("/artifacts")).map(([, body]) => body as { kind: string; lang: string });
+    expect(bodies.length).toBeGreaterThan(1);
+    for (const body of bodies) expect(body.lang).toBe(body.kind === "model_export" ? "en" : "fr");
+  });
   it("offers four terms, makes a link and shows its once-only copy field after success", async () => {
     render(); await button("Share").props.onClick();
     const choices = render();

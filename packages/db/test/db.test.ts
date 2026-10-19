@@ -214,3 +214,11 @@ describe("audit", () => {
     await expect(migrate(db)).rejects.toThrow(/edited after it was applied/);
   });
 });
+
+
+test("card 93c: artifact language uses one fixed-search-path function with a default", async () => {
+  const [r] = await db.query<{ proconfig: string[]; pronargdefaults: number }>(`select proconfig, pronargdefaults from pg_proc where oid = to_regprocedure('fn_request_artifact(uuid,text,text,text)')`);
+  expect(r).toMatchObject({ proconfig: ["search_path=public"], pronargdefaults: 1 });
+  const [old] = await db.query(`select to_regprocedure('fn_request_artifact(uuid,text,text)') as old`);
+  expect(old!.old).toBeNull();
+});

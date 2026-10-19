@@ -427,6 +427,14 @@ describe("the build decision report", () => {
     for (const g of failing) expect(rows.filter((r) => r[0] === g.label)).toHaveLength(1);
     expect(rows.filter((r) => r[0] !== "").length).toBe(failing.length);
   });
+  test("card 93c: the French worst case fits two pages", async () => {
+    const x = { ...dealInput(0.8, (i) => ({ ...i, revenue: Array.from({ length: 8 }, (_, k) => ({ key: `F${k}`, label: `Logement ${k + 1}`, basis: "per_unit" as const, units: 15, rentMonthly: 1800 + 150 * k })) })), lang: "fr" } as ArtifactInput;
+    x.assumptions = mapleInput("build_decision").assumptions.slice(0, 6).map((a) => ({ ...a, sponsorStated: true }));
+    const result = await renderArtifact(x, "pdf");
+    expect(result.provenance).toMatchObject({ pass: true, orphans: [] });
+    const { PDFDocument } = await import("pdf-lib");
+    expect((await PDFDocument.load(result.bytes)).getPageCount()).toBeLessThanOrEqual(2);
+  });
   test("the worst case (five failing gates, many rents, sponsor-stated inputs) fits two pages", async () => {
     const many = (i: EngineInput): EngineInput => ({ ...i, revenue: Array.from({ length: 8 }, (_, k) => ({ key: `T${k}`, label: `Type ${k + 1}`, basis: "per_unit" as const, units: 15, rentMonthly: 1_800 + 150 * k })) });
     const x = dealInput(0.8, many);
@@ -1414,5 +1422,51 @@ describe("the broker's logo on the lender package (task 89d)", () => {
       expect(html({ ...x, broker })).toBe(html(x));
       expect(hasMedia((await renderArtifact({ ...x, broker }, "docx")).bytes)).toBe(false);
     }
+  });
+});
+
+
+describe("card 93c draft French reports", () => {
+  const banner = "Traduction provisoire : ce rapport n'a pas encore été révisé par un traducteur qualifié. En cas de divergence, la version anglaise fait foi.";
+  test.each((["ic_memo", "lender_package", "build_decision", "partner_memo"] as const).flatMap((kind) => (["pdf", "docx"] as const).map((format) => ({ kind, format }))))("$kind $format is a French draft with sourced French figures", async ({ kind, format }) => {
+    const x = { ...mapleInput(kind), lang: "fr" } as ArtifactInput;
+    x.input = { ...x.input, waterfall: { lpSharePct: 90, preferredReturnPct: 8, gpPromotePct: 20 } };
+    x.result = underwrite(x.input, x.policy);
+    x.assumptions = [
+      { fieldKey: "land_cost", itemKey: null, label: "Land cost", unit: "$", value: 2450000, sourceKind: "analyst", source: "Translation example", sponsorStated: true },
+      { fieldKey: "exit_cap_rate_pct", itemKey: null, label: "Exit cap rate", unit: "%", value: 5.5, sourceKind: "analyst", source: "Translation example", sponsorStated: true },
+    ];
+    const html = renderHtml(buildModel(x));
+    expect(html).toContain('<html lang="fr-CA">');
+    expect(visibleText(html.slice(html.indexOf("<body>") + 6)).trimStart()).toMatch(/^Traduction provisoire/);
+    const text = visibleText(html).replace(/\s/g, " ");
+    expect(text).toContain("2 450 000 $");
+    expect(text).toContain("5,50 %");
+    const artifact = await renderArtifact(x, format);
+    expect(artifact.provenance).toMatchObject({ pass: true, orphans: [] });
+    if (format === "docx") {
+      const mammoth = await import("mammoth");
+      const extracted = await mammoth.extractRawText({ buffer: Buffer.from(artifact.bytes) });
+      expect(extracted.value.trimStart().startsWith(banner)).toBe(true);
+    } else {
+      const pdfjs = await import("pdfjs-dist/legacy/build/pdf.mjs");
+      const task = pdfjs.getDocument({ data: new Uint8Array(artifact.bytes), useSystemFonts: true });
+      try {
+        const page = await (await task.promise).getPage(1);
+        const content = await page.getTextContent();
+        const first = content.items.map((i) => "str" in i ? i.str : "").join(" ").replace(/\s+/g, " ").trim();
+        expect(first.startsWith(banner)).toBe(true);
+      } finally { await task.destroy(); }
+    }
+  });
+  test("translates stored English check messages while leaving the run unchanged", () => {
+    const x = { ...mapleInput("ic_memo"), lang: "fr", input: allEquityDeal() } as ArtifactInput;
+    x.result = underwrite(x.input, POLICY_V1);
+    const before = canonicalJson(x.result);
+    const check = x.result.checks.find((c) => c.key === "sources_cover_uses")!;
+    const text = visibleText(renderHtml(buildModel(x)));
+    expect(text).not.toContain(check.message);
+    expect(text).toContain("Aucun montant de fonds propres n'est indiqué");
+    expect(canonicalJson(x.result)).toBe(before);
   });
 });
