@@ -40,7 +40,7 @@ export type Scope = "senior" | "mezzanine" | "refinance";
 
 const SCOPE_WORDS: Record<Scope, RegExp> = {
   mezzanine: /\b(mezzanine|mezz|second mortgage|2nd mortgage|second charge|second[- ]ranking|second[- ]position|junior|subordinate loan|deuxieme rang|deuxieme hypotheque|pret de second rang|second rang|(?:mic|mortgage investment corporation) (?:second|2nd)|private second|(?<=\b(?:mortgages?|loans?|charges?|lenders?|hypotheques?|prets?)\b.{0,80})(?:the\s+)?second(?=\s*(?:is\b|:|\$))|^\s*second\s*$|preteur prive de second rang)\b/,
-  refinance: /\b(take-?out|take out|refinanc\w*|permanent loan|permanent financing|exit financing|long[- ]term mortgage|pret permanent|financement permanent|financement de sortie|permanent (?:mortgage|debt|facility|lender)|permanent (?=(?:io|interest|amorti[sz]\w*|repayment|rate|term)\b)|conversion (?:rate|coupon)|converts? to (?:(?:an?|the) )?(?:\$|\d|(?:[a-z-]+ ){0,2}(?:loan|mortgage|debt|financing|facility|rate))|term[- ]out|hypotheque permanente|pret a terme|reprise(?!\s+(?:des?\s+|du\s+|de la\s+)?(?:travaux|chantier|construction|possession|bail|baux|terrain)))\b/,
+  refinance: /\b(take-?out|take out|refi|refinanc\w*|permanent loan|permanent financing|exit financing|long[- ]term mortgage|pret permanent|financement permanent|financement de sortie|permanent (?:mortgage|debt|facility|lender)|permanent (?=(?:io|interest|amorti[sz]\w*|repayment|rate|term)\b)|conversion (?:rate|coupon)|converts? to (?:(?:an?|the) )?(?:\$|\d|(?:[a-z-]+ ){0,2}(?:loan|mortgage|debt|financing|facility|rate))|term[- ]out|hypotheque permanente|pret a terme|reprise(?!\s+(?:des?\s+|du\s+|de la\s+)?(?:travaux|chantier|construction|possession|bail|baux|terrain)))\b/,
   senior: /\b(senior|construction (?:loan|facility)|first mortgage|premier rang|pret de construction)\b/,
 };
 const TERM_SHEET_RE = /\b(term sheet|feuille de modalites)\b/;
@@ -84,7 +84,7 @@ const VALUE_RE = /\b(value|valeur)\b/;
 /** An explicitly named exit cap-rate label; valuation can qualify this input, but a stated value cannot. */
 export function isExitCapLabel(raw: string): boolean {
   const label = normalizeLabel(raw).label;
-  return CAP_RE.test(label) && /\b(exit|terminal|reversion|sortie)\b/.test(label) && !VALUE_RE.test(label);
+  return CAP_RE.test(label) && /\b(exit|terminal|reversion|going[- ]out|sortie)\b/.test(label) && !VALUE_RE.test(label);
 }
 
 // A yearly rent, a per-unit or per-area label, and the rent figures they refuse.
@@ -212,7 +212,7 @@ function lenderFigure(rawLabel: string, t: NumberToken, opts: MapOptions): strin
   const lastFour = (x: string[]) => (x.join(" ").match(/loan to (?:cost|value)|debt service coverage|\S+/g) ?? []).slice(-4);
   const near = (prose || opts.ahead ? lastFour([...words, ...words_(opts.ahead ?? "").split(" ")]) : words).join(" ");
   const capped = CAPPED_RE.test(near) && !(money && CAPPED_COST_RE.test(plain) && !LOAN_WORD_RE.test(plain));
-  if ((LIMIT_RE.test(without(near, LIMIT_RE)) || capped) && !COVERAGE_RE.test(plain)) return "A lender's limit, not the deal's figure";
+  if ((LIMIT_RE.test(without(near.replace(/\b(exit|terminal|reversion|going[- ]out|sortie) cap of\b/g, "$1 cap"), LIMIT_RE)) || capped) && !COVERAGE_RE.test(plain)) return "A lender's limit, not the deal's figure";
   // The figure's own noun decides: an interest-only word before it or right after it makes it the IO period; one further on in the sentence does not.
   const ownIo = IO_RE.test(plain) || IO_START_RE.test(prose && at >= 0 ? ctx.slice(at + raw.length) : foldText(opts.after ?? ""));
   if ((t.unit === "months" || t.unit === "years") && ((TERM_RE.test(without(plain, TERM_RE)) && !AMORT_RE.test(plain)) || TERM_AFTER_RE.test(tail)) && !ownIo) return "A loan's term, not the build period, hold or amortization";
@@ -441,7 +441,7 @@ const LOAN_WORDS = /\b(loans?|debt|mortgage|facility|prets?|dette|hypotheque|hyp
 const LOAN_FILLER = /\b(from|with|at|de|du|des|d|avec|chez|a|au|aux|by|the|le|la|les|l|of|for|pour|is|est|are|sont|and|et)\b/g;
 const IO_AFTER_RE = /^\s*(?:of\s+|d\s*)?(?:io\b|interest[- ]only|interets? seulement)/;
 const AMORT_AFTER_RE = /^\s*(?:d\s*)?amorti[sz]/;
-const BASIS_AFTER_RE = /^\s*(?:of|de|du|des|ltv|ltc|loan[- ]to|ratio|pret[- ]valeur|rpv|pret a)\b/;
+export const BASIS_AFTER_RE = /^\s*(?:of|de|du|des|ltv|ltc|loan[- ]to|ratio|pret[- ]valeur|rpv|pret a)\b/;
 
 /** The scope of a label that is only a loan's name ("Senior", "from Valleyline, mezz", "prêt de second rang"); null when it holds anything more. A lender's name is a title-case word. */
 export function loanNameOnly(rawLabel: string): Scope | null {
@@ -637,6 +637,10 @@ export function mapToken(rawLabel: string, t: NumberToken, opts: MapOptions = {}
   // A sales tax line, or a rebate of one, is refused before any credit rule reads it; a cost that only states its tax basis is read.
   const folded = foldText(rawLabel);
   if (t.value !== null && (t.unit === "$" || t.currency || t.unit === null) && SALES_TAX_RE.test(folded) && !SALES_TAX_BASIS_RE.test(folded.replace(/\+/g, " plus ").replace(/[^a-z0-9/]+/g, " ")) && !SALES_TAX_EXEMPT_RE.test(folded)) return { kind: "ignored", reason: SALES_TAX_NOTE };
+  if (/\b(purchase price|prix d achat)\b/.test(normalizeLabel(rawLabel).label)) {
+    const clause = normalizeLabel(`${rawLabel.split(/[,;]/).pop() ?? ""} ${(opts.after ?? "").split(/[,;]|\b(?:and|et)\b/)[0] ?? ""}`).label;
+    if (unitTypesIn(clause).length || PER_UNIT_RE.test(clause) || /\b(sale|sell|sold|buyer|resale|vente|acheteur|revente)\b/.test(clause)) return { kind: "unmapped" };
+  }
   const m = mapSigned(rawLabel, t, opts);
   // A figure its field could never hold is shown, never read: nothing is flipped, rescaled or clamped.
   if (m.kind !== "field") return m;

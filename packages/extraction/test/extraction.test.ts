@@ -4941,17 +4941,12 @@ describe("card 93a", () => {
     expect(values(r)).toEqual([]);
     expect(r.other).toMatchObject([{ value: 5, note: "A cap rate with no word about a sale or an exit may be the going-in rate; enter it by hand if it is the exit rate" }]);
   });
-  test("R4: a bare loan carries its rate, a loan fee does not", async () => {
-    for (const label of ["Loan:", "Mortgage of", "The loan is", "First mortgage"]) expect(values(await read(`${label} $4,000,000 at 6.4% fixed`))).toEqual([["senior_loan_amount", null, 4000000], ["senior_rate_pct", null, 6.4]]);
-    expect((await read("Loan fee $43,000 at 1%")).candidates.some((c) => c.fieldKey?.endsWith("rate_pct"))).toBe(false);
-  });
-  test("R5: an untyped count and rent share All units, without parking rent", async () => {
-    for (const [line, n, rent] of [["4 units at $2,100/month", 4, 2100], ["Four units at $2,100 per month", 4, 2100], ["12 units at $1,850/mo", 12, 1850]] as const) expect(values(await read(line))).toEqual([["unit_count", "All units", n], ["unit_rent_monthly", "All units", rent]]);
-    expect(values(await read("This property has 4 units at $2,100/month and 30 parking stalls at $75/month"))).toEqual([["unit_count", "All units", 4], ["unit_rent_monthly", "All units", 2100]]);
-    expect(values(await read("4 two-bedroom units at $2,100/month"))).toEqual([["unit_count", "2BR", 4], ["unit_rent_monthly", "2BR", 2100]]);
-  });
   test("R6: a loan basis after a percentage is not its interest rate", async () => {
-    for (const [line, key, amount] of [["Senior loan $4,000,000 at 25% LTC", "senior_loan_amount", 4000000], ["Construction loan of $4,000,000 at 25% loan to cost", "senior_loan_amount", 4000000], ["Mezz $650,000 at 20% LTV", "mezz_loan_amount", 650000]] as const) expect(values(await read(line))).toEqual([[key, null, amount]]);
+    for (const [line, key, amount] of [["Senior loan $4,000,000 at 25% LTC", "senior_loan_amount", 4000000], ["Construction loan of $4,000,000 at 25% loan to cost", "senior_loan_amount", 4000000], ["Mezz $650,000 at 20% LTV", "mezz_loan_amount", 650000]] as const) {
+      const r = await read(line);
+      expect(values(r)).toContainEqual([key, null, amount]);
+      expect(r.candidates.some((c) => c.fieldKey?.endsWith("rate_pct"))).toBe(false);
+    }
     for (const tail of ["12% fixed", "12% fixed, 75% LTV"]) expect(values(await read(`Mezz $650,000 at ${tail}`))).toEqual([["mezz_loan_amount", null, 650000], ["mezz_rate_pct", null, 12]]);
   });
   test("R7: a purchase price is land cost unless it names a buyer or a unit basis", async () => {

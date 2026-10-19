@@ -1,7 +1,7 @@
 import { FIELD_BY_KEY, OUTPUT_LIKE_PHRASES } from "@agir/contracts";
 import { detectFormat, normalizeText, SF_PER_M2, tokenize, unitTypesIn, wholeUnitType, type DocumentFormat, type NumberToken } from "@agir/numbers";
 import type { Cell, NormalizedDocument, Table } from "./document.ts";
-import { CREDIT_NOTE, DEPOSIT_NOTE, DEPOSIT_RE, LTV_BASIS, canonicalItem, costSentence, currencyOf, flagRead, flagSentence, hasPhrase, isExitCapLabel, isPlainRentLabel, loanNameOnly, loanTerm, mapToken, normalizeLabel, OLD_SHEET_RE, rankScope, SCENARIO_SHEET_NOTE, SCENARIO_SHEET_RE, SUPERSEDED_LABEL_NOTE, scopeIn, scopesIn, withCurrency, type MapOptions, type Mapped, type Scope } from "./mapping.ts";
+import { BASIS_AFTER_RE, CREDIT_NOTE, DEPOSIT_NOTE, DEPOSIT_RE, LTV_BASIS, canonicalItem, costSentence, currencyOf, flagRead, flagSentence, hasPhrase, isExitCapLabel, isPlainRentLabel, loanNameOnly, loanTerm, mapToken, normalizeLabel, OLD_SHEET_RE, rankScope, SCENARIO_SHEET_NOTE, SCENARIO_SHEET_RE, SUPERSEDED_LABEL_NOTE, scopeIn, scopesIn, withCurrency, type MapOptions, type Mapped, type Scope } from "./mapping.ts";
 
 /** One value found in one document, with where it came from and why it was (or was not) mapped. */
 export type Candidate = {
@@ -211,7 +211,7 @@ function lineScopes(doc: NormalizedDocument, format: DocumentFormat, rank: Scope
 function continues(prev: string, next: string): boolean {
   // A list item ("2) ...", "- ...") starts its own paragraph.
   if (/[.!?:]\s*$/.test(prev) || !/^(\p{Ll}|\d|[$€£])/u.test(next) || /^(\d{1,2}[.)]|[-•*])\s/.test(next)) return false;
-  return !(/[\d%]\s*$/.test(prev) && /^[\d$€£]/.test(next));
+  return !(/[\d%](?:\s*(?:\$?\/(?:mo|month|yr|year|sf|mois)|per (?:month|year)|sf|units|suites|doors|par (?:mois|an)|logements|pi²|m²))?\s*$/.test(fold(prev)) && /^[\d$€£]/.test(next));
 }
 
 /** The lines the table reader did not consume, with a sentence wrapped across lines made one paragraph. */
@@ -787,7 +787,7 @@ function readSentence(sentence: { text: string; start: number }, para0: Paragrap
       sentenceLoan = named.length === 1 ? named[0]! : named.length > 1 ? null : sentenceLoan;
       if (sentenceLoan) opts = { ...opts, scope: sentenceLoan };
     }
-    if (carry?.at === i - 1 && t.unit === "%" && !scopeIn(label, false)) {
+    if (carry?.at === i - 1 && t.unit === "%" && !scopeIn(label, false) && !BASIS_AFTER_RE.test(fold(afterFigure))) {
       opts = { ...opts, scope: carry.scope };
       if (normalizeLabel(label).label.replace(/\b(at|a|au|aux|avec|with|de|du|of|for|pour|bearing|carrying|portant)\b/g, "").trim() === "") usedLabel = RATE_WORD[carry.scope];
     }
