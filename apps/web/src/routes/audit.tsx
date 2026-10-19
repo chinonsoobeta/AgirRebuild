@@ -7,7 +7,7 @@ import { useI18n, type I18n } from "../i18n";
 export function describeEvent(i: I18n, e: AuditEvent): string {
   const p = e.payload ?? {};
   const fr = i.lang === "fr";
-  const kind = (k: string) => (k === "ic_memo" ? i.t("reports.memo") : k === "lender_package" ? i.t("reports.lender") : k === "build_decision" ? i.t("reports.buildDecision") : i.t("reports.modelExport"));
+  const kind = (k: string) => (k === "ic_memo" ? i.t("reports.memo") : k === "lender_package" ? i.t("reports.lender") : k === "build_decision" ? i.t("reports.buildDecision") : k === "partner_memo" ? i.t("reports.partnerMemo") : i.t("reports.modelExport"));
   const field = () => i.L.field(p.field, p.item || null);
   switch (e.action) {
     case "deal.created": return fr ? "A créé le projet" : "Created the deal";
@@ -37,8 +37,8 @@ export function describeEvent(i: I18n, e: AuditEvent): string {
       return fr
         ? `A consigné la décision « ${i.L.decision(p.decision).toLowerCase()} » pour l'analyse ${p.run_number}${p.against_verdict ? ", contraire au verdict" : ""}`
         : `Recorded the decision "${String(p.decision).replace(/_/g, " ")}" on run ${p.run_number}${p.against_verdict ? ", against the verdict" : ""}`;
-    case "artifact.requested": return fr ? `A demandé : ${kind(p.kind)} (${p.format})` : `Requested a ${String(p.kind).replace(/_/g, " ")} (${p.format})`;
-    case "artifact.ready": return fr ? `A diffusé : ${kind(p.kind)} (${p.format})` : `Released a ${String(p.kind).replace(/_/g, " ")} (${p.format})`;
+    case "artifact.requested": return fr ? `A demandé : ${kind(p.kind)} (${p.format})` : `Requested a ${(p.kind === "partner_memo" ? kind(p.kind) : String(p.kind).replace(/_/g, " "))} (${p.format})`;
+    case "artifact.ready": return fr ? `A diffusé : ${kind(p.kind)} (${p.format})` : `Released a ${(p.kind === "partner_memo" ? kind(p.kind) : String(p.kind).replace(/_/g, " "))} (${p.format})`;
     case "artifact.blocked": return fr ? "A bloqué un rapport : chiffres sans source" : "Blocked a report: figures without a source";
     case "workspace.created": return fr ? "A créé l'espace de travail" : "Created the workspace";
     case "figure.labelled": return fr ? `A étiqueté un chiffre comme ${field()}` : `Labelled a figure as ${field()}`;

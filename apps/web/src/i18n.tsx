@@ -451,6 +451,7 @@ const EN = {
   "reports.memo": "IC memo",
   "reports.lender": "Lender package",
   "reports.buildDecision": "Build decision",
+  "reports.partnerMemo": "Partner memo",
   "reports.model": "Model",
   "reports.modelExport": "Model export",
   "reports.word": "Word",
@@ -961,6 +962,7 @@ const FR: Record<Key, Entry> = {
   "reports.memo": "Mémo du comité",
   "reports.lender": "Dossier pour le prêteur",
   "reports.buildDecision": "Décision de construire",
+  "reports.partnerMemo": "Note aux partenaires",
   "reports.model": "Modèle",
   "reports.modelExport": "Export du modèle",
   "reports.word": "Word",
@@ -1283,6 +1285,7 @@ const SALE_SHARES: Record<string, string> = {
 };
 
 const FR_REASONS: [RegExp, string | ((m: RegExpMatchArray) => string)][] = [
+  [/^This deal has no LP\/GP split, or is not sold, so it has no partner memo\.$/, "Ce projet n'a pas de partage commanditaires/commandité, ou n'est pas vendu ; il n'a donc pas de note aux partenaires."],
   [/^This driver does not apply to this deal\.$/, "Cette hypothèse ne s'applique pas à ce projet."],
   [/^The inputs do not give this a meaningful value\.$/, "Les données ne permettent pas d'en tirer une valeur significative."],
   [/^Total development cost is zero\.$/, "Le coût total de développement est nul."],
