@@ -261,11 +261,14 @@ describe("artifacts", () => {
       Object.assign(first!, { clientConfirmedBy: "Dana Client", clientConfirmedAt: "2026-10-19T12:00:00Z" });
       const model = buildModel(x);
       const text = visibleText(renderHtml(model));
-      expect(text).toContain("Stated by the sponsor, confirmed by the client Dana Client on 2026-10-19, not independently confirmed");
+      // Task 92: every client of the deal can download a report, so it never names the client.
+      expect(text).toContain("Stated by the sponsor, confirmed by the client on 2026-10-19, not independently confirmed");
+      expect(text).not.toContain("Dana Client");
+      expect(JSON.stringify(model)).not.toContain("Dana Client");
       expect(text).toContain("The client confirmed 1 of them; that is not an independent confirmation.");
       expect(text).toContain("Stated by the sponsor, not independently confirmed");
       expect(verifyProvenance(text, model.formatter.manifest).orphans).toEqual([]);
-      expect(model.formatter.manifest.map((m) => m.ref)).toEqual(expect.arrayContaining([`ident:clientConfirmedBy.${first!.fieldKey}`, `ident:clientConfirmedAt.${first!.fieldKey}`, "ident:clientConfirmed.count"]));
+      expect(model.formatter.manifest.map((m) => m.ref)).toEqual(expect.arrayContaining([`ident:clientConfirmedAt.${first!.fieldKey}`, "ident:clientConfirmed.count"]));
       expect((await renderArtifact(x, "docx")).provenance.pass).toBe(true);
       // Without a client confirmation, the block has no such sentence.
       delete first!.clientConfirmedBy;
@@ -285,6 +288,14 @@ describe("artifacts", () => {
     expect(rows[0]![5]).toBe("Confirmation");
     expect(rows[1]![5]).toBe("Stated by the sponsor, not independently confirmed");
     expect(rows[2]![5] ?? "").toBe("");
+    // Task 92: a client's confirmation is dated, never named.
+    Object.assign(x.assumptions[0]!, { clientConfirmedBy: "Dana Client", clientConfirmedAt: "2026-10-19T12:00:00Z" });
+    const named = new ExcelJS.Workbook();
+    await named.xlsx.load(Buffer.from((await renderArtifact(x, "xlsx")).bytes) as never);
+    const cells: string[] = [];
+    named.eachSheet((sheet) => sheet.eachRow((row) => cells.push(JSON.stringify(row.values))));
+    expect(cells.join("\n")).toContain("Stated by the sponsor, confirmed by the client on 2026-10-19, not independently confirmed");
+    expect(cells.join("\n")).not.toContain("Dana Client");
   });
 });
 
