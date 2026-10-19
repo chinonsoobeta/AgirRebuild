@@ -1,4 +1,5 @@
 import { Hono, type Context } from "hono";
+import { getConnInfo } from "@hono/node-server/conninfo";
 import { randomBytes } from "node:crypto";
 import { getCookie, setCookie, deleteCookie } from "hono/cookie";
 import { z } from "zod";
@@ -10,7 +11,7 @@ import { MAX_UPLOAD_BYTES } from "@agir/worker";
 import { checkPassword, createSession, endSession, hashPassword, rateLimiter, SESSION_DAYS, userForSession } from "./auth.ts";
 import { auditPackage, createRun, dealOverview, HttpError, labelRefusal, reviewView, runView, sha256 } from "./services.ts";
 
-export type AppDeps = { db: Db; store: BlobStore; secureCookies: boolean; demoSignIn?: boolean };
+export type AppDeps = { db: Db; store: BlobStore; secureCookies: boolean; demoSignIn?: boolean; trustProxy?: boolean };
 type Env = { Variables: { user: { id: string; email: string; name: string } } };
 
 const COOKIE = "agir_session";
@@ -25,8 +26,16 @@ const INVITE_GONE = "This invitation is not available. It may have been used, re
 
 const PG_STATUS: Record<string, number> = { "42501": 403, "28000": 401, P0002: 404, "22023": 422, "23505": 409, "40001": 409, "23514": 422, "22P02": 404 };
 
-export function createApp({ db, store, secureCookies, demoSignIn = false }: AppDeps) {
+export function createApp({ db, store, secureCookies, demoSignIn = false, trustProxy = false }: AppDeps) {
   const app = new Hono<Env>();
+  const clientKey = (c: Context<Env>): string => {
+    if (trustProxy) {
+      const forwarded = c.req.header("x-forwarded-for")?.split(",").at(-1)?.trim();
+      if (forwarded) return forwarded;
+    }
+    try { return getConnInfo(c).remote.address || "local"; }
+    catch { return "local"; }
+  };
   const authLimit = rateLimiter(20, 60_000);
   const shareLimit = rateLimiter(60, 60_000);
   const inviteLimit = rateLimiter(60, 60_000);
@@ -53,7 +62,7 @@ export function createApp({ db, store, secureCookies, demoSignIn = false }: AppD
   // Shared links and invitations carry a secret in the path: rate-limited, never cached, never sent on as a referrer.
   for (const [prefix, limit] of [["/api/share/*", shareLimit], ["/api/invite/*", inviteLimit]] as const) {
     app.use(prefix, async (c, next) => {
-      if (limit(c.req.header("x-forwarded-for") ?? "local")) await next();
+      if (limit(clientKey(c))) await next();
       else c.res = c.json({ error: "Too many requests. Wait a minute." }, 429);
       c.header("cache-control", "no-store");
       c.header("referrer-policy", "no-referrer");
@@ -78,7 +87,7 @@ export function createApp({ db, store, secureCookies, demoSignIn = false }: AppD
   const cookieOpts = { httpOnly: true, sameSite: "Lax" as const, secure: secureCookies, path: "/", maxAge: SESSION_DAYS * 86400 };
 
   app.post("/api/auth/signup", async (c) => {
-    if (!authLimit(c.req.header("x-forwarded-for") ?? "local")) return c.json({ error: "Too many attempts. Wait a minute." }, 429);
+    if (!authLimit(clientKey(c))) return c.json({ error: "Too many attempts. Wait a minute." }, 429);
     const body = z
       .object({ email: z.string().email(), name: z.string().min(1).max(120), password: z.string().min(10, "Use at least 10 characters").max(200), reviewMode: z.enum(REVIEW_MODES).optional(),
         invite: z.string().min(1).max(200).optional() })
@@ -112,7 +121,7 @@ export function createApp({ db, store, secureCookies, demoSignIn = false }: AppD
   });
 
   app.post("/api/auth/login", async (c) => {
-    if (!authLimit(c.req.header("x-forwarded-for") ?? "local")) return c.json({ error: "Too many attempts. Wait a minute." }, 429);
+    if (!authLimit(clientKey(c))) return c.json({ error: "Too many attempts. Wait a minute." }, 429);
     const body = z.object({ email: z.string(), password: z.string() }).parse(await c.req.json());
     const [u] = await db.query<{ id: string; password_hash: string }>(`select id, password_hash from users where email = $1`, [body.email.toLowerCase()]);
     if (!u || !(await checkPassword(body.password, u.password_hash))) return c.json({ error: "That email and password do not match." }, 401);

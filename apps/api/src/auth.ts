@@ -52,6 +52,9 @@ export function rateLimiter(limit: number, windowMs: number) {
     const now = Date.now();
     const h = hits.get(key);
     if (!h || h.until < now) {
+      if (hits.size > 10_000) {
+        for (const [oldKey, entry] of hits) if (entry.until < now) hits.delete(oldKey);
+      }
       hits.set(key, { n: 1, until: now + windowMs });
       return true;
     }

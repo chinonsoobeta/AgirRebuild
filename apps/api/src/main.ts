@@ -31,7 +31,10 @@ if (env !== "production" && process.env.AGIR_SEED !== "0") {
   await seedDemo(db, store);
 }
 
-const app = createApp({ db, store, secureCookies: env === "production", demoSignIn: env !== "production" && process.env.AGIR_SEED !== "0" });
+const app = createApp({ db, store, secureCookies: env === "production", demoSignIn: env !== "production" && process.env.AGIR_SEED !== "0",
+  // Set it only when the API runs behind exactly one proxy that sets x-forwarded-for.
+  trustProxy: process.env.AGIR_TRUST_PROXY === "1",
+});
 const webDist = join(root, "apps/web/dist");
 if (existsSync(webDist)) {
   // Production reads the page once; elsewhere it is re-read so a rebuild shows without a restart.
