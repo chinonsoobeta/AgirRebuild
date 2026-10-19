@@ -8,7 +8,7 @@ import { FIELDS, FIELD_BY_KEY, runPolicy, type Currency, type Policy, type Engin
 import { itemFold } from "@agir/numbers";
 import { renderArtifact, RendererUnavailableError, type ArtifactInput } from "@agir/artifacts";
 import { sha256Hex, type BlobStore, type Db } from "@agir/db";
-import { applyLabels, applySuggestions, consolidate, extractCandidates, figureOrder, kindOf, offerable, offeredIds, parseDocument, withoutLabelled, type SourcedCandidate } from "@agir/extraction";
+import { applyLabels, applySuggestions, consolidate, extractCandidates, figureOrder, kindOf, offerable, offeredIds, parseDocument, ocrPdf, withoutLabelled, type SourcedCandidate } from "@agir/extraction";
 
 export const MAX_UPLOAD_BYTES = 75 * 1024 * 1024;
 
@@ -164,13 +164,21 @@ async function extractDocument(deps: WorkerDeps, documentId: string) {
     return;
   }
   if (parsed.needsOcr) {
-    await setStage(db, d.id, "read_failed", "This PDF is scanned pages with no text layer. Agir does not run OCR yet: enter its values by hand, or upload a text PDF.", {
-      page_count: parsed.pageCount,
-      needs_ocr: true,
-    });
-    return;
+    const unavailable = "This PDF is scanned pages with no text layer. Agir does not run OCR yet: enter its values by hand, or upload a text PDF.";
+    try {
+      const result = await ocrPdf(bytes);
+      if (!result.lines.length) {
+        await setStage(db, d.id, "read_failed", unavailable, { page_count: parsed.pageCount, needs_ocr: true });
+        return;
+      }
+      parsed = { ...parsed, ...result, fullText: result.lines.map((l) => l.text).join("\n") };
+    } catch (e) {
+      const message = (e as Error).message;
+      await setStage(db, d.id, "read_failed", message === "OCR is not available on this machine" ? unavailable : message, { page_count: parsed.pageCount, needs_ocr: true });
+      return;
+    }
   }
-  await setStage(db, d.id, "extracting", null, { page_count: parsed.pageCount });
+  await setStage(db, d.id, "extracting", null, { page_count: parsed.pageCount, ...(parsed.needsOcr ? { needs_ocr: true } : {}) });
   const result = extractCandidates(parsed);
   const format = result.format.mixed ? "mixed" : result.format.decimal === "." ? "1,234.56" : result.format.decimal === "," ? "1.234,56" : "not detected";
   const asSourced = (c: (typeof result.candidates)[number]): SourcedCandidate => ({ ...c, documentId: d.id, documentName: d.name });
@@ -192,8 +200,8 @@ async function extractDocument(deps: WorkerDeps, documentId: string) {
       );
     }
     await tx.query(
-      `update documents set stage = 'extracted', stage_detail = null, candidate_count = $2, number_format = $3, updated_at = now() where id = $1`,
-      [d.id, result.candidates.length, format],
+      `update documents set stage = 'extracted', stage_detail = $4, candidate_count = $2, number_format = $3, updated_at = now() where id = $1`,
+      [d.id, result.candidates.length, format, parsed.needsOcr ? `Read by OCR from ${parsed.pageCount} scanned ${parsed.pageCount === 1 ? "page" : "pages"}. Check every value against the page before approving it.` : null],
     );
     await tx.query(`insert into jobs (kind, payload) values ('reconcile_deal', $1)`, [JSON.stringify({ deal_id: d.deal_id })]);
   });
@@ -244,16 +252,16 @@ export async function reconcileDeal(db: Db, dealId: string) {
     if (!deal) return;
     const rows = await tx.query<{
       id: string; document_id: string; document_name: string; field_key: string; item_key: string | null; value: number;
-      raw: string; unit_seen: string | null; location: string; context: string; rule: string; note: string | null;
+      raw: string; unit_seen: string | null; location: string; context: string; rule: string; note: string | null; needs_ocr: boolean;
     }>(
-      `select c.id, c.document_id, d.name as document_name, c.field_key, c.item_key, c.value, c.raw, c.unit_seen, c.location, c.context, c.rule, c.note
+      `select c.id, c.document_id, d.name as document_name, c.field_key, c.item_key, c.value, c.raw, c.unit_seen, c.location, c.context, c.rule, c.note, d.needs_ocr
        from candidates c join documents d on d.id = c.document_id
        where c.deal_id = $1 and c.field_key is not null and c.value is not null and d.retired_at is null and d.stage = 'extracted'`,
       [dealId],
     );
     const toSourced = (r: (typeof rows)[number]): SourcedCandidate => ({
       fieldKey: r.field_key, itemKey: r.item_key, value: r.value, raw: r.raw, unitSeen: r.unit_seen, location: r.location,
-      context: r.context, rule: r.rule, ...(r.note ? { note: r.note } : {}), documentId: r.document_id, documentName: r.document_name,
+      context: r.context, rule: r.rule, ...(r.note ? { note: r.note } : {}), documentId: r.document_id, documentName: r.document_name, ...(r.needs_ocr ? { ocr: true } : {}),
     });
     const sourced = rows.map(toSourced);
     // A stored suggestion counts only while the workspace switch is on, and only after the boundary has checked it. The model is never called here.
@@ -264,7 +272,7 @@ export async function reconcileDeal(db: Db, dealId: string) {
     const unlabelled = figureOrder(
       (
         await tx.query<(typeof rows)[number]>(
-          `select c.id, c.document_id, d.name as document_name, c.field_key, c.item_key, c.value, c.raw, c.unit_seen, c.location, c.context, c.rule, c.note
+          `select c.id, c.document_id, d.name as document_name, c.field_key, c.item_key, c.value, c.raw, c.unit_seen, c.location, c.context, c.rule, c.note, d.needs_ocr
            from candidates c join documents d on d.id = c.document_id
            where c.deal_id = $1 and c.field_key is null and c.value is not null and d.retired_at is null and d.stage = 'extracted'`,
           [dealId],
@@ -341,6 +349,7 @@ export async function reconcileDeal(db: Db, dealId: string) {
         unit_seen: s.unitSeen,
         context: s.context,
         rule: s.rule,
+        ...(s.ocr ? { ocr: true } : {}),
         ...(s.note ? { note: s.note } : {}),
         ...(s.labelledBy ? { labelled_by: s.labelledBy } : {}),
       }));

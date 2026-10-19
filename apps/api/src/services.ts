@@ -59,7 +59,7 @@ type AssumptionDb = {
   pending_value: number | null;
   source_kind: "document" | "analyst" | "default";
   /** unit_seen is the unit the document wrote; sources recorded before it was kept have none. */
-  sources: { document_id: string; document_name: string; value: number; location: string; raw: string; unit_seen?: string | null; context: string; rule?: string; labelled_by?: string }[];
+  sources: { document_id: string; document_name: string; value: number; location: string; raw: string; unit_seen?: string | null; context: string; rule?: string; ocr?: boolean; labelled_by?: string }[];
   conflict_values: { value: number; documents: string[] }[] | null;
   reason: string | null;
   decided_by: string | null;

@@ -44,6 +44,7 @@ function Quote({ s, currency }: { s: Source; currency: string | null | undefined
     <div className="stack" style={{ gap: 6 }}>
       <span className="row small" style={{ gap: 8, fontWeight: 600 }}><I.Doc />{s.document_name}</span>
       <div className="source-quote">{i >= 0 ? (<>{s.context.slice(0, i)}<mark>{s.raw}</mark>{s.context.slice(i + s.raw.length)}</>) : s.context}</div>
+      {s.ocr && <span className="small" style={{ fontWeight: 600 }}>{t("review.ocr")}</span>}
       {s.rule === "suggested" && <span className="small" style={{ fontWeight: 600 }}>{t("review.suggested")}</span>}
       <span className="small faint">{msg(s.location)}</span>
       {(s.unit_seen?.startsWith("m2") || s.unit_seen?.startsWith("$/m2")) && <span className="small faint">{t("review.fromM2")}</span>}
@@ -57,7 +58,7 @@ const metricUnit = (unit: string) => unit === "sf" || unit === "$/sf/yr";
 /** A value typed in square metres becomes square feet (rent per m² becomes rent per sf) before it is posted, and the reason records what was typed. */
 /** A document value no document states any more (card 63): kept only as the person's own value, with a reason, and never by Approve all. */
 export const keepsWithReason = (a: Pick<Assumption, "sourceKind" | "sources">) => a.sourceKind === "document" && a.sources.length === 0;
-export const approvable = <A extends Pick<Assumption, "sourceKind" | "sources">>(rows: A[]) => rows.filter((a) => !keepsWithReason(a));
+export const approvable = <A extends Pick<Assumption, "sourceKind" | "sources">>(rows: A[]) => rows.filter((a) => !keepsWithReason(a) && !a.sources.some((s) => s.ocr));
 
 export function enteredInUnit(unit: string, metric: boolean, value: number, reason: string, lang: Lang): { value: number; reason: string } {
   if (!metric || !metricUnit(unit)) return { value, reason };

@@ -13,6 +13,7 @@ type Entry = string | ((p: Record<string, any>) => string | string[]);
 const s = (n: number, one: string, many: string) => (n === 1 ? one : many);
 
 const EN = {
+  "review.ocr": "Read by OCR: check it against the page",
   "nav.deals": "Deals",
   "nav.settings": "Settings",
   "nav.signOut": "Sign out",
@@ -580,6 +581,7 @@ const EN = {
 export type Key = keyof typeof EN;
 
 const FR: Record<Key, Entry> = {
+  "review.ocr": "Lu par reconnaissance optique : vérifiez-le sur la page",
   "nav.deals": "Projets",
   "nav.settings": "Paramètres",
   "nav.signOut": "Se déconnecter",
@@ -1411,6 +1413,9 @@ const SALE_SHARES: Record<string, string> = {
 };
 
 const FR_REASONS: [RegExp, string | ((m: RegExpMatchArray) => string)][] = [
+  [/^Read by OCR from (\d+) scanned pages?\. Check every value against the page before approving it\.$/, (m) => `Lu par reconnaissance optique à partir de ${m[1]} ${m[1] === "1" ? "page numérisée" : "pages numérisées"}. Vérifiez chaque valeur sur la page avant de l'approuver.`],
+  [/^This scanned PDF has more than 50 pages; Agir reads scans of up to 50 pages\. Split it, or enter its values by hand\.$/, "Ce PDF numérisé dépasse 50 pages ; Agir lit les numérisations de 50 pages au plus. Divisez-le ou saisissez ses valeurs à la main."],
+  [/^OCR is not available on this machine$/, "La reconnaissance optique n'est pas disponible sur cette machine"],
   [/^This link is not available\. It may have expired or been revoked\.$/, "Ce lien n'est pas disponible. Il a peut-être expiré ou été révoqué."],
   [/^Only a finished report can be shared\.$/, "Seul un rapport terminé peut être partagé."],
   [/^This link is already revoked\.$/, "Ce lien est déjà révoqué."],

@@ -3,7 +3,7 @@ import type { Candidate } from "./candidates.ts";
 import { canonicalItem, currencyOf, itemFold, outsideBounds } from "./mapping.ts";
 
 /** `labelledBy` is the person whose label put a figure here (task 58), so review can ask someone else to confirm it. */
-export type SourcedCandidate = Candidate & { documentId: string; documentName: string; labelledBy?: string };
+export type SourcedCandidate = Candidate & { documentId: string; documentName: string; ocr?: boolean; labelledBy?: string };
 
 export type Proposal = {
   fieldKey: string;
