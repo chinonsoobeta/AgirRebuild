@@ -86,6 +86,7 @@ export type RunView = {
   };
   inputs: { fieldKey: string; itemKey: string | null; label: string; value: number; sourceKind: string; source: string; sponsorStated: boolean; confirmedBy: string | null; confirmedByReview: boolean; confirmedAt: string | null }[];
   decisions: { id: string; decision: string; rationale: string; conditions: string | null; override_reason: string | null; created_at: string; decided_by: string }[];
+  heldPartners?: { lpIrr: number | null; gpIrr: number | null; promote: number; paidLp: number; paidGp: number; paidPromote: number };
 };
 export type Artifact = { id: string; kind: string; format: string; status: string; error: string | null; sha256: string | null; created_at: string; run_id: string; run_number: number; provenance_entries: number | null };
 export type ShareTerm = "24h" | "7d" | "30d" | "none";

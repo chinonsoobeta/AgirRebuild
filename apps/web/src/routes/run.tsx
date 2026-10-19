@@ -1,6 +1,6 @@
 import { Link } from "@tanstack/react-router";
 import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
-import { useState } from "react";
+import { Fragment, useState } from "react";
 import { FIELD_BY_KEY } from "@agir/contracts";
 import { api, type Metric, type RunView } from "../api";
 import { Banner, canEdit, DealHeader, ErrorText, Glossary, MetricValue, StatusTag, useDeal, useSession, VerdictBadge } from "../components/ui";
@@ -202,11 +202,21 @@ export function Run({ dealId }: { dealId: string }) {
               <tbody>
                 {headline.map((k) => {
                   const m = metric(k);
+                  const p = k === "unrealized_equity_irr" ? v.heldPartners : undefined;
                   return (
-                    <tr key={k}>
-                      <th scope="row"><button type="button" className="btn quiet small" style={{ padding: 0, height: "auto", textAlign: "left", whiteSpace: "normal" }} onClick={() => setTrace(m)}>{L.metric(k)}</button></th>
-                      <td className="r"><MetricValue {...m} />{m.status !== "VALID" && m.reason && <div className="small faint">{i.msg(m.reason)}</div>}</td>
-                    </tr>
+                    <Fragment key={k}>
+                      <tr>
+                        <th scope="row"><button type="button" className="btn quiet small" style={{ padding: 0, height: "auto", textAlign: "left", whiteSpace: "normal" }} onClick={() => setTrace(m)}>{L.metric(k)}</button></th>
+                        <td className="r"><MetricValue {...m} />{m.status !== "VALID" && m.reason && <div className="small faint">{i.msg(m.reason)}</div>}</td>
+                      </tr>
+                      {/* A held deal's partner returns (card 88): report arithmetic, not metrics, so they have no formula trace. */}
+                      {p && ([["run.heldLpIrr", p.lpIrr, "%"], ["run.heldGpIrr", p.gpIrr, "%"], ["run.heldPromote", p.promote, "$"]] as const).map(([label, value, unit]) => (
+                        <tr key={label}>
+                          <th scope="row">{t(label)}</th>
+                          <td className="r"><MetricValue value={value} unit={unit} status={value === null ? "NOT_MEANINGFUL" : "VALID"} /></td>
+                        </tr>
+                      ))}
+                    </Fragment>
                   );
                 })}
               </tbody>

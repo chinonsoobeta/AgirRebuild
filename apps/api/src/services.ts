@@ -15,7 +15,7 @@ import {
   type Readiness,
   type RunResult,
 } from "@agir/contracts";
-import { assemble, canonicalJson, ENGINE_VERSION, replay, underwrite } from "@agir/engine";
+import { assemble, canonicalJson, ENGINE_VERSION, heldPartnerReturns, replay, underwrite } from "@agir/engine";
 import type { Db } from "@agir/db";
 import { applyLabels, figureOrder, offeredIds, type SourcedCandidate } from "@agir/extraction";
 
@@ -357,6 +357,10 @@ export async function runView(tx: Db, runId: string) {
      from decisions d join users u on u.id = d.decided_by where d.run_id = $1 order by d.created_at desc`,
     [runId],
   );
+  // A held run with a split shows its partner returns (card 88): report arithmetic over the stored flows, not metrics.
+  const { input } = run.input_snapshot;
+  const held = input.exit === "refinance_hold" && input.waterfall ? heldPartnerReturns(run.result.equityFlows, input.waterfall) : null;
+  const positive = (flows: readonly { amount: number }[]) => flows.filter((f) => f.amount > 0).reduce((n, f) => n + f.amount, 0);
   return {
     id: run.id,
     dealId: run.deal_id,
@@ -375,6 +379,8 @@ export async function runView(tx: Db, runId: string) {
     result: run.result,
     inputs: run.input_snapshot.assumptions,
     decisions,
+    ...(held ? { heldPartners: { lpIrr: held.withValue.lpIrr, gpIrr: held.withValue.gpIrr, promote: held.withValue.promote,
+      paidLp: positive(held.paid.lp), paidGp: positive(held.paid.gp), paidPromote: held.paid.promote } } : {}),
   };
 }
 
