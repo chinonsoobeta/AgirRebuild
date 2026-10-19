@@ -1564,10 +1564,10 @@ export function build(lang: Lang, setLang: (l: Lang) => void) {
       const to = r.to.map((e) => {
         const v = f.value(e.to, e.unit);
         switch (e.key) {
-          case "price": return `${e.item}: ${v}`;
+          case "price": return `${e.item}${fr ? "\u00a0" : ""}: ${v}`;
           case "absorption": return fr ? `rythme de vente ${f.value(e.to, "")} logements par mois` : `sales pace ${f.value(e.to, "")} units per month`;
           case "presales": return fr ? `prévendu ${v}` : `presold ${v}`;
-          case "rent": return `${e.item}: ${v}`;
+          case "rent": return `${e.item}${fr ? "\u00a0" : ""}: ${v}`;
           case "cost": return fr ? `coût total ${v}` : `total cost ${v}`;
           case "exit_cap": return fr ? `taux de sortie ${v}` : `exit cap ${v}`;
           case "occupancy": return fr ? `occupation ${v}` : `occupancy ${v}`;
