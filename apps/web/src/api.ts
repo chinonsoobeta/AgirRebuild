@@ -22,12 +22,12 @@ async function request<T>(method: string, path: string, body?: unknown, raw?: Bl
 export const api = {
   get: <T>(p: string) => request<T>("GET", p),
   post: <T>(p: string, body?: unknown) => request<T>("POST", p, body ?? {}),
-  upload: <T>(p: string, file: File) => request<T>("PUT", p, undefined, file),
+  upload: <T>(p: string, file: File, method: "PUT" | "POST" = "PUT") => request<T>(method, p, undefined, file),
   del: <T>(p: string, body: unknown) => request<T>("DELETE", p, body),
 };
 
 // ---- Response shapes ---------------------------------------------------------------
-export type Me = { user: { id: string; email: string; name: string }; workspaces: { id: string; name: string; review_mode: "team" | "solo"; label_suggestions: boolean; role: "owner" | "admin" | "analyst" | "viewer" | "reviewer" | "client" }[] };
+export type Me = { user: { id: string; email: string; name: string }; workspaces: { id: string; name: string; review_mode: "team" | "solo"; label_suggestions: boolean; has_logo: boolean; role: "owner" | "admin" | "analyst" | "viewer" | "reviewer" | "client" }[] };
 export type Tone = "pass" | "review" | "stop" | "neutral";
 export type DealOverview = {
   deal: {

@@ -11,6 +11,8 @@ export type ArtifactKind = "ic_memo" | "lender_package" | "build_decision" | "pa
 
 export type ArtifactInput = {
   kind: ArtifactKind;
+  /** The broker's workspace and logo (card 89d); printed on the lender package only. Absent, the package is unchanged. */
+  broker?: { name: string; logo: { bytes: Uint8Array; mime: "image/png" | "image/jpeg"; width: number; height: number } };
   /** Currency and province as the deal stated them when it was created; null when it never did. */
   deal: { name: string; assetType: string; location: string; currency: Currency | null; province: string | null };
   run: {
@@ -58,6 +60,8 @@ export type Block =
   | { type: "checks"; items: { tone: "pass" | "warning" | "error"; text: string }[] };
 
 export type DocModel = {
+  /** The lender package's header logo and "Prepared by <workspace>" (card 89d); at most 48 px high, aspect kept. */
+  brand?: { preparedBy: string; logo: { bytes: Uint8Array; mime: "image/png" | "image/jpeg"; width: number; height: number } };
   title: string;
   kicker: string;
   meta: string;
@@ -676,7 +680,11 @@ export function buildModel(x: ArtifactInput): DocModel {
     `Inputs ${f.ident(x.run.inputHash.slice(0, 16), "run.inputHash")}, result ${f.ident(x.run.resultHash.slice(0, 16), "run.resultHash")}.`;
   // Every amount prints with "$"; the deal says once which dollar that is.
   const currency = x.deal.currency ? `All amounts in ${CURRENCY_NAMES[x.deal.currency][0]} (${x.deal.currency})` : "Currency not stated";
+  const logo = x.kind === "lender_package" ? x.broker?.logo : undefined;
+  const scale = logo ? Math.min(1, 48 / logo.height) : 1;
   return {
+    ...(logo ? { brand: { preparedBy: `Prepared by ${f.ident(x.broker!.name, "broker.name")}`,
+      logo: { ...logo, width: Math.max(1, Math.round(logo.width * scale)), height: Math.round(logo.height * scale) } } } : {}),
     title: f.ident(x.deal.name, "deal.name"),
     kicker: { ic_memo: "Investment Committee memorandum", build_decision: "Build decision", partner_memo: "Partner memo" }[x.kind as string] ?? "Lender package",
     meta: [

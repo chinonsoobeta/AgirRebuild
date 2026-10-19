@@ -81,6 +81,34 @@ export function ClientsPanel({ dealId }: { dealId: string }) {
   );
 }
 
+/** The owner's logo for the lender package (card 89d): upload, preview, remove. */
+export function LogoPanel({ workspaceId, hasLogo }: { workspaceId: string; hasLogo: boolean }) {
+  const { t } = useI18n();
+  const qc = useQueryClient();
+  const [version, setVersion] = useState(0);
+  const done = () => { setVersion(version + 1); return qc.invalidateQueries({ queryKey: ["me"] }); };
+  const upload = useMutation({ mutationFn: (file: File) => api.upload(`/workspaces/${workspaceId}/logo`, file, "POST"), onSuccess: done });
+  const remove = useMutation({ mutationFn: () => api.del(`/workspaces/${workspaceId}/logo`, {}), onSuccess: done });
+  return (
+    <section className="panel stack">
+      <h2 className="h-section">{t("logo.title")}</h2>
+      <p className="small muted">{t("logo.body")}</p>
+      {hasLogo && (
+        <div className="row" style={{ alignItems: "center" }}>
+          <img src={`/api/workspaces/${workspaceId}/logo?v=${version}`} alt={t("logo.title")} style={{ maxHeight: 48, maxWidth: 240 }} />
+          <button className="btn quiet small" type="button" onClick={() => { if (window.confirm(t("logo.removeConfirm"))) remove.mutate(); }}>{t("clients.remove")}</button>
+        </div>
+      )}
+      <div className="field">
+        <label htmlFor="logo-file">{hasLogo ? t("logo.replace") : t("logo.choose")}</label>
+        <input id="logo-file" type="file" accept="image/png,image/jpeg"
+          onChange={(e) => { const file = e.currentTarget.files?.[0]; e.currentTarget.value = ""; if (file) upload.mutate(file); }} />
+      </div>
+      <ErrorText error={upload.error ?? remove.error} />
+    </section>
+  );
+}
+
 /** Choose a deal, then manage its clients. */
 function Clients() {
   const { t } = useI18n();
@@ -151,6 +179,7 @@ export function Settings() {
             </form>
           )}
           {(role === "owner" || role === "admin") && <Clients />}
+          {role === "owner" && <LogoPanel workspaceId={workspaceId} hasLogo={ws?.has_logo ?? false} />}
         </div>
         <div className="stack" style={{ gap: 16 }}>
           <fieldset className="panel stack" style={{ margin: 0 }} disabled={role !== "owner"}>

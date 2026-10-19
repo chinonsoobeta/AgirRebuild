@@ -175,7 +175,7 @@ export function createApp({ db, store, secureCookies, demoSignIn = false }: AppD
   app.get("/api/me", async (c) => {
     const workspaces = await as(c, (tx) =>
       tx.query(
-        `select w.id, w.name, w.review_mode, w.label_suggestions, m.role from workspaces w join workspace_members m on m.workspace_id = w.id and m.user_id = agir_uid() order by w.created_at`,
+        `select w.id, w.name, w.review_mode, w.label_suggestions, w.logo_key is not null as has_logo, m.role from workspaces w join workspace_members m on m.workspace_id = w.id and m.user_id = agir_uid() order by w.created_at`,
       ),
     );
     return c.json({ user: c.get("user"), workspaces });
@@ -189,6 +189,36 @@ export function createApp({ db, store, secureCookies, demoSignIn = false }: AppD
   app.post("/api/workspaces", async (c) => {
     const { name, reviewMode } = z.object({ name: z.string().min(1).max(120), reviewMode: z.enum(REVIEW_MODES).optional() }).parse(await c.req.json());
     return c.json({ id: await as(c, (tx) => createWorkspace(tx, name, reviewMode)) });
+  });
+
+  // ---- The broker's logo (card 89d): the owner sets it; it is printed on the lender package only. ----------------
+  app.post("/api/workspaces/:ws/logo", async (c) => {
+    const ws = z.string().uuid().parse(c.req.param("ws"));
+    const [m] = await as(c, (tx) => tx.query<{ role: string }>(`select role from workspace_members where workspace_id = $1 and user_id = agir_uid()`, [ws]));
+    if (m?.role !== "owner") return c.json({ error: "Only the workspace owner can change its logo." }, 403);
+    if (Number(c.req.header("content-length") ?? 0) > LOGO_MAX_BYTES) return c.json({ error: "The image is larger than 500 KB." }, 413);
+    const bytes = new Uint8Array(await c.req.arrayBuffer());
+    if (bytes.byteLength > LOGO_MAX_BYTES) return c.json({ error: "The image is larger than 500 KB." }, 413);
+    const image = imageInfo(bytes);
+    if (image === "unknown") return c.json({ error: "Upload a PNG or JPEG image." }, 415);
+    if (image === "unreadable") return c.json({ error: "The image's width and height could not be read." }, 422);
+    const put = await store.put(bytes);
+    await as(c, (tx) => tx.query(`select fn_set_logo($1, $2, $3, $4, $5)`, [ws, put.key, image.mime, image.width, image.height]));
+    return c.json(image);
+  });
+
+  app.get("/api/workspaces/:ws/logo", async (c) => {
+    const ws = z.string().uuid().parse(c.req.param("ws"));
+    const [w] = await as(c, (tx) => tx.query<{ logo_key: string | null; logo_mime: string | null }>(`select logo_key, logo_mime from workspaces where id = $1`, [ws]));
+    if (!w?.logo_key) return c.json({ error: "This workspace has no logo." }, 404);
+    return new Response(new Uint8Array(await store.get(w.logo_key)), {
+      headers: { "content-type": w.logo_mime!, "x-content-type-options": "nosniff", "cache-control": "private, no-cache" },
+    });
+  });
+
+  app.delete("/api/workspaces/:ws/logo", async (c) => {
+    await as(c, (tx) => tx.query(`select fn_clear_logo($1)`, [z.string().uuid().parse(c.req.param("ws"))]));
+    return c.json({ ok: true });
   });
 
   app.post("/api/workspaces/:ws/review-mode", async (c) => {
@@ -657,4 +687,34 @@ export function createApp({ db, store, secureCookies, demoSignIn = false }: AppD
   });
 
   return app;
+}
+
+const LOGO_MAX_BYTES = 500 * 1024;
+
+/** A logo's type from its first bytes (never its name), and its size from the PNG IHDR chunk or the JPEG start-of-frame marker. */
+export function imageInfo(b: Uint8Array): { mime: "image/png" | "image/jpeg"; width: number; height: number } | "unknown" | "unreadable" {
+  const dv = new DataView(b.buffer, b.byteOffset, b.byteLength);
+  const sized = (mime: "image/png" | "image/jpeg", width: number, height: number) => (width > 0 && height > 0 ? { mime, width, height } : "unreadable" as const);
+  if (b.length >= 8 && [0x89, 0x50, 0x4e, 0x47, 0x0d, 0x0a, 0x1a, 0x0a].every((x, i) => b[i] === x)) {
+    if (b.length < 24 || String.fromCharCode(...b.slice(12, 16)) !== "IHDR") return "unreadable";
+    return sized("image/png", dv.getUint32(16), dv.getUint32(20));
+  }
+  if (b.length >= 3 && b[0] === 0xff && b[1] === 0xd8 && b[2] === 0xff) {
+    let i = 2;
+    while (i + 4 <= b.length) {
+      if (b[i] !== 0xff) return "unreadable";
+      const marker = b[i + 1]!;
+      if (marker === 0xff) { i += 1; continue; }
+      if (marker === 0x01 || (marker >= 0xd0 && marker <= 0xd8)) { i += 2; continue; }
+      if (marker === 0xd9 || marker === 0xda) return "unreadable"; // the image data starts before any frame header
+      const length = dv.getUint16(i + 2);
+      if (length < 2) return "unreadable";
+      if (marker >= 0xc0 && marker <= 0xcf && marker !== 0xc4 && marker !== 0xc8 && marker !== 0xcc) {
+        return i + 9 <= b.length ? sized("image/jpeg", dv.getUint16(i + 7), dv.getUint16(i + 5)) : "unreadable";
+      }
+      i += 2 + length;
+    }
+    return "unreadable";
+  }
+  return "unknown";
 }

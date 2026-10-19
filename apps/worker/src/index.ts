@@ -505,8 +505,17 @@ async function renderJob(deps: WorkerDeps, artifactId: string) {
     await db.query(`update artifacts set status = 'failed', error = $2, updated_at = now() where id = $1`, [a.id, `This run was made under policy ${run.policy_version}, which this build does not have.`]);
     return;
   }
+  // The broker's logo goes on the lender package only (card 89d).
+  const [ws] = a.kind === "lender_package"
+    ? await db.query<{ name: string; logo_key: string | null; logo_mime: "image/png" | "image/jpeg" | null; logo_width: number | null; logo_height: number | null }>(
+      `select name, logo_key, logo_mime, logo_width, logo_height from workspaces where id = $1`, [a.workspace_id])
+    : [];
+  const broker = ws?.logo_key
+    ? { name: ws.name, logo: { bytes: await store.get(ws.logo_key), mime: ws.logo_mime!, width: ws.logo_width!, height: ws.logo_height! } }
+    : undefined;
   const input: ArtifactInput = {
     kind: a.kind,
+    ...(broker ? { broker } : {}),
     deal: { name: deal.name, assetType: deal.asset_type, location: deal.location, currency: deal.currency, province: deal.province },
     run: {
       id: run.id,

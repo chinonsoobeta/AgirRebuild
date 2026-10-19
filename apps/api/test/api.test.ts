@@ -2692,7 +2692,11 @@ describe("the broker's logo (task 89d)", () => {
     expect(got.headers.get("content-type")).toBe("image/png");
     expect(got.headers.get("x-content-type-options")).toBe("nosniff");
     expect(Buffer.from(await got.arrayBuffer()).equals(Buffer.from(png(120, 40)))).toBe(true);
-    expect((await app.request(`/api/workspaces/${ws}/logo`, { headers: { cookie: carol.cookie } })).status).toBe(404);
+    // Carol is a viewer of this workspace by now (an earlier test); a stranger reads nothing.
+    expect((await app.request(`/api/workspaces/${ws}/logo`, { headers: { cookie: carol.cookie } })).status).toBe(200);
+    const stranger = await signup("stranger89d@example.com", "Sam Stranger");
+    expect((await app.request(`/api/workspaces/${ws}/logo`, { headers: { cookie: stranger.cookie } })).status).toBe(404);
+    expect((await upload(stranger, png(10, 10))).status).toBe(403);
     const [w] = await db.query<{ logo_key: string }>(`select logo_key from workspaces where id = $1`, [ws]);
     const events = await logoEvents();
     expect(events.map((e) => e.action)).toEqual(["logo.set", "logo.set"]);

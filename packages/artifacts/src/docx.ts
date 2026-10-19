@@ -3,12 +3,19 @@ import type { Block, DocModel } from "./model.ts";
 /** The same document model as Word. Every string comes from the model, so provenance carries over. */
 export async function renderDocx(m: DocModel): Promise<Uint8Array> {
   const d = await import("docx");
-  const { Document, Packer, Paragraph, TextRun, Table, TableRow, TableCell, WidthType, AlignmentType, HeadingLevel, BorderStyle } = d;
+  const { Document, Packer, Paragraph, TextRun, Table, TableRow, TableCell, WidthType, AlignmentType, HeadingLevel, BorderStyle, ImageRun } = d;
   const font = "IBM Plex Sans";
   const run = (text: string, opts: { bold?: boolean; size?: number; color?: string; mono?: boolean; italics?: boolean } = {}) =>
     new TextRun({ text, bold: opts.bold, size: opts.size ?? 20, color: opts.color ?? "15171C", font: opts.mono ? "IBM Plex Mono" : font, italics: opts.italics });
   const rule = { style: BorderStyle.SINGLE, size: 4, color: "DDD8CC" };
   const children: (InstanceType<typeof Paragraph> | InstanceType<typeof Table>)[] = [];
+  if (m.brand) {
+    const { logo, preparedBy } = m.brand;
+    children.push(new Paragraph({ spacing: { after: 160 }, children: [
+      new ImageRun({ type: logo.mime === "image/png" ? "png" : "jpg", data: logo.bytes, transformation: { width: logo.width, height: logo.height } }),
+      run(`   ${preparedBy}`, { size: 18, color: "454A55" }),
+    ] }));
+  }
   children.push(new Paragraph({ children: [run(m.kicker.toUpperCase(), { size: 16, color: "454A55" })] }));
   children.push(new Paragraph({ heading: HeadingLevel.TITLE, children: [new TextRun({ text: m.title, font: "Newsreader", size: 56 })] }));
   children.push(new Paragraph({ spacing: { after: 240 }, children: [run(m.meta, { color: "454A55" })] }));
@@ -85,7 +92,7 @@ export async function renderDocx(m: DocModel): Promise<Uint8Array> {
 
 /** The text of the Word document, for the provenance scan. */
 export function docxText(m: DocModel): string {
-  const parts: string[] = [m.kicker, m.title, m.meta, m.footer];
+  const parts: string[] = [...(m.brand ? [m.brand.preparedBy] : []), m.kicker, m.title, m.meta, m.footer];
   for (const b of m.blocks) {
     if (b.type === "heading" || b.type === "paragraph") parts.push(b.text);
     else if (b.type === "verdict") parts.push(b.label, b.headline, b.explanation);

@@ -68,6 +68,8 @@ export function describeEvent(i: I18n, e: AuditEvent): string {
       return fr ? `A donné accès à un réviseur${p.expires_at ? ` jusqu'au ${i.f.date(p.expires_at)}` : ""}` : `Gave a reviewer access${p.expires_at ? ` until ${i.f.date(p.expires_at)}` : ""}`;
     case "document.suggestions_failed":
       return fr ? "Les suggestions de libellés d'un modèle ont échoué pour un document ; les valeurs lues restent" : "A model's label suggestions failed for a document; the values read stand";
+    case "logo.set": return fr ? "A mis le logo du dossier pour le prêteur" : "Set the lender package logo";
+    case "logo.cleared": return fr ? "A retiré le logo du dossier pour le prêteur" : "Removed the lender package logo";
     case "invite.created": return fr ? "A créé un lien d'invitation pour un client" : "Made an invitation link for a client";
     case "invite.revoked": return fr ? "A révoqué un lien d'invitation" : "Revoked an invitation link";
     case "invite.used": return fr ? "Un client s'est joint au projet par un lien d'invitation" : "A client joined the deal through an invitation link";

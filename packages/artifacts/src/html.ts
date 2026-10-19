@@ -106,9 +106,9 @@ tr.strong td{font-weight:600;border-bottom:1px solid #15171C}
 .tag{font-size:8pt;font-weight:600;padding:1pt 6pt;border-radius:3px;white-space:nowrap}
 p{margin:0 0 8pt}
 .muted{color:#454A55}
-footer{margin-top:16pt;padding-top:8pt;border-top:1px solid #DDD8CC;font-size:8.5pt;color:#454A55}
+${m.brand ? ".brand{display:flex;align-items:center;justify-content:space-between;gap:12pt;margin:0 0 10pt;font-size:9pt;color:#454A55}\n" : ""}footer{margin-top:16pt;padding-top:8pt;border-top:1px solid #DDD8CC;font-size:8.5pt;color:#454A55}
 </style></head><body>
-<div class="mast"><span class="mark"><i></i><b>agir</b></span><span>${esc(m.kicker)}</span></div>
+${m.brand ? `<div class="brand"><img src="data:${m.brand.logo.mime};base64,${Buffer.from(m.brand.logo.bytes).toString("base64")}" width="${m.brand.logo.width}" height="${m.brand.logo.height}" alt=""><span>${esc(m.brand.preparedBy)}</span></div>\n` : ""}<div class="mast"><span class="mark"><i></i><b>agir</b></span><span>${esc(m.kicker)}</span></div>
 <h1>${esc(m.title)}</h1>
 <p class="meta">${esc(m.meta)}</p>
 ${m.blocks.map(block).join("\n")}
