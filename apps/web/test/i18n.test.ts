@@ -807,3 +807,19 @@ describe("French spacing before break-even colons (task 84a)", () => {
     expect(build("en", () => {}).L.breakeven(row, gate)).toContain("Type A: ");
   });
 });
+
+describe("partner memo wording (task 84d)", () => {
+  const en = build("en", () => {}), fr = build("fr", () => {});
+  const message = "This deal has no LP/GP split, or is not sold, so it has no partner memo.";
+  it("translates the kind and ineligible-run sentence", () => {
+    expect(en.t("reports.partnerMemo" as Key)).toBe("Partner memo");
+    expect(fr.t("reports.partnerMemo" as Key)).toBe("Note aux partenaires");
+    expect(fr.err(new Error(message))).toBe("Ce projet n'a pas de partage commanditaires/commandité, ou n'est pas vendu ; il n'a donc pas de note aux partenaires.");
+    expect(fr.err(new Error(message))).not.toMatch(/\b(this|deal|split|sold|partner|memo|has|not)\b/i);
+  });
+  it.each(["artifact.requested", "artifact.ready"])("%s names the partner memo in both languages", (action) => {
+    const event = { seq: 1, action, entity: "artifact", entity_id: null, payload: { kind: "partner_memo", format: "pdf" }, hash: "", created_at: "", actor: null };
+    expect(describeEvent(en, event)).toContain("Partner memo");
+    expect(describeEvent(fr, event)).toContain("Note aux partenaires");
+  });
+});

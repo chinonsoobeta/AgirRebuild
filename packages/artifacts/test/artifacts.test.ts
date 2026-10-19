@@ -2,7 +2,7 @@ import { describe, expect, test } from "vitest";
 import { FIELD_BY_KEY, POLICY_V1, policyFor, type EngineInput } from "@agir/contracts";
 import { createHash } from "node:crypto";
 import { readFileSync } from "node:fs";
-import { applyStress, breakeven, assemble, canonicalJson, ENGINE_VERSION, underwrite, type AssumptionRow } from "@agir/engine";
+import { runWaterfall, applyStress, breakeven, assemble, canonicalJson, ENGINE_VERSION, underwrite, type AssumptionRow } from "@agir/engine";
 import { consolidate, extractCandidates, type SourcedCandidate } from "@agir/extraction";
 import { loadOracle } from "@agir/testkit";
 import { allEquityDeal, developmentDeal } from "../../engine/test/fixtures.ts";
@@ -915,5 +915,80 @@ describe("what would change the answer for a deal that sells its units (task 83)
       expect(model.blocks.some((b) => b.type === "table" && b.columns.some((c) => c.label === "Input moved"))).toBe(false);
       expect(verifyProvenance(text, model.formatter.manifest).orphans).toEqual([]);
     }
+  });
+});
+
+const partnerMemoInput = (sale: boolean): ArtifactInput => {
+  const base = sale ? saleInput("kestrel-row-townhomes", "ic_memo") : mapleInput("ic_memo");
+  const input = { ...(sale ? base.input : developmentDeal()), waterfall: { lpSharePct: 90, preferredReturnPct: 8, gpPromotePct: 20 } };
+  const policy = policyFor(input);
+  return { ...base, kind: "partner_memo", deal: { ...base.deal, name: sale ? "Kestrel Row" : "Development rental" },
+    input, policy, result: underwrite(input, policy), assumptions: [], notFound: [], run: { ...base.run,
+      policyVersion: policy.version, policyHash: createHash("sha256").update(canonicalJson(policy)).digest("hex") } };
+};
+
+describe("the partner memo (task 84d)", () => {
+  test.each([false, true])("sale=%s prints partner terms, cash and stress metrics with provenance", (sale) => {
+    const x = partnerMemoInput(sale);
+    const model = buildModel(x);
+    const text = visibleText(renderHtml(model));
+    const w = runWaterfall(x.result.equityFlows, x.input.waterfall!);
+    const sums = (flows: { amount: number }[]) => ({
+      contributed: -flows.filter((f) => f.amount < 0).reduce((n, f) => n + f.amount, 0),
+      distributed: flows.filter((f) => f.amount > 0).reduce((n, f) => n + f.amount, 0),
+    });
+    const lp = sums(w.lp), gp = sums(w.gp);
+    const metric = (key: string) => x.result.scenarios[0]!.metrics.find((m) => m.key === key)!;
+    expect(model.kicker).toBe("Partner memo");
+    const stats = model.blocks.find((b) => b.type === "stats")!;
+    expect(stats.type === "stats" ? stats.items : []).toEqual(["equity_multiple", "equity_irr", "lp_irr", "gp_irr"].map((key) => ({
+      label: metric(key).label, value: formatValue(metric(key).value!, metric(key).unit),
+    })));
+    expect(saleTable(model, "Partnership terms").rows).toEqual([
+      ["lp_share_pct", 90], ["preferred_return_pct", 8], ["gp_promote_pct", 20],
+    ].map(([key, value]) => [FIELD_BY_KEY.get(String(key))!.label, formatValue(Number(value), "%")]));
+    const table = saleTable(model, "Capital and distributions");
+    expect(table.columns.map((c) => c.label)).toEqual(["Partner", "Contributed", "Distributed", "Multiple", "IRR"]);
+    expect(table.rows.slice(0, 3).map((r) => r[0])).toEqual(["LP", "GP", "Total"]);
+    for (const [label, totals, irr] of [["LP", lp, "lp_irr"], ["GP", gp, "gp_irr"]] as const) {
+      expect(table.rows.find((r) => r[0] === label)).toEqual([label, formatValue(totals.contributed, "$"),
+        formatValue(totals.distributed, "$"), formatValue(totals.distributed / totals.contributed, "x"), formatValue(metric(irr).value!, "%")]);
+    }
+    const total = table.rows.find((r) => r[0] === "Total")!;
+    const number = (s: string) => Number(s.replace(/[^0-9.-]/g, ""));
+    expect(Math.abs(number(total[1]!) - lp.contributed - gp.contributed)).toBeLessThanOrEqual(1);
+    expect(Math.abs(number(total[2]!) - lp.distributed - gp.distributed)).toBeLessThanOrEqual(1);
+    expect(total.slice(3)).toEqual([formatValue(metric("equity_multiple").value!, "x"), formatValue(metric("equity_irr").value!, "%")]);
+    expect(table.rows[3]).toEqual(["GP promote", "", formatValue(metric("gp_promote").value!, "$"), "", ""]);
+    expect(saleTable(model, "Stresses (each a full re-run of the model)").columns.map((c) => c.label))
+      .toEqual(["Scenario", ...["equity_multiple", "lp_irr", "gp_irr"].map((key) => metric(key).label)]);
+    const captions = model.blocks.flatMap((b) => b.type === "table" && b.caption ? [b.caption] : []);
+    expect(captions).toEqual(["Partnership terms", "Capital and distributions", "Sources and uses", "Stresses (each a full re-run of the model)"]);
+    expect(text).toContain("Distributions go pro rata until the LP has received its capital and its preferred return, compounded annually on what is unreturned. After that the GP takes its promote share of each dollar and the rest is split pro rata.");
+    expect(text).toContain("Every input and its source is listed in the IC memo and the lender package.");
+    expect(verifyProvenance(text, model.formatter.manifest)).toMatchObject({ pass: true, orphans: [] });
+    if (sale) {
+      expect(model.blocks).toContainEqual({ type: "paragraph", muted: true, text: SALE_OPERATIONS });
+      expect(text).not.toMatch(/DSCR|debt yield|\brent\b/i);
+      const decision = buildModel({ ...x, kind: "build_decision" });
+      expect(decision.blocks).not.toContainEqual({ type: "paragraph", muted: true, text: SALE_OPERATIONS });
+    }
+  });
+  test.each([false, true])("sale=%s renders Word and PDF", async (sale) => {
+    for (const format of ["docx", "pdf"] as const) {
+      let out;
+      try { out = await renderArtifact(partnerMemoInput(sale), format); }
+      catch (e) { if (format === "pdf" && e instanceof RendererUnavailableError) continue; throw e; }
+      expect(out.provenance).toMatchObject({ pass: true, orphans: [] });
+      expect(out.bytes.byteLength).toBeGreaterThan(1_000);
+    }
+  }, 60_000);
+  test.each(["no split", "held"])("%s is refused by the builder with a named error", (mode) => {
+    const x = partnerMemoInput(false);
+    x.input = mode === "no split" ? developmentDeal() : { ...x.input, exit: "refinance_hold", refinance: { month: 36, amount: 29_000_000, ratePct: 5, amortYears: 30, ioMonths: 0 } };
+    x.result = underwrite(x.input, policyFor(x.input));
+    let error: unknown;
+    try { buildModel(x); } catch (e) { error = e; }
+    expect(error).toMatchObject({ name: "PartnerMemoUnavailableError", message: "This deal has no LP/GP split, or is not sold, so it has no partner memo." });
   });
 });

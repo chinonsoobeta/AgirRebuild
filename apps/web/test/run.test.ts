@@ -6,6 +6,7 @@ import { underwrite } from "../../../packages/engine/src/index.ts";
 import { allEquityDeal, developmentDeal } from "../../../packages/engine/test/fixtures.ts";
 import * as runScreen from "../src/routes/run.tsx";
 import * as exploreScreen from "../src/routes/explore.tsx";
+import { Reports } from "../src/routes/reports.tsx";
 import { Explore } from "../src/routes/explore.tsx";
 import { build } from "../src/i18n.tsx";
 
@@ -115,5 +116,18 @@ describe("sale exploration layouts (task 82)", () => {
       chartMetrics: ["equity_multiple", "equity_irr", "profit_on_cost", "sizing_dscr", "yield_on_cost", "development_spread", "development_profit"],
       tornadoMetric: "equity_multiple", grid: { metric: "sizing_dscr", x: "rateBps", y: "rentPct" },
     });
+  });
+});
+
+describe("offering the partner memo (task 84d)", () => {
+  it.each([
+    ["sale with split", { ...saleInput, waterfall: { lpSharePct: 90, preferredReturnPct: 8, gpPromotePct: 20 } }, true],
+    ["rental sale with split", { ...rentalInput, waterfall: { lpSharePct: 90, preferredReturnPct: 8, gpPromotePct: 20 } }, true],
+    ["no split", rentalInput, false],
+    ["held with split", { ...heldInput, waterfall: { lpSharePct: 90, preferredReturnPct: 8, gpPromotePct: 20 } }, false],
+  ] as const)("%s", (_name, input, offered) => {
+    queryState.run = { result: underwrite(input, policyFor(input)) };
+    const html = renderToStaticMarkup(createElement(Reports, { dealId: "partners" }));
+    expect(html.includes("Partner memo")).toBe(offered);
   });
 });

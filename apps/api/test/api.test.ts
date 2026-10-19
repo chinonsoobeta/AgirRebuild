@@ -2126,3 +2126,51 @@ describe("trying changes on a stored sale (task 82)", () => {
     expect(await stored()).toBe(before);
   });
 });
+
+describe("requesting the partner memo (task 84d)", () => {
+  let partnerRun: string, partnerDeal: string, heldRun: string;
+  beforeAll(async () => {
+    const workspace = (await call(alice, "POST", "/api/workspaces", { name: "Partners", reviewMode: "solo" })).json.id;
+    for (const held of [false, true]) {
+      const d = (await call(alice, "POST", `/api/workspaces/${workspace}/deals`, { name: held ? "Held partners" : "Sold partners", assetType: "Multifamily" })).json.id;
+      const fields: [string, number, string?][] = [
+        ["land_cost", 1_000_000], ["hard_cost", 0], ["soft_cost", 0], ["contingency", 0], ["construction_months", 0], ["lease_up_months", 0],
+        ["hold_years", 1], ["stabilized_occupancy_pct", 100], ["expense_ratio_pct", 0], ["exit_cap_rate_pct", 10], ["selling_costs_pct", 0],
+        ["senior_loan_amount", 0], ["unit_count", 10, "A"], ["unit_rent_monthly", 1_000, "A"], ["lp_share_pct", 90], ["preferred_return_pct", 8], ["gp_promote_pct", 20],
+        ...(held ? [["refinance_and_hold", 1], ["refinance_month", 1], ["refinance_amount", 500_000], ["refinance_rate_pct", 5], ["refinance_amort_years", 30]] as [string, number][] : []),
+      ];
+      for (const [fieldKey, value, itemKey] of fields) expect((await call(alice, "POST", `/api/deals/${d}/values`,
+        { fieldKey, value, reason: "Partner memo test", ...(itemKey ? { itemKey } : {}) })).status, fieldKey).toBe(200);
+      const made = await call(alice, "POST", `/api/deals/${d}/runs`);
+      expect(made.status).toBe(200);
+      if (held) heldRun = made.json.id; else { partnerRun = made.json.id; partnerDeal = d; }
+    }
+  });
+  test("accepts PDF, generates it through the worker, and records the kind", async () => {
+    const request = await call(alice, "POST", `/api/runs/${partnerRun}/artifacts`, { kind: "partner_memo", format: "pdf" });
+    expect(request.status).toBe(200);
+    await work();
+    const artifact = (await call(alice, "GET", `/api/deals/${partnerDeal}/artifacts`)).json.find((a: any) => a.kind === "partner_memo");
+    expect(artifact).toMatchObject({ id: request.json.id, status: "ready" });
+    const file = await app.request(`/api/artifacts/${artifact.id}/file`, { headers: { cookie: alice.cookie } });
+    expect(new Uint8Array(await file.arrayBuffer()).slice(0, 4)).toEqual(new TextEncoder().encode("%PDF"));
+    expect(file.headers.get("content-disposition")).toContain("Partner%20memo");
+    const events = (await call(alice, "GET", `/api/deals/${partnerDeal}/audit`)).json;
+    expect(events.some((e: any) => e.action === "artifact.requested" && e.payload.kind === "partner_memo")).toBe(true);
+  }, 120_000);
+  test("held and unsplit runs are rejected before any artifact job is created", async () => {
+    const count = async () => canonicalJson(await db.query(`select (select count(*) from artifacts) as artifacts, (select count(*) from jobs) as jobs, (select count(*) from audit_events) as audit`));
+    const before = await count();
+    for (const id of [heldRun, run]) {
+      const response = await call(alice, "POST", `/api/runs/${id}/artifacts`, { kind: "partner_memo", format: "pdf" });
+      expect(response.status).toBe(422);
+      expect(response.json.error).toBe("This deal has no LP/GP split, or is not sold, so it has no partner memo.");
+    }
+    expect(await count()).toBe(before);
+  });
+  test("fresh migrations include 0016 and its kind check still refuses an unknown kind", async () => {
+    expect(await db.query(`select name from schema_migrations where name = '0016_partner_memo.sql'`)).toHaveLength(1);
+    const me = (await call(alice, "GET", "/api/me")).json.user.id;
+    await expect(asUser(db, me, (tx) => tx.query(`select fn_request_artifact($1, $2, $3)`, [partnerRun, "unknown", "pdf"]))).rejects.toThrow(/artifacts_kind_check/);
+  });
+});
