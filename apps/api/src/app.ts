@@ -1,5 +1,4 @@
 import { Hono, type Context } from "hono";
-import { randomBytes } from "node:crypto";
 import { getCookie, setCookie, deleteCookie } from "hono/cookie";
 import { z } from "zod";
 import { COUNTRIES, CURRENCIES, FIELDS, FIELD_GROUP_LABELS, METRICS, POLICIES, POLICY_V1, PROVINCE_CODES, REVIEW_MODES, runPolicy, type EngineInput, type Policy } from "@agir/contracts";
@@ -8,7 +7,7 @@ import { breakeven, DRIVERS, driversFor, SALE_DRIVERS, EngineInputError, explore
 import { canonicalItem, itemFold, kindOf } from "@agir/extraction";
 import { MAX_UPLOAD_BYTES } from "@agir/worker";
 import { checkPassword, createSession, endSession, hashPassword, rateLimiter, SESSION_DAYS, userForSession } from "./auth.ts";
-import { auditPackage, createRun, dealOverview, HttpError, labelRefusal, reviewView, runView, sha256 } from "./services.ts";
+import { auditPackage, createRun, dealOverview, HttpError, labelRefusal, reviewView, runView } from "./services.ts";
 
 export type AppDeps = { db: Db; store: BlobStore; secureCookies: boolean; demoSignIn?: boolean };
 type Env = { Variables: { user: { id: string; email: string; name: string } } };
@@ -26,15 +25,6 @@ const PG_STATUS: Record<string, number> = { "42501": 403, "28000": 401, P0002: 4
 export function createApp({ db, store, secureCookies, demoSignIn = false }: AppDeps) {
   const app = new Hono<Env>();
   const authLimit = rateLimiter(20, 60_000);
-  const shareLimit = rateLimiter(60, 60_000);
-  const fileResponse = async (a: { kind: string; format: string; storage_key: string | null; run_number: number; deal: string }, inline: boolean) => {
-    const bytes = await store.get(a.storage_key!);
-    const mime = { pdf: "application/pdf", docx: "application/vnd.openxmlformats-officedocument.wordprocessingml.document", xlsx: "application/vnd.openxmlformats-officedocument.spreadsheetml.sheet" }[a.format] ?? "application/octet-stream";
-    const label = { ic_memo: "IC memo", lender_package: "Lender package", build_decision: "Build decision", partner_memo: "Partner memo", model_export: "Model" }[a.kind] ?? a.kind;
-    return new Response(new Uint8Array(bytes), {
-      headers: { "content-type": mime, "content-disposition": `${inline && a.format === "pdf" ? "inline" : "attachment"}; filename="${encodeURIComponent(`${a.deal} - ${label} - Run ${a.run_number}.${a.format}`)}"` },
-    });
-  };
 
   app.onError((err, c) => {
     if (err instanceof HttpError) return c.json({ error: err.message, ...(err.body ? { detail: err.body } : {}) }, err.status as 400);
@@ -42,17 +32,8 @@ export function createApp({ db, store, secureCookies, demoSignIn = false }: AppD
     if (err instanceof z.ZodError) return c.json({ error: "Some fields are missing or not valid.", issues: err.issues }, 422);
     const code = (err as { code?: string }).code;
     if (code && PG_STATUS[code]) return c.json({ error: err.message }, PG_STATUS[code] as 400);
-    const shared = c.req.path.startsWith("/api/share/");
-    console.error(JSON.stringify({ at: new Date().toISOString(), event: "api.error", path: shared ? "/api/share/…" : c.req.path, error: shared ? "Shared link request failed" : err.message }));
+    console.error(JSON.stringify({ at: new Date().toISOString(), event: "api.error", path: c.req.path, error: err.message }));
     return c.json({ error: "Something went wrong on our side. It has been logged." }, 500);
-  });
-
-  app.use("/api/share/*", async (c, next) => {
-    if (shareLimit(c.req.header("x-forwarded-for") ?? "local")) await next();
-    else c.res = c.json({ error: "Too many requests. Wait a minute." }, 429);
-    c.header("cache-control", "no-store");
-    c.header("referrer-policy", "no-referrer");
-    c.header("x-robots-tag", "noindex");
   });
 
   // Mutations must carry a custom header, which a cross-site form cannot send.
@@ -118,21 +99,6 @@ export function createApp({ db, store, secureCookies, demoSignIn = false }: AppD
     deleteCookie(c, COOKIE, { path: "/" });
     return c.json({ ok: true });
   });
-
-  for (const [suffix, what] of [["", "page"], ["/file", "file"], ["/audit-package", "audit_package"]] as const) {
-    app.get(`/api/share/:secret${suffix}`, async (c) => {
-      const [link] = await db.query<{ link_id: string; artifact_id: string; run_id: string; created_by: string; kind: string; format: string;
-        storage_key: string | null; run_number: number; deal_name: string; expires_at: string | null }>(
-        `select * from fn_open_share_link($1, $2)`, [sha256(c.req.param("secret")!), what]);
-      if (!link) return c.json({ error: "This link is not available. It may have expired or been revoked." }, 404);
-      if (what === "page") return c.json({ deal: link.deal_name, kind: link.kind, format: link.format, runNumber: link.run_number, expiresAt: link.expires_at });
-      if (what === "file") return fileResponse({ ...link, deal: link.deal_name }, c.req.query("inline") === "1");
-      const pkg = await asUser(db, link.created_by, (tx) => auditPackage(tx, link.run_id));
-      return new Response(JSON.stringify(pkg, null, 2), {
-        headers: { "content-type": "application/json", "content-disposition": `attachment; filename="agir-audit-package-run-${pkg.manifest.run.number}.json"` },
-      });
-    });
-  }
 
   // Everything below needs a session.
   app.use("/api/*", async (c, next) => {
@@ -533,31 +499,13 @@ export function createApp({ db, store, secureCookies, demoSignIn = false }: AppD
       ),
     );
     if (!a || a.status !== "ready" || !a.storage_key) return c.json({ error: "This file is not ready." }, 404);
-    return fileResponse(a, c.req.query("inline") === "1");
-  });
-
-  app.post("/api/artifacts/:id/share-links", async (c) => {
-    const { term } = z.object({ term: z.enum(["24h", "7d", "30d", "none"]) }).parse(await c.req.json());
-    const secret = randomBytes(32).toString("base64url");
-    const link = await as(c, async (tx) => {
-      const [made] = await tx.query<{ id: string }>(`select fn_create_share_link($1, $2, $3) as id`, [c.req.param("id"), term, sha256(secret)]);
-      const [row] = await tx.query<{ id: string; expires_at: string | null }>(`select id, expires_at from share_links where id = $1`, [made!.id]);
-      return row!;
+    const bytes = await store.get(a.storage_key);
+    const mime = { pdf: "application/pdf", docx: "application/vnd.openxmlformats-officedocument.wordprocessingml.document", xlsx: "application/vnd.openxmlformats-officedocument.spreadsheetml.sheet" }[a.format] ?? "application/octet-stream";
+    const label = { ic_memo: "IC memo", lender_package: "Lender package", build_decision: "Build decision", partner_memo: "Partner memo", model_export: "Model" }[a.kind] ?? a.kind;
+    const inline = c.req.query("inline") === "1" && a.format === "pdf";
+    return new Response(new Uint8Array(bytes), {
+      headers: { "content-type": mime, "content-disposition": `${inline ? "inline" : "attachment"}; filename="${encodeURIComponent(`${a.deal} - ${label} - Run ${a.run_number}.${a.format}`)}"` },
     });
-    return c.json({ id: link.id, url: `/s/${secret}`, expiresAt: link.expires_at });
-  });
-
-  app.get("/api/deals/:id/share-links", async (c) => c.json(await as(c, (tx) => tx.query(
-    `select l.id, l.artifact_id, a.kind, a.format, r.run_number, l.term, l.expires_at, l.created_at, maker.name as created_by,
-      l.revoked_at, revoker.name as revoked_by, count(e.seq)::int as openings, max(e.created_at) as last_opened_at
-      from share_links l join artifacts a on a.id = l.artifact_id join runs r on r.id = a.run_id
-      left join users maker on maker.id = l.created_by left join users revoker on revoker.id = l.revoked_by
-      left join audit_events e on e.entity = 'share_link' and e.entity_id = l.id::text and e.action = 'share.opened'
-      where l.deal_id = $1 group by l.id, a.kind, a.format, r.run_number, maker.name, revoker.name order by l.created_at desc`, [c.req.param("id")]))));
-
-  app.post("/api/share-links/:id/revoke", async (c) => {
-    await as(c, (tx) => tx.query(`select fn_revoke_share_link($1)`, [c.req.param("id")]));
-    return c.json({ ok: true });
   });
 
   // ---- Audit ------------------------------------------------------------------------------
