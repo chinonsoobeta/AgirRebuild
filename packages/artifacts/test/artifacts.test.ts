@@ -2,7 +2,7 @@ import { describe, expect, test } from "vitest";
 import { FIELD_BY_KEY, POLICY_V1, policyFor, type EngineInput } from "@agir/contracts";
 import { createHash } from "node:crypto";
 import { readFileSync } from "node:fs";
-import { assemble, canonicalJson, ENGINE_VERSION, underwrite, type AssumptionRow } from "@agir/engine";
+import { applyStress, breakeven, assemble, canonicalJson, ENGINE_VERSION, underwrite, type AssumptionRow } from "@agir/engine";
 import { consolidate, extractCandidates, type SourcedCandidate } from "@agir/extraction";
 import { loadOracle } from "@agir/testkit";
 import { allEquityDeal, developmentDeal } from "../../engine/test/fixtures.ts";
@@ -671,7 +671,7 @@ describe("the reports for a deal that sells its units (task 80)", () => {
     expect(text).not.toMatch(/DSCR|Debt yield|Break-even occupancy|Capitalized interest|\brent\b/i);
     const captions = model.blocks.flatMap((b) => b.type === "table" ? [b.caption] : []);
     for (const caption of ["Revenue program", "Operations", "Stabilized operations, year 1", "Annual cash flows"]) expect(captions).not.toContain(caption);
-    expect(saleTable(model, "Stresses (each a full re-run of the model)").columns.map((c) => c.label)).toEqual(["Scenario", "Profit on cost (units sold)", "Margin on sales revenue", "Equity multiple"]);
+    if (!(kind === "build_decision" && x.result.verdict.code !== "APPROVE")) expect(saleTable(model, "Stresses (each a full re-run of the model)").columns.map((c) => c.label)).toEqual(["Scenario", "Profit on cost (units sold)", "Margin on sales revenue", "Equity multiple"]);
     const stats = model.blocks.find((b) => b.type === "stats");
     expect(stats?.type === "stats" ? stats.items.map((i) => i.label) : []).toEqual(kind === "ic_memo"
       ? ["Total cost", "Profit on cost (units sold)", "Margin on sales revenue", "Equity multiple", "Equity IRR"]
@@ -725,7 +725,7 @@ describe("the reports for a deal that sells its units (task 80)", () => {
       }
     }
   });
-  test("Alder's rejected build decision shows stresses, ranks by failed gates then profit on cost, and has no break-even table", () => {
+  test("Alder's rejected build decision ranks stresses by failed gates then profit on cost and shows break-even rows", () => {
     const x = saleInput("alder-court-condo", "build_decision");
     expect(x.result.verdict.code).toBe("REJECT");
     for (const tie of [false, true]) {
@@ -737,9 +737,9 @@ describe("the reports for a deal that sells its units (task 80)", () => {
       const paragraph = model.blocks.find((b) => b.type === "paragraph" && b.text.startsWith("Weakest stress:"));
       expect(paragraph?.type === "paragraph" && paragraph.text.startsWith(`Weakest stress: ${weakest.label}.`)).toBe(true);
       expect(paragraph?.type === "paragraph" ? paragraph.text : "").toContain(`Its profit on cost: ${formatValue(poc(weakest.key), "%")}.`);
-      expect(model.blocks).toContainEqual({ type: "paragraph", muted: true, text: SALE_CHANGE });
-      expect(model.blocks.some((b) => b.type === "table" && b.columns.some((c) => c.label === "Input moved"))).toBe(false);
-      expect(saleTable(model, "Stresses (each a full re-run of the model)").rows).toHaveLength(result.scenarios.length);
+      expect(model.blocks).not.toContainEqual({ type: "paragraph", muted: true, text: SALE_CHANGE });
+      expect(model.blocks.some((b) => b.type === "table" && b.columns.some((c) => c.label === "Input moved"))).toBe(!tie);
+      expect(model.blocks.some((b) => b.type === "table" && b.caption === "Stresses (each a full re-run of the model)")).toBe(false);
     }
   });
   test("the sale workbook has the specified sheets, ledger columns, numeric money and metric omission note", async () => {
@@ -782,4 +782,138 @@ describe("the reports for a deal that sells its units (task 80)", () => {
       if (format === "pdf") expect(new TextDecoder().decode(out.bytes.slice(0, 5))).toBe("%PDF-");
     }
   }, 60_000);
+});
+
+describe("what would change the answer for a deal that sells its units (task 83)", () => {
+  const tableOf = (model: ReturnType<typeof buildModel>) => {
+    const table = model.blocks.find((b) => b.type === "table" && b.columns.some((c) => c.label === "Input moved"));
+    if (!table || table.type !== "table") throw new Error("Missing change-the-answer table");
+    return table;
+  };
+  const gateRows = (model: ReturnType<typeof buildModel>, label: string) => {
+    const rows = tableOf(model).rows;
+    const first = rows.findIndex((r) => r[0] === label);
+    expect(first).toBeGreaterThanOrEqual(0);
+    const next = rows.findIndex((r, i) => i > first && r[0] !== "");
+    return rows.slice(first, next < 0 ? undefined : next);
+  };
+  test.each(SALE_SLUGS)("%s prints one six-column block per failing gate with provenance", (slug) => {
+    const x = saleInput(slug, "build_decision");
+    expect(x.result.verdict.code).toBe(slug === "alder-court-condo" ? "REJECT" : "APPROVE_WITH_CONDITIONS");
+    const model = buildModel(x);
+    const text = visibleText(renderHtml(model));
+    expect(text).toContain("What would change the answer");
+    expect(text).not.toContain(SALE_CHANGE);
+    const table = tableOf(model);
+    expect(table.columns.map((c) => c.label)).toEqual(["Gate", "Needs", "This run", "Input moved", "In this run", "Passes at"]);
+    const failing = x.result.verdict.gates.filter((g) => g.status === "failed");
+    expect(table.rows.filter((r) => r[0] !== "").map((r) => r[0])).toEqual(failing.map((g) => g.label));
+    const result = breakeven(x.input, x.policy);
+    for (const g of failing) {
+      const rows = gateRows(model, g.label);
+      const expectedCount = result.rows.filter((r) => r.gate === g.key).reduce((n, r) =>
+        n + (r.state !== "value" || r.driver === "pricePct" ? 1 : r.to.length + (r.driver === "rateBps" && r.to.length > 1 ? 1 : 0)), 0);
+      expect(rows).toHaveLength(expectedCount);
+      expect(rows[0]!.slice(1, 3)).toEqual([formatValue(g.threshold, g.unit), formatValue(g.actual!, g.unit)]);
+      expect(rows.every((r) => r.length === 6)).toBe(true);
+      expect(rows.slice(1).every((r) => r.slice(0, 3).every((c) => c === ""))).toBe(true);
+    }
+    expect(model.blocks.some((b) => b.type === "table" && b.caption === "Stresses (each a full re-run of the model)")).toBe(false);
+    expect(verifyProvenance(text, model.formatter.manifest)).toMatchObject({ pass: true, orphans: [] });
+  });
+  test("an approved sale keeps the stress table and has no change-the-answer section", () => {
+    const x = saleInput("kestrel-row-townhomes", "build_decision");
+    x.result = { ...x.result, verdict: { ...x.result.verdict, code: "APPROVE" } };
+    const model = buildModel(x);
+    expect(saleTable(model, "Stresses (each a full re-run of the model)").rows).toHaveLength(x.result.scenarios.length);
+    expect(visibleText(renderHtml(model))).not.toContain("What would change the answer");
+    expect(model.blocks.some((b) => b.type === "table" && b.columns.some((c) => c.label === "Input moved"))).toBe(false);
+  });
+  test("Alder prices move together in one row with the engine shock and recorded count", () => {
+    const x = saleInput("alder-court-condo", "build_decision");
+    const model = buildModel(x);
+    const prices = breakeven(x.input, x.policy).rows.filter((r) => r.driver === "pricePct" && r.state === "value");
+    expect(prices.length).toBeGreaterThan(0);
+    for (const price of prices) {
+      const g = x.result.verdict.gates.find((g) => g.key === price.gate)!;
+      const rows = gateRows(model, g.label).filter((r) => r[3]!.startsWith("Sale price"));
+      expect(rows).toHaveLength(1);
+      expect(rows[0]!.slice(3)).toEqual(["Sale prices, all 3 unit types (same share)", "—", "+" + formatValue(price.shock!, "%")]);
+      expect(model.formatter.manifest).toEqual(expect.arrayContaining([
+        { text: "3", ref: `ident:breakeven.${g.key}.price.count` },
+        { text: formatValue(price.shock!, "%"), ref: `run:breakeven.${g.key}.price.shock` },
+      ]));
+    }
+  });
+  test("one unit type prints the rounded-up passing price and passes when fed back", () => {
+    const x = saleInput("kestrel-row-townhomes", "build_decision");
+    // Keep the eight-unit program; all units now use the first type's price and label.
+    const units = x.input.forSale!.units;
+    x.input = { ...x.input, forSale: { ...x.input.forSale!, units: [{ ...units[0]!, units: units.reduce((n, u) => n + u.units, 0) }] } };
+    x.result = underwrite(x.input, x.policy);
+    const price = breakeven(x.input, x.policy).rows.find((r) => r.gate === "profit_on_cost_for_sale" && r.driver === "pricePct")!;
+    expect(price.state).toBe("value");
+    const model = buildModel(x);
+    const gate = x.result.verdict.gates.find((g) => g.key === price.gate)!;
+    const echo = price.to[0]!;
+    const passing = roundToward(echo.to, 1, 1);
+    const printed = gateRows(model, gate.label).find((r) => r[3] === `Sale price, ${echo.item}`)!;
+    expect(printed.slice(3)).toEqual([`Sale price, ${echo.item}`, formatValue(echo.from, "$"), formatValue(passing, "$")]);
+    const at = underwrite(applyStress(x.input, { key: "price", label: "Price", pricePct: price.shock! }), x.policy).verdict.gates.find((g) => g.key === gate.key)!;
+    expect(at.status).toBe("passed");
+    expect(at.actual).toBe(price.actual);
+    const rounded = { ...x.input, forSale: { ...x.input.forSale!, units: x.input.forSale!.units.map((u) => ({ ...u, price: passing })) } };
+    expect(underwrite(rounded, x.policy).verdict.gates.find((g) => g.key === gate.key)!.status).toBe("passed");
+    expect(verifyProvenance(visibleText(renderHtml(model)), model.formatter.manifest).orphans).toEqual([]);
+  });
+  test("sales pace and presales print their passing echoes rounded up to hundredths", () => {
+    const x = saleInput("kestrel-row-townhomes", "build_decision");
+    x.input = { ...x.input, forSale: { ...x.input.forSale!, absorptionPerMonth: 0.05 } };
+    x.result = underwrite(x.input, x.policy);
+    const result = breakeven(x.input, x.policy);
+    const model = buildModel(x);
+    for (const [driver, label, unit] of [["absorptionPct", "Sales pace", "units/mo"], ["presalesPts", "Presold units", "%"]] as const) {
+      const row = result.rows.find((r) => r.driver === driver && r.state === "value")!;
+      expect(row, driver).toBeDefined();
+      const echo = row.to[0]!;
+      const g = x.result.verdict.gates.find((g) => g.key === row.gate)!;
+      const printed = gateRows(model, g.label).find((r) => r[3] === label)!;
+      expect(printed.slice(3)).toEqual([label, formatValue(echo.from, unit), formatValue(roundToward(echo.to, 1, 0.01), unit)]);
+      if (driver === "absorptionPct") expect(printed.slice(4)).toEqual(["0.05 units per month", "0.06 units per month"]);
+    }
+    expect(formatValue(1, "units/mo")).toBe("1 unit per month");
+    expect(formatValue(2.43, "units/mo")).toBe("2.43 units per month");
+    expect(formatValue(2.4, "units/mo")).toBe("2.4 units per month");
+    expect(verifyProvenance(visibleText(renderHtml(model)), model.formatter.manifest).orphans).toEqual([]);
+  });
+  test("unavailable moves name each sale driver and its state", () => {
+    const x = saleInput("kestrel-row-townhomes", "build_decision");
+    x.input = { ...x.input, forSale: { ...x.input.forSale!, units: [x.input.forSale!.units[0]!] } };
+    x.result = underwrite(x.input, x.policy);
+    const model = buildModel(x);
+    const states = { out_of_range: "Out of range", no_effect: "No effect", not_monotonic: "Not monotonic" } as const;
+    const names = { pricePct: "Sale prices", absorptionPct: "Sales pace", presalesPts: "Presales" } as const;
+    for (const driver of ["pricePct", "absorptionPct", "presalesPts"] as const) {
+      const rows = breakeven(x.input, x.policy).rows.filter((r) => r.driver === driver && r.state !== "value");
+      expect(rows.length, driver).toBeGreaterThan(0);
+      for (const row of rows) {
+        const gate = x.result.verdict.gates.find((g) => g.key === row.gate)!;
+        expect(gateRows(model, gate.label).map((r) => r.slice(3))).toContainEqual([names[driver], "—", states[row.state as keyof typeof states]]);
+      }
+    }
+  });
+  test.each(SALE_SLUGS)("%s explains an earlier engine or a different policy as rental reports do", (slug) => {
+    const x = saleInput(slug, "build_decision");
+    for (const [run, message] of [
+      [{ ...x.run, engineVersion: "0.9.0" }, "Not shown: this run was made by an earlier engine."],
+      [{ ...x.run, policyHash: "different" }, "Not shown: this run was made under a different policy."],
+    ] as const) {
+      const model = buildModel({ ...x, run });
+      const text = visibleText(renderHtml(model));
+      expect(text).toContain("What would change the answer");
+      expect(text).toContain(message);
+      expect(model.blocks.some((b) => b.type === "table" && b.columns.some((c) => c.label === "Input moved"))).toBe(false);
+      expect(verifyProvenance(text, model.formatter.manifest).orphans).toEqual([]);
+    }
+  });
 });
