@@ -2866,3 +2866,27 @@ describe("a client never sees another client (task 91a)", () => {
     expect(pkg.auditEvents.filter((e: any) => e.redacted).map((e: any) => e.action)).toEqual(["invite.used"]);
   });
 });
+
+
+describe("card 93b scanned uploads", () => {
+  test("extracts a scan and preserves its OCR warning and source rule", async () => {
+    const { createCanvas } = await import("@napi-rs/canvas");
+    const { scanPdf } = await import("@agir/testkit");
+    const canvas = createCanvas(1700, 2200);
+    const ctx = canvas.getContext("2d");
+    ctx.fillStyle = "white"; ctx.fillRect(0, 0, 1700, 2200);
+    ctx.fillStyle = "black"; ctx.font = "40px sans-serif";
+    ctx.fillText("Exit cap rate 5.5%", 100, 160);
+    const d = (await call(alice, "POST", `/api/workspaces/${ws}/deals`, { name: "OCR review example", assetType: "Multifamily" })).json.id;
+    const bytes = await scanPdf(canvas.toBuffer("image/jpeg", 90));
+    const uploaded = await call(alice, "PUT", `/api/deals/${d}/documents?name=scan.pdf`, undefined, bytes);
+    expect(uploaded.status).toBe(200);
+    await work();
+    const doc = (await call(alice, "GET", `/api/deals/${d}/documents`)).json[0];
+    expect(doc).toMatchObject({ stage: "extracted", needs_ocr: true, page_count: 1,
+      stage_detail: "Read by OCR from 1 scanned page. Check every value against the page before approving it." });
+    const a = (await call(alice, "GET", `/api/deals/${d}/review`)).json.assumptions.find((a: any) => a.fieldKey === "exit_cap_rate_pct");
+    expect(a.value).toBe(5.5);
+    expect(a.sources[0]).toMatchObject({ ocr: true, rule: "line:prose" });
+  }, 60_000);
+});

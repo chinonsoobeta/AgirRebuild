@@ -112,3 +112,12 @@ export async function documentBytes(doc: OracleDoc): Promise<Uint8Array> {
   if (doc.kind === "csv") return csvBytes(doc);
   return new TextEncoder().encode([doc.title, ...(doc.lines ?? [])].filter(Boolean).join("\n") + "\n");
 }
+
+/** An image-only PDF for scan-reading tests, with no text layer. */
+export async function scanPdf(jpeg: Uint8Array, pages = 1): Promise<Uint8Array> {
+  const { PDFDocument } = await import("pdf-lib");
+  const pdf = await PDFDocument.create();
+  const img = await pdf.embedJpg(jpeg);
+  for (let n = 0; n < pages; n++) pdf.addPage([612, 792]).drawImage(img, { x: 0, y: 0, width: 612, height: 792 });
+  return pdf.save();
+}

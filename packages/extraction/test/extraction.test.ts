@@ -1,4 +1,4 @@
-import { describe, expect, test } from "vitest";
+import { describe, expect, test, vi } from "vitest";
 import { SF_PER_M2 } from "@agir/numbers";
 import { assemble, type AssumptionRow } from "@agir/engine";
 import { WAIVED_NOTE, applyLabels, itemFold, applySuggestions, consolidate, extractCandidates, offerable, offeredIds, figureOrder, withoutLabelled, normalizeLabel, parseDocument, scoreExtraction, type Cell, type NormalizedDocument, type SourcedCandidate, type Table } from "../src/index.ts";
@@ -4960,4 +4960,51 @@ describe("card 93a", () => {
     expect(values(await read("4 studios at $1,500/month.", "2 two-bedroom units at $2,400/month."))).toEqual(expected);
     expect(values(await read("The senior lender will advance a loan of", "$4,000,000 at 6.4%"))).toContainEqual(["senior_loan_amount", null, 4000000]);
   });
+});
+
+
+vi.mock("tesseract.js", async (original) => {
+  const actual = await original<typeof import("tesseract.js")>();
+  return { ...actual, createWorker: vi.fn(actual.createWorker) };
+});
+
+describe("card 93b local OCR", () => {
+  const scan = async (pages = 1) => {
+    const { createCanvas } = await import("@napi-rs/canvas");
+    const { scanPdf } = await import("@agir/testkit");
+    const canvas = createCanvas(1700, 2200);
+    const ctx = canvas.getContext("2d");
+    ctx.fillStyle = "white"; ctx.fillRect(0, 0, 1700, 2200);
+    ctx.fillStyle = "black"; ctx.font = "40px sans-serif";
+    ctx.fillText("Terminal cap rate 5.5%", 100, 160);
+    ctx.fillText("Senior loan $1,850,000 at 6.75%", 100, 250);
+    return scanPdf(canvas.toBuffer("image/jpeg", 90), pages);
+  };
+  test("reads both lines with confidence locations and local language data", async () => {
+    const { ocrPdf } = await import("../src/index.ts");
+    const { createWorker } = await import("tesseract.js");
+    const { existsSync } = await import("node:fs");
+    const { join } = await import("node:path");
+    const bytes = await scan();
+    const parsed = await parseDocument(bytes, "scan.pdf");
+    expect(parsed.needsOcr).toBe(true);
+    const result = await ocrPdf(bytes);
+    expect(result.pageCount).toBe(1);
+    expect(result.lines.map((l) => l.text)).toEqual(["Terminal cap rate 5.5%", "Senior loan $1,850,000 at 6.75%"]);
+    for (const line of result.lines) expect(line.location).toMatch(/^page 1, line \d \(OCR, confidence \d+%\)$/);
+    const found = extractCandidates({ ...parsed, ...result, fullText: result.lines.map((l) => l.text).join("\n") });
+    expect(found.candidates).toContainEqual(expect.objectContaining({ fieldKey: "exit_cap_rate_pct", value: 5.5 }));
+    const options = vi.mocked(createWorker).mock.calls.at(-1)![2]!;
+    expect(options.gzip).toBe(true);
+    expect(options.cacheMethod).toBe("none");
+    expect(existsSync(join(options.langPath!, "eng.traineddata.gz"))).toBe(true);
+    expect(existsSync(join(options.langPath!, "fra.traineddata.gz"))).toBe(true);
+  }, 60_000);
+  test("refuses 51 scanned pages before creating an OCR worker", async () => {
+    const { ocrPdf } = await import("../src/index.ts");
+    const { createWorker } = await import("tesseract.js");
+    const calls = vi.mocked(createWorker).mock.calls.length;
+    await expect(ocrPdf(await scan(51))).rejects.toThrow("This scanned PDF has more than 50 pages; Agir reads scans of up to 50 pages. Split it, or enter its values by hand.");
+    expect(vi.mocked(createWorker).mock.calls.length).toBe(calls);
+  }, 60_000);
 });

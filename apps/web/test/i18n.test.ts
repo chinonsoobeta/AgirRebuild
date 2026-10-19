@@ -854,3 +854,12 @@ describe("share-link wording (task 86b)", () => {
     }
   });
 });
+
+
+it("card 93b: Approve all excludes OCR sources but keeps text sources", () => {
+  const rows = [
+    { sourceKind: "document", sources: [{ ocr: true }] },
+    { sourceKind: "document", sources: [{ document_name: "typed.txt" }] },
+  ] as any;
+  expect(approvable(rows)).toEqual([rows[1]]);
+});
