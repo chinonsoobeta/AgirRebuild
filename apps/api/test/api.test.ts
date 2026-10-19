@@ -9,7 +9,7 @@ import { drain, reconcileDeal, type SuggestRequest, type SuggestReply } from "@a
 import { documentBytes, loadOracle } from "@agir/testkit";
 import { createApp } from "../src/app.ts";
 import { POLICIES, POLICY_V1, RENTAL_HOLD_DRAFT, type Policy } from "@agir/contracts";
-import { DRIVERS, SALE_DRIVERS, canonicalJson } from "@agir/engine";
+import { DRIVERS, SALE_DRIVERS, canonicalJson, heldPartnerReturns } from "@agir/engine";
 import { POLICY_HASHES, sha256, sourceLabel } from "../src/services.ts";
 
 let db: Db;
@@ -2177,6 +2177,20 @@ describe("requesting the partner memo (task 84d)", () => {
     const events = (await call(alice, "GET", `/api/deals/${artifact!.deal_id}/audit`)).json;
     expect(events.some((e: any) => e.action === "artifact.requested" && e.payload.kind === "partner_memo")).toBe(true);
   }, 120_000);
+  test("the held run with a split carries its partner returns; the sold and unsplit runs do not (task 88b)", async () => {
+    const [stored] = await db.query<{ result: any; input_snapshot: any }>(`select result, input_snapshot from runs where id = $1`, [heldRun]);
+    const h = heldPartnerReturns(stored!.result.equityFlows, stored!.input_snapshot.input.waterfall);
+    const positive = (flows: { amount: number }[]) => flows.filter((f) => f.amount > 0).reduce((n, f) => n + f.amount, 0);
+    const view = await call(alice, "GET", `/api/runs/${heldRun}`);
+    expect(view.status).toBe(200);
+    expect(view.json.heldPartners).toEqual({ lpIrr: h.withValue.lpIrr, gpIrr: h.withValue.gpIrr, promote: h.withValue.promote,
+      paidLp: positive(h.paid.lp), paidGp: positive(h.paid.gp), paidPromote: h.paid.promote });
+    for (const id of [partnerRun, run]) {
+      const other = await call(alice, "GET", `/api/runs/${id}`);
+      expect(other.status).toBe(200);
+      expect("heldPartners" in other.json).toBe(false);
+    }
+  });
   test("fresh migrations include 0016 and its kind check still refuses an unknown kind", async () => {
     expect(await db.query(`select name from schema_migrations where name = '0016_partner_memo.sql'`)).toHaveLength(1);
     const me = (await call(alice, "GET", "/api/me")).json.user.id;

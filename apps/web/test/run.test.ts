@@ -7,7 +7,7 @@ import { api, ApiError } from "../src/api";
 import { Audit } from "../src/routes/audit";
 import { renderToStaticMarkup } from "react-dom/server";
 import { policyFor, type EngineInput } from "@agir/contracts";
-import { underwrite } from "../../../packages/engine/src/index.ts";
+import { heldPartnerReturns, underwrite } from "../../../packages/engine/src/index.ts";
 import { allEquityDeal, developmentDeal } from "../../../packages/engine/test/fixtures.ts";
 import * as runScreen from "../src/routes/run.tsx";
 import * as exploreScreen from "../src/routes/explore.tsx";
@@ -232,6 +232,50 @@ describe("the run screen shows the partners (task 85d)", () => {
       const metric = result.scenarios[0]!.metrics.find((m) => m.key === key)!;
       expect(text).toContain(fr.f.value(metric.value, metric.unit));
     }
+    expect(text).not.toMatch(/\b(LP|GP|IRR|promote|waterfall|equity|yield|debt|loan|rent|cash|gate|stated)\b/i);
+    queryState.lang = "en";
+  });
+  const heldPartners = (() => {
+    const h = heldPartnerReturns(heldWithSplit.equityFlows, split);
+    const positive = (flows: { amount: number }[]) => flows.filter((f) => f.amount > 0).reduce((n, f) => n + f.amount, 0);
+    return { lpIrr: h.withValue.lpIrr, gpIrr: h.withValue.gpIrr, promote: h.withValue.promote, paidLp: positive(h.paid.lp), paidGp: positive(h.paid.gp), paidPromote: h.paid.promote };
+  })();
+  const heldView = (extra: object) => ({ id: "held-run", number: 1, result: heldWithSplit, fresh: true, staleReasons: [], inputs: [],
+    policyVersion: heldWithSplit.policyVersion, policyDraft: true, engineVersion: heldWithSplit.engineVersion,
+    createdAt: "2026-10-19T00:00:00Z", createdBy: null, inputHash: "input-hash", resultHash: "result-hash", signed: "development key", ...extra });
+  const heldLabels = ["run.heldLpIrr", "run.heldGpIrr", "run.heldPromote"] as const;
+  it.each([true, false])("the held screen shows the three partner figures after the unrealized IRR only with heldPartners=%s (task 88b)", (withPartners) => {
+    queryState.run = heldView(withPartners ? { heldPartners } : {});
+    const text = renderToStaticMarkup(createElement(runScreen.Run, { dealId: "held" })).replace(/<[^>]*>/g, " ");
+    const i = build("en", () => {});
+    const labels = heldLabels.map((key) => i.t(key));
+    expect(labels).toEqual(["LP IRR (unrealized, not a sale)", "GP IRR (unrealized, not a sale)", "GP promote (unrealized, not a sale)"]);
+    for (const label of labels) expect(text.includes(label)).toBe(withPartners);
+    if (!withPartners) return;
+    const positions = [i.L.metric("unrealized_equity_irr"), ...labels].map((label) => text.indexOf(label));
+    expect(positions.every((p, n) => p >= 0 && (n === 0 || p > positions[n - 1]!))).toBe(true);
+    const values = [heldPartners.lpIrr === null ? i.t("common.notMeaningful") : i.f.value(heldPartners.lpIrr, "%"),
+      heldPartners.gpIrr === null ? i.t("common.notMeaningful") : i.f.value(heldPartners.gpIrr, "%"), i.f.value(heldPartners.promote, "$")];
+    labels.forEach((label, n) => expect(text.slice(text.indexOf(label) + label.length).trimStart().startsWith(values[n]!)).toBe(true));
+  });
+  it("a null held partner IRR reads Not meaningful (task 88b)", () => {
+    queryState.run = heldView({ heldPartners: { ...heldPartners, gpIrr: null } });
+    const html = renderToStaticMarkup(createElement(runScreen.Run, { dealId: "held" }));
+    const i = build("en", () => {});
+    const after = html.slice(html.indexOf(i.t("run.heldGpIrr")));
+    expect(after.indexOf('class="not-meaningful"')).toBeGreaterThan(0);
+    expect(after.indexOf('class="not-meaningful"')).toBeLessThan(after.indexOf(i.t("run.heldPromote")));
+  });
+  it("the French held screen shows the three partner figures in French (task 88b)", () => {
+    queryState.lang = "fr";
+    queryState.run = heldView({ heldPartners });
+    const text = renderToStaticMarkup(createElement(runScreen.Run, { dealId: "held" })).replace(/<[^>]*>/g, " ");
+    const fr = build("fr", () => {}), en = build("en", () => {});
+    for (const key of heldLabels) {
+      expect(fr.t(key)).not.toBe(en.t(key));
+      expect(text).toContain(fr.t(key));
+    }
+    expect(text).toContain(fr.f.value(heldPartners.promote, "$"));
     expect(text).not.toMatch(/\b(LP|GP|IRR|promote|waterfall|equity|yield|debt|loan|rent|cash|gate|stated)\b/i);
     queryState.lang = "en";
   });
