@@ -427,12 +427,31 @@ describe("a deal that sells its units can have partners (task 84c)", () => {
     for (const key of ["lp_irr", "gp_irr", "gp_promote"]) expect(result.scenarios[0]!.metrics.find((m) => m.key === key))
       .toMatchObject({ status: "NOT_MEANINGFUL", value: null, reason: "Deal returns are not meaningful." });
   });
-  test("partner flows with no single IRR use the rental reasons", () => {
+  test("partner flows with no single IRR say why, in the sale's wording", () => {
     const input = { ...fromOracle(oracle().inputs), waterfall: split };
     input.forSale = { ...input.forSale!, units: input.forSale!.units.map((u) => ({ ...u, price: 0 })) };
     const result = underwrite(input, policyFor(input));
-    for (const [key, reason] of [["lp_irr", "The LP cash flows have no single IRR."], ["gp_irr", "The GP cash flows have no single IRR."]]) {
-      expect(result.scenarios[0]!.metrics.find((m) => m.key === key)).toMatchObject({ status: "NOT_MEANINGFUL", value: null, reason });
+    for (const [key, who] of [["lp_irr", "LP"], ["gp_irr", "GP"]]) {
+      expect(result.scenarios[0]!.metrics.find((m) => m.key === key)).toMatchObject({ status: "NOT_MEANINGFUL", value: null,
+        reason: `The ${who}'s dated cash flows have 0 sign changes and 0 IRR roots; exactly one of each is required.` });
     }
+  });
+  test("a partner IRR follows the sale's rule: one sign change and one root, as equity IRR does (audit)", () => {
+    for (const slug of ["kestrel-row-townhomes", "alder-court-condo"]) {
+      const result = underwrite({ ...fromOracle(oracle(slug).inputs), waterfall: split }, policyFor(fromOracle(oracle(slug).inputs)));
+      for (const s of result.scenarios) {
+        const get = (k: string) => s.metrics.find((m) => m.key === k)!;
+        if (get("equity_irr").status === "NOT_MEANINGFUL") {
+          for (const k of ["lp_irr", "gp_irr"]) {
+            expect(get(k).status, `${slug} ${s.key} ${k}`).toBe("NOT_MEANINGFUL");
+            expect(get(k).reason, `${slug} ${s.key} ${k}`).toMatch(/^The (LP|GP)'s dated cash flows have \d+ sign changes and \d+ IRR roots; exactly one of each is required\.$/);
+          }
+        }
+      }
+    }
+    const kestrel = underwrite({ ...fromOracle(oracle("kestrel-row-townhomes").inputs), waterfall: split }, policyFor(fromOracle(oracle("kestrel-row-townhomes").inputs)));
+    const absorption = kestrel.scenarios.find((s) => s.key === "absorption")!.metrics.find((m) => m.key === "lp_irr")!;
+    expect(absorption.status).toBe("NOT_MEANINGFUL");
+    expect(kestrel.scenarios[0]!.metrics.find((m) => m.key === "lp_irr")!.value).toBeCloseTo(33.94010121379986, 9);
   });
 });

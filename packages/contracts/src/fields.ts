@@ -268,14 +268,14 @@ const held = [
 const timeline = [q("construction_months", { zeroAllowed: true }), q("lease_up_months", { zeroAllowed: true })];
 
 const SALE_QUESTIONS: TemplateQuestion[] = [
-      q("land_cost"), q("hard_cost"), q("soft_cost"), q("contingency", { zeroAllowed: true }), q("other_cost", { optional: true }),
-      q("development_charges", { zeroAllowed: true }), q("land_transfer_tax", { optional: true }), q("gst_hst_net", { optional: true }),
-      q("construction_months"), q("unit_count", { repeatable: true }), q("unit_sale_price", { repeatable: true }),
-      q("presold_units_pct", { zeroAllowed: true }), q("deposit_pct", { zeroAllowed: true }), q("absorption_units_per_month"),
-      q("sales_commission_pct", { zeroAllowed: true }), q("closing_lag_months", { zeroAllowed: true }), q("unsold_carry_monthly", { zeroAllowed: true }),
-      q("senior_loan_amount", { zeroAllowed: true, skipsIfZero: ["senior_rate_pct", "senior_presale_threshold_pct"] }),
-      q("senior_rate_pct"), q("senior_presale_threshold_pct", { optional: true }),
-    ];
+  q("land_cost"), q("hard_cost"), q("soft_cost"), q("contingency", { zeroAllowed: true }), q("other_cost", { optional: true }),
+  q("development_charges", { zeroAllowed: true }), q("land_transfer_tax", { optional: true }), q("gst_hst_net", { optional: true }),
+  q("construction_months"), q("unit_count", { repeatable: true }), q("unit_sale_price", { repeatable: true }),
+  q("presold_units_pct", { zeroAllowed: true }), q("deposit_pct", { zeroAllowed: true }), q("absorption_units_per_month"),
+  q("sales_commission_pct", { zeroAllowed: true }), q("closing_lag_months", { zeroAllowed: true }), q("unsold_carry_monthly", { zeroAllowed: true }),
+  q("senior_loan_amount", { zeroAllowed: true, skipsIfZero: ["senior_rate_pct", "senior_presale_threshold_pct"] }),
+  q("senior_rate_pct"), q("senior_presale_threshold_pct", { optional: true }),
+];
 
 export const TEMPLATES: readonly Template[] = [
   {

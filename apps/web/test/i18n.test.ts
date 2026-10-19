@@ -819,7 +819,7 @@ describe("partner memo wording (task 84d)", () => {
   });
   it.each(["artifact.requested", "artifact.ready"])("%s names the partner memo in both languages", (action) => {
     const event = { seq: 1, action, entity: "artifact", entity_id: null, payload: { kind: "partner_memo", format: "pdf" }, hash: "", created_at: "", actor: null };
-    expect(describeEvent(en, event)).toContain("Partner memo");
+    expect(describeEvent(en, event)).toBe(`${action === "artifact.requested" ? "Requested" : "Released"} a partner memo (pdf)`);
     expect(describeEvent(fr, event)).toContain("Note aux partenaires");
   });
 });

@@ -117,6 +117,21 @@ export function buildForSaleLedger(input: EngineInput): ForSaleLedger {
   } };
 }
 
+/** Sign changes in flows netted by date, as the ledger counts them for equity_irr. */
+function signChanges(flows: readonly { t: number; amount: number }[]): number {
+  const dated = new Map<number, number>();
+  for (const f of flows) dated.set(Math.round(f.t * 12), (dated.get(Math.round(f.t * 12)) ?? 0) + f.amount);
+  let last = 0;
+  let changes = 0;
+  for (const [, amount] of [...dated].sort(([a], [b]) => a - b)) {
+    const sign = Math.sign(amount);
+    if (sign === 0) continue;
+    if (last !== 0 && sign !== last) changes++;
+    last = sign;
+  }
+  return changes;
+}
+
 export function forSaleMetrics(input: EngineInput, L: ForSaleLedger) {
   const v: Record<string, number | null> = { ...L.values };
   const commitments = input.senior.amount + (input.mezzanine?.amount ?? 0);
@@ -140,10 +155,15 @@ export function forSaleMetrics(input: EngineInput, L: ForSaleLedger) {
       for (const key of ["lp_irr", "gp_irr", "gp_promote"]) partnerMetrics.push(m(key, null, "NOT_MEANINGFUL", "Deal returns are not meaningful."));
     } else {
       const w = runWaterfall(L.equityFlows, input.waterfall);
-      const lp = irrRoots(w.lp);
-      const gp = irrRoots(w.gp);
-      partnerMetrics.push(lp.length === 1 ? m("lp_irr", lp[0]! * 100) : m("lp_irr", null, "NOT_MEANINGFUL", "The LP cash flows have no single IRR."));
-      partnerMetrics.push(gp.length === 1 ? m("gp_irr", gp[0]! * 100) : m("gp_irr", null, "NOT_MEANINGFUL", "The GP cash flows have no single IRR."));
+      // The sale's own rule for an IRR: one sign change in the dated flows and one root, as for equity_irr.
+      const partnerIrr = (key: string, who: string, flows: typeof w.lp) => {
+        const roots = irrRoots(flows);
+        const changes = signChanges(flows);
+        return changes === 1 && roots.length === 1 ? m(key, roots[0]! * 100)
+          : m(key, null, "NOT_MEANINGFUL", `The ${who}'s dated cash flows have ${changes} sign changes and ${roots.length} IRR roots; exactly one of each is required.`);
+      };
+      partnerMetrics.push(partnerIrr("lp_irr", "LP", w.lp));
+      partnerMetrics.push(partnerIrr("gp_irr", "GP", w.gp));
       partnerMetrics.push(m("gp_promote", w.promote));
     }
   }
