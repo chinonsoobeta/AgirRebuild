@@ -2266,14 +2266,14 @@ describe("share links (task 86a)", () => {
     if (mode === "departed") await db.query(`delete from workspace_members where workspace_id = $1 and user_id = $2`, [workspace, viewerId]);
     if (mode === "expired membership") await db.query(`update workspace_members set role = 'reviewer', expires_at = now() - interval '1 minute' where workspace_id = $1 and user_id = $2`, [workspace, viewerId]);
     try {
-      const [{ n: before }] = await db.query<{ n: number }>(`select count(*) as n from audit_events where action = 'share.opened'`);
+      const before = (await db.query<{ n: number }>(`select count(*) as n from audit_events where action = 'share.opened'`))[0]!.n;
       const secret = mode === "unknown" ? randomUUID() : link.secret;
       for (const suffix of ["", "/file", "/audit-package"]) {
         const response = await call(null, "GET", `/api/share/${secret}${suffix}`);
         expect(response.status).toBe(404);
         expect(response.json).toEqual({ error: unavailable }); privacy(response.headers);
       }
-      const [{ n: after }] = await db.query<{ n: number }>(`select count(*) as n from audit_events where action = 'share.opened'`);
+      const after = (await db.query<{ n: number }>(`select count(*) as n from audit_events where action = 'share.opened'`))[0]!.n;
       expect(after).toBe(before);
     } finally {
       if (mode === "departed") await call(alice, "POST", `/api/workspaces/${workspace}/members`, { email: "carol@example.com", role: "viewer" });
