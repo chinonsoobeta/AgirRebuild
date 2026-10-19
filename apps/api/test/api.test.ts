@@ -2527,3 +2527,110 @@ describe("clients see and confirm only their own deals (task 89a)", () => {
     expect(events).toEqual(expect.arrayContaining(["client.assigned", "client.unassigned"]));
   });
 });
+
+describe("invite links for clients (task 89b)", () => {
+  let iw: string, dealX: string, hana: Session;
+  const secrets: string[] = [];
+  const errors = vi.spyOn(console, "error");
+  const invite = async (s: Session = alice) => {
+    const made = await call(s, "POST", `/api/deals/${dealX}/invites`);
+    expect(made.status).toBe(200);
+    const secret = (made.json.url as string).slice(3);
+    secrets.push(secret);
+    return { id: made.json.id as string, secret };
+  };
+  const join = (body: object) => app.request("/api/auth/signup", { method: "POST", headers: { "x-agir": "1", "content-type": "application/json" },
+    body: JSON.stringify({ password: "correct horse battery", ...body }) });
+  const gone = { error: "This invitation is not available. It may have been used, revoked or expired." };
+  beforeAll(async () => {
+    hana = await signup("hana.viewer@example.com", "Hana Viewer");
+    iw = (await call(alice, "POST", "/api/workspaces", { name: "Invites", reviewMode: "solo" })).json.id;
+    expect((await call(alice, "POST", `/api/workspaces/${iw}/members`, { email: "hana.viewer@example.com", role: "viewer" })).status).toBe(200);
+    dealX = (await call(alice, "POST", `/api/workspaces/${iw}/deals`, { name: "Invite deal", assetType: "Multifamily" })).json.id;
+  });
+
+  test("an admin makes a link; it is shown once and listed without its secret", async () => {
+    const made = await call(alice, "POST", `/api/deals/${dealX}/invites`);
+    expect(made.status).toBe(200);
+    expect(made.json.url).toMatch(/^\/i\/[A-Za-z0-9_-]{43}$/);
+    secrets.push(made.json.url.slice(3));
+    const list = await call(alice, "GET", `/api/deals/${dealX}/invites`);
+    expect(list.json).toEqual([expect.objectContaining({ id: made.json.id, created_by: "Alice Analyst", used_at: null, used_by: null, revoked_at: null, expires_at: expect.any(String) })]);
+    const text = JSON.stringify(list.json);
+    expect(text).not.toContain(made.json.url.slice(3));
+    expect(text).not.toContain(sha256(made.json.url.slice(3)));
+    expect((await call(hana, "POST", `/api/deals/${dealX}/invites`)).status).toBe(403);
+    expect((await call(hana, "GET", `/api/deals/${dealX}/invites`)).json).toEqual([]);
+  });
+
+  test("signed out, the link names the workspace and the deal", async () => {
+    const { secret } = await invite();
+    const page = await call(null, "GET", `/api/invite/${secret}`);
+    expect(page.status).toBe(200);
+    expect(page.json).toEqual({ workspace: "Invites", deal: "Invite deal" });
+    expect(page.headers.get("cache-control")).toBe("no-store");
+    expect(page.headers.get("referrer-policy")).toBe("no-referrer");
+  });
+
+  test("signing up through the link makes a client of that deal only, once", async () => {
+    const { id, secret } = await invite();
+    const res = await join({ email: "ida.client@example.com", name: "Ida Client", invite: secret });
+    expect(res.status).toBe(200);
+    const ida = { cookie: res.headers.get("set-cookie")!.split(";")[0]! };
+    const me = (await call(ida, "GET", "/api/me")).json;
+    expect(me.workspaces.map((w: any) => [w.name, w.role])).toEqual([["Invites", "client"]]);
+    expect((await call(ida, "GET", `/api/workspaces/${iw}/deals`)).json.map((d: any) => d.deal.id)).toEqual([dealX]);
+    expect((await call(alice, "GET", `/api/deals/${dealX}/invites`)).json.find((i: any) => i.id === id)).toMatchObject({ used_by: "Ida Client", used_at: expect.any(String) });
+    expect((await call(null, "GET", `/api/invite/${secret}`))).toMatchObject({ status: 404, json: gone });
+    const again = await join({ email: "ida.twice@example.com", name: "Ida Twice", invite: secret });
+    expect(again.status).toBe(404);
+    expect(await again.json()).toEqual(gone);
+    expect(await db.query(`select 1 from users where email = 'ida.twice@example.com'`)).toEqual([]);
+    expect((await call(ida, "POST", `/api/deals/${dealX}/invites`)).status).toBe(403);
+  });
+
+  test("a revoked or expired link is refused the same way, and a taken email leaves the link unused", async () => {
+    const revoked = await invite();
+    expect((await call(hana, "POST", `/api/invites/${revoked.id}/revoke`)).status).toBe(403);
+    expect((await call(alice, "POST", `/api/invites/${revoked.id}/revoke`)).status).toBe(200);
+    expect((await call(alice, "POST", `/api/invites/${revoked.id}/revoke`)).status).toBe(422);
+    const expired = await invite();
+    await db.query(`update client_invites set expires_at = now() - interval '1 minute' where id = $1`, [expired.id]);
+    for (const { secret } of [revoked, expired]) {
+      expect(await call(null, "GET", `/api/invite/${secret}`)).toMatchObject({ status: 404, json: gone });
+      expect((await join({ email: `late.${secret.slice(0, 6).toLowerCase().replace(/[^a-z0-9]/g, "x")}@example.com`, name: "Too Late", invite: secret })).status).toBe(404);
+    }
+    expect(await call(null, "GET", `/api/invite/not-a-real-secret`)).toMatchObject({ status: 404, json: gone });
+    const fresh = await invite();
+    expect((await join({ email: "alice@example.com", name: "Alice Again", invite: fresh.secret })).status).toBe(409);
+    expect((await call(alice, "GET", `/api/deals/${dealX}/invites`)).json.find((i: any) => i.id === fresh.id).used_at).toBeNull();
+  });
+
+  test("a signed-in person accepts; a member of the workspace cannot", async () => {
+    const jo = await signup("jo.existing@example.com", "Jo Existing");
+    const { secret } = await invite();
+    expect((await call(null, "POST", `/api/invite/${secret}/accept`)).status).toBe(401);
+    expect((await call(jo, "POST", `/api/invite/${secret}/accept`)).status).toBe(200);
+    const me = (await call(jo, "GET", "/api/me")).json;
+    expect(me.workspaces.map((w: any) => [w.name, w.role])).toEqual(expect.arrayContaining([["Invites", "client"]]));
+    expect(me.workspaces).toHaveLength(2);
+    const staff = await invite();
+    const refused = await call(hana, "POST", `/api/invite/${staff.secret}/accept`);
+    expect(refused.status).toBe(409);
+    expect(refused.json.error).toBe("You are already a member of this workspace.");
+    expect(await call(null, "GET", `/api/invite/${staff.secret}`)).toMatchObject({ status: 200 });
+  });
+
+  test("no secret or its hash reaches an audit payload or a log line", async () => {
+    const actions = (await call(alice, "GET", `/api/deals/${dealX}/audit`)).json.map((e: any) => e.action);
+    expect(actions).toEqual(expect.arrayContaining(["invite.created", "invite.revoked", "invite.used"]));
+    const payloads = (await db.query<{ p: string }>(`select payload::text as p from audit_events`)).map((r) => r.p).join("\n");
+    const logs = errors.mock.calls.map((c) => c.join(" ")).join("\n");
+    expect(secrets.length).toBeGreaterThan(5);
+    for (const s of secrets) {
+      expect(payloads).not.toContain(s);
+      expect(payloads).not.toContain(sha256(s));
+      expect(logs).not.toContain(s);
+    }
+  });
+});
