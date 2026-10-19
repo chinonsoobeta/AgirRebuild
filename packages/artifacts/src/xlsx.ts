@@ -74,7 +74,8 @@ export async function renderXlsx(x: ArtifactInput): Promise<Uint8Array> {
   const held = x.input.exit === "refinance_hold";
   head(ledger, sale ? ["Month", "Phase", "Cost draw", "Equity draw", "Debt draw", "Capitalized interest", "Loan repayment", "Debt balance", "Sale to equity"] : ["Month", "Phase", "Cost draw", "Equity draw", "Debt draw", "Capitalized interest", "EGI", "Operating costs", "NOI", "Debt service", "Debt balance", "Refinance net", ...(held ? [] : ["Sale to equity"])]);
   for (const m of r.ledger) {
-    const row = ledger.addRow(sale ? [m.month, m.phase, m.costDraw, m.equityDraw, m.debtDraw, m.capitalizedInterest, m.debtService, m.debtBalance, m.saleNet] : [m.month, m.phase, m.costDraw, m.equityDraw, m.debtDraw, m.capitalizedInterest, m.egi, m.opex, m.noi, m.debtService, m.debtBalance, m.refinanceNet, ...(held ? [] : [m.saleNet])]);
+    // A sale's months after completion are selling completed units, not a hold.
+    const row = ledger.addRow(sale ? [m.month, m.phase === "hold" ? "selling" : m.phase, m.costDraw, m.equityDraw, m.debtDraw, m.capitalizedInterest, m.debtService, m.debtBalance, m.saleNet] : [m.month, m.phase, m.costDraw, m.equityDraw, m.debtDraw, m.capitalizedInterest, m.egi, m.opex, m.noi, m.debtService, m.debtBalance, m.refinanceNet, ...(held ? [] : [m.saleNet])]);
     for (let c = 3; c <= (sale ? 9 : held ? 12 : 13); c++) row.getCell(c).numFmt = fmt("$");
   }
   ledger.columns.forEach((c) => (c.width = 15));

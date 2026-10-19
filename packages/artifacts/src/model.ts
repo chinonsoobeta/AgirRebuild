@@ -160,8 +160,9 @@ function operations(f: Formatter, x: ArtifactInput): Block {
 
 export const DRAFT_POLICY_LINE = "Draft policy, not signed by credit";
 
-/** A deal kept and refinanced has no sale: its reports lead with the hold measures and show the unrealized ones under their label. */
+/** A deal that sells its units has no rental operations: its reports show the unit sales and the sale results instead. */
 const isSale = (x: ArtifactInput) => x.input.exit === "for_sale";
+/** A deal kept and refinanced has no sale: its reports lead with the hold measures and show the unrealized ones under their label. */
 const isHeld = (x: ArtifactInput) => x.input.exit === "refinance_hold";
 
 /** Under a draft policy, said once beside the verdict. */
@@ -185,11 +186,11 @@ function saleStats(f: Formatter, full = true): { label: string; value: string }[
 function unitSales(f: Formatter, x: ArtifactInput): Block {
   const sale = x.input.forSale!;
   const rows = sale.units.map((u) => [f.ident(u.label, `forSale.${u.key}.label`), f.input(u.units, "units", `unit_count|${u.key}`) + " units", f.input(u.price, "$", `unit_sale_price|${u.key}`)]);
-  const field = (key: string, value: number, unit: Parameters<Formatter["input"]>[1], suffix = "") => [FIELD_BY_KEY.get(key)!.label, f.input(value, unit, key) + suffix, ""];
+  const field = (key: string, value: number, unit: Parameters<Formatter["input"]>[1]) => [FIELD_BY_KEY.get(key)!.label, f.input(value, unit, key), ""];
   rows.push(
     field("presold_units_pct", sale.presoldPct, "%"),
     field("deposit_pct", sale.depositPct, "%"),
-    field("absorption_units_per_month", sale.absorptionPerMonth, "units", " units per month"),
+    field("absorption_units_per_month", sale.absorptionPerMonth, "units"),
     field("sales_commission_pct", sale.commissionPct, "%"),
     field("closing_lag_months", sale.closingLagMonths, "months"),
     field("unsold_carry_monthly", sale.carryMonthly, "$"),
@@ -342,7 +343,7 @@ export function roundToward(value: number, dir: 1 | -1, step: number): number {
   return (dir > 0 ? Math.ceil(q - 1e-6) : Math.floor(q + 1e-6)) / Math.round(1 / step);
 }
 
-/** The stress with the most failed gates; a tie goes to the lower stressed sizing DSCR. One sentence, from the stored gates. */
+/** The stress with the most failed gates; a tie goes to the lower stressed sizing DSCR (for a sale, the lower profit on cost). One sentence, from the stored gates. */
 function weakestStress(f: Formatter, r: RunResult, sale = false): Block[] {
   const metricKey = sale ? "profit_on_cost_for_sale" : "sizing_dscr";
   const stresses = r.scenarios.filter((s) => s.key !== "base");

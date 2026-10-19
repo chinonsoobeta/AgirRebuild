@@ -691,6 +691,12 @@ describe("the reports for a deal that sells its units (task 80)", () => {
       expect(model.blocks).toContainEqual({ type: "paragraph", muted: true, text: SALE_OPERATIONS });
     }
   });
+  test("audit: Kestrel sells out in 1.5 years, not a rounded 2, and the sales pace is not followed by a second unit", () => {
+    const model = buildModel(saleInput("kestrel-row-townhomes", "ic_memo"));
+    expect(saleTable(model, "Sale results").rows).toContainEqual(["Time to sell out", "1.5 years"]);
+    expect(saleTable(model, "Unit sales").rows).toContainEqual([FIELD_BY_KEY.get("absorption_units_per_month")!.label, "1", ""]);
+    expect(formatValue(25, "years")).toBe("25 years");
+  });
   test("Kestrel sources equal uses without a balancing row", () => {
     const x = saleInput("kestrel-row-townhomes", "ic_memo");
     const m = (key: string) => x.result.scenarios[0]!.metrics.find((m) => m.key === key)!.value!;
@@ -755,6 +761,9 @@ describe("the reports for a deal that sells its units (task 80)", () => {
       expect([row.getCell(6).value, row.getCell(7).value, row.getCell(9).value]).toEqual([x.result.ledger[n - 2]!.capitalizedInterest, x.result.ledger[n - 2]!.debtService, x.result.ledger[n - 2]!.saleNet]);
     });
     expect(Math.abs(distributed - x.result.scenarios[0]!.metrics.find((m) => m.key === "equity_distributed")!.value!)).toBeLessThanOrEqual(1);
+    // Audit: the months after completion are selling, never "hold".
+    const phases = new Set<unknown>(); ledger.eachRow((row, n) => { if (n > 1) phases.add(row.getCell(2).value); });
+    expect([...phases]).toEqual(["construction", "selling"]);
     const metrics = wb.getWorksheet("Metrics")!;
     expect(String(metrics.getRow(2).getCell(1).value)).toContain("The units are sold; there is no rental income.");
     const metricLabels: unknown[] = [];

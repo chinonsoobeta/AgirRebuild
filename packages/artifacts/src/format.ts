@@ -26,7 +26,7 @@ export function formatValue(value: number, unit: MetricUnit | "$" | "%" | "x" | 
     case "months":
       return `${Math.round(value)} months`;
     case "years":
-      return `${Math.round(value)} years`;
+      return `${value.toLocaleString("en-US", { maximumFractionDigits: 2 })} years`;
     case "sf":
       return money0.format(Math.round(value)) + " SF";
     case "$/mo":
