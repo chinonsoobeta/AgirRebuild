@@ -1,9 +1,11 @@
 import { describe, expect, test } from "vitest";
 import { readFileSync } from "node:fs";
+import { createHash } from "node:crypto";
 import * as contracts from "@agir/contracts";
 import { FIELDS, FIELD_BY_KEY, TEMPLATES, policyFor, type EngineInput } from "@agir/contracts";
-import { assemble, underwrite, type AssumptionRow } from "../src/index.ts";
-import { allEquityDeal } from "./fixtures.ts";
+import { assemble, canonicalJson, underwrite, type AssumptionRow } from "../src/index.ts";
+import { allEquityDeal, developmentDeal } from "./fixtures.ts";
+import { fundConstruction, placeConstructionCosts } from "../src/ledger.ts";
 
 type OracleInputs = { unit_types: { name: string; units: number; price: number }[]; land: number; hard: number; soft: number; contingency: number; construction_months: number; presold_units_pct: number; deposit_pct: number; absorption_units_per_month: number; sales_commission_pct: number; closing_lag_months: number; unsold_carry_monthly: number; senior_commitment: number; senior_rate_pct: number; mezz_commitment: number; mezz_rate_pct: number; senior_presale_threshold_pct: number };
 const fromOracle = (d: OracleInputs): EngineInput => ({
@@ -24,7 +26,6 @@ const rentalOnly = [
   "min_dscr_covenant", "refinance_month", "refinance_amount", "refinance_ltv_pct", "refinance_rate_pct", "refinance_amort_years",
   "refinance_io_months", "refinance_insurance_premium_pct", "refinance_and_hold", "lp_share_pct", "preferred_return_pct", "gp_promote_pct",
   "senior_amort_years", "senior_io_months", "mezz_amort_years", "mezz_io_months",
-  "equity_amount", "stated_total_cost", "stated_ltc_pct", "stated_interest_reserve",
 ];
 const requiredSale = ["presold_units_pct", "deposit_pct", "absorption_units_per_month", "sales_commission_pct", "closing_lag_months", "unsold_carry_monthly"];
 const saleFields = ["sell_units", "unit_sale_price", ...requiredSale, "senior_presale_threshold_pct"];
@@ -151,5 +152,209 @@ describe("setting up a deal that sells its units (task 78)", () => {
     const { readiness, input } = assemble(answers);
     expect(readiness.status).toBe("ready");
     expect(underwrite(input!, policyFor(input!)).verdict.code).toMatch(/^(APPROVE|APPROVE_WITH_CONDITIONS|REJECT)$/);
+  });
+});
+
+const checkFixture = (held = false): EngineInput => ({ ...developmentDeal(),
+  stated: { equity: 10_000_000, totalCost: 40_000_000, ltcPct: 70, interestReserve: 1_000_000, minDscrCovenant: 1.2 },
+  ...(held ? { exit: "refinance_hold", refinance: { month: 36, amount: 29_000_000, ratePct: 5, amortYears: 30, ioMonths: 0 } } : {}),
+});
+
+const constructionFigures = (input: EngineInput) => {
+  const C = input.constructionMonths;
+  const cost = placeConstructionCosts(input, C);
+  const funding = fundConstruction(input, C, cost.costByMonth, cost.costsBeforeFinancing);
+  const result = underwrite(input, policyFor(input));
+  return { totalCost: funding.tdc, equity: funding.equityContributed, debt: funding.commitments + funding.sim.mezzAccruedBeyondCommitment,
+    loanToCost: result.scenarios[0]!.metrics.find((m) => m.key === "loan_to_cost")!.value!, interest: funding.capitalizedInterest };
+};
+const statedRun = (stated: EngineInput["stated"] = {}, slug = "kestrel-row-townhomes") => {
+  const input = { ...fromOracle(oracle(slug).inputs), stated };
+  return underwrite(input, policyFor(input));
+};
+const check = (result: ReturnType<typeof underwrite>, key: string) => result.checks.find((c) => c.key === key);
+const CHECK_PINS = {
+  "rental": [
+    {
+      "key": "ltc_ceiling",
+      "kind": "bound",
+      "severity": "pass",
+      "message": "Loan to cost of 59.6% is within the policy ceiling of 85%.",
+      "actual": 59.566001596862165
+    },
+    {
+      "key": "sources_cover_uses",
+      "kind": "agreement",
+      "severity": "error",
+      "message": "Stated equity of $10,000,000 plus debt of $27,000,000 falls $8,327,870 short of the $45,327,870 total cost.",
+      "expected": 18327870.389444295,
+      "actual": 10000000
+    },
+    {
+      "key": "stated_total_cost",
+      "kind": "agreement",
+      "severity": "warning",
+      "message": "The documents state a total cost of $40,000,000; the model computes $45,327,870.",
+      "expected": 45327870.3894443,
+      "actual": 40000000
+    },
+    {
+      "key": "stated_ltc",
+      "kind": "agreement",
+      "severity": "warning",
+      "message": "The documents state a loan to cost of 70.0%; the model computes 59.6%.",
+      "expected": 59.566001596862165,
+      "actual": 70
+    },
+    {
+      "key": "interest_reserve",
+      "kind": "agreement",
+      "severity": "warning",
+      "message": "The budget states a $1,000,000 interest reserve; the model calculates $2,233,810 of interest before stabilization. The reserve looks underfunded by $1,233,810.",
+      "expected": 2233810.3894442962,
+      "actual": 1000000
+    },
+    {
+      "key": "dscr_covenant",
+      "kind": "agreement",
+      "severity": "warning",
+      "message": "Contractual DSCR falls to 1.18x, under the 1.20x covenant.",
+      "expected": 1.2,
+      "actual": 1.1788854470752164
+    },
+    {
+      "key": "base_sizing_dscr",
+      "kind": "bound",
+      "severity": "warning",
+      "message": "Base-case sizing DSCR of 1.14x is under the 1.20x floor.",
+      "expected": 1.2,
+      "actual": 1.1415650511715316
+    }
+  ],
+  "held": [
+    {
+      "key": "ltc_ceiling",
+      "kind": "bound",
+      "severity": "pass",
+      "message": "Loan to cost of 59.6% is within the policy ceiling of 85%.",
+      "actual": 59.566001596862165
+    },
+    {
+      "key": "sources_cover_uses",
+      "kind": "agreement",
+      "severity": "error",
+      "message": "Stated equity of $10,000,000 plus debt of $27,000,000 falls $8,327,870 short of the $45,327,870 total cost.",
+      "expected": 18327870.389444295,
+      "actual": 10000000
+    },
+    {
+      "key": "stated_total_cost",
+      "kind": "agreement",
+      "severity": "warning",
+      "message": "The documents state a total cost of $40,000,000; the model computes $45,327,870.",
+      "expected": 45327870.3894443,
+      "actual": 40000000
+    },
+    {
+      "key": "stated_ltc",
+      "kind": "agreement",
+      "severity": "warning",
+      "message": "The documents state a loan to cost of 70.0%; the model computes 59.6%.",
+      "expected": 59.566001596862165,
+      "actual": 70
+    },
+    {
+      "key": "interest_reserve",
+      "kind": "agreement",
+      "severity": "warning",
+      "message": "The budget states a $1,000,000 interest reserve; the model calculates $2,233,810 of interest before stabilization. The reserve looks underfunded by $1,233,810.",
+      "expected": 2233810.3894442962,
+      "actual": 1000000
+    },
+    {
+      "key": "dscr_covenant",
+      "kind": "agreement",
+      "severity": "pass",
+      "message": "Contractual DSCR of 1.23x meets the 1.20x covenant in every hold year.",
+      "expected": 1.2,
+      "actual": 1.2258382250417657
+    }
+  ]
+};
+
+describe("a sale checks the figures a person states (task 81)", () => {
+  test("an unstated Kestrel input retains its pre-change hash", () => {
+    const { input } = assemble(rowsFor());
+    expect(input!.stated).toEqual({});
+    expect(createHash("sha256").update(canonicalJson(input)).digest("hex")).toBe("6da97ac4e573322f49634e2a7bd90236f7ba07554f9e40ff452118009c13c1b2");
+  });
+  test.each([["equity_amount", "equity", 1_583_889], ["stated_total_cost", "totalCost", 4_883_889], ["stated_ltc_pct", "ltcPct", 67.6], ["stated_interest_reserve", "interestReserve", 103_889]] as const)("%s is readable for a sale and reaches stated.%s", (field, key, value) => {
+    const { input, readiness } = assemble([...rowsFor(), row(field, value)]);
+    expect(readiness).toMatchObject({ status: "ready", missing: [], impossible: [], conflicting: [], pending: [] });
+    expect(input!.stated).toEqual({ [key]: value });
+  });
+  test("without stated equity the sale has the rental pass line", () => {
+    expect(check(statedRun(), "sources_cover_uses")).toEqual({ key: "sources_cover_uses", kind: "agreement", severity: "pass", message: "No equity amount is stated, so equity is the $1,583,889 the debt does not fund." });
+    for (const key of ["stated_total_cost", "stated_ltc", "interest_reserve_before_completion"]) expect(check(statedRun(), key)).toBeUndefined();
+  });
+  test.each([-2, -0.5, 0, 2])("stated construction equity respects the tolerance: %s times tolerance", (factor) => {
+    const input = fromOracle(oracle().inputs);
+    const figures = constructionFigures(input);
+    const stated = figures.equity + factor * figures.totalCost * policyFor(input).agreementTolerancePct / 100;
+    const result = statedRun({ equity: stated });
+    const severity = factor < -1 ? "error" : factor > 1 ? "warning" : "pass";
+    expect(check(result, "sources_cover_uses")).toMatchObject({ severity, actual: stated });
+    expect(result.verdict.code).toBe(severity === "error" ? "REJECT" : statedRun().verdict.code);
+    if (factor === 0) expect(check(result, "sources_cover_uses")!.message).toBe("Sources equal uses at $4,883,889.");
+    if (severity !== "pass") expect(check(result, "sources_cover_uses")!.expected).toBe(figures.equity);
+  });
+  test.each([1, 1.1])("stated total cost at %s times the model agrees or warns", (factor) => {
+    const figures = constructionFigures(fromOracle(oracle().inputs));
+    const c = check(statedRun({ totalCost: figures.totalCost * factor }), "stated_total_cost")!;
+    expect(c).toMatchObject({ severity: factor === 1 ? "pass" : "warning", expected: figures.totalCost, actual: figures.totalCost * factor });
+    expect(c.message).toBe(factor === 1 ? "The stated total cost of $4,883,889 matches the model." : "The documents state a total cost of $5,372,278; the model computes $4,883,889.");
+  });
+  test.each([1, 2])("stated loan to cost %s points above the model", (points) => {
+    const figures = constructionFigures(fromOracle(oracle().inputs));
+    expect(check(statedRun({ ltcPct: figures.loanToCost + points }), "stated_ltc"))
+      .toMatchObject({ severity: points === 1 ? "pass" : "warning", expected: figures.loanToCost, actual: figures.loanToCost + points });
+  });
+  test.each([0, 1, 2])("reserve at %s times construction interest has the sale key and exact wording", (factor) => {
+    const figures = constructionFigures(fromOracle(oracle().inputs));
+    const reserve = figures.interest * factor;
+    const amount = "$" + Math.round(reserve).toLocaleString("en-US");
+    expect(check(statedRun({ interestReserve: reserve }), "interest_reserve_before_completion")).toEqual({
+      key: "interest_reserve_before_completion", kind: "agreement", severity: factor === 0 ? "warning" : "pass",
+      expected: figures.interest, actual: reserve,
+      message: factor === 0 ? "The budget states a $0 interest reserve; the model calculates $103,889 of interest during construction. The reserve looks underfunded by $103,889."
+        : `The stated interest reserve of ${amount} covers the $103,889 of interest during construction the model calculates.`,
+    });
+    expect(check(statedRun({ interestReserve: reserve }), "interest_reserve")).toBeUndefined();
+  });
+  test("a sale still refuses the rental DSCR covenant", () => {
+    expect(assemble([...rowsFor(), row("min_dscr_covenant", 1.2)]).readiness.impossible)
+      .toEqual([{ fieldKey: "min_dscr_covenant", label: "Minimum DSCR covenant does not apply when the units are sold" }]);
+  });
+  test.each(["kestrel-row-townhomes", "alder-court-condo"])("%s keeps every metric and gate when stated figures agree", (slug) => {
+    const figures = constructionFigures(fromOracle(oracle(slug).inputs));
+    const base = statedRun({}, slug);
+    const agreed = statedRun({ equity: figures.equity, totalCost: figures.totalCost, ltcPct: figures.loanToCost, interestReserve: figures.interest }, slug);
+    expect(agreed.scenarios).toEqual(base.scenarios);
+    expect(agreed.verdict.gates).toEqual(base.verdict.gates);
+    expect(agreed.verdict.code).toBe(base.verdict.code);
+    expect(agreed.checks.filter((c) => c.kind === "agreement").map((c) => [c.key, c.severity]))
+      .toEqual([["sources_cover_uses", "pass"], ["stated_total_cost", "pass"], ["stated_ltc", "pass"], ["interest_reserve_before_completion", "pass"]]);
+  });
+  test("Alder's equity-shortfall message includes mezzanine interest above commitment in debt", () => {
+    const input = fromOracle(oracle("alder-court-condo").inputs);
+    const figures = constructionFigures(input);
+    expect(figures.debt).toBeGreaterThan(input.senior.amount + input.mezzanine!.amount);
+    const c = check(statedRun({ equity: 0 }, "alder-court-condo"), "sources_cover_uses")!;
+    expect(c).toMatchObject({ severity: "error", expected: figures.equity });
+    expect(c.message).toContain(`plus debt of $${Math.round(figures.debt).toLocaleString("en-US")}`);
+  });
+  test.each([false, true])("the populated rental/held fixture keeps its exact checks array: held=%s", (held) => {
+    const input = checkFixture(held);
+    expect(underwrite(input, policyFor(input)).checks).toEqual(held ? CHECK_PINS.held : CHECK_PINS.rental);
   });
 });

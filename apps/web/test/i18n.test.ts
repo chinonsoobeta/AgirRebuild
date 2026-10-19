@@ -749,3 +749,23 @@ describe("every gate and every policy's stresses have French names", () => {
     expect(fr.L.stress(key, "\u0000")).not.toBe("\u0000");
   });
 });
+
+
+describe("a sale checks the figures a person states (task 81)", () => {
+  const en = build("en", () => {});
+  const fr = build("fr", () => {});
+  it.each(["pass", "warning"])("renders a construction interest reserve %s in French", (severity) => {
+    const c = { key: "interest_reserve_before_completion", kind: "agreement", severity, expected: 103_889, actual: severity === "pass" ? 110_000 : 50_000,
+      message: severity === "pass" ? "The stated interest reserve of $110,000 covers the $103,889 of interest during construction the model calculates."
+        : "The budget states a $50,000 interest reserve; the model calculates $103,889 of interest during construction. The reserve looks underfunded by $53,889." };
+    expect(checkText(en, c)).toBe(c.message);
+    const french = checkText(fr, c);
+    expect(french).toContain("pendant la construction");
+    expect(french).toContain(fr.f.value(c.actual, "$"));
+    expect(french).toContain(fr.f.value(c.expected, "$"));
+    expect(french).not.toMatch(/\b(must|needs|give|the|and|between|required|from|to|least|above|under|months|years|construction interest|underfunded|covers)\b/i);
+    expect(french).toBe(severity === "pass"
+      ? `La réserve d'intérêts déclarée de ${fr.f.value(c.actual, "$")} couvre les ${fr.f.value(c.expected, "$")} d'intérêts pendant la construction calculés par le modèle.`
+      : `Le budget prévoit une réserve d'intérêts de ${fr.f.value(c.actual, "$")} ; le modèle calcule ${fr.f.value(c.expected, "$")} d'intérêts pendant la construction. La réserve semble insuffisante de ${fr.f.value(c.expected - c.actual, "$")}.`);
+  });
+});
