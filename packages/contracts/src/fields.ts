@@ -238,7 +238,7 @@ export const FIELD_GROUP_LABELS: Record<FieldGroup, string> = {
 // Structure only; the wording lives in the web i18n. Each answer is entered through fn_enter_value
 // and the named defaults are accepted explicitly through fn_accept_defaults, never applied silently.
 
-export type TemplateQuestion = { field: string; item?: string; optional?: true; repeatable?: true; zeroAllowed?: true; skipsIfZero?: string[]; heldOnly?: true };
+export type TemplateQuestion = { field: string; item?: string; optional?: true; repeatable?: true; zeroAllowed?: true; skipsIfZero?: string[]; heldOnly?: true; notHeld?: true };
 export type Template = { minUnits: number; maxUnits: number; questions: TemplateQuestion[]; defaults: string[] } &
   ({ key: "multiplex" | "apartment"; sells?: false } | { key: "townhomes" | "condo"; sells: true });
 
@@ -267,6 +267,12 @@ const held = [
 ];
 const timeline = [q("construction_months", { zeroAllowed: true }), q("lease_up_months", { zeroAllowed: true })];
 
+const partners = [
+  q("lp_share_pct", { optional: true, notHeld: true }),
+  q("preferred_return_pct", { optional: true, notHeld: true }),
+  q("gp_promote_pct", { optional: true, notHeld: true }),
+];
+
 const SALE_QUESTIONS: TemplateQuestion[] = [
   q("land_cost"), q("hard_cost"), q("soft_cost"), q("contingency", { zeroAllowed: true }), q("other_cost", { optional: true }),
   q("development_charges", { zeroAllowed: true }), q("land_transfer_tax", { optional: true }), q("gst_hst_net", { optional: true }),
@@ -274,7 +280,7 @@ const SALE_QUESTIONS: TemplateQuestion[] = [
   q("presold_units_pct", { zeroAllowed: true }), q("deposit_pct", { zeroAllowed: true }), q("absorption_units_per_month"),
   q("sales_commission_pct", { zeroAllowed: true }), q("closing_lag_months", { zeroAllowed: true }), q("unsold_carry_monthly", { zeroAllowed: true }),
   q("senior_loan_amount", { zeroAllowed: true, skipsIfZero: ["senior_rate_pct", "senior_presale_threshold_pct"] }),
-  q("senior_rate_pct"), q("senior_presale_threshold_pct", { optional: true }),
+  q("senior_rate_pct"), q("senior_presale_threshold_pct", { optional: true }), ...partners,
 ];
 
 export const TEMPLATES: readonly Template[] = [
@@ -288,7 +294,7 @@ export const TEMPLATES: readonly Template[] = [
       q("property_tax_annual", { zeroAllowed: true }),
       ...timeline,
       q("unit_count", { item: "Residential" }), q("unit_rent_monthly", { item: "Residential" }),
-      q("stabilized_occupancy_pct"), q("exit_cap_rate_pct"), ...loan, ...held,
+      q("stabilized_occupancy_pct"), q("exit_cap_rate_pct"), ...loan, ...held, ...partners,
     ],
     defaults: DEFAULTS,
   },
@@ -303,7 +309,7 @@ export const TEMPLATES: readonly Template[] = [
       q("property_tax_annual", { zeroAllowed: true }),
       ...timeline,
       q("unit_count", { repeatable: true }), q("unit_rent_monthly", { repeatable: true }),
-      q("stabilized_occupancy_pct"), q("other_income_annual", { optional: true }), q("exit_cap_rate_pct"), ...loan, ...held,
+      q("stabilized_occupancy_pct"), q("other_income_annual", { optional: true }), q("exit_cap_rate_pct"), ...loan, ...held, ...partners,
     ],
     defaults: DEFAULTS,
   },

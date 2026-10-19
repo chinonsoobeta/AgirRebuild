@@ -148,7 +148,7 @@ describe("setting up a deal that sells its units (task 78)", () => {
     }
     expect(t.questions.find((q) => q.field === "development_charges")).toMatchObject({ zeroAllowed: true });
     expect(t.questions.map((q) => q.field)).toEqual(["land_cost", "hard_cost", "soft_cost", "contingency", "other_cost", "development_charges", "land_transfer_tax", "gst_hst_net",
-      "construction_months", "unit_count", "unit_sale_price", ...requiredSale, "senior_loan_amount", "senior_rate_pct", "senior_presale_threshold_pct"]);
+      "construction_months", "unit_count", "unit_sale_price", ...requiredSale, "senior_loan_amount", "senior_rate_pct", "senior_presale_threshold_pct", "lp_share_pct", "preferred_return_pct", "gp_promote_pct"]);
     const { readiness, input } = assemble(answers);
     expect(readiness.status).toBe("ready");
     expect(underwrite(input!, policyFor(input!)).verdict.code).toMatch(/^(APPROVE|APPROVE_WITH_CONDITIONS|REJECT)$/);

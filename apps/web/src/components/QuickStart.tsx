@@ -74,13 +74,16 @@ export function QuickStart({ dealId }: { dealId: string }) {
       if (!tpl.sells && held && Boolean(String(fd.get("refinance_amount") ?? "").trim()) === Boolean(String(fd.get("refinance_ltv_pct") ?? "").trim())) {
         throw new Error(t("qs.errRefinance"));
       }
+      const partnerAnswers = tpl.questions.filter((q) => q.notHeld && (tpl.sells || !held))
+        .map((q) => Boolean(String(fd.get(q.field) ?? "").trim()));
+      if (partnerAnswers.some(Boolean) && !partnerAnswers.every(Boolean)) throw new Error(t("qs.errPartners"));
       const skipAmort = unusedSeniorAmort(fd);
       const entries: Entry[] = tpl.sells ? [{ fieldKey: "sell_units", itemKey: null, value: 1 }] : [];
       let units = 0;
       let skip: string[] = [];
       for (const q of tpl.questions) {
         const label = L.field(q.field);
-        if (skip.includes(q.field) || (q.heldOnly && !held) || (q.field === "refinance_and_hold" && !held) ||
+        if (skip.includes(q.field) || (q.heldOnly && !held) || (q.notHeld && held && !tpl.sells) || (q.field === "refinance_and_hold" && !held) ||
           (q.field === "senior_amort_years" && skipAmort)) continue;
         if (q.repeatable) {
           types.forEach((n, i) => {
@@ -106,7 +109,7 @@ export function QuickStart({ dealId }: { dealId: string }) {
   if (save.isSuccess) return <Banner tone="neutral" title={t(tpl.sells ? "qs.doneSales" : "qs.done")}><Link className="btn primary small" to="/deals/$dealId/review" params={{ dealId }}>{t("qs.next")}</Link></Banner>;
   if (!review.data || (review.data.assumptions.length > 0 && !save.isPending && !save.isError)) return null;
 
-  const hidden = FIELDS.filter((d) => (tpl.sells ? !RENTAL_ONLY_FIELDS.includes(d.key) && d.key !== "sell_units" : d.group !== "sale") && d.required === false && d.absentMeans && !tpl.questions.some((q) => q.field === d.key && (!q.heldOnly || held)));
+  const hidden = FIELDS.filter((d) => (tpl.sells ? !RENTAL_ONLY_FIELDS.includes(d.key) && d.key !== "sell_units" : d.group !== "sale") && d.required === false && d.absentMeans && !(held && !tpl.sells && tpl.questions.some((q) => q.field === d.key && q.notHeld)) && !tpl.questions.some((q) => q.field === d.key && (!q.heldOnly || held) && (!q.notHeld || !held || tpl.sells)));
   const input = (name: string, field: string, optional?: boolean) => {
     const unit = FIELD_BY_KEY.get(field)!.unit;
     return (
@@ -134,7 +137,7 @@ export function QuickStart({ dealId }: { dealId: string }) {
       </div>
       {tpl.sells && <p className="small muted">{t("qs.saleLine")}</p>}
       <div className="stack" style={{ gap: 14 }} key={key}>
-        {tpl.questions.filter((q) => (!q.heldOnly || held) && !(tpl.sells && saleNoLoan && (q.field === "senior_rate_pct" || q.field === "senior_presale_threshold_pct"))).map((q) => {
+        {tpl.questions.filter((q) => (!q.heldOnly || held) && (!q.notHeld || !held || tpl.sells) && !(tpl.sells && saleNoLoan && (q.field === "senior_rate_pct" || q.field === "senior_presale_threshold_pct"))).map((q) => {
           if (q.field === "refinance_and_hold") return (
             <div key={q.field} className="field">
               <label htmlFor={q.field} style={{ fontWeight: 600 }}>{L.ask(q.field)[0]}</label>
