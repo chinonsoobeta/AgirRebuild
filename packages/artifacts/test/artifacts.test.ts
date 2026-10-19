@@ -612,6 +612,18 @@ describe("a deal that is kept and refinanced (card 60)", () => {
     });
   });
 
+  describe("a Partners sheet in the Excel export (task 85b)", () => {
+    test("the held fixture keeps its sheet names even with a split", async () => {
+      const x = holdInput("model_export");
+      x.input = { ...x.input, waterfall: { lpSharePct: 90, preferredReturnPct: 8, gpPromotePct: 20 } };
+      x.result = underwrite(x.input, x.policy);
+      const ExcelJS = (await import("exceljs")).default;
+      const wb = new ExcelJS.Workbook();
+      await wb.xlsx.load(Buffer.from((await renderArtifact(x, "xlsx")).bytes) as never);
+      expect(wb.worksheets.map((ws) => ws.name)).toEqual(["Summary", "Metrics", "Annual", "Monthly ledger", "Equity flows", "Inputs", "Checks"]);
+    });
+  });
+
 });
 
 type OracleInputs = { unit_types: { name: string; units: number; price: number }[]; land: number; hard: number; soft: number; contingency: number; construction_months: number; presold_units_pct: number; deposit_pct: number; absorption_units_per_month: number; sales_commission_pct: number; closing_lag_months: number; unsold_carry_monthly: number; senior_commitment: number; senior_rate_pct: number; mezz_commitment: number; mezz_rate_pct: number; senior_presale_threshold_pct: number };
@@ -990,5 +1002,97 @@ describe("the partner memo (task 84d)", () => {
     let error: unknown;
     try { buildModel(x); } catch (e) { error = e; }
     expect(error).toMatchObject({ name: "PartnerMemoUnavailableError", message: "This deal has no LP/GP split, or is not sold, so it has no partner memo." });
+  });
+});
+
+
+describe("a Partners sheet in the Excel export (task 85b)", () => {
+  const workbook = async (x: ArtifactInput) => {
+    const ExcelJS = (await import("exceljs")).default;
+    const wb = new ExcelJS.Workbook();
+    await wb.xlsx.load(Buffer.from((await renderArtifact(x, "xlsx")).bytes) as never);
+    return wb;
+  };
+  test.each([false, true])("sale=%s has terms, conserved monthly flows, totals and metric rows", async (sale) => {
+    const x = partnerMemoInput(sale);
+    const w = runWaterfall(x.result.equityFlows, x.input.waterfall!);
+    const wb = await workbook(x);
+    const names = wb.worksheets.map((ws) => ws.name);
+    expect(names[names.indexOf("Equity flows") + 1]).toBe("Partners");
+    const sheet = wb.getWorksheet("Partners")!;
+    expect(sheet).toBeDefined();
+    const months = [...new Set(x.result.equityFlows.map((f) => Math.round(f.t * 12)))].sort((a, b) => a - b);
+    // No blank rows: three terms, a header, one row per cash-date month and four closing rows.
+    expect(sheet.rowCount).toBe(3 + 1 + months.length + 4);
+    for (const [n, key, value] of [[1, "lp_share_pct", 90], [2, "preferred_return_pct", 8], [3, "gp_promote_pct", 20]] as const) {
+      expect((sheet.getRow(n).values as unknown[]).slice(1)).toEqual([FIELD_BY_KEY.get(key)!.label, value]);
+      expect(sheet.getRow(n).getCell(2).numFmt).toBe('0.00"%"');
+    }
+    expect((sheet.getRow(4).values as unknown[]).slice(1)).toEqual(["Month (cash date)", "Year", "Kind", "Deal flow", "LP flow", "GP flow"]);
+    const sums = [0, 0, 0];
+    for (const [n, month] of months.entries()) {
+      const deal = x.result.equityFlows.filter((f) => Math.round(f.t * 12) === month);
+      expect(new Set(deal.map((f) => f.t)).size).toBe(1);
+      const amounts = [deal, w.lp.filter((f) => Math.round(f.t * 12) === month), w.gp.filter((f) => Math.round(f.t * 12) === month)]
+        .map((flows) => flows.reduce((sum, f) => sum + f.amount, 0));
+      const row = sheet.getRow(n + 5);
+      expect((row.values as unknown[]).slice(1)).toEqual([month, deal[0]!.t, [...new Set(deal.map((f) => f.kind))].join(", "), ...amounts]);
+      expect(Math.abs(amounts[1]! + amounts[2]! - amounts[0]!)).toBeLessThanOrEqual(0.01);
+      amounts.forEach((v, i) => { sums[i]! += v; });
+      for (const col of [4, 5, 6]) expect(row.getCell(col).numFmt).toBe(wb.getWorksheet("Equity flows")!.getRow(2).getCell(4).numFmt);
+    }
+    expect((sheet.getRow(months.length + 5).values as unknown[]).slice(1)).toEqual(["Total", , , ...sums]);
+    const capital = saleTable(buildModel(x), "Capital and distributions").rows;
+    for (const [n, label, flows] of [[0, "Total", x.result.equityFlows], [1, "LP", w.lp], [2, "GP", w.gp]] as const) {
+      const row = capital.find((r) => r[0] === label)!;
+      const number = (s: string) => Number(s.replace(/[^0-9.-]/g, ""));
+      const contributed = -flows.filter((f) => f.amount < 0).reduce((sum, f) => sum + f.amount, 0);
+      const distributed = flows.filter((f) => f.amount > 0).reduce((sum, f) => sum + f.amount, 0);
+      expect(Math.abs(contributed - number(row[1]!))).toBeLessThanOrEqual(1);
+      expect(Math.abs(distributed - number(row[2]!))).toBeLessThanOrEqual(1);
+      expect(Math.abs(sums[n]! - (number(row[2]!) - number(row[1]!)))).toBeLessThanOrEqual(1);
+    }
+    for (const [n, key] of ["lp_irr", "gp_irr", "gp_promote"].entries()) {
+      const metric = x.result.scenarios[0]!.metrics.find((m) => m.key === key)!;
+      const row = sheet.getRow(months.length + 6 + n);
+      expect((row.values as unknown[]).slice(1)).toEqual([metric.label, metric.value]);
+      expect(row.getCell(2).numFmt).toBe(metric.unit === "$" ? wb.getWorksheet("Equity flows")!.getRow(2).getCell(4).numFmt : '0.00"%"');
+    }
+    sheet.eachRow((row) => row.eachCell((cell) => expect(typeof cell.value).not.toBe("object")));
+  });
+  test("Kestrel groups both waterfall tiers and month 15's sale and contribution by cash date", async () => {
+    const x = partnerMemoInput(true);
+    const w = runWaterfall(x.result.equityFlows, x.input.waterfall!);
+    const month = w.lp.map((f) => Math.round(f.t * 12)).find((m) => w.lp.filter((f) => Math.round(f.t * 12) === m).length >= 2)!;
+    expect(month).toBeDefined();
+    expect(w.lp.length).toBeGreaterThan(x.result.equityFlows.length);
+    const sheet = (await workbook(x)).getWorksheet("Partners")!;
+    expect(sheet).toBeDefined();
+    for (const key of new Set([month, 15])) {
+      const rows: unknown[][] = [];
+      sheet.eachRow((row, n) => { if (n > 4 && row.getCell(1).value === key) rows.push((row.values as unknown[]).slice(1)); });
+      expect(rows).toHaveLength(1);
+      expect(Math.abs(Number(rows[0]![4]) + Number(rows[0]![5]) - Number(rows[0]![3]))).toBeLessThanOrEqual(0.01);
+      expect(Number(rows[0]![4])).toBe(w.lp.filter((f) => Math.round(f.t * 12) === key).reduce((sum, f) => sum + f.amount, 0));
+      if (key === 15) {
+        const flows = x.result.equityFlows.filter((f) => Math.round(f.t * 12) === 15);
+        expect(flows).toHaveLength(2);
+        expect(rows[0]![2]).toBe("sale, contribution");
+        expect(rows[0]![3]).toBe(flows[0]!.amount + flows[1]!.amount);
+      }
+    }
+  });
+  test.each(["alder", "maple"])("%s without a split keeps its sheet names", async (deal) => {
+    const x = deal === "alder" ? saleInput("alder-court-condo", "model_export") : mapleInput("model_export");
+    expect((await workbook(x)).worksheets.map((ws) => ws.name)).toEqual(["Summary", "Metrics", ...(deal === "maple" ? ["Annual"] : []), "Monthly ledger", "Equity flows", "Inputs", "Checks"]);
+  });
+  test("non-valid partner metrics print their stored reasons", async () => {
+    const x = partnerMemoInput(true);
+    const keys = ["lp_irr", "gp_irr", "gp_promote"];
+    x.result.scenarios[0]!.metrics = x.result.scenarios[0]!.metrics.map((m) => keys.includes(m.key)
+      ? { ...m, status: "NOT_MEANINGFUL", value: null, reason: "Deal returns are not meaningful." } : m);
+    const sheet = (await workbook(x)).getWorksheet("Partners")!;
+    expect(sheet).toBeDefined();
+    for (const offset of [2, 1, 0]) expect(sheet.getRow(sheet.rowCount - offset).getCell(2).value).toBe("Deal returns are not meaningful.");
   });
 });
