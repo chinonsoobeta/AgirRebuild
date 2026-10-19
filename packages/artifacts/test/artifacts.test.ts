@@ -250,6 +250,28 @@ describe("artifacts", () => {
       expect(visibleText(renderHtml(buildModel(mapleInput(kind))))).not.toContain("Stated by the sponsor");
     }
   });
+  test("a value the client confirmed stays sponsor-stated and says so (task 89a)", async () => {
+    const material = (a: ArtifactInput["assumptions"][number]) => FIELD_BY_KEY.get(a.fieldKey)!.material;
+    for (const kind of ["lender_package", "ic_memo", "build_decision"] as const) {
+      const x = mapleInput(kind);
+      const [first, second] = x.assumptions.filter(material);
+      first!.sponsorStated = true;
+      second!.sponsorStated = true;
+      Object.assign(first!, { clientConfirmedBy: "Dana Client", clientConfirmedAt: "2026-10-19T12:00:00Z" });
+      const model = buildModel(x);
+      const text = visibleText(renderHtml(model));
+      expect(text).toContain("Stated by the sponsor, confirmed by the client Dana Client on 2026-10-19, not independently confirmed");
+      expect(text).toContain("The client confirmed 1 of them; that is not an independent confirmation.");
+      expect(text).toContain("Stated by the sponsor, not independently confirmed");
+      expect(verifyProvenance(text, model.formatter.manifest).orphans).toEqual([]);
+      expect(model.formatter.manifest.map((m) => m.ref)).toEqual(expect.arrayContaining([`clientConfirmedBy.${first!.fieldKey}`, `clientConfirmedAt.${first!.fieldKey}`, "clientConfirmed.count"]));
+      expect((await renderArtifact(x, "docx")).provenance.pass).toBe(true);
+      // Without a client confirmation, the block has no such sentence.
+      delete first!.clientConfirmedBy;
+      delete first!.clientConfirmedAt;
+      expect(visibleText(renderHtml(buildModel(x)))).not.toContain("The client confirmed");
+    }
+  });
   test("the model export carries a Confirmation column", async () => {
     const x = mapleInput("model_export");
     x.assumptions[0]!.sponsorStated = true;

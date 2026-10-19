@@ -2367,3 +2367,163 @@ describe("share links (task 86a)", () => {
     expect(grants).toEqual([]);
   });
 });
+
+describe("clients see and confirm only their own deals (task 89a)", () => {
+  let cw: string, dealA: string, dealB: string, runA: string, runB: string, artifactA: string;
+  let dana: Session, erin: Session, frank: Session, gus: Session;
+  const ids: Record<string, string> = {};
+  const fields: [string, number, string?][] = [
+    ["land_cost", 1_000_000], ["hard_cost", 0], ["soft_cost", 0], ["contingency", 0], ["construction_months", 0], ["lease_up_months", 0],
+    ["hold_years", 1], ["stabilized_occupancy_pct", 100], ["expense_ratio_pct", 0], ["exit_cap_rate_pct", 10], ["selling_costs_pct", 0],
+    ["senior_loan_amount", 0], ["unit_count", 10, "A"], ["unit_rent_monthly", 1_000, "A"],
+  ];
+  const review = async (s: Session, d: string) => (await call(s, "GET", `/api/deals/${d}/review`)).json;
+  const stated = async (d: string) => (await review(alice, d)).assumptions.find((a: any) => a.sponsorStated && a.fieldKey === "exit_cap_rate_pct");
+  const hash = async (d: string) => (await db.query<{ h: string }>(`select fn_assumptions_hash($1) as h`, [d]))[0]!.h;
+  beforeAll(async () => {
+    dana = await signup("dana.client@example.com", "Dana Client");
+    erin = await signup("erin.client@example.com", "Erin Client");
+    frank = await signup("frank.staff@example.com", "Frank Staff");
+    gus = await signup("gus.stranger@example.com", "Gus Stranger");
+    for (const [name, s] of [["dana", dana], ["erin", erin], ["frank", frank], ["gus", gus], ["alice", alice]] as const) ids[name] = (await call(s, "GET", "/api/me")).json.user.id;
+    cw = (await call(alice, "POST", "/api/workspaces", { name: "Broker", reviewMode: "solo" })).json.id;
+    expect((await call(alice, "POST", `/api/workspaces/${cw}/members`, { email: "frank.staff@example.com", role: "analyst" })).status).toBe(200);
+    for (const which of ["A", "B"]) {
+      const d = (await call(alice, "POST", `/api/workspaces/${cw}/deals`, { name: `Client deal ${which}`, assetType: "Multifamily" })).json.id;
+      for (const [fieldKey, value, itemKey] of fields) expect((await call(alice, "POST", `/api/deals/${d}/values`,
+        { fieldKey, value, reason: "Client test value", ...(itemKey ? { itemKey } : {}) })).status, fieldKey).toBe(200);
+      const made = await call(alice, "POST", `/api/deals/${d}/runs`);
+      expect(made.status).toBe(200);
+      expect((await call(alice, "POST", `/api/runs/${made.json.id}/decision`, { decision: "return_to_underwriting", rationale: "Client test decision" })).status).toBe(200);
+      const artifact = await call(alice, "POST", `/api/runs/${made.json.id}/artifacts`, { kind: "model_export", format: "xlsx" });
+      expect(artifact.status).toBe(200);
+      if (which === "A") { dealA = d; runA = made.json.id; artifactA = artifact.json.id; } else { dealB = d; runB = made.json.id; }
+    }
+    await work();
+    expect((await call(alice, "POST", `/api/artifacts/${artifactA}/share-links`, { term: "7d" })).status).toBe(200);
+    expect((await call(alice, "POST", `/api/deals/${dealA}/clients`, { email: "dana.client@example.com" })).status).toBe(200);
+    expect((await call(alice, "POST", `/api/deals/${dealB}/clients`, { email: "erin.client@example.com" })).status).toBe(200);
+  }, 120_000);
+
+  const DEAL_TABLES = ["documents", "candidates", "assumptions", "assumption_events", "runs", "decisions", "artifacts", "figure_labels", "label_suggestions", "share_links", "audit_events"];
+  const counts = (user: string, deal: string) => asUser(db, user, async (tx) => {
+    const out: Record<string, number> = {};
+    out.deals = (await tx.query<{ n: number }>(`select count(*)::int as n from deals where id = $1`, [deal]))[0]!.n;
+    for (const t of DEAL_TABLES) out[t] = (await tx.query<{ n: number }>(`select count(*)::int as n from ${t} where deal_id = $1`, [deal]))[0]!.n;
+    for (const t of ["run_metrics", "run_gates", "run_checks"]) out[t] = (await tx.query<{ n: number }>(`select count(*)::int as n from ${t} x join runs r on r.id = x.run_id where r.deal_id = $1`, [deal]))[0]!.n;
+    return out;
+  });
+
+  test("a client sees their deal and its rows, and nothing of another deal", async () => {
+    const staff = await counts(ids.frank!, dealA);
+    const mine = await counts(ids.dana!, dealA);
+    for (const t of ["deals", "assumptions", "assumption_events", "runs", "decisions", "artifacts", "audit_events", "run_metrics", "run_gates", "run_checks"]) {
+      expect(staff[t], t).toBeGreaterThan(0);
+      expect(mine[t], t).toBe(staff[t]);
+    }
+    expect(staff.share_links).toBe(1);
+    expect(mine.share_links).toBe(0);
+    expect(Object.values(await counts(ids.dana!, dealB)).every((n) => n === 0)).toBe(true);
+    expect(Object.values(await counts(ids.erin!, dealA)).every((n) => n === 0)).toBe(true);
+    expect(Object.values(await counts(ids.gus!, dealA)).every((n) => n === 0)).toBe(true);
+    expect((await call(dana, "GET", `/api/workspaces/${cw}/deals`)).json.map((d: any) => d.id)).toEqual([dealA]);
+    expect((await call(frank, "GET", `/api/workspaces/${cw}/deals`)).json.map((d: any) => d.id).sort()).toEqual([dealA, dealB].sort());
+    expect((await call(dana, "GET", `/api/deals/${dealB}`)).status).toBe(404);
+  });
+
+  test("a client sees the staff and themself, never another client or a workspace event", async () => {
+    const people = await asUser(db, ids.dana!, (tx) => tx.query<{ user_id: string; role: string }>(`select user_id, role from workspace_members where workspace_id = $1 order by role`, [cw]));
+    expect(people.map((p) => p.user_id).sort()).toEqual([ids.alice!, ids.frank!, ids.dana!].sort());
+    const users = await asUser(db, ids.dana!, (tx) => tx.query<{ id: string }>(`select id from users where id = any($1::uuid[])`, [[ids.erin, ids.alice, ids.frank, ids.gus]]));
+    expect(users.map((u) => u.id).sort()).toEqual([ids.alice!, ids.frank!].sort());
+    const members = (await call(dana, "GET", `/api/workspaces/${cw}/members`)).json.map((m: any) => m.email);
+    expect(members).not.toContain("erin.client@example.com");
+    const staffSees = (await call(frank, "GET", `/api/workspaces/${cw}/members`)).json.map((m: any) => m.email);
+    expect(staffSees).toEqual(expect.arrayContaining(["dana.client@example.com", "erin.client@example.com"]));
+    const events = await asUser(db, ids.dana!, (tx) => tx.query<{ n: number }>(`select count(*)::int as n from audit_events where workspace_id = $1 and deal_id is null`, [cw]));
+    expect(events[0]!.n).toBe(0);
+    expect((await asUser(db, ids.frank!, (tx) => tx.query<{ n: number }>(`select count(*)::int as n from audit_events where workspace_id = $1 and deal_id is null`, [cw])))[0]!.n).toBeGreaterThan(0);
+  });
+
+  test("a client is refused every change", async () => {
+    const a = await stated(dealA);
+    const refused: [string, string, unknown?][] = [
+      ["POST", `/api/deals/${dealA}/values`, { fieldKey: "hold_years", value: 2, reason: "Client trying to edit" }],
+      ["POST", `/api/assumptions/${a.id}/review`, { action: "modify", value: 9, reason: "Client trying to modify", version: a.version }],
+      ["POST", `/api/deals/${dealA}/runs`],
+      ["POST", `/api/runs/${runA}/artifacts`, { kind: "ic_memo", format: "pdf" }],
+      ["POST", `/api/runs/${runA}/decision`, { decision: "reject", rationale: "Client trying to decide" }],
+      ["POST", `/api/artifacts/${artifactA}/share-links`, { term: "7d" }],
+      ["POST", `/api/deals/${dealA}/copy`, { name: "Client copy" }],
+      ["POST", `/api/workspaces/${cw}/members`, { email: "gus.stranger@example.com", role: "viewer" }],
+      ["POST", `/api/deals/${dealA}/clients`, { email: "gus.stranger@example.com" }],
+      ["GET", `/api/deals/${dealA}/clients`],
+    ];
+    for (const [method, path, body] of refused) expect((await call(dana, method, path, body)).status, path).toBe(403);
+    expect((await call(dana, "GET", `/api/deals/${dealA}/share-links`)).json).toEqual([]);
+  });
+
+  test("assigning a client: admin and up, an existing account, never a staff member", async () => {
+    expect((await call(frank, "POST", `/api/deals/${dealA}/clients`, { email: "gus.stranger@example.com" })).status).toBe(403);
+    expect((await call(alice, "POST", `/api/deals/${dealA}/clients`, { email: "frank.staff@example.com" })).status).toBe(422);
+    expect((await call(alice, "POST", `/api/deals/${dealA}/clients`, { email: "nobody.here@example.com" })).status).toBe(404);
+    expect((await call(alice, "POST", `/api/deals/${dealA}/clients`, { email: "dana.client@example.com" })).status).toBe(200);
+    const list = (await call(alice, "GET", `/api/deals/${dealA}/clients`)).json;
+    expect(list.map((c: any) => [c.name, c.email])).toEqual([["Dana Client", "dana.client@example.com"]]);
+    await expect(asUser(db, ids.alice!, (tx) => tx.query(`select fn_add_member($1, $2, 'client')`, [cw, "gus.stranger@example.com"]))).rejects.toThrow(/A client is added to a deal/);
+  });
+
+  test("a client confirms a value the broker stated; the run goes out of date", async () => {
+    const before = await hash(dealA);
+    const a = await stated(dealA);
+    expect((await call(dana, "POST", `/api/assumptions/${a.id}/client-confirm`, { version: a.version })).status).toBe(200);
+    expect(await hash(dealA)).not.toBe(before);
+    const after = await stated(dealA);
+    expect(after).toMatchObject({ sponsorStated: true, clientConfirmedBy: "Dana Client" });
+    expect(after.clientConfirmedAt).toEqual(expect.any(String));
+    expect((await call(dana, "GET", `/api/runs/${runA}`)).json.fresh).toBe(false);
+    expect((await call(dana, "POST", `/api/assumptions/${a.id}/client-confirm`, { version: after.version })).status).toBe(422);
+    const other = (await review(alice, dealA)).assumptions.find((x: any) => !x.sponsorStated && x.status === "approved");
+    expect((await call(dana, "POST", `/api/assumptions/${other.id}/client-confirm`, { version: other.version })).status).toBe(422);
+    const b = await stated(dealB);
+    expect((await call(dana, "POST", `/api/assumptions/${b.id}/client-confirm`, { version: b.version })).status).toBe(403);
+    expect((await call(frank, "POST", `/api/assumptions/${b.id}/client-confirm`, { version: b.version })).status).toBe(403);
+    const events = (await call(alice, "GET", `/api/deals/${dealA}/audit`)).json;
+    expect(events.some((e: any) => e.action === "assumption.client_confirm")).toBe(true);
+    // The new run records the client's confirmation; older snapshots have no such key.
+    const rerun = await call(alice, "POST", `/api/deals/${dealA}/runs`);
+    const snap = (await call(alice, "GET", `/api/runs/${rerun.json.id}`)).json.inputs.find((i: any) => i.fieldKey === "exit_cap_rate_pct");
+    expect(snap).toMatchObject({ clientConfirmedBy: "Dana Client", clientConfirmedAt: expect.any(String) });
+    expect((await call(alice, "GET", `/api/runs/${runB}`)).json.inputs.every((i: any) => !("clientConfirmedBy" in i))).toBe(true);
+  });
+
+  test("changing the value clears the client's confirmation; a reviewer's confirmation keeps it", async () => {
+    let a = await stated(dealA);
+    expect((await call(alice, "POST", `/api/assumptions/${a.id}/review`, { action: "modify", value: 9, reason: "The broker revised the cap rate", version: a.version })).status).toBe(200);
+    a = await stated(dealA);
+    expect(a.clientConfirmedBy ?? null).toBeNull();
+    expect((await call(dana, "POST", `/api/assumptions/${a.id}/client-confirm`, { version: a.version })).status).toBe(200);
+    a = (await review(alice, dealA)).assumptions.find((x: any) => x.id === a.id);
+    expect((await call(frank, "POST", `/api/assumptions/${a.id}/review`, { action: "second_approve", version: a.version })).status).toBe(200);
+    const done = (await review(alice, dealA)).assumptions.find((x: any) => x.id === a.id);
+    expect(done).toMatchObject({ sponsorStated: false, secondApprover: "Frank Staff", clientConfirmedBy: "Dana Client" });
+  });
+
+  test("a deal without a client confirmation keeps the assumptions hash it had before 0018", async () => {
+    const [{ h }] = await db.query<{ h: string }>(`select encode(sha256(convert_to(coalesce((
+        select jsonb_agg(jsonb_build_array(field_key, item_key, status, value)
+          || case when agir_sponsor_stated(a) then '["sponsor_stated"]'::jsonb else '[]'::jsonb end order by field_key, item_key)
+        from assumptions a where deal_id = $1 and status in ('approved', 'default_accepted')
+      ), '[]'::jsonb)::text, 'UTF8')), 'hex') as h`, [dealB]) as [{ h: string }];
+    expect(await hash(dealB)).toBe(h);
+    expect((await call(alice, "GET", `/api/runs/${runB}`)).json.fresh).toBe(true);
+  });
+
+  test("unassigning a client hides the deal again", async () => {
+    expect((await call(alice, "DELETE", `/api/deals/${dealA}/clients/${ids.dana}`)).status).toBe(200);
+    expect((await call(dana, "GET", `/api/workspaces/${cw}/deals`)).json).toEqual([]);
+    expect(Object.values(await counts(ids.dana!, dealA)).every((n) => n === 0)).toBe(true);
+    const events = (await call(alice, "GET", `/api/deals/${dealA}/audit`)).json.map((e: any) => e.action);
+    expect(events).toEqual(expect.arrayContaining(["client.assigned", "client.unassigned"]));
+  });
+});
