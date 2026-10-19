@@ -1,10 +1,11 @@
 import { FIELD_BY_KEY, placeLabel } from "@agir/contracts";
+import { runWaterfall } from "@agir/engine";
 import { confirmationLabel, DRAFT_POLICY_LINE, notFoundSentence, type ArtifactInput } from "./model.ts";
 
 /**
  * The model export: every number of the run as a number, never as text, so an
  * analyst can check it in a spreadsheet. Values are read from the stored run;
- * nothing is recomputed.
+ * partner flows use the existing waterfall over the stored equity flows.
  */
 export async function renderXlsx(x: ArtifactInput): Promise<Uint8Array> {
   const ExcelJS = (await import("exceljs")).default;
@@ -85,6 +86,43 @@ export async function renderXlsx(x: ArtifactInput): Promise<Uint8Array> {
   for (const f of r.equityFlows) {
     const row = flows.addRow([f.month, f.t, f.kind === "unrealized" ? "Unrealized, not a sale" : f.kind, f.amount]);
     row.getCell(4).numFmt = fmt("$");
+  }
+
+  const lpIrr = r.scenarios.find((s) => s.key === "base")!.metrics.find((m) => m.key === "lp_irr");
+  if (lpIrr && lpIrr.status !== "NOT_APPLICABLE") {
+    const partners = wb.addWorksheet("Partners");
+    const terms = x.input.waterfall!;
+    for (const [key, value] of [["lp_share_pct", terms.lpSharePct], ["preferred_return_pct", terms.preferredReturnPct], ["gp_promote_pct", terms.gpPromotePct]] as const) {
+      const row = partners.addRow([FIELD_BY_KEY.get(key)!.label, value]);
+      row.getCell(2).numFmt = fmt("%");
+    }
+    head(partners, ["Month (cash date)", "Year", "Kind", "Deal flow", "LP flow", "GP flow"]);
+    const months = new Map<number, { t: number; kinds: string[]; deal: number; lp: number; gp: number }>();
+    for (const flow of r.equityFlows) {
+      const key = Math.round(flow.t * 12);
+      const month = months.get(key) ?? { t: flow.t, kinds: [], deal: 0, lp: 0, gp: 0 };
+      if (!month.kinds.includes(flow.kind)) month.kinds.push(flow.kind);
+      month.deal += flow.amount;
+      months.set(key, month);
+    }
+    const waterfall = runWaterfall(r.equityFlows, terms);
+    for (const [key, entries] of [["lp", waterfall.lp], ["gp", waterfall.gp]] as const) {
+      for (const flow of entries) months.get(Math.round(flow.t * 12))![key] += flow.amount;
+    }
+    const totals = [0, 0, 0];
+    for (const [key, month] of [...months].sort(([a], [b]) => a - b)) {
+      const amounts = [month.deal, month.lp, month.gp];
+      const row = partners.addRow([key, month.t, month.kinds.join(", "), ...amounts]);
+      amounts.forEach((amount, n) => { totals[n]! += amount; row.getCell(n + 4).numFmt = fmt("$"); });
+    }
+    const total = partners.addRow(["Total", null, null, ...totals]);
+    for (const col of [4, 5, 6]) total.getCell(col).numFmt = fmt("$");
+    for (const key of ["lp_irr", "gp_irr", "gp_promote"]) {
+      const metric = r.scenarios.find((s) => s.key === "base")!.metrics.find((m) => m.key === key)!;
+      const row = partners.addRow([metric.label, metric.status === "VALID" ? metric.value : metric.reason]);
+      row.getCell(2).numFmt = fmt(metric.unit);
+    }
+    partners.columns.forEach((c) => (c.width = 24));
   }
 
   const inputs = wb.addWorksheet("Inputs");
