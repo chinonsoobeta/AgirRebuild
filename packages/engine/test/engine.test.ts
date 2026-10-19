@@ -5,7 +5,7 @@ import { FIELDS, FIELD_BY_KEY, METRICS, POLICIES, POLICY_V1, RENTAL_HOLD_INSURED
 import { createHash } from "node:crypto";
 import { readFileSync, readdirSync } from "node:fs";
 import { join } from "node:path";
-import { allocate, applyStress, assemble, buildLedger, canonicalJson, gateSpecs, grid, irrRoots, levelPayment, tornado, underwrite, validateInput, EngineInputError } from "../src/index.ts";
+import { allocate, applyStress, assemble, buildLedger, canonicalJson, gateSpecs, grid, heldPartnerReturns, irrRoots, levelPayment, runWaterfall, tornado, underwrite, validateInput, EngineInputError } from "../src/index.ts";
 import { allEquityDeal, developmentDeal } from "./fixtures.ts";
 
 const metric = (r: RunResult, key: string, scenario = "base") =>
@@ -1671,5 +1671,25 @@ describe("Canadian cost lines and a mortgage insurance premium, as entered value
       const multiplex = TEMPLATES.find((t) => t.key === "multiplex")!;
       for (const k of ["land_transfer_tax", "gst_hst_net"]) expect(multiplex.questions.some((x) => x.field === k), k).toBe(false);
     });
+  });
+});
+
+describe("a held deal's partner returns (task 88a)", () => {
+  const input: EngineInput = { ...developmentDeal(), refinance: { month: 36, ltvPct: 65, ratePct: 5, amortYears: 30, ioMonths: 0 }, exit: "refinance_hold",
+    waterfall: { lpSharePct: 90, preferredReturnPct: 3, gpPromotePct: 20 } };
+  test("is the waterfall with and without the unrealized flow, and changes no result", () => {
+    const before = canonicalJson(underwrite(input, policyFor(input)));
+    const r = underwrite(input, policyFor(input));
+    const flowsBefore = canonicalJson(r.equityFlows);
+    const out = heldPartnerReturns(r.equityFlows, input.waterfall!);
+    const w = runWaterfall(r.equityFlows, input.waterfall!);
+    const paid = runWaterfall(r.equityFlows.filter((f) => f.kind !== "unrealized"), input.waterfall!);
+    const irr = (flows: { t: number; amount: number }[]) => { const roots = irrRoots(flows); return roots.length === 1 ? roots[0]! * 100 : null; };
+    expect(out).toEqual({ withValue: { ...w, lpIrr: irr(w.lp), gpIrr: irr(w.gp) }, paid });
+    expect(out.withValue.lpIrr).not.toBeNull();
+    expect(out.withValue.promote).toBeGreaterThan(0);
+    expect(out.paid.promote).toBe(0);
+    expect(canonicalJson(r.equityFlows)).toBe(flowsBefore);
+    expect(canonicalJson(underwrite(input, policyFor(input)))).toBe(before);
   });
 });

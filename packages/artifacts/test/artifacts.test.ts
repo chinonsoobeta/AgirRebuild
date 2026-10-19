@@ -2,7 +2,7 @@ import { describe, expect, test } from "vitest";
 import { FIELD_BY_KEY, POLICY_V1, policyFor, type EngineInput } from "@agir/contracts";
 import { createHash } from "node:crypto";
 import { readFileSync } from "node:fs";
-import { runWaterfall, irrRoots, applyStress, breakeven, assemble, canonicalJson, ENGINE_VERSION, underwrite, type AssumptionRow } from "@agir/engine";
+import { runWaterfall, irrRoots, heldPartnerReturns, applyStress, breakeven, assemble, canonicalJson, ENGINE_VERSION, underwrite, type AssumptionRow } from "@agir/engine";
 import { consolidate, extractCandidates, type SourcedCandidate } from "@agir/extraction";
 import { loadOracle } from "@agir/testkit";
 import { allEquityDeal, developmentDeal } from "../../engine/test/fixtures.ts";
@@ -613,13 +613,19 @@ describe("a deal that is kept and refinanced (card 60)", () => {
   });
 
   describe("a Partners sheet in the Excel export (task 85b)", () => {
-    test("the held fixture keeps its sheet names even with a split", async () => {
+    test("the held fixture with a split gets Partners after Equity flows (changed in task 88a)", async () => {
       const x = holdInput("model_export");
       x.input = { ...x.input, waterfall: { lpSharePct: 90, preferredReturnPct: 8, gpPromotePct: 20 } };
       x.result = underwrite(x.input, x.policy);
       const ExcelJS = (await import("exceljs")).default;
       const wb = new ExcelJS.Workbook();
       await wb.xlsx.load(Buffer.from((await renderArtifact(x, "xlsx")).bytes) as never);
+      expect(wb.worksheets.map((ws) => ws.name)).toEqual(["Summary", "Metrics", "Annual", "Monthly ledger", "Equity flows", "Partners", "Inputs", "Checks"]);
+    });
+    test("the held fixture without a split keeps its sheet names (task 88a)", async () => {
+      const ExcelJS = (await import("exceljs")).default;
+      const wb = new ExcelJS.Workbook();
+      await wb.xlsx.load(Buffer.from((await renderArtifact(holdInput("model_export"), "xlsx")).bytes) as never);
       expect(wb.worksheets.map((ws) => ws.name)).toEqual(["Summary", "Metrics", "Annual", "Monthly ledger", "Equity flows", "Inputs", "Checks"]);
     });
   });
@@ -1116,6 +1122,39 @@ describe("the partner memo of a held deal (task 87a)", () => {
       expect(out.bytes.byteLength).toBeGreaterThan(1_000);
     }
   }, 60_000);
+
+  test.each([3, 8])("90/%s/20: the held Partners sheet reads the helper (task 88a)", async (pref) => {
+    const x = { ...heldPartnerInput(pref), kind: "model_export" as const };
+    const ExcelJS = (await import("exceljs")).default;
+    const wb = new ExcelJS.Workbook();
+    await wb.xlsx.load(Buffer.from((await renderArtifact(x, "xlsx")).bytes) as never);
+    const names = wb.worksheets.map((ws) => ws.name);
+    expect(names[names.indexOf("Equity flows") + 1]).toBe("Partners");
+    const sheet = wb.getWorksheet("Partners")!;
+    const h = heldPartnerReturns(x.result.equityFlows, x.input.waterfall!);
+    const months = [...new Set(x.result.equityFlows.map((f) => Math.round(f.t * 12)))].sort((a, b) => a - b);
+    expect((sheet.getRow(4).values as unknown[]).slice(1)).toEqual(["Month (cash date)", "Year", "Kind", "Deal flow", "LP flow", "GP flow"]);
+    for (const [n, month] of months.entries()) {
+      const row = (sheet.getRow(n + 5).values as unknown[]).slice(1);
+      const deal = x.result.equityFlows.filter((f) => Math.round(f.t * 12) === month);
+      expect(row[2]).toBe([...new Set(deal.map((f) => f.kind === "unrealized" ? "Unrealized, not a sale" : f.kind))].join(", "));
+      expect(Math.abs((row[4] as number) + (row[5] as number) - (row[3] as number))).toBeLessThanOrEqual(0.01);
+    }
+    const last = months.length + 5;
+    expect((sheet.getRow(last).values as unknown[])[1]).toBe("Total");
+    const positive = (flows: { amount: number }[]) => flows.filter((f) => f.amount > 0).reduce((n, f) => n + f.amount, 0);
+    const summary = [last + 1, last + 2, last + 3, last + 4, last + 5, last + 6, last + 7].map((n) => (sheet.getRow(n).values as unknown[]).slice(1));
+    expect(summary).toEqual([
+      ["LP IRR (unrealized, not a sale)", h.withValue.lpIrr ?? "Not meaningful"],
+      ["GP IRR (unrealized, not a sale)", h.withValue.gpIrr ?? "Not meaningful"],
+      ["GP promote (unrealized, not a sale)", h.withValue.promote],
+      [],
+      ["Paid out to the LP", positive(h.paid.lp)],
+      ["Paid out to the GP", positive(h.paid.gp)],
+      ["GP promote paid", h.paid.promote],
+    ]);
+    expect(sheet.rowCount).toBe(last + 7);
+  });
 
   test("a stated value that is not meaningful still builds, by the roots rule", () => {
     const x = heldPartnerInput(8, { expenseRatioPct: undefined, fixedOpexAnnual: 50_000_000 });
