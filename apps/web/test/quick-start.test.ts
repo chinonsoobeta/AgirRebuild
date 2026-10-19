@@ -9,7 +9,7 @@ import { QuickStart } from "../src/components/QuickStart.tsx";
 import { build, type Lang } from "../src/i18n.tsx";
 
 const state = vi.hoisted(() => ({ template: "multiplex", lang: "en", error: null as unknown,
-  submit: undefined as undefined | ((e: { preventDefault: () => void; currentTarget: unknown }) => void), mutate: vi.fn() }));
+  held: false, booleanIndex: 0, submit: undefined as undefined | ((e: { preventDefault: () => void; currentTarget: unknown }) => void), mutate: vi.fn() }));
 vi.mock("@tanstack/react-query", () => ({
   useQuery: () => ({ data: { assumptions: [] } }), useQueryClient: () => ({}), useMutation: () => ({ mutate: state.mutate }),
 }));
@@ -26,6 +26,7 @@ vi.mock("react", async (original) => {
   return { ...react, useState: (initial: unknown) => {
     const [value, set] = react.useState(initial);
     if (initial === "multiplex") return [state.template, set];
+    if (initial === false && state.booleanIndex++ === 0) return [state.held, set];
     if (initial === null) return [value, (error: unknown) => { state.error = error; }];
     return [value, set];
   } };
@@ -38,8 +39,8 @@ vi.mock("react/jsx-dev-runtime", async (original) => {
   } };
 });
 
-const render = () => renderToStaticMarkup(createElement(QuickStart, { dealId: "condo" }));
-const submitAnswers = (template: string, count: number, loan = 3_300_000) => {
+const render = () => { state.booleanIndex = 0; return renderToStaticMarkup(createElement(QuickStart, { dealId: "condo" })); };
+const submitAnswers = (template: string, count: number, loan = 3_300_000, extra: Record<string, number> = {}) => {
   state.template = template;
   render();
   // The same oracle answers used by the townhomes quick-start sale-readiness test.
@@ -51,7 +52,7 @@ const submitAnswers = (template: string, count: number, loan = 3_300_000) => {
     sales_commission_pct: d.sales_commission_pct, closing_lag_months: d.closing_lag_months, unsold_carry_monthly: d.unsold_carry_monthly,
     senior_loan_amount: loan, senior_rate_pct: d.senior_rate_pct, senior_presale_threshold_pct: d.senior_presale_threshold_pct };
   const fd = new FormData();
-  for (const [key, value] of Object.entries(values)) fd.set(key, String(value));
+  for (const [key, value] of Object.entries({ ...values, ...extra })) fd.set(key, String(value));
   vi.stubGlobal("FormData", function () { return fd; });
   state.submit!({ preventDefault: () => {}, currentTarget: {} });
 };
@@ -90,5 +91,67 @@ describe("small condo quick start (task 84b)", () => {
     expect(state.mutate).not.toHaveBeenCalled();
     expect(state.error).toBeInstanceOf(Error);
     expect((state.error as Error).message).toBe(build("en", () => {}).t("qs.errUnits", { min, max }));
+  });
+});
+
+
+describe("the quick start asks for the partner split (task 85c)", () => {
+  const fields = ["lp_share_pct", "preferred_return_pct", "gp_promote_pct"];
+  beforeEach(() => { state.template = "multiplex"; state.held = false; state.lang = "en"; state.error = null; state.submit = undefined; state.mutate.mockClear(); });
+  afterEach(() => { state.held = false; vi.unstubAllGlobals(); });
+  it.each(TEMPLATES.map((t) => t.key))("%s ends with the shared optional not-held questions", (key) => {
+    const questions = TEMPLATES.find((t) => t.key === key)!.questions.slice(-3);
+    expect(questions).toEqual(fields.map((field) => ({ field, optional: true, notHeld: true })));
+    const shared = TEMPLATES[0]!.questions.slice(-3);
+    questions.forEach((q, n) => expect(q).toBe(shared[n]));
+  });
+  it.each(TEMPLATES.map((t) => t.key))("%s shows partner questions for a sale exit", (key) => {
+    state.template = key;
+    const html = render();
+    for (const field of fields) expect(html).toContain(`name="${field}"`);
+    const positions = fields.map((field) => html.indexOf(`name="${field}"`));
+    expect([...positions].sort((a, b) => a - b)).toEqual(positions);
+  });
+  it("a kept multiplex has no partner questions or hidden partner fields", () => {
+    state.held = true;
+    const html = render();
+    for (const field of fields) {
+      expect(html).not.toContain(`name="${field}"`);
+      expect(html).not.toContain(build("en", () => {}).L.field(field));
+    }
+  });
+  it("all three condo answers reach a ready sale input", () => {
+    submitAnswers("condo", 4, 3_300_000, { lp_share_pct: 90, preferred_return_pct: 8, gp_promote_pct: 20 });
+    expect(state.error).toBeNull();
+    expect(state.mutate).toHaveBeenCalledOnce();
+    const entries = state.mutate.mock.calls[0]![0].entries as { fieldKey: string; itemKey: string | null; value: number }[];
+    expect(entries.slice(-3)).toEqual(fields.map((fieldKey, n) => ({ fieldKey, itemKey: null, value: [90, 8, 20][n] })));
+    const { input, readiness } = assemble(entries.map((e) => ({ fieldKey: e.fieldKey, itemKey: e.itemKey, valueNumeric: e.value, status: "approved" })));
+    expect(readiness.status).toBe("ready");
+    expect(input!.waterfall).toEqual({ lpSharePct: 90, preferredReturnPct: 8, gpPromotePct: 20 });
+  });
+  it.each(["en", "fr"] as const)("a partial split refuses before sending in %s", (lang) => {
+    state.lang = lang;
+    submitAnswers("condo", 4, 3_300_000, { lp_share_pct: 90 });
+    expect(state.mutate).not.toHaveBeenCalled();
+    expect(state.error).toBeInstanceOf(Error);
+    expect((state.error as Error).message).toBe(lang === "en"
+      ? "Enter the LP share, the preferred return and the promote together, or leave all three blank."
+      : "Saisissez la part des commanditaires, le rendement privilégié et la prime ensemble, ou laissez les trois vides.");
+  });
+  it("blank partner answers preserve the exact 84b entries", () => {
+    submitAnswers("condo", 4);
+    expect(state.error).toBeNull();
+    const d = JSON.parse(readFileSync(new URL("../../../oracles/for-sale/kestrel-row-townhomes.outcome.json", import.meta.url), "utf8")).inputs;
+    const pairs: [string, number, string | null][] = [
+      ["sell_units", 1, null], ["land_cost", d.land, null], ["hard_cost", d.hard, null], ["soft_cost", d.soft, null],
+      ["contingency", d.contingency, null], ["development_charges", 0, null], ["construction_months", d.construction_months, null],
+      ["unit_count", 4, "Condo"], ["unit_sale_price", d.unit_types[0].price, "Condo"],
+      ["presold_units_pct", d.presold_units_pct, null], ["deposit_pct", d.deposit_pct, null],
+      ["absorption_units_per_month", d.absorption_units_per_month, null], ["sales_commission_pct", d.sales_commission_pct, null],
+      ["closing_lag_months", d.closing_lag_months, null], ["unsold_carry_monthly", d.unsold_carry_monthly, null],
+      ["senior_loan_amount", 3_300_000, null], ["senior_rate_pct", d.senior_rate_pct, null], ["senior_presale_threshold_pct", d.senior_presale_threshold_pct, null],
+    ];
+    expect(state.mutate.mock.calls[0]![0].entries).toEqual(pairs.map(([fieldKey, value, itemKey]) => ({ fieldKey, itemKey, value })));
   });
 });
