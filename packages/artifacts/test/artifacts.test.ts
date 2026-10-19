@@ -624,6 +624,16 @@ describe("a deal that is kept and refinanced (card 60)", () => {
     });
   });
 
+  describe("a report says when a check decides the verdict (task 85a)", () => {
+    test("the held fixture without an error check adds no paragraph", () => {
+      const x = holdInput("build_decision");
+      expect(x.result.verdict.hardFailReasons).toEqual([]);
+      const { text, report } = textOf(x);
+      expect(text).not.toContain("This run fails a check that no gate can offset.");
+      expect(report.orphans).toEqual([]);
+    });
+  });
+
 });
 
 type OracleInputs = { unit_types: { name: string; units: number; price: number }[]; land: number; hard: number; soft: number; contingency: number; construction_months: number; presold_units_pct: number; deposit_pct: number; absorption_units_per_month: number; sales_commission_pct: number; closing_lag_months: number; unsold_carry_monthly: number; senior_commitment: number; senior_rate_pct: number; mezz_commitment: number; mezz_rate_pct: number; senior_presale_threshold_pct: number };
@@ -672,7 +682,7 @@ const saleTable = (model: ReturnType<typeof buildModel>, caption: string) => {
 };
 
 describe("the reports for a deal that sells its units (task 80)", () => {
-  test.each([["ic_memo", "fa9dd2f818ca58ba1500ec30db01d5171229546e8828b96d74e9f0138bf93812"], ["build_decision", "c49c28c5eafee7e5d6eb89704d4b04584c7887ecbf5d51bd33160417cf83d17e"], ["lender_package", "5f81e68b930e8735a4036eba356bad6242bc1e05cdaa3ca89a84a69f47dd208c"]] as const)("the existing Maple Heights %s text is byte-identical", (kind, hash) => {
+  test.each([["ic_memo", "fa9dd2f818ca58ba1500ec30db01d5171229546e8828b96d74e9f0138bf93812"], ["build_decision", "d4510a95e802f3ebfa1ad4a5826f15f1e78f7d2da58034ecd023e78474090940"], ["lender_package", "5f81e68b930e8735a4036eba356bad6242bc1e05cdaa3ca89a84a69f47dd208c"]] as const)("the existing Maple Heights %s text is byte-identical", (kind, hash) => {
     expect(createHash("sha256").update(visibleText(renderHtml(buildModel(mapleInput(kind))))).digest("hex")).toBe(hash);
   });
   test.each(SALE_SLUGS.flatMap((slug) => SALE_KINDS.map((kind) => [slug, kind] as const)))("%s %s has provenance, sale stats and stresses without rental sections", (slug, kind) => {
@@ -1094,5 +1104,67 @@ describe("a Partners sheet in the Excel export (task 85b)", () => {
     const sheet = (await workbook(x)).getWorksheet("Partners")!;
     expect(sheet).toBeDefined();
     for (const offset of [2, 1, 0]) expect(sheet.getRow(sheet.rowCount - offset).getCell(2).value).toBe("Deal returns are not meaningful.");
+  });
+});
+
+
+describe("a report says when a check decides the verdict (task 85a)", () => {
+  const message = "This run fails a check that no gate can offset. Passing the gates alone would not change the verdict while it stands.";
+  const shortEquity = () => {
+    const x = saleInput("kestrel-row-townhomes", "build_decision");
+    x.input = { ...x.input, stated: { equity: 0 } };
+    x.result = underwrite(x.input, x.policy);
+    expect(x.result.verdict.hardFailReasons.length).toBeGreaterThan(0);
+    return x;
+  };
+  test.each([false, true])("Kestrel short equity with all gates passed=%s prints the warning before its table", (passed) => {
+    const x = shortEquity();
+    expect(x.result.verdict.gates.some((g) => g.status === "failed")).toBe(true);
+    if (passed) x.result.verdict.gates = x.result.verdict.gates.map((g) => ({ ...g, status: "passed" }));
+    const model = buildModel(x);
+    const at = model.blocks.findIndex((b) => b.type === "heading" && b.text === "What would change the answer");
+    expect(at).toBeGreaterThanOrEqual(0);
+    expect(model.blocks[at + 1]).toEqual({ type: "paragraph", text: message });
+    const table = model.blocks[at + 2];
+    expect(table?.type).toBe("table");
+    if (table?.type === "table") {
+      if (passed) expect(table.caption).toBe("Stresses (each a full re-run of the model)");
+      else expect(table.columns.some((c) => c.label === "Input moved")).toBe(true);
+    }
+    expect(verifyProvenance(visibleText(renderHtml(model)), model.formatter.manifest).orphans).toEqual([]);
+  });
+  test("Maple keeps its notice first and adds the approved warning and table only", () => {
+    const x = mapleInput("build_decision");
+    expect(x.result.verdict.hardFailReasons.length).toBeGreaterThan(0);
+    const model = buildModel(x);
+    const at = model.blocks.findIndex((b) => b.type === "heading" && b.text === "What would change the answer");
+    expect(model.blocks[at + 1]).toEqual({ type: "paragraph", muted: true, text: "Not shown: this run was made under a different policy." });
+    expect(model.blocks[at + 2]).toEqual({ type: "paragraph", text: message });
+    expect(model.blocks[at + 3]).toMatchObject({ type: "table", columns: expect.arrayContaining([{ label: "Input moved" }]) });
+    expect(model.blocks[at + 4]).toMatchObject({ type: "paragraph", text: "One input is moved at a time. Everything else is held." });
+    const text = visibleText(renderHtml(model));
+    expect(text.split(message)).toHaveLength(2);
+    // Owner waived paragraph-only restoration and authorized the table too. Remove exactly these additions.
+    const restored = { ...model, blocks: model.blocks.filter((_, n) => n < at + 2 || n > at + 4) };
+    expect(createHash("sha256").update(visibleText(renderHtml(restored))).digest("hex"))
+      .toBe("c49c28c5eafee7e5d6eb89704d4b04584c7887ecbf5d51bd33160417cf83d17e");
+    expect(verifyProvenance(text, model.formatter.manifest).orphans).toEqual([]);
+  });
+  test.each(["engine", "policy"])("the %s notice comes before the warning", (notice) => {
+    const x = shortEquity();
+    if (notice === "engine") x.run.engineVersion = "0.9.0";
+    else x.run.policyHash = "different";
+    const model = buildModel(x);
+    const at = model.blocks.findIndex((b) => b.type === "heading" && b.text === "What would change the answer");
+    expect(model.blocks[at + 1]).toMatchObject({ type: "paragraph", text: expect.stringMatching(/^Not shown:/) });
+    expect(model.blocks[at + 2]).toEqual({ type: "paragraph", text: message });
+    expect(verifyProvenance(visibleText(renderHtml(model)), model.formatter.manifest).orphans).toEqual([]);
+  });
+  test("Kestrel without stated equity adds no warning", () => {
+    const x = saleInput("kestrel-row-townhomes", "build_decision");
+    expect(x.result.verdict.hardFailReasons).toEqual([]);
+    const model = buildModel(x);
+    expect(visibleText(renderHtml(model))).not.toContain(message);
+    expect(verifyProvenance(visibleText(renderHtml(model)), model.formatter.manifest).orphans).toEqual([]);
   });
 });
