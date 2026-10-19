@@ -1064,7 +1064,7 @@ describe("the partner memo of a held deal (task 87a)", () => {
     expect(capital.columns.map((c) => c.label)).toEqual(["Partner", "Contributed", "Distributed", "Multiple", "IRR"]);
     expect(capital.rows.map((r) => r[0])).toEqual(["LP", "GP", "Total", "GP promote (unrealized, not a sale)"]);
     for (const [label, flows] of [["LP", w.lp], ["GP", w.gp]] as const) {
-      const c = sum(flows, -1) * -1, d = sum(flows, 1);
+      const c = sum(flows, -1), d = sum(flows, 1);
       expect(capital.rows.find((r) => r[0] === label)).toEqual([label, formatValue(c, "$"), formatValue(d, "$"), formatValue(d / c, "x"), irrText(flows)]);
     }
     const total = capital.rows.find((r) => r[0] === "Total")!;
@@ -1076,7 +1076,7 @@ describe("the partner memo of a held deal (task 87a)", () => {
     expect(paidTable.columns.map((c) => c.label)).toEqual(["Partner", "Contributed", "Paid out", "Paid out / contributed"]);
     expect(paidTable.rows.map((r) => r[0])).toEqual(["LP", "GP", "Total", "GP promote paid"]);
     for (const [label, flows] of [["LP", paid.lp], ["GP", paid.gp]] as const) {
-      const c = -sum(flows, -1), d = sum(flows, 1);
+      const c = sum(flows, -1), d = sum(flows, 1);
       expect(paidTable.rows.find((r) => r[0] === label)).toEqual([label, formatValue(c, "$"), formatValue(d, "$"), formatValue(d / c, "x")]);
     }
     const cashPaid = x.result.equityFlows.filter((f) => f.kind === "operating" || f.kind === "refinance").reduce((n, f) => n + f.amount, 0);

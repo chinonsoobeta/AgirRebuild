@@ -1341,7 +1341,7 @@ const FR_REASONS: [RegExp, string | ((m: RegExpMatchArray) => string)][] = [
   [/^Only a finished report can be shared\.$/, "Seul un rapport terminé peut être partagé."],
   [/^This link is already revoked\.$/, "Ce lien est déjà révoqué."],
   [/^Too many requests\. Wait a minute\.$/, "Trop de demandes. Attendez une minute."],
-  [/^This deal has no LP\/GP split, or is not sold, so it has no partner memo\.$/, "Ce projet n'a pas de partage commanditaires/commandité, ou n'est pas vendu ; il n'a donc pas de note aux partenaires."],
+  [/^This deal has no LP\/GP split, so it has no partner memo\.$/, "Ce projet n'a pas de partage commanditaires/commandité ; il n'a donc pas de note aux partenaires."],
   [/^This driver does not apply to this deal\.$/, "Cette hypothèse ne s'applique pas à ce projet."],
   [/^The inputs do not give this a meaningful value\.$/, "Les données ne permettent pas d'en tirer une valeur significative."],
   [/^Total development cost is zero\.$/, "Le coût total de développement est nul."],

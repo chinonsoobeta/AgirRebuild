@@ -4,7 +4,7 @@
 
 import { CURRENCY_NAMES, FIELD_BY_KEY, placeLabel, type Currency, type EngineInput, type FieldUnit, type Policy, type RunResult, type VerdictCode } from "@agir/contracts";
 import { createHash } from "node:crypto";
-import { runWaterfall, breakeven, canonicalJson, ENGINE_VERSION, type BreakevenEcho, type BreakevenRow } from "@agir/engine";
+import { runWaterfall, irrRoots, breakeven, canonicalJson, ENGINE_VERSION, type BreakevenEcho, type BreakevenRow } from "@agir/engine";
 import { Formatter, formatValue } from "./format.ts";
 
 export type ArtifactKind = "ic_memo" | "lender_package" | "build_decision" | "partner_memo" | "model_export";
@@ -433,15 +433,93 @@ function changeTheAnswer(f: Formatter, x: ArtifactInput): Block[] {
 
 class PartnerMemoUnavailableError extends Error {
   constructor() {
-    super("This deal has no LP/GP split, or is not sold, so it has no partner memo.");
+    super("This deal has no LP/GP split, so it has no partner memo.");
     this.name = "PartnerMemoUnavailableError";
   }
+}
+
+/**
+ * The partner sections of a held deal's memo (card 87, owner decision 2026-10-19): the existing waterfall over the
+ * run's stored equity flows, with the stated value (unrealized, not a sale) and without it (cash paid out).
+ * Report arithmetic over the base case's flows, not engine metrics, so no stored result changes.
+ */
+function heldPartnerBlocks(f: Formatter, x: ArtifactInput): Block[] {
+  const r = x.result;
+  const terms = x.input.waterfall!;
+  const w = runWaterfall(r.equityFlows, terms);
+  const paid = runWaterfall(r.equityFlows.filter((flow) => flow.kind !== "unrealized"), terms);
+  const irr = (flows: { t: number; amount: number }[], ref: string) => {
+    const roots = irrRoots(flows);
+    return f.derived(roots.length === 1 ? roots[0]! * 100 : null, "%", `irr(${ref})`);
+  };
+  const totals = (flows: { amount: number }[]) => ({
+    contributed: -flows.filter((flow) => flow.amount < 0).reduce((n, flow) => n + flow.amount, 0),
+    distributed: flows.filter((flow) => flow.amount > 0).reduce((n, flow) => n + flow.amount, 0),
+  });
+  const lpIrr = irr(w.lp, "waterfall.LP.flows"), gpIrr = irr(w.gp, "waterfall.GP.flows");
+  const metricItem = (key: string) => ({ label: f.metricOf("base", key).label, value: f.metric("base", key) });
+  const blocks: Block[] = [{ type: "stats", items: [
+    metricItem("unrealized_equity_multiple"), metricItem("unrealized_equity_irr"),
+    { label: "LP IRR (unrealized, not a sale)", value: lpIrr },
+    { label: "GP IRR (unrealized, not a sale)", value: gpIrr },
+  ] }];
+  blocks.push({ type: "table", caption: "Partnership terms", columns: [{ label: "Term" }, { label: "Value", numeric: true }],
+    rows: [["lp_share_pct", terms.lpSharePct], ["preferred_return_pct", terms.preferredReturnPct], ["gp_promote_pct", terms.gpPromotePct]]
+      .map(([key, value]) => [FIELD_BY_KEY.get(String(key))!.label, f.input(Number(value), "%", String(key))]),
+  });
+  const lp = totals(w.lp), gp = totals(w.gp);
+  const has = (key: string) => r.scenarios.find((s) => s.key === "base")!.metrics.some((m) => m.key === key);
+  const capital = ([["LP", lp, lpIrr], ["GP", gp, gpIrr]] as const).map(([label, cash, partnerIrr]) => [
+    f.ident(label, `waterfall.${label}.label`),
+    f.derived(cash.contributed, "$", `sum(-waterfall.${label}.negativeFlows)`),
+    f.derived(cash.distributed, "$", `sum(waterfall.${label}.positiveFlows)`),
+    f.derived(cash.contributed > 0 ? cash.distributed / cash.contributed : null, "x", `waterfall.${label}.distributed / waterfall.${label}.contributed`),
+    partnerIrr,
+  ]);
+  capital.push(["Total",
+    has("equity_contributed") ? f.metric("base", "equity_contributed") : f.derived(lp.contributed + gp.contributed, "$", "waterfall.LP.contributed + waterfall.GP.contributed"),
+    has("equity_distributed") ? f.metric("base", "equity_distributed") : f.derived(lp.distributed + gp.distributed, "$", "waterfall.LP.distributed + waterfall.GP.distributed"),
+    f.metric("base", "unrealized_equity_multiple"), f.metric("base", "unrealized_equity_irr"),
+  ]);
+  capital.push(["GP promote (unrealized, not a sale)", "", f.derived(w.promote, "$", "waterfall.promote"), "", ""]);
+  blocks.push({ type: "table", caption: "Capital and distributions, with the stated value (unrealized, not a sale)",
+    columns: [{ label: "Partner" }, { label: "Contributed", numeric: true }, { label: "Distributed", numeric: true }, { label: "Multiple", numeric: true }, { label: "IRR", numeric: true }],
+    rows: capital,
+  });
+  const plp = totals(paid.lp), pgp = totals(paid.gp);
+  const paidRows = ([["LP", plp], ["GP", pgp]] as const).map(([label, cash]) => [
+    f.ident(label, `paid.${label}.label`),
+    f.derived(cash.contributed, "$", `sum(-paid.${label}.negativeFlows)`),
+    f.derived(cash.distributed, "$", `sum(paid.${label}.positiveFlows)`),
+    f.derived(cash.contributed > 0 ? cash.distributed / cash.contributed : null, "x", `paid.${label}.distributed / paid.${label}.contributed`),
+  ]);
+  const contributed = plp.contributed + pgp.contributed, paidOut = plp.distributed + pgp.distributed;
+  paidRows.push(["Total",
+    f.derived(contributed, "$", "paid.LP.contributed + paid.GP.contributed"),
+    f.derived(paidOut, "$", "paid.LP.distributed + paid.GP.distributed"),
+    f.derived(contributed > 0 ? paidOut / contributed : null, "x", "paid.distributed / paid.contributed"),
+  ]);
+  paidRows.push(["GP promote paid", "", f.derived(paid.promote, "$", "paid.promote"), ""]);
+  blocks.push({ type: "table", caption: "Cash paid out before the stated value",
+    columns: [{ label: "Partner" }, { label: "Contributed", numeric: true }, { label: "Paid out", numeric: true }, { label: "Paid out / contributed", numeric: true }],
+    rows: paidRows,
+  });
+  blocks.push(
+    { type: "paragraph", muted: true, text: "Distributions go pro rata until the LP has received its capital and its preferred return, compounded annually on what is unreturned. After that the GP takes its promote share of each dollar and the rest is split pro rata." },
+    { type: "paragraph", muted: true, text: "Nothing is sold. The stated value is final-year NOI over the exit cap rate, less the debt outstanding; returns that include it are unrealized. Cash paid out is the operating and refinance cash only." },
+    sourcesAndUses(f, x),
+    stresses(f, r, true, false, ["dcr_after_refinance", "unrealized_equity_multiple", "unrealized_equity_irr"]),
+    ...notFoundBlocks(x),
+    { type: "paragraph", muted: true, text: "Every input and its source is listed in the IC memo and the lender package." },
+  );
+  return blocks;
 }
 
 export function buildModel(x: ArtifactInput): DocModel {
   if (x.kind === "partner_memo") {
     const lp = x.result.scenarios.find((s) => s.key === "base")?.metrics.find((m) => m.key === "lp_irr");
-    if (!lp || lp.status === "NOT_APPLICABLE") throw new PartnerMemoUnavailableError();
+    const heldSplit = isHeld(x) && x.input.waterfall !== undefined;
+    if (!heldSplit && (!lp || lp.status === "NOT_APPLICABLE")) throw new PartnerMemoUnavailableError();
   }
   const f = new Formatter(x.result);
   const r = x.result;
@@ -480,6 +558,8 @@ export function buildModel(x: ArtifactInput): DocModel {
     blocks.push(sourcesAndUses(f, x), ...mezzAccrual(f, r), ...(sale ? [unitSales(f, x), saleResults(f, x), SALE_OPERATIONS] : [revenueProgram(f, x), operations(f, x)]), gates(f, r), stresses(f, r, held, sale), ...(sale ? [] : [annual(f, r, false)]));
     blocks.push({ type: "heading", text: "Checks" }, checks(f, r));
     blocks.push(...notFoundBlocks(x), inputsAppendix(f, x));
+  } else if (x.kind === "partner_memo" && held) {
+    blocks.push(verdict, ...draftLine(x), ...sponsorStatedBlocks(f, x), ...heldPartnerBlocks(f, x));
   } else if (x.kind === "partner_memo") {
     blocks.push(verdict, ...draftLine(x), ...sponsorStatedBlocks(f, x));
     blocks.push({ type: "stats", items: ["equity_multiple", "equity_irr", "lp_irr", "gp_irr"].map((key) => ({

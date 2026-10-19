@@ -503,10 +503,12 @@ export function createApp({ db, store, secureCookies, demoSignIn = false }: AppD
     if (body.kind !== "model_export" && body.format === "xlsx") return c.json({ error: "Memos, lender packages and build decision reports are PDF or Word." }, 422);
     const [r] = await as(c, async (tx) => {
       if (body.kind === "partner_memo") {
-        const [run] = await tx.query<{ result: { scenarios: { key: string; metrics: { key: string; status: string }[] }[] } }>(`select result from runs where id = $1`, [c.req.param("id")]);
+        const [run] = await tx.query<{ result: { scenarios: { key: string; metrics: { key: string; status: string }[] }[] }; input_snapshot: { input: EngineInput } }>(
+          `select result, input_snapshot from runs where id = $1`, [c.req.param("id")]);
         if (!run) throw new HttpError(404, "Run not found");
         const lp = run.result.scenarios.find((s) => s.key === "base")?.metrics.find((m) => m.key === "lp_irr");
-        if (!lp || lp.status === "NOT_APPLICABLE") throw new HttpError(422, "This deal has no LP/GP split, or is not sold, so it has no partner memo.");
+        const heldSplit = run.input_snapshot.input.exit === "refinance_hold" && run.input_snapshot.input.waterfall !== undefined;
+        if (!heldSplit && (!lp || lp.status === "NOT_APPLICABLE")) throw new HttpError(422, "This deal has no LP/GP split, so it has no partner memo.");
       }
       return tx.query<{ id: string }>(`select fn_request_artifact($1, $2, $3) as id`, [c.req.param("id"), body.kind, body.format]);
     });

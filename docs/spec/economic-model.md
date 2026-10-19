@@ -152,8 +152,16 @@ debt service each times 12 / months used), and the metric's reason says so.
 
 **Sale metrics in hold mode** are `NOT_APPLICABLE` with the reason "The deal is kept and refinanced, not sold.":
 `exit_value`, `net_sale_proceeds`, `development_profit`, `profit_on_cost`, `equity_multiple`, `equity_irr`,
-`sale_month`, `lp_irr`, `gp_irr` and `gp_promote`. Never 0. The waterfall on unrealized flows is a later card.
+`sale_month`, `lp_irr`, `gp_irr` and `gp_promote`. Never 0.
 Every other metric is computed as today from the same ledger.
+
+**Partners of a held deal.** Owner decision 2026-10-19 (card 87): a held deal with an LP/GP split has a partner
+memo. It runs the existing waterfall over the run's stored equity flows twice: with the unrealized flow, giving each
+partner's distributions, multiple and IRR and the GP promote, all labelled unrealized, not a sale; and without it
+(by kind, since the last operating flow shares its date), giving the cash paid out so far, with no IRR. These are
+report arithmetic over the run's flows with the engine's `runWaterfall` and `irrRoots`, not engine metrics, so no
+run result changes; an IRR follows the roots rule of decision 3. Base case only: the stored flows are the base
+scenario's.
 
 **Stresses.** The same six single shocks and the combined one, each a full re-run in hold mode. An exit-cap shock
 moves both the refinance loan, when it is sized by loan-to-value, and the stated value.

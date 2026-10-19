@@ -26,7 +26,10 @@ export function Reports({ dealId }: { dealId: string }) {
   const deal = useDeal(dealId);
   const run = useRun(deal.data?.run?.id);
   const lp = run.data?.result.scenarios.find((s) => s.key === "base")?.metrics.find((m) => m.key === "lp_irr");
-  const partnerMemo = Boolean(lp && lp.status !== "NOT_APPLICABLE");
+  // A held run with a split has a partner memo too (card 87); its partner returns are unrealized.
+  const heldSplit = Boolean(run.data?.result.scenarios.find((s) => s.key === "base")?.metrics.some((m) => m.key === "unrealized_equity_irr")
+    && run.data?.inputs?.some((i) => i.fieldKey === "lp_share_pct"));
+  const partnerMemo = heldSplit || Boolean(lp && lp.status !== "NOT_APPLICABLE");
   const arts = useQuery({
     queryKey: ["artifacts", dealId],
     queryFn: () => api.get<Artifact[]>(`/deals/${dealId}/artifacts`),
