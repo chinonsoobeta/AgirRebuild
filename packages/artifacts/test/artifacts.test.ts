@@ -2,6 +2,7 @@ import { describe, expect, test } from "vitest";
 import { FIELD_BY_KEY, POLICY_V1, policyFor, type EngineInput } from "@agir/contracts";
 import { createHash } from "node:crypto";
 import { readFileSync } from "node:fs";
+import { crc32, deflateSync } from "node:zlib";
 import { runWaterfall, irrRoots, heldPartnerReturns, applyStress, breakeven, assemble, canonicalJson, ENGINE_VERSION, underwrite, type AssumptionRow } from "@agir/engine";
 import { consolidate, extractCandidates, type SourcedCandidate } from "@agir/extraction";
 import { loadOracle } from "@agir/testkit";
@@ -1342,5 +1343,59 @@ describe("a report says when a check decides the verdict (task 85a)", () => {
     const model = buildModel(x);
     expect(visibleText(renderHtml(model))).not.toContain(message);
     expect(verifyProvenance(visibleText(renderHtml(model)), model.formatter.manifest).orphans).toEqual([]);
+  });
+});
+
+describe("the broker's logo on the lender package (task 89d)", () => {
+  // A real PNG, so Word can embed it.
+  const png = (w: number, h: number) => {
+    const chunk = (type: string, data: Buffer) => {
+      const len = Buffer.alloc(4); len.writeUInt32BE(data.length);
+      const body = Buffer.concat([Buffer.from(type, "ascii"), data]);
+      const crc = Buffer.alloc(4); crc.writeUInt32BE(crc32(body) >>> 0);
+      return Buffer.concat([len, body, crc]);
+    };
+    const ihdr = Buffer.alloc(13); ihdr.writeUInt32BE(w, 0); ihdr.writeUInt32BE(h, 4); ihdr[8] = 8; ihdr[9] = 2;
+    const raw = Buffer.alloc((w * 3 + 1) * h);
+    return new Uint8Array(Buffer.concat([Buffer.from([0x89, 0x50, 0x4e, 0x47, 0x0d, 0x0a, 0x1a, 0x0a]), chunk("IHDR", ihdr), chunk("IDAT", deflateSync(raw)), chunk("IEND", Buffer.alloc(0))]));
+  };
+  // Digits in the name: "Prepared by" goes through the provenance manifest.
+  const broker = { name: "Harbour 2026 Brokers", logo: { bytes: png(120, 40), mime: "image/png" as const, width: 120, height: 40 } };
+  const html = (x: ArtifactInput) => renderHtml(buildModel(x));
+  const hasMedia = (bytes: Uint8Array) => Buffer.from(bytes).includes("word/media/");
+  test("the PDF page shows the logo, at most 48 px high, and Prepared by the workspace", () => {
+    const x = { ...mapleInput("lender_package"), broker };
+    const page = html(x);
+    const img = page.match(/<img [^>]*>/g) ?? [];
+    expect(img).toHaveLength(1);
+    expect(img[0]).toContain(`src="data:image/png;base64,${Buffer.from(broker.logo.bytes).toString("base64")}"`);
+    expect(img[0]).toMatch(/height="40"/);
+    expect(img[0]).toMatch(/width="120"/);
+    expect(visibleText(page)).toContain("Prepared by Harbour 2026 Brokers");
+    const model = buildModel(x);
+    expect(verifyProvenance(visibleText(page), model.formatter.manifest).orphans).toEqual([]);
+  });
+  test("a tall logo is scaled to 48 px high, keeping its aspect", () => {
+    const tall = { ...broker, logo: { ...broker.logo, bytes: png(100, 200), width: 100, height: 200 } };
+    const img = html({ ...mapleInput("lender_package"), broker: tall }).match(/<img [^>]*>/)![0];
+    expect(img).toMatch(/height="48"/);
+    expect(img).toMatch(/width="24"/);
+  });
+  test("the Word lender package has the image part and Prepared by; its scan passes", async () => {
+    const out = await renderArtifact({ ...mapleInput("lender_package"), broker }, "docx");
+    expect(out.provenance.orphans).toEqual([]);
+    expect(hasMedia(out.bytes)).toBe(true);
+    const plain = await renderArtifact(mapleInput("lender_package"), "docx");
+    expect(hasMedia(plain.bytes)).toBe(false);
+  });
+  test("without a logo, the lender package is today's", () => {
+    expect(html({ ...mapleInput("lender_package"), broker: undefined })).toBe(html(mapleInput("lender_package")));
+    expect(html(mapleInput("lender_package"))).not.toContain("<img");
+  });
+  test("the IC memo, build decision and partner memo ignore a logo", async () => {
+    for (const x of [mapleInput("ic_memo"), mapleInput("build_decision"), partnerMemoInput(false)]) {
+      expect(html({ ...x, broker })).toBe(html(x));
+      expect(hasMedia((await renderArtifact({ ...x, broker }, "docx")).bytes)).toBe(false);
+    }
   });
 });

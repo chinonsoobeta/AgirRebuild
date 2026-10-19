@@ -6,7 +6,7 @@ import { renderToStaticMarkup } from "react-dom/server";
 import { api, ApiError, type Assumption } from "../src/api";
 import { canDecide, canEdit } from "../src/components/ui";
 import { ClientConfirmation } from "../src/routes/review.tsx";
-import { ClientsPanel } from "../src/routes/settings.tsx";
+import { ClientsPanel, LogoPanel } from "../src/routes/settings.tsx";
 import { Invite } from "../src/routes/invite.tsx";
 import { Reports } from "../src/routes/reports.tsx";
 import { build, type Lang } from "../src/i18n.tsx";
@@ -54,6 +54,7 @@ vi.mock("../src/api", async (original) => {
     post: vi.fn(async (path: string) => path.endsWith("/invites") ? { id: "new-invite", url: `/i/${state.secret}` }
       : path.endsWith("/accept") ? { ok: true, dealId: "deal-1" } : { ok: true }),
     del: vi.fn(async () => ({ ok: true })),
+    upload: vi.fn(async () => ({ mime: "image/png", width: 120, height: 40 })),
   } };
 });
 vi.mock("react", async (original) => {
@@ -67,7 +68,7 @@ vi.mock("react", async (original) => {
 vi.mock("react/jsx-dev-runtime", async (original) => {
   const runtime = await original<typeof import("react/jsx-dev-runtime")>();
   return { ...runtime, jsxDEV: (...args: Parameters<typeof runtime.jsxDEV>) => {
-    if (typeof args[0] === "string" && ["button", "select", "input", "a", "form"].includes(args[0])) state.nodes.push({ tag: args[0], props: args[1] as Record<string, any> });
+    if (typeof args[0] === "string" && ["button", "select", "input", "a", "form", "img"].includes(args[0])) state.nodes.push({ tag: args[0], props: args[1] as Record<string, any> });
     return runtime.jsxDEV(...args);
   } };
 });
@@ -230,5 +231,32 @@ describe("the invitation page (task 89c)", () => {
     expect(buttons("Rejoindre comme client").length).toBe(1);
     state.me = undefined; state.meError = new ApiError(401, "x");
     expect(text(page())).toContain("Créer mon compte");
+  });
+});
+
+describe("the logo section of settings (task 89d)", () => {
+  it("without a logo: the owner picks a PNG or JPEG, which is posted", async () => {
+    const html = text(render(createElement(LogoPanel, { workspaceId: "ws", hasLogo: false })));
+    for (const s of ["Logo on the lender package", "PNG or JPEG, at most 500 KB. It appears, with Prepared by and this workspace's name, only on the lender package."]) expect(html).toContain(s);
+    expect(state.nodes.some((n) => n.tag === "img")).toBe(false);
+    const input = state.nodes.find((n) => n.tag === "input" && n.props.type === "file")!;
+    expect(input.props.accept).toBe("image/png,image/jpeg");
+    const file = { name: "logo.png" };
+    await input.props.onChange({ currentTarget: { files: [file], value: "x" } });
+    expect(vi.mocked(api.upload).mock.calls).toEqual([["/workspaces/ws/logo", file, "POST"]]);
+    expect(state.invalidate.mock.calls.length).toBeGreaterThan(0);
+  });
+  it("with a logo: a preview and Remove, after confirmation", async () => {
+    render(createElement(LogoPanel, { workspaceId: "ws", hasLogo: true }));
+    const img = state.nodes.find((n) => n.tag === "img")!;
+    expect(String(img.props.src)).toMatch(/^\/api\/workspaces\/ws\/logo/);
+    expect(img.props.style.maxHeight).toBe(48);
+    await buttons("Remove")[0]!.props.onClick();
+    expect(vi.mocked(window.confirm).mock.calls[0]![0]).toBe("Remove the logo? Lender packages made from now on will not show it.");
+    expect(vi.mocked(api.del).mock.calls).toEqual([["/workspaces/ws/logo", {}]]);
+  });
+  it("French", () => {
+    state.lang = "fr";
+    expect(text(render(createElement(LogoPanel, { workspaceId: "ws", hasLogo: true })))).toContain("Logo sur le dossier pour le prêteur");
   });
 });

@@ -3,6 +3,7 @@ import { mkdtempSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { randomUUID } from "node:crypto";
+import * as zlib from "node:zlib";
 import { asUser, fileStore, migrate, openPglite, type Db } from "@agir/db";
 import Anthropic from "@anthropic-ai/sdk";
 import { drain, reconcileDeal, type SuggestRequest, type SuggestReply } from "@agir/worker";
@@ -2634,4 +2635,83 @@ describe("invite links for clients (task 89b)", () => {
       expect(logs).not.toContain(s);
     }
   });
+});
+
+describe("the broker's logo (task 89d)", () => {
+  const png = (w: number, h: number) => {
+    const { deflateSync, crc32 } = zlib;
+    const chunk = (type: string, data: Buffer) => {
+      const len = Buffer.alloc(4); len.writeUInt32BE(data.length);
+      const body = Buffer.concat([Buffer.from(type, "ascii"), data]);
+      const crc = Buffer.alloc(4); crc.writeUInt32BE(crc32(body) >>> 0);
+      return Buffer.concat([len, body, crc]);
+    };
+    const ihdr = Buffer.alloc(13); ihdr.writeUInt32BE(w, 0); ihdr.writeUInt32BE(h, 4); ihdr[8] = 8; ihdr[9] = 2;
+    return new Uint8Array(Buffer.concat([Buffer.from([0x89, 0x50, 0x4e, 0x47, 0x0d, 0x0a, 0x1a, 0x0a]), chunk("IHDR", ihdr),
+      chunk("IDAT", deflateSync(Buffer.alloc((w * 3 + 1) * h))), chunk("IEND", Buffer.alloc(0))]));
+  };
+  // A JPEG's size is in its start-of-frame marker, after any other segment.
+  const jpeg = (w: number, h: number, sof = true) => new Uint8Array([0xff, 0xd8, 0xff, 0xe0, 0x00, 0x10, 0x4a, 0x46, 0x49, 0x46, 0x00, 0x01, 0x01, 0x00, 0x00, 0x01, 0x00, 0x01, 0x00, 0x00,
+    ...(sof ? [0xff, 0xc0, 0x00, 0x11, 0x08, h >> 8, h & 255, w >> 8, w & 255, 0x03, 0x01, 0x22, 0x00, 0x02, 0x11, 0x01, 0x03, 0x11, 0x01] : []), 0xff, 0xd9]);
+  const upload = (s: Session, bytes: Uint8Array) => call(s, "POST", `/api/workspaces/${ws}/logo`, undefined, bytes);
+  const logoEvents = () => db.query<{ action: string; payload: any }>(`select action, payload from audit_events where workspace_id = $1 and action like 'logo.%' order by seq`, [ws]);
+  const media = async (kind: string) => {
+    const r = await call(alice, "POST", `/api/runs/${run}/artifacts`, { kind, format: "docx" });
+    expect(r.status).toBe(200);
+    await work();
+    const file = await app.request(`/api/artifacts/${r.json.id}/file`, { headers: { cookie: alice.cookie } });
+    expect(file.status).toBe(200);
+    return Buffer.from(await file.arrayBuffer()).includes("word/media/");
+  };
+
+  test("refuses SVG, GIF, an oversized file, an unreadable size, and anyone but the owner", async () => {
+    const svg = new TextEncoder().encode(`<svg xmlns="http://www.w3.org/2000/svg" width="10" height="10"></svg>`);
+    expect((await upload(alice, svg)).status).toBe(415);
+    expect((await upload(alice, new TextEncoder().encode("GIF89a\x01\x00\x01\x00"))).status).toBe(415);
+    const big = new Uint8Array(500 * 1024 + 1); big.set(png(10, 10));
+    expect((await upload(alice, big)).status).toBe(413);
+    expect((await upload(alice, png(10, 10).slice(0, 12))).status).toBe(422);
+    expect((await upload(alice, jpeg(10, 10, false))).status).toBe(422);
+    expect((await upload(alice, png(0, 10))).status).toBe(422);
+    expect((await upload(bob, png(10, 10))).status).toBe(403);
+    expect((await upload(carol, png(10, 10))).status).toBe(403);
+    const [w] = await db.query<{ logo_key: string | null }>(`select logo_key from workspaces where id = $1`, [ws]);
+    expect(w!.logo_key).toBeNull();
+    expect(await logoEvents()).toEqual([]);
+  });
+
+  test("the owner sets a JPEG, then a PNG; members read it, others do not; the audit has no storage key", async () => {
+    const j = await upload(alice, jpeg(300, 100));
+    expect(j.status).toBe(200);
+    expect(j.json).toEqual({ mime: "image/jpeg", width: 300, height: 100 });
+    const p = await upload(alice, png(120, 40));
+    expect(p.json).toEqual({ mime: "image/png", width: 120, height: 40 });
+    expect((await call(alice, "GET", "/api/me")).json.workspaces.find((x: any) => x.id === ws).has_logo).toBe(true);
+    const got = await app.request(`/api/workspaces/${ws}/logo`, { headers: { cookie: bob.cookie } });
+    expect(got.status).toBe(200);
+    expect(got.headers.get("content-type")).toBe("image/png");
+    expect(got.headers.get("x-content-type-options")).toBe("nosniff");
+    expect(Buffer.from(await got.arrayBuffer()).equals(Buffer.from(png(120, 40)))).toBe(true);
+    expect((await app.request(`/api/workspaces/${ws}/logo`, { headers: { cookie: carol.cookie } })).status).toBe(404);
+    const [w] = await db.query<{ logo_key: string }>(`select logo_key from workspaces where id = $1`, [ws]);
+    const events = await logoEvents();
+    expect(events.map((e) => e.action)).toEqual(["logo.set", "logo.set"]);
+    expect(events[1]!.payload).toEqual({ mime: "image/png", width: 120, height: 40 });
+    expect(JSON.stringify(events)).not.toContain(w!.logo_key.slice(3, 20));
+  });
+
+  test("the Word lender package carries the logo; the IC memo does not", async () => {
+    expect(await media("lender_package")).toBe(true);
+    expect(await media("ic_memo")).toBe(false);
+  }, 120_000);
+
+  test("the owner removes it; then the lender package has no image", async () => {
+    expect((await call(bob, "DELETE", `/api/workspaces/${ws}/logo`, {})).status).toBe(403);
+    expect((await call(alice, "DELETE", `/api/workspaces/${ws}/logo`, {})).status).toBe(200);
+    expect((await call(alice, "GET", "/api/me")).json.workspaces.find((x: any) => x.id === ws).has_logo).toBe(false);
+    expect((await app.request(`/api/workspaces/${ws}/logo`, { headers: { cookie: alice.cookie } })).status).toBe(404);
+    expect((await logoEvents()).map((e) => e.action)).toEqual(["logo.set", "logo.set", "logo.cleared"]);
+    expect((await logoEvents()).at(-1)!.payload).toEqual({});
+    expect(await media("lender_package")).toBe(false);
+  }, 120_000);
 });
