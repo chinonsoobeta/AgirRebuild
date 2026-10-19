@@ -40,6 +40,17 @@ export function describeEvent(i: I18n, e: AuditEvent): string {
     case "artifact.requested": return fr ? `A demandé : ${kind(p.kind)} (${p.format})` : `Requested a ${String(p.kind).replace(/_/g, " ")} (${p.format})`;
     case "artifact.ready": return fr ? `A diffusé : ${kind(p.kind)} (${p.format})` : `Released a ${String(p.kind).replace(/_/g, " ")} (${p.format})`;
     case "artifact.blocked": return fr ? "A bloqué un rapport : chiffres sans source" : "Blocked a report: figures without a source";
+    case "share.created": {
+      const terms: Record<string, string> = fr ? { "24h": "24 heures", "7d": "7 jours", "30d": "30 jours", none: "Sans expiration" }
+        : { "24h": "24 hours", "7d": "7 days", "30d": "30 days", none: "No expiry" };
+      return fr ? `A partagé : ${kind(p.kind)} (${p.format}), ${terms[p.term] ?? ""}` : `Shared a ${kind(p.kind)} (${p.format}), ${terms[p.term] ?? ""}`;
+    }
+    case "share.revoked": return fr ? "A révoqué un lien partagé" : "Revoked a shared link";
+    case "share.opened": {
+      const what: Record<string, string> = fr ? { page: "la page", file: "le rapport", audit_package: "le dossier d'audit" }
+        : { page: "the page", file: "the report", audit_package: "the audit package" };
+      return fr ? `A ouvert un lien partagé : ${what[p.what] ?? what.page}` : `Opened a shared link: ${what[p.what] ?? what.page}`;
+    }
     case "workspace.created": return fr ? "A créé l'espace de travail" : "Created the workspace";
     case "figure.labelled": return fr ? `A étiqueté un chiffre comme ${field()}` : `Labelled a figure as ${field()}`;
     case "figure.unlabelled": return fr ? "A retiré l'étiquette d'un chiffre" : "Removed a figure's label";
