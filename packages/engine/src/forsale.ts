@@ -6,6 +6,7 @@ import { irrRoots } from "./irr.ts";
 import { ratio, sum } from "./math.ts";
 import { applyStress } from "./stress.ts";
 import { computeVerdict } from "./verdict.ts";
+import { runStatedChecks } from "./checks.ts";
 
 export type ForSaleLedger = {
   rows: LedgerRow[];
@@ -13,6 +14,7 @@ export type ForSaleLedger = {
   closings: number[];
   values: Record<string, number>;
   converged: boolean;
+  construction: { equityContributed: number; debt: number };
 };
 
 export function buildForSaleLedger(input: EngineInput): ForSaleLedger {
@@ -97,7 +99,9 @@ export function buildForSaleLedger(input: EngineInput): ForSaleLedger {
   const netSales = gross * (1 - f.commissionPct / 100);
   const profit = netSales - funding.tdc - carryTotal - interestAfter;
   const reconciliation = distributed - contributed - profit;
-  return { rows, equityFlows, closings, converged: funding.converged, values: {
+  return { rows, equityFlows, closings, converged: funding.converged,
+    construction: { equityContributed: funding.equityContributed, debt: funding.commitments + sim.mezzAccruedBeyondCommitment },
+    values: {
     gross_sales_revenue: gross, net_sales_revenue: netSales, total_development_cost: funding.tdc,
     interest_before_completion: funding.capitalizedInterest, interest_after_completion: interestAfter, carry_total: carryTotal,
     development_profit_for_sale: profit, equity_contributed: contributed, equity_distributed: distributed, peak_equity: peak,
@@ -157,6 +161,14 @@ export function underwriteForSale(input: EngineInput, policy: Policy, engineVers
   const f = input.forSale!;
   if (f.presaleThresholdPct !== undefined && f.presoldPct < f.presaleThresholdPct) checks.push({ key: "presale_threshold_unmet", kind: "bound", severity: "error",
     message: `The construction loan needs ${f.presaleThresholdPct}% presold; ${f.presoldPct}% is stated.`, expected: f.presaleThresholdPct, actual: f.presoldPct });
+  checks.push(...runStatedChecks(input.stated, policy.agreementTolerancePct, {
+    totalCost: base.values.total_development_cost!,
+    equity: base.construction.equityContributed,
+    debt: base.construction.debt,
+    // As in rental checks, a zero-cost deal compares stated LTC against zero.
+    loanToCost: baseMetrics.metrics.find((m) => m.key === "loan_to_cost")!.value ?? 0,
+    interest: base.values.interest_before_completion!,
+  }, true));
   return { engineVersion, policyVersion: policy.version, scenarios, checks, verdict: computeVerdict(scenarios, checks, policy),
     annual: [], equityFlows: base.equityFlows, ledger: base.rows, irrRoots: baseMetrics.roots, warnings: [] };
 }

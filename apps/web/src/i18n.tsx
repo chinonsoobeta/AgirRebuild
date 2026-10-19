@@ -1736,6 +1736,10 @@ function checkTextRaw(i: I18n, c: CheckLike, ltcCeiling: number): string {
       return c.severity === "pass" ? `Le coût total déclaré de ${$(a)} concorde avec le modèle.` : `Les documents indiquent un coût total de ${$(a)} ; le modèle calcule ${$(e)}.`;
     case "stated_ltc":
       return c.severity === "pass" ? `Le ratio prêt-coût déclaré de ${pct(a)} concorde avec le modèle.` : `Les documents indiquent un ratio prêt-coût de ${pct(a)} ; le modèle calcule ${pct(e)}.`;
+    case "interest_reserve_before_completion":
+      return c.severity === "pass"
+        ? `La réserve d'intérêts déclarée de ${$(a)} couvre les ${$(e)} d'intérêts pendant la construction calculés par le modèle.`
+        : `Le budget prévoit une réserve d'intérêts de ${$(a)} ; le modèle calcule ${$(e)} d'intérêts pendant la construction. La réserve semble insuffisante de ${$((e ?? 0) - (a ?? 0))}.`;
     case "interest_reserve":
       return c.severity === "pass"
         ? `La réserve d'intérêts déclarée de ${$(a)} couvre les ${$(e)} calculés par le modèle.`

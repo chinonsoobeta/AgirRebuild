@@ -161,7 +161,6 @@ export const RENTAL_ONLY_FIELDS: readonly string[] = [
   "min_dscr_covenant", "refinance_month", "refinance_amount", "refinance_ltv_pct", "refinance_rate_pct", "refinance_amort_years",
   "refinance_io_months", "refinance_insurance_premium_pct", "refinance_and_hold", "lp_share_pct", "preferred_return_pct", "gp_promote_pct",
   "senior_amort_years", "senior_io_months", "mezz_amort_years", "mezz_io_months",
-  "equity_amount", "stated_total_cost", "stated_ltc_pct", "stated_interest_reserve",
 ];
 
 export const FIELD_BY_KEY: ReadonlyMap<string, FieldDef> = new Map(FIELDS.map((f) => [f.key, f]));

@@ -17,7 +17,6 @@ function agrees(stated: number, computed: number, tolPct: number): boolean {
  */
 export function runChecks(input: EngineInput, L: Ledger, policy: Policy, contractualDscr: number | null): Check[] {
   const out: Check[] = [];
-  const tol = policy.agreementTolerancePct;
 
   // ---- Bounds -----------------------------------------------------------------
   if (L.commitments > 0 && L.commitments >= L.tdc) {
@@ -85,48 +84,80 @@ export function runChecks(input: EngineInput, L: Ledger, policy: Policy, contrac
     });
   }
 
-  // ---- Sources and uses ---------------------------------------------------------
+  out.push(...runStatedChecks(input.stated, policy.agreementTolerancePct, {
+    totalCost: L.tdc,
+    equity: L.requiredEquity,
+    debt: L.commitments + L.mezzAccruedBeyondCommitment,
+    loanToCost: ltc,
+    interest: L.capitalizedInterest,
+  }));
   const s = input.stated;
+  if (s.minDscrCovenant !== undefined && contractualDscr !== null) {
+    const ok = contractualDscr >= s.minDscrCovenant;
+    out.push({
+      key: "dscr_covenant",
+      kind: "agreement",
+      severity: ok ? "pass" : "warning",
+      message: ok
+        ? `Contractual DSCR of ${contractualDscr.toFixed(2)}x meets the ${s.minDscrCovenant.toFixed(2)}x covenant in every hold year.`
+        : `Contractual DSCR falls to ${contractualDscr.toFixed(2)}x, under the ${s.minDscrCovenant.toFixed(2)}x covenant.`,
+      expected: s.minDscrCovenant,
+      actual: contractualDscr,
+    });
+  }
+  return out;
+}
+
+/** Agreement with the base model's figures; construction interest is named for the deal's mode. */
+export function runStatedChecks(
+  s: EngineInput["stated"],
+  tol: number,
+  figures: { totalCost: number; equity: number; debt: number; loanToCost: number; interest: number },
+  beforeCompletion = false,
+): Check[] {
+  const out: Check[] = [];
+  const ltc = figures.loanToCost;
+  // ---- Sources and uses ---------------------------------------------------------
   if (s.equity !== undefined) {
-    const gap = L.requiredEquity - s.equity;
-    if (gap > (L.tdc * tol) / 100) {
+    const gap = figures.equity - s.equity;
+    if (gap > (figures.totalCost * tol) / 100) {
       out.push({
         key: "sources_cover_uses",
         kind: "agreement",
         severity: "error",
-        message: `Stated equity of ${money(s.equity)} plus debt of ${money(L.commitments + L.mezzAccruedBeyondCommitment)} falls ${money(gap)} short of the ${money(L.tdc)} total cost.`,
-        expected: L.requiredEquity,
+        message: `Stated equity of ${money(s.equity)} plus debt of ${money(figures.debt)} falls ${money(gap)} short of the ${money(figures.totalCost)} total cost.`,
+        expected: figures.equity,
         actual: s.equity,
       });
-    } else if (-gap > (L.tdc * tol) / 100) {
+    } else if (-gap > (figures.totalCost * tol) / 100) {
       out.push({
         key: "sources_cover_uses",
         kind: "agreement",
         severity: "warning",
-        message: `Stated equity of ${money(s.equity)} is ${money(-gap)} more than the deal needs; the model contributes only ${money(L.requiredEquity)}.`,
-        expected: L.requiredEquity,
+        message: `Stated equity of ${money(s.equity)} is ${money(-gap)} more than the deal needs; the model contributes only ${money(figures.equity)}.`,
+        expected: figures.equity,
         actual: s.equity,
       });
     } else {
-      out.push({ key: "sources_cover_uses", kind: "agreement", severity: "pass", message: `Sources equal uses at ${money(L.tdc)}.`, actual: s.equity });
+      out.push({ key: "sources_cover_uses", kind: "agreement", severity: "pass", message: `Sources equal uses at ${money(figures.totalCost)}.`, actual: s.equity });
     }
   } else {
     out.push({
       key: "sources_cover_uses",
       kind: "agreement",
       severity: "pass",
-      message: `No equity amount is stated, so equity is the ${money(L.requiredEquity)} the debt does not fund.`,
+      message: `No equity amount is stated, so equity is the ${money(figures.equity)} the debt does not fund.`,
     });
   }
   if (s.totalCost !== undefined) {
     out.push({
       key: "stated_total_cost",
       kind: "agreement",
-      severity: agrees(s.totalCost, L.tdc, tol) ? "pass" : "warning",
-      message: agrees(s.totalCost, L.tdc, tol)
+      severity: agrees(s.totalCost, figures.totalCost, tol) ? "pass" : "warning",
+      message: agrees(s.totalCost, figures.totalCost, tol)
         ? `The stated total cost of ${money(s.totalCost)} matches the model.`
-        : `The documents state a total cost of ${money(s.totalCost)}; the model computes ${money(L.tdc)}.`,
-      expected: L.tdc,
+        : `The documents state a total cost of ${money(s.totalCost)}; the model computes ${money(figures.totalCost)}.`,
+      expected: figures.totalCost,
       actual: s.totalCost,
     });
   }
@@ -144,29 +175,18 @@ export function runChecks(input: EngineInput, L: Ledger, policy: Policy, contrac
     });
   }
   if (s.interestReserve !== undefined) {
-    const under = s.interestReserve < L.capitalizedInterest * (1 - tol / 100);
+    const under = s.interestReserve < figures.interest * (1 - tol / 100);
     out.push({
-      key: "interest_reserve",
+      key: beforeCompletion ? "interest_reserve_before_completion" : "interest_reserve",
       kind: "agreement",
       severity: under ? "warning" : "pass",
       message: under
-        ? `The budget states a ${money(s.interestReserve)} interest reserve; the model calculates ${money(L.capitalizedInterest)} of interest before stabilization. The reserve looks underfunded by ${money(L.capitalizedInterest - s.interestReserve)}.`
-        : `The stated interest reserve of ${money(s.interestReserve)} covers the ${money(L.capitalizedInterest)} the model calculates.`,
-      expected: L.capitalizedInterest,
+        ? `The budget states a ${money(s.interestReserve)} interest reserve; the model calculates ${money(figures.interest)} of interest ${beforeCompletion ? "during construction" : "before stabilization"}. The reserve looks underfunded by ${money(figures.interest - s.interestReserve)}.`
+        : beforeCompletion
+          ? `The stated interest reserve of ${money(s.interestReserve)} covers the ${money(figures.interest)} of interest during construction the model calculates.`
+          : `The stated interest reserve of ${money(s.interestReserve)} covers the ${money(figures.interest)} the model calculates.`,
+      expected: figures.interest,
       actual: s.interestReserve,
-    });
-  }
-  if (s.minDscrCovenant !== undefined && contractualDscr !== null) {
-    const ok = contractualDscr >= s.minDscrCovenant;
-    out.push({
-      key: "dscr_covenant",
-      kind: "agreement",
-      severity: ok ? "pass" : "warning",
-      message: ok
-        ? `Contractual DSCR of ${contractualDscr.toFixed(2)}x meets the ${s.minDscrCovenant.toFixed(2)}x covenant in every hold year.`
-        : `Contractual DSCR falls to ${contractualDscr.toFixed(2)}x, under the ${s.minDscrCovenant.toFixed(2)}x covenant.`,
-      expected: s.minDscrCovenant,
-      actual: contractualDscr,
     });
   }
   return out;

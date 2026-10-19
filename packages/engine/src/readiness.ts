@@ -244,7 +244,12 @@ export function assemble(rows: readonly AssumptionRow[]): { readiness: Readiness
     constructionMonths: n("construction_months"),
     senior: { amount: n("senior_loan_amount"), ratePct: n("senior_rate_pct"), ioMonths: 0 },
     ...(n("mezz_loan_amount") > 0 ? { mezzanine: { amount: n("mezz_loan_amount"), ratePct: n("mezz_rate_pct"), amortYears: 30, ioMonths: 0 } } : {}),
-    stated: {},
+    stated: {
+      ...(v("equity_amount") !== undefined ? { equity: n("equity_amount") } : {}),
+      ...(v("stated_total_cost") !== undefined ? { totalCost: n("stated_total_cost") } : {}),
+      ...(v("stated_ltc_pct") !== undefined ? { ltcPct: n("stated_ltc_pct") } : {}),
+      ...(v("stated_interest_reserve") !== undefined ? { interestReserve: n("stated_interest_reserve") } : {}),
+    },
     exit: "for_sale",
     revenue: [],
     leaseUpMonths: 0,

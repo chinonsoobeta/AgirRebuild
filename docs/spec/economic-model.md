@@ -273,6 +273,8 @@ oracles once a person completes each workbook's "Hand check" sheet. No engine co
 **Mode.** A flag `sell_units` ("Sell the units (no rental)") sets `exit = "for_sale"`. It excludes
 `refinance_and_hold`; both together block the run. Rent, occupancy, expense, growth, exit cap, selling cost,
 lease-up and refinance fields are out of use; if any is stated the run is blocked with a named problem.
+Equity, total cost, loan to cost and interest reserve stated for a sale are checked against the model as for a rental deal
+(interest reserve against interest during construction); the DSCR covenant is rental-only.
 
 **Inputs** (entered by a person, no defaults): `unit_count` and `unit_sale_price` per unit type, the price net
 of GST/HST and any rebate the builder keeps; `presold_units_pct`; `deposit_pct`; `absorption_units_per_month`;
