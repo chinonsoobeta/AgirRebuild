@@ -302,6 +302,7 @@ describe("share links on the web (task 86b)", () => {
     queryState.shared = { ...queryState.shared as object, format };
     const html = await sharePage();
     for (const text of ["Shared reference", "IC memo", "Run 7", "This link expires on", "Download", "Download the audit package", "Shared from Agir. Read-only."]) expect(html).toContain(text);
+    expect(html).not.toMatch(/m\.\./); // the date's "a.m." / "p.m." ends the sentence once
     expect(queryState.nodes.some((n) => n.tag === "a" && n.props.children === "Open")).toBe(format === "pdf");
     const fileLinks = queryState.nodes.filter((n) => n.tag === "a" && String(n.props.href).includes("/file"));
     expect(fileLinks.length).toBe(format === "pdf" ? 2 : 1);

@@ -43,7 +43,7 @@ export function describeEvent(i: I18n, e: AuditEvent): string {
     case "share.created": {
       const terms: Record<string, string> = fr ? { "24h": "24 heures", "7d": "7 jours", "30d": "30 jours", none: "Sans expiration" }
         : { "24h": "24 hours", "7d": "7 days", "30d": "30 days", none: "No expiry" };
-      return fr ? `A partagé : ${kind(p.kind)} (${p.format}), ${terms[p.term] ?? ""}` : `Shared a ${kind(p.kind)} (${p.format}), ${terms[p.term] ?? ""}`;
+      return fr ? `A partagé un lien : ${kind(p.kind)} (${p.format}), ${terms[p.term] ?? ""}` : `Shared a link to the ${kind(p.kind)} (${p.format}), ${terms[p.term] ?? ""}`;
     }
     case "share.revoked": return fr ? "A révoqué un lien partagé" : "Revoked a shared link";
     case "share.opened": {

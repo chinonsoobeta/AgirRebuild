@@ -827,7 +827,7 @@ describe("partner memo wording (task 84d)", () => {
 
 describe("share-link wording (task 86b)", () => {
   it.each([
-    ["share.created", { kind: "ic_memo", format: "pdf", term: "7d" }, "Shared a IC memo (pdf), 7 days", "A partagé : Mémo du comité (pdf), 7 jours"],
+    ["share.created", { kind: "ic_memo", format: "pdf", term: "7d" }, "Shared a link to the IC memo (pdf), 7 days", "A partagé un lien : Mémo du comité (pdf), 7 jours"],
     ["share.revoked", {}, "Revoked a shared link", "A révoqué un lien partagé"],
     ["share.opened", { what: "page" }, "Opened a shared link: the page", "A ouvert un lien partagé : la page"],
     ["share.opened", { what: "file" }, "Opened a shared link: the report", "A ouvert un lien partagé : le rapport"],

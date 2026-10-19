@@ -489,7 +489,7 @@ const EN = {
   "share.revoked": "Revoked",
   "share.revoke": "Revoke",
   "share.confirm": "Revoke this link? Anyone holding it will no longer be able to open it.",
-  "share.expiry": (p) => `This link expires on ${p.date}.`,
+  "share.expiry": (p) => /* the date ends in "a.m." or "p.m." */ `This link expires on ${p.date}`,
   "share.noExpiry": "This link does not expire.",
   "share.package": "Download the audit package",
   "share.readOnly": "Shared from Agir. Read-only.",
