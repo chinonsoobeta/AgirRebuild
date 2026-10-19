@@ -283,10 +283,13 @@ function checks(f: Formatter, r: RunResult): Block {
 
 type Assumption = ArtifactInput["assumptions"][number];
 
-/** How an input was confirmed, in words; "" when it was approved the ordinary way. `id` prints the date or name. */
+/**
+ * How an input was confirmed, in words; "" when it was approved the ordinary way. `id` prints the date or name.
+ * A client's confirmation is dated, never named: every client of the deal can download the report (card 92).
+ */
 export function confirmationLabel(a: Assumption, id: (text: string, ref: string) => string = (t) => t): string {
-  if (a.sponsorStated && a.clientConfirmedBy) {
-    return `Stated by the sponsor, confirmed by the client ${id(a.clientConfirmedBy, `clientConfirmedBy.${a.fieldKey}`)} on ${id((a.clientConfirmedAt ?? "").slice(0, 10), `clientConfirmedAt.${a.fieldKey}`)}, not independently confirmed`;
+  if (a.sponsorStated && a.clientConfirmedAt) {
+    return `Stated by the sponsor, confirmed by the client on ${id(a.clientConfirmedAt.slice(0, 10), `clientConfirmedAt.${a.fieldKey}`)}, not independently confirmed`;
   }
   if (a.sponsorStated) return "Stated by the sponsor, not independently confirmed";
   if (a.confirmedByReview) return `Confirmed by Agir review on ${id((a.confirmedAt ?? "").slice(0, 10), `confirmedAt.${a.fieldKey}`)}`;
@@ -312,7 +315,7 @@ function sponsorStatedBlocks(f: Formatter, x: ArtifactInput): Block[] {
   const material = x.assumptions.filter((a) => a.sponsorStated || a.confirmedBy || a.confirmedByReview || FIELD_BY_KEY.get(a.fieldKey)?.material).length;
   const n = f.ident(String(stated.length), "sponsorStated.count");
   const m = f.ident(String(material), "materialInputs.count");
-  const byClient = stated.filter((a) => a.clientConfirmedBy).length;
+  const byClient = stated.filter((a) => a.clientConfirmedAt).length;
   const client = byClient > 0 ? ` The client confirmed ${f.ident(String(byClient), "clientConfirmed.count")} of them; that is not an independent confirmation.` : "";
   return [
     { type: "heading", text: "Stated by the sponsor, not independently confirmed" },
