@@ -1063,7 +1063,7 @@ describe("a Partners sheet in the Excel export (task 85b)", () => {
   test("Kestrel groups both waterfall tiers and month 15's sale and contribution by cash date", async () => {
     const x = partnerMemoInput(true);
     const w = runWaterfall(x.result.equityFlows, x.input.waterfall!);
-    const month = w.lp.map((f) => Math.round(f.t * 12)).find((m) => w.lp.filter((f) => Math.round(f.t * 12) === m).length >= 2)!;
+    const month = w.lp.map((f) => Math.round(f.t * 12)).find((m) => w.lp.filter((f) => Math.round(f.t * 12) === m).length > x.result.equityFlows.filter((f) => Math.round(f.t * 12) === m).length)!;
     expect(month).toBeDefined();
     expect(w.lp.length).toBeGreaterThan(x.result.equityFlows.length);
     const sheet = (await workbook(x)).getWorksheet("Partners")!;
