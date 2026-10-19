@@ -368,10 +368,18 @@ function weakestStress(f: Formatter, r: RunResult, sale = false): Block[] {
 function changeTheAnswer(f: Formatter, x: ArtifactInput): Block[] {
   const heading: Block = { type: "heading", text: "What would change the answer" };
   const failing = x.result.verdict.gates.filter((g) => g.status === "failed");
-  if (x.result.verdict.code === "APPROVE" || failing.length === 0) return [];
-  if (x.run.engineVersion !== ENGINE_VERSION) return [heading, { type: "paragraph", muted: true, text: "Not shown: this run was made by an earlier engine." }];
+  const hardFail: Block[] = x.result.verdict.hardFailReasons.length > 0
+    ? [{ type: "paragraph", text: "This run fails a check that no gate can offset. Passing the gates alone would not change the verdict while it stands." }] : [];
+  if (x.result.verdict.code === "APPROVE" || (failing.length === 0 && hardFail.length === 0)) return [];
+  if (x.run.engineVersion !== ENGINE_VERSION) return [heading, { type: "paragraph", muted: true, text: "Not shown: this run was made by an earlier engine." }, ...hardFail];
+  const intro: Block[] = [heading];
   // The run stores its policy's hash: a policy edited under the same version name is a different policy.
-  if (x.run.policyHash !== createHash("sha256").update(canonicalJson(x.policy)).digest("hex")) return [heading, { type: "paragraph", muted: true, text: "Not shown: this run was made under a different policy." }];
+  if (x.run.policyHash !== createHash("sha256").update(canonicalJson(x.policy)).digest("hex")) {
+    intro.push({ type: "paragraph", muted: true, text: "Not shown: this run was made under a different policy." });
+    if (hardFail.length === 0) return intro;
+  }
+  intro.push(...hardFail);
+  if (failing.length === 0) return intro;
   const { rows } = breakeven(x.input, x.policy);
   const body: string[][] = [];
   let ratesTogether = false;
@@ -413,7 +421,7 @@ function changeTheAnswer(f: Formatter, x: ArtifactInput): Block[] {
     }
   }
   return [
-    heading,
+    ...intro,
     {
       type: "table",
       columns: [{ label: "Gate" }, { label: "Needs", numeric: true }, { label: "This run", numeric: true }, { label: "Input moved" }, { label: "In this run", numeric: true }, { label: "Passes at", numeric: true }],
@@ -529,6 +537,9 @@ export function buildModel(x: ArtifactInput): DocModel {
     blocks.push(...weakestStress(f, r, sale));
     // An approved deal has no gate to move; its stresses stand in for the section.
     blocks.push(...(r.verdict.code === "APPROVE" ? [stresses(f, r, held, sale)] : changeTheAnswer(f, x)));
+    if (r.verdict.code !== "APPROVE" && r.verdict.hardFailReasons.length > 0 && !r.verdict.gates.some((g) => g.status === "failed")) {
+      blocks.push(stresses(f, r, held, sale));
+    }
     blocks.push(...notFoundBlocks(x), { type: "paragraph", muted: true, text: "Every input and its source is listed in the IC memo and the lender package." });
   } else {
     blocks.push(verdict, ...draftLine(x), ...sponsorStatedBlocks(f, x));
