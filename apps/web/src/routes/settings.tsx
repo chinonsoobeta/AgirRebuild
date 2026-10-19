@@ -93,7 +93,7 @@ function Clients() {
     <section className="panel stack">
       <h2 className="h-section">{t("clients.title")}</h2>
       <p className="small muted">{t("clients.body")}</p>
-      {list.length === 0 ? <p className="small muted">{t("clients.noDeals")}</p> : (
+      {!deals.data ? <p className="small muted">{t("common.loading")}</p> : list.length === 0 ? <p className="small muted">{t("clients.noDeals")}</p> : (
         <>
           <div className="field"><label htmlFor="c-deal">{t("clients.deal")}</label>
             <select className="select" id="c-deal" value={chosen} onChange={(e) => setDealId(e.target.value)}>{list.map((d) => <option key={d.deal.id} value={d.deal.id}>{d.deal.name}</option>)}</select>
