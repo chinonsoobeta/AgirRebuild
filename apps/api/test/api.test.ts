@@ -2775,3 +2775,69 @@ describe("the broker's logo (task 89d)", () => {
     expect(await media("lender_package")).toBe(false);
   }, 120_000);
 });
+
+describe("a client never sees another client (task 91a)", () => {
+  let d: string, run: string;
+  let hana: Session, ivan: Session;
+  const ids: Record<string, string> = {};
+  const fields: [string, number, string?][] = [
+    ["land_cost", 1_000_000], ["hard_cost", 0], ["soft_cost", 0], ["contingency", 0], ["construction_months", 0], ["lease_up_months", 0],
+    ["hold_years", 1], ["stabilized_occupancy_pct", 100], ["expense_ratio_pct", 0], ["exit_cap_rate_pct", 10], ["selling_costs_pct", 0],
+    ["senior_loan_amount", 0], ["unit_count", 10, "A"], ["unit_rent_monthly", 1_000, "A"],
+  ];
+  const reads = (s: Session) => [`/api/runs/${run}`, `/api/runs/${run}/audit-package`, `/api/deals/${d}/review`, `/api/deals/${d}/audit`, `/api/deals/${d}`];
+  const seesHana = async (s: Session) => {
+    const out: string[] = [];
+    for (const path of reads(s)) {
+      const r = await call(s, "GET", path);
+      expect(r.status, path).toBe(200);
+      const text = typeof r.json === "string" ? r.json : JSON.stringify(r.json);
+      if (text.includes(ids.hana!) || text.includes("Hana Client")) out.push(path);
+    }
+    return out;
+  };
+  beforeAll(async () => {
+    hana = await signup("hana.client@example.com", "Hana Client");
+    ivan = await signup("ivan.client@example.com", "Ivan Client");
+    for (const [name, s] of [["hana", hana], ["ivan", ivan]] as const) ids[name] = (await call(s, "GET", "/api/me")).json.user.id;
+    const ws = (await call(alice, "POST", "/api/workspaces", { name: "Two clients", reviewMode: "solo" })).json.id;
+    d = (await call(alice, "POST", `/api/workspaces/${ws}/deals`, { name: "Shared deal", assetType: "Multifamily" })).json.id;
+    for (const [fieldKey, value, itemKey] of fields) expect((await call(alice, "POST", `/api/deals/${d}/values`,
+      { fieldKey, value, reason: "Two-client test value", ...(itemKey ? { itemKey } : {}) })).status, fieldKey).toBe(200);
+    expect((await call(alice, "POST", `/api/deals/${d}/clients`, { email: "ivan.client@example.com" })).status).toBe(200);
+    const invite = await call(alice, "POST", `/api/deals/${d}/invites`);
+    expect((await call(hana, "POST", `/api/invite/${(invite.json.url as string).slice(3)}/accept`)).status).toBe(200);
+    const a = (await call(hana, "GET", `/api/deals/${d}/review`)).json.assumptions.find((x: any) => x.sponsorStated && x.fieldKey === "exit_cap_rate_pct");
+    expect((await call(hana, "POST", `/api/assumptions/${a.id}/client-confirm`, { version: a.version })).status).toBe(200);
+    const made = await call(alice, "POST", `/api/deals/${d}/runs`);
+    expect(made.status).toBe(200);
+    run = made.json.id;
+  }, 120_000);
+
+  test("another client reads no name or id of the client who joined and confirmed", async () => {
+    expect(await seesHana(ivan)).toEqual([]);
+  });
+
+  test("the confirming client and the staff still read it", async () => {
+    expect(await seesHana(hana)).toEqual(expect.arrayContaining([`/api/runs/${run}`, `/api/runs/${run}/audit-package`, `/api/deals/${d}/review`]));
+    expect(await seesHana(alice)).toEqual(expect.arrayContaining([`/api/runs/${run}`, `/api/runs/${run}/audit-package`, `/api/deals/${d}/review`, `/api/deals/${d}/audit`]));
+  });
+
+  test("another client still sees that a client confirmed, and every event, with the hidden ones marked", async () => {
+    const input = (await call(ivan, "GET", `/api/runs/${run}`)).json.inputs.find((x: any) => x.fieldKey === "exit_cap_rate_pct");
+    expect(input.clientConfirmedAt).toBeTruthy();
+    expect(input.clientConfirmedBy).toBeNull();
+    const row = (await call(ivan, "GET", `/api/deals/${d}/review`)).json.assumptions.find((x: any) => x.fieldKey === "exit_cap_rate_pct");
+    expect(row.clientConfirmedAt).toBeTruthy();
+    expect(row.clientConfirmedById).toBeNull();
+    const staff = (await call(alice, "GET", `/api/deals/${d}/audit`)).json;
+    const theirs = (await call(ivan, "GET", `/api/deals/${d}/audit`)).json;
+    expect(theirs.map((e: any) => e.seq)).toEqual(staff.map((e: any) => e.seq));
+    const hidden = theirs.filter((e: any) => e.redacted);
+    expect(hidden.map((e: any) => e.action).sort()).toEqual(["invite.used"]);
+    expect(theirs.find((e: any) => e.action === "client.assigned").redacted).toBeUndefined();
+    const pkg = (await call(ivan, "GET", `/api/runs/${run}/audit-package`)).json;
+    expect(pkg.validation.status).toBe("passed");
+    expect(pkg.auditEvents.filter((e: any) => e.redacted).map((e: any) => e.action)).toEqual(["invite.used"]);
+  });
+});
