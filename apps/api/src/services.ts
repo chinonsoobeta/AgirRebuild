@@ -217,9 +217,43 @@ export async function labelRefusal(tx: Db, documentId: string, label: { id: stri
   return applyLabels(figures, [label]).dropped[0]?.why ?? null;
 }
 
+/**
+ * A client never sees another client (card 91). Row-level security hides another client's user row, but a name
+ * or id copied into a row the client can read (a run's stored inputs, an audit event) would still show, so for a
+ * client of the deal it is removed here. Staff get null and see everything.
+ */
+export async function clientViewer(tx: Db, dealId: string): Promise<{ id: string; name: string } | null> {
+  const [me] = await tx.query<{ id: string; name: string }>(
+    `select u.id, u.name from users u join workspace_members m on m.user_id = u.id join deals d on d.workspace_id = m.workspace_id
+     where u.id = agir_uid() and d.id = $1 and m.role = 'client'`,
+    [dealId],
+  );
+  return me ?? null;
+}
+
+/** A run stores the confirming client's name only; a name equal to the caller's own tells the caller nothing new. */
+export function hideClientInputs(viewer: { name: string } | null, inputs: unknown[]): unknown[] {
+  if (!viewer) return inputs;
+  return inputs.map((x) => {
+    const a = x as { clientConfirmedBy?: string | null };
+    return a.clientConfirmedBy && a.clientConfirmedBy !== viewer.name ? { ...a, clientConfirmedBy: null } : x;
+  });
+}
+
+/** Events naming another user by id (a client assigned, removed or joined) keep their place, marked, without the id. */
+export function hideClientEvents<E extends { entity_id: string | null; payload: unknown }>(viewer: { id: string } | null, events: E[]): E[] {
+  if (!viewer) return events;
+  return events.map((e) => {
+    const user = (e.payload as { user?: unknown } | null)?.user;
+    if (typeof user !== "string" || user === viewer.id) return e;
+    return { ...e, entity_id: e.entity_id === user ? null : e.entity_id, payload: { ...(e.payload as object), user: null }, redacted: true };
+  });
+}
+
 export async function reviewView(tx: Db, dealId: string) {
   const assumptions = await loadAssumptions(tx, dealId);
   const { readiness } = readinessFor(assumptions);
+  const viewer = await clientViewer(tx, dealId);
   const rows = await tx.query<{ id: string; document_id: string; document_name: string; raw: string; value: number | null; unit_seen: string | null; location: string; context: string; note: string | null }>(
     `select c.id, c.document_id, d.name as document_name, c.raw, c.value, c.unit_seen, c.location, c.context, c.note
      from candidates c join documents d on d.id = c.document_id
@@ -270,8 +304,8 @@ export async function reviewView(tx: Db, dealId: string) {
         confirmedByReview: a.confirmed_by_review,
         secondApprovedAt: a.second_approved_at,
         sponsorStated: a.sponsor_stated,
-        clientConfirmedBy: a.client_confirmed_by_name,
-        clientConfirmedById: a.client_confirmed_by,
+        clientConfirmedBy: viewer && a.client_confirmed_by !== viewer.id ? null : a.client_confirmed_by_name,
+        clientConfirmedById: viewer && a.client_confirmed_by !== viewer.id ? null : a.client_confirmed_by,
         clientConfirmedAt: a.client_confirmed_at,
         version: a.version,
       };
@@ -386,7 +420,7 @@ export async function runView(tx: Db, runId: string) {
     staleReasons,
     isLatest: latest?.id === run.id,
     result: run.result,
-    inputs: run.input_snapshot.assumptions,
+    inputs: hideClientInputs(await clientViewer(tx, run.deal_id), run.input_snapshot.assumptions),
     decisions,
     ...(held ? { heldPartners: { lpIrr: held.withValue.lpIrr, gpIrr: held.withValue.gpIrr, promote: held.withValue.promote,
       paidLp: positive(held.paid.lp), paidGp: positive(held.paid.gp), paidPromote: held.paid.promote } } : {}),
@@ -422,13 +456,14 @@ export async function auditPackage(tx: Db, runId: string) {
   check("replay", replayed, "Replaying the recorded engine on the recorded input reproduces the result exactly.");
   check("decisions_bound", decisions.every((d) => d.run_id === run.id), "Every decision in the package names this run.");
   check("audit_chain", Boolean(chain?.ok), chain?.ok ? `The audit chain is intact (${chain.events} events).` : `The audit chain breaks at event ${chain?.broken_at}.`);
+  const viewer = await clientViewer(tx, run.deal_id);
   return {
     manifest: { deal, run: { id: run.id, number: run.run_number, createdAt: run.created_at, engineVersion: run.engine_version, policyHash: run.policy_hash, inputHash: run.input_hash, resultHash: run.result_hash } },
     validation: { status: checks.every((c) => c.status === "passed") ? "passed" : "failed", checkedAt: new Date().toISOString(), checks },
-    inputs: run.input_snapshot,
+    inputs: { ...run.input_snapshot, assumptions: hideClientInputs(viewer, run.input_snapshot.assumptions) },
     result: run.result,
     decisions,
     artifacts,
-    auditEvents: events,
+    auditEvents: hideClientEvents(viewer, events as { entity_id: string | null; payload: unknown }[]),
   };
 }

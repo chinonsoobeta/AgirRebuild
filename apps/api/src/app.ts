@@ -9,7 +9,7 @@ import { breakeven, DRIVERS, driversFor, SALE_DRIVERS, EngineInputError, explore
 import { canonicalItem, itemFold, kindOf } from "@agir/extraction";
 import { MAX_UPLOAD_BYTES } from "@agir/worker";
 import { checkPassword, createSession, endSession, hashPassword, rateLimiter, SESSION_DAYS, userForSession } from "./auth.ts";
-import { auditPackage, createRun, dealOverview, HttpError, labelRefusal, reviewView, runView, sha256 } from "./services.ts";
+import { auditPackage, clientViewer, createRun, dealOverview, hideClientEvents, HttpError, labelRefusal, reviewView, runView, sha256 } from "./services.ts";
 
 export type AppDeps = { db: Db; store: BlobStore; secureCookies: boolean; demoSignIn?: boolean; trustProxy?: boolean };
 type Env = { Variables: { user: { id: string; email: string; name: string } } };
@@ -685,12 +685,12 @@ export function createApp({ db, store, secureCookies, demoSignIn = false, trustP
 
   // ---- Audit ------------------------------------------------------------------------------
   app.get("/api/deals/:id/audit", async (c) => {
-    const rows = await as(c, (tx) =>
-      tx.query(
+    const rows = await as(c, async (tx) =>
+      hideClientEvents(await clientViewer(tx, c.req.param("id")), await tx.query<{ entity_id: string | null; payload: unknown }>(
         `select e.seq, e.action, e.entity, e.entity_id, e.payload, e.hash, e.created_at, u.name as actor
          from audit_events e left join users u on u.id = e.actor where e.deal_id = $1 order by e.seq desc limit 500`,
         [c.req.param("id")],
-      ),
+      )),
     );
     return c.json(rows);
   });
