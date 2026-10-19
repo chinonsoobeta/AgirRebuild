@@ -1,4 +1,4 @@
-import { beforeAll, describe, expect, test } from "vitest";
+import { beforeAll, describe, expect, test, vi } from "vitest";
 import { mkdtempSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
@@ -2172,5 +2172,169 @@ describe("requesting the partner memo (task 84d)", () => {
     expect(await db.query(`select name from schema_migrations where name = '0016_partner_memo.sql'`)).toHaveLength(1);
     const me = (await call(alice, "GET", "/api/me")).json.user.id;
     await expect(asUser(db, me, (tx) => tx.query(`select fn_request_artifact($1, $2, $3)`, [partnerRun, "unknown", "pdf"]))).rejects.toThrow(/artifacts_kind_check/);
+  });
+});
+
+
+describe("share links (task 86a)", () => {
+  let workspace: string, sharedDeal: string, sharedRun: string, artifact: string, queued: string;
+  let outsider: Session, ownerId: string, viewerId: string;
+  const unavailable = "This link is not available. It may have expired or been revoked.";
+  const privacy = (headers: Headers) => {
+    expect(headers.get("cache-control")).toBe("no-store");
+    expect(headers.get("referrer-policy")).toBe("no-referrer");
+    expect(headers.get("x-robots-tag")).toBe("noindex");
+  };
+  const make = async (who = alice, term = "7d") => {
+    const made = await call(who, "POST", `/api/artifacts/${artifact}/share-links`, { term });
+    expect(made.status).toBe(200);
+    const secret = String(made.json.url).slice(3);
+    expect(/^[A-Za-z0-9_-]{43}$/.test(secret)).toBe(true);
+    return { id: made.json.id as string, secret, expiresAt: made.json.expiresAt as string | null };
+  };
+  beforeAll(async () => {
+    app = createApp({ db, store, secureCookies: false });
+    outsider = await signup("share-outsider@example.com", "Share Outsider");
+    ownerId = (await call(alice, "GET", "/api/me")).json.user.id;
+    viewerId = (await call(carol, "GET", "/api/me")).json.user.id;
+    workspace = (await call(alice, "POST", "/api/workspaces", { name: "Share test", reviewMode: "solo" })).json.id;
+    for (const [email, role] of [["bob@example.com", "analyst"], ["carol@example.com", "viewer"]]) {
+      expect((await call(alice, "POST", `/api/workspaces/${workspace}/members`, { email, role })).status).toBe(200);
+    }
+    sharedDeal = (await call(alice, "POST", `/api/workspaces/${workspace}/deals`, { name: "Shared reference", assetType: "Multifamily" })).json.id;
+    const values: [string, number, string?][] = [["land_cost", 1_000_000], ["hard_cost", 0], ["soft_cost", 0], ["contingency", 0],
+      ["construction_months", 0], ["lease_up_months", 0], ["hold_years", 1], ["stabilized_occupancy_pct", 100], ["expense_ratio_pct", 0],
+      ["exit_cap_rate_pct", 10], ["selling_costs_pct", 0], ["senior_loan_amount", 0], ["unit_count", 10, "A"], ["unit_rent_monthly", 1000, "A"]];
+    for (const [fieldKey, value, itemKey] of values) expect((await call(alice, "POST", `/api/deals/${sharedDeal}/values`,
+      { fieldKey, value, reason: "Share link fixture", ...(itemKey ? { itemKey } : {}) })).status).toBe(200);
+    sharedRun = (await call(alice, "POST", `/api/deals/${sharedDeal}/runs`)).json.id;
+    artifact = (await call(alice, "POST", `/api/runs/${sharedRun}/artifacts`, { kind: "ic_memo", format: "pdf" })).json.id;
+    await work();
+    expect((await call(alice, "GET", `/api/deals/${sharedDeal}/artifacts`)).json.find((a: any) => a.id === artifact).status).toBe("ready");
+    queued = (await call(alice, "POST", `/api/runs/${sharedRun}/artifacts`, { kind: "ic_memo", format: "docx" })).json.id;
+  }, 120_000);
+  test.each(["owner", "analyst", "viewer"])("%s can make a link", async (role) => {
+    const who = role === "owner" ? alice : role === "analyst" ? bob : carol;
+    const link = await make(who);
+    const [stored] = await db.query<{ token_hash: string }>(`select token_hash from share_links where id = $1`, [link.id]);
+    expect(stored!.token_hash === sha256(link.secret)).toBe(true);
+  });
+  test("outsiders, queued reports and invalid terms are refused; mutations retain CSRF", async () => {
+    expect((await call(outsider, "POST", `/api/artifacts/${artifact}/share-links`, { term: "7d" })).status).toBe(403);
+    const waiting = await call(alice, "POST", `/api/artifacts/${queued}/share-links`, { term: "7d" });
+    expect(waiting.status).toBe(422);
+    expect(waiting.json.error).toBe("Only a finished report can be shared.");
+    expect((await call(alice, "POST", `/api/artifacts/${artifact}/share-links`, { term: "bad" })).status).toBe(422);
+    expect((await call(alice, "POST", `/api/artifacts/${randomUUID()}/share-links`, { term: "7d" })).status).toBe(404);
+    expect((await app.request(`/api/artifacts/${artifact}/share-links`, { method: "POST", headers: { cookie: alice.cookie } })).status).toBe(403);
+  });
+  test("public page, bytes and audit package match the signed-in views and record only anonymous openings", async () => {
+    const link = await make();
+    const page = await call(null, "GET", `/api/share/${link.secret}`);
+    expect(page.status).toBe(200);
+    privacy(page.headers);
+    expect(page.json).toEqual({ deal: "Shared reference", kind: "ic_memo", format: "pdf", runNumber: 1, expiresAt: link.expiresAt });
+    const file = await app.request(`/api/share/${link.secret}/file?inline=1`);
+    const signed = await app.request(`/api/artifacts/${artifact}/file?inline=1`, { headers: { cookie: alice.cookie } });
+    privacy(file.headers);
+    expect(file.status).toBe(200);
+    expect(file.headers.get("content-type")).toBe(signed.headers.get("content-type"));
+    expect(file.headers.get("content-disposition")).toBe(signed.headers.get("content-disposition"));
+    expect(new Uint8Array(await file.arrayBuffer())).toEqual(new Uint8Array(await signed.arrayBuffer()));
+    const pkg = await call(null, "GET", `/api/share/${link.secret}/audit-package`);
+    privacy(pkg.headers);
+    expect(pkg.status).toBe(200);
+    const signedPkg = await call(alice, "GET", `/api/runs/${sharedRun}/audit-package`);
+    delete pkg.json.validation.checkedAt; delete signedPkg.json.validation.checkedAt;
+    expect(pkg.json).toEqual(signedPkg.json);
+    const opened = await db.query(`select actor, payload, entity, entity_id from audit_events where action = 'share.opened' and entity_id = $1 order by seq`, [link.id]);
+    expect(opened).toEqual(["page", "file", "audit_package"].map((what) => ({ actor: null, payload: { what }, entity: "share_link", entity_id: link.id })));
+    const list = await call(carol, "GET", `/api/deals/${sharedDeal}/share-links`);
+    expect(list.status).toBe(200);
+    expect(list.json.find((l: any) => l.id === link.id)).toMatchObject({ artifact_id: artifact, kind: "ic_memo", format: "pdf", run_number: 1,
+      term: "7d", created_by: "Alice Analyst", openings: 3, revoked_at: null, revoked_by: null });
+    expect(list.json.find((l: any) => l.id === link.id).last_opened_at).toBeTruthy();
+    expect(JSON.stringify(list.json).includes("token_hash")).toBe(false);
+    expect(JSON.stringify(list.json).includes(link.secret)).toBe(false);
+    const times = list.json.map((l: any) => new Date(l.created_at).getTime());
+    expect(times).toEqual([...times].sort((a, b) => b - a));
+  });
+  test.each(["unknown", "revoked", "expired", "departed", "expired membership"])("%s gives the same private 404 without an opening", async (mode) => {
+    const link = await make(mode === "departed" || mode === "expired membership" ? carol : alice);
+    if (mode === "revoked") expect((await call(alice, "POST", `/api/share-links/${link.id}/revoke`)).status).toBe(200);
+    if (mode === "expired") await db.query(`update share_links set expires_at = now() - interval '1 minute' where id = $1`, [link.id]);
+    if (mode === "departed") await db.query(`delete from workspace_members where workspace_id = $1 and user_id = $2`, [workspace, viewerId]);
+    if (mode === "expired membership") await db.query(`update workspace_members set role = 'reviewer', expires_at = now() - interval '1 minute' where workspace_id = $1 and user_id = $2`, [workspace, viewerId]);
+    try {
+      const [{ n: before }] = await db.query<{ n: number }>(`select count(*) as n from audit_events where action = 'share.opened'`);
+      const secret = mode === "unknown" ? randomUUID() : link.secret;
+      for (const suffix of ["", "/file", "/audit-package"]) {
+        const response = await call(null, "GET", `/api/share/${secret}${suffix}`);
+        expect(response.status).toBe(404);
+        expect(response.json).toEqual({ error: unavailable }); privacy(response.headers);
+      }
+      const [{ n: after }] = await db.query<{ n: number }>(`select count(*) as n from audit_events where action = 'share.opened'`);
+      expect(after).toBe(before);
+    } finally {
+      if (mode === "departed") await call(alice, "POST", `/api/workspaces/${workspace}/members`, { email: "carol@example.com", role: "viewer" });
+      if (mode === "expired membership") await db.query(`update workspace_members set role = 'viewer', expires_at = null where workspace_id = $1 and user_id = $2`, [workspace, viewerId]);
+    }
+  });
+  test.each([["24h", 86400], ["7d", 604800], ["30d", 2592000], ["none", null]] as const)("%s has the specified expiry", async (term, seconds) => {
+    const link = await make(alice, term);
+    const [stored] = await db.query<{ expires_at: string | null }>(`select expires_at from share_links where id = $1`, [link.id]);
+    if (seconds === null) { expect(link.expiresAt).toBeNull(); expect(stored!.expires_at).toBeNull(); }
+    else expect(Math.abs(new Date(link.expiresAt!).getTime() - Date.now() - seconds * 1000)).toBeLessThan(60_000);
+    expect((await call(null, "GET", `/api/share/${link.secret}`)).status).toBe(200);
+  });
+  test.each(["owner", "analyst", "viewer"])("%s can revoke; outsiders and a second revocation are refused", async (role) => {
+    const link = await make();
+    expect((await call(outsider, "POST", `/api/share-links/${link.id}/revoke`)).status).toBe(403);
+    const who = role === "owner" ? alice : role === "analyst" ? bob : carol;
+    expect((await call(who, "POST", `/api/share-links/${link.id}/revoke`)).status).toBe(200);
+    const again = await call(who, "POST", `/api/share-links/${link.id}/revoke`);
+    expect(again.status).toBe(422); expect(again.json.error).toBe("This link is already revoked.");
+    const events = await db.query(`select action, payload from audit_events where entity_id = $1 order by seq`, [link.id]);
+    expect(events.map((e) => e.action)).toEqual(["share.created", "share.revoked"]);
+    expect(events[1]!.payload).toEqual({ artifact_id: artifact });
+    expect(Object.keys(events[0]!.payload as object).sort()).toEqual(["artifact_id", "run_id", "kind", "format", "term", "expires_at"].sort());
+  });
+  test("secrets are absent from stored rows, audit payloads and forced-error logs", async () => {
+    const link = await make();
+    const rows = await db.query(`select * from share_links`);
+    const payloads = await db.query(`select payload from audit_events`);
+    expect(JSON.stringify(rows).includes(link.secret)).toBe(false);
+    expect(JSON.stringify(payloads).includes(link.secret)).toBe(false);
+    const broken = createApp({ db, secureCookies: false, store: { ...store, get: async () => { throw new Error(link.secret); } } });
+    const log = vi.spyOn(console, "error").mockImplementation(() => {});
+    try {
+      const response = await broken.request(`/api/share/${link.secret}/file`);
+      expect(response.status).toBe(500); privacy(response.headers);
+      expect(log).toHaveBeenCalledOnce();
+      expect(JSON.stringify(log.mock.calls).includes(link.secret)).toBe(false);
+      expect(JSON.parse(String(log.mock.calls[0]![0])).path).toBe("/api/share/…");
+    } finally { log.mockRestore(); }
+  });
+  test("the 61st public request is limited and retains privacy headers", async () => {
+    const limited = createApp({ db, store, secureCookies: false });
+    const secret = randomUUID();
+    for (let n = 1; n <= 61; n++) {
+      const response = await limited.request(`/api/share/${secret}`);
+      expect(response.status).toBe(n <= 60 ? 404 : 429); privacy(response.headers);
+      if (n === 61) expect(await response.json()).toEqual({ error: "Too many requests. Wait a minute." });
+    }
+  });
+  test("the new table has member-read RLS and no direct write grants", async () => {
+    expect(await db.query(`select name from schema_migrations where name = '0017_share_links.sql'`)).toHaveLength(1);
+    const link = await make();
+    const outsiderId = (await call(outsider, "GET", "/api/me")).json.user.id;
+    expect(await asUser(db, outsiderId, (tx) => tx.query(`select id from share_links where id = $1`, [link.id]))).toEqual([]);
+    for (const sql of ["insert into share_links default values", "update share_links set revoked_at = now()", "delete from share_links"]) {
+      await expect(asUser(db, ownerId, (tx) => tx.query(sql))).rejects.toMatchObject({ code: "42501" });
+    }
+    const grants = await db.query(`select p.proname from pg_proc p,
+      lateral aclexplode(coalesce(p.proacl, acldefault('f', p.proowner))) a
+      where p.proname in ('fn_create_share_link', 'fn_revoke_share_link', 'fn_open_share_link') and a.grantee = 0 and a.privilege_type = 'EXECUTE'`);
+    expect(grants).toEqual([]);
   });
 });
