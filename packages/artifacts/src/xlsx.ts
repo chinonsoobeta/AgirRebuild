@@ -1,5 +1,5 @@
 import { FIELD_BY_KEY, placeLabel } from "@agir/contracts";
-import { runWaterfall } from "@agir/engine";
+import { heldPartnerReturns, runWaterfall } from "@agir/engine";
 import { confirmationLabel, DRAFT_POLICY_LINE, notFoundSentence, type ArtifactInput } from "./model.ts";
 
 /**
@@ -89,7 +89,9 @@ export async function renderXlsx(x: ArtifactInput): Promise<Uint8Array> {
   }
 
   const lpIrr = r.scenarios.find((s) => s.key === "base")!.metrics.find((m) => m.key === "lp_irr");
-  if (lpIrr && lpIrr.status !== "NOT_APPLICABLE") {
+  // A held run with a split has the sheet too (card 88); its partner returns are unrealized, not a sale.
+  const heldSplit = x.input.exit === "refinance_hold" && x.input.waterfall ? heldPartnerReturns(r.equityFlows, x.input.waterfall) : null;
+  if (heldSplit || (lpIrr && lpIrr.status !== "NOT_APPLICABLE")) {
     const partners = wb.addWorksheet("Partners");
     const terms = x.input.waterfall!;
     for (const [key, value] of [["lp_share_pct", terms.lpSharePct], ["preferred_return_pct", terms.preferredReturnPct], ["gp_promote_pct", terms.gpPromotePct]] as const) {
@@ -101,11 +103,12 @@ export async function renderXlsx(x: ArtifactInput): Promise<Uint8Array> {
     for (const flow of r.equityFlows) {
       const key = Math.round(flow.t * 12);
       const month = months.get(key) ?? { t: flow.t, kinds: [], deal: 0, lp: 0, gp: 0 };
-      if (!month.kinds.includes(flow.kind)) month.kinds.push(flow.kind);
+      const kind = flow.kind === "unrealized" ? "Unrealized, not a sale" : flow.kind;
+      if (!month.kinds.includes(kind)) month.kinds.push(kind);
       month.deal += flow.amount;
       months.set(key, month);
     }
-    const waterfall = runWaterfall(r.equityFlows, terms);
+    const waterfall = heldSplit ? heldSplit.withValue : runWaterfall(r.equityFlows, terms);
     for (const [key, entries] of [["lp", waterfall.lp], ["gp", waterfall.gp]] as const) {
       for (const flow of entries) months.get(Math.round(flow.t * 12))![key] += flow.amount;
     }
@@ -117,10 +120,28 @@ export async function renderXlsx(x: ArtifactInput): Promise<Uint8Array> {
     }
     const total = partners.addRow(["Total", null, null, ...totals]);
     for (const col of [4, 5, 6]) total.getCell(col).numFmt = fmt("$");
-    for (const key of ["lp_irr", "gp_irr", "gp_promote"]) {
-      const metric = r.scenarios.find((s) => s.key === "base")!.metrics.find((m) => m.key === key)!;
-      const row = partners.addRow([metric.label, metric.status === "VALID" ? metric.value : metric.reason]);
-      row.getCell(2).numFmt = fmt(metric.unit);
+    if (heldSplit) {
+      const positive = (flows: { amount: number }[]) => flows.filter((flow) => flow.amount > 0).reduce((n, flow) => n + flow.amount, 0);
+      const rows: [string, number | null, "%" | "$"][] = [
+        ["LP IRR (unrealized, not a sale)", heldSplit.withValue.lpIrr, "%"],
+        ["GP IRR (unrealized, not a sale)", heldSplit.withValue.gpIrr, "%"],
+        ["GP promote (unrealized, not a sale)", heldSplit.withValue.promote, "$"],
+        ["", null, "$"],
+        ["Paid out to the LP", positive(heldSplit.paid.lp), "$"],
+        ["Paid out to the GP", positive(heldSplit.paid.gp), "$"],
+        ["GP promote paid", heldSplit.paid.promote, "$"],
+      ];
+      for (const [label, value, unit] of rows) {
+        if (!label) { partners.addRow([]); continue; }
+        const row = partners.addRow([label, value ?? "Not meaningful"]);
+        if (value !== null) row.getCell(2).numFmt = fmt(unit);
+      }
+    } else {
+      for (const key of ["lp_irr", "gp_irr", "gp_promote"]) {
+        const metric = r.scenarios.find((s) => s.key === "base")!.metrics.find((m) => m.key === key)!;
+        const row = partners.addRow([metric.label, metric.status === "VALID" ? metric.value : metric.reason]);
+        row.getCell(2).numFmt = fmt(metric.unit);
+      }
     }
     partners.columns.forEach((c) => (c.width = 24));
   }

@@ -1,4 +1,5 @@
 import type { EquityFlow } from "@agir/contracts";
+import { irrRoots } from "./irr.ts";
 
 /**
  * A two-tier LP/GP waterfall over the deal's dated equity flows.
@@ -48,3 +49,25 @@ export function runWaterfall(
   }
   return { lp, gp, promote: promoteTotal };
 }
+
+/**
+ * A held deal's partner returns (card 87): report arithmetic over a run's stored equity flows, not a metric, so no
+ * result changes. `withValue` includes the unrealized flow (unrealized, not a sale); `paid` is the cash paid out so
+ * far. Paid filters by kind, not by date, because the last operating flow shares its date with the unrealized flow.
+ * A partner IRR follows the roots rule: one root is a value in percent, none or several is null.
+ */
+export function heldPartnerReturns(
+  flows: readonly EquityFlow[],
+  terms: { lpSharePct: number; preferredReturnPct: number; gpPromotePct: number },
+) {
+  const irr = (partner: { t: number; amount: number }[]) => {
+    const roots = irrRoots(partner);
+    return roots.length === 1 ? roots[0]! * 100 : null;
+  };
+  const w = runWaterfall(flows, terms);
+  return {
+    withValue: { ...w, lpIrr: irr(w.lp), gpIrr: irr(w.gp) },
+    paid: runWaterfall(flows.filter((flow) => flow.kind !== "unrealized"), terms),
+  };
+}
+

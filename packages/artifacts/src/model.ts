@@ -4,7 +4,7 @@
 
 import { CURRENCY_NAMES, FIELD_BY_KEY, placeLabel, type Currency, type EngineInput, type FieldUnit, type Policy, type RunResult, type VerdictCode } from "@agir/contracts";
 import { createHash } from "node:crypto";
-import { runWaterfall, irrRoots, breakeven, canonicalJson, ENGINE_VERSION, type BreakevenEcho, type BreakevenRow } from "@agir/engine";
+import { runWaterfall, heldPartnerReturns, breakeven, canonicalJson, ENGINE_VERSION, type BreakevenEcho, type BreakevenRow } from "@agir/engine";
 import { Formatter, formatValue } from "./format.ts";
 
 export type ArtifactKind = "ic_memo" | "lender_package" | "build_decision" | "partner_memo" | "model_export";
@@ -446,17 +446,12 @@ class PartnerMemoUnavailableError extends Error {
 function heldPartnerBlocks(f: Formatter, x: ArtifactInput): Block[] {
   const r = x.result;
   const terms = x.input.waterfall!;
-  const w = runWaterfall(r.equityFlows, terms);
-  const paid = runWaterfall(r.equityFlows.filter((flow) => flow.kind !== "unrealized"), terms);
-  const irr = (flows: { t: number; amount: number }[], ref: string) => {
-    const roots = irrRoots(flows);
-    return f.derived(roots.length === 1 ? roots[0]! * 100 : null, "%", `irr(${ref})`);
-  };
+  const { withValue: w, paid } = heldPartnerReturns(r.equityFlows, terms);
   const totals = (flows: { amount: number }[]) => ({
     contributed: -flows.filter((flow) => flow.amount < 0).reduce((n, flow) => n + flow.amount, 0),
     distributed: flows.filter((flow) => flow.amount > 0).reduce((n, flow) => n + flow.amount, 0),
   });
-  const lpIrr = irr(w.lp, "waterfall.LP.flows"), gpIrr = irr(w.gp, "waterfall.GP.flows");
+  const lpIrr = f.derived(w.lpIrr, "%", "irr(waterfall.LP.flows)"), gpIrr = f.derived(w.gpIrr, "%", "irr(waterfall.GP.flows)");
   const metricItem = (key: string) => ({ label: f.metricOf("base", key).label, value: f.metric("base", key) });
   const blocks: Block[] = [{ type: "stats", items: [
     metricItem("unrealized_equity_multiple"), metricItem("unrealized_equity_irr"),
