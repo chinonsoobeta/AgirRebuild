@@ -375,8 +375,8 @@ function changeTheAnswer(f: Formatter, x: ArtifactInput): Block[] {
   const intro: Block[] = [heading];
   // The run stores its policy's hash: a policy edited under the same version name is a different policy.
   if (x.run.policyHash !== createHash("sha256").update(canonicalJson(x.policy)).digest("hex")) {
-    intro.push({ type: "paragraph", muted: true, text: "Not shown: this run was made under a different policy." });
-    if (hardFail.length === 0) return intro;
+    // Break-evens worked out under another policy would not be this run's, so none are shown.
+    return [heading, { type: "paragraph", muted: true, text: "Not shown: this run was made under a different policy." }, ...hardFail];
   }
   intro.push(...hardFail);
   if (failing.length === 0) return intro;

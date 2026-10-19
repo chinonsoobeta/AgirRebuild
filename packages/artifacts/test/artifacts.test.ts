@@ -682,7 +682,7 @@ const saleTable = (model: ReturnType<typeof buildModel>, caption: string) => {
 };
 
 describe("the reports for a deal that sells its units (task 80)", () => {
-  test.each([["ic_memo", "fa9dd2f818ca58ba1500ec30db01d5171229546e8828b96d74e9f0138bf93812"], ["build_decision", "d4510a95e802f3ebfa1ad4a5826f15f1e78f7d2da58034ecd023e78474090940"], ["lender_package", "5f81e68b930e8735a4036eba356bad6242bc1e05cdaa3ca89a84a69f47dd208c"]] as const)("the existing Maple Heights %s text is byte-identical", (kind, hash) => {
+  test.each([["ic_memo", "fa9dd2f818ca58ba1500ec30db01d5171229546e8828b96d74e9f0138bf93812"], ["build_decision", "64389bea70bedfb6f257617d58cc54d1bfff3bf08f55eb90e2f967f1d91736d0"], ["lender_package", "5f81e68b930e8735a4036eba356bad6242bc1e05cdaa3ca89a84a69f47dd208c"]] as const)("the existing Maple Heights %s text is byte-identical", (kind, hash) => {
     expect(createHash("sha256").update(visibleText(renderHtml(buildModel(mapleInput(kind))))).digest("hex")).toBe(hash);
   });
   test.each(SALE_SLUGS.flatMap((slug) => SALE_KINDS.map((kind) => [slug, kind] as const)))("%s %s has provenance, sale stats and stresses without rental sections", (slug, kind) => {
@@ -1133,19 +1133,18 @@ describe("a report says when a check decides the verdict (task 85a)", () => {
     }
     expect(verifyProvenance(visibleText(renderHtml(model)), model.formatter.manifest).orphans).toEqual([]);
   });
-  test("Maple keeps its notice first and adds the approved warning and table only", () => {
+  test("Maple keeps its notice first, then adds the warning and no table", () => {
     const x = mapleInput("build_decision");
     expect(x.result.verdict.hardFailReasons.length).toBeGreaterThan(0);
     const model = buildModel(x);
     const at = model.blocks.findIndex((b) => b.type === "heading" && b.text === "What would change the answer");
     expect(model.blocks[at + 1]).toEqual({ type: "paragraph", muted: true, text: "Not shown: this run was made under a different policy." });
     expect(model.blocks[at + 2]).toEqual({ type: "paragraph", text: message });
-    expect(model.blocks[at + 3]).toMatchObject({ type: "table", columns: expect.arrayContaining([{ label: "Input moved" }]) });
-    expect(model.blocks[at + 4]).toMatchObject({ type: "paragraph", text: "One input is moved at a time. Everything else is held." });
+    expect(model.blocks[at + 3]).not.toMatchObject({ type: "table" });
     const text = visibleText(renderHtml(model));
     expect(text.split(message)).toHaveLength(2);
-    // Owner waived paragraph-only restoration and authorized the table too. Remove exactly these additions.
-    const restored = { ...model, blocks: model.blocks.filter((_, n) => n < at + 2 || n > at + 4) };
+    // The warning is the only change: without it, the text is the card 80 pin.
+    const restored = { ...model, blocks: model.blocks.filter((_, n) => n !== at + 2) };
     expect(createHash("sha256").update(visibleText(renderHtml(restored))).digest("hex"))
       .toBe("c49c28c5eafee7e5d6eb89704d4b04584c7887ecbf5d51bd33160417cf83d17e");
     expect(verifyProvenance(text, model.formatter.manifest).orphans).toEqual([]);
@@ -1158,6 +1157,8 @@ describe("a report says when a check decides the verdict (task 85a)", () => {
     const at = model.blocks.findIndex((b) => b.type === "heading" && b.text === "What would change the answer");
     expect(model.blocks[at + 1]).toMatchObject({ type: "paragraph", text: expect.stringMatching(/^Not shown:/) });
     expect(model.blocks[at + 2]).toEqual({ type: "paragraph", text: message });
+    // A run from another engine or policy shows no break-even table.
+    expect(model.blocks.some((b) => b.type === "table" && b.columns.some((c) => c.label === "Input moved"))).toBe(false);
     expect(verifyProvenance(visibleText(renderHtml(model)), model.formatter.manifest).orphans).toEqual([]);
   });
   test("Kestrel without stated equity adds no warning", () => {
