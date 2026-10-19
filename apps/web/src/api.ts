@@ -90,7 +90,7 @@ export type RunView = {
   decisions: { id: string; decision: string; rationale: string; conditions: string | null; override_reason: string | null; created_at: string; decided_by: string }[];
   heldPartners?: { lpIrr: number | null; gpIrr: number | null; promote: number; paidLp: number; paidGp: number; paidPromote: number };
 };
-export type Artifact = { id: string; kind: string; format: string; status: string; error: string | null; sha256: string | null; created_at: string; run_id: string; run_number: number; provenance_entries: number | null };
+export type Artifact = { lang: "en" | "fr"; id: string; kind: string; format: string; status: string; error: string | null; sha256: string | null; created_at: string; run_id: string; run_number: number; provenance_entries: number | null };
 export type ShareTerm = "24h" | "7d" | "30d" | "none";
 export type ShareLink = { id: string; artifact_id: string; kind: string; format: string; run_number: number; term: ShareTerm; expires_at: string | null; created_at: string;
   created_by: string | null; revoked_at: string | null; revoked_by: string | null; openings: number; last_opened_at: string | null };

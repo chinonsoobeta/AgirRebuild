@@ -1,5 +1,6 @@
 import { readFileSync } from "node:fs";
 import { createRequire } from "node:module";
+import { reportText } from "./text.ts";
 import type { Block, DocModel } from "./model.ts";
 
 const require = createRequire(import.meta.url);
@@ -31,12 +32,12 @@ const esc = (s: string) => s.replace(/&/g, "&amp;").replace(/</g, "&lt;").replac
 
 const VERDICT_COLOR = { APPROVE: "#2350C8", APPROVE_WITH_CONDITIONS: "#9A6212", REJECT: "#C8401F", NOT_EVALUATED: "#626773" } as const;
 const TONE = {
-  pass: { bg: "#E4EAF8", fg: "#1B45B0", word: "Pass" },
-  warning: { bg: "#F6ECD4", fg: "#8A5A00", word: "Check" },
-  error: { bg: "#F8E3DC", fg: "#B3361A", word: "Fails" },
+  pass: { bg: "#E4EAF8", fg: "#1B45B0" },
+  warning: { bg: "#F6ECD4", fg: "#8A5A00" },
+  error: { bg: "#F8E3DC", fg: "#B3361A" },
 } as const;
 
-function block(b: Block): string {
+function block(b: Block, lang: "en" | "fr"): string {
   switch (b.type) {
     case "heading":
       return `<h2>${esc(b.text)}</h2>`;
@@ -61,14 +62,14 @@ function block(b: Block): string {
         .join("")}</tbody></table></section>`;
     case "checks":
       return `<ul class="checks">${b.items
-        .map((i) => `<li><span class="tag" style="background:${TONE[i.tone].bg};color:${TONE[i.tone].fg}">${TONE[i.tone].word}</span><span>${esc(i.text)}</span></li>`)
+        .map((i) => `<li><span class="tag" style="background:${TONE[i.tone].bg};color:${TONE[i.tone].fg}">${reportText(lang, i.tone === "pass" ? "pass" : i.tone === "warning" ? "check" : "fails")}</span><span>${esc(i.text)}</span></li>`)
         .join("")}</ul>`;
   }
 }
 
 /** The artifact as one self-contained HTML page (Ink & Signal), for screen and for PDF. */
 export function renderHtml(m: DocModel): string {
-  return `<!doctype html><html lang="en"><head><meta charset="utf-8"><title>${esc(m.title)} · ${esc(m.kicker)}</title><style>
+  return `<!doctype html><html lang="${m.lang === "fr" ? "fr-CA" : "en"}"><head><meta charset="utf-8"><title>${esc(m.title)} · ${esc(m.kicker)}</title><style>
 ${fonts()}
 @page{size:Letter;margin:0.75in 0.75in 0.7in}
 *{box-sizing:border-box}
@@ -108,10 +109,10 @@ p{margin:0 0 8pt}
 .muted{color:#454A55}
 ${m.brand ? ".brand{display:flex;align-items:center;justify-content:space-between;gap:12pt;margin:0 0 10pt;font-size:9pt;color:#454A55}\n" : ""}footer{margin-top:16pt;padding-top:8pt;border-top:1px solid #DDD8CC;font-size:8.5pt;color:#454A55}
 </style></head><body>
-${m.brand ? `<div class="brand"><img src="data:${m.brand.logo.mime};base64,${Buffer.from(m.brand.logo.bytes).toString("base64")}" width="${m.brand.logo.width}" height="${m.brand.logo.height}" alt=""><span>${esc(m.brand.preparedBy)}</span></div>\n` : ""}<div class="mast"><span class="mark"><i></i><b>agir</b></span><span>${esc(m.kicker)}</span></div>
+${m.banner ? `<p>${esc(m.banner)}</p>\n` : ""}${m.brand ? `<div class="brand"><img src="data:${m.brand.logo.mime};base64,${Buffer.from(m.brand.logo.bytes).toString("base64")}" width="${m.brand.logo.width}" height="${m.brand.logo.height}" alt=""><span>${esc(m.brand.preparedBy)}</span></div>\n` : ""}<div class="mast"><span class="mark"><i></i><b>agir</b></span><span>${esc(m.kicker)}</span></div>
 <h1>${esc(m.title)}</h1>
 <p class="meta">${esc(m.meta)}</p>
-${m.blocks.map(block).join("\n")}
+${m.blocks.map((b) => block(b, m.lang)).join("\n")}
 <footer>${esc(m.footer)}</footer>
 </body></html>`;
 }

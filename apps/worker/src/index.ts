@@ -490,8 +490,8 @@ export async function reconcileDeal(db: Db, dealId: string) {
 
 async function renderJob(deps: WorkerDeps, artifactId: string) {
   const { db, store } = deps;
-  const [a] = await db.query<{ id: string; run_id: string; deal_id: string; workspace_id: string; kind: ArtifactInput["kind"]; format: "pdf" | "docx" | "xlsx" | "html" }>(
-    `select id, run_id, deal_id, workspace_id, kind, format from artifacts where id = $1`,
+  const [a] = await db.query<{ id: string; run_id: string; deal_id: string; workspace_id: string; kind: ArtifactInput["kind"]; lang: "en" | "fr"; format: "pdf" | "docx" | "xlsx" | "html" }>(
+    `select id, run_id, deal_id, workspace_id, kind, format, lang from artifacts where id = $1`,
     [artifactId],
   );
   if (!a) return;
@@ -524,6 +524,7 @@ async function renderJob(deps: WorkerDeps, artifactId: string) {
     : undefined;
   const input: ArtifactInput = {
     kind: a.kind,
+    lang: a.lang,
     ...(broker ? { broker } : {}),
     deal: { name: deal.name, assetType: deal.asset_type, location: deal.location, currency: deal.currency, province: deal.province },
     run: {

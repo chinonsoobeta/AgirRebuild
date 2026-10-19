@@ -1,3 +1,4 @@
+import { reportText } from "./text.ts";
 import type { Block, DocModel } from "./model.ts";
 
 /** The same document model as Word. Every string comes from the model, so provenance carries over. */
@@ -9,6 +10,7 @@ export async function renderDocx(m: DocModel): Promise<Uint8Array> {
     new TextRun({ text, bold: opts.bold, size: opts.size ?? 20, color: opts.color ?? "15171C", font: opts.mono ? "IBM Plex Mono" : font, italics: opts.italics });
   const rule = { style: BorderStyle.SINGLE, size: 4, color: "DDD8CC" };
   const children: (InstanceType<typeof Paragraph> | InstanceType<typeof Table>)[] = [];
+  if (m.banner) children.push(new Paragraph({ children: [run(m.banner)] }));
   if (m.brand) {
     const { logo, preparedBy } = m.brand;
     children.push(new Paragraph({ spacing: { after: 160 }, children: [
@@ -74,7 +76,7 @@ export async function renderDocx(m: DocModel): Promise<Uint8Array> {
       }
       case "checks":
         for (const i of b.items) {
-          children.push(new Paragraph({ children: [run(`${i.tone === "pass" ? "Pass" : i.tone === "warning" ? "Check" : "Fails"}  `, { bold: true, size: 18 }), run(i.text, { size: 18 })] }));
+          children.push(new Paragraph({ children: [run(`${reportText(m.lang, i.tone === "pass" ? "pass" : i.tone === "warning" ? "check" : "fails")}  `, { bold: true, size: 18 }), run(i.text, { size: 18 })] }));
         }
         break;
     }
@@ -92,7 +94,7 @@ export async function renderDocx(m: DocModel): Promise<Uint8Array> {
 
 /** The text of the Word document, for the provenance scan. */
 export function docxText(m: DocModel): string {
-  const parts: string[] = [...(m.brand ? [m.brand.preparedBy] : []), m.kicker, m.title, m.meta, m.footer];
+  const parts: string[] = [...(m.banner ? [m.banner] : []),...(m.brand ? [m.brand.preparedBy] : []), m.kicker, m.title, m.meta, m.footer];
   for (const b of m.blocks) {
     if (b.type === "heading" || b.type === "paragraph") parts.push(b.text);
     else if (b.type === "verdict") parts.push(b.label, b.headline, b.explanation);

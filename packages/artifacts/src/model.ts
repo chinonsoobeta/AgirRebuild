@@ -2,15 +2,17 @@
 // and the inputs that run used, and from nothing else: it never recomputes a
 // verdict, a gate or a metric.
 
-import { CURRENCY_NAMES, FIELD_BY_KEY, placeLabel, type Currency, type EngineInput, type FieldUnit, type Policy, type RunResult, type VerdictCode } from "@agir/contracts";
+import { FR_ABSENT, CURRENCY_NAMES, FIELD_BY_KEY, placeLabel, type Currency, type EngineInput, type FieldUnit, type Policy, type RunResult, type VerdictCode } from "@agir/contracts";
 import { createHash } from "node:crypto";
 import { runWaterfall, heldPartnerReturns, breakeven, canonicalJson, ENGINE_VERSION, type BreakevenEcho, type BreakevenRow } from "@agir/engine";
 import { Formatter, formatValue } from "./format.ts";
+import { reportText, reportSource } from "./text.ts";
 
 export type ArtifactKind = "ic_memo" | "lender_package" | "build_decision" | "partner_memo" | "model_export";
 
 export type ArtifactInput = {
   kind: ArtifactKind;
+  lang?: "en" | "fr";
   /** The broker's workspace and logo (card 89d); printed on the lender package only. Absent, the package is unchanged. */
   broker?: { name: string; logo: { bytes: Uint8Array; mime: "image/png" | "image/jpeg"; width: number; height: number } };
   /** Currency and province as the deal stated them when it was created; null when it never did. */
@@ -60,6 +62,8 @@ export type Block =
   | { type: "checks"; items: { tone: "pass" | "warning" | "error"; text: string }[] };
 
 export type DocModel = {
+  lang: "en" | "fr";
+  banner?: string;
   /** The lender package's header logo and "Prepared by <workspace>" (card 89d); at most 48 px high, aspect kept. */
   brand?: { preparedBy: string; logo: { bytes: Uint8Array; mime: "image/png" | "image/jpeg"; width: number; height: number } };
   title: string;
@@ -70,12 +74,12 @@ export type DocModel = {
   formatter: Formatter;
 };
 
-const VERDICT_LABEL: Record<VerdictCode, string> = {
-  APPROVE: "Approve",
-  APPROVE_WITH_CONDITIONS: "Approve with conditions",
-  REJECT: "Reject",
-  NOT_EVALUATED: "Not evaluated",
-};
+const VERDICT_LABEL = (lang: "en" | "fr"): Record<VerdictCode, string> => ({
+  APPROVE: reportText(lang, "approve"),
+  APPROVE_WITH_CONDITIONS: reportText(lang, "approveConditions"),
+  REJECT: reportText(lang, "reject"),
+  NOT_EVALUATED: reportText(lang, "notEvaluated"),
+});
 
 const UNIT_MAP: Record<FieldUnit, Parameters<typeof formatValue>[1] | "flag"> = {
   $: "$",
@@ -92,36 +96,36 @@ const UNIT_MAP: Record<FieldUnit, Parameters<typeof formatValue>[1] | "flag"> = 
 
 function inputValue(f: Formatter, a: ArtifactInput["assumptions"][number]): string {
   const u = UNIT_MAP[a.unit];
-  if (u === "flag") return a.value === 1 ? "Yes" : "No";
+  if (u === "flag") return a.value === 1 ? reportText(f.lang, "yes") : reportText(f.lang, "no");
   return f.input(a.value, u, `${a.fieldKey}${a.itemKey ? "|" + a.itemKey : ""}`);
 }
 
 function sourcesAndUses(f: Formatter, x: ArtifactInput): Block {
   const i = x.input;
   const rows: string[][] = [
-    ["Land", f.input(i.budget.land, "$", "land_cost")],
-    ["Hard costs", f.input(i.budget.hard, "$", "hard_cost")],
-    ["Soft costs", f.input(i.budget.soft, "$", "soft_cost")],
-    ["Contingency", f.input(i.budget.contingency, "$", "contingency")],
+    [reportText(f.lang, "land"), f.input(i.budget.land, "$", "land_cost")],
+    [reportText(f.lang, "hard"), f.input(i.budget.hard, "$", "hard_cost")],
+    [reportText(f.lang, "soft"), f.input(i.budget.soft, "$", "soft_cost")],
+    [reportText(f.lang, "contingency"), f.input(i.budget.contingency, "$", "contingency")],
   ];
-  if (i.budget.other > 0) rows.push(["Other costs", f.input(i.budget.other, "$", "other_cost")]);
-  else if (i.budget.other < 0) rows.push(["Other costs (credit)", f.input(i.budget.other, "$", "other_cost")]);
+  if (i.budget.other > 0) rows.push([reportText(f.lang, "other"), f.input(i.budget.other, "$", "other_cost")]);
+  else if (i.budget.other < 0) rows.push([reportText(f.lang, "otherCredit"), f.input(i.budget.other, "$", "other_cost")]);
   // The entered cost lines, each by name and only when a person stated it.
-  if (i.budget.developmentCharges !== undefined) rows.push(["Development charges", f.input(i.budget.developmentCharges, "$", "development_charges")]);
-  if (i.budget.landTransferTax !== undefined) rows.push(["Land transfer tax", f.input(i.budget.landTransferTax, "$", "land_transfer_tax")]);
-  if (i.budget.gstHstNet !== undefined) rows.push(["GST/HST net of rebates", f.input(i.budget.gstHstNet, "$", "gst_hst_net")]);
+  if (i.budget.developmentCharges !== undefined) rows.push([reportText(f.lang, "charges"), f.input(i.budget.developmentCharges, "$", "development_charges")]);
+  if (i.budget.landTransferTax !== undefined) rows.push([reportText(f.lang, "transferTax"), f.input(i.budget.landTransferTax, "$", "land_transfer_tax")]);
+  if (i.budget.gstHstNet !== undefined) rows.push([reportText(f.lang, "gst"), f.input(i.budget.gstHstNet, "$", "gst_hst_net")]);
   if (!isSale(x) && x.result.scenarios[0]?.metrics.find((m) => m.key === "leaseup_operating_cost")?.status === "VALID") {
-    rows.push(["Operating costs during lease-up", f.metric("base", "leaseup_operating_cost")]);
+    rows.push([reportText(f.lang, "leaseupCosts"), f.metric("base", "leaseup_operating_cost")]);
   }
-  rows.push(isSale(x) ? ["Interest during construction", f.metric("base", "interest_before_completion")] : ["Capitalized interest", f.metric("base", "capitalized_interest")]);
-  rows.push(["Total uses", f.metric("base", "total_development_cost")]);
+  rows.push(isSale(x) ? [reportText(f.lang, "constructionInterest"), f.metric("base", "interest_before_completion")] : [reportText(f.lang, "capitalizedInterest"), f.metric("base", "capitalized_interest")]);
+  rows.push([reportText(f.lang, "uses"), f.metric("base", "total_development_cost")]);
   const usesEnd = rows.length - 1;
-  if (i.senior.amount > 0) rows.push(["Senior loan", f.input(i.senior.amount, "$", "senior_loan_amount")]);
-  if (i.mezzanine && i.mezzanine.amount > 0) rows.push(["Mezzanine loan", f.input(i.mezzanine.amount, "$", "mezz_loan_amount")]);
-  if (x.result.checks.some((c) => c.key === "mezz_interest_accrued")) rows.push(["Mezzanine interest accrued (paid in kind)", f.metric("base", "mezz_interest_accrued")]);
-  rows.push(["Equity", f.metric("base", "required_equity")]);
-  rows.push(["Total sources", f.metric("base", "total_development_cost")]);
-  return { type: "table", caption: "Sources and uses", columns: [{ label: "Line" }, { label: "Amount", numeric: true }], rows, strong: [usesEnd, rows.length - 1] };
+  if (i.senior.amount > 0) rows.push([reportText(f.lang, "senior"), f.input(i.senior.amount, "$", "senior_loan_amount")]);
+  if (i.mezzanine && i.mezzanine.amount > 0) rows.push([reportText(f.lang, "mezz"), f.input(i.mezzanine.amount, "$", "mezz_loan_amount")]);
+  if (x.result.checks.some((c) => c.key === "mezz_interest_accrued")) rows.push([reportText(f.lang, "mezzAccrued"), f.metric("base", "mezz_interest_accrued")]);
+  rows.push([reportText(f.lang, "equity"), f.metric("base", "required_equity")]);
+  rows.push([reportText(f.lang, "sources"), f.metric("base", "total_development_cost")]);
+  return { type: "table", caption: reportText(f.lang, "sourcesUses"), columns: [{ label: reportText(f.lang, "line") }, { label: reportText(f.lang, "amount"), numeric: true }], rows, strong: [usesEnd, rows.length - 1] };
 }
 
 /** Where the mezzanine loan is described: the run's own sentence, when its interest ran past the commitment. */
@@ -132,8 +136,8 @@ function mezzAccrual(f: Formatter, r: RunResult): Block[] {
 
 function revenueProgram(f: Formatter, x: ArtifactInput): Block {
   const rows = x.input.revenue.map((c) => [
-    f.ident(c.label, `revenue.${c.key}.label`),
-    c.basis === "per_unit" ? f.input(c.units, "units", `unit_count|${c.key}`) + " units" : f.input(c.areaSf ?? 0, "sf", `rentable_area_sf|${c.key}`),
+    f.ident(c.label === "All units" ? reportText(f.lang, "allUnits") : c.label, `revenue.${c.key}.label`),
+    c.basis === "per_unit" ? f.input(c.units, "units", `unit_count|${c.key}`) + reportText(f.lang, "unitsSuffix") : f.input(c.areaSf ?? 0, "sf", `rentable_area_sf|${c.key}`),
     c.basis === "per_unit" ? f.input(c.rentMonthly ?? 0, "$/mo", `unit_rent_monthly|${c.key}`) : f.input(c.rentPsfAnnual ?? 0, "$/sf", `rent_psf_annual|${c.key}`),
     c.occupancyPct !== undefined
       ? f.input(c.occupancyPct, "%", `item_occupancy_pct|${c.key}`)
@@ -141,8 +145,8 @@ function revenueProgram(f: Formatter, x: ArtifactInput): Block {
   ]);
   return {
     type: "table",
-    caption: "Revenue program",
-    columns: [{ label: "Component" }, { label: "Size", numeric: true }, { label: "Rent", numeric: true }, { label: "Occupancy", numeric: true }],
+    caption: reportText(f.lang, "revenue"),
+    columns: [{ label: reportText(f.lang, "component") }, { label: reportText(f.lang, "size"), numeric: true }, { label: reportText(f.lang, "rent"), numeric: true }, { label: reportText(f.lang, "occupancy"), numeric: true }],
     rows,
   };
 }
@@ -152,14 +156,14 @@ function operations(f: Formatter, x: ArtifactInput): Block {
   const tax = x.input.propertyTaxAnnual;
   return {
     type: "table",
-    caption: "Stabilized operations, year 1",
-    columns: [{ label: "Line" }, { label: "Amount", numeric: true }],
+    caption: reportText(f.lang, "stabilizedOperations"),
+    columns: [{ label: reportText(f.lang, "line") }, { label: reportText(f.lang, "amount"), numeric: true }],
     rows: [
-      ["Gross potential rent", f.metric("base", "gross_potential_rent")],
-      ["Effective gross income", f.metric("base", "effective_gross_income")],
-      ["Operating expenses", f.metric("base", "operating_expenses")],
-      ...(tax !== undefined ? [["Property tax (fixed, within operating expenses)", f.input(tax, "$", "property_tax_annual")]] : []),
-      ["Net operating income", f.metric("base", "stabilized_noi")],
+      [reportText(f.lang, "gpr"), f.metric("base", "gross_potential_rent")],
+      [reportText(f.lang, "egi"), f.metric("base", "effective_gross_income")],
+      [reportText(f.lang, "opex"), f.metric("base", "operating_expenses")],
+      ...(tax !== undefined ? [[reportText(f.lang, "propertyTax"), f.input(tax, "$", "property_tax_annual")]] : []),
+      [reportText(f.lang, "noi"), f.metric("base", "stabilized_noi")],
     ],
     strong: [tax !== undefined ? 4 : 3],
   };
@@ -174,7 +178,7 @@ const isHeld = (x: ArtifactInput) => x.input.exit === "refinance_hold";
 
 /** Under a draft policy, said once beside the verdict. */
 function draftLine(x: ArtifactInput): Block[] {
-  return x.policy.draft ? [{ type: "paragraph", text: DRAFT_POLICY_LINE }] : [];
+  return x.policy.draft ? [{ type: "paragraph", text: reportText(x.lang ?? "en", "draftPolicy") }] : [];
 }
 
 /** The hold measures, then the unrealized multiple and IRR with the stated value, each under its own label. */
@@ -187,13 +191,13 @@ function heldStats(f: Formatter, unrealized = true): { label: string; value: str
 function saleStats(f: Formatter, full = true): { label: string; value: string }[] {
   const keys = full ? ["total_development_cost", "profit_on_cost_for_sale", "margin_on_revenue", "equity_multiple", "equity_irr"]
     : ["profit_on_cost_for_sale", "margin_on_revenue", "equity_multiple"];
-  return keys.map((key) => ({ label: key === "total_development_cost" ? "Total cost" : f.metricOf("base", key).label, value: f.metric("base", key) }));
+  return keys.map((key) => ({ label: key === "total_development_cost" ? reportText(f.lang, "totalCost") : f.metricOf("base", key).label, value: f.metric("base", key) }));
 }
 
 function unitSales(f: Formatter, x: ArtifactInput): Block {
   const sale = x.input.forSale!;
-  const rows = sale.units.map((u) => [f.ident(u.label, `forSale.${u.key}.label`), f.input(u.units, "units", `unit_count|${u.key}`) + " units", f.input(u.price, "$", `unit_sale_price|${u.key}`)]);
-  const field = (key: string, value: number, unit: Parameters<Formatter["input"]>[1]) => [FIELD_BY_KEY.get(key)!.label, f.input(value, unit, key), ""];
+  const rows = sale.units.map((u) => [f.ident(u.label, `forSale.${u.key}.label`), f.input(u.units, "units", `unit_count|${u.key}`) + reportText(f.lang, "unitsSuffix"), f.input(u.price, "$", `unit_sale_price|${u.key}`)]);
+  const field = (key: string, value: number, unit: Parameters<Formatter["input"]>[1]) => [f.field(key, FIELD_BY_KEY.get(key)!.label), f.input(value, unit, key), ""];
   rows.push(
     field("presold_units_pct", sale.presoldPct, "%"),
     field("deposit_pct", sale.depositPct, "%"),
@@ -203,29 +207,29 @@ function unitSales(f: Formatter, x: ArtifactInput): Block {
     field("unsold_carry_monthly", sale.carryMonthly, "$"),
   );
   if (sale.presaleThresholdPct !== undefined) rows.push(field("senior_presale_threshold_pct", sale.presaleThresholdPct, "%"));
-  return { type: "table", caption: "Unit sales", columns: [{ label: "Unit type or field" }, { label: "Count or value", numeric: true }, { label: "Sale price per unit", numeric: true }], rows };
+  return { type: "table", caption: reportText(f.lang, "unitSales"), columns: [{ label: reportText(f.lang, "unitOrField") }, { label: reportText(f.lang, "countValue"), numeric: true }, { label: reportText(f.lang, "salePriceUnit"), numeric: true }], rows };
 }
 
 function saleResults(f: Formatter, x: ArtifactInput): Block {
   const keys = ["gross_sales_revenue", "net_sales_revenue", "carry_total", "interest_after_completion", "development_profit_for_sale", "profit_on_cost_for_sale",
     "margin_on_revenue", "sellout_month", "sellout_years", "deposits_held_at_completion", "senior_balance_at_completion",
     ...(x.input.mezzanine && x.input.mezzanine.amount > 0 ? ["mezz_balance_at_completion"] : [])];
-  return { type: "table", caption: "Sale results", columns: [{ label: "Figure" }, { label: "Value", numeric: true }],
+  return { type: "table", caption: reportText(f.lang, "saleResults"), columns: [{ label: reportText(f.lang, "figure") }, { label: reportText(f.lang, "value"), numeric: true }],
     rows: keys.map((key) => [f.metricOf("base", key).label, f.metric("base", key)]) };
 }
 
-const SALE_OPERATIONS: Block = { type: "paragraph", muted: true, text: "A deal that sells its units has no years of operations. Each month's costs, loans and closings are in the Excel export." };
+const SALE_OPERATIONS = (lang: "en" | "fr"): Block => ({ type: "paragraph", muted: true, text: reportText(lang, "saleOperations") });
 
 function gates(f: Formatter, r: RunResult): Block {
-  const label = { passed: "Passes", failed: "Fails", not_applicable: "Not applicable", not_evaluated: "Not evaluated" } as const;
+  const label = { passed: reportText(f.lang, "passes"), failed: reportText(f.lang, "fails"), not_applicable: reportText(f.lang, "notApplicable"), not_evaluated: reportText(f.lang, "notEvaluated") } as const;
   return {
     type: "table",
-    caption: "Committee gates",
-    columns: [{ label: "Gate" }, { label: "Needs", numeric: true }, { label: "Result", numeric: true }, { label: "Outcome" }],
+    caption: reportText(f.lang, "committeeGates"),
+    columns: [{ label: reportText(f.lang, "gate") }, { label: reportText(f.lang, "needs"), numeric: true }, { label: reportText(f.lang, "result"), numeric: true }, { label: reportText(f.lang, "outcome") }],
     rows: r.verdict.gates.map((g) => [
-      g.label,
-      "at least " + f.run(g.threshold, g.unit, `gate.${g.key}.threshold`),
-      g.actual === null ? (g.status === "not_applicable" ? "Not applicable" : "Not measured") : f.run(g.actual, g.unit, `gate.${g.key}.actual`),
+      f.gate(g.key, g.label),
+      reportText(f.lang, "atLeast") + f.run(g.threshold, g.unit, `gate.${g.key}.threshold`),
+      g.actual === null ? (g.status === "not_applicable" ? reportText(f.lang, "notApplicable") : reportText(f.lang, "notMeasured")) : f.run(g.actual, g.unit, `gate.${g.key}.actual`),
       label[g.status],
     ]),
   };
@@ -236,9 +240,9 @@ function stresses(f: Formatter, r: RunResult, held = false, sale = false, keys?:
   const read = keys ?? (sale ? ["profit_on_cost_for_sale", "margin_on_revenue", "equity_multiple"] : held ? ["sizing_dscr", "dcr_after_refinance", "unrealized_equity_multiple"] : ["sizing_dscr", "equity_multiple", "profit_on_cost"]);
   return {
     type: "table",
-    caption: "Stresses (each a full re-run of the model)",
-    columns: [{ label: "Scenario" }, ...read.map((k) => ({ label: k === "sizing_dscr" ? "Sizing DSCR" : f.metricOf("base", k).label, numeric: true }))],
-    rows: r.scenarios.map((s) => [f.ident(s.label, `policy.stress.${s.key}`), ...read.map((k) => f.metric(s.key, k))]),
+    caption: reportText(f.lang, "stresses"),
+    columns: [{ label: reportText(f.lang, "scenario") }, ...read.map((k) => ({ label: k === "sizing_dscr" ? reportText(f.lang, "sizingDscr") : f.metricOf("base", k).label, numeric: true }))],
+    rows: r.scenarios.map((s) => [f.ident(f.stress(s.key, s.label), `policy.stress.${s.key}`), ...read.map((k) => f.metric(s.key, k))]),
     strong: [r.scenarios.length - 1],
   };
 }
@@ -246,7 +250,7 @@ function stresses(f: Formatter, r: RunResult, held = false, sale = false, keys?:
 function annual(f: Formatter, r: RunResult, withCoverage: boolean): Block {
   const rows = r.annual.map((y) => {
     const base = [
-      y.year === 0 ? "Before stabilization" : f.ident(`Year ${y.year}`, `annual.${y.year}.label`),
+      y.year === 0 ? reportText(f.lang, "beforeStabilization") : f.ident(reportText(f.lang, "year", String(y.year)), `annual.${y.year}.label`),
       f.run(y.egi, "$", `annual.${y.year}.egi`),
       f.run(y.opex, "$", `annual.${y.year}.opex`),
       f.run(y.noi, "$", `annual.${y.year}.noi`),
@@ -256,22 +260,22 @@ function annual(f: Formatter, r: RunResult, withCoverage: boolean): Block {
     if (withCoverage) {
       base.push(
         y.year === 0 || y.sizingDebtService <= 0
-          ? "Not applicable"
+          ? reportText(f.lang, "notApplicable")
           : f.derived(y.noi / y.sizingDebtService, "x", `annual.${y.year}.noi / annual.${y.year}.sizingDebtService`),
       );
     }
     return base;
   });
   const columns = [
-    { label: "Period" },
-    { label: "EGI", numeric: true },
-    { label: "Operating costs", numeric: true },
-    { label: "NOI", numeric: true },
-    { label: "Debt service", numeric: true },
-    { label: "Cash flow", numeric: true },
+    { label: reportText(f.lang, "period") },
+    { label: reportText(f.lang, "egiShort"), numeric: true },
+    { label: reportText(f.lang, "operatingCosts"), numeric: true },
+    { label: reportText(f.lang, "noiShort"), numeric: true },
+    { label: reportText(f.lang, "debtService"), numeric: true },
+    { label: reportText(f.lang, "cashFlow"), numeric: true },
   ];
-  if (withCoverage) columns.push({ label: "Sizing DSCR", numeric: true });
-  return { type: "table", caption: "Annual cash flows", columns, rows };
+  if (withCoverage) columns.push({ label: reportText(f.lang, "sizingDscr"), numeric: true });
+  return { type: "table", caption: reportText(f.lang, "annual"), columns, rows };
 }
 
 function checks(f: Formatter, r: RunResult): Block {
@@ -287,25 +291,25 @@ type Assumption = ArtifactInput["assumptions"][number];
  * How an input was confirmed, in words; "" when it was approved the ordinary way. `id` prints the date or name.
  * A client's confirmation is dated, never named: every client of the deal can download the report (card 92).
  */
-export function confirmationLabel(a: Assumption, id: (text: string, ref: string) => string = (t) => t): string {
+export function confirmationLabel(a: Assumption, id: (text: string, ref: string) => string = (t) => t, lang: "en" | "fr" = "en"): string {
   if (a.sponsorStated && a.clientConfirmedAt) {
-    return `Stated by the sponsor, confirmed by the client on ${id(a.clientConfirmedAt.slice(0, 10), `clientConfirmedAt.${a.fieldKey}`)}, not independently confirmed`;
+    return reportText(lang, "clientConfirmed", id(a.clientConfirmedAt.slice(0, 10), `clientConfirmedAt.${a.fieldKey}`));
   }
-  if (a.sponsorStated) return "Stated by the sponsor, not independently confirmed";
-  if (a.confirmedByReview) return `Confirmed by Agir review on ${id((a.confirmedAt ?? "").slice(0, 10), `confirmedAt.${a.fieldKey}`)}`;
-  if (a.confirmedBy) return `Confirmed by ${id(a.confirmedBy, `confirmedBy.${a.fieldKey}`)}`;
+  if (a.sponsorStated) return reportText(lang, "sponsorStated");
+  if (a.confirmedByReview) return reportText(lang, "agirConfirmed", id((a.confirmedAt ?? "").slice(0, 10), `confirmedAt.${a.fieldKey}`));
+  if (a.confirmedBy) return reportText(lang, "confirmedBy", id(a.confirmedBy, `confirmedBy.${a.fieldKey}`));
   return "";
 }
 
 function inputRow(f: Formatter, a: Assumption): string[] {
-  const note = confirmationLabel(a, (t, ref) => f.ident(t, ref));
-  return [f.ident(a.itemKey ? `${a.label} (${a.itemKey})` : a.label, `field.${a.fieldKey}`), inputValue(f, a), f.ident(a.source, `source.${a.fieldKey}`) + (note ? ` · ${note}` : "")];
+  const note = confirmationLabel(a, (t, ref) => f.ident(t, ref), f.lang);
+  return [f.ident(a.itemKey ? `${f.field(a.fieldKey, a.label)} (${a.itemKey === "All units" ? reportText(f.lang, "allUnits") : a.itemKey})` : f.field(a.fieldKey, a.label), `field.${a.fieldKey}`), inputValue(f, a), f.ident(reportSource(f.lang, a.source), `source.${a.fieldKey}`) + (note ? ` · ${note}` : "")];
 }
 
-const INPUT_COLUMNS = [{ label: "Input" }, { label: "Value", numeric: true }, { label: "Source" }];
+const INPUT_COLUMNS = (lang: "en" | "fr") => [{ label: reportText(lang, "input") }, { label: reportText(lang, "value"), numeric: true }, { label: reportText(lang, "source") }];
 
 function inputsAppendix(f: Formatter, x: ArtifactInput): Block {
-  return { type: "table", caption: "Approved inputs and where each came from", columns: INPUT_COLUMNS, rows: x.assumptions.map((a) => inputRow(f, a)) };
+  return { type: "table", caption: reportText(f.lang, "approvedInputs"), columns: INPUT_COLUMNS(f.lang), rows: x.assumptions.map((a) => inputRow(f, a)) };
 }
 
 /** The inputs a sponsor stated and nobody else confirmed, up front; nothing when there are none. */
@@ -316,29 +320,29 @@ function sponsorStatedBlocks(f: Formatter, x: ArtifactInput): Block[] {
   const n = f.ident(String(stated.length), "sponsorStated.count");
   const m = f.ident(String(material), "materialInputs.count");
   const byClient = stated.filter((a) => a.clientConfirmedAt).length;
-  const client = byClient > 0 ? ` The client confirmed ${f.ident(String(byClient), "clientConfirmed.count")} of them; that is not an independent confirmation.` : "";
+  const client = byClient > 0 ? reportText(f.lang, "clientCount", f.ident(String(byClient), "clientConfirmed.count")) : "";
   return [
-    { type: "heading", text: "Stated by the sponsor, not independently confirmed" },
+    { type: "heading", text: reportText(f.lang, "sponsorStated") },
     {
       type: "paragraph",
-      text: `${n} of the ${m} material inputs this run used ${stated.length === 1 ? "was" : "were"} stated by the sponsor and not confirmed by anyone else. Check them before relying on this ${x.kind === "ic_memo" ? "memo" : (x.kind === "build_decision" || x.kind === "partner_memo") ? "report" : "package"}.${client}`,
+      text: reportText(f.lang, "sponsorSummary", n, m, stated.length === 1 ? "was" : "were", x.kind === "ic_memo" ? "memo" : (x.kind === "build_decision" || x.kind === "partner_memo") ? "report" : "package", client),
     },
-    { type: "table", columns: INPUT_COLUMNS, rows: stated.map((a) => inputRow(f, a)) },
+    { type: "table", columns: INPUT_COLUMNS(f.lang), rows: stated.map((a) => inputRow(f, a)) },
   ];
 }
 
 /** The one sentence for a line no document gave: a template, with no number. */
-export const notFoundSentence = (n: { label: string; detail?: string }) => `${n.label} \u2014 not found. The run treats this as: ${n.detail ?? "nothing"}.`;
+export const notFoundSentence = (n: { label: string; detail?: string }, lang: "en" | "fr" = "en") => reportText(lang, "missingSentence", n.label, n.detail ?? reportText(lang, "nothing"));
 
-function notFoundBlocks(x: ArtifactInput): Block[] {
+function notFoundBlocks(f: Formatter, x: ArtifactInput): Block[] {
   const list = x.notFound ?? [];
   if (list.length === 0) return [];
-  return [{ type: "heading", text: "Not found in the documents" }, ...list.map((n): Block => ({ type: "paragraph", text: notFoundSentence(n) }))];
+  return [{ type: "heading", text: reportText(x.lang ?? "en", "notFound") }, ...list.map((n): Block => ({ type: "paragraph", text: notFoundSentence({ ...n, label: f.lang === "fr" ? (n.itemKey ? `${f.field(n.fieldKey, n.label)} (${n.itemKey === "All units" ? reportText(f.lang, "allUnits") : n.itemKey})` : f.field(n.fieldKey, n.label)) : n.label, detail: f.lang === "fr" ? FR_ABSENT[n.fieldKey] ?? n.detail : n.detail }, f.lang) }))];
 }
 
-const STATE_WORDS = { out_of_range: "Out of range", no_effect: "No effect", not_monotonic: "Not monotonic" } as const;
-const DRIVER_NAME: Partial<Record<BreakevenRow["driver"], string>> = { pricePct: "Sale prices", absorptionPct: "Sales pace", presalesPts: "Presales", rentPct: "Rent", exitCapBps: "Exit cap rate", costPct: "Project cost", rateBps: "Loan interest rates", occupancyPts: "Stabilized occupancy" };
-const ECHO_NAME: Record<BreakevenEcho["key"], string> = { price: "Sale price", absorption: "Sales pace", presales: "Presold units", rent: "Rent", cost: "Project cost", exit_cap: "Exit cap rate", senior_rate: "Senior loan rate", mezzanine_rate: "Mezzanine loan rate", refinance_rate: "Refinance rate", occupancy: "Stabilized occupancy" };
+const STATE_WORDS = (lang: "en" | "fr") => ({ out_of_range: reportText(lang, "outOfRange"), no_effect: reportText(lang, "noEffect"), not_monotonic: reportText(lang, "notMonotonic") } as const);
+const DRIVER_NAME = (lang: "en" | "fr"): Partial<Record<BreakevenRow["driver"], string>> => ({ pricePct: reportText(lang, "salePrices"), absorptionPct: reportText(lang, "salesPace"), presalesPts: reportText(lang, "presales"), rentPct: reportText(lang, "rent"), exitCapBps: reportText(lang, "exitCap"), costPct: reportText(lang, "projectCost"), rateBps: reportText(lang, "loanRates"), occupancyPts: reportText(lang, "stabilizedOccupancy") });
+const ECHO_NAME = (lang: "en" | "fr"): Record<BreakevenEcho["key"], string> => ({ price: reportText(lang, "salePrice"), absorption: reportText(lang, "salesPace"), presales: reportText(lang, "presoldUnits"), rent: reportText(lang, "rent"), cost: reportText(lang, "projectCost"), exit_cap: reportText(lang, "exitCap"), senior_rate: reportText(lang, "seniorRate"), mezzanine_rate: reportText(lang, "mezzRate"), refinance_rate: reportText(lang, "refinanceRate"), occupancy: reportText(lang, "stabilizedOccupancy") });
 const ECHO_UNIT = { units: "units/mo", "$/unit/mo": "$/mo", "$/sf/yr": "$/sf", $: "$", "%": "%" } as const;
 
 /** Which way each break-even echo rounds to keep passing, and to what step, at the precision this report prints. */
@@ -374,24 +378,24 @@ function weakestStress(f: Formatter, r: RunResult, sale = false): Block[] {
   if (!w) return [];
   const gates = failed(w.key);
   const fails = gates.length
-    ? `It fails ${f.ident(String(gates.length), "stress.failedGates")} ${gates.length === 1 ? "gate" : "gates"}: ${gates.map((g) => g.label).join("; ")}.`
-    : "It fails no gate.";
-  return [{ type: "paragraph", text: `Weakest stress: ${f.ident(w.label, `policy.stress.${w.key}`)}. ${fails} Its ${sale ? "profit on cost" : "sizing DSCR"}: ${f.metric(w.key, metricKey)}.` }];
+    ? reportText(f.lang, "failsSome", f.ident(String(gates.length), "stress.failedGates"), gates.length === 1 ? "gate" : "gates", gates.map((g) => f.gate(g.key, g.label)).join("; "))
+    : reportText(f.lang, "failsNone");
+  return [{ type: "paragraph", text: reportText(f.lang, "weakest", f.ident(f.stress(w.key, w.label), `policy.stress.${w.key}`), fails, reportText(f.lang, sale ? "profitOnCostPhrase" : "sizingDscrPhrase"), f.metric(w.key, metricKey)) }];
 }
 
 /** For each failing gate, the one input that would make it pass, from `breakeven()` over the run's stored input and policy. */
 function changeTheAnswer(f: Formatter, x: ArtifactInput): Block[] {
-  const heading: Block = { type: "heading", text: "What would change the answer" };
+  const heading: Block = { type: "heading", text: reportText(f.lang, "changeAnswer") };
   const failing = x.result.verdict.gates.filter((g) => g.status === "failed");
   const hardFail: Block[] = x.result.verdict.hardFailReasons.length > 0
-    ? [{ type: "paragraph", text: "This run fails a check that no gate can offset. Passing the gates alone would not change the verdict while it stands." }] : [];
+    ? [{ type: "paragraph", text: reportText(f.lang, "hardFail") }] : [];
   if (x.result.verdict.code === "APPROVE" || (failing.length === 0 && hardFail.length === 0)) return [];
-  if (x.run.engineVersion !== ENGINE_VERSION) return [heading, { type: "paragraph", muted: true, text: "Not shown: this run was made by an earlier engine." }, ...hardFail];
+  if (x.run.engineVersion !== ENGINE_VERSION) return [heading, { type: "paragraph", muted: true, text: reportText(f.lang, "earlierEngine") }, ...hardFail];
   const intro: Block[] = [heading];
   // The run stores its policy's hash: a policy edited under the same version name is a different policy.
   if (x.run.policyHash !== createHash("sha256").update(canonicalJson(x.policy)).digest("hex")) {
     // Break-evens worked out under another policy would not be this run's, so none are shown.
-    return [heading, { type: "paragraph", muted: true, text: "Not shown: this run was made under a different policy." }, ...hardFail];
+    return [heading, { type: "paragraph", muted: true, text: reportText(f.lang, "differentPolicy") }, ...hardFail];
   }
   intro.push(...hardFail);
   if (failing.length === 0) return intro;
@@ -400,35 +404,35 @@ function changeTheAnswer(f: Formatter, x: ArtifactInput): Block[] {
   let ratesTogether = false;
   for (const g of failing) {
     const needs = f.run(g.threshold, g.unit, `gate.${g.key}.threshold`);
-    const has = g.actual === null ? "Not measured" : f.run(g.actual, g.unit, `gate.${g.key}.actual`);
+    const has = g.actual === null ? reportText(f.lang, "notMeasured") : f.run(g.actual, g.unit, `gate.${g.key}.actual`);
     // The gate's name, need and result print on its first row only.
     let first = true;
     const add = (cells: string[]) => {
-      body.push([...(first ? [g.label, needs, has] : ["", "", ""]), ...cells]);
+      body.push([...(first ? [f.gate(g.key, g.label), needs, has] : ["", "", ""]), ...cells]);
       first = false;
     };
     for (const row of rows.filter((k) => k.gate === g.key)) {
       if (row.state !== "value") {
-        add([DRIVER_NAME[row.driver] ?? row.driver, "\u2014", STATE_WORDS[row.state]]);
+        add([DRIVER_NAME(f.lang)[row.driver] ?? row.driver, "\u2014", STATE_WORDS(f.lang)[row.state]]);
         continue;
       }
       if (row.driver === "rentPct" && row.to.length > 1) {
         // Rents move together by one share: the row says so, and the engine's own shock is the figure.
-        add([`Rent, all ${f.ident(String(row.to.length), `breakeven.${g.key}.rent.count`)} unit types (same share)`, "\u2014", `+${f.run(row.shock, "%", `breakeven.${g.key}.rent.shock`)}`]);
+        add([reportText(f.lang, "rentTogether", f.ident(String(row.to.length), `breakeven.${g.key}.rent.count`)), "\u2014", `+${f.run(row.shock, "%", `breakeven.${g.key}.rent.shock`)}`]);
         continue;
       }
       if (row.driver === "pricePct" && row.to.length > 1) {
-        add([`Sale prices, all ${f.ident(String(row.to.length), `breakeven.${g.key}.price.count`)} unit types (same share)`, "—", `+${f.run(row.shock, "%", `breakeven.${g.key}.price.shock`)}`]);
+        add([reportText(f.lang, "priceTogether", f.ident(String(row.to.length), `breakeven.${g.key}.price.count`)), "—", `+${f.run(row.shock, "%", `breakeven.${g.key}.price.shock`)}`]);
         continue;
       }
       const allRates = row.driver === "rateBps" && row.to.length > 1;
       if (allRates) {
-        add([`Loan interest rates, all ${f.ident(String(row.to.length), `breakeven.${g.key}.rate.count`)} together (same move)`, "\u2014", `${row.shock! > 0 ? "+" : ""}${f.run(row.shock, "bps", `breakeven.${g.key}.rate.shock`)}`]);
+        add([reportText(f.lang, "rateTogether", f.ident(String(row.to.length), `breakeven.${g.key}.rate.count`)), "\u2014", `${row.shock! > 0 ? "+" : ""}${f.run(row.shock, "bps", `breakeven.${g.key}.rate.shock`)}`]);
         ratesTogether = true;
       }
       for (const e of row.to) {
         const ref = `breakeven.${g.key}.${e.key}${e.item ? "|" + e.item : ""}`;
-        const name = (e.item ? `${ECHO_NAME[e.key]}, ${e.item}` : ECHO_NAME[e.key]) + (allRates ? ", in the same move" : "");
+        const name = (e.item ? `${ECHO_NAME(f.lang)[e.key]}, ${e.item}` : ECHO_NAME(f.lang)[e.key]) + (allRates ? reportText(f.lang, "sameMove") : "");
         const unit = ECHO_UNIT[e.unit];
         const [dir, step] = PASSING_ROUND[e.key](e.unit);
         add([f.ident(name, `${ref}.label`), f.run(e.from, unit, `${ref}.from`), f.derived(roundToward(e.to, dir, step), unit, `${dir > 0 ? "ceil" : "floor"}(${ref}.to, ${step})`)]);
@@ -439,10 +443,10 @@ function changeTheAnswer(f: Formatter, x: ArtifactInput): Block[] {
     ...intro,
     {
       type: "table",
-      columns: [{ label: "Gate" }, { label: "Needs", numeric: true }, { label: "This run", numeric: true }, { label: "Input moved" }, { label: "In this run", numeric: true }, { label: "Passes at", numeric: true }],
+      columns: [{ label: reportText(f.lang, "gate") }, { label: reportText(f.lang, "needs"), numeric: true }, { label: reportText(f.lang, "thisRun"), numeric: true }, { label: reportText(f.lang, "inputMoved") }, { label: reportText(f.lang, "inThisRun"), numeric: true }, { label: reportText(f.lang, "passesAt"), numeric: true }],
       rows: body,
     },
-    { type: "paragraph", muted: true, text: "One input is moved at a time. Everything else is held." + (ratesTogether ? " Loan interest rates move together by the same amount." : "") },
+    { type: "paragraph", muted: true, text: reportText(f.lang, "oneInput") + (ratesTogether ? reportText(f.lang, "ratesTogether") : "") },
   ];
 }
 
@@ -470,57 +474,57 @@ function heldPartnerBlocks(f: Formatter, x: ArtifactInput): Block[] {
   const metricItem = (key: string) => ({ label: f.metricOf("base", key).label, value: f.metric("base", key) });
   const blocks: Block[] = [{ type: "stats", items: [
     metricItem("unrealized_equity_multiple"), metricItem("unrealized_equity_irr"),
-    { label: "LP IRR (unrealized, not a sale)", value: lpIrr },
-    { label: "GP IRR (unrealized, not a sale)", value: gpIrr },
+    { label: reportText(f.lang, "lpIrrHeld"), value: lpIrr },
+    { label: reportText(f.lang, "gpIrrHeld"), value: gpIrr },
   ] }];
-  blocks.push({ type: "table", caption: "Partnership terms", columns: [{ label: "Term" }, { label: "Value", numeric: true }],
+  blocks.push({ type: "table", caption: reportText(f.lang, "partnerTerms"), columns: [{ label: reportText(f.lang, "term") }, { label: reportText(f.lang, "value"), numeric: true }],
     rows: [["lp_share_pct", terms.lpSharePct], ["preferred_return_pct", terms.preferredReturnPct], ["gp_promote_pct", terms.gpPromotePct]]
-      .map(([key, value]) => [FIELD_BY_KEY.get(String(key))!.label, f.input(Number(value), "%", String(key))]),
+      .map(([key, value]) => [f.field(String(key), FIELD_BY_KEY.get(String(key))!.label), f.input(Number(value), "%", String(key))]),
   });
   const lp = totals(w.lp), gp = totals(w.gp);
   const has = (key: string) => r.scenarios.find((s) => s.key === "base")!.metrics.some((m) => m.key === key);
   const capital = ([["LP", lp, lpIrr], ["GP", gp, gpIrr]] as const).map(([label, cash, partnerIrr]) => [
-    f.ident(label, `waterfall.${label}.label`),
+    f.ident(reportText(f.lang, label === "LP" ? "lp" : "gp"), `waterfall.${label}.label`),
     f.derived(cash.contributed, "$", `sum(-waterfall.${label}.negativeFlows)`),
     f.derived(cash.distributed, "$", `sum(waterfall.${label}.positiveFlows)`),
     f.derived(cash.contributed > 0 ? cash.distributed / cash.contributed : null, "x", `waterfall.${label}.distributed / waterfall.${label}.contributed`),
     partnerIrr,
   ]);
-  capital.push(["Total",
+  capital.push([reportText(f.lang, "total"),
     has("equity_contributed") ? f.metric("base", "equity_contributed") : f.derived(lp.contributed + gp.contributed, "$", "waterfall.LP.contributed + waterfall.GP.contributed"),
     has("equity_distributed") ? f.metric("base", "equity_distributed") : f.derived(lp.distributed + gp.distributed, "$", "waterfall.LP.distributed + waterfall.GP.distributed"),
     f.metric("base", "unrealized_equity_multiple"), f.metric("base", "unrealized_equity_irr"),
   ]);
-  capital.push(["GP promote (unrealized, not a sale)", "", f.derived(w.promote, "$", "waterfall.promote"), "", ""]);
-  blocks.push({ type: "table", caption: "Capital and distributions, with the stated value (unrealized, not a sale)",
-    columns: [{ label: "Partner" }, { label: "Contributed", numeric: true }, { label: "Distributed", numeric: true }, { label: "Multiple", numeric: true }, { label: "IRR", numeric: true }],
+  capital.push([reportText(f.lang, "gpPromoteHeld"), "", f.derived(w.promote, "$", "waterfall.promote"), "", ""]);
+  blocks.push({ type: "table", caption: reportText(f.lang, "capitalHeld"),
+    columns: [{ label: reportText(f.lang, "partner") }, { label: reportText(f.lang, "contributed"), numeric: true }, { label: reportText(f.lang, "distributed"), numeric: true }, { label: reportText(f.lang, "multiple"), numeric: true }, { label: reportText(f.lang, "irr"), numeric: true }],
     rows: capital,
   });
   const plp = totals(paid.lp), pgp = totals(paid.gp);
   const paidRows = ([["LP", plp], ["GP", pgp]] as const).map(([label, cash]) => [
-    f.ident(label, `paid.${label}.label`),
+    f.ident(reportText(f.lang, label === "LP" ? "lp" : "gp"), `paid.${label}.label`),
     f.derived(cash.contributed, "$", `sum(-paid.${label}.negativeFlows)`),
     f.derived(cash.distributed, "$", `sum(paid.${label}.positiveFlows)`),
     f.derived(cash.contributed > 0 ? cash.distributed / cash.contributed : null, "x", `paid.${label}.distributed / paid.${label}.contributed`),
   ]);
   const contributed = plp.contributed + pgp.contributed, paidOut = plp.distributed + pgp.distributed;
-  paidRows.push(["Total",
+  paidRows.push([reportText(f.lang, "total"),
     f.derived(contributed, "$", "paid.LP.contributed + paid.GP.contributed"),
     f.derived(paidOut, "$", "paid.LP.distributed + paid.GP.distributed"),
     f.derived(contributed > 0 ? paidOut / contributed : null, "x", "paid.distributed / paid.contributed"),
   ]);
-  paidRows.push(["GP promote paid", "", f.derived(paid.promote, "$", "paid.promote"), ""]);
-  blocks.push({ type: "table", caption: "Cash paid out before the stated value",
-    columns: [{ label: "Partner" }, { label: "Contributed", numeric: true }, { label: "Paid out", numeric: true }, { label: "Paid out / contributed", numeric: true }],
+  paidRows.push([reportText(f.lang, "gpPromotePaid"), "", f.derived(paid.promote, "$", "paid.promote"), ""]);
+  blocks.push({ type: "table", caption: reportText(f.lang, "paidCapital"),
+    columns: [{ label: reportText(f.lang, "partner") }, { label: reportText(f.lang, "contributed"), numeric: true }, { label: reportText(f.lang, "paidOut"), numeric: true }, { label: reportText(f.lang, "paidMultiple"), numeric: true }],
     rows: paidRows,
   });
   blocks.push(
-    { type: "paragraph", muted: true, text: "Distributions go pro rata until the LP has received its capital and its preferred return, compounded annually on what is unreturned. After that the GP takes its promote share of each dollar and the rest is split pro rata." },
-    { type: "paragraph", muted: true, text: "Nothing is sold. The stated value is final-year NOI over the exit cap rate, less the debt outstanding; returns that include it are unrealized. Cash paid out is the operating and refinance cash only." },
+    { type: "paragraph", muted: true, text: reportText(f.lang, "waterfall") },
+    { type: "paragraph", muted: true, text: reportText(f.lang, "heldExplanation") },
     sourcesAndUses(f, x),
     stresses(f, r, true, false, ["dcr_after_refinance", "unrealized_equity_multiple", "unrealized_equity_irr"]),
-    ...notFoundBlocks(x),
-    { type: "paragraph", muted: true, text: "Every input and its source is listed in the IC memo and the lender package." },
+    ...notFoundBlocks(f, x),
+    { type: "paragraph", muted: true, text: reportText(f.lang, "inputSources") },
   );
   return blocks;
 }
@@ -531,14 +535,14 @@ export function buildModel(x: ArtifactInput): DocModel {
     const heldSplit = isHeld(x) && x.input.waterfall !== undefined;
     if (!heldSplit && (!lp || lp.status === "NOT_APPLICABLE")) throw new PartnerMemoUnavailableError();
   }
-  const f = new Formatter(x.result);
+  const f = new Formatter(x.result, x.lang ?? "en", x.policy.maxLtcPct);
   const r = x.result;
   const date = f.ident(x.run.createdAt.slice(0, 10), "run.date");
-  const runLabel = f.ident(`Run ${x.run.runNumber}`, "run.number");
+  const runLabel = f.ident(reportText(f.lang, "run", String(x.run.runNumber)), "run.number");
   const verdict: Block = {
     type: "verdict",
     code: r.verdict.code,
-    label: VERDICT_LABEL[r.verdict.code],
+    label: VERDICT_LABEL(f.lang)[r.verdict.code],
     headline: f.text(r.verdict.headline, "verdict.headline"),
     explanation: f.text(r.verdict.explanation, "verdict.explanation"),
   };
@@ -552,22 +556,22 @@ export function buildModel(x: ArtifactInput): DocModel {
       items: sale ? saleStats(f) : held
         ? heldStats(f)
         : [
-            { label: "Total cost", value: f.metric("base", "total_development_cost") },
-            { label: "Yield on cost", value: f.metric("base", "yield_on_cost") },
-            { label: "Sizing DSCR", value: f.metric("base", "sizing_dscr") },
-            { label: "Equity multiple", value: f.metric("base", "equity_multiple") },
-            { label: "Equity IRR", value: f.metric("base", "equity_irr") },
+            { label: reportText(f.lang, "totalCost"), value: f.metric("base", "total_development_cost") },
+            { label: reportText(f.lang, "yieldOnCost"), value: f.metric("base", "yield_on_cost") },
+            { label: reportText(f.lang, "sizingDscr"), value: f.metric("base", "sizing_dscr") },
+            { label: reportText(f.lang, "equityMultiple"), value: f.metric("base", "equity_multiple") },
+            { label: reportText(f.lang, "equityIrr"), value: f.metric("base", "equity_irr") },
           ],
     });
     if (x.decision) {
-      blocks.push({ type: "heading", text: "Committee decision" });
+      blocks.push({ type: "heading", text: reportText(f.lang, "committeeDecision") });
       // Recorded human text: printed as written and listed in the manifest as such.
-      blocks.push({ type: "paragraph", text: `${x.decision.decision.replace(/_/g, " ")}: ${f.ident(x.decision.rationale, "decision.rationale")}` });
-      if (x.decision.conditions) blocks.push({ type: "paragraph", text: `Conditions: ${f.ident(x.decision.conditions, "decision.conditions")}` });
+      blocks.push({ type: "paragraph", text: `${f.lang === "fr" ? ({ approve: reportText("fr", "approve"), approve_with_conditions: reportText("fr", "approveConditions"), reject: reportText("fr", "reject"), return_to_underwriting: reportText("fr", "returnToUnderwriting") }[x.decision.decision] ?? x.decision.decision) : x.decision.decision.replace(/_/g, " ")}: ${f.ident(x.decision.rationale, "decision.rationale")}` });
+      if (x.decision.conditions) blocks.push({ type: "paragraph", text: reportText(f.lang, "conditions", f.ident(x.decision.conditions, "decision.conditions")) });
     }
-    blocks.push(sourcesAndUses(f, x), ...mezzAccrual(f, r), ...(sale ? [unitSales(f, x), saleResults(f, x), SALE_OPERATIONS] : [revenueProgram(f, x), operations(f, x)]), gates(f, r), stresses(f, r, held, sale), ...(sale ? [] : [annual(f, r, false)]));
-    blocks.push({ type: "heading", text: "Checks" }, checks(f, r));
-    blocks.push(...notFoundBlocks(x), inputsAppendix(f, x));
+    blocks.push(sourcesAndUses(f, x), ...mezzAccrual(f, r), ...(sale ? [unitSales(f, x), saleResults(f, x), SALE_OPERATIONS(f.lang)] : [revenueProgram(f, x), operations(f, x)]), gates(f, r), stresses(f, r, held, sale), ...(sale ? [] : [annual(f, r, false)]));
+    blocks.push({ type: "heading", text: reportText(f.lang, "checks") }, checks(f, r));
+    blocks.push(...notFoundBlocks(f, x), inputsAppendix(f, x));
   } else if (x.kind === "partner_memo" && held) {
     blocks.push(verdict, ...draftLine(x), ...sponsorStatedBlocks(f, x), ...heldPartnerBlocks(f, x));
   } else if (x.kind === "partner_memo") {
@@ -576,9 +580,9 @@ export function buildModel(x: ArtifactInput): DocModel {
       label: f.metricOf("base", key).label, value: f.metric("base", key),
     })) });
     const terms = x.input.waterfall!;
-    blocks.push({ type: "table", caption: "Partnership terms", columns: [{ label: "Term" }, { label: "Value", numeric: true }],
+    blocks.push({ type: "table", caption: reportText(f.lang, "partnerTerms"), columns: [{ label: reportText(f.lang, "term") }, { label: reportText(f.lang, "value"), numeric: true }],
       rows: [["lp_share_pct", terms.lpSharePct], ["preferred_return_pct", terms.preferredReturnPct], ["gp_promote_pct", terms.gpPromotePct]]
-        .map(([key, value]) => [FIELD_BY_KEY.get(String(key))!.label, f.input(Number(value), "%", String(key))]),
+        .map(([key, value]) => [f.field(String(key), FIELD_BY_KEY.get(String(key))!.label), f.input(Number(value), "%", String(key))]),
     });
     const w = runWaterfall(r.equityFlows, terms);
     const totals = (flows: { amount: number }[]) => ({
@@ -587,27 +591,27 @@ export function buildModel(x: ArtifactInput): DocModel {
     });
     const lp = totals(w.lp), gp = totals(w.gp);
     const partnerRows = ([["LP", lp, "lp_irr"], ["GP", gp, "gp_irr"]] as const).map(([label, cash, irr]) => [
-      f.ident(label, `waterfall.${label}.label`),
+      f.ident(reportText(f.lang, label === "LP" ? "lp" : "gp"), `waterfall.${label}.label`),
       f.derived(cash.contributed, "$", `sum(-waterfall.${label}.negativeFlows)`),
       f.derived(cash.distributed, "$", `sum(waterfall.${label}.positiveFlows)`),
       f.derived(cash.contributed > 0 ? cash.distributed / cash.contributed : null, "x", `waterfall.${label}.distributed / waterfall.${label}.contributed`),
       f.metric("base", irr),
     ]);
     const has = (key: string) => r.scenarios.find((s) => s.key === "base")!.metrics.some((m) => m.key === key);
-    partnerRows.push(["Total",
+    partnerRows.push([reportText(f.lang, "total"),
       has("equity_contributed") ? f.metric("base", "equity_contributed") : f.derived(lp.contributed + gp.contributed, "$", "waterfall.LP.contributed + waterfall.GP.contributed"),
       has("equity_distributed") ? f.metric("base", "equity_distributed") : f.derived(lp.distributed + gp.distributed, "$", "waterfall.LP.distributed + waterfall.GP.distributed"),
       f.metric("base", "equity_multiple"), f.metric("base", "equity_irr"),
     ]);
-    partnerRows.push(["GP promote", "", f.metric("base", "gp_promote"), "", ""]);
-    blocks.push({ type: "table", caption: "Capital and distributions",
-      columns: [{ label: "Partner" }, { label: "Contributed", numeric: true }, { label: "Distributed", numeric: true }, { label: "Multiple", numeric: true }, { label: "IRR", numeric: true }],
+    partnerRows.push([reportText(f.lang, "gpPromote"), "", f.metric("base", "gp_promote"), "", ""]);
+    blocks.push({ type: "table", caption: reportText(f.lang, "capital"),
+      columns: [{ label: reportText(f.lang, "partner") }, { label: reportText(f.lang, "contributed"), numeric: true }, { label: reportText(f.lang, "distributed"), numeric: true }, { label: reportText(f.lang, "multiple"), numeric: true }, { label: reportText(f.lang, "irr"), numeric: true }],
       rows: partnerRows,
     });
-    blocks.push({ type: "paragraph", muted: true, text: "Distributions go pro rata until the LP has received its capital and its preferred return, compounded annually on what is unreturned. After that the GP takes its promote share of each dollar and the rest is split pro rata." });
+    blocks.push({ type: "paragraph", muted: true, text: reportText(f.lang, "waterfall") });
     blocks.push(sourcesAndUses(f, x), stresses(f, r, false, false, ["equity_multiple", "lp_irr", "gp_irr"]));
-    if (sale) blocks.push(SALE_OPERATIONS);
-    blocks.push(...notFoundBlocks(x), { type: "paragraph", muted: true, text: "Every input and its source is listed in the IC memo and the lender package." });
+    if (sale) blocks.push(SALE_OPERATIONS(f.lang));
+    blocks.push(...notFoundBlocks(f, x), { type: "paragraph", muted: true, text: reportText(f.lang, "inputSources") });
   } else if (x.kind === "build_decision") {
     blocks.push(verdict, ...draftLine(x), ...sponsorStatedBlocks(f, x));
     blocks.push({
@@ -615,13 +619,13 @@ export function buildModel(x: ArtifactInput): DocModel {
       items: sale ? saleStats(f, false) : held
         ? [
             ...heldStats(f, false),
-            { label: "Yield on cost", value: f.metric("base", "yield_on_cost") },
-            { label: "Sizing DSCR (weakest year)", value: f.metric("base", "sizing_dscr") },
+            { label: reportText(f.lang, "yieldOnCost"), value: f.metric("base", "yield_on_cost") },
+            { label: reportText(f.lang, "sizingWorst"), value: f.metric("base", "sizing_dscr") },
           ]
         : [
-            { label: "Yield on cost", value: f.metric("base", "yield_on_cost") },
-            { label: "Sizing DSCR (weakest year)", value: f.metric("base", "sizing_dscr") },
-            { label: "Equity multiple", value: f.metric("base", "equity_multiple") },
+            { label: reportText(f.lang, "yieldOnCost"), value: f.metric("base", "yield_on_cost") },
+            { label: reportText(f.lang, "sizingWorst"), value: f.metric("base", "sizing_dscr") },
+            { label: reportText(f.lang, "equityMultiple"), value: f.metric("base", "equity_multiple") },
           ],
     });
     blocks.push(...weakestStress(f, r, sale));
@@ -630,7 +634,7 @@ export function buildModel(x: ArtifactInput): DocModel {
     if (r.verdict.code !== "APPROVE" && r.verdict.hardFailReasons.length > 0 && !r.verdict.gates.some((g) => g.status === "failed")) {
       blocks.push(stresses(f, r, held, sale));
     }
-    blocks.push(...notFoundBlocks(x), { type: "paragraph", muted: true, text: "Every input and its source is listed in the IC memo and the lender package." });
+    blocks.push(...notFoundBlocks(f, x), { type: "paragraph", muted: true, text: reportText(f.lang, "inputSources") });
   } else {
     blocks.push(verdict, ...draftLine(x), ...sponsorStatedBlocks(f, x));
     if (held) blocks.push({ type: "stats", items: heldStats(f) });
@@ -638,59 +642,61 @@ export function buildModel(x: ArtifactInput): DocModel {
     const debtRows: string[][] = [];
     if (i.senior.amount > 0) {
       debtRows.push(
-        ["Senior loan", f.input(i.senior.amount, "$", "senior_loan_amount")],
-        ["Senior rate", f.input(i.senior.ratePct, "%", "senior_rate_pct")],
+        [reportText(f.lang, "senior"), f.input(i.senior.amount, "$", "senior_loan_amount")],
+        [reportText(f.lang, "seniorRateShort"), f.input(i.senior.ratePct, "%", "senior_rate_pct")],
         ...(sale ? [] : [
-          ...(i.senior.amortYears === undefined ? [] : [["Amortization", f.input(i.senior.amortYears, "years", "senior_amort_years")]]),
-          ["Interest-only period", f.input(i.senior.ioMonths, "months", "senior_io_months")],
+          ...(i.senior.amortYears === undefined ? [] : [[reportText(f.lang, "amortization"), f.input(i.senior.amortYears, "years", "senior_amort_years")]]),
+          [reportText(f.lang, "ioPeriod"), f.input(i.senior.ioMonths, "months", "senior_io_months")],
         ]),
       );
     }
     if (i.mezzanine && i.mezzanine.amount > 0) {
-      debtRows.push(["Mezzanine loan", f.input(i.mezzanine.amount, "$", "mezz_loan_amount")], ["Mezzanine rate", f.input(i.mezzanine.ratePct, "%", "mezz_rate_pct")], ["Mezzanine interest accrued above commitment", f.metric("base", "mezz_interest_accrued")]);
+      debtRows.push([reportText(f.lang, "mezz"), f.input(i.mezzanine.amount, "$", "mezz_loan_amount")], [reportText(f.lang, "mezzRateShort"), f.input(i.mezzanine.ratePct, "%", "mezz_rate_pct")], [reportText(f.lang, "mezzExcess"), f.metric("base", "mezz_interest_accrued")]);
     }
-    debtRows.push(["Loan to cost", f.metric("base", "loan_to_cost")]);
+    debtRows.push([reportText(f.lang, "ltc"), f.metric("base", "loan_to_cost")]);
     if (sale) {
       if (i.forSale!.presaleThresholdPct !== undefined) debtRows.push(
-        [FIELD_BY_KEY.get("senior_presale_threshold_pct")!.label, f.input(i.forSale!.presaleThresholdPct, "%", "senior_presale_threshold_pct")],
-        [FIELD_BY_KEY.get("presold_units_pct")!.label, f.input(i.forSale!.presoldPct, "%", "presold_units_pct")],
+        [f.field("senior_presale_threshold_pct", FIELD_BY_KEY.get("senior_presale_threshold_pct")!.label), f.input(i.forSale!.presaleThresholdPct, "%", "senior_presale_threshold_pct")],
+        [f.field("presold_units_pct", FIELD_BY_KEY.get("presold_units_pct")!.label), f.input(i.forSale!.presoldPct, "%", "presold_units_pct")],
       );
       for (const key of ["interest_after_completion", "senior_balance_at_completion", ...(i.mezzanine && i.mezzanine.amount > 0 ? ["mezz_balance_at_completion"] : [])]) {
         debtRows.push([f.metricOf("base", key).label, f.metric("base", key)]);
       }
     } else debtRows.push(
-      ["Debt yield", f.metric("base", "debt_yield")],
-      ["Sizing DSCR (weakest year)", f.metric("base", "sizing_dscr")],
-      ["Contractual DSCR (weakest year)", f.metric("base", "contractual_dscr")],
-      ["Interest-only DSCR (year 1)", f.metric("base", "io_dscr_year1")],
-      ["Cumulative cash shortfall after stabilization", f.metric("base", "cumulative_cash_shortfall")],
-      ["Break-even occupancy", f.metric("base", "break_even_occupancy")],
+      [reportText(f.lang, "debtYield"), f.metric("base", "debt_yield")],
+      [reportText(f.lang, "sizingWorst"), f.metric("base", "sizing_dscr")],
+      [reportText(f.lang, "contractualWorst"), f.metric("base", "contractual_dscr")],
+      [reportText(f.lang, "ioCoverage"), f.metric("base", "io_dscr_year1")],
+      [reportText(f.lang, "cashShortfall"), f.metric("base", "cumulative_cash_shortfall")],
+      [reportText(f.lang, "breakEvenOccupancy"), f.metric("base", "break_even_occupancy")],
     );
     const refinanceDcr = r.verdict.gates.find((g) => g.key === "dcr_after_refinance");
-    if (refinanceDcr) debtRows.push(["Coverage after refinance (DCR), minimum", f.run(refinanceDcr.threshold, refinanceDcr.unit, "gate.dcr_after_refinance.threshold")]);
-    blocks.push({ type: "table", caption: sale ? "Debt" : "Debt and coverage", columns: [{ label: "Term" }, { label: "Value", numeric: true }], rows: debtRows });
+    if (refinanceDcr) debtRows.push([reportText(f.lang, "refiCoverageMin"), f.run(refinanceDcr.threshold, refinanceDcr.unit, "gate.dcr_after_refinance.threshold")]);
+    blocks.push({ type: "table", caption: sale ? reportText(f.lang, "debt") : reportText(f.lang, "debtCoverage"), columns: [{ label: reportText(f.lang, "term") }, { label: reportText(f.lang, "value"), numeric: true }], rows: debtRows });
     // Beside the refinance loan: the premium is added to it, not paid in cash.
     if (i.refinance?.insurancePremiumPct !== undefined) {
-      blocks.push({ type: "paragraph", text: `Mortgage insurance premium: ${f.input(i.refinance.insurancePremiumPct, "%", "refinance_insurance_premium_pct")} (${f.metric("base", "refinance_premium_added")} added to the loan)` });
+      blocks.push({ type: "paragraph", text: reportText(f.lang, "premium", f.input(i.refinance.insurancePremiumPct, "%", "refinance_insurance_premium_pct"), f.metric("base", "refinance_premium_added")) });
     }
-    blocks.push(sourcesAndUses(f, x), ...mezzAccrual(f, r), ...(sale ? [unitSales(f, x), saleResults(f, x), SALE_OPERATIONS] : [operations(f, x), annual(f, r, true)]), stresses(f, r, held, sale));
-    blocks.push({ type: "heading", text: "Checks" }, checks(f, r));
-    blocks.push(...notFoundBlocks(x), inputsAppendix(f, x));
+    blocks.push(sourcesAndUses(f, x), ...mezzAccrual(f, r), ...(sale ? [unitSales(f, x), saleResults(f, x), SALE_OPERATIONS(f.lang)] : [operations(f, x), annual(f, r, true)]), stresses(f, r, held, sale));
+    blocks.push({ type: "heading", text: reportText(f.lang, "checks") }, checks(f, r));
+    blocks.push(...notFoundBlocks(f, x), inputsAppendix(f, x));
   }
   const footer =
-    `Every figure traces to an approved input or to ${runLabel} of this deal. ` +
-    `Engine ${f.ident(x.run.engineVersion, "run.engine")}, ${f.ident(x.run.policyVersion, "run.policy")}. ` +
-    `Inputs ${f.ident(x.run.inputHash.slice(0, 16), "run.inputHash")}, result ${f.ident(x.run.resultHash.slice(0, 16), "run.resultHash")}.`;
+    reportText(f.lang, "footerTrace", runLabel) +
+    reportText(f.lang, "footerEngine", f.ident(x.run.engineVersion, "run.engine"), f.ident(x.run.policyVersion, "run.policy")) +
+    reportText(f.lang, "footerHashes", f.ident(x.run.inputHash.slice(0, 16), "run.inputHash"), f.ident(x.run.resultHash.slice(0, 16), "run.resultHash"));
   // Every amount prints with "$"; the deal says once which dollar that is.
-  const currency = x.deal.currency ? `All amounts in ${CURRENCY_NAMES[x.deal.currency][0]} (${x.deal.currency})` : "Currency not stated";
+  const currency = x.deal.currency ? reportText(f.lang, "currency", CURRENCY_NAMES[x.deal.currency][f.lang === "fr" ? 1 : 0], x.deal.currency) : reportText(f.lang, "currencyMissing");
   const logo = x.kind === "lender_package" ? x.broker?.logo : undefined;
   // At most 48 px high and 240 px wide, keeping its aspect.
   const scale = logo ? Math.min(1, 48 / logo.height, 240 / logo.width) : 1;
   return {
-    ...(logo ? { brand: { preparedBy: `Prepared by ${f.ident(x.broker!.name, "broker.name")}`,
+    lang: f.lang,
+    ...(f.lang === "fr" ? { banner: reportText("fr", "banner") } : {}),
+    ...(logo ? { brand: { preparedBy: reportText(f.lang, "preparedBy", f.ident(x.broker!.name, "broker.name")),
       logo: { ...logo, width: Math.max(1, Math.round(logo.width * scale)), height: Math.round(logo.height * scale) } } } : {}),
     title: f.ident(x.deal.name, "deal.name"),
-    kicker: { ic_memo: "Investment Committee memorandum", build_decision: "Build decision", partner_memo: "Partner memo" }[x.kind as string] ?? "Lender package",
+    kicker: { ic_memo: reportText(f.lang, "icMemo"), build_decision: reportText(f.lang, "buildDecision"), partner_memo: reportText(f.lang, "partnerMemo") }[x.kind as string] ?? reportText(f.lang, "lenderPackage"),
     meta: [
       f.ident(x.deal.assetType, "deal.assetType"),
       f.ident(placeLabel(x.deal.location, x.deal.province), "deal.location"),

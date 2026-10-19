@@ -20,7 +20,7 @@ const OPTIONS = [
 const TERMS: ShareTerm[] = ["24h", "7d", "30d", "none"];
 
 export function Reports({ dealId }: { dealId: string }) {
-  const { t, f } = useI18n();
+  const { t, f, lang } = useI18n();
   const { role } = useSession();
   const qc = useQueryClient();
   const deal = useDeal(dealId);
@@ -50,7 +50,7 @@ export function Reports({ dealId }: { dealId: string }) {
     onSuccess: () => qc.invalidateQueries({ queryKey: ["share-links", dealId] }),
   });
   const make = useMutation({
-    mutationFn: (b: { kind: string; format: string }) => api.post(`/runs/${deal.data!.run!.id}/artifacts`, b),
+    mutationFn: (b: { kind: string; format: string }) => api.post(`/runs/${deal.data!.run!.id}/artifacts`, { ...b, lang: b.kind === "model_export" ? "en" : lang }),
     onSuccess: () => Promise.all([qc.invalidateQueries({ queryKey: ["artifacts", dealId] }), qc.invalidateQueries({ queryKey: ["deal", dealId] })]),
   });
   if (!deal.data) return <p className="muted">{t("common.loading")}</p>;
@@ -84,7 +84,7 @@ export function Reports({ dealId }: { dealId: string }) {
           {(arts.data ?? []).map((a) => (
             <Fragment key={a.id}>
             <tr>
-              <td>{kind(a.kind)} <span className="faint">· {fmtName(a.format)}</span></td>
+              <td>{kind(a.kind)} <span className="faint">· {fmtName(a.format)}</span>{a.lang === "fr" && <span className="tag">{t("reports.frDraft")}</span>}</td>
               <td className="num">{t("common.run", { n: a.run_number })}</td>
               <td>
                 {a.status === "ready" && <StatusTag tone="pass">{t("reports.ready")}{a.provenance_entries ? t("reports.traced", { n: a.provenance_entries }) : ""}</StatusTag>}

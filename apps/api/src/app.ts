@@ -39,12 +39,12 @@ export function createApp({ db, store, secureCookies, demoSignIn = false, trustP
   const authLimit = rateLimiter(20, 60_000);
   const shareLimit = rateLimiter(60, 60_000);
   const inviteLimit = rateLimiter(60, 60_000);
-  const fileResponse = async (a: { kind: string; format: string; storage_key: string | null; run_number: number; deal: string }, inline: boolean) => {
+  const fileResponse = async (a: { kind: string; format: string; storage_key: string | null; run_number: number; deal: string; lang?: "en" | "fr" }, inline: boolean) => {
     const bytes = await store.get(a.storage_key!);
     const mime = { pdf: "application/pdf", docx: "application/vnd.openxmlformats-officedocument.wordprocessingml.document", xlsx: "application/vnd.openxmlformats-officedocument.spreadsheetml.sheet" }[a.format] ?? "application/octet-stream";
     const label = { ic_memo: "IC memo", lender_package: "Lender package", build_decision: "Build decision", partner_memo: "Partner memo", model_export: "Model" }[a.kind] ?? a.kind;
     return new Response(new Uint8Array(bytes), {
-      headers: { "content-type": mime, "content-disposition": `${inline && a.format === "pdf" ? "inline" : "attachment"}; filename="${encodeURIComponent(`${a.deal} - ${label} - Run ${a.run_number}.${a.format}`)}"` },
+      headers: { "content-type": mime, "content-disposition": `${inline && a.format === "pdf" ? "inline" : "attachment"}; filename="${encodeURIComponent(`${a.deal} - ${label} - Run ${a.run_number}${a.lang === "fr" ? "-fr" : ""}.${a.format}`)}"` },
     });
   };
 
@@ -157,7 +157,10 @@ export function createApp({ db, store, secureCookies, demoSignIn = false, trustP
         `select * from fn_open_share_link($1, $2)`, [sha256(c.req.param("secret")!), what]);
       if (!link) return c.json({ error: "This link is not available. It may have expired or been revoked." }, 404);
       if (what === "page") return c.json({ deal: link.deal_name, kind: link.kind, format: link.format, runNumber: link.run_number, expiresAt: link.expires_at });
-      if (what === "file") return fileResponse({ ...link, deal: link.deal_name }, c.req.query("inline") === "1");
+      if (what === "file") {
+        const [artifact] = await db.query<{ lang: "en" | "fr" }>(`select lang from artifacts where id = $1`, [link.artifact_id]);
+        return fileResponse({ ...link, deal: link.deal_name, lang: artifact?.lang }, c.req.query("inline") === "1");
+      }
       const pkg = await asUser(db, link.created_by, (tx) => auditPackage(tx, link.run_id));
       return new Response(JSON.stringify(pkg, null, 2), {
         headers: { "content-type": "application/json", "content-disposition": `attachment; filename="agir-audit-package-run-${pkg.manifest.run.number}.json"` },
@@ -596,7 +599,8 @@ export function createApp({ db, store, secureCookies, demoSignIn = false, trustP
 
   // ---- Artifacts ------------------------------------------------------------------------
   app.post("/api/runs/:id/artifacts", async (c) => {
-    const body = z.object({ kind: z.enum(["ic_memo", "lender_package", "build_decision", "partner_memo", "model_export"]), format: z.enum(["pdf", "docx", "xlsx"]) }).parse(await c.req.json());
+    const body = z.object({ kind: z.enum(["ic_memo", "lender_package", "build_decision", "partner_memo", "model_export"]), format: z.enum(["pdf", "docx", "xlsx"]), lang: z.enum(["en", "fr"]).default("en") }).parse(await c.req.json());
+    if (body.kind === "model_export" && body.lang === "fr") return c.json({ error: "The model export is in English only for now." }, 422);
     if (body.kind === "model_export" && body.format !== "xlsx") return c.json({ error: "The model export is an Excel file." }, 422);
     if (body.kind !== "model_export" && body.format === "xlsx") return c.json({ error: "Memos, lender packages and build decision reports are PDF or Word." }, 422);
     const [r] = await as(c, async (tx) => {
@@ -608,7 +612,7 @@ export function createApp({ db, store, secureCookies, demoSignIn = false, trustP
         const heldSplit = run.input_snapshot.input.exit === "refinance_hold" && run.input_snapshot.input.waterfall !== undefined;
         if (!heldSplit && (!lp || lp.status === "NOT_APPLICABLE")) throw new HttpError(422, "This deal has no LP/GP split, so it has no partner memo.");
       }
-      return tx.query<{ id: string }>(`select fn_request_artifact($1, $2, $3) as id`, [c.req.param("id"), body.kind, body.format]);
+      return tx.query<{ id: string }>(`select fn_request_artifact($1, $2, $3, $4) as id`, [c.req.param("id"), body.kind, body.format, body.lang]);
     });
     return c.json({ id: r!.id });
   });
@@ -616,7 +620,7 @@ export function createApp({ db, store, secureCookies, demoSignIn = false, trustP
   app.get("/api/deals/:id/artifacts", async (c) => {
     const rows = await as(c, (tx) =>
       tx.query(
-        `select a.id, a.kind, a.format, a.status, a.error, a.sha256, a.created_at, a.run_id, r.run_number,
+        `select a.id, a.kind, a.format, a.lang, a.status, a.error, a.sha256, a.created_at, a.run_id, r.run_number,
                 (a.provenance->>'entries')::int as provenance_entries
          from artifacts a join runs r on r.id = a.run_id where a.deal_id = $1 order by a.created_at desc`,
         [c.req.param("id")],
@@ -627,8 +631,8 @@ export function createApp({ db, store, secureCookies, demoSignIn = false, trustP
 
   app.get("/api/artifacts/:id/file", async (c) => {
     const [a] = await as(c, (tx) =>
-      tx.query<{ kind: string; format: string; status: string; storage_key: string | null; run_number: number; deal: string }>(
-        `select a.kind, a.format, a.status, a.storage_key, r.run_number, d.name as deal from artifacts a join runs r on r.id = a.run_id join deals d on d.id = a.deal_id where a.id = $1`,
+      tx.query<{ kind: string; format: string; status: string; storage_key: string | null; run_number: number; deal: string; lang: "en" | "fr" }>(
+        `select a.kind, a.format, a.lang, a.status, a.storage_key, r.run_number, d.name as deal from artifacts a join runs r on r.id = a.run_id join deals d on d.id = a.deal_id where a.id = $1`,
         [c.req.param("id")],
       ),
     );
