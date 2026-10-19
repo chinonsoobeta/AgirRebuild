@@ -322,9 +322,9 @@ function notFoundBlocks(x: ArtifactInput): Block[] {
 }
 
 const STATE_WORDS = { out_of_range: "Out of range", no_effect: "No effect", not_monotonic: "Not monotonic" } as const;
-const DRIVER_NAME: Partial<Record<BreakevenRow["driver"], string>> = { rentPct: "Rent", exitCapBps: "Exit cap rate", costPct: "Project cost", rateBps: "Loan interest rates", occupancyPts: "Stabilized occupancy" };
+const DRIVER_NAME: Partial<Record<BreakevenRow["driver"], string>> = { pricePct: "Sale prices", absorptionPct: "Sales pace", presalesPts: "Presales", rentPct: "Rent", exitCapBps: "Exit cap rate", costPct: "Project cost", rateBps: "Loan interest rates", occupancyPts: "Stabilized occupancy" };
 const ECHO_NAME: Record<BreakevenEcho["key"], string> = { price: "Sale price", absorption: "Sales pace", presales: "Presold units", rent: "Rent", cost: "Project cost", exit_cap: "Exit cap rate", senior_rate: "Senior loan rate", mezzanine_rate: "Mezzanine loan rate", refinance_rate: "Refinance rate", occupancy: "Stabilized occupancy" };
-const ECHO_UNIT = { units: "units", "$/unit/mo": "$/mo", "$/sf/yr": "$/sf", $: "$", "%": "%" } as const;
+const ECHO_UNIT = { units: "units/mo", "$/unit/mo": "$/mo", "$/sf/yr": "$/sf", $: "$", "%": "%" } as const;
 
 /** Which way each break-even echo rounds to keep passing, and to what step, at the precision this report prints. */
 const PASSING_ROUND: Record<BreakevenEcho["key"], (unit: BreakevenEcho["unit"]) => [1 | -1, number]> = {
@@ -392,6 +392,10 @@ function changeTheAnswer(f: Formatter, x: ArtifactInput): Block[] {
       if (row.driver === "rentPct" && row.to.length > 1) {
         // Rents move together by one share: the row says so, and the engine's own shock is the figure.
         add([`Rent, all ${f.ident(String(row.to.length), `breakeven.${g.key}.rent.count`)} unit types (same share)`, "\u2014", `+${f.run(row.shock, "%", `breakeven.${g.key}.rent.shock`)}`]);
+        continue;
+      }
+      if (row.driver === "pricePct" && row.to.length > 1) {
+        add([`Sale prices, all ${f.ident(String(row.to.length), `breakeven.${g.key}.price.count`)} unit types (same share)`, "—", `+${f.run(row.shock, "%", `breakeven.${g.key}.price.shock`)}`]);
         continue;
       }
       const allRates = row.driver === "rateBps" && row.to.length > 1;
@@ -475,7 +479,7 @@ export function buildModel(x: ArtifactInput): DocModel {
     });
     blocks.push(...weakestStress(f, r, sale));
     // An approved deal has no gate to move; its stresses stand in for the section.
-    blocks.push(...(sale ? [stresses(f, r, held, true), { type: "paragraph" as const, muted: true, text: "What would change the answer is not yet available for a deal that sells its units." }] : r.verdict.code === "APPROVE" ? [stresses(f, r, held)] : changeTheAnswer(f, x)));
+    blocks.push(...(r.verdict.code === "APPROVE" ? [stresses(f, r, held, sale)] : changeTheAnswer(f, x)));
     blocks.push(...notFoundBlocks(x), { type: "paragraph", muted: true, text: "Every input and its source is listed in the IC memo and the lender package." });
   } else {
     blocks.push(verdict, ...draftLine(x), ...sponsorStatedBlocks(f, x));

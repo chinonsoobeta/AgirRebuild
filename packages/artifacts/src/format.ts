@@ -10,7 +10,7 @@ export type ProvenanceEntry = { text: string; ref: string };
 
 const money0 = new Intl.NumberFormat("en-US", { maximumFractionDigits: 0 });
 
-export function formatValue(value: number, unit: MetricUnit | "$" | "%" | "x" | "sf" | "units" | "months" | "years" | "$/mo" | "$/sf"): string {
+export function formatValue(value: number, unit: MetricUnit | "$" | "%" | "x" | "sf" | "units" | "units/mo" | "months" | "years" | "$/mo" | "$/sf"): string {
   switch (unit) {
     case "$":
       return (value < 0 ? "-$" : "$") + money0.format(Math.abs(Math.round(value)));
@@ -23,6 +23,8 @@ export function formatValue(value: number, unit: MetricUnit | "$" | "%" | "x" | 
     case "count":
     case "units":
       return money0.format(Math.round(value));
+    case "units/mo":
+      return `${value.toLocaleString("en-US", { maximumFractionDigits: 2 })} ${value === 1 ? "unit" : "units"} per month`;
     case "months":
       return `${Math.round(value)} months`;
     case "years":
