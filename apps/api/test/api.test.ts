@@ -9,7 +9,7 @@ import { drain, reconcileDeal, type SuggestRequest, type SuggestReply } from "@a
 import { documentBytes, loadOracle } from "@agir/testkit";
 import { createApp } from "../src/app.ts";
 import { POLICIES, POLICY_V1, RENTAL_HOLD_DRAFT, type Policy } from "@agir/contracts";
-import { canonicalJson } from "@agir/engine";
+import { DRIVERS, SALE_DRIVERS, canonicalJson } from "@agir/engine";
 import { POLICY_HASHES, sha256, sourceLabel } from "../src/services.ts";
 
 let db: Db;
@@ -2081,5 +2081,45 @@ describe("card 58c: the deal overview says while a reconcile is still to run", (
     // The app role still cannot read the queue itself.
     await expect(asUser(db, alicia!.id, (tx) => tx.query(`select * from jobs`))).rejects.toThrow();
     await work();
+  });
+});
+
+describe("trying changes on a stored sale (task 82)", () => {
+  test("uses sale drivers, rejects rental axes and shocks, and writes nothing", async () => {
+    const sw = (await call(alice, "POST", "/api/workspaces", { name: "Sale exploration", reviewMode: "solo" })).json.id;
+    const d = (await call(alice, "POST", `/api/workspaces/${sw}/deals`, { name: "Sale scratch", assetType: "Townhomes" })).json.id;
+    const values: [string, number, string?][] = [
+      ["sell_units", 1], ["land_cost", 100_000], ["hard_cost", 300_000], ["soft_cost", 20_000], ["contingency", 10_000],
+      ["construction_months", 12], ["senior_loan_amount", 0], ["unit_count", 2, "TH"], ["unit_sale_price", 400_000, "TH"],
+      ["presold_units_pct", 50], ["deposit_pct", 10], ["absorption_units_per_month", 1], ["sales_commission_pct", 4],
+      ["closing_lag_months", 0], ["unsold_carry_monthly", 100],
+    ];
+    for (const [fieldKey, value, itemKey] of values) expect((await call(alice, "POST", `/api/deals/${d}/values`,
+      { fieldKey, value, reason: "Quick start answer", ...(itemKey ? { itemKey } : {}) })).status, fieldKey).toBe(200);
+    const made = await call(alice, "POST", `/api/deals/${d}/runs`);
+    expect(made.status).toBe(200);
+    const id = made.json.id;
+    const stored = async () => canonicalJson(await db.query(`select r.*, (select count(*) from audit_events) as audit, (select count(*) from run_metrics) as metrics, (select count(*) from runs) as runs from runs r where r.id = $1`, [id]));
+    const before = await stored();
+    expect((await call(alice, "GET", `/api/runs/${id}/drivers`)).json).toEqual(SALE_DRIVERS);
+    expect((await call(alice, "GET", `/api/runs/${run}/drivers`)).json).toEqual(DRIVERS);
+    expect((await call(alice, "GET", "/api/sensitivity/drivers")).json).toEqual(DRIVERS);
+    for (const shock of [{ exitCapBps: 25 }, { leaseUpMonths: 1 }, { unknown: 1 }]) {
+      const res = await call(alice, "POST", `/api/runs/${id}/explore`, { shock });
+      expect(res.status).toBe(422);
+      expect(res.json.error).toBe("This driver does not apply to this deal.");
+    }
+    const invalidAxis = await call(alice, "POST", `/api/runs/${id}/grid`, { metric: "profit_on_cost_for_sale", x: "rateBps", y: "rentPct" });
+    expect(invalidAxis.status).toBe(422);
+    expect(invalidAxis.json.error).toBe("This driver does not apply to this deal.");
+    expect((await call(alice, "POST", `/api/runs/${run}/explore`, { shock: { pricePct: 10 } })).status).toBe(422);
+    for (const [endpoint, body] of [["explore", { shock: { pricePct: -10, absorptionPct: 10, presalesPts: 5 } }],
+      ["tornado", { metric: "profit_on_cost_for_sale" }], ["breakeven", {}],
+      ["grid", { metric: "profit_on_cost_for_sale", x: "rateBps", y: "pricePct" }]] as const) {
+      const res = await call(alice, "POST", `/api/runs/${id}/${endpoint}`, body);
+      expect(res.status, endpoint).toBe(200);
+      expect(res.json.scratch).toBe(true);
+    }
+    expect(await stored()).toBe(before);
   });
 });

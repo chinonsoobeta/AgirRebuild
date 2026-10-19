@@ -5,6 +5,7 @@ import { policyFor, type EngineInput } from "@agir/contracts";
 import { underwrite } from "../../../packages/engine/src/index.ts";
 import { allEquityDeal, developmentDeal } from "../../../packages/engine/test/fixtures.ts";
 import * as runScreen from "../src/routes/run.tsx";
+import * as exploreScreen from "../src/routes/explore.tsx";
 import { Explore } from "../src/routes/explore.tsx";
 import { build } from "../src/i18n.tsx";
 
@@ -79,19 +80,40 @@ describe("the run screen for a deal that sells its units (task 79)", () => {
     const html = renderToStaticMarkup(createElement(runScreen.Run, { dealId: mode }));
     const i = build("en", () => {});
     expect(html.includes(i.t("run.annual"))).toBe(mode !== "sale");
-    expect(html.includes(`<a>${i.t("run.explore")}</a>`)).toBe(mode !== "sale");
+    expect(html.includes(`<a>${i.t("run.explore")}</a>`)).toBe(true);
     expect(html.includes("A deal that sells its units has no years of operations.")).toBe(mode === "sale");
   });
-  it("a sale's explore route renders only its header and explanation and disables every sensitivity query", () => {
+  it("a sale's explore route renders the screen and enables every sensitivity query", () => {
     queryState.run = { result: sale };
     const html = renderToStaticMarkup(createElement(Explore, { dealId: "sale" }));
-    expect(html).toBe('<header>Deal header</header><p class="muted">Trying changes is not yet available for a deal that sells its units.</p>');
+    expect(html).toContain("Deal header");
+    expect(html).toContain(build("en", () => {}).L.metric("profit_on_cost_for_sale"));
+    expect(queryState.options.find((q) => q.queryKey[0] === "tornado")!.queryKey).toEqual(["tornado", "sale-run", "profit_on_cost_for_sale"]);
+    expect(queryState.options.find((q) => q.queryKey[0] === "grid")!.queryKey).toEqual(["grid", "sale-run", { metric: "profit_on_cost_for_sale", x: "rateBps", y: "pricePct" }]);
+    expect(queryState.options.find((q) => q.queryKey[0] === "drivers")!.queryKey).toEqual(["drivers", "sale-run"]);
     const sensitivity = queryState.options.filter((q) => q.queryKey[0] !== "run");
     expect(sensitivity.map((q) => q.queryKey[0])).toEqual(["drivers", "explore", "tornado", "breakeven", "grid"]);
-    expect(sensitivity.every((q) => q.enabled === false)).toBe(true);
+    expect(sensitivity.every((q) => q.enabled === true)).toBe(true);
   });
   it("does not start sensitivity requests before the run's mode is known", () => {
     renderToStaticMarkup(createElement(Explore, { dealId: "sale" }));
     expect(queryState.options.filter((q) => q.queryKey[0] !== "run").every((q) => q.enabled === false)).toBe(true);
+  });
+});
+
+describe("sale exploration layouts (task 82)", () => {
+  it("selects the exact sale metrics and defaults", () => {
+    expect(exploreScreen.exploreLayoutFor(true)).toEqual({
+      compare: ["profit_on_cost_for_sale", "margin_on_revenue", "development_profit_for_sale", "equity_multiple", "equity_irr", "total_development_cost", "required_equity", "peak_equity", "loan_to_cost"],
+      chartMetrics: ["profit_on_cost_for_sale", "margin_on_revenue", "development_profit_for_sale", "equity_multiple", "equity_irr"],
+      tornadoMetric: "profit_on_cost_for_sale", grid: { metric: "profit_on_cost_for_sale", x: "rateBps", y: "pricePct" },
+    });
+  });
+  it("keeps the rental metrics and defaults", () => {
+    expect(exploreScreen.exploreLayoutFor(false)).toEqual({
+      compare: ["yield_on_cost", "development_spread", "profit_on_cost", "equity_multiple", "equity_irr", "sizing_dscr", "contractual_dscr", "total_development_cost", "required_equity", "exit_value"],
+      chartMetrics: ["equity_multiple", "equity_irr", "profit_on_cost", "sizing_dscr", "yield_on_cost", "development_spread", "development_profit"],
+      tornadoMetric: "equity_multiple", grid: { metric: "sizing_dscr", x: "rateBps", y: "rentPct" },
+    });
   });
 });

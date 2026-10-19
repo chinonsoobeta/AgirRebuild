@@ -726,14 +726,13 @@ describe("the run screen for a deal that sells its units (task 79)", () => {
       expect(`${fr.L.metric(m.key)} ${fr.L.formula(m.key)}`, m.key).not.toMatch(/\b(must|needs|give|the|and|between|required|from|to|least|above|under|months|years|units|sale|sales|carry|closing|completion|price|equity|interest)\b/i);
     }
   });
-  it("explains the missing operating years and unavailable exploration in both languages", () => {
-    for (const key of ["run.saleCashFlows", "explore.saleUnavailable"] as Key[]) {
+  it("explains the missing operating years in both languages", () => {
+    for (const key of ["run.saleCashFlows"] as Key[]) {
       expect(en.t(key), key).not.toBe(key);
       expect(fr.t(key), key).not.toBe(key);
       expect(fr.t(key), key).not.toBe(en.t(key));
     }
     expect(en.t("run.saleCashFlows" as Key)).toBe("A deal that sells its units has no years of operations. Each month's costs, loans and closings are in the Excel export.");
-    expect(en.t("explore.saleUnavailable" as Key)).toBe("Trying changes is not yet available for a deal that sells its units.");
   });
 });
 
@@ -767,5 +766,35 @@ describe("a sale checks the figures a person states (task 81)", () => {
     expect(french).toBe(severity === "pass"
       ? `La réserve d'intérêts déclarée de ${fr.f.value(c.actual, "$")} couvre les ${fr.f.value(c.expected, "$")} d'intérêts pendant la construction calculés par le modèle.`
       : `Le budget prévoit une réserve d'intérêts de ${fr.f.value(c.actual, "$")} ; le modèle calcule ${fr.f.value(c.expected, "$")} d'intérêts pendant la construction. La réserve semble insuffisante de ${fr.f.value(c.expected - c.actual, "$")}.`);
+  });
+});
+
+describe("sale exploration words (task 82)", () => {
+  const en = build("en", () => {});
+  const fr = build("fr", () => {});
+  it.each([
+    ["pricePct", "Sale prices", "Prix de vente", "Sale prices would need to be", "Les prix de vente devraient être", "price", "$"],
+    ["absorptionPct", "Sales pace", "Rythme de vente", "The sales pace would need to be", "Le rythme de vente devrait être", "absorption", "units"],
+    ["presalesPts", "Presales", "Préventes", "Presales would need to be", "Les préventes devraient être", "presales", "%"],
+  ])("translates %s and its break-even sentence and echo", (driver, english, french, startEn, startFr, key, unit) => {
+    expect(en.L.driver(driver)).toBe(english);
+    expect(fr.L.driver(driver)).toBe(french);
+    const row = { driver, state: "value", shock: 10, limit: 50, to: [{ key, item: "A", to: 100, unit }] };
+    const gate = { key: "profit_on_cost_for_sale", label: "Profit on cost, units sold", threshold: 15, unit: "%" };
+    expect(en.L.breakeven(row, gate)).toContain(startEn);
+    expect(fr.L.breakeven(row, gate)).toContain(startFr);
+    expect(fr.L.breakeven(row, gate)).not.toMatch(/\b(must|needs|give|the|and|between|required|from|to|least|above|under|months|years|units|sale|sales|carry|closing|completion|price|equity|interest|higher|faster|presold)\b/i);
+    if (key === "absorption") {
+      expect(en.L.breakeven(row, gate)).toContain("sales pace 100 units per month");
+      expect(fr.L.breakeven(row, gate)).toContain("rythme de vente 100 logements par mois");
+    }
+    if (key === "presales") {
+      expect(en.L.breakeven(row, gate)).toContain("presold 100%");
+      expect(fr.L.breakeven(row, gate)).toContain("prévendu 100");
+    }
+    if (key === "price") expect(en.L.breakeven(row, gate)).toContain("A: $100");
+  });
+  it("translates an inapplicable driver error", () => {
+    expect(fr.err(new Error("This driver does not apply to this deal."))).toBe("Cette hypothèse ne s'applique pas à ce projet.");
   });
 });
