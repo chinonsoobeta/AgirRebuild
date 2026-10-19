@@ -244,6 +244,9 @@ export function assemble(rows: readonly AssumptionRow[]): { readiness: Readiness
     constructionMonths: n("construction_months"),
     senior: { amount: n("senior_loan_amount"), ratePct: n("senior_rate_pct"), ioMonths: 0 },
     ...(n("mezz_loan_amount") > 0 ? { mezzanine: { amount: n("mezz_loan_amount"), ratePct: n("mezz_rate_pct"), amortYears: 30, ioMonths: 0 } } : {}),
+    ...(has("lp_share_pct")
+      ? { waterfall: { lpSharePct: n("lp_share_pct"), preferredReturnPct: n("preferred_return_pct"), gpPromotePct: n("gp_promote_pct") } }
+      : {}),
     stated: {
       ...(v("equity_amount") !== undefined ? { equity: n("equity_amount") } : {}),
       ...(v("stated_total_cost") !== undefined ? { totalCost: n("stated_total_cost") } : {}),

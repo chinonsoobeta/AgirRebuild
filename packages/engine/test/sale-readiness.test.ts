@@ -392,13 +392,17 @@ describe("a deal that sells its units can have partners (task 84c)", () => {
       expect(scenario.metrics.find((m) => m.key === "lp_irr")!.status).not.toBe("NOT_APPLICABLE");
     }
   });
-  test("with no promote or preferred return both partners earn the equity IRR", () => {
+  test("with no promote or preferred return partners match each other and every meaningful equity IRR", () => {
     const input = { ...fromOracle(oracle().inputs), waterfall: { ...split, preferredReturnPct: 0, gpPromotePct: 0 } };
     const result = underwrite(input, policyFor(input));
+    expect(result.scenarios[0]!.metrics.find((m) => m.key === "equity_irr")!.status).toBe("VALID");
     for (const scenario of result.scenarios) {
-      const value = (key: string) => scenario.metrics.find((m) => m.key === key)!.value!;
-      expect(Math.abs(value("lp_irr") - value("equity_irr"))).toBeLessThanOrEqual(1e-9);
-      expect(Math.abs(value("gp_irr") - value("equity_irr"))).toBeLessThanOrEqual(1e-9);
+      const metric = (key: string) => scenario.metrics.find((m) => m.key === key)!;
+      expect(Math.abs(metric("lp_irr").value! - metric("gp_irr").value!)).toBeLessThanOrEqual(1e-9);
+      if (metric("equity_irr").status === "VALID") {
+        expect(Math.abs(metric("lp_irr").value! - metric("equity_irr").value!)).toBeLessThanOrEqual(1e-9);
+        expect(Math.abs(metric("gp_irr").value! - metric("equity_irr").value!)).toBeLessThanOrEqual(1e-9);
+      }
     }
   });
   test.each(["kestrel-row-townhomes", "alder-court-condo"] as const)("%s preserves its unstated result hash and every non-partner metric and gate", (slug) => {

@@ -6,6 +6,7 @@ import { irrRoots } from "./irr.ts";
 import { ratio, sum } from "./math.ts";
 import { applyStress } from "./stress.ts";
 import { computeVerdict } from "./verdict.ts";
+import { runWaterfall } from "./waterfall.ts";
 import { runStatedChecks } from "./checks.ts";
 
 export type ForSaleLedger = {
@@ -132,7 +133,23 @@ export function forSaleMetrics(input: EngineInput, L: ForSaleLedger) {
   v.equity_multiple = ratio(v.equity_distributed!, v.equity_contributed!);
   const roots = irrRoots(L.equityFlows);
   v.equity_irr = v.flow_sign_changes === 1 && roots.length === 1 ? roots[0]! * 100 : null;
+  const partnerMetrics: ReturnType<typeof m>[] = [];
+  if (input.waterfall) {
+    const contributions = -sum(L.equityFlows.filter((f) => f.amount < 0).map((f) => f.amount));
+    if (contributions <= 0) {
+      for (const key of ["lp_irr", "gp_irr", "gp_promote"]) partnerMetrics.push(m(key, null, "NOT_MEANINGFUL", "Deal returns are not meaningful."));
+    } else {
+      const w = runWaterfall(L.equityFlows, input.waterfall);
+      const lp = irrRoots(w.lp);
+      const gp = irrRoots(w.gp);
+      partnerMetrics.push(lp.length === 1 ? m("lp_irr", lp[0]! * 100) : m("lp_irr", null, "NOT_MEANINGFUL", "The LP cash flows have no single IRR."));
+      partnerMetrics.push(gp.length === 1 ? m("gp_irr", gp[0]! * 100) : m("gp_irr", null, "NOT_MEANINGFUL", "The GP cash flows have no single IRR."));
+      partnerMetrics.push(m("gp_promote", w.promote));
+    }
+  }
   const metrics = METRICS.map((def) => {
+    const partner = partnerMetrics.find((metric) => metric.key === def.key);
+    if (partner) return partner;
     if (!Object.hasOwn(v, def.key)) return m(def.key, null, "NOT_APPLICABLE", "The units are sold; there is no rental income.");
     if (def.key === "loan_to_cost" && ltc === null) return m(def.key, null, "NOT_MEANINGFUL", "Total development cost is zero.");
     if (def.key === "cost_per_unit" && units <= 0) return m(def.key, null, "NOT_APPLICABLE", "The program has no dwelling units.");

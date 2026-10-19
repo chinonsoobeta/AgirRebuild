@@ -29,6 +29,7 @@ export function validateInput(input: EngineInput): void {
   }
   if (input.exit === "for_sale") {
     validateForSale(input, p);
+    if (input.waterfall) validateWaterfall(input.waterfall, p);
     if (p.length > 0) throw new EngineInputError(p);
     return;
   }
@@ -89,12 +90,7 @@ export function validateInput(input: EngineInput): void {
   if (input.exit === "refinance_hold" && !input.refinance) {
     p.push("A deal that is kept and refinanced needs its refinance: the month, the amount or loan-to-value, the rate and the amortization.");
   }
-  if (input.waterfall) {
-    const w = input.waterfall;
-    if (!finite(w.lpSharePct) || w.lpSharePct <= 0 || w.lpSharePct >= 100) p.push("LP share must be above 0 and below 100");
-    if (!finite(w.preferredReturnPct) || w.preferredReturnPct < 0) p.push("preferred return must be at least 0");
-    if (!finite(w.gpPromotePct) || w.gpPromotePct < 0 || w.gpPromotePct > 100) p.push("GP promote must be from 0 to 100");
-  }
+  if (input.waterfall) validateWaterfall(input.waterfall, p);
   if (p.length > 0) throw new EngineInputError(p);
 }
 
@@ -122,4 +118,10 @@ function validateForSale(input: EngineInput, p: string[]) {
   if (!finite(f.absorptionPerMonth) || f.absorptionPerMonth <= 0) p.push("sales pace must be above 0 units per month");
   if (!finite(f.closingLagMonths) || !Number.isInteger(f.closingLagMonths) || f.closingLagMonths < 0) p.push("months from completion to first closing must be a whole number of at least 0");
   if (!finite(f.carryMonthly) || f.carryMonthly < 0) p.push("carry per unsold unit must be at least 0");
+}
+
+function validateWaterfall(w: NonNullable<EngineInput["waterfall"]>, p: string[]) {
+  if (!finite(w.lpSharePct) || w.lpSharePct <= 0 || w.lpSharePct >= 100) p.push("LP share must be above 0 and below 100");
+  if (!finite(w.preferredReturnPct) || w.preferredReturnPct < 0) p.push("preferred return must be at least 0");
+  if (!finite(w.gpPromotePct) || w.gpPromotePct < 0 || w.gpPromotePct > 100) p.push("GP promote must be from 0 to 100");
 }

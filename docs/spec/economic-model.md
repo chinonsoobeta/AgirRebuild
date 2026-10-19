@@ -316,6 +316,7 @@ revenue − total development cost − carry − interest after completion), `pr
 revenue), `peak_equity`, `sellout_month`, `deposits_held_at_completion`, `equity_multiple`, `equity_irr`.
 NOI, rent, occupancy, coverage, exit value, development spread, yield on cost and break-even occupancy are
 `NOT_APPLICABLE` ("The units are sold; there is no rental income."), never 0.
+With an LP/GP split stated, `lp_irr`, `gp_irr` and `gp_promote` come from the same two-tier waterfall over the sale’s dated equity flows; without one they are `NOT_APPLICABLE` as before.
 
 **Stresses**, each a full re-run with debt commitments unchanged: prices −10%; absorption × 0.70; land, hard,
 soft and contingency +10%; rates +1 point; construction +6 months; presales −15 points (not below 0); and all
