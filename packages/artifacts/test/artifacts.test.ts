@@ -1381,6 +1381,12 @@ describe("the broker's logo on the lender package (task 89d)", () => {
     expect(img).toMatch(/height="48"/);
     expect(img).toMatch(/width="24"/);
   });
+  test("a wide logo is scaled to at most 240 px wide, keeping its aspect (task 91b)", () => {
+    const wide = { ...broker, logo: { ...broker.logo, bytes: png(1200, 100), width: 1200, height: 100 } };
+    const img = html({ ...mapleInput("lender_package"), broker: wide }).match(/<img [^>]*>/)![0];
+    expect(img).toMatch(/width="240"/);
+    expect(img).toMatch(/height="20"/);
+  });
   test("the Word lender package has the image part and Prepared by; its scan passes", async () => {
     const out = await renderArtifact({ ...mapleInput("lender_package"), broker }, "docx");
     expect(out.provenance.orphans).toEqual([]);

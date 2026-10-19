@@ -2720,6 +2720,31 @@ describe("the broker's logo (task 89d)", () => {
     return Buffer.from(await file.arrayBuffer()).includes("word/media/");
   };
 
+  test("refuses an incomplete image and one over 4,096 pixels a side (task 91b)", async () => {
+    const whole = png(10, 10);
+    expect((await upload(alice, whole.slice(0, 24))).status).toBe(422);
+    expect((await upload(alice, whole.slice(0, -12))).status).toBe(422);
+    expect((await upload(alice, jpeg(10, 10).slice(0, -2))).status).toBe(422);
+    for (const [w, h] of [[4097, 1], [1, 4097]]) {
+      const r = await upload(alice, png(w, h));
+      expect(r.status, `${w}x${h}`).toBe(422);
+      expect(r.json.error).toBe("The image is larger than 4,096 pixels on a side.");
+    }
+    expect(await logoEvents()).toEqual([]);
+  });
+  test("stops reading an upload with no length once it passes 500 KB (task 91b)", async () => {
+    let pulls = 0;
+    const body = new ReadableStream<Uint8Array>({
+      pull(controller) {
+        pulls++;
+        if (pulls > 40) controller.close(); else controller.enqueue(new Uint8Array(256 * 1024));
+      },
+    });
+    const r = await app.request(`/api/workspaces/${ws}/logo`, { method: "POST", headers: { "x-agir": "1", cookie: alice.cookie }, body, duplex: "half" } as RequestInit);
+    expect(r.status).toBe(413);
+    expect(pulls).toBeLessThanOrEqual(4);
+    expect(await logoEvents()).toEqual([]);
+  });
   test("refuses SVG, GIF, an oversized file, an unreadable size, and anyone but the owner", async () => {
     const svg = new TextEncoder().encode(`<svg xmlns="http://www.w3.org/2000/svg" width="10" height="10"></svg>`);
     expect((await upload(alice, svg)).status).toBe(415);
