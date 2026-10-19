@@ -1,5 +1,7 @@
+/// <reference types="node" />
 import { beforeEach, describe, expect, it, vi } from "vitest";
 import { createElement } from "react";
+import { readFileSync } from "node:fs";
 import { renderToStaticMarkup } from "react-dom/server";
 import { policyFor, type EngineInput } from "@agir/contracts";
 import { underwrite } from "../../../packages/engine/src/index.ts";
@@ -8,9 +10,9 @@ import * as runScreen from "../src/routes/run.tsx";
 import * as exploreScreen from "../src/routes/explore.tsx";
 import { Reports } from "../src/routes/reports.tsx";
 import { Explore } from "../src/routes/explore.tsx";
-import { build } from "../src/i18n.tsx";
+import { build, type Lang } from "../src/i18n.tsx";
 
-const queryState = vi.hoisted(() => ({ run: undefined as unknown, options: [] as { queryKey: unknown[]; enabled?: boolean }[] }));
+const queryState = vi.hoisted(() => ({ run: undefined as unknown, lang: "en" as Lang, options: [] as { queryKey: unknown[]; enabled?: boolean }[] }));
 vi.mock("@tanstack/react-query", () => ({
   useQuery: (options: { queryKey: unknown[]; enabled?: boolean }) => {
     queryState.options.push(options);
@@ -32,7 +34,7 @@ vi.mock("../src/components/ui", async (original) => {
 });
 vi.mock("../src/i18n", async (original) => {
   const i18n = await original<typeof import("../src/i18n")>();
-  return { ...i18n, useI18n: () => i18n.build("en", () => {}) };
+  return { ...i18n, useI18n: () => i18n.build(queryState.lang, () => {}) };
 });
 vi.mock("@tanstack/react-router", async () => {
   const { createElement } = await import("react");
@@ -129,5 +131,69 @@ describe("offering the partner memo (task 84d)", () => {
     queryState.run = { result: underwrite(input, policyFor(input)) };
     const html = renderToStaticMarkup(createElement(Reports, { dealId: "partners" }));
     expect(html.includes("Partner memo")).toBe(offered);
+  });
+});
+
+
+describe("the run screen shows the partners (task 85d)", () => {
+  const split = { lpSharePct: 90, preferredReturnPct: 8, gpPromotePct: 20 };
+  const d = JSON.parse(readFileSync(new URL("../../../oracles/for-sale/kestrel-row-townhomes.outcome.json", import.meta.url), "utf8")).inputs;
+  // Use the existing fromOracle shape; neutral rental-only values come from allEquityDeal.
+  const kestrel: EngineInput = { ...allEquityDeal(),
+    budget: { land: d.land, hard: d.hard, soft: d.soft, contingency: d.contingency, other: 0 },
+    revenue: [], constructionMonths: d.construction_months, leaseUpMonths: 0, exit: "for_sale",
+    senior: { amount: d.senior_commitment, ratePct: d.senior_rate_pct, ioMonths: 0 },
+    forSale: { units: d.unit_types.map((u: { name: string; units: number; price: number }, n: number) => ({ key: String(n), label: u.name, units: u.units, price: u.price })),
+      presoldPct: d.presold_units_pct, depositPct: d.deposit_pct, absorptionPerMonth: d.absorption_units_per_month,
+      commissionPct: d.sales_commission_pct, closingLagMonths: d.closing_lag_months, carryMonthly: d.unsold_carry_monthly,
+      presaleThresholdPct: d.senior_presale_threshold_pct },
+  };
+  const rentalWithSplit = underwrite({ ...rentalInput, waterfall: split }, policyFor(rentalInput));
+  const saleWithSplit = underwrite({ ...kestrel, waterfall: split }, policyFor(kestrel));
+  const saleWithoutSplit = underwrite(kestrel, policyFor(kestrel));
+  const heldWithSplit = underwrite({ ...heldInput, waterfall: split }, policyFor(heldInput));
+  const partners = ["lp_irr", "gp_irr", "gp_promote"];
+  beforeEach(() => { queryState.lang = "en"; queryState.options = []; queryState.run = undefined; });
+  it.each([
+    ["rental split", rentalWithSplit, rental, true], ["sale split", saleWithSplit, saleWithoutSplit, true],
+    ["rental no split", rental, rental, false], ["sale no split", saleWithoutSplit, saleWithoutSplit, false],
+    ["held", heldWithSplit, held, false],
+  ] as const)("%s has the prescribed headline list and unchanged stress columns", (_name, result, plain, hasPartners) => {
+    const before = runScreen.layoutFor(plain.scenarios[0]!.metrics);
+    const expected = before.headline.flatMap((key) => hasPartners && key === "equity_irr" ? [key, ...partners] : [key]);
+    expect(runScreen.layoutFor(result.scenarios[0]!.metrics)).toEqual({ ...before, headline: expected });
+  });
+  it.each([true, false])("the sale screen renders partner labels and values only with split=%s", (withSplit) => {
+    const result = withSplit ? saleWithSplit : saleWithoutSplit;
+    queryState.run = { id: "sale-run", number: 1, result, fresh: true, staleReasons: [], inputs: [],
+      policyVersion: result.policyVersion, policyDraft: true, engineVersion: result.engineVersion,
+      createdAt: "2026-10-19T00:00:00Z", createdBy: null, inputHash: "input-hash", resultHash: "result-hash", signed: "development key" };
+    const html = renderToStaticMarkup(createElement(runScreen.Run, { dealId: "partners" }));
+    const i = build("en", () => {});
+    for (const key of partners) {
+      expect(html.includes(i.L.metric(key))).toBe(withSplit);
+      if (withSplit) {
+        const metric = result.scenarios[0]!.metrics.find((m) => m.key === key)!;
+        expect(html).toContain(i.f.value(metric.value, metric.unit));
+      }
+    }
+  });
+  it("the French sale screen uses the existing French partner labels, formulas and values", () => {
+    queryState.lang = "fr";
+    const result = saleWithSplit;
+    queryState.run = { id: "sale-run", number: 1, result, fresh: true, staleReasons: [], inputs: [],
+      policyVersion: result.policyVersion, policyDraft: true, engineVersion: result.engineVersion,
+      createdAt: "2026-10-19T00:00:00Z", createdBy: null, inputHash: "input-hash", resultHash: "result-hash", signed: "development key" };
+    const text = renderToStaticMarkup(createElement(runScreen.Run, { dealId: "partners" })).replace(/<[^>]*>/g, " ");
+    const fr = build("fr", () => {}), en = build("en", () => {});
+    for (const key of partners) {
+      expect(text).toContain(fr.L.metric(key));
+      expect(fr.L.formula(key).length).toBeGreaterThan(10);
+      expect(fr.L.formula(key)).not.toBe(en.L.formula(key));
+      const metric = result.scenarios[0]!.metrics.find((m) => m.key === key)!;
+      expect(text).toContain(fr.f.value(metric.value, metric.unit));
+    }
+    expect(text).not.toMatch(/\b(LP|GP|IRR|promote|waterfall|equity|yield|debt|loan|rent|cash|gate|stated)\b/i);
+    queryState.lang = "en";
   });
 });
