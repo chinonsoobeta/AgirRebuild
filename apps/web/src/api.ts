@@ -27,7 +27,7 @@ export const api = {
 };
 
 // ---- Response shapes ---------------------------------------------------------------
-export type Me = { user: { id: string; email: string; name: string }; workspaces: { id: string; name: string; review_mode: "team" | "solo"; label_suggestions: boolean; role: "owner" | "admin" | "analyst" | "viewer" | "reviewer" }[] };
+export type Me = { user: { id: string; email: string; name: string }; workspaces: { id: string; name: string; review_mode: "team" | "solo"; label_suggestions: boolean; role: "owner" | "admin" | "analyst" | "viewer" | "reviewer" | "client" }[] };
 export type Tone = "pass" | "review" | "stop" | "neutral";
 export type DealOverview = {
   deal: {
@@ -62,7 +62,9 @@ export type Assumption = {
   id: string; fieldKey: string; itemKey: string | null; label: string; group: string; groupLabel: string; unit: string; material: boolean;
   conservative: "max" | "min" | null; status: string; value: number | null; pendingValue: number | null; sourceKind: "document" | "analyst" | "default";
   sources: Source[]; conflictValues: { value: number; documents: string[] }[] | null; reason: string | null; decidedBy: string | null;
-  decidedById: string | null; decidedAt: string | null; secondApprover: string | null; confirmedByReview: boolean; secondApprovedAt: string | null; sponsorStated: boolean; version: number;
+  decidedById: string | null; decidedAt: string | null; secondApprover: string | null; confirmedByReview: boolean; secondApprovedAt: string | null; sponsorStated: boolean;
+  /** The deal's client said the broker's value is right (card 89); not an independent confirmation. A client cannot see another client's name. */
+  clientConfirmedBy: string | null; clientConfirmedById: string | null; clientConfirmedAt: string | null; version: number;
 };
 export type ReadinessItem = { fieldKey: string; itemKey?: string; label: string; detail?: string };
 export type Review = {
@@ -93,4 +95,7 @@ export type ShareTerm = "24h" | "7d" | "30d" | "none";
 export type ShareLink = { id: string; artifact_id: string; kind: string; format: string; run_number: number; term: ShareTerm; expires_at: string | null; created_at: string;
   created_by: string | null; revoked_at: string | null; revoked_by: string | null; openings: number; last_opened_at: string | null };
 export type SharedReport = { deal: string; kind: string; format: string; runNumber: number; expiresAt: string | null };
+export type DealClient = { id: string; name: string; email: string; assigned_at: string };
+export type ClientInvite = { id: string; created_at: string; expires_at: string; created_by: string | null; used_at: string | null; used_by: string | null; revoked_at: string | null; revoked_by: string | null };
+export type InvitePeek = { workspace: string; deal: string };
 export type AuditEvent = { seq: number; action: string; entity: string; entity_id: string | null; payload: any; hash: string; created_at: string; actor: string | null };

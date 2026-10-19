@@ -72,6 +72,7 @@ type AssumptionDb = {
   /** Approved on one person's say, a material field, no second approver (agir_sponsor_stated in the database). */
   sponsor_stated: boolean;
   /** The deal's client said the broker's value is right (card 89); not an independent confirmation. */
+  client_confirmed_by: string | null;
   client_confirmed_by_name: string | null;
   client_confirmed_at: string | null;
   version: number;
@@ -270,6 +271,7 @@ export async function reviewView(tx: Db, dealId: string) {
         secondApprovedAt: a.second_approved_at,
         sponsorStated: a.sponsor_stated,
         clientConfirmedBy: a.client_confirmed_by_name,
+        clientConfirmedById: a.client_confirmed_by,
         clientConfirmedAt: a.client_confirmed_at,
         version: a.version,
       };

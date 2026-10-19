@@ -36,7 +36,8 @@ export function Reports({ dealId }: { dealId: string }) {
     refetchInterval: (q) => (q.state.data?.some((a) => a.status === "queued") ? 1200 : false),
   });
   const links = useQuery({ queryKey: ["share-links", dealId], queryFn: () => api.get<ShareLink[]>(`/deals/${dealId}/share-links`) });
-  // Sharing is open to every role (card 86): a link is read-only and shows no more than its maker can see.
+  // Sharing is open to every staff role (card 86): a link is read-only and shows no more than its maker can see.
+  // A client (card 89) may not share.
   const [sharing, setSharing] = useState<string | null>(null);
   const [term, setTerm] = useState<ShareTerm>("7d");
   const [made, setMade] = useState<string | null>(null);
@@ -96,7 +97,7 @@ export function Reports({ dealId }: { dealId: string }) {
               <td className="r" style={{ whiteSpace: "nowrap" }}>
                 {a.status === "ready" && a.format === "pdf" && <a className="btn quiet small" href={`/api/artifacts/${a.id}/file?inline=1`} target="_blank" rel="noreferrer">{t("common.open")}</a>}
                 {a.status === "ready" && <a className="btn small" href={`/api/artifacts/${a.id}/file`}><I.Download />{t("common.download")}</a>}
-                {a.status === "ready" && <button className="btn quiet small" type="button" onClick={() => { setSharing(a.id); setMade(null); share.reset(); }}>{t("share.button")}</button>}
+                {a.status === "ready" && role !== "client" && <button className="btn quiet small" type="button" onClick={() => { setSharing(a.id); setMade(null); share.reset(); }}>{t("share.button")}</button>}
               </td>
             </tr>
             {sharing === a.id && (

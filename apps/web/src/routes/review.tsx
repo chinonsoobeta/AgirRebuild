@@ -7,6 +7,29 @@ import { Banner, canEdit, DealHeader, ErrorText, Glossary, StatusTag, useDeal, u
 import * as I from "../components/icons";
 import { useI18n, type Lang } from "../i18n";
 
+/** A client's confirmation of a value the broker stated (card 89): its button for the client, then who confirmed it and when.
+ * It is not an independent confirmation, so the value stays stated by the sponsor. */
+export function ClientConfirmation({ a, isClient, meId }: { a: Assumption; isClient: boolean; meId: string }) {
+  const { t, f } = useI18n();
+  const qc = useQueryClient();
+  const confirm = useMutation({
+    mutationFn: () => api.post(`/assumptions/${a.id}/client-confirm`, { version: a.version }),
+    onSuccess: () => qc.invalidateQueries({ queryKey: ["review"] }),
+  });
+  if (a.clientConfirmedAt) {
+    const date = f.date(a.clientConfirmedAt);
+    return <div>{a.clientConfirmedById === meId ? t("review.clientConfirmedYou", { date })
+      : a.clientConfirmedBy ? t("review.clientConfirmedBy", { who: a.clientConfirmedBy, date }) : t("review.clientConfirmedOther", { date })}</div>;
+  }
+  if (!isClient || !a.sponsorStated) return null;
+  return (
+    <>
+      <button className="btn primary small" type="button" disabled={confirm.isPending} onClick={() => confirm.mutate()}>{t("review.clientConfirm")}</button>
+      <ErrorText error={confirm.error} />
+    </>
+  );
+}
+
 // A source that says which currency it is in records it at the end of unit_seen ("USD", "$/mo USD").
 // It is a foreign figure, shown but never used, only when that differs from the deal's currency or the deal states none.
 export const foreignIn = (s: Source, dealCurrency: string | null | undefined) => {
@@ -573,8 +596,10 @@ export function Review({ dealId }: { dealId: string }) {
                       {a.sourceKind === "default" ? <StatusTag tone="pass" glyph={I.Bookmark}>{t("review.defaultAccepted")}</StatusTag> : a.sourceKind === "analyst" ? t("review.enteredByShort", { who: a.decidedBy }) : a.sources[0]?.document_name}
                       {a.confirmedByReview ? <span>{t("review.confirmedByReview", { date: f.date(a.secondApprovedAt!) })}</span> : a.secondApprover && <span>{t("review.confirmedBy", { who: a.secondApprover })}</span>}
                       {a.sponsorStated && <div>{t("review.statedBy", { who: a.decidedBy })}</div>}
+                      {a.clientConfirmedAt && <ClientConfirmation a={a} isClient={role === "client"} meId={me.user.id} />}
                     </td>
                     <td className="r">
+                      {role === "client" && !a.clientConfirmedAt && <ClientConfirmation a={a} isClient meId={me.user.id} />}
                       {(editable || role === "reviewer") && a.sponsorStated && <button className="btn primary small" type="button" disabled={a.decidedById === me.user.id} onClick={() => act.mutate({ id: a.id, action: "second_approve" })}>{t("review.confirm")}</button>}
                       {editable && <button className="btn quiet small" type="button" onClick={() => act.mutate({ id: a.id, action: "reopen", version: a.version })}>{t("review.reopen")}</button>}
                     </td>

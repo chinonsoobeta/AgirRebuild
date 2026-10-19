@@ -5,7 +5,7 @@ import { api } from "../api";
 import { ErrorText, LanguageSwitch } from "../components/ui";
 import { useI18n } from "../i18n";
 
-function AuthFrame({ children }: { children: React.ReactNode }) {
+export function AuthFrame({ children }: { children: React.ReactNode }) {
   const { t } = useI18n();
   return (
     <div className="auth">

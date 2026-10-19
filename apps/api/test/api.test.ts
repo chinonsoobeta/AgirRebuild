@@ -2481,6 +2481,7 @@ describe("clients see and confirm only their own deals (task 89a)", () => {
     const after = await stated(dealA);
     expect(after).toMatchObject({ sponsorStated: true, clientConfirmedBy: "Dana Client" });
     expect(after.clientConfirmedAt).toEqual(expect.any(String));
+    expect(after.clientConfirmedById).toBe((await call(dana, "GET", "/api/me")).json.user.id); // task 89c: "Confirmed by you"
     expect((await call(dana, "GET", `/api/runs/${runA}`)).json.fresh).toBe(false);
     expect((await call(dana, "POST", `/api/assumptions/${a.id}/client-confirm`, { version: after.version })).status).toBe(422);
     const other = (await review(alice, dealA)).assumptions.find((x: any) => !x.sponsorStated && x.status === "approved");

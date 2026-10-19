@@ -46,7 +46,7 @@ export function SessionGate({ children }: { children: ReactNode }) {
   return <SessionCtx.Provider value={{ me: me.data, workspaceId: workspace.id, role: workspace.role, solo: workspace.review_mode === "solo", setWorkspace }}>{children}</SessionCtx.Provider>;
 }
 
-export const canEdit = (role: string) => role !== "viewer" && role !== "reviewer";
+export const canEdit = (role: string) => role !== "viewer" && role !== "reviewer" && role !== "client";
 export const canDecide = (role: string) => role === "owner" || role === "admin";
 
 // ---- Shell ----------------------------------------------------------------------------

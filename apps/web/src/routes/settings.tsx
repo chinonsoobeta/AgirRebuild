@@ -1,8 +1,109 @@
 import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
-import { type FormEvent } from "react";
-import { api } from "../api";
+import { useState, type FormEvent } from "react";
+import { api, type ClientInvite, type DealClient, type DealOverview } from "../api";
 import { ErrorText, useSession } from "../components/ui";
 import { useI18n } from "../i18n";
+
+/** A deal's clients and its invitation links (card 89). Admins and owners only; an invitation link is shown once. */
+export function ClientsPanel({ dealId }: { dealId: string }) {
+  const { t, f } = useI18n();
+  const qc = useQueryClient();
+  const [made, setMade] = useState<string | null>(null);
+  const clients = useQuery({ queryKey: ["deal-clients", dealId], queryFn: () => api.get<DealClient[]>(`/deals/${dealId}/clients`) });
+  const invites = useQuery({ queryKey: ["invites", dealId], queryFn: () => api.get<ClientInvite[]>(`/deals/${dealId}/invites`) });
+  const refresh = () => Promise.all([qc.invalidateQueries({ queryKey: ["deal-clients", dealId] }), qc.invalidateQueries({ queryKey: ["invites", dealId] })]);
+  const add = useMutation({ mutationFn: (email: string) => api.post(`/deals/${dealId}/clients`, { email }), onSuccess: refresh });
+  const remove = useMutation({ mutationFn: (id: string) => api.del(`/deals/${dealId}/clients/${id}`, {}), onSuccess: refresh });
+  const invite = useMutation({
+    mutationFn: () => api.post<{ id: string; url: string }>(`/deals/${dealId}/invites`),
+    onSuccess: (r) => { setMade(window.location.origin + r.url); return refresh(); },
+  });
+  const revoke = useMutation({ mutationFn: (id: string) => api.post(`/invites/${id}/revoke`), onSuccess: refresh });
+  const status = (i: ClientInvite) => i.revoked_at ? t("clients.revoked") : i.used_at ? t("clients.used", { who: i.used_by }) : new Date(i.expires_at) <= new Date() ? t("clients.expired") : null;
+  return (
+    <div className="stack" style={{ gap: 12 }}>
+      <strong>{t("clients.ofDeal")}</strong>
+      {(clients.data ?? []).length === 0 ? <p className="small muted">{t("clients.none")}</p> : (
+        <table className="tbl">
+          <tbody>
+            {(clients.data ?? []).map((c) => (
+              <tr key={c.id}><td>{c.name}</td><td className="muted">{c.email}</td>
+                <td className="r"><button className="btn quiet small" type="button" onClick={() => { if (window.confirm(t("clients.removeConfirm"))) remove.mutate(c.id); }}>{t("clients.remove")}</button></td>
+              </tr>
+            ))}
+          </tbody>
+        </table>
+      )}
+      <form
+        className="stack"
+        onSubmit={(e: FormEvent<HTMLFormElement>) => {
+          e.preventDefault();
+          add.mutate((e.currentTarget.elements.namedItem("email") as HTMLInputElement).value);
+          e.currentTarget.reset();
+        }}
+      >
+        <div className="row" style={{ alignItems: "flex-end" }}>
+          <div className="field grow"><label htmlFor="c-email">{t("clients.add")}</label><input className="input" id="c-email" name="email" type="email" required /></div>
+          <button className="btn" type="submit">{t("settings.addBtn")}</button>
+        </div>
+      </form>
+      <ErrorText error={add.error ?? remove.error} />
+      <p className="small muted">{t("clients.inviteBody")}</p>
+      <div><button className="btn" type="button" disabled={invite.isPending} onClick={() => { setMade(null); invite.mutate(); }}>{t("clients.invite")}</button></div>
+      {made && (
+        <div className="stack" style={{ gap: 6 }}>
+          <div className="row">
+            <input className="input" aria-label={t("clients.link")} readOnly value={made} style={{ flex: 1 }} />
+            <button className="btn small" type="button" onClick={() => navigator.clipboard.writeText(made)}>{t("share.copy")}</button>
+          </div>
+          <span className="small muted">{t("share.once")}</span>
+        </div>
+      )}
+      <ErrorText error={invite.error ?? revoke.error} />
+      {(invites.data ?? []).length > 0 && (
+        <>
+          <strong>{t("clients.invites")}</strong>
+          <table className="tbl small">
+            <thead><tr><th>{t("share.by")}</th><th>{t("share.on")}</th><th>{t("share.expires")}</th><th>{t("reports.col.status")}</th><th className="r"><span className="sr-only">{t("share.revoke")}</span></th></tr></thead>
+            <tbody>
+              {(invites.data ?? []).map((i) => (
+                <tr key={i.id}>
+                  <td>{i.created_by}</td><td className="muted">{f.date(i.created_at)}</td><td className="muted">{f.date(i.expires_at)}</td>
+                  <td>{status(i) ?? t("clients.open")}</td>
+                  <td className="r">{!status(i) && <button className="btn quiet small" type="button" onClick={() => { if (window.confirm(t("clients.revokeConfirm"))) revoke.mutate(i.id); }}>{t("share.revoke")}</button>}</td>
+                </tr>
+              ))}
+            </tbody>
+          </table>
+        </>
+      )}
+    </div>
+  );
+}
+
+/** Choose a deal, then manage its clients. */
+function Clients() {
+  const { t } = useI18n();
+  const { workspaceId } = useSession();
+  const deals = useQuery({ queryKey: ["deals", workspaceId], queryFn: () => api.get<DealOverview[]>(`/workspaces/${workspaceId}/deals`) });
+  const [dealId, setDealId] = useState<string | null>(null);
+  const list = deals.data ?? [];
+  const chosen = list.find((d) => d.deal.id === dealId)?.deal.id ?? list[0]?.deal.id;
+  return (
+    <section className="panel stack">
+      <h2 className="h-section">{t("clients.title")}</h2>
+      <p className="small muted">{t("clients.body")}</p>
+      {list.length === 0 ? <p className="small muted">{t("clients.noDeals")}</p> : (
+        <>
+          <div className="field"><label htmlFor="c-deal">{t("clients.deal")}</label>
+            <select className="select" id="c-deal" value={chosen} onChange={(e) => setDealId(e.target.value)}>{list.map((d) => <option key={d.deal.id} value={d.deal.id}>{d.deal.name}</option>)}</select>
+          </div>
+          {chosen && <ClientsPanel key={chosen} dealId={chosen} />}
+        </>
+      )}
+    </section>
+  );
+}
 
 export function Settings() {
   const { t, f, L, lang, setLang } = useI18n();
@@ -49,6 +150,7 @@ export function Settings() {
               <ErrorText error={add.error} />
             </form>
           )}
+          {(role === "owner" || role === "admin") && <Clients />}
         </div>
         <div className="stack" style={{ gap: 16 }}>
           <fieldset className="panel stack" style={{ margin: 0 }} disabled={role !== "owner"}>
@@ -98,7 +200,7 @@ export function Settings() {
           <h2 className="h-section">{t("settings.roles")}</h2>
           <table className="tbl small">
             <tbody>
-              {(["viewer", "reviewer", "analyst", "admin", "owner"] as const).map((r) => <tr key={r}><th scope="row">{L.role(r)}</th><td className="muted">{t(`settings.r.${r}`)}</td></tr>)}
+              {(["client", "viewer", "reviewer", "analyst", "admin", "owner"] as const).map((r) => <tr key={r}><th scope="row">{L.role(r)}</th><td className="muted">{t(`settings.r.${r}`)}</td></tr>)}
             </tbody>
           </table>
           <form

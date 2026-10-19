@@ -82,7 +82,7 @@ export function Run({ dealId }: { dealId: string }) {
         {start.isPending ? t("run.running") : label}
       </button>
       {blocked && <span className="why">{t("run.blockedWhy", { why })}</span>}
-      {!canEdit(role) && <span className="why">{t("run.viewerWhy")}</span>}
+      {!canEdit(role) && <span className="why">{t(role === "client" ? "run.clientWhy" : "run.viewerWhy")}</span>}
     </div>
   );
 
