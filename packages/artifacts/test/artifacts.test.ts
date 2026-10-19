@@ -264,7 +264,7 @@ describe("artifacts", () => {
       expect(text).toContain("The client confirmed 1 of them; that is not an independent confirmation.");
       expect(text).toContain("Stated by the sponsor, not independently confirmed");
       expect(verifyProvenance(text, model.formatter.manifest).orphans).toEqual([]);
-      expect(model.formatter.manifest.map((m) => m.ref)).toEqual(expect.arrayContaining([`clientConfirmedBy.${first!.fieldKey}`, `clientConfirmedAt.${first!.fieldKey}`, "clientConfirmed.count"]));
+      expect(model.formatter.manifest.map((m) => m.ref)).toEqual(expect.arrayContaining([`ident:clientConfirmedBy.${first!.fieldKey}`, `ident:clientConfirmedAt.${first!.fieldKey}`, "ident:clientConfirmed.count"]));
       expect((await renderArtifact(x, "docx")).provenance.pass).toBe(true);
       // Without a client confirmation, the block has no such sentence.
       delete first!.clientConfirmedBy;

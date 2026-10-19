@@ -40,6 +40,9 @@ export type ArtifactInput = {
     confirmedBy?: string | null;
     confirmedByReview?: boolean;
     confirmedAt?: string | null;
+    /** The deal's client confirmed the broker's value (card 89); present only when it did. Not an independent confirmation. */
+    clientConfirmedBy?: string | null;
+    clientConfirmedAt?: string | null;
   }[];
   /** Optional lines no document gave, as the run recorded them; absent on runs made before the list existed. */
   notFound?: { fieldKey: string; itemKey?: string; label: string; detail?: string }[];
@@ -278,6 +281,9 @@ type Assumption = ArtifactInput["assumptions"][number];
 
 /** How an input was confirmed, in words; "" when it was approved the ordinary way. `id` prints the date or name. */
 export function confirmationLabel(a: Assumption, id: (text: string, ref: string) => string = (t) => t): string {
+  if (a.sponsorStated && a.clientConfirmedBy) {
+    return `Stated by the sponsor, confirmed by the client ${id(a.clientConfirmedBy, `clientConfirmedBy.${a.fieldKey}`)} on ${id((a.clientConfirmedAt ?? "").slice(0, 10), `clientConfirmedAt.${a.fieldKey}`)}, not independently confirmed`;
+  }
   if (a.sponsorStated) return "Stated by the sponsor, not independently confirmed";
   if (a.confirmedByReview) return `Confirmed by Agir review on ${id((a.confirmedAt ?? "").slice(0, 10), `confirmedAt.${a.fieldKey}`)}`;
   if (a.confirmedBy) return `Confirmed by ${id(a.confirmedBy, `confirmedBy.${a.fieldKey}`)}`;
@@ -302,11 +308,13 @@ function sponsorStatedBlocks(f: Formatter, x: ArtifactInput): Block[] {
   const material = x.assumptions.filter((a) => a.sponsorStated || a.confirmedBy || a.confirmedByReview || FIELD_BY_KEY.get(a.fieldKey)?.material).length;
   const n = f.ident(String(stated.length), "sponsorStated.count");
   const m = f.ident(String(material), "materialInputs.count");
+  const byClient = stated.filter((a) => a.clientConfirmedBy).length;
+  const client = byClient > 0 ? ` The client confirmed ${f.ident(String(byClient), "clientConfirmed.count")} of them; that is not an independent confirmation.` : "";
   return [
     { type: "heading", text: "Stated by the sponsor, not independently confirmed" },
     {
       type: "paragraph",
-      text: `${n} of the ${m} material inputs this run used ${stated.length === 1 ? "was" : "were"} stated by the sponsor and not confirmed by anyone else. Check them before relying on this ${x.kind === "ic_memo" ? "memo" : (x.kind === "build_decision" || x.kind === "partner_memo") ? "report" : "package"}.`,
+      text: `${n} of the ${m} material inputs this run used ${stated.length === 1 ? "was" : "were"} stated by the sponsor and not confirmed by anyone else. Check them before relying on this ${x.kind === "ic_memo" ? "memo" : (x.kind === "build_decision" || x.kind === "partner_memo") ? "report" : "package"}.${client}`,
     },
     { type: "table", columns: INPUT_COLUMNS, rows: stated.map((a) => inputRow(f, a)) },
   ];

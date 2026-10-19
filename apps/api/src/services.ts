@@ -71,17 +71,20 @@ type AssumptionDb = {
   confirmed_by_review: boolean;
   /** Approved on one person's say, a material field, no second approver (agir_sponsor_stated in the database). */
   sponsor_stated: boolean;
+  /** The deal's client said the broker's value is right (card 89); not an independent confirmation. */
+  client_confirmed_by_name: string | null;
+  client_confirmed_at: string | null;
   version: number;
   updated_at: string;
 };
 
 async function loadAssumptions(tx: Db, dealId: string): Promise<AssumptionDb[]> {
   return tx.query<AssumptionDb>(
-    `select a.*, u.name as decided_by_name, s.name as second_approver_name,
+    `select a.*, u.name as decided_by_name, s.name as second_approver_name, k.name as client_confirmed_by_name,
        exists (select 1 from workspace_members m where m.workspace_id = a.workspace_id and m.user_id = a.second_approver and m.role = 'reviewer') as confirmed_by_review,
        (a.status = 'approved' and a.source_kind = 'analyst' and a.second_approver is null and f.material) as sponsor_stated
      from assumptions a join field_catalog f on f.key = a.field_key
-       left join users u on u.id = a.decided_by left join users s on s.id = a.second_approver
+       left join users u on u.id = a.decided_by left join users s on s.id = a.second_approver left join users k on k.id = a.client_confirmed_by
      where a.deal_id = $1 order by a.field_key, a.item_key`,
     [dealId],
   );
@@ -266,6 +269,8 @@ export async function reviewView(tx: Db, dealId: string) {
         confirmedByReview: a.confirmed_by_review,
         secondApprovedAt: a.second_approved_at,
         sponsorStated: a.sponsor_stated,
+        clientConfirmedBy: a.client_confirmed_by_name,
+        clientConfirmedAt: a.client_confirmed_at,
         version: a.version,
       };
     }),
@@ -312,6 +317,8 @@ export async function createRun(tx: Db, dealId: string) {
       confirmedBy: a.second_approver_name,
       confirmedByReview: a.confirmed_by_review,
       confirmedAt: a.second_approved_at,
+      // Only when set, so a snapshot without a client's confirmation is what it was before card 89.
+      ...(a.client_confirmed_at ? { clientConfirmedBy: a.client_confirmed_by_name, clientConfirmedAt: a.client_confirmed_at } : {}),
     }));
   const inputHash = sha256(canonicalJson(input));
   const resultHash = sha256(canonicalJson(result));

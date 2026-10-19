@@ -244,6 +244,37 @@ export function createApp({ db, store, secureCookies, demoSignIn = false }: AppD
 
   app.get("/api/deals/:id", async (c) => c.json(await as(c, (tx) => dealOverview(tx, c.req.param("id")))));
 
+  // ---- Clients (card 89): a broker's client sees the deals assigned to it and confirms the values the broker stated.
+  app.get("/api/deals/:id/clients", async (c) => {
+    const rows = await as(c, async (tx) => {
+      const [d] = await tx.query<{ staff: boolean }>(`select agir_is_staff(workspace_id) as staff from deals where id = $1`, [c.req.param("id")]);
+      if (!d) throw new HttpError(404, "Deal not found");
+      if (!d.staff) throw new HttpError(403, "Your role in this workspace does not allow this action");
+      return tx.query(`select u.id, u.name, u.email, dc.created_at as assigned_at from deal_clients dc join users u on u.id = dc.user_id
+        where dc.deal_id = $1 order by u.name`, [c.req.param("id")]);
+    });
+    return c.json(rows);
+  });
+
+  app.post("/api/deals/:id/clients", async (c) => {
+    const { email } = z.object({ email: z.string().email() }).parse(await c.req.json());
+    await as(c, (tx) => tx.query(`select fn_assign_client($1, $2)`, [c.req.param("id"), email]));
+    return c.json({ ok: true });
+  });
+
+  app.delete("/api/deals/:id/clients/:userId", async (c) => {
+    const userId = z.string().uuid().parse(c.req.param("userId"));
+    await as(c, (tx) => tx.query(`select fn_unassign_client($1, $2)`, [c.req.param("id"), userId]));
+    return c.json({ ok: true });
+  });
+
+  app.post("/api/assumptions/:id/client-confirm", async (c) => {
+    const { version } = z.object({ version: z.number().int().nullable().optional() }).parse(await c.req.json());
+    const [r] = await as(c, (tx) =>
+      tx.query(`select (a).status, (a).version from (select fn_client_confirm($1, $2) a) x`, [c.req.param("id"), version ?? null]));
+    return c.json(r);
+  });
+
   // ---- Documents --------------------------------------------------------------------
   app.get("/api/deals/:id/documents", async (c) => {
     const rows = await as(c, (tx) =>

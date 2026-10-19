@@ -2426,8 +2426,8 @@ describe("clients see and confirm only their own deals (task 89a)", () => {
     expect(Object.values(await counts(ids.dana!, dealB)).every((n) => n === 0)).toBe(true);
     expect(Object.values(await counts(ids.erin!, dealA)).every((n) => n === 0)).toBe(true);
     expect(Object.values(await counts(ids.gus!, dealA)).every((n) => n === 0)).toBe(true);
-    expect((await call(dana, "GET", `/api/workspaces/${cw}/deals`)).json.map((d: any) => d.id)).toEqual([dealA]);
-    expect((await call(frank, "GET", `/api/workspaces/${cw}/deals`)).json.map((d: any) => d.id).sort()).toEqual([dealA, dealB].sort());
+    expect((await call(dana, "GET", `/api/workspaces/${cw}/deals`)).json.map((d: any) => d.deal.id)).toEqual([dealA]);
+    expect((await call(frank, "GET", `/api/workspaces/${cw}/deals`)).json.map((d: any) => d.deal.id).sort()).toEqual([dealA, dealB].sort());
     expect((await call(dana, "GET", `/api/deals/${dealB}`)).status).toBe(404);
   });
 

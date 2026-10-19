@@ -68,6 +68,8 @@ export function describeEvent(i: I18n, e: AuditEvent): string {
       return fr ? `A donné accès à un réviseur${p.expires_at ? ` jusqu'au ${i.f.date(p.expires_at)}` : ""}` : `Gave a reviewer access${p.expires_at ? ` until ${i.f.date(p.expires_at)}` : ""}`;
     case "document.suggestions_failed":
       return fr ? "Les suggestions de libellés d'un modèle ont échoué pour un document ; les valeurs lues restent" : "A model's label suggestions failed for a document; the values read stand";
+    case "client.assigned": return fr ? "A ajouté un client à ce projet" : "Added a client to this deal";
+    case "client.unassigned": return fr ? "A retiré un client de ce projet" : "Removed a client from this deal";
     case "member.added": return fr ? `A ajouté une personne (${i.L.role(p.role)})` : `Added a person (${p.role})`;
     default:
       if (e.action.startsWith("assumption.")) {
@@ -75,12 +77,12 @@ export function describeEvent(i: I18n, e: AuditEvent): string {
         const FR_ACT: Record<string, string> = {
           approve: "Approuvée", resolve: "Conflit résolu", modify: "Valeur modifiée", second_approve: "Confirmée par un second approbateur", reject: "Rejetée",
           reopen: "Rouverte", enter: "Valeur saisie", accept_default: "Valeur par défaut acceptée", override_pending_second_approval: "Dérogation en attente",
-          copied: "Copiée", use_as_stated: "Utilisée telle qu'énoncée", needs_second_approver: "Second approbateur requis",
+          copied: "Copiée", use_as_stated: "Utilisée telle qu'énoncée", needs_second_approver: "Second approbateur requis", client_confirm: "Confirmée par le client",
         };
         const EN_ACT: Record<string, string> = {
           enter: "Entered", approve: "Approved", resolve: "Resolved", modify: "Modified", second_approve: "Confirmed by a second approver", reject: "Rejected",
           reopen: "Reopened", accept_default: "Default accepted", override_pending_second_approval: "Override waiting for a second approver", copied: "Copied",
-          use_as_stated: "Used as stated", needs_second_approver: "Needs a second approver",
+          use_as_stated: "Used as stated", needs_second_approver: "Needs a second approver", client_confirm: "Confirmed by the client",
         };
         const verb = fr ? FR_ACT[action] ?? action : EN_ACT[action] ?? action.replace(/_/g, " ");
         const n = Number(p.to_value);
