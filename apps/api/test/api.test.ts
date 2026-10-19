@@ -9,6 +9,7 @@ import Anthropic from "@anthropic-ai/sdk";
 import { drain, reconcileDeal, type SuggestRequest, type SuggestReply } from "@agir/worker";
 import { documentBytes, loadOracle } from "@agir/testkit";
 import { createApp } from "../src/app.ts";
+import { rateLimiter } from "../src/auth.ts";
 import { POLICIES, POLICY_V1, RENTAL_HOLD_DRAFT, type Policy } from "@agir/contracts";
 import { DRIVERS, SALE_DRIVERS, canonicalJson, heldPartnerReturns } from "@agir/engine";
 import { POLICY_HASHES, sha256, sourceLabel } from "../src/services.ts";
@@ -2352,7 +2353,7 @@ describe("share links (task 86a)", () => {
       expect(response.status).toBe(n <= 60 ? 404 : 429); privacy(response.headers);
       if (n === 61) expect(await response.json()).toEqual({ error: "Too many requests. Wait a minute." });
     }
-    expect((await limited.request(`/api/share/${secret}`, { headers: { "x-forwarded-for": "another-client" } })).status).toBe(404);
+    expect((await limited.request(`/api/share/${secret}`, { headers: { "x-forwarded-for": "another-client" } })).status).toBe(429);
   });
   test("the new table has member-read RLS and no direct write grants", async () => {
     expect(await db.query(`select name from schema_migrations where name = '0017_share_links.sql'`)).toHaveLength(1);
@@ -2366,6 +2367,41 @@ describe("share links (task 86a)", () => {
       lateral aclexplode(coalesce(p.proacl, acldefault('f', p.proowner))) a
       where p.proname in ('fn_create_share_link', 'fn_revoke_share_link', 'fn_open_share_link') and a.grantee = 0 and a.privilege_type = 'EXECUTE'`);
     expect(grants).toEqual([]);
+  });
+});
+
+describe("connection rate limits (task 90b)", () => {
+  test("a trusted proxy uses the last forwarded address", async () => {
+    const limited = createApp({ db, store, secureCookies: false, trustProxy: true });
+    const path = `/api/share/${randomUUID()}`;
+    for (let n = 1; n <= 61; n++) {
+      expect((await limited.request(path, { headers: { "x-forwarded-for": "a" } })).status).toBe(n <= 60 ? 404 : 429);
+    }
+    expect((await limited.request(path, { headers: { "x-forwarded-for": "b" } })).status).toBe(404);
+    expect((await limited.request(path, { headers: { "x-forwarded-for": "b, a" } })).status).toBe(429);
+  });
+  test("changing a forwarded header does not reset failed login attempts", async () => {
+    const limited = createApp({ db, store, secureCookies: false });
+    for (let n = 1; n <= 21; n++) {
+      const response = await limited.request("/api/auth/login", {
+        method: "POST",
+        headers: { "x-agir": "1", "content-type": "application/json", "x-forwarded-for": `client-${n}` },
+        body: JSON.stringify({ email: "missing.rate-limit@example.com", password: "wrong password" }),
+      });
+      expect(response.status).toBe(n <= 20 ? 401 : 429);
+    }
+  });
+  test("expired keys get a fresh window after a large map, and live keys keep their limit", () => {
+    vi.useFakeTimers();
+    try {
+      const limit = rateLimiter(20, 60_000);
+      for (let n = 0; n < 10_001; n++) expect(limit(`expired-${n}`)).toBe(true);
+      vi.advanceTimersByTime(60_001);
+      expect(limit("live")).toBe(true);
+      expect(limit("expired-0")).toBe(true);
+      for (let n = 2; n <= 20; n++) expect(limit("live")).toBe(true);
+      expect(limit("live")).toBe(false);
+    } finally { vi.useRealTimers(); }
   });
 });
 
