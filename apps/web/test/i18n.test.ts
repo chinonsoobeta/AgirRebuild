@@ -823,3 +823,34 @@ describe("partner memo wording (task 84d)", () => {
     expect(describeEvent(fr, event)).toContain("Note aux partenaires");
   });
 });
+
+
+describe("share-link wording (task 86b)", () => {
+  it.each([
+    ["share.created", { kind: "ic_memo", format: "pdf", term: "7d" }, "Shared a IC memo (pdf), 7 days", "A partagé : Mémo du comité (pdf), 7 jours"],
+    ["share.revoked", {}, "Revoked a shared link", "A révoqué un lien partagé"],
+    ["share.opened", { what: "page" }, "Opened a shared link: the page", "A ouvert un lien partagé : la page"],
+    ["share.opened", { what: "file" }, "Opened a shared link: the report", "A ouvert un lien partagé : le rapport"],
+    ["share.opened", { what: "audit_package" }, "Opened a shared link: the audit package", "A ouvert un lien partagé : le dossier d'audit"],
+  ] as const)("%s %j has the specified audit sentences", (action, payload, en, fr) => {
+    const event = { seq: 1, action, payload, actor: null, entity: "share_link", entity_id: "link-id", hash: "hash", created_at: "2026-10-19T12:00:00Z" };
+    expect(describeEvent(build("en", () => {}), event)).toBe(en);
+    expect(describeEvent(build("fr", () => {}), event)).toBe(fr);
+  });
+  it("every new interface string and public error has French wording without English leftovers", () => {
+    const keys = ["share.button", "share.term.24h", "share.term.7d", "share.term.30d", "share.term.none", "share.make", "share.link", "share.copy", "share.once",
+      "share.title", "share.by", "share.on", "share.expires", "share.openings", "share.lastOpened", "share.active", "share.expired", "share.revoked",
+      "share.revoke", "share.confirm", "share.expiry", "share.noExpiry", "share.package", "share.readOnly", "audit.someone"] as Key[];
+    const en = build("en", () => {}), fr = build("fr", () => {});
+    for (const key of keys) {
+      const text = fr.t(key, { date: "DATE" });
+      expect(typeof text, key).toBe("string");
+      expect(text, key).not.toBe(en.t(key, { date: "DATE" }));
+      expect(text, key).not.toMatch(/\b(share|shared|link|copy|make|expiry|expires|openings|opened|revoked|revoke|someone|download|only|from|the|and|this|now|again)\b/i);
+    }
+    for (const message of ["This link is not available. It may have expired or been revoked.", "Only a finished report can be shared.", "This link is already revoked.", "Too many requests. Wait a minute."]) {
+      expect(fr.msg(message)).not.toBe(message);
+      expect(fr.msg(message)).not.toMatch(/\b(link|expired|revoked|report|requests|wait|the|this)\b/i);
+    }
+  });
+});

@@ -1,7 +1,10 @@
 /// <reference types="node" />
-import { beforeEach, describe, expect, it, vi } from "vitest";
+import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import { createElement } from "react";
 import { readFileSync } from "node:fs";
+import { randomBytes } from "node:crypto";
+import { api, ApiError } from "../src/api";
+import { Audit } from "../src/routes/audit";
 import { renderToStaticMarkup } from "react-dom/server";
 import { policyFor, type EngineInput } from "@agir/contracts";
 import { underwrite } from "../../../packages/engine/src/index.ts";
@@ -12,14 +15,22 @@ import { Reports } from "../src/routes/reports.tsx";
 import { Explore } from "../src/routes/explore.tsx";
 import { build, type Lang } from "../src/i18n.tsx";
 
-const queryState = vi.hoisted(() => ({ run: undefined as unknown, lang: "en" as Lang, options: [] as { queryKey: unknown[]; enabled?: boolean }[] }));
+const queryState = vi.hoisted(() => ({ run: undefined as unknown, lang: "en" as Lang, role: "owner", options: [] as { queryKey: unknown[]; enabled?: boolean; queryFn?: () => Promise<unknown> }[],
+  artifacts: [] as unknown[], links: [] as unknown[], events: [] as unknown[], shared: undefined as unknown, shareError: null as unknown,
+  interactive: false, hooks: [] as unknown[], index: 0, nodes: [] as { tag: string; props: Record<string, any> }[], secret: "", invalidate: vi.fn(async () => {}) }));
 vi.mock("@tanstack/react-query", () => ({
-  useQuery: (options: { queryKey: unknown[]; enabled?: boolean }) => {
+  useQuery: (options: { queryKey: unknown[]; enabled?: boolean; queryFn?: () => Promise<unknown> }) => {
     queryState.options.push(options);
-    return options.queryKey[0] === "run" ? { data: queryState.run } : {};
+    const key = options.queryKey[0];
+    return key === "run" ? { data: queryState.run } : key === "artifacts" ? { data: queryState.artifacts }
+      : key === "share-links" ? { data: queryState.links } : key === "share" ? { data: queryState.shared, error: queryState.shareError }
+      : key === "audit" ? { data: queryState.events } : {};
   },
-  useMutation: () => ({}),
-  useQueryClient: () => ({}),
+  useMutation: (options: { mutationFn: (body: any) => Promise<any>; onSuccess?: (data: any) => unknown }) => ({
+    mutate: async (body: unknown) => { const data = await options.mutationFn(body); await options.onSuccess?.(data); },
+    isPending: false, reset: () => {},
+  }),
+  useQueryClient: () => ({ invalidateQueries: queryState.invalidate }),
 }));
 vi.mock("../src/components/ui", async (original) => {
   const ui = await original<typeof import("../src/components/ui")>();
@@ -29,7 +40,7 @@ vi.mock("../src/components/ui", async (original) => {
     DealHeader: () => createElement("header", null, "Deal header"),
     useDeal: () => ({ data: { run: { id: "sale-run", number: 1 }, documents: { total: 0, processing: 0, failed: 0 },
       review: { status: "ready", approved: 1, needsReview: 0, conflicting: 0, awaitingSecond: 0, missing: 0, impossible: 0 } } }),
-    useSession: () => ({ solo: true }),
+    useSession: () => ({ solo: true, role: queryState.role }),
   };
 });
 vi.mock("../src/i18n", async (original) => {
@@ -39,6 +50,33 @@ vi.mock("../src/i18n", async (original) => {
 vi.mock("@tanstack/react-router", async () => {
   const { createElement } = await import("react");
   return { Link: ({ children }: { children: unknown }) => createElement("a", null, children as string) };
+});
+
+vi.mock("../src/api", async (original) => {
+  const real = await original<typeof import("../src/api")>();
+  return { ...real, api: { ...real.api,
+    get: vi.fn(async () => queryState.shared),
+    post: vi.fn(async (path: string) => path.endsWith("/revoke") ? { ok: true } : { id: "new-link", url: `/s/${queryState.secret}`, expiresAt: null }),
+  } };
+});
+vi.mock("react", async (original) => {
+  const react = await original<typeof import("react")>();
+  return { ...react, useState: (initial: unknown) => {
+    const originalState = react.useState(initial);
+    if (!queryState.interactive) return originalState;
+    const n = queryState.index++;
+    if (!(n in queryState.hooks)) queryState.hooks[n] = initial;
+    return [queryState.hooks[n], (value: unknown) => { queryState.hooks[n] = value; }];
+  } };
+});
+vi.mock("react/jsx-dev-runtime", async (original) => {
+  const runtime = await original<typeof import("react/jsx-dev-runtime")>();
+  return { ...runtime, jsxDEV: (...args: Parameters<typeof runtime.jsxDEV>) => {
+    if (queryState.interactive && typeof args[0] === "string" && ["button", "select", "input", "a"].includes(args[0])) {
+      queryState.nodes.push({ tag: args[0], props: args[1] as Record<string, any> });
+    }
+    return runtime.jsxDEV(...args);
+  } };
 });
 
 const saleInput: EngineInput = { ...allEquityDeal(), revenue: [], exit: "for_sale",
@@ -195,5 +233,99 @@ describe("the run screen shows the partners (task 85d)", () => {
     }
     expect(text).not.toMatch(/\b(LP|GP|IRR|promote|waterfall|equity|yield|debt|loan|rent|cash|gate|stated)\b/i);
     queryState.lang = "en";
+  });
+});
+
+
+describe("share links on the web (task 86b)", () => {
+  const artifact = (id: string, status: string) => ({ id, kind: "ic_memo", format: "pdf", status, error: null, sha256: null,
+    created_at: "2026-10-19T12:00:00Z", run_id: "run", run_number: 1, provenance_entries: null });
+  const link = (id: string, expires_at: string | null, revoked_at: string | null = null) => ({ id, artifact_id: "ready", kind: "ic_memo", format: "pdf",
+    run_number: 1, term: expires_at ? "7d" : "none", expires_at, created_at: "2026-10-19T12:00:00Z", created_by: "Alice Analyst",
+    revoked_at, revoked_by: revoked_at ? "Bob Approver" : null, openings: 3, last_opened_at: "2026-10-19T13:00:00Z" });
+  const render = (element = createElement(Reports, { dealId: "links" })) => {
+    queryState.index = 0; queryState.nodes = [];
+    return renderToStaticMarkup(element).replaceAll(queryState.secret, "[redacted]");
+  };
+  const button = (label: string) => queryState.nodes.find((n) => n.tag === "button" && n.props.children === label)!;
+  const sharePage = async () => {
+    const { Share } = await vi.importActual<{ Share: (p: { secret: string }) => ReturnType<typeof createElement> }>("../src/routes/share.tsx");
+    return render(createElement(Share, { secret: queryState.secret }));
+  };
+  beforeEach(() => {
+    queryState.interactive = true; queryState.hooks = []; queryState.lang = "en"; queryState.role = "owner";
+    queryState.artifacts = [artifact("ready", "ready"), artifact("queued", "queued"), artifact("failed", "failed")];
+    queryState.links = []; queryState.events = []; queryState.options = []; queryState.shareError = null;
+    queryState.shared = { deal: "Shared reference", kind: "ic_memo", format: "pdf", runNumber: 7, expiresAt: "2099-10-19T12:00:00Z" };
+    queryState.secret = randomBytes(32).toString("base64url");
+    vi.clearAllMocks();
+    vi.stubGlobal("window", { location: { origin: "https://agir.test" }, confirm: vi.fn(() => true) });
+    vi.stubGlobal("navigator", { clipboard: { writeText: vi.fn(async () => {}) } });
+  });
+  afterEach(() => { queryState.interactive = false; queryState.artifacts = []; queryState.links = []; queryState.lang = "en"; vi.unstubAllGlobals(); });
+  it.each(["owner", "analyst", "viewer"])("%s can share only the ready report", (role) => {
+    queryState.role = role; render();
+    const buttons = queryState.nodes.filter((n) => n.tag === "button" && n.props.children === "Share");
+    expect(buttons.length).toBe(1);
+    expect(Boolean(buttons[0]!.props.disabled)).toBe(false);
+  });
+  it("offers four terms, makes a link and shows its once-only copy field after success", async () => {
+    render(); await button("Share").props.onClick();
+    const choices = render();
+    for (const term of ["24 hours", "7 days", "30 days", "No expiry"]) expect(choices).toContain(term);
+    queryState.nodes.find((n) => n.tag === "select")!.props.onChange({ target: { value: "24h" } });
+    render(); await button("Make link").props.onClick();
+    const made = render();
+    expect(made).toContain("Copy this link now. It is not shown again.");
+    const input = queryState.nodes.find((n) => n.tag === "input" && n.props.readOnly)!;
+    expect(Boolean(input)).toBe(true);
+    expect(input.props.value === `https://agir.test/s/${queryState.secret}`).toBe(true);
+    expect(vi.mocked(api.post).mock.calls.some(([path, body]) => path === "/artifacts/ready/share-links" && (body as { term: string }).term === "24h")).toBe(true);
+    await button("Copy").props.onClick();
+    const copy = vi.mocked(navigator.clipboard.writeText);
+    expect(copy.mock.calls.length).toBe(1);
+    expect(copy.mock.calls[0]![0] === input.props.value).toBe(true);
+    expect(queryState.invalidate.mock.calls.length).toBeGreaterThan(0);
+  });
+  it("renders active, expired and revoked links and revokes only active rows after confirmation", async () => {
+    queryState.links = [link("active", null), link("expired", "2000-01-01T00:00:00Z"), link("revoked", "2099-01-01T00:00:00Z", "2026-10-19T12:00:00Z")];
+    const html = render();
+    for (const text of ["Shared links", "Report", "Made by", "Made on", "Expires", "Openings", "Last opened", "Status", "Active", "Expired", "Revoked", "No expiry"]) expect(html).toContain(text);
+    expect(queryState.nodes.filter((n) => n.tag === "button" && n.props.children === "Revoke").length).toBe(1);
+    await button("Revoke").props.onClick();
+    expect(vi.mocked(window.confirm).mock.calls[0]![0]).toBe("Revoke this link? Anyone holding it will no longer be able to open it.");
+    expect(vi.mocked(api.post).mock.calls.some(([path]) => path === "/share-links/active/revoke")).toBe(true);
+    expect(queryState.invalidate.mock.calls.length).toBeGreaterThan(0);
+  });
+  it("hides the Shared links table when there are no links", () => { expect(render()).not.toContain("Shared links"); });
+  it.each(["pdf", "docx"])("the public %s page has its metadata, downloads and appropriate Open button, without requesting me", async (format) => {
+    queryState.shared = { ...queryState.shared as object, format };
+    const html = await sharePage();
+    for (const text of ["Shared reference", "IC memo", "Run 7", "This link expires on", "Download", "Download the audit package", "Shared from Agir. Read-only."]) expect(html).toContain(text);
+    expect(queryState.nodes.some((n) => n.tag === "a" && n.props.children === "Open")).toBe(format === "pdf");
+    const fileLinks = queryState.nodes.filter((n) => n.tag === "a" && String(n.props.href).includes("/file"));
+    expect(fileLinks.length).toBe(format === "pdf" ? 2 : 1);
+    expect(queryState.nodes.some((n) => n.tag === "a" && String(n.props.href).endsWith("/audit-package"))).toBe(true);
+    const query = queryState.options.find((q) => q.queryKey[0] === "share")!;
+    await query.queryFn!();
+    expect(vi.mocked(api.get).mock.calls.some(([path]) => path === "/me")).toBe(false);
+    expect(queryState.options.some((q) => q.queryKey[0] === "me")).toBe(false);
+  });
+  it("the public page prints no expiry when appropriate", async () => {
+    queryState.shared = { ...queryState.shared as object, expiresAt: null };
+    expect(await sharePage()).toContain("This link does not expire.");
+  });
+  it("a public 404 shows only the API sentence", async () => {
+    queryState.shared = undefined;
+    queryState.shareError = new ApiError(404, "This link is not available. It may have expired or been revoked.");
+    const text = (await sharePage()).replace(/<[^>]*>/g, "").trim();
+    expect(text).toBe("This link is not available. It may have expired or been revoked.");
+  });
+  it.each(["en", "fr"] as const)("an anonymous opening uses the link-holder actor label in %s", (lang) => {
+    queryState.lang = lang;
+    queryState.events = [{ seq: 1, action: "share.opened", actor: null, entity: "share_link", entity_id: "link-id", payload: { what: "page" }, hash: "a".repeat(64), created_at: "2026-10-19T12:00:00Z" }];
+    const html = render(createElement(Audit, { dealId: "links" }));
+    expect(html).toContain(lang === "en" ? "Someone with the link" : "Une personne ayant le lien");
+    expect(html).not.toContain(build(lang, () => {}).t("audit.worker"));
   });
 });
