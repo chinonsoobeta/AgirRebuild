@@ -3,7 +3,7 @@ import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import { createElement } from "react";
 import { renderToStaticMarkup } from "react-dom/server";
 import { readFileSync } from "node:fs";
-import { TEMPLATES } from "@agir/contracts";
+import { FIELD_BY_KEY, TEMPLATES } from "@agir/contracts";
 import { assemble, type AssumptionRow } from "../../../packages/engine/src/index.ts";
 import { QuickStart } from "../src/components/QuickStart.tsx";
 import { build, type Lang } from "../src/i18n.tsx";
@@ -99,9 +99,9 @@ describe("the quick start asks for the partner split (task 85c)", () => {
   const fields = ["lp_share_pct", "preferred_return_pct", "gp_promote_pct"];
   beforeEach(() => { state.template = "multiplex"; state.held = false; state.lang = "en"; state.error = null; state.submit = undefined; state.mutate.mockClear(); });
   afterEach(() => { state.held = false; vi.unstubAllGlobals(); });
-  it.each(TEMPLATES.map((t) => t.key))("%s ends with the shared optional not-held questions", (key) => {
+  it.each(TEMPLATES.map((t) => t.key))("%s ends with the shared optional partner questions", (key) => {
     const questions = TEMPLATES.find((t) => t.key === key)!.questions.slice(-3);
-    expect(questions).toEqual(fields.map((field) => ({ field, optional: true, notHeld: true })));
+    expect(questions).toEqual(fields.map((field) => ({ field, optional: true })));
     const shared = TEMPLATES[0]!.questions.slice(-3);
     questions.forEach((q, n) => expect(q).toBe(shared[n]));
   });
@@ -112,13 +112,47 @@ describe("the quick start asks for the partner split (task 85c)", () => {
     const positions = fields.map((field) => html.indexOf(`name="${field}"`));
     expect([...positions].sort((a, b) => a - b)).toEqual(positions);
   });
-  it("a kept multiplex has no partner questions or hidden partner fields", () => {
+  it("a kept multiplex shows the partner questions, in order, and lists none as hidden (task 87b)", () => {
     state.held = true;
     const html = render();
-    for (const field of fields) {
-      expect(html).not.toContain(`name="${field}"`);
-      expect(html).not.toContain(build("en", () => {}).L.field(field));
-    }
+    for (const field of fields) expect(html).toContain(`name="${field}"`);
+    const positions = fields.map((field) => html.indexOf(`name="${field}"`));
+    expect([...positions].sort((a, b) => a - b)).toEqual(positions);
+    for (const field of fields) expect(html).not.toContain(`Not asked: ${build("en", () => {}).L.field(field)}`);
+  });
+  const submitKept = (extra: Record<string, number>) => {
+    state.template = "multiplex";
+    state.held = true;
+    render();
+    const values: Record<string, string | number> = { reason: "Quick start answer", accept: 1, refinance_and_hold: 1,
+      land_cost: 400_000, hard_cost: 1_200_000, soft_cost: 150_000, contingency: 60_000, development_charges: 20_000, property_tax_annual: 9_000,
+      construction_months: 12, lease_up_months: 3, unit_count: 4, unit_rent_monthly: 2_400, stabilized_occupancy_pct: 96, exit_cap_rate_pct: 5,
+      senior_loan_amount: 1_200_000, senior_rate_pct: 6, senior_amort_years: 30, senior_io_months: 0,
+      refinance_month: 24, refinance_amount: 1_300_000, refinance_rate_pct: 5, refinance_amort_years: 30 };
+    const fd = new FormData();
+    for (const [key, value] of Object.entries({ ...values, ...extra })) fd.set(key, String(value));
+    vi.stubGlobal("FormData", function () { return fd; });
+    state.submit!({ preventDefault: () => {}, currentTarget: {} });
+  };
+  it("a kept multiplex with all three answers reaches a ready held input with the split (task 87b)", () => {
+    submitKept({ lp_share_pct: 90, preferred_return_pct: 8, gp_promote_pct: 20 });
+    expect(state.error).toBeNull();
+    expect(state.mutate).toHaveBeenCalledOnce();
+    const entries = state.mutate.mock.calls[0]![0].entries as { fieldKey: string; itemKey: string | null; value: number }[];
+    expect(entries.slice(-3)).toEqual(fields.map((fieldKey, n) => ({ fieldKey, itemKey: null, value: [90, 8, 20][n] })));
+    const defaults = ["hold_years", "selling_costs_pct", "expense_ratio_pct"].map((fieldKey) => ({ fieldKey, itemKey: null, value: FIELD_BY_KEY.get(fieldKey)!.default! }));
+    const { input, readiness } = assemble([...entries, ...defaults].map((e) => ({ fieldKey: e.fieldKey, itemKey: e.itemKey, valueNumeric: e.value, status: "approved" })));
+    expect(readiness.status).toBe("ready");
+    expect(input!.exit).toBe("refinance_hold");
+    expect(input!.waterfall).toEqual({ lpSharePct: 90, preferredReturnPct: 8, gpPromotePct: 20 });
+  });
+  it.each(["en", "fr"] as const)("a kept multiplex with only the LP share refuses before sending in %s (task 87b)", (lang) => {
+    state.lang = lang;
+    submitKept({ lp_share_pct: 90 });
+    expect(state.mutate).not.toHaveBeenCalled();
+    expect((state.error as Error).message).toBe(lang === "en"
+      ? "Enter the LP share, the preferred return and the promote together, or leave all three blank."
+      : "Saisissez la part des commanditaires, le rendement privilégié et la prime ensemble, ou laissez les trois vides.");
   });
   it("all three condo answers reach a ready sale input", () => {
     submitAnswers("condo", 4, 3_300_000, { lp_share_pct: 90, preferred_return_pct: 8, gp_promote_pct: 20 });
