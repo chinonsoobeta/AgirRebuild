@@ -116,7 +116,7 @@ export function buildForSaleLedger(input: EngineInput): ForSaleLedger {
   } };
 }
 
-function forSaleMetrics(input: EngineInput, L: ForSaleLedger) {
+export function forSaleMetrics(input: EngineInput, L: ForSaleLedger) {
   const v: Record<string, number | null> = { ...L.values };
   const commitments = input.senior.amount + (input.mezzanine?.amount ?? 0);
   const units = sum(input.forSale!.units.map((u) => u.units));

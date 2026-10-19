@@ -3,7 +3,7 @@ import { getCookie, setCookie, deleteCookie } from "hono/cookie";
 import { z } from "zod";
 import { COUNTRIES, CURRENCIES, FIELDS, FIELD_GROUP_LABELS, METRICS, POLICIES, POLICY_V1, PROVINCE_CODES, REVIEW_MODES, runPolicy, type EngineInput, type Policy } from "@agir/contracts";
 import { asUser, type BlobStore, type Db } from "@agir/db";
-import { breakeven, DRIVERS, EngineInputError, explore, grid, tornado, type DriverKey, type Shock } from "@agir/engine";
+import { breakeven, DRIVERS, driversFor, SALE_DRIVERS, EngineInputError, explore, grid, tornado, type DriverKey, type Shock } from "@agir/engine";
 import { canonicalItem, itemFold, kindOf } from "@agir/extraction";
 import { MAX_UPLOAD_BYTES } from "@agir/worker";
 import { checkPassword, createSession, endSession, hashPassword, rateLimiter, SESSION_DAYS, userForSession } from "./auth.ts";
@@ -414,8 +414,9 @@ export function createApp({ db, store, secureCookies, demoSignIn = false }: AppD
   // ---- Sensitivity (scratch mode) ------------------------------------------------
   // Re-runs of the engine on a shocked copy of a stored run's input. Read-only:
   // nothing is written, signed or audited, and none of it can be exported.
-  const shockSchema = z.object(Object.fromEntries(DRIVERS.map((d) => [d.key, z.number().finite().min(d.min).max(d.max).optional()]))) as z.ZodType<Shock>;
-  const driverKey = z.enum(DRIVERS.map((d) => d.key as string) as [string, ...string[]]).transform((k) => k as DriverKey);
+  const allDrivers = [...new Map([...DRIVERS, ...SALE_DRIVERS].map((d) => [d.key, d])).values()];
+  const shockSchema = z.object(Object.fromEntries(allDrivers.map((d) => [d.key, z.number().finite().min(d.min).max(d.max).optional()]))) as z.ZodType<Shock>;
+  const driverKey = z.string().transform((k) => k as DriverKey);
   const metricKey = z.enum(METRICS.map((m) => m.key) as [string, ...string[]]);
   /** A stored run's input, and the policy that run was made under. */
   const runInputAndPolicy = async (c: Context<Env>): Promise<{ input: EngineInput; policy: Policy }> => {
@@ -426,9 +427,15 @@ export function createApp({ db, store, secureCookies, demoSignIn = false }: AppD
     return { input: r.input_snapshot.input, policy };
   };
   app.get("/api/sensitivity/drivers", (c) => c.json(DRIVERS));
+  app.get("/api/runs/:id/drivers", async (c) => {
+    const { input } = await runInputAndPolicy(c);
+    return c.json(driversFor(input));
+  });
   app.post("/api/runs/:id/explore", async (c) => {
-    const { shock } = z.object({ shock: shockSchema }).parse(await c.req.json());
+    const { shock: raw } = z.object({ shock: z.object({}).passthrough() }).parse(await c.req.json());
     const { input, policy } = await runInputAndPolicy(c);
+    if (Object.keys(raw).some((key) => !driversFor(input).some((d) => d.key === key))) throw new HttpError(422, "This driver does not apply to this deal.");
+    const shock = shockSchema.parse(raw);
     return c.json({ scratch: true, ...explore(input, policy, shock) });
   });
   app.post("/api/runs/:id/tornado", async (c) => {
@@ -444,6 +451,7 @@ export function createApp({ db, store, secureCookies, demoSignIn = false }: AppD
     const b = z.object({ metric: metricKey, x: driverKey, y: driverKey, steps: z.number().int().min(3).max(9).default(5) }).parse(await c.req.json());
     if (b.x === b.y) throw new HttpError(422, "Choose two different drivers.");
     const { input } = await runInputAndPolicy(c);
+    if (![b.x, b.y].every((key) => driversFor(input).some((d) => d.key === key))) throw new HttpError(422, "This driver does not apply to this deal.");
     return c.json({ scratch: true, metric: b.metric, ...grid(input, b.metric, b.x, b.y, b.steps) });
   });
 

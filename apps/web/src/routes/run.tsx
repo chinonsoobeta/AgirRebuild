@@ -120,7 +120,7 @@ export function Run({ dealId }: { dealId: string }) {
           <p className="muted" style={{ fontSize: 16 }}>{vt.explanation}</p>
         </div>
         <div className="row">
-          {!sale && <Link to="/deals/$dealId/explore" params={{ dealId }} className="btn quiet">{t("run.explore")}</Link>}
+          <Link to="/deals/$dealId/explore" params={{ dealId }} className="btn quiet">{t("run.explore")}</Link>
           <Link to="/deals/$dealId/reports" params={{ dealId }} className="btn">{t("run.memo")}</Link>
           <Link to="/deals/$dealId/decision" params={{ dealId }} className="btn primary">{t("run.decide")}</Link>
         </div>

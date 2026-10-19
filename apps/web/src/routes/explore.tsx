@@ -16,6 +16,16 @@ type Grid = { x: string; y: string; xs: number[]; ys: number[]; cells: (number |
 
 const COMPARE = ["yield_on_cost", "development_spread", "profit_on_cost", "equity_multiple", "equity_irr", "sizing_dscr", "contractual_dscr", "total_development_cost", "required_equity", "exit_value"];
 const CHART_METRICS = ["equity_multiple", "equity_irr", "profit_on_cost", "sizing_dscr", "yield_on_cost", "development_spread", "development_profit"];
+export function exploreLayoutFor(sale: boolean) {
+  return sale ? {
+    compare: ["profit_on_cost_for_sale", "margin_on_revenue", "development_profit_for_sale", "equity_multiple", "equity_irr", "total_development_cost", "required_equity", "peak_equity", "loan_to_cost"],
+    chartMetrics: ["profit_on_cost_for_sale", "margin_on_revenue", "development_profit_for_sale", "equity_multiple", "equity_irr"],
+    tornadoMetric: "profit_on_cost_for_sale",
+    grid: { metric: "profit_on_cost_for_sale", x: "rateBps", y: "pricePct" },
+  } : { compare: COMPARE, chartMetrics: CHART_METRICS, tornadoMetric: "equity_multiple",
+    grid: { metric: "sizing_dscr", x: "rateBps", y: "rentPct" } };
+}
+
 const INK_DOWN = "#454a55";
 const INK_UP = "#9c978a";
 
@@ -36,8 +46,9 @@ export function Explore({ dealId }: { dealId: string }) {
   const runId = deal.data?.run?.id;
   const run = useRun(runId);
   const sale = run.data ? layoutFor(run.data.result.scenarios[0]!.metrics).sale : false;
-  const canExplore = Boolean(run.data) && !sale;
-  const drivers = useQuery({ queryKey: ["drivers"], queryFn: () => api.get<Driver[]>("/sensitivity/drivers"), staleTime: Infinity, enabled: canExplore });
+  const layout = exploreLayoutFor(sale);
+  const canExplore = Boolean(run.data);
+  const drivers = useQuery({ queryKey: ["drivers", runId], queryFn: () => api.get<Driver[]>(`/runs/${runId}/drivers`), staleTime: Infinity, enabled: canExplore });
   const [shock, setShock] = useState<Record<string, number>>({});
   const debounced = useDebounced(shock, 250);
   const explored = useQuery({
@@ -46,10 +57,14 @@ export function Explore({ dealId }: { dealId: string }) {
     enabled: canExplore,
     placeholderData: (prev) => prev,
   });
-  const [tMetric, setTMetric] = useState("equity_multiple");
+  const [tChoice, setTChoice] = useState<{ sale: boolean; metric: string } | null>(null);
+  const tMetric = tChoice?.sale === sale ? tChoice.metric : layout.tornadoMetric;
+  const setTMetric = (metric: string) => setTChoice({ sale, metric });
   const tornado = useQuery({ queryKey: ["tornado", runId, tMetric], queryFn: () => api.post<Tornado>(`/runs/${runId}/tornado`, { metric: tMetric }), enabled: canExplore });
   const breakeven = useQuery({ queryKey: ["breakeven", runId], queryFn: () => api.post<Breakeven>(`/runs/${runId}/breakeven`, {}), enabled: canExplore });
-  const [g, setG] = useState({ metric: "sizing_dscr", x: "rateBps", y: "rentPct" });
+  const [gChoice, setGChoice] = useState<{ sale: boolean; value: { metric: string; x: string; y: string } } | null>(null);
+  const g = gChoice?.sale === sale ? gChoice.value : layout.grid;
+  const setG = (value: typeof g) => setGChoice({ sale, value });
   const grid = useQuery({ queryKey: ["grid", runId, g], queryFn: () => api.post<Grid>(`/runs/${runId}/grid`, { ...g, steps: 5 }), enabled: canExplore && g.x !== g.y, placeholderData: (prev) => prev });
 
   if (!deal.data) return <p className="muted">{t("common.loading")}</p>;
@@ -61,12 +76,6 @@ export function Explore({ dealId }: { dealId: string }) {
       </>
     );
   }
-  if (sale) return (
-    <>
-      <DealHeader o={deal.data} active="run" />
-      <p className="muted">{t("explore.saleUnavailable")}</p>
-    </>
-  );
   const runData = run.data;
   const metricOf = (scenarios: Exploration["scenarios"] | undefined, key: string) => scenarios?.[0]?.metrics.find((m) => m.key === key);
   const unitOf = (key: string) => metricOf(runData?.result.scenarios, key)?.unit ?? "x";
@@ -155,7 +164,7 @@ export function Explore({ dealId }: { dealId: string }) {
         <table className="tbl">
           <thead><tr><th>{t("explore.col.metric")}</th><th className="r">{t("explore.col.run")}</th><th className="r">{t("explore.col.explored")}</th><th className="r">{t("explore.col.change")}</th></tr></thead>
           <tbody>
-            {COMPARE.map((k) => {
+            {layout.compare.map((k) => {
               const a = metricOf(runData?.result.scenarios, k);
               const b = metricOf(explored.data?.scenarios, k);
               return (
@@ -174,6 +183,7 @@ export function Explore({ dealId }: { dealId: string }) {
       <TornadoChart
         data={tornado.data}
         drivers={drivers.data ?? []}
+        chartMetrics={layout.chartMetrics}
         metric={tMetric}
         unit={unitOf(tMetric)}
         onMetric={setTMetric}
@@ -186,7 +196,7 @@ export function Explore({ dealId }: { dealId: string }) {
         <h2 id="grid-h" className="h-section">{t("explore.grid")}</h2>
         <div className="row" style={{ alignItems: "flex-end" }}>
           <div className="field"><label htmlFor="g-metric">{t("explore.metric")}</label>
-            <select className="select" id="g-metric" value={g.metric} onChange={(e) => setG({ ...g, metric: e.target.value })}>{CHART_METRICS.map((m) => <option key={m} value={m}>{L.metric(m)}</option>)}</select>
+            <select className="select" id="g-metric" value={g.metric} onChange={(e) => setG({ ...g, metric: e.target.value })}>{layout.chartMetrics.map((m) => <option key={m} value={m}>{L.metric(m)}</option>)}</select>
           </div>
           <div className="field"><label htmlFor="g-x">{t("explore.across")}</label>
             <select className="select" id="g-x" value={g.x} onChange={(e) => setG({ ...g, x: e.target.value })}>{(drivers.data ?? []).filter((d) => d.key !== g.y).map((d) => <option key={d.key} value={d.key}>{L.driver(d.key)}</option>)}</select>
@@ -243,7 +253,7 @@ function BreakevenTables({ data, gates, checks, error }: { data?: Breakeven; gat
   );
 }
 
-function TornadoChart({ data, drivers, metric, unit, onMetric, error }: { data?: Tornado; drivers: Driver[]; metric: string; unit: string; onMetric: (m: string) => void; error: unknown }) {
+function TornadoChart({ data, drivers, chartMetrics, metric, unit, onMetric, error }: { data?: Tornado; chartMetrics: string[]; drivers: Driver[]; metric: string; unit: string; onMetric: (m: string) => void; error: unknown }) {
   const { t, f, L } = useI18n();
   const [hover, setHover] = useState<string | null>(null);
   const unitOfDriver = (key: string) => drivers.find((d) => d.key === key)?.unit ?? "%";
@@ -260,7 +270,7 @@ function TornadoChart({ data, drivers, metric, unit, onMetric, error }: { data?:
           <p className="small muted" style={{ maxWidth: 720 }}>{t("explore.tornadoBody")}</p>
         </div>
         <div className="field"><label htmlFor="t-metric">{t("explore.metric")}</label>
-          <select className="select" id="t-metric" value={metric} onChange={(e) => onMetric(e.target.value)}>{CHART_METRICS.map((m) => <option key={m} value={m}>{L.metric(m)}</option>)}</select>
+          <select className="select" id="t-metric" value={metric} onChange={(e) => onMetric(e.target.value)}>{chartMetrics.map((m) => <option key={m} value={m}>{L.metric(m)}</option>)}</select>
         </div>
       </div>
       <ErrorText error={error} />

@@ -2104,7 +2104,7 @@ describe("trying changes on a stored sale (task 82)", () => {
     expect((await call(alice, "GET", `/api/runs/${id}/drivers`)).json).toEqual(SALE_DRIVERS);
     expect((await call(alice, "GET", `/api/runs/${run}/drivers`)).json).toEqual(DRIVERS);
     expect((await call(alice, "GET", "/api/sensitivity/drivers")).json).toEqual(DRIVERS);
-    for (const shock of [{ exitCapBps: 25 }, { leaseUpMonths: 1 }, { unknown: 1 }]) {
+    for (const shock of [{ exitCapBps: 25 }, { exitCapBps: 5000 }, { leaseUpMonths: 1 }, { unknown: 1 }]) {
       const res = await call(alice, "POST", `/api/runs/${id}/explore`, { shock });
       expect(res.status).toBe(422);
       expect(res.json.error).toBe("This driver does not apply to this deal.");
@@ -2112,6 +2112,9 @@ describe("trying changes on a stored sale (task 82)", () => {
     const invalidAxis = await call(alice, "POST", `/api/runs/${id}/grid`, { metric: "profit_on_cost_for_sale", x: "rateBps", y: "rentPct" });
     expect(invalidAxis.status).toBe(422);
     expect(invalidAxis.json.error).toBe("This driver does not apply to this deal.");
+    const unknownAxis = await call(alice, "POST", `/api/runs/${id}/grid`, { metric: "profit_on_cost_for_sale", x: "rateBps", y: "unknown" });
+    expect(unknownAxis.status).toBe(422);
+    expect(unknownAxis.json.error).toBe("This driver does not apply to this deal.");
     expect((await call(alice, "POST", `/api/runs/${run}/explore`, { shock: { pricePct: 10 } })).status).toBe(422);
     for (const [endpoint, body] of [["explore", { shock: { pricePct: -10, absorptionPct: 10, presalesPts: 5 } }],
       ["tornado", { metric: "profit_on_cost_for_sale" }], ["breakeven", {}],

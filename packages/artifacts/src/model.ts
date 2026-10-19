@@ -323,11 +323,14 @@ function notFoundBlocks(x: ArtifactInput): Block[] {
 
 const STATE_WORDS = { out_of_range: "Out of range", no_effect: "No effect", not_monotonic: "Not monotonic" } as const;
 const DRIVER_NAME: Partial<Record<BreakevenRow["driver"], string>> = { rentPct: "Rent", exitCapBps: "Exit cap rate", costPct: "Project cost", rateBps: "Loan interest rates", occupancyPts: "Stabilized occupancy" };
-const ECHO_NAME: Record<BreakevenEcho["key"], string> = { rent: "Rent", cost: "Project cost", exit_cap: "Exit cap rate", senior_rate: "Senior loan rate", mezzanine_rate: "Mezzanine loan rate", refinance_rate: "Refinance rate", occupancy: "Stabilized occupancy" };
-const ECHO_UNIT = { "$/unit/mo": "$/mo", "$/sf/yr": "$/sf", $: "$", "%": "%" } as const;
+const ECHO_NAME: Record<BreakevenEcho["key"], string> = { price: "Sale price", absorption: "Sales pace", presales: "Presold units", rent: "Rent", cost: "Project cost", exit_cap: "Exit cap rate", senior_rate: "Senior loan rate", mezzanine_rate: "Mezzanine loan rate", refinance_rate: "Refinance rate", occupancy: "Stabilized occupancy" };
+const ECHO_UNIT = { units: "units", "$/unit/mo": "$/mo", "$/sf/yr": "$/sf", $: "$", "%": "%" } as const;
 
 /** Which way each break-even echo rounds to keep passing, and to what step, at the precision this report prints. */
 const PASSING_ROUND: Record<BreakevenEcho["key"], (unit: BreakevenEcho["unit"]) => [1 | -1, number]> = {
+  price: () => [1, 1],
+  absorption: () => [1, 0.01],
+  presales: () => [1, 0.01],
   rent: (u) => [1, u === "$/sf/yr" ? 0.01 : 1],
   cost: () => [-1, 1],
   exit_cap: () => [-1, 0.01],

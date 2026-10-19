@@ -6,6 +6,7 @@
 import type { EngineInput, Metric, Policy, RunResult } from "@agir/contracts";
 import { runChecks } from "./checks.ts";
 import { buildLedger, MissingSeniorAmortizationError } from "./ledger.ts";
+import { buildForSaleLedger, forSaleMetrics } from "./forsale.ts";
 import { computeMetrics } from "./metrics.ts";
 import { applyStress } from "./stress.ts";
 import { underwrite } from "./underwrite.ts";
@@ -13,6 +14,9 @@ import { validateInput } from "./validate.ts";
 import { gateSpecs, gateStatusOf, type GateSpec } from "./verdict.ts";
 
 export type Shock = {
+  pricePct?: number;
+  absorptionPct?: number;
+  presalesPts?: number;
   exitCapBps?: number;
   rentPct?: number;
   occupancyPts?: number;
@@ -49,7 +53,18 @@ export const DRIVERS: readonly Driver[] = [
   { key: "leaseUpMonths", label: "Lease-up period", unit: "months", min: -6, max: 12, step: 1, swing: 6, direction: -1 },
 ];
 
-const DRIVER_BY_KEY = new Map(DRIVERS.map((d) => [d.key, d]));
+export const SALE_DRIVERS: readonly Driver[] = [
+  { key: "pricePct", label: "Sale prices", unit: "%", min: -20, max: 20, step: 2.5, swing: 10, direction: 1 },
+  { key: "absorptionPct", label: "Sales pace", unit: "%", min: -50, max: 50, step: 5, swing: 30, direction: 1 },
+  { key: "presalesPts", label: "Presales", unit: "pts", min: -30, max: 30, step: 5, swing: 15, direction: 1 },
+  ...["costPct", "rateBps", "constructionMonths"].map((key) => DRIVERS.find((d) => d.key === key)!),
+];
+
+export function driversFor(input: EngineInput): readonly Driver[] {
+  return input.exit === "for_sale" ? SALE_DRIVERS : DRIVERS;
+}
+
+const DRIVER_BY_KEY = new Map([...DRIVERS, ...SALE_DRIVERS].map((d) => [d.key, d]));
 
 const clamp = (x: number, lo: number, hi: number) => Math.min(hi, Math.max(lo, x));
 
@@ -61,12 +76,24 @@ export function shockInput(input: EngineInput, shock: Shock): EngineInput {
 /** `shockInput` with its own clamps for some drivers (breakeven searches wider than the charts do). */
 function shockWithin(input: EngineInput, shock: Shock, limits: Partial<Record<DriverKey, [number, number]>>): EngineInput {
   const s: Required<Shock> = {
+    pricePct: 0, absorptionPct: 0, presalesPts: 0,
     exitCapBps: 0, rentPct: 0, occupancyPts: 0, costPct: 0, expensePts: 0, rateBps: 0, constructionMonths: 0, leaseUpMonths: 0,
   };
   for (const [k, v] of Object.entries(shock) as [DriverKey, number | undefined][]) {
-    const d = DRIVER_BY_KEY.get(k);
+    const d = driversFor(input).find((d) => d.key === k);
     if (!d || v === undefined || !Number.isFinite(v)) continue;
     s[k] = clamp(v, ...(limits[k] ?? [d.min, d.max]));
+  }
+  if (input.exit === "for_sale") {
+    const out = applyStress(input, {
+      key: "explore", label: "Exploration", costPct: s.costPct, rateBps: s.rateBps,
+      pricePct: s.pricePct, absorptionPct: s.absorptionPct, presalesPts: s.presalesPts,
+      constructionMonths: clamp(input.constructionMonths + Math.round(s.constructionMonths), 0, 120) - input.constructionMonths,
+    });
+    out.forSale = { ...out.forSale!, presoldPct: clamp(out.forSale!.presoldPct, 0, 100) };
+    out.senior = { ...out.senior, ratePct: Math.max(0, out.senior.ratePct) };
+    if (out.mezzanine) out.mezzanine = { ...out.mezzanine, ratePct: Math.max(0, out.mezzanine.ratePct) };
+    return out;
   }
   const out = applyStress(input, {
     key: "explore",
@@ -96,6 +123,7 @@ function shockWithin(input: EngineInput, shock: Shock, limits: Partial<Record<Dr
 
 /** Base-case metrics only: one ledger, no stresses. Fast enough for charts. */
 export function baseMetrics(input: EngineInput): Metric[] {
+  if (input.exit === "for_sale") return forSaleMetrics(input, buildForSaleLedger(input)).metrics;
   return computeMetrics(input, buildLedger(input)).metrics;
 }
 
@@ -134,7 +162,7 @@ export function tornado(input: EngineInput, metricKey: string): { base: number |
     return m;
   };
   const base = value(input);
-  const rows = DRIVERS.map((d) => ({
+  const rows = driversFor(input).map((d) => ({
     driver: d.key,
     label: d.label,
     lowShock: -d.swing,
@@ -150,8 +178,9 @@ export function tornado(input: EngineInput, metricKey: string): { base: number |
 /** A grid of one metric over two drivers, each at `steps` evenly spaced values. */
 export function grid(input: EngineInput, metricKey: string, x: DriverKey, y: DriverKey, steps = 5) {
   if (x === y) throw new Error("Choose two different drivers");
-  const dx = DRIVER_BY_KEY.get(x)!;
-  const dy = DRIVER_BY_KEY.get(y)!;
+  const dx = driversFor(input).find((d) => d.key === x);
+  const dy = driversFor(input).find((d) => d.key === y);
+  if (!dx || !dy) throw new Error("This driver does not apply to this deal.");
   const n = Math.max(3, Math.min(9, Math.round(steps)));
   const axis = (d: Driver) => Array.from({ length: n }, (_, i) => -d.swing + (2 * d.swing * i) / (n - 1));
   const xs = axis(dx);
@@ -169,7 +198,7 @@ export function grid(input: EngineInput, metricKey: string, x: DriverKey, y: Dri
 // everything else held. Scratch mode like the rest: real reruns on a shocked copy, nothing kept.
 
 export type BreakevenState = "value" | "out_of_range" | "no_effect" | "not_monotonic";
-export type BreakevenEcho = { key: "rent" | "cost" | "exit_cap" | "senior_rate" | "mezzanine_rate" | "refinance_rate" | "occupancy"; item?: string; from: number; to: number; unit: "$/unit/mo" | "$/sf/yr" | "$" | "%" };
+export type BreakevenEcho = { key: "price" | "absorption" | "presales" | "rent" | "cost" | "exit_cap" | "senior_rate" | "mezzanine_rate" | "refinance_rate" | "occupancy"; item?: string; from: number; to: number; unit: "$/unit/mo" | "$/sf/yr" | "$" | "%" | "units" };
 export type BreakevenRow = {
   gate: string;
   driver: DriverKey;
@@ -187,7 +216,8 @@ export type BreakevenRow = {
 };
 
 const BREAKEVEN_DRIVERS = ["rentPct", "exitCapBps", "costPct", "rateBps", "occupancyPts"] as const;
-const BREAKEVEN_STEP: Record<(typeof BREAKEVEN_DRIVERS)[number], number> = { rentPct: 0.1, exitCapBps: 1, costPct: 0.1, rateBps: 1, occupancyPts: 0.1 };
+const SALE_BREAKEVEN_DRIVERS = ["pricePct", "absorptionPct", "presalesPts", "costPct", "rateBps"] as const;
+const BREAKEVEN_STEP: Record<(typeof BREAKEVEN_DRIVERS)[number] | (typeof SALE_BREAKEVEN_DRIVERS)[number], number> = { pricePct: 0.1, absorptionPct: 1, presalesPts: 0.1, rentPct: 0.1, exitCapBps: 1, costPct: 0.1, rateBps: 1, occupancyPts: 0.1 };
 const UNIT_SUFFIX = { "%": "%", bps: " bps", pts: " pts" } as const;
 const NOT_STEADY = "The gate does not move steadily with this input; use the grid.";
 
@@ -219,6 +249,12 @@ export function solveBreakeven(probe: Probe, N: number): { state: BreakevenState
 function echoes(driver: DriverKey, before: EngineInput, after: EngineInput): BreakevenEcho[] {
   const cost = (i: EngineInput) => i.budget.land + i.budget.hard + i.budget.soft + i.budget.contingency + i.budget.other + (i.budget.developmentCharges ?? 0) + (i.budget.landTransferTax ?? 0) + (i.budget.gstHstNet ?? 0);
   switch (driver) {
+    case "pricePct":
+      return after.forSale!.units.map((u, k) => ({ key: "price", item: u.label, from: before.forSale!.units[k]!.price, to: u.price, unit: "$" }));
+    case "absorptionPct":
+      return [{ key: "absorption", from: before.forSale!.absorptionPerMonth, to: after.forSale!.absorptionPerMonth, unit: "units" }];
+    case "presalesPts":
+      return [{ key: "presales", from: before.forSale!.presoldPct, to: after.forSale!.presoldPct, unit: "%" }];
     case "rentPct":
       return after.revenue.flatMap((c, k): BreakevenEcho[] => {
         const b = before.revenue[k]!;
@@ -259,14 +295,18 @@ function gateMetric(input: EngineInput, policy: Policy, spec: GateSpec): Metric 
 /** Rows for every failing gate and each of five drivers, and the error-severity checks that no gate can offset. */
 export function breakeven(input: EngineInput, policy: Policy, specs: GateSpec[] = gateSpecs(policy)): { rows: BreakevenRow[]; hardFails: string[] } {
   validateInput(input);
-  const base = buildLedger(input);
-  const contractual = computeMetrics(input, base).metrics.find((m) => m.key === "contractual_dscr");
-  const hardFails = runChecks(input, base, policy, contractual?.status === "VALID" ? contractual.value : null)
+  const sale = input.exit === "for_sale";
+  const base = sale ? undefined : buildLedger(input);
+  const contractual = sale ? undefined : computeMetrics(input, base!).metrics.find((m) => m.key === "contractual_dscr");
+  const hardFails = (sale ? underwrite(input, policy).checks : runChecks(input, base!, policy, contractual?.status === "VALID" ? contractual.value : null))
     .filter((c) => c.severity === "error")
     .map((c) => c.message);
   const loanRates = [input.senior.amount > 0 ? input.senior.ratePct : 0, input.mezzanine?.ratePct ?? 0, input.refinance?.ratePct ?? 0];
   // The furthest each driver may move in its good direction, in steps.
-  const reach: Record<(typeof BREAKEVEN_DRIVERS)[number], number> = {
+  const reach: Record<keyof typeof BREAKEVEN_STEP, number> = {
+    pricePct: 50,
+    absorptionPct: 200,
+    presalesPts: sale ? 100 - input.forSale!.presoldPct : 0,
     rentPct: 100,
     exitCapBps: Math.max(0, Math.min(300, Math.floor((input.exitCapPct - 0.25) * 100 + 1e-9))),
     costPct: 50,
@@ -276,7 +316,7 @@ export function breakeven(input: EngineInput, policy: Policy, specs: GateSpec[] 
   const rows: BreakevenRow[] = [];
   for (const spec of specs) {
     if (gateStatusOf(gateMetric(input, policy, spec), spec.threshold) !== "failed") continue;
-    for (const key of BREAKEVEN_DRIVERS) {
+    for (const key of sale ? SALE_BREAKEVEN_DRIVERS : BREAKEVEN_DRIVERS) {
       const d = DRIVER_BY_KEY.get(key)!;
       const step = BREAKEVEN_STEP[key];
       const N = Math.round(reach[key] / step);

@@ -7,6 +7,6 @@ export { irrRoots } from "./irr.ts";
 export { allocate, levelPayment, drawShares, smoothstep } from "./math.ts";
 export { runWaterfall } from "./waterfall.ts";
 export { canonicalJson } from "./canonical.ts";
-export { DRIVERS, shockInput, explore, tornado, grid, baseMetrics, breakeven, solveBreakeven, type BreakevenRow, type BreakevenEcho, type BreakevenState, type Shock, type Driver, type DriverKey, type TornadoRow, type Exploration } from "./explore.ts";
+export { DRIVERS, SALE_DRIVERS, driversFor, shockInput, explore, tornado, grid, baseMetrics, breakeven, solveBreakeven, type BreakevenRow, type BreakevenEcho, type BreakevenState, type Shock, type Driver, type DriverKey, type TornadoRow, type Exploration } from "./explore.ts";
 export { gateSpecs, type GateSpec } from "./verdict.ts";
-export { buildForSaleLedger, type ForSaleLedger } from "./forsale.ts";
+export { buildForSaleLedger, forSaleMetrics, type ForSaleLedger } from "./forsale.ts";

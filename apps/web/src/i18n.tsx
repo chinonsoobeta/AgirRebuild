@@ -375,7 +375,6 @@ const EN = {
   "explore.banner": "Exploration, not a run.",
   "explore.bannerBody": (p) => `Every figure here is a re-run of run ${p.n} with your changes. Nothing is saved, and none of it can be exported or decided on.`,
   "explore.noRun": "Explore needs a run to start from.",
-  "explore.saleUnavailable": "Trying changes is not yet available for a deal that sells its units.",
   "explore.drivers": "Change the assumptions",
   "explore.reset": "Reset",
   "explore.results": "What changes",
@@ -885,7 +884,6 @@ const FR: Record<Key, Entry> = {
   "explore.banner": "Exploration, pas une analyse.",
   "explore.bannerBody": (p) => `Chaque chiffre ici est un nouveau calcul de l'analyse ${p.n} avec vos changements. Rien n'est enregistré, et rien ne peut être exporté ni servir à une décision.`,
   "explore.noRun": "L'exploration part d'une analyse existante.",
-  "explore.saleUnavailable": "L'essai de modifications n'est pas encore offert pour un projet qui vend ses logements.",
   "explore.drivers": "Modifier les hypothèses",
   "explore.reset": "Réinitialiser",
   "explore.results": "Ce qui change",
@@ -1235,6 +1233,9 @@ const GATES: Record<string, [string, string]> = {
   stressed_profit_on_cost_for_sale: ["Profit on cost, units sold, combined stress", "Profit sur coût, logements vendus, stress combiné"],
 };
 const DRIVERS_L: Record<string, [string, string]> = {
+  pricePct: ["Sale prices", "Prix de vente"],
+  absorptionPct: ["Sales pace", "Rythme de vente"],
+  presalesPts: ["Presales", "Préventes"],
   exitCapBps: ["Exit cap rate", "Taux de sortie"],
   rentPct: ["Rents", "Loyers"],
   occupancyPts: ["Occupancy", "Occupation"],
@@ -1244,7 +1245,7 @@ const DRIVERS_L: Record<string, [string, string]> = {
   constructionMonths: ["Construction period", "Durée de construction"],
   leaseUpMonths: ["Lease-up period", "Période de location"],
 };
-const BE_UNIT: Record<string, string> = { rentPct: "%", costPct: "%", exitCapBps: "bps", rateBps: "bps", occupancyPts: "pts" };
+const BE_UNIT: Record<string, string> = { pricePct: "%", absorptionPct: "%", presalesPts: "pts", rentPct: "%", costPct: "%", exitCapBps: "bps", rateBps: "bps", occupancyPts: "pts" };
 type BreakevenText = { driver: string; state: string; shock: number | null; limit: number; to: { key: string; item?: string; to: number; unit: string }[] };
 const VERDICT: Record<string, [string, string]> = {
   APPROVE: ["Approve", "Approuver"],
@@ -1280,6 +1281,7 @@ const SALE_SHARES: Record<string, string> = {
 };
 
 const FR_REASONS: [RegExp, string | ((m: RegExpMatchArray) => string)][] = [
+  [/^This driver does not apply to this deal\.$/, "Cette hypothèse ne s'applique pas à ce projet."],
   [/^The inputs do not give this a meaningful value\.$/, "Les données ne permettent pas d'en tirer une valeur significative."],
   [/^Total development cost is zero\.$/, "Le coût total de développement est nul."],
   [/^Stabilized NOI is not positive, so the deal cannot be capitalized\.$/, "Le RNE stabilisé n'est pas positif ; le projet ne peut pas être capitalisé."],
@@ -1562,6 +1564,9 @@ export function build(lang: Lang, setLang: (l: Lang) => void) {
       const to = r.to.map((e) => {
         const v = f.value(e.to, e.unit);
         switch (e.key) {
+          case "price": return `${e.item}: ${v}`;
+          case "absorption": return fr ? `rythme de vente ${f.value(e.to, "")} logements par mois` : `sales pace ${f.value(e.to, "")} units per month`;
+          case "presales": return fr ? `prévendu ${v}` : `presold ${v}`;
           case "rent": return `${e.item}: ${v}`;
           case "cost": return fr ? `coût total ${v}` : `total cost ${v}`;
           case "exit_cap": return fr ? `taux de sortie ${v}` : `exit cap ${v}`;
@@ -1573,8 +1578,8 @@ export function build(lang: Lang, setLang: (l: Lang) => void) {
       }).join("; ");
       const m = mag(r.shock!);
       const text = (fr
-        ? { rentPct: `Les loyers devraient être ${m} plus élevés`, costPct: `Les coûts de développement devraient être ${m} plus bas`, exitCapBps: `Le taux de sortie devrait être ${m} plus bas`, rateBps: `Les taux d'intérêt devraient être ${m} plus bas`, occupancyPts: `L'occupation devrait être ${m} plus élevée` }
-        : { rentPct: `Rents would need to be ${m} higher`, costPct: `Development costs would need to be ${m} lower`, exitCapBps: `The exit cap rate would need to be ${m} lower`, rateBps: `Interest rates would need to be ${m} lower`, occupancyPts: `Occupancy would need to be ${m} higher` }
+        ? { pricePct: `Les prix de vente devraient être ${m} plus élevés`, absorptionPct: `Le rythme de vente devrait être ${m} plus rapide`, presalesPts: `Les préventes devraient être ${m} plus élevées`, rentPct: `Les loyers devraient être ${m} plus élevés`, costPct: `Les coûts de développement devraient être ${m} plus bas`, exitCapBps: `Le taux de sortie devrait être ${m} plus bas`, rateBps: `Les taux d'intérêt devraient être ${m} plus bas`, occupancyPts: `L'occupation devrait être ${m} plus élevée` }
+        : { pricePct: `Sale prices would need to be ${m} higher`, absorptionPct: `The sales pace would need to be ${m} faster`, presalesPts: `Presales would need to be ${m} higher`, rentPct: `Rents would need to be ${m} higher`, costPct: `Development costs would need to be ${m} lower`, exitCapBps: `The exit cap rate would need to be ${m} lower`, rateBps: `Interest rates would need to be ${m} lower`, occupancyPts: `Occupancy would need to be ${m} higher` }
       )[r.driver as "rentPct"];
       const g = L.gate(gate.key, gate.label).replace(/^\p{Lu}(?=\p{Ll})/u, (c) => c.toLowerCase());
       const thr = f.value(gate.threshold, gate.unit);

@@ -789,7 +789,7 @@ describe("sale exploration words (task 82)", () => {
       expect(fr.L.breakeven(row, gate)).toContain("rythme de vente 100 logements par mois");
     }
     if (key === "presales") {
-      expect(en.L.breakeven(row, gate)).toContain("presold 100%");
+      expect(en.L.breakeven(row, gate)).toContain("presold 100.00%");
       expect(fr.L.breakeven(row, gate)).toContain("prévendu 100");
     }
     if (key === "price") expect(en.L.breakeven(row, gate)).toContain("A: $100");
