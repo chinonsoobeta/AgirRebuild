@@ -23,7 +23,7 @@ async function createWorkspace(tx: Db, name: string, reviewMode?: string): Promi
 
 const INVITE_GONE = "This invitation is not available. It may have been used, revoked or expired.";
 
-const PG_STATUS: Record<string, number> = { "42501": 403, "28000": 401, P0002: 404, "22023": 422, "23505": 409, "40001": 409, "23514": 422 };
+const PG_STATUS: Record<string, number> = { "42501": 403, "28000": 401, P0002: 404, "22023": 422, "23505": 409, "40001": 409, "23514": 422, "22P02": 404 };
 
 export function createApp({ db, store, secureCookies, demoSignIn = false }: AppDeps) {
   const app = new Hono<Env>();
@@ -44,7 +44,7 @@ export function createApp({ db, store, secureCookies, demoSignIn = false }: AppD
     if (err instanceof EngineInputError) return c.json({ error: err.message, problems: err.problems }, 422);
     if (err instanceof z.ZodError) return c.json({ error: "Some fields are missing or not valid.", issues: err.issues }, 422);
     const code = (err as { code?: string }).code;
-    if (code && PG_STATUS[code]) return c.json({ error: err.message }, PG_STATUS[code] as 400);
+    if (code && PG_STATUS[code]) return c.json({ error: code === "22P02" ? "Not found." : err.message }, PG_STATUS[code] as 400);
     const shared = c.req.path.startsWith("/api/share/") || c.req.path.startsWith("/api/invite/");
     console.error(JSON.stringify({ at: new Date().toISOString(), event: "api.error", path: shared ? "/api/share/…" : c.req.path, error: shared ? "Shared link request failed" : err.message }));
     return c.json({ error: "Something went wrong on our side. It has been logged." }, 500);
