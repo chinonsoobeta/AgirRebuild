@@ -798,3 +798,12 @@ describe("sale exploration words (task 82)", () => {
     expect(fr.err(new Error("This driver does not apply to this deal."))).toBe("Cette hypothèse ne s'applique pas à ce projet.");
   });
 });
+
+describe("French spacing before break-even colons (task 84a)", () => {
+  it.each([["pricePct", "price", "$"], ["rentPct", "rent", "$/unit/mo"]])("%s uses a French no-break space and preserves English", (driver, key, unit) => {
+    const row = { driver, state: "value", shock: 10, limit: 50, to: [{ key, item: "Type A", to: 100, unit }] };
+    const gate = { key: "profit_on_cost_for_sale", label: "Profit on cost", threshold: 15, unit: "%" };
+    expect(build("fr", () => {}).L.breakeven(row, gate)).toContain("Type A\u00a0: ");
+    expect(build("en", () => {}).L.breakeven(row, gate)).toContain("Type A: ");
+  });
+});
