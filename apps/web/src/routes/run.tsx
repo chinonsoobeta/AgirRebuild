@@ -25,12 +25,15 @@ const SALE_HEADLINE = [
   "equity_irr", "deposits_held_at_completion", "completion_month", "sellout_month", "cost_per_unit",
 ];
 
-export function layoutFor(metrics: readonly Pick<Metric, "key">[]) {
+export function layoutFor(metrics: readonly Pick<Metric, "key" | "status">[]) {
+  const lp = metrics.find((m) => m.key === "lp_irr");
+  const withPartners = (keys: string[]) => lp && lp.status !== "NOT_APPLICABLE"
+    ? keys.flatMap((key) => key === "equity_irr" ? [key, "lp_irr", "gp_irr", "gp_promote"] : [key]) : keys;
   if (metrics.some((m) => m.key === "gross_sales_revenue")) {
-    return { sale: true, headline: SALE_HEADLINE, stressKeys: ["profit_on_cost_for_sale", "margin_on_revenue", "equity_multiple"] };
+    return { sale: true, headline: withPartners(SALE_HEADLINE), stressKeys: ["profit_on_cost_for_sale", "margin_on_revenue", "equity_multiple"] };
   }
   const held = metrics.some((m) => m.key === "stated_value");
-  return { sale: false, headline: held ? HELD_HEADLINE : HEADLINE,
+  return { sale: false, headline: held ? HELD_HEADLINE : withPartners(HEADLINE),
     stressKeys: held ? ["sizing_dscr", "dcr_after_refinance", "unrealized_equity_multiple"] : ["sizing_dscr", "equity_multiple", "profit_on_cost"] };
 }
 
