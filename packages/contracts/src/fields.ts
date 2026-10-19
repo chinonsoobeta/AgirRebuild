@@ -240,7 +240,7 @@ export const FIELD_GROUP_LABELS: Record<FieldGroup, string> = {
 
 export type TemplateQuestion = { field: string; item?: string; optional?: true; repeatable?: true; zeroAllowed?: true; skipsIfZero?: string[]; heldOnly?: true };
 export type Template = { minUnits: number; maxUnits: number; questions: TemplateQuestion[]; defaults: string[] } &
-  ({ key: "multiplex" | "apartment"; sells?: false } | { key: "townhomes"; sells: true });
+  ({ key: "multiplex" | "apartment"; sells?: false } | { key: "townhomes" | "condo"; sells: true });
 
 /** A held senior loan uses no amortization when it stays interest-only until the stated refinance. */
 export function heldSeniorAmortUnused(get: (key: string) => number | undefined): boolean {
@@ -266,6 +266,16 @@ const held = [
   q("refinance_insurance_premium_pct", { heldOnly: true, optional: true }),
 ];
 const timeline = [q("construction_months", { zeroAllowed: true }), q("lease_up_months", { zeroAllowed: true })];
+
+const SALE_QUESTIONS: TemplateQuestion[] = [
+      q("land_cost"), q("hard_cost"), q("soft_cost"), q("contingency", { zeroAllowed: true }), q("other_cost", { optional: true }),
+      q("development_charges", { zeroAllowed: true }), q("land_transfer_tax", { optional: true }), q("gst_hst_net", { optional: true }),
+      q("construction_months"), q("unit_count", { repeatable: true }), q("unit_sale_price", { repeatable: true }),
+      q("presold_units_pct", { zeroAllowed: true }), q("deposit_pct", { zeroAllowed: true }), q("absorption_units_per_month"),
+      q("sales_commission_pct", { zeroAllowed: true }), q("closing_lag_months", { zeroAllowed: true }), q("unsold_carry_monthly", { zeroAllowed: true }),
+      q("senior_loan_amount", { zeroAllowed: true, skipsIfZero: ["senior_rate_pct", "senior_presale_threshold_pct"] }),
+      q("senior_rate_pct"), q("senior_presale_threshold_pct", { optional: true }),
+    ];
 
 export const TEMPLATES: readonly Template[] = [
   {
@@ -302,15 +312,8 @@ export const TEMPLATES: readonly Template[] = [
     sells: true,
     minUnits: 2,
     maxUnits: 30,
-    questions: [
-      q("land_cost"), q("hard_cost"), q("soft_cost"), q("contingency", { zeroAllowed: true }), q("other_cost", { optional: true }),
-      q("development_charges", { zeroAllowed: true }), q("land_transfer_tax", { optional: true }), q("gst_hst_net", { optional: true }),
-      q("construction_months"), q("unit_count", { repeatable: true }), q("unit_sale_price", { repeatable: true }),
-      q("presold_units_pct", { zeroAllowed: true }), q("deposit_pct", { zeroAllowed: true }), q("absorption_units_per_month"),
-      q("sales_commission_pct", { zeroAllowed: true }), q("closing_lag_months", { zeroAllowed: true }), q("unsold_carry_monthly", { zeroAllowed: true }),
-      q("senior_loan_amount", { zeroAllowed: true, skipsIfZero: ["senior_rate_pct", "senior_presale_threshold_pct"] }),
-      q("senior_rate_pct"), q("senior_presale_threshold_pct", { optional: true }),
-    ],
+    questions: SALE_QUESTIONS,
     defaults: [],
   },
+  { key: "condo", sells: true, minUnits: 4, maxUnits: 60, questions: SALE_QUESTIONS, defaults: [] },
 ];

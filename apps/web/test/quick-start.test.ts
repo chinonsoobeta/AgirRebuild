@@ -1,3 +1,4 @@
+/// <reference types="node" />
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import { createElement } from "react";
 import { renderToStaticMarkup } from "react-dom/server";
@@ -32,7 +33,7 @@ vi.mock("react", async (original) => {
 vi.mock("react/jsx-dev-runtime", async (original) => {
   const runtime = await original<typeof import("react/jsx-dev-runtime")>();
   return { ...runtime, jsxDEV: (...args: Parameters<typeof runtime.jsxDEV>) => {
-    if (args[0] === "form") state.submit = args[1].onSubmit as typeof state.submit;
+    if (args[0] === "form") state.submit = (args[1] as { onSubmit?: typeof state.submit }).onSubmit;
     return runtime.jsxDEV(...args);
   } };
 });
