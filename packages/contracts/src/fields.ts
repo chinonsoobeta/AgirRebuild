@@ -238,7 +238,7 @@ export const FIELD_GROUP_LABELS: Record<FieldGroup, string> = {
 // Structure only; the wording lives in the web i18n. Each answer is entered through fn_enter_value
 // and the named defaults are accepted explicitly through fn_accept_defaults, never applied silently.
 
-export type TemplateQuestion = { field: string; item?: string; optional?: true; repeatable?: true; zeroAllowed?: true; skipsIfZero?: string[]; heldOnly?: true; notHeld?: true };
+export type TemplateQuestion = { field: string; item?: string; optional?: true; repeatable?: true; zeroAllowed?: true; skipsIfZero?: string[]; heldOnly?: true };
 export type Template = { minUnits: number; maxUnits: number; questions: TemplateQuestion[]; defaults: string[] } &
   ({ key: "multiplex" | "apartment"; sells?: false } | { key: "townhomes" | "condo"; sells: true });
 
@@ -268,9 +268,9 @@ const held = [
 const timeline = [q("construction_months", { zeroAllowed: true }), q("lease_up_months", { zeroAllowed: true })];
 
 const partners = [
-  q("lp_share_pct", { optional: true, notHeld: true }),
-  q("preferred_return_pct", { optional: true, notHeld: true }),
-  q("gp_promote_pct", { optional: true, notHeld: true }),
+  q("lp_share_pct", { optional: true }),
+  q("preferred_return_pct", { optional: true }),
+  q("gp_promote_pct", { optional: true }),
 ];
 
 const SALE_QUESTIONS: TemplateQuestion[] = [
