@@ -2,7 +2,7 @@ import { describe, expect, test } from "vitest";
 import { FIELD_BY_KEY, POLICY_V1, policyFor, type EngineInput } from "@agir/contracts";
 import { createHash } from "node:crypto";
 import { readFileSync } from "node:fs";
-import { runWaterfall, applyStress, breakeven, assemble, canonicalJson, ENGINE_VERSION, underwrite, type AssumptionRow } from "@agir/engine";
+import { runWaterfall, irrRoots, applyStress, breakeven, assemble, canonicalJson, ENGINE_VERSION, underwrite, type AssumptionRow } from "@agir/engine";
 import { consolidate, extractCandidates, type SourcedCandidate } from "@agir/extraction";
 import { loadOracle } from "@agir/testkit";
 import { allEquityDeal, developmentDeal } from "../../engine/test/fixtures.ts";
@@ -1005,13 +1005,127 @@ describe("the partner memo (task 84d)", () => {
       expect(out.bytes.byteLength).toBeGreaterThan(1_000);
     }
   }, 60_000);
-  test.each(["no split", "held"])("%s is refused by the builder with a named error", (mode) => {
+  test.each(["no split", "held without a split"])("%s is refused by the builder with a named error", (mode) => {
     const x = partnerMemoInput(false);
-    x.input = mode === "no split" ? developmentDeal() : { ...x.input, exit: "refinance_hold", refinance: { month: 36, amount: 29_000_000, ratePct: 5, amortYears: 30, ioMonths: 0 } };
+    if (mode === "no split") x.input = developmentDeal();
+    else {
+      const { waterfall: _, ...rest } = x.input;
+      x.input = { ...rest, exit: "refinance_hold", refinance: { month: 36, amount: 29_000_000, ratePct: 5, amortYears: 30, ioMonths: 0 } };
+    }
     x.result = underwrite(x.input, policyFor(x.input));
     let error: unknown;
     try { buildModel(x); } catch (e) { error = e; }
-    expect(error).toMatchObject({ name: "PartnerMemoUnavailableError", message: "This deal has no LP/GP split, or is not sold, so it has no partner memo." });
+    expect(error).toMatchObject({ name: "PartnerMemoUnavailableError", message: "This deal has no LP/GP split, so it has no partner memo." });
+  });
+});
+
+describe("the partner memo of a held deal (task 87a)", () => {
+  const heldPartnerInput = (preferredReturnPct: number, extra: Partial<EngineInput> = {}): ArtifactInput => {
+    const base = partnerMemoInput(false);
+    const input: EngineInput = { ...developmentDeal(), refinance: { month: 36, ltvPct: 65, ratePct: 5, amortYears: 30, ioMonths: 0 }, exit: "refinance_hold",
+      waterfall: { lpSharePct: 90, preferredReturnPct, gpPromotePct: 20 }, ...extra };
+    const policy = policyFor(input);
+    return { ...base, deal: { ...base.deal, name: "Kept Rental" }, input, policy, result: underwrite(input, policy),
+      run: { ...base.run, policyVersion: policy.version, policyHash: createHash("sha256").update(canonicalJson(policy)).digest("hex") } };
+  };
+  const metric = (x: ArtifactInput, key: string) => x.result.scenarios[0]!.metrics.find((m) => m.key === key)!;
+  const irrText = (flows: { t: number; amount: number }[]) => {
+    const roots = irrRoots(flows);
+    return roots.length === 1 ? formatValue(roots[0]! * 100, "%") : "Not meaningful";
+  };
+  const sum = (flows: { amount: number }[], sign: 1 | -1) => sign * flows.filter((f) => sign * f.amount > 0).reduce((n, f) => n + f.amount, 0);
+  const number = (s: string) => Number(s.replace(/[^0-9.-]/g, ""));
+  const CAPITAL = "Capital and distributions, with the stated value (unrealized, not a sale)";
+  const PAID = "Cash paid out before the stated value";
+  const NOTHING_SOLD = "Nothing is sold. The stated value is final-year NOI over the exit cap rate, less the debt outstanding; returns that include it are unrealized. Cash paid out is the operating and refinance cash only.";
+
+  test("with a promote (90/3/20): stats, both partner tables, order and provenance", () => {
+    const x = heldPartnerInput(3);
+    const model = buildModel(x);
+    const text = visibleText(renderHtml(model));
+    const w = runWaterfall(x.result.equityFlows, x.input.waterfall!);
+    const paid = runWaterfall(x.result.equityFlows.filter((f) => f.kind !== "unrealized"), x.input.waterfall!);
+    expect(w.promote).toBeGreaterThan(0);
+    expect(paid.promote).toBe(0);
+    const lpIrr = irrRoots(w.lp), gpIrr = irrRoots(w.gp);
+    expect(lpIrr).toHaveLength(1);
+    expect(gpIrr).toHaveLength(1);
+    expect(lpIrr[0]! * 100).toBeLessThan(metric(x, "unrealized_equity_irr").value!);
+    expect(gpIrr[0]! * 100).toBeGreaterThan(metric(x, "unrealized_equity_irr").value!);
+    const stats = model.blocks.find((b) => b.type === "stats")!;
+    expect(stats.type === "stats" ? stats.items : []).toEqual([
+      ...["unrealized_equity_multiple", "unrealized_equity_irr"].map((key) => ({ label: metric(x, key).label, value: formatValue(metric(x, key).value!, metric(x, key).unit) })),
+      { label: "LP IRR (unrealized, not a sale)", value: irrText(w.lp) },
+      { label: "GP IRR (unrealized, not a sale)", value: irrText(w.gp) },
+    ]);
+    const captions = model.blocks.flatMap((b) => b.type === "table" && b.caption ? [b.caption] : []);
+    expect(captions).toEqual(["Partnership terms", CAPITAL, PAID, "Sources and uses", "Stresses (each a full re-run of the model)"]);
+    const capital = saleTable(model, CAPITAL);
+    expect(capital.columns.map((c) => c.label)).toEqual(["Partner", "Contributed", "Distributed", "Multiple", "IRR"]);
+    expect(capital.rows.map((r) => r[0])).toEqual(["LP", "GP", "Total", "GP promote (unrealized, not a sale)"]);
+    for (const [label, flows] of [["LP", w.lp], ["GP", w.gp]] as const) {
+      const c = sum(flows, -1) * -1, d = sum(flows, 1);
+      expect(capital.rows.find((r) => r[0] === label)).toEqual([label, formatValue(c, "$"), formatValue(d, "$"), formatValue(d / c, "x"), irrText(flows)]);
+    }
+    const total = capital.rows.find((r) => r[0] === "Total")!;
+    expect(Math.abs(number(total[2]!) - sum(x.result.equityFlows, 1))).toBeLessThanOrEqual(1);
+    expect(Math.abs(sum(w.lp, 1) + sum(w.gp, 1) - sum(x.result.equityFlows, 1))).toBeLessThanOrEqual(0.01);
+    expect(total.slice(3)).toEqual(["unrealized_equity_multiple", "unrealized_equity_irr"].map((key) => formatValue(metric(x, key).value!, metric(x, key).unit)));
+    expect(capital.rows[3]).toEqual(["GP promote (unrealized, not a sale)", "", formatValue(w.promote, "$"), "", ""]);
+    const paidTable = saleTable(model, PAID);
+    expect(paidTable.columns.map((c) => c.label)).toEqual(["Partner", "Contributed", "Paid out", "Paid out / contributed"]);
+    expect(paidTable.rows.map((r) => r[0])).toEqual(["LP", "GP", "Total", "GP promote paid"]);
+    for (const [label, flows] of [["LP", paid.lp], ["GP", paid.gp]] as const) {
+      const c = -sum(flows, -1), d = sum(flows, 1);
+      expect(paidTable.rows.find((r) => r[0] === label)).toEqual([label, formatValue(c, "$"), formatValue(d, "$"), formatValue(d / c, "x")]);
+    }
+    const cashPaid = x.result.equityFlows.filter((f) => f.kind === "operating" || f.kind === "refinance").reduce((n, f) => n + f.amount, 0);
+    expect(Math.abs(sum(paid.lp, 1) + sum(paid.gp, 1) - cashPaid)).toBeLessThanOrEqual(0.01);
+    expect(Math.abs(number(paidTable.rows[2]![2]!) - cashPaid)).toBeLessThanOrEqual(1);
+    expect(paidTable.rows[3]).toEqual(["GP promote paid", "", formatValue(0, "$"), ""]);
+    expect(saleTable(model, "Stresses (each a full re-run of the model)").columns.map((c) => c.label))
+      .toEqual(["Scenario", ...["dcr_after_refinance", "unrealized_equity_multiple", "unrealized_equity_irr"].map((key) => metric(x, key).label)]);
+    expect(text).toContain("Distributions go pro rata until the LP has received its capital and its preferred return");
+    expect(text).toContain(NOTHING_SOLD);
+    expect(text.indexOf(NOTHING_SOLD)).toBeGreaterThan(text.indexOf("Distributions go pro rata"));
+    expect(text).toContain("Every input and its source is listed in the IC memo and the lender package.");
+    expect(text).toContain("unrealized, not a sale");
+    expect(stats.type === "stats" && stats.items.some((i) => i.value === "Not applicable")).toBe(false);
+    expect(verifyProvenance(text, model.formatter.manifest)).toMatchObject({ pass: true, orphans: [] });
+  });
+
+  test("below the preferred return (90/8/20): no promote, and each partner's IRR is the deal's", () => {
+    const x = heldPartnerInput(8);
+    const model = buildModel(x);
+    const w = runWaterfall(x.result.equityFlows, x.input.waterfall!);
+    expect(w.promote).toBe(0);
+    const deal = formatValue(metric(x, "unrealized_equity_irr").value!, "%");
+    const stats = model.blocks.find((b) => b.type === "stats")!;
+    const items = stats.type === "stats" ? stats.items : [];
+    expect(items.slice(2).map((i) => i.value)).toEqual([deal, deal]);
+    expect(saleTable(model, CAPITAL).rows[3]).toEqual(["GP promote (unrealized, not a sale)", "", formatValue(0, "$"), "", ""]);
+    expect(verifyProvenance(visibleText(renderHtml(model)), model.formatter.manifest)).toMatchObject({ pass: true, orphans: [] });
+  });
+
+  test.each([3, 8])("90/%s/20 renders Word and PDF with zero orphans", async (pref) => {
+    for (const format of ["docx", "pdf"] as const) {
+      let out;
+      try { out = await renderArtifact(heldPartnerInput(pref), format); }
+      catch (e) { if (format === "pdf" && e instanceof RendererUnavailableError) continue; throw e; }
+      expect(out.provenance).toMatchObject({ pass: true, orphans: [] });
+      expect(out.bytes.byteLength).toBeGreaterThan(1_000);
+    }
+  }, 60_000);
+
+  test("a stated value that is not meaningful still builds, by the roots rule", () => {
+    const x = heldPartnerInput(8, { expenseRatioPct: undefined, fixedOpexAnnual: 50_000_000 });
+    expect(metric(x, "stated_value").status).toBe("NOT_MEANINGFUL");
+    expect(x.result.equityFlows.some((f) => f.kind === "unrealized")).toBe(false);
+    const model = buildModel(x);
+    const w = runWaterfall(x.result.equityFlows, x.input.waterfall!);
+    const stats = model.blocks.find((b) => b.type === "stats")!;
+    expect(stats.type === "stats" ? stats.items.slice(2).map((i) => i.value) : []).toEqual([irrText(w.lp), irrText(w.gp)]);
+    expect(verifyProvenance(visibleText(renderHtml(model)), model.formatter.manifest)).toMatchObject({ pass: true, orphans: [] });
   });
 });
 

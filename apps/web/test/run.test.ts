@@ -164,9 +164,10 @@ describe("offering the partner memo (task 84d)", () => {
     ["sale with split", { ...saleInput, waterfall: { lpSharePct: 90, preferredReturnPct: 8, gpPromotePct: 20 } }, true],
     ["rental sale with split", { ...rentalInput, waterfall: { lpSharePct: 90, preferredReturnPct: 8, gpPromotePct: 20 } }, true],
     ["no split", rentalInput, false],
-    ["held with split", { ...heldInput, waterfall: { lpSharePct: 90, preferredReturnPct: 8, gpPromotePct: 20 } }, false],
+    ["held with split", { ...heldInput, waterfall: { lpSharePct: 90, preferredReturnPct: 8, gpPromotePct: 20 } }, true],
+    ["held without split", heldInput, false],
   ] as const)("%s", (_name, input, offered) => {
-    queryState.run = { result: underwrite(input, policyFor(input)) };
+    queryState.run = { result: underwrite(input, policyFor(input)), ...("waterfall" in input ? { inputs: [{ fieldKey: "lp_share_pct" }] } : {}) } as never;
     const html = renderToStaticMarkup(createElement(Reports, { dealId: "partners" }));
     expect(html.includes("Partner memo")).toBe(offered);
   });

@@ -2158,16 +2158,25 @@ describe("requesting the partner memo (task 84d)", () => {
     const events = (await call(alice, "GET", `/api/deals/${partnerDeal}/audit`)).json;
     expect(events.some((e: any) => e.action === "artifact.requested" && e.payload.kind === "partner_memo")).toBe(true);
   }, 120_000);
-  test("held and unsplit runs are rejected before any artifact job is created", async () => {
+  test("unsplit runs are rejected before any artifact job is created", async () => {
     const count = async () => canonicalJson(await db.query(`select (select count(*) from artifacts) as artifacts, (select count(*) from jobs) as jobs, (select count(*) from audit_events) as audit`));
     const before = await count();
-    for (const id of [heldRun, run]) {
+    for (const id of [run]) {
       const response = await call(alice, "POST", `/api/runs/${id}/artifacts`, { kind: "partner_memo", format: "pdf" });
       expect(response.status).toBe(422);
-      expect(response.json.error).toBe("This deal has no LP/GP split, or is not sold, so it has no partner memo.");
+      expect(response.json.error).toBe("This deal has no LP/GP split, so it has no partner memo.");
     }
     expect(await count()).toBe(before);
   });
+  test("a held run with a split is accepted and its memo is generated (task 87a)", async () => {
+    const request = await call(alice, "POST", `/api/runs/${heldRun}/artifacts`, { kind: "partner_memo", format: "pdf" });
+    expect(request.status).toBe(200);
+    await work();
+    const [artifact] = await db.query<{ status: string; kind: string; deal_id: string }>(`select status, kind, deal_id from artifacts where id = $1`, [request.json.id]);
+    expect(artifact).toMatchObject({ status: "ready", kind: "partner_memo" });
+    const events = (await call(alice, "GET", `/api/deals/${artifact!.deal_id}/audit`)).json;
+    expect(events.some((e: any) => e.action === "artifact.requested" && e.payload.kind === "partner_memo")).toBe(true);
+  }, 120_000);
   test("fresh migrations include 0016 and its kind check still refuses an unknown kind", async () => {
     expect(await db.query(`select name from schema_migrations where name = '0016_partner_memo.sql'`)).toHaveLength(1);
     const me = (await call(alice, "GET", "/api/me")).json.user.id;
