@@ -120,7 +120,7 @@ export function Audit({ dealId }: { dealId: string }) {
             <tr key={e.seq}>
               <td className="num faint">{e.seq}</td>
               <td>{describeEvent(i, e)}</td>
-              <td className="small muted">{e.actor ?? t("audit.worker")}</td>
+              <td className="small muted">{e.actor ?? (e.action === "share.opened" ? t("audit.someone") : t("audit.worker"))}</td>
               <td className="small muted">{f.date(e.created_at)}</td>
               <td className="num small faint">{e.hash.slice(0, 12)}</td>
             </tr>

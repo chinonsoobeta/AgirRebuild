@@ -14,6 +14,7 @@ import { Reports } from "./routes/reports";
 import { Audit } from "./routes/audit";
 import { Settings } from "./routes/settings";
 import { Explore } from "./routes/explore";
+import { Share } from "./routes/share";
 import { I18nProvider } from "./i18n";
 
 const queryClient = new QueryClient({ defaultOptions: { queries: { staleTime: 5_000, retry: (n, e: any) => e?.status !== 401 && e?.status !== 403 && e?.status !== 404 && n < 2 } } });
@@ -21,6 +22,8 @@ const queryClient = new QueryClient({ defaultOptions: { queries: { staleTime: 5_
 const root = createRootRoute({ component: () => <Outlet /> });
 const login = createRoute({ getParentRoute: () => root, path: "/login", component: Login });
 const signup = createRoute({ getParentRoute: () => root, path: "/signup", component: Signup });
+// A shared link: outside the session gate, so it opens without an account (card 86).
+const share = createRoute({ getParentRoute: () => root, path: "/s/$secret", component: function SharedLink() { const { secret } = share.useParams(); return <Share secret={secret} />; } });
 const app = createRoute({
   getParentRoute: () => root,
   id: "app",
@@ -43,6 +46,7 @@ const dealIndex = createRoute({ getParentRoute: () => deal, path: "/", component
 const routeTree = root.addChildren([
   login,
   signup,
+  share,
   app.addChildren([
     index,
     deals,
