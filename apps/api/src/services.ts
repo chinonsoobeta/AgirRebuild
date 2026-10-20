@@ -19,7 +19,7 @@ import {
 } from "@agir/contracts";
 import { assemble, canonicalJson, ENGINE_VERSION, heldPartnerReturns, replay } from "@agir/engine";
 import type { Db } from "@agir/db";
-import { applyLabels, figureOrder, offeredIds, type SourcedCandidate } from "@agir/extraction";
+import { applyLabels, figureOrder, offeredIds, suggestFields, type SourcedCandidate } from "@agir/extraction";
 
 export const sha256 = (s: string) => createHash("sha256").update(s).digest("hex");
 /** The hash of each registered policy, by version. A run is fresh against the hash of the policy it was made under. */
@@ -374,8 +374,16 @@ export async function reviewView(tx: Db, dealId: string, asOf: string) {
     return {
       documentId: r.document_id, document_name: r.document_name, raw: r.raw, value: r.value, location: r.location, context: r.context, note: r.note, figureId,
       label: l ? { fieldKey: l.field_key, itemKey: l.item_key || null, by: l.by, at: l.created_at } : null,
+      // Card 112: fields a person might label it with. Never stored or read; a click saves an ordinary label.
+      suggestions: l || !figureId || r.value === null ? [] : suggestFields({ raw: r.raw, context: r.context, note: r.note, unitSeen: r.unit_seen }),
     };
   });
+  // Up to three unlabelled figures that may hold a missing input: those it ranks first, then the others, each in the table's order.
+  const likely = (fieldKey: string) =>
+    other.filter((o) => o.suggestions.includes(fieldKey))
+      .sort((a, b) => Number(a.suggestions[0] !== fieldKey) - Number(b.suggestions[0] !== fieldKey))
+      .slice(0, 3)
+      .map((o) => ({ documentId: o.documentId, figureId: o.figureId!, document_name: o.document_name, location: o.location, raw: o.raw, context: o.context }));
   return {
     readiness,
     proposals,
@@ -416,7 +424,7 @@ export async function reviewView(tx: Db, dealId: string, asOf: string) {
     }),
     missing: readiness.missing.map((m) => {
       const def = FIELD_BY_KEY.get(m.fieldKey)!;
-      return { ...m, unit: def.unit, material: def.material, default: def.default ?? null, help: def.help ?? null, groupLabel: FIELD_GROUP_LABELS[def.group] };
+      return { ...m, unit: def.unit, material: def.material, default: def.default ?? null, help: def.help ?? null, groupLabel: FIELD_GROUP_LABELS[def.group], likely: likely(m.fieldKey) };
     }),
     notFound: readiness.notFound.map((m) => {
       const def = FIELD_BY_KEY.get(m.fieldKey)!;

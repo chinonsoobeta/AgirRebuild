@@ -1,6 +1,8 @@
-import { FIELD_BY_KEY } from "@agir/contracts";
+import { FIELD_BY_KEY, FIELDS } from "@agir/contracts";
+import { detectFormat, tokenize } from "@agir/numbers";
 import type { Candidate } from "./candidates.ts";
-import { canonicalItem, currencyOf, itemFold, outsideBounds } from "./mapping.ts";
+import { CONCEPTS } from "./concepts.ts";
+import { canonicalItem, currencyOf, foldText, itemFold, outsideBounds } from "./mapping.ts";
 
 /** `labelledBy` is the person whose label put a figure here (task 58), so review can ask someone else to confirm it. */
 export type SourcedCandidate = Candidate & { documentId: string; documentName: string; ocr?: boolean; labelledBy?: string };
@@ -157,6 +159,50 @@ export function applySuggestions(
   return { kept, dropped };
 }
 
+/**
+ * Whether a person may label a figure written with `unitSeen` as a field of `fieldUnit`. A bare number takes the field's unit, because the person states it;
+ * a plain dollar figure takes the basis of the money field named (a rent-roll cell under "Monthly rent" reads "$2,350");
+ * a figure written with its own basis ("a month", "per sf") must fit as it is.
+ */
+const labelFits = (fieldUnit: string, unitSeen: string | null): boolean => {
+  const unit = seenUnit(unitSeen);
+  return unit === null || (unit === "$" && fieldUnit.startsWith("$")) || unitFits(fieldUnit, unit);
+};
+
+const LOOKS_LIKE = /^Looks like (.+), but the number is not written as /;
+
+/**
+ * Card 112. At most three fields a person might label an unnamed figure with, best first. Nothing reads, stores or approves a suggestion:
+ * a person's click saves an ordinary label, which crosses `applyLabels` as any other. Only a figure no field matched, or one that looked like
+ * a field but was written in another unit, gets suggestions; a figure refused for any other reason was refused for that reason.
+ * The field a "Looks like" note names ranks first; then each concept whose words appear in the context and whose exclusion does not,
+ * by how many of its words appear (two fitting concepts are both suggested). The figure's unit must fit as a label's does, and an
+ * itemized field needs an item name, so it is never suggested. Ties keep the order of FIELDS.
+ */
+export function suggestFields(f: { raw: string; context: string; note: string | null; unitSeen?: string | null }): string[] {
+  const looks = LOOKS_LIKE.exec(f.note ?? "")?.[1];
+  if (!looks && !NO_MATCH_NOTES.includes(f.note ?? "")) return [];
+  const unitSeen = f.unitSeen !== undefined ? f.unitSeen : (tokenize(f.raw, detectFormat(f.raw))[0]?.unit ?? null);
+  // The figure's own clause names it best, as for the reader: the words before it, or after it when it leads its clause.
+  // Words elsewhere in its context count too, for less, and an exclusion counts only in the clause.
+  const at = f.context.indexOf(f.raw);
+  const before = at < 0 ? f.context : f.context.slice(0, at).split(/[,;]/).pop()!;
+  const clause = foldText(before.trim() || f.context.slice(at + f.raw.length).split(/[,;.]/)[0]!);
+  const text = foldText(f.context);
+  const count = (c: (typeof CONCEPTS)[number], t: string) => [...c.words, ...(c.with ?? [])].reduce((sum, w) => sum + (t.match(new RegExp(w.source, "g"))?.length ?? 0), 0);
+  const score = new Map<string, number>();
+  const named = looks ? FIELDS.find((d) => d.label.toLowerCase() === looks) : undefined;
+  if (named) score.set(named.key, 1000);
+  for (const c of CONCEPTS) {
+    if (!c.words.some((w) => w.test(text)) || c.exclude.test(clause)) continue;
+    score.set(c.fieldKey, (score.get(c.fieldKey) ?? 0) + 10 * count(c, clause) + count(c, text));
+  }
+  return FIELDS.filter((d) => score.has(d.key) && d.extractable && !d.itemized && labelFits(d.unit, unitSeen))
+    .sort((a, b) => score.get(b.key)! - score.get(a.key)!)
+    .slice(0, 3)
+    .map((d) => d.key);
+}
+
 export const LABELLED_NOTE = "Labelled by a person from the document; confirm it";
 
 /** Every unlabelled figure that has a value, in one order for the worker, the review and a reconcile, so their ids match. */
@@ -185,11 +231,7 @@ export function applyLabels(
     const def = FIELD_BY_KEY.get(l.fieldKey);
     if (!def) { drop("The key is not in the catalog"); continue; }
     if (!def.extractable) { drop("This field is not read from documents"); continue; }
-    const unit = seenUnit(fig.unitSeen);
-    // A plain dollar figure takes the basis of the money field a person names (a rent-roll cell under "Monthly rent" reads "$2,350");
-    // a figure written with its own basis ("a month", "per sf") must fit as it is.
-    const plainDollar = unit === "$" && def.unit.startsWith("$");
-    if (unit !== null && !plainDollar && !unitFits(def.unit, unit)) { drop(`The figure's unit (${fig.unitSeen}) does not fit ${def.unit}`); continue; }
+    if (!labelFits(def.unit, fig.unitSeen)) { drop(`The figure's unit (${fig.unitSeen}) does not fit ${def.unit}`); continue; }
     if (outsideBounds(def, fig.value!)) { drop(`The figure is outside what ${def.key} can hold`); continue; }
     let itemKey: string | null = null;
     if (def.itemized) {

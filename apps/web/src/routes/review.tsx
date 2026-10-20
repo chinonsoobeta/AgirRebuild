@@ -482,7 +482,7 @@ export function Review({ dealId }: { dealId: string }) {
                 )}
               </div>
               <p className="small muted">{t("review.missingBody", { defaults: defaultable.length > 0 })}</p>
-              <ErrorText error={enter.error ?? defaults.error ?? formError} />
+              <ErrorText error={enter.error ?? defaults.error ?? label.error ?? formError} />
               {unused > 0 && (
                 <p className="small muted">{t("review.unusedLine", { n: unused })} <a href="#unused-figures" onClick={() => setOtherOpen(true)}>{t("review.unusedLink")}</a></p>
               )}
@@ -495,6 +495,17 @@ export function Review({ dealId }: { dealId: string }) {
                       <span className="small faint">{L.group(m.groupLabel ? groupKey(m.groupLabel) : "")}{m.default !== null ? t("review.default", { v: f.value(m.default, m.unit) }) : ""}{m.material ? t("review.materialTag") : ""}</span>
                     </div>
                     {L.help(m.fieldKey, m.help) && <span className="help">{L.help(m.fieldKey, m.help)}</span>}
+                    {m.likely.length > 0 && (
+                      <div className="stack small" style={{ gap: 6 }}>
+                        <span className="muted">{t("review.likely")}</span>
+                        {m.likely.map((x) => (
+                          <div key={`${x.documentId}|${x.figureId}`} className="spread">
+                            <span>{x.document_name} <span className="faint">{msg(x.location)}</span> <span className="num">{x.context}</span></span>
+                            {editable && <button className="btn quiet small" type="button" disabled={label.isPending} onClick={() => label.mutate({ documentId: x.documentId, figureId: x.figureId, fieldKey: m.fieldKey })}>{t("review.useFigure")}</button>}
+                          </div>
+                        ))}
+                      </div>
+                    )}
                   </>,
                 );
               })}
@@ -666,7 +677,12 @@ export function Review({ dealId }: { dealId: string }) {
                           {editable && <button className="btn quiet small" type="button" disabled={unlabel.isPending} onClick={() => unlabel.mutate({ documentId: o.documentId, figureId: o.figureId! })}>{t("review.undo")}</button>}
                         </div>
                       ) : editable && o.figureId && o.value !== null ? (
-                        <UseAs o={o} items={itemNames} busy={label.isPending} onSave={(b) => label.mutate(b)} />
+                        <div className="stack" style={{ gap: 4 }}>
+                          {o.suggestions.map((k) => (
+                            <button key={k} className="btn quiet small" type="button" disabled={label.isPending} onClick={() => label.mutate({ documentId: o.documentId, figureId: o.figureId!, fieldKey: k })}>{t("review.useAsSuggested", { field: L.field(k) })}</button>
+                          ))}
+                          <UseAs o={o} items={itemNames} busy={label.isPending} onSave={(b) => label.mutate(b)} />
+                        </div>
                       ) : null}
                     </td>
                   </tr>

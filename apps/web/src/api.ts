@@ -72,10 +72,10 @@ export type Review = {
   tableNotices: import("@agir/contracts").Proposal[];
   readiness: { status: "ready" | "blocked"; missing: ReadinessItem[]; conflicting: ReadinessItem[]; pending: ReadinessItem[]; impossible: ReadinessItem[]; notFound: ReadinessItem[]; choices: ReadinessItem[]; defaultable: string[] };
   assumptions: Assumption[];
-  missing: (ReadinessItem & { unit: string; material: boolean; default: number | null; help: string | null; groupLabel: string })[];
+  missing: (ReadinessItem & { unit: string; material: boolean; default: number | null; help: string | null; groupLabel: string; likely: { documentId: string; figureId: string; document_name: string; location: string; raw: string; context: string }[] })[];
   notFound: Review["missing"];
   choices: Review["missing"];
-  other: { documentId: string; document_name: string; raw: string; value: number | null; location: string; context: string; note: string | null; figureId: string | null; label: { fieldKey: string; itemKey: string | null; by: string; at: string } | null }[];
+  other: { documentId: string; document_name: string; raw: string; value: number | null; location: string; context: string; note: string | null; figureId: string | null; label: { fieldKey: string; itemKey: string | null; by: string; at: string } | null; suggestions: string[] }[];
 };
 export type Metric = { key: string; label: string; unit: string; value: number | null; status: string; reason?: string; formula: string };
 export type RunView = {

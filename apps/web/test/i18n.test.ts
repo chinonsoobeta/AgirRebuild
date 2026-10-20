@@ -898,3 +898,16 @@ describe("card 97a proposal translations", () => {
     }
   });
 });
+
+describe("card 112: suggested fields and likely figures on review", () => {
+  it("has its strings in both languages", () => {
+    const en = build("en", () => {});
+    const fr = build("fr", () => {});
+    expect(en.t("review.useAsSuggested", { field: "lease-up period" })).toBe("Use as lease-up period");
+    expect(fr.t("review.useAsSuggested", { field: "période de location" })).toBe("Utiliser comme période de location");
+    expect(en.t("review.likely")).toBe("Possibly in your documents:");
+    expect(fr.t("review.likely")).toBe("Peut-être dans vos documents :");
+    expect(en.t("review.useFigure")).toBe("Use this figure");
+    expect(fr.t("review.useFigure")).toBe("Utiliser ce chiffre");
+  });
+});

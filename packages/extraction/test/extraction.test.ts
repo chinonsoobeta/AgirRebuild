@@ -1,7 +1,7 @@
 import { describe, expect, test, vi } from "vitest";
 import { SF_PER_M2 } from "@agir/numbers";
 import { assemble, type AssumptionRow } from "@agir/engine";
-import { WAIVED_NOTE, applyLabels, itemFold, applySuggestions, consolidate, extractCandidates, offerable, offeredIds, figureOrder, withoutLabelled, normalizeLabel, parseDocument, scoreExtraction, type Cell, type NormalizedDocument, type SourcedCandidate, type Table } from "../src/index.ts";
+import { WAIVED_NOTE, applyLabels, itemFold, applySuggestions, consolidate, extractCandidates, offerable, offeredIds, figureOrder, withoutLabelled, normalizeLabel, parseDocument, scoreExtraction, suggestFields, type Cell, type NormalizedDocument, type SourcedCandidate, type Table } from "../src/index.ts";
 import { MAX_PDF_PAGES, pdfPageError, relativeLinks } from "../src/parse.ts";
 import { loadOracles, toNormalized } from "./oracle.ts";
 
@@ -6438,5 +6438,73 @@ describe("card 111 audit: words after a duration name the deal's own schedule on
   test("the deal's own schedule still reads", () => {
     expect(concept(lines("Expect 18 months of construction, then 6 months to fill the 12 units."))).toEqual([["lease_up_months", 6]]);
     expect(concept(lines("The schedule allows 16 months of site works and then 5 months to find tenants."))).toEqual([["construction_months", 16], ["lease_up_months", 5]]);
+  });
+});
+
+describe("card 112: ranked field suggestions for a figure the reader could not name", () => {
+  const NO_FIELD = "No field matches this label";
+  const NO_LINE = "No budget line matches this label";
+  const looks = (field: string, as: string) => `Looks like ${field}, but the number is not written as ${as}. Enter it by hand if it is.`;
+  const s = (context: string, raw: string, note: string | null = NO_FIELD, unitSeen?: string | null) => suggestFields({ raw, context, note, ...(unitSeen !== undefined ? { unitSeen } : {}) });
+
+  test("a build period in the figure's context is suggested first", () => {
+    expect(s("Site crews mobilised for 16 months", "16 months")[0]).toBe("construction_months");
+    expect(s("Équipes de chantier mobilisées pendant 14 mois", "14 mois")[0]).toBe("construction_months");
+    expect(s("The renovation crew needs 11 months", "11 months")[0]).toBe("construction_months");
+  });
+
+  test("the field a unit-mismatch note names is suggested only when the figure's unit fits it", () => {
+    const framing = s("Framing crew on site: 16 months", "16 months", looks("land cost", "a dollar amount"));
+    expect(framing).toContain("construction_months");
+    expect(framing).not.toContain("land_cost");
+    expect(s("Hold period: 10", "10", looks("hold period", "years"))[0]).toBe("hold_years");
+    expect(s("Durée de détention : 10", "10", looks("hold period", "years"))[0]).toBe("hold_years");
+    expect(s("Lease-up: 9", "9", looks("lease-up period", "months"), null)[0]).toBe("lease_up_months");
+  });
+
+  test("a cost line is suggested from its concept words, two fitting fields ranked by how many of their words appear", () => {
+    expect(s("Paperwork and consultants: $85,000", "$85,000", NO_LINE)[0]).toBe("soft_cost");
+    expect(s("Paperwork and consultants", "85000", NO_LINE, null)[0]).toBe("soft_cost");
+    expect(s("Honoraires et permis : 85 000 $", "85 000 $", NO_LINE)[0]).toBe("soft_cost");
+    expect(s("Land and design $600,000", "$600,000")).toEqual(expect.arrayContaining(["land_cost", "soft_cost"]));
+    expect(s("Terrain et conception : 600 000 $", "600 000 $")).toEqual(expect.arrayContaining(["land_cost", "soft_cost"]));
+    expect(s("Design, permits and land: $600,000", "$600,000").slice(0, 2)).toEqual(["soft_cost", "land_cost"]);
+    // A tie keeps the field order of the catalogue.
+    expect(s("Land and design $600,000", "$600,000").slice(0, 2)).toEqual(["land_cost", "soft_cost"]);
+  });
+
+  test("a field whose exclusion matches is not suggested", () => {
+    expect(s("Construction loan interest: $50,000", "$50,000")).not.toContain("hard_cost");
+    expect(s("Intérêts du prêt de construction : 50 000 $", "50 000 $")).not.toContain("hard_cost");
+    expect(s("Land transfer tax: $40,000", "$40,000")).not.toContain("land_cost");
+  });
+
+  test.each([
+    ["This sentence speaks of another property (\"comparable\"); its figures are not inputs", "A comparable building took 16 months of construction.", "16 months"],
+    ["A lender's condition, not the occupancy assumption", "The lender requires 90% occupancy before conversion.", "90%"],
+    ["A point in time, not a duration", "Construction started 6 months ago.", "6 months"],
+    ["A point in time, not a duration", "Les travaux ont commencé il y a 6 mois.", "6 mois"],
+    ["A fee or premium, not an input", "Lender fee on the construction loan: $25,000", "$25,000"],
+    [null, "Land: $600,000", "$600,000"],
+  ])("a figure refused for a reason gets no suggestion: %s", (note, context, raw) => expect(s(context, raw, note)).toEqual([]));
+
+  test("a % figure never gets a $ field, nor a $ figure a % field", () => {
+    for (const [context, raw] of [["Land share of value: 12%", "12%"], ["Part du terrain : 12 %", "12 %"], ["Construction and design allowance 5%", "5%"]]) {
+      const got = s(context!, raw!);
+      expect(got.filter((k) => ["land_cost", "hard_cost", "soft_cost", "contingency"].includes(k))).toEqual([]);
+    }
+    expect(s("Rent growth: $3,000", "$3,000")).not.toContain("rent_growth_pct");
+  });
+
+  test("an itemized field is never suggested: it needs an item name", () => {
+    expect(s("Rentable area: 1200", "1200", looks("rentable area", "square feet or square metres"), null)).toEqual([]);
+    expect(s("Units: 12%", "12%", looks("units", "a unit count"))).not.toContain("unit_count");
+    expect(s("Superficie locative du commerce : 1200", "1200", looks("rentable area", "square feet or square metres"), null)).toEqual([]);
+  });
+
+  test("at most three, and the same input gives the same output", () => {
+    const one = s("Construction, design, land and contingency: $900,000", "$900,000");
+    expect(one.length).toBeLessThanOrEqual(3);
+    expect(s("Construction, design, land and contingency: $900,000", "$900,000")).toEqual(one);
   });
 });

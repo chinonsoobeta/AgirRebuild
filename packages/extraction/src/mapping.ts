@@ -45,7 +45,7 @@ const SCOPE_WORDS: Record<Scope, RegExp> = {
   senior: /\b(senior|construction (?:loan|facility)|first mortgage|premier rang|pret de construction)\b/,
 };
 const TERM_SHEET_RE = /\b(term sheet|feuille de modalites)\b/;
-const foldText = (t: string) => t.toLowerCase().normalize("NFD").replace(/[\u0300-\u036f]/g, "").replace(/[’']/g, " ");
+export const foldText = (t: string) => t.toLowerCase().normalize("NFD").replace(/[\u0300-\u036f]/g, "").replace(/[’']/g, " ");
 
 // "Postponed to X" / "subordinate to X": the document's loan is the second-ranking one; X, whatever follows, is not named.
 const SUBORDINATE_RE = /\b(subordinate[ds]?|postponed|subordonnee?s?|postposee?s?)\s+(to|a|au|aux)\b/;

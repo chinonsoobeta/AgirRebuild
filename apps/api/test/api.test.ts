@@ -690,6 +690,36 @@ describe("audit of task 58: a label is checked when it is saved, and in team rev
   });
 });
 
+describe("card 112: ranked field suggestions in review, and likely figures for each missing input", () => {
+  test("an unnamed figure carries its suggestions and is listed under the missing input; a label clears both, and a viewer cannot save one", async () => {
+    const w = (await call(alice, "POST", "/api/workspaces", { name: "Suggestions" })).json.id;
+    expect((await call(alice, "POST", `/api/workspaces/${w}/members`, { email: "carol@example.com", role: "viewer" })).status).toBe(200);
+    const d = (await call(alice, "POST", `/api/workspaces/${w}/deals`, { name: "Suggest Row", assetType: "Multifamily", location: "Regina", province: "SK" })).json.id;
+    expect((await call(alice, "PUT", `/api/deals/${d}/documents?name=notes.txt`, undefined, new TextEncoder().encode("Project notes\nTenants and crew: 9 months\nBanner allowance: $7,000\n"))).status).toBe(200);
+    await work();
+    const review = async () => (await call(alice, "GET", `/api/deals/${d}/review`)).json;
+    let v = await review();
+    const f = v.other.find((o: any) => o.raw === "9 months");
+    expect(f).toMatchObject({ note: "No field matches this label", label: null, suggestions: ["lease_up_months"] });
+    expect(v.other.find((o: any) => o.raw === "$7,000").suggestions).toEqual([]);
+    expect(v.missing.find((m: any) => m.fieldKey === "lease_up_months").likely).toEqual([
+      { documentId: f.documentId, figureId: f.figureId, document_name: "notes.txt", location: f.location, raw: "9 months", context: f.context },
+    ]);
+    expect(v.missing.filter((m: any) => m.fieldKey !== "lease_up_months").every((m: any) => m.likely.length === 0)).toBe(true);
+    // A suggestion is never stored or audited: only a person's label is.
+    expect(await db.query(`select 1 from figure_labels where deal_id = $1`, [d])).toHaveLength(0);
+    expect(await db.query(`select 1 from audit_events where deal_id = $1 and action like 'figure.%'`, [d])).toHaveLength(0);
+    const body = { documentId: f.documentId, figureId: f.figureId, fieldKey: "lease_up_months" };
+    expect((await call(carol, "POST", `/api/deals/${d}/figure-labels`, body)).status).toBe(403);
+    expect((await call(alice, "POST", `/api/deals/${d}/figure-labels`, body)).status).toBe(200);
+    await work();
+    v = await review();
+    expect(v.other.find((o: any) => o.raw === "9 months")).toMatchObject({ label: { fieldKey: "lease_up_months" }, suggestions: [] });
+    expect(v.missing.some((m: any) => m.likely.some((x: any) => x.figureId === f.figureId))).toBe(false);
+    expect(v.assumptions.find((a: any) => a.fieldKey === "lease_up_months")).toMatchObject({ status: "needs_review", value: 9 });
+  });
+});
+
 describe("task 59: a person working alone is not blocked on day one", () => {
   const modeOf = async (s: Session) => (await call(s, "GET", "/api/me")).json.workspaces[0];
   const newDeal = async (s: Session, w: string, name: string) =>
