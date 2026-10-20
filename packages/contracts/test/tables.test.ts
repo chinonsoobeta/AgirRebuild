@@ -65,6 +65,9 @@ describe("card 94a cited tables", () => {
     for (const province of ["BC","MB","ON","NS","NB","PE","AB","NL","SK"]) expect(landTransferTaxOptions({province,value:500000,asOf:"2027-01-01"})).toMatchObject({unavailable:expect.stringContaining("past its re-check date")});
     expect(gstHstNetOptions({province:"ON",units:4,selling:false,asOf:"2027-01-01"})).toMatchObject({unavailable:expect.stringContaining("past its re-check date")});
   });
+  it("uses the read date where BC and Manitoba give no effective date", () => {
+    for (const id of ["bc-land","mb-land"]) expect(TABLES.find(t=>t.id === id)!.effective).toBe("2026-10-19");
+  });
   it("records official source metadata", () => {
     for (const t of TABLES) {
       expect(t.url).toMatch(/^https:\/\//);

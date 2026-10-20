@@ -5,7 +5,7 @@ import { randomBytes } from "node:crypto";
 import { renderToStaticMarkup } from "react-dom/server";
 import { api, ApiError, type Assumption } from "../src/api";
 import { canDecide, canEdit } from "../src/components/ui";
-import { ClientConfirmation } from "../src/routes/review.tsx";
+import { ClientConfirmation, TableProposal } from "../src/routes/review.tsx";
 import { ClientsPanel, LogoPanel } from "../src/routes/settings.tsx";
 import { Invite } from "../src/routes/invite.tsx";
 import { Reports } from "../src/routes/reports.tsx";
@@ -258,5 +258,51 @@ describe("the logo section of settings (task 89d)", () => {
   it("French", () => {
     state.lang = "fr";
     expect(text(render(createElement(LogoPanel, { workspaceId: "ws", hasLogo: true })))).toContain("Logo sur le dossier pour le prêteur");
+  });
+});
+
+
+describe("card 94c table proposal controls", () => {
+  const proposal = (options = [{label:"CMHC MLI Select, 50 points",value:5.49,reason:"Proposed from CMHC, Multi-unit Fees and Premiums (effective 2025-07-14, read 2026-10-19): CMHC MLI Select, 50 points."}]) => ({fieldKey:"refinance_insurance_premium_pct",tableId:"cmhc-premium",title:"Multi-unit Fees and Premiums",publisher:"CMHC",url:"https://example.test/official",effective:"2025-07-14",options});
+  it("shows a single proposal with source and accepts its exact value and reason", () => {
+    state.role="owner"; const onUse=vi.fn(), p=proposal();
+    const html=render(createElement(TableProposal,{proposal:p,unit:"%",onUse,busy:false}));
+    expect(text(html)).toContain("Proposed: 5.49% — CMHC, effective 2025-07-14");
+    expect(html).toContain('href="https://example.test/official"');
+    expect(buttons("Use this")).toHaveLength(1);
+    buttons("Use this")[0]!.props.onClick();
+    expect(onUse).toHaveBeenCalledWith({fieldKey:p.fieldKey,value:5.49,reason:p.options[0]!.reason});
+  });
+  it("offers a labelled select and accepts the chosen option", () => {
+    state.role="analyst"; const onUse=vi.fn();
+    const p=proposal([{label:"Ontario, outside Toronto",value:16475,reason:"First official option"},{label:"Toronto",value:32950,reason:"Second official option"}]);
+    const element=createElement(TableProposal,{proposal:p,unit:"$",onUse,busy:false});
+    const html=render(element);
+    expect(html).toContain("<select");
+    const select=state.nodes.find(n=>n.tag === "select")!;
+    expect(select.props["aria-label"]).toBeTruthy();
+    select.props.onChange({target:{value:"1"}}); render(element);
+    buttons("Use this")[0]!.props.onClick();
+    expect(onUse).toHaveBeenCalledWith({fieldKey:p.fieldKey,value:32950,reason:"Second official option"});
+  });
+  it("displays an unavailable proposal without acceptance", () => {
+    state.role="owner";
+    const html=render(createElement(TableProposal,{proposal:{...proposal([]),unavailable:"the table needs a loan-to-value"},unit:"%",onUse:vi.fn(),busy:false}));
+    expect(text(html)).toContain("the table needs a loan-to-value");
+    expect(buttons("Use this")).toHaveLength(0);
+  });
+  it("a client sees the proposal but no Use this control", () => {
+    state.role="client";
+    const html=render(createElement(TableProposal,{proposal:proposal(),unit:"%",onUse:vi.fn(),busy:false}));
+    expect(text(html)).toContain("CMHC");expect(buttons("Use this")).toHaveLength(0);
+  });
+  it("explains Quebec QST in French without calculating an amount", () => {
+    state.lang="fr";state.role="owner";
+    const unavailable="Quebec has no full QST rebate for purpose-built rentals (the full rebate covers GST only). QST of 9.975% on the fair market value at completion is payable, less a rebate of up to $7,182 per unit that is nil at $225,000 or more per unit. Enter the net amount.";
+    const html=render(createElement(TableProposal,{proposal:{...proposal([]),unavailable},unit:"$",onUse:vi.fn(),busy:false}));
+    const words=text(html);
+    expect(words).toContain("aucun remboursement intégral de la TVQ");expect(words).toContain("7 182");
+    expect(words).toContain("9,975");expect(words).toContain("225 000");
+    expect(buttons("Use this")).toHaveLength(0);
   });
 });

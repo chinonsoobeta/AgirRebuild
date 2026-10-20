@@ -66,12 +66,12 @@ describe("selling the units (task 77)", () => {
     });
   });
   test("pins all three rental policies and selects only the new mode's policy", () => {
-    const expected = {"policy-v1": "9f95780101a9ecfe6444c47dd319c1cb8d77251d60700a1a4dde1733055296b9", "rental-hold-draft": "2fb3d651462684813c8207c60d86fe0a3d0785bc7220fa5a57a91968b9bd3ae8", "rental-hold-insured-draft": "68828e103643ba37b73715961151693012cee5ad22fb24d702c269d39e4b2960"};
+    const expected = {"policy-v1": "9f95780101a9ecfe6444c47dd319c1cb8d77251d60700a1a4dde1733055296b9", "rental-hold-draft": "2fb3d651462684813c8207c60d86fe0a3d0785bc7220fa5a57a91968b9bd3ae8", "rental-hold-insured-draft": "1acd96e37d38fc6a4fb724c4fd565bd91ead4b5e938c2e6625b8de9b68eca206"};
     for (const p of [contracts.POLICY_V1, contracts.RENTAL_HOLD_DRAFT, contracts.RENTAL_HOLD_INSURED_DRAFT]) expect(sha(p)).toBe(expected[p.version as keyof typeof expected]);
     expect(contracts.policyFor(small()).version).toBe("for-sale-draft");
     expect(contracts.policyFor(allEquityDeal())).toBe(contracts.POLICY_V1);
     expect(contracts.policyFor({ ...developmentDeal(), exit: "refinance_hold" })).toBe(contracts.RENTAL_HOLD_DRAFT);
-    expect(contracts.policyFor({ ...developmentDeal(), exit: "refinance_hold", refinance: { month: 36, amount: 1, ratePct: 1, amortYears: 30, ioMonths: 0, insurancePremiumPct: 4 } })).toBe(contracts.RENTAL_HOLD_INSURED_DRAFT);
+    expect(contracts.policyFor({ ...developmentDeal(), exit: "refinance_hold", refinance: { month: 36, amount: 1, ratePct: 1, amortYears: 30, ioMonths: 0, insurancePremiumPct: 4, mliSelectPoints: 50 } })).toBe(contracts.RENTAL_HOLD_INSURED_DRAFT);
   });
   test.each([
     ["cannot state rents", (d: EngineInput) => ({ ...d, revenue: allEquityDeal().revenue })],
@@ -151,10 +151,118 @@ describe("selling the units (task 77)", () => {
   });
   test("rental and held fixtures keep their complete ledger and result hashes", () => {
     const held: EngineInput = { ...developmentDeal(), exit: "refinance_hold", refinance: { month: 36, amount: 29000000, ratePct: 5, amortYears: 30, ioMonths: 0 } };
+    // Frozen pre-94b policy, with no refinanceLimits. Its hash proves the exact stored-policy copy.
+    const legacyInsuredPolicy = Object.freeze(
+    {
+      "maxLtcPct": 85,
+      "baseSizingDscrFloor": 1.1,
+      "maxFailedGatesForConditions": 2,
+      "agreementTolerancePct": 1,
+      "sourcePrecedence": [
+        "lender_term_sheet",
+        "appraisal",
+        "budget",
+        "rent_roll",
+        "sponsor_summary",
+        "market_study",
+        "other"
+      ],
+      "stresses": [
+        {
+          "key": "exit_cap",
+          "label": "Exit cap +75 bps",
+          "exitCapBps": 75
+        },
+        {
+          "key": "cost",
+          "label": "Costs +10%",
+          "costPct": 10
+        },
+        {
+          "key": "rate",
+          "label": "Interest rate +150 bps",
+          "rateBps": 150
+        },
+        {
+          "key": "rent",
+          "label": "Rent -10%",
+          "rentPct": -10
+        },
+        {
+          "key": "occupancy",
+          "label": "Occupancy -5 pts",
+          "occupancyPts": -5
+        },
+        {
+          "key": "expense",
+          "label": "Operating costs +5 pts",
+          "expensePts": 5
+        },
+        {
+          "key": "combined",
+          "label": "Combined",
+          "exitCapBps": 75,
+          "costPct": 10,
+          "rateBps": 150,
+          "rentPct": -10,
+          "occupancyPts": -5,
+          "expensePts": 5
+        }
+      ],
+      "version": "rental-hold-insured-draft",
+      "draft": true,
+      "gates": {
+        "developmentSpreadMinBps": 100,
+        "dcrAfterRefinanceMin": 1.1,
+        "stressedSizingDscrMin": 1.2,
+        "stressedUnrealizedMultipleMin": 1
+      },
+      "gateKeys": [
+        "development_spread",
+        "dcr_after_refinance",
+        "stressed_sizing_dscr",
+        "stressed_unrealized_equity_multiple"
+      ]
+    } as const);
+    expect(sha(legacyInsuredPolicy)).toBe("68828e103643ba37b73715961151693012cee5ad22fb24d702c269d39e4b2960");
+    expect(legacyInsuredPolicy).not.toHaveProperty("refinanceLimits");
     const inputs = { rental: developmentDeal(), allEquity: allEquityDeal(), held, insured: { ...held, refinance: { ...held.refinance!, insurancePremiumPct: 4 } } };
-    for (const pin of [{"name": "rental", "input": "0d2d665f09e3eb4fa03f0aa69ae97ef268d36775e01d92f84257739e5099df7d", "ledger": "c32c695fd8d80d883a79e1bbdaba30709f49e9d28d222f88c96906041eac86dd", "result": "ca707fa0c9e7414dbe944c3a6f1409cec7413f4f744293f4e3538ab4a5921395"}, {"name": "allEquity", "input": "ab34be3951216eda02b33cf6df1cade189bbe9955e6fcfba429464371f85db8f", "ledger": "4af891bcfe9d11c51db3422c116eb3e0d7c5888c1041a4fd25644e6a59e7a22b", "result": "f3d2cd0c98f657a0eb5a24e9a824045872ba741be3450153db1a573cbbfe0ef5"}, {"name": "held", "input": "090fc971d369184cb95bc3d9330f69dddcc3c19d5ed62e350cf2d28e8108ea7d", "ledger": "f5eb1ebe1b5cfe98baf793c4a87fb88b03ca1f7a1cf86f287306086b9e1f8b8a", "result": "b625d070932949181ae8affc679e34ade9809a7c02ee534daa12072e91d23e47"}, {"name": "insured", "input": "bfd5969f62772a5be63eb0ad7a54c061890436232b0035d16a9d09c031036993", "ledger": "a539e14e0823cde1643c5e0dbafc1566c5cf4b91775646d4b41cefa13e88ff2d", "result": "1eecd188300f2356e8338c8836eec8c3c9068aba68581f7ac0dba2672607efbf"}]) {
+    for (const pin of [{"name": "rental", "input": "0d2d665f09e3eb4fa03f0aa69ae97ef268d36775e01d92f84257739e5099df7d", "ledger": "c32c695fd8d80d883a79e1bbdaba30709f49e9d28d222f88c96906041eac86dd", "result": "ca707fa0c9e7414dbe944c3a6f1409cec7413f4f744293f4e3538ab4a5921395"}, {"name": "allEquity", "input": "ab34be3951216eda02b33cf6df1cade189bbe9955e6fcfba429464371f85db8f", "ledger": "4af891bcfe9d11c51db3422c116eb3e0d7c5888c1041a4fd25644e6a59e7a22b", "result": "f3d2cd0c98f657a0eb5a24e9a824045872ba741be3450153db1a573cbbfe0ef5"}, {"name": "held", "input": "090fc971d369184cb95bc3d9330f69dddcc3c19d5ed62e350cf2d28e8108ea7d", "ledger": "f13c6c0a79d0ffd1ddad852611d2037e06f000696dcd5d708734c13b14518ef2", "result": "b625d070932949181ae8affc679e34ade9809a7c02ee534daa12072e91d23e47"}, {"name": "insured", "input": "bfd5969f62772a5be63eb0ad7a54c061890436232b0035d16a9d09c031036993", "ledger": "3ecd3b5f1d032d0c9df1e580a1561dc620176e2297357bb95e4a20d7e3d7255e", "result": "1eecd188300f2356e8338c8836eec8c3c9068aba68581f7ac0dba2672607efbf"}]) {
       const input = inputs[pin.name as keyof typeof inputs];
-      expect({ name: pin.name, input: sha(input), ledger: sha(engine.buildLedger(input)), result: sha(run(input)) }).toEqual(pin);
+      const ledger = engine.buildLedger(input);
+      const result = pin.name === "insured" ? engine.replay(engine.ENGINE_VERSION, input, legacyInsuredPolicy) : run(input);
+      expect({ name: pin.name, input: sha(input), ledger: sha(ledger), result: sha(result) }).toEqual(pin);
+      if (pin.name === "insured" || pin.name === "held") {
+        expect(ledger.refinance!.value).toBe(45075765);
+        const legacyRefinance: Partial<NonNullable<typeof ledger.refinance>> = {...ledger.refinance!};
+        delete legacyRefinance.value;
+        expect(sha({...ledger,refinance:legacyRefinance})).toBe(pin.name === "insured"
+          ? "a539e14e0823cde1643c5e0dbafc1566c5cf4b91775646d4b41cefa13e88ff2d"
+          : "f5eb1ebe1b5cfe98baf793c4a87fb88b03ca1f7a1cf86f287306086b9e1f8b8a");
+      }
+    }
+  });
+  test.each([{"name": "insuredSelect", "input": "e0a637cbfe7cb62f6f7dd714240a2d17452a926dcb91d024c9c2becaa8af603f", "ledger": "3ecd3b5f1d032d0c9df1e580a1561dc620176e2297357bb95e4a20d7e3d7255e", "result": "1eecd188300f2356e8338c8836eec8c3c9068aba68581f7ac0dba2672607efbf", "policyVersion": "rental-hold-insured-draft"}, {"name": "insuredStandardShort", "input": "bfd5969f62772a5be63eb0ad7a54c061890436232b0035d16a9d09c031036993", "ledger": "3ecd3b5f1d032d0c9df1e580a1561dc620176e2297357bb95e4a20d7e3d7255e", "result": "747311cdafc972f06543f394140b5950f1915c6c2f0297ae8eaac37f9f530a60", "policyVersion": "rental-hold-insured-standard-short-draft"}])("card 94b current-policy pin: $name", (pin) => {
+    const input: EngineInput = { ...developmentDeal(), exit: "refinance_hold", refinance: {
+      month: 36, amount: 29000000, ratePct: 5, amortYears: 30, ioMonths: 0, insurancePremiumPct: 4,
+      ...(pin.name === "insuredSelect" ? {mliSelectPoints:50} : {}),
+    }};
+    const policy=contracts.policyFor(input), result=engine.underwrite(input,policy);
+    expect({name:pin.name,input:sha(input),ledger:sha(engine.buildLedger(input)),result:sha(result),policyVersion:result.policyVersion}).toEqual(pin);
+    const select=pin.name === "insuredSelect";
+    expect(result.verdict.gates.map(g=>({key:g.key,threshold:g.threshold,status:g.status}))).toEqual([
+      {key:"development_spread",threshold:100,status:"failed"},
+      {key:"dcr_after_refinance",threshold:select ? 1.10 : 1.30,status:select ? "passed" : "failed"},
+      {key:"stressed_sizing_dscr",threshold:1.20,status:"failed"},
+      {key:"stressed_unrealized_equity_multiple",threshold:1,status:"failed"},
+    ]);
+    expect(result.verdict.gates.filter(g=>g.status === "failed")).toHaveLength(select ? 3 : 4);
+    expect(result.verdict.code).toBe("REJECT");
+    if (select) expect(result.checks.filter(c=>c.severity === "error" && ["insured_min_units","refinance_ltv_limit","refinance_amort_limit"].includes(c.key))).toEqual([]);
+    else {
+      const warning=result.checks.find(c=>c.key === "base_sizing_dscr");
+      expect(warning).toMatchObject({severity:"warning",expected:1.30,message:expect.stringContaining("under the 1.30x floor")});
+      expect(warning!.actual).toBeLessThan(1.30);
     }
   });
   // Audit: checks read the base case only. Costs 100 (land 60, hard 40), debt 70 at 0%, one presold unit at 75:

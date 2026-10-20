@@ -4,7 +4,9 @@ const table = (id: string, title: string, publisher: string, url: string, effect
   ({ id, title, publisher, url, effective, readOn: "2026-10-19", recheckBy, status: "official" });
 export const CMHC_PREMIUM = table("cmhc-premium", "Multi-unit Fees and Premiums", "CMHC", "https://assets.cmhc-schl.gc.ca/sites/cmhc/media-newsroom/notices/2025/cmhc-to-update-multi-unit-mortgage-loan-insurance-premiums/fees-and-premiums.pdf", "2025-07-14");
 export const LAND_TABLES = {
-  BC: table("bc-land", "Property transfer tax", "Government of British Columbia", "https://www2.gov.bc.ca/gov/content/taxes/property-taxes/property-transfer-tax", "2024-01-01"),
+  // the page gives no effective date; this is the date read
+  BC: table("bc-land", "Property transfer tax", "Government of British Columbia", "https://www2.gov.bc.ca/gov/content/taxes/property-taxes/property-transfer-tax", "2026-10-19"),
+  // the page gives no effective date; this is the date read
   MB: table("mb-land", "Land transfer tax", "Government of Manitoba", "https://gov.mb.ca/finance/other/landtransfertax.html", "2026-10-19"),
   ON: table("on-land", "Calculating land transfer tax", "Government of Ontario", "https://www.ontario.ca/document/land-transfer-tax/calculating-land-transfer-tax", "2026-04-22"),
   Toronto: table("toronto-land", "Municipal Land Transfer Tax rates and fees", "City of Toronto", "https://www.toronto.ca/services-payments/property-taxes-utilities/municipal-land-transfer-tax-mltt/municipal-land-transfer-tax-mltt-rates-and-fees/", "2026-04-01"),
@@ -23,6 +25,7 @@ export const GST_HST = table("gst-hst-pbrh", "Purpose-built rental housing rebat
 export const TABLES: readonly Table[] = [CMHC_PREMIUM, ...Object.values(LAND_TABLES), GST_HST];
 export const tableCurrent = (t: Table, asOf: string): boolean => asOf >= t.effective && asOf < t.recheckBy;
 const expired = { unavailable: "The table is not effective yet or is past its re-check date; enter the value yourself." };
+export type Proposal = { fieldKey: string; tableId: string; title: string; publisher: string; url: string; effective: string; options: { label: string; value: number; reason: string }[]; unavailable?: string };
 export type TableOption = { key: string; label: string; value: number; note?: string };
 type Options = { options: TableOption[] } | { unavailable: string };
 

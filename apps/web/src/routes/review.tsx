@@ -133,6 +133,24 @@ function UseAs({ o, items, onSave, busy }: { o: ReviewData["other"][number]; ite
   );
 }
 
+/** The same proposed-value controls in Not found and Choices. Acceptance uses the existing entry mutation. */
+export function TableProposal({ proposal, unit, onUse, busy }: { proposal: import("@agir/contracts").Proposal; unit: string; onUse: (b: {fieldKey: string; value: number; reason: string}) => void; busy: boolean }) {
+  const { t, f, msg, lang } = useI18n();
+  const { role } = useSession();
+  const [selected,setSelected] = useState(0);
+  if (proposal.unavailable) return <p className="small muted">{msg(proposal.unavailable)}</p>;
+  const option = proposal.options[selected] ?? proposal.options[0];
+  if (!option) return null;
+  const amount = (n: number) => unit === "$" ? new Intl.NumberFormat(lang === "fr" ? "fr-CA" : "en-CA",{style:"currency",currency:"CAD",currencyDisplay:"narrowSymbol",minimumFractionDigits:2,maximumFractionDigits:2}).format(n) : f.value(n,unit);
+  return <div className="stack small" style={{gap:8}}>
+    <div>{t("review.proposed",{value:amount(option.value),publisher:proposal.publisher,date:proposal.effective})}{" "}<a href={proposal.url} target="_blank" rel="noreferrer">{t("review.proposalSource")}</a></div>
+    {proposal.options.length > 1 ? <select aria-label={t("review.proposalOption")} value={selected} onChange={e=>setSelected(Number(e.target.value))}>
+      {proposal.options.map((o,index)=><option key={index} value={index}>{o.label} — {amount(o.value)}</option>)}
+    </select> : <span>{option.label}</span>}
+    {canEdit(role) && <div><button className="btn quiet small" type="button" disabled={busy} onClick={()=>onUse({fieldKey:proposal.fieldKey,value:option.value,reason:option.reason})}>{t("review.useProposal")}</button></div>}
+  </div>;
+}
+
 export function Review({ dealId }: { dealId: string }) {
   const { t, f, L, msg, lang } = useI18n();
   const { me, role, solo } = useSession();
@@ -491,6 +509,7 @@ export function Review({ dealId }: { dealId: string }) {
                       <span>{t("review.notFoundLine", { field: name(m), meaning: L.absent(m.fieldKey) })}</span>
                       {editable && entering !== id && <button className="btn quiet small" type="button" onClick={() => setEntering(id)}>{t("review.notFoundEnter")}</button>}
                     </div>
+                    {r.proposals?.find(p=>p.fieldKey === m.fieldKey) && <TableProposal key={r.proposals.find(p=>p.fieldKey === m.fieldKey)!.tableId} proposal={r.proposals.find(p=>p.fieldKey === m.fieldKey)!} unit={m.unit} onUse={b=>enter.mutate(b)} busy={enter.isPending} />}
                     {entering === id && entryForm(m, id, <label htmlFor={id} className="sr-only">{name(m)}</label>)}
                   </div>
                 );
@@ -511,6 +530,7 @@ export function Review({ dealId }: { dealId: string }) {
                       {editable && entering !== id && <button className="btn quiet small" type="button" onClick={() => setEntering(id)}>{m.unit === "flag" ? t("review.choiceEnter") : t("review.notFoundEnter")}</button>}
                     </div>
                     {L.help(m.fieldKey, m.help) && <span className="help">{L.help(m.fieldKey, m.help)}</span>}
+                    {r.proposals?.find(p=>p.fieldKey === m.fieldKey) && <TableProposal key={r.proposals.find(p=>p.fieldKey === m.fieldKey)!.tableId} proposal={r.proposals.find(p=>p.fieldKey === m.fieldKey)!} unit={m.unit} onUse={b=>enter.mutate(b)} busy={enter.isPending} />}
                     {/* A Yes/No choice is named by its radiogroup; a number needs a label of its own. */}
                     {entering === id && entryForm(m, id, m.unit === "flag" ? <span className="sr-only">{name(m)}</span> : <label htmlFor={id} className="sr-only">{name(m)}</label>)}
                   </div>

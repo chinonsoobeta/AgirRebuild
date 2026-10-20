@@ -1,4 +1,4 @@
-import { beforeAll, describe, expect, test, vi } from "vitest";
+import { afterAll, beforeAll, describe, expect, test, vi } from "vitest";
 import { mkdtempSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
@@ -2909,5 +2909,68 @@ describe("card 93c artifact language", () => {
   });
   test("refuses a French model export explicitly", async () => {
     expect(await call(alice, "POST", `/api/runs/${run}/artifacts`, { kind: "model_export", format: "xlsx", lang: "fr" })).toMatchObject({ status: 422, json: { error: "The model export is in English only for now." } });
+  });
+});
+
+describe("card 94c table proposals", () => {
+  let owner: Session, workspace: string;
+  let date = "2026-10-20";
+  let previousApp: typeof app;
+  beforeAll(async () => {
+    previousApp = app;
+    app = createApp({db,store,secureCookies:false,now:()=>new Date(`${date}T12:00:00Z`)});
+    owner = await signup("tables94@example.com","Table Proposals Owner","solo");
+    workspace=(await call(owner,"GET","/api/me")).json.workspaces[0].id;
+  });
+  afterAll(()=>{app=previousApp;});
+  const make = async (province?: string, prerequisites = true) => {
+    const d=(await call(owner,"POST",`/api/workspaces/${workspace}/deals`,{name:"Fictional table proposal rental",assetType:"Multifamily",location:"Halifax",...(province ? {province}: {country:"US"})})).json.id;
+    const values: [string,number,string?][] = [["refinance_and_hold",1],["refinance_month",24],["unit_count",12,"Residential"]];
+    if (prerequisites) values.push(["land_cost",750000],["refinance_ltv_pct",85],["refinance_amort_years",40],["refinance_mli_select_points",50]);
+    for (const [fieldKey,value,itemKey] of values) expect((await call(owner,"POST",`/api/deals/${d}/values`,{fieldKey,value,itemKey,reason:"Fictional card 94 setup"})).status).toBe(200);
+    return d;
+  };
+  const review = async (d: string) => (await call(owner,"GET",`/api/deals/${d}/review`)).json;
+  test("Halifax land, Select premium and rental GST are proposals only; accepting uses the governed value route", async () => {
+    const d=await make("NS"), r=await review(d);
+    expect(r.proposals).toHaveLength(3);
+    expect(r.assumptions.some((a:any)=>["land_transfer_tax","refinance_insurance_premium_pct","gst_hst_net"].includes(a.fieldKey))).toBe(false);
+    const land=r.proposals.find((p:any)=>p.fieldKey === "land_transfer_tax");
+    expect(land.options.find((o:any)=>o.label === "Halifax Regional Municipality").value).toBe(11250);
+    const premium=r.proposals.find((p:any)=>p.fieldKey === "refinance_insurance_premium_pct");
+    expect(premium.options[0].value).toBe(5.49);
+    expect(premium.options[0].reason).toBe(`Proposed from ${premium.publisher}, ${premium.title} (effective ${premium.effective}, read 2026-10-19): ${premium.options[0].label}.`);
+    expect(r.proposals.find((p:any)=>p.fieldKey === "gst_hst_net").options[0].value).toBe(0);
+    expect((await call(owner,"POST",`/api/deals/${d}/values`,{fieldKey:premium.fieldKey,...premium.options[0]})).json.status).toBe("approved");
+    const accepted=await review(d);
+    expect(accepted.proposals.some((p:any)=>p.fieldKey === premium.fieldKey)).toBe(false);
+    expect(accepted.assumptions.find((a:any)=>a.fieldKey === premium.fieldKey)).toMatchObject({value:5.49,status:"approved",reason:premium.options[0].reason});
+  });
+  test("withholds every proposal at the re-check date", async () => {
+    const d=await make("NS"); date="2027-01-02";
+    try {
+      const r=await review(d);
+      expect(r.proposals).toHaveLength(3);
+      for (const p of r.proposals) { expect(p.options).toEqual([]); expect(p.unavailable).toContain("past its re-check date"); }
+    } finally {date="2026-10-20";}
+  });
+  test("requires an explicit province, despite free-text Halifax", async () => {
+    const r=await review(await make());
+    expect(r.proposals).toHaveLength(3);
+    for (const p of r.proposals) {expect(p.options).toEqual([]);expect(p.unavailable).toBe("the deal has no province");}
+  });
+  test("requires approved prerequisites, and an LTV rather than a refinance amount", async () => {
+    const d=await make("NS",false), r=await review(d);
+    expect(r.proposals.find((p:any)=>p.fieldKey === "land_transfer_tax").unavailable).toBe("state the land cost first");
+    expect(r.proposals.find((p:any)=>p.fieldKey === "refinance_insurance_premium_pct").unavailable).toBe("the table needs a loan-to-value");
+    expect((await call(owner,"POST",`/api/deals/${d}/values`,{fieldKey:"refinance_amount",value:1000000,reason:"Fictional amount sizing"})).status).toBe(200);
+    expect((await review(d)).proposals.find((p:any)=>p.fieldKey === "refinance_insurance_premium_pct").unavailable).toBe("the table needs a loan-to-value");
+  });
+  test("QC has no proposed QST value and explains the entered net amount", async () => {
+    const r=await review(await make("QC"));
+    const p=r.proposals.find((p:any)=>p.fieldKey === "gst_hst_net");
+    expect(p.options).toEqual([]);
+    expect(p.unavailable).toContain("no full QST rebate");
+    expect(p.unavailable).toContain("$7,182");
   });
 });

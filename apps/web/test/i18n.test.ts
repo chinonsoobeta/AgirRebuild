@@ -265,6 +265,8 @@ describe("every sentence the engine's checks can produce has a French rendering"
     ["preferred return", (d) => { d.waterfall = { lpSharePct: 90, preferredReturnPct: -1, gpPromotePct: 20 }; }],
     ["GP promote", (d) => { d.waterfall = { lpSharePct: 90, preferredReturnPct: 8, gpPromotePct: 101 }; }],
     ["property tax", (d) => { d.propertyTaxAnnual = -1; }],
+    ["MLI Select points", (d) => { d.refinance = { month: 24, amount: 1_000, ratePct: 5, amortYears: 25, ioMonths: 0, mliSelectPoints: 151 }; }],
+    ["refinance term", (d) => { d.refinance = { month: 24, amount: 1_000, ratePct: 5, amortYears: 25, ioMonths: 0, termYears: 41 }; }],
     ["refinance insurance premium", (d) => { d.refinance = { month: 24, amount: 1_000, ratePct: 5, amortYears: 25, ioMonths: 0, insurancePremiumPct: 11 }; }],
     ["a sale deal with rents", sells((d) => { d.revenue = allEquityDeal().revenue; })],
     ["a sale deal with a refinance", sells((d) => { d.refinance = { month: 24, amount: 1_000, ratePct: 5, amortYears: 25, ioMonths: 0 }; })],

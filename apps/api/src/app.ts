@@ -11,7 +11,7 @@ import { MAX_UPLOAD_BYTES } from "@agir/worker";
 import { checkPassword, createSession, endSession, hashPassword, rateLimiter, SESSION_DAYS, userForSession } from "./auth.ts";
 import { auditPackage, clientViewer, createRun, dealOverview, hideClientEvents, HttpError, labelRefusal, reviewView, runView, sha256 } from "./services.ts";
 
-export type AppDeps = { db: Db; store: BlobStore; secureCookies: boolean; demoSignIn?: boolean; trustProxy?: boolean };
+export type AppDeps = { db: Db; store: BlobStore; secureCookies: boolean; demoSignIn?: boolean; trustProxy?: boolean; now?: () => Date };
 type Env = { Variables: { user: { id: string; email: string; name: string } } };
 
 const COOKIE = "agir_session";
@@ -26,7 +26,7 @@ const INVITE_GONE = "This invitation is not available. It may have been used, re
 
 const PG_STATUS: Record<string, number> = { "42501": 403, "28000": 401, P0002: 404, "22023": 422, "23505": 409, "40001": 409, "23514": 422, "22P02": 404 };
 
-export function createApp({ db, store, secureCookies, demoSignIn = false, trustProxy = false }: AppDeps) {
+export function createApp({ db, store, secureCookies, demoSignIn = false, trustProxy = false, now = () => new Date() }: AppDeps) {
   const app = new Hono<Env>();
   const clientKey = (c: Context<Env>): string => {
     if (trustProxy) {
@@ -437,7 +437,7 @@ export function createApp({ db, store, secureCookies, demoSignIn = false, trustP
     return c.json({ ok: true });
   });
 
-  app.get("/api/deals/:id/review", async (c) => c.json(await as(c, (tx) => reviewView(tx, c.req.param("id")))));
+  app.get("/api/deals/:id/review", async (c) => c.json(await as(c, (tx) => reviewView(tx, c.req.param("id"), now().toISOString().slice(0, 10)))));
 
   app.post("/api/assumptions/:id/review", async (c) => {
     const body = z
