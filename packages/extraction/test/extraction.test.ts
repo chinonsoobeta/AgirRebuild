@@ -5706,3 +5706,40 @@ describe("card 105: trade shorthand for operating and loan assumptions", () => {
     expect(pick(r)).toEqual([[key, n]]);
   });
 });
+
+describe("card 105 audit: stabilization named, presale and resale-price caps", () => {
+  const read = (...lines: string[]) => extractCandidates({ kind: "pdf", lines: lines.map((text, i) => ({ text, location: `page 1, line ${i + 1}` })), tables: [], pageCount: 1, needsOcr: false, fullText: lines.join("\n") });
+  const pick = (r: ReturnType<typeof read>) => r.candidates.map((c) => [c.fieldKey, c.value]);
+  const LOAN = "Construction loan: $5,000,000";
+  test.each(["Actual stabilized occupancy: 95%", "Initial stabilized occupancy: 95%", "Occupation stabilisée initiale : 95 %"])("a label that names stabilization is not an early occupancy: %s", (line) => {
+    expect(pick(read(LOAN, line))).toEqual([["senior_loan_amount", 5_000_000], ["stabilized_occupancy_pct", 95]]);
+  });
+  test.each(["Pre-sale cap: 25%", "Pre sale cap: 30%", "Presales cap: 60%", "Pre-sales cap rate: 5.5%"])("a presale cap is not the exit cap: %s", (line) => {
+    expect(pick(read(LOAN, line))).toEqual([["senior_loan_amount", 5_000_000]]);
+  });
+  test.each(["Resale cap: 2% per year", "Resale cap: 2.5% annually", "Sale cap: 3% a year", "Cap de revente : 2 % par an", "Resale cap: 2% of appreciation"])("a resale price limit is not the exit cap: %s", (line) => {
+    expect(pick(read(LOAN, line))).toEqual([["senior_loan_amount", 5_000_000]]);
+  });
+  test.each([
+    ["First mortgage amort.: 30 years", "The second amort.: 20 years"],
+    ["Bank amortization: 30 years", "Second amort 20 years"],
+    ["Senior amort 30 yr;", "the second int. 11% and the second amort 20 yr;"],
+  ])("a second mortgage's amortization is the mezzanine's: %s / %s", (a, b) => {
+    const keys = pick(read(LOAN, a, b));
+    expect(keys).toContainEqual(["senior_amort_years", 30]);
+    expect(keys).toContainEqual(["mezz_amort_years", 20]);
+    expect(keys).not.toContainEqual(["senior_amort_years", 20]);
+  });
+  test("the bare abbreviation 'amort.' in a sentence is shown, not read", () => {
+    const r = read(LOAN, "Behind it, a second lender advances $200,000 at 11%, amort. 20 years, IO 12 months.");
+    expect(pick(r).filter(([k]) => /amort/.test(String(k)))).toEqual([]);
+    expect(pick(read(LOAN, "The loan amortizes over 30 years."))).toContainEqual(["senior_amort_years", 30]);
+  });
+  test("a second phase or second year is not a second mortgage", () => {
+    expect(pick(read(LOAN, "Second phase amortization: 30 years"))).toEqual([["senior_loan_amount", 5_000_000], ["senior_amort_years", 30]]);
+  });
+  test("a sale cap rate is still the exit cap", () => {
+    expect(pick(read(LOAN, "Resale cap: 5.70%"))).toEqual([["senior_loan_amount", 5_000_000], ["exit_cap_rate_pct", 5.7]]);
+    expect(pick(read(LOAN, "Sale cap rate 5.5%, going-in 5.0%"))).toEqual([["senior_loan_amount", 5_000_000], ["exit_cap_rate_pct", 5.5]]);
+  });
+});

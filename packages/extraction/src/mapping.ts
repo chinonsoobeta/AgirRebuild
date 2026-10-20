@@ -39,7 +39,7 @@ const ITEMIZED_ALIASES: Record<string, string[]> = {
 export type Scope = "senior" | "mezzanine" | "refinance";
 
 const SCOPE_WORDS: Record<Scope, RegExp> = {
-  mezzanine: /\b(mezzanine|mezz|second mortgage|2nd mortgage|second charge|second[- ]ranking|second[- ]position|junior|subordinate loan|deuxieme rang|deuxieme hypotheque|pret de second rang|second rang|(?:mic|mortgage investment corporation) (?:second|2nd)|private second|(?<=\b(?:mortgages?|loans?|charges?|lenders?|hypotheques?|prets?)\b.{0,80})(?:the\s+)?second(?=\s*(?:is\b|:|\$))|^\s*second\s*$|preteur prive de second rang)\b/,
+  mezzanine: /\b(mezzanine|mezz|second mortgage|2nd mortgage|second charge|second[- ]ranking|second[- ]position|junior|subordinate loan|deuxieme rang|deuxieme hypotheque|pret de second rang|second rang|(?:mic|mortgage investment corporation) (?:second|2nd)|private second|(?<=\b(?:mortgages?|loans?|charges?|lenders?|hypotheques?|prets?)\b.{0,80})(?:the\s+)?second(?=\s*(?:is\b|:|\$))|^\s*second\s*$|(?:the\s+)?second(?=\s+(?:amort\w*|int|interest|rate|coupon|io|lender|loan)\b)|preteur prive de second rang)\b/,
   refinance: /\b(take-?out|take out|refi|refinanc\w*|permanent loan|permanent financing|exit financing|long[- ]term mortgage|pret permanent|financement permanent|financement de sortie|permanent (?:mortgage|debt|facility|lender)|permanent (?=(?:io|interest|amorti[sz]\w*|repayment|rate|term)\b)|conversion (?:rate|coupon)|converts? to (?:(?:an?|the) )?(?:\$|\d|(?:[a-z-]+ ){0,2}(?:loan|mortgage|debt|financing|facility|rate))|term[- ]out|hypotheque permanente|pret a terme|reprise(?!\s+(?:des?\s+|du\s+|de la\s+)?(?:travaux|chantier|construction|possession|bail|baux|terrain))|replacement (?:loan|debt|financing|facility|mortgage|lender|interest|rate|amorti[sz]ation|amount)|(?:pret|financement) de remplacement)\b/,
   senior: /\b(senior|construction (?:loan|facility)|first mortgage|premier rang|pret de construction)\b/,
 };
@@ -128,6 +128,9 @@ const CONDITION_RE = /\b(minimum|min|at least|before|prior to|until|consecutive 
 const LEASED_RE = /\b(pre-?leas\w*|leased|occupied|pre-?lou\w*|loue\w*|occupe\w*|occupancy|occupation)\b/;
 const EARLY_OCCUPANCY_RE = /\b(at (?:completion|delivery|opening|turnover|month \d+)|in year 1|initial(?:e)?|in-place|actual|a la livraison|a l ouverture|at maturity of the loan|a l echeance du pret)\b/;
 const EARLY_OCCUPANCY_NOTE = "An occupancy before stabilization, not the stabilized occupancy";
+// A presale share or a resale price limit is a cap on something, not the exit cap rate.
+const PRESALE_CAP_RE = /\b(pre[- ]?sales?|prevente\w*)\b/;
+const CAP_LIMIT_AFTER_RE = /^\s*(?:per (?:year|annum)|a year|annually|par an(?:nee)?|of (?:the )?(?:appreciation|purchase price|original price))\b/;
 const ACCOUNTING_AMORT_RE = /\bamort(?:i[sz]\w*)?\s+(?:of|des?|du|d)\s+(?:(?:financing|project|loan|financement|de financement)\s+)?(?:fees?|costs?|frais|couts?)\b/;
 const CURRENT_RE = /\b(current|currently|today|as of|actuel(?:le)?|en date du)\b/;
 const STABILIZED_RE = /\b(stabili[sz]ed|stabilisee?|projected|pro forma|projete\w*)\b/;
@@ -821,7 +824,7 @@ function mapLabel(rawLabel: string, t: NumberToken, opts: MapOptions = {}): Mapp
   // A month/year index is a separate number token, so its occupancy label may precede the previous token.
   const occupancyLabel = prose && opts.context && /^[\s:]*$/.test(rawLabel)
     ? normalizeLabel(opts.context.slice(0, t.start).split(/[,;]/).pop() ?? "").label : label;
-  if (t.unit === "%" && LEASED_RE.test(occupancyLabel) && (EARLY_OCCUPANCY_RE.test(occupancyLabel) || (CURRENT_RE.test(occupancyLabel) && !STABILIZED_RE.test(occupancyLabel)))) return { kind: "ignored", reason: EARLY_OCCUPANCY_NOTE };
+  if (t.unit === "%" && LEASED_RE.test(occupancyLabel) && !/\bstabili[sz]\w*/.test(occupancyLabel) && (EARLY_OCCUPANCY_RE.test(occupancyLabel) || (CURRENT_RE.test(occupancyLabel) && !STABILIZED_RE.test(occupancyLabel)))) return { kind: "ignored", reason: EARLY_OCCUPANCY_NOTE };
   const scope: Scope = scopeIn(label) ?? opts.scope ?? "senior";
   const scoped = (key: string): FieldDef => FIELD_BY_KEY.get(scope === "senior" ? key : (SCOPE_FIELD[scope][key] ?? key))!;
   const asField = (def: FieldDef): Mapped | null => {
@@ -998,6 +1001,9 @@ function mapLabel(rawLabel: string, t: NumberToken, opts: MapOptions = {}): Mapp
   }
   // A covenant alias beside a result, a stress or a margin over it ("DSCR covenant headroom") is not the covenant.
   if (best?.def.key === "min_dscr_covenant" && indexFigure(rawLabel, t)) return { kind: "ignored", reason: INDEX_NOTE };
+  // The bare abbreviation inside a sentence can't say whose amortization it is (card 105 audit); a label line can.
+  if (prose && best?.alias === "amort" && !scopeIn(label) && normalizeLabel(opts.context?.slice(0, t.start) ?? "").label !== label) return { kind: "ignored", reason: "An abbreviated amortization inside a sentence; enter it by hand if it is this loan's" };
+  if (best?.def.key === "exit_cap_rate_pct" && (PRESALE_CAP_RE.test(label) || CAP_LIMIT_AFTER_RE.test(foldText(opts.after ?? "")))) return { kind: "ignored", reason: "A presale share or a resale price limit, not the exit cap rate" };
   if (best?.def.key === "min_dscr_covenant" && COVERAGE_RESULT_RE.test(label)) return { kind: "ignored", reason: "A coverage result or a margin over the covenant, not the minimum covenant" };
   if (best) return notAssumed(best.def.key) ?? { kind: "field", fieldKey: best.def.key, itemKey: null, value: best.value, unitSeen: best.unitSeen };
   // An EGI basis supplies the unit, but the cost's own label must identify the field.
