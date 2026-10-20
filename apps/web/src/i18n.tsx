@@ -13,6 +13,13 @@ type Entry = string | ((p: Record<string, any>) => string | string[]);
 const s = (n: number, one: string, many: string) => (n === 1 ? one : many);
 
 const EN = {
+  "threshold.title": "Thresholds", "threshold.strategy": "Strategy", "threshold.name": "Threshold", "threshold.standard": "Agir standard",
+  "threshold.workspace": "Workspace value", "threshold.yours": "Your value", "threshold.looser": "Looser than Agir's standard",
+  "threshold.cited": "Looser than CMHC's cited rule", "threshold.removed": "Stress removed", "threshold.reason": "Reason (required)",
+  "threshold.save": "Save threshold", "threshold.clear": "Use inherited value", "threshold.whole": "whole numbers",
+  "threshold.range": (p: any) => `${p.min}–${p.max} ${p.unit}${p.whole ? `; ${p.whole}` : ""}`,
+  "threshold.withYours": "with your thresholds", "threshold.standardVerdict": (p: any) => `Under Agir's standard thresholds: ${p.verdict}`,
+
   "threshold.inherited": "Inherited value",
   "audit.thresholdChanged": (p: any) => `Changed a policy threshold: ${p.name} = ${p.value}. ${p.reason}`,
 
@@ -591,6 +598,13 @@ const EN = {
 export type Key = keyof typeof EN;
 
 const FR: Record<Key, Entry> = {
+  "threshold.title": "Seuils", "threshold.strategy": "Stratégie", "threshold.name": "Seuil", "threshold.standard": "Standard d'Agir",
+  "threshold.workspace": "Valeur de l'espace de travail", "threshold.yours": "Votre valeur", "threshold.looser": "Plus souple que le standard d'Agir",
+  "threshold.cited": "Plus souple que la règle citée de la SCHL", "threshold.removed": "Stress retiré", "threshold.reason": "Motif (obligatoire)",
+  "threshold.save": "Enregistrer le seuil", "threshold.clear": "Utiliser la valeur héritée", "threshold.whole": "nombres entiers",
+  "threshold.range": (p: any) => `${p.min}–${p.max} ${({bps:"pb",years:"ans",months:"mois",units:"logements",gates:"critères"} as Record<string,string>)[p.unit] ?? p.unit}${p.whole ? `; ${p.whole}` : ""}`,
+  "threshold.withYours": "avec vos seuils", "threshold.standardVerdict": (p: any) => `Selon les seuils standard d'Agir : ${p.verdict}`,
+
   "threshold.inherited": "Valeur héritée",
   "audit.thresholdChanged": (p: any) => `A modifié un seuil de politique : ${p.name} = ${p.value}. ${p.reason}`,
 
@@ -1289,6 +1303,7 @@ const SALE_SHARES: Record<string, string> = {
 };
 
 const FR_REASONS: [RegExp, string | ((m: RegExpMatchArray) => string)][] = [
+  [/^Give a reason for the threshold change$/, "Indiquez le motif de la modification du seuil"],
   [/^Published table$/, "Tableau publié"],
   [/^This table option is not available\. Review the current proposals\.$/, "Cette option du tableau n’est pas disponible. Consultez les propositions actuelles."],
   [/^approve the unit counts first$/, "Approuvez d’abord les nombres de logements"],

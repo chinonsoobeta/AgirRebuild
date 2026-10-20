@@ -2,6 +2,7 @@ import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
 import { useState, type FormEvent } from "react";
 import { api, type ClientInvite, type DealClient, type DealOverview } from "../api";
 import { ErrorText, useSession } from "../components/ui";
+import { Thresholds } from "../components/thresholds";
 import { useI18n } from "../i18n";
 
 /** A deal's clients and its invitation links (card 89). Admins and owners only; an invitation link is shown once. */
@@ -191,6 +192,7 @@ export function Settings() {
             ))}
             <ErrorText error={mode.error} />
           </fieldset>
+          <Thresholds scope="workspaces" id={workspaceId} />
           <fieldset className="panel stack" style={{ margin: 0 }} disabled={role !== "owner"}>
             <legend className="h-section" style={{ padding: "0 4px" }}>{t("settings.suggest")}</legend>
             <label className="choice"><input type="checkbox" checked={ws?.label_suggestions ?? false} onChange={(e) => suggest.mutate(e.target.checked)} />

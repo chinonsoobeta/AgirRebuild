@@ -79,9 +79,11 @@ export type Review = {
 };
 export type Metric = { key: string; label: string; unit: string; value: number | null; status: string; reason?: string; formula: string };
 export type RunView = {
+  policyCustom?: boolean; policy?: import("@agir/contracts").Policy; standardPolicy?: import("@agir/contracts").Policy; policyChanges?: import("@agir/contracts").PolicyChange[];
   id: string; dealId: string; number: number; createdAt: string; createdBy: string | null; engineVersion: string; policyVersion: string; policyDraft: boolean;
   inputHash: string; resultHash: string; signed: string; fresh: boolean; staleReasons: string[]; isLatest: boolean;
   result: {
+    standard?: import("@agir/contracts").RunResult["standard"];
     scenarios: { key: string; label: string; metrics: Metric[] }[];
     verdict: { code: string; headline: string; explanation: string; hardFailReasons: string[]; gates: { key: string; label: string; scenario: string; metricKey: string; threshold: number; unit: string; actual: number | null; status: string }[] };
     checks: { key: string; kind: string; severity: "pass" | "warning" | "error"; message: string }[];
@@ -101,3 +103,6 @@ export type DealClient = { id: string; name: string; email: string; assigned_at:
 export type ClientInvite = { id: string; created_at: string; expires_at: string; created_by: string | null; used_at: string | null; used_by: string | null; revoked_at: string | null; revoked_by: string | null };
 export type InvitePeek = { workspace: string; deal: string };
 export type AuditEvent = { seq: number; action: string; entity: string; entity_id: string | null; payload: any; hash: string; created_at: string; actor: string | null };
+
+export type ThresholdNote = import("@agir/contracts").PolicyValue & { setByName: string };
+export type ThresholdView = { policies: { version: string; thresholds: (import("@agir/contracts").Threshold & { workspace: ThresholdNote | null; deal: ThresholdNote | null; value: number; layer: string | null; looser: boolean; stressRemoved: boolean })[] }[] };

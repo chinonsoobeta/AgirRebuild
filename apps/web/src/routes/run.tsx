@@ -1,10 +1,11 @@
-import { tableSourceLabel } from "@agir/contracts";
+import { stressLabel, tableSourceLabel } from "@agir/contracts";
 import { Link } from "@tanstack/react-router";
 import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
 import { Fragment, useState } from "react";
 import { FIELD_BY_KEY } from "@agir/contracts";
 import { api, type Metric, type RunView } from "../api";
 import { Banner, canEdit, DealHeader, ErrorText, Glossary, MetricValue, StatusTag, useDeal, useSession, VerdictBadge } from "../components/ui";
+import { Thresholds, StandardVerdict } from "../components/thresholds";
 import * as I from "../components/icons";
 import { checkText, dealStatus, useI18n, verdictText } from "../i18n";
 
@@ -118,7 +119,9 @@ export function Run({ dealId }: { dealId: string }) {
       <ErrorText error={start.error} />
       <section className="panel spread" aria-label="Verdict" style={{ padding: "28px 32px", alignItems: "flex-end", gap: 32 }}>
         <div className="stack" style={{ gap: 12, maxWidth: 760 }}>
-          <div className="row"><VerdictBadge code={v.result.verdict.code} /><span className="label">{t("run.verdictLabel", { n: v.number, policy: v.policyVersion })}</span></div>
+          <div className="row"><VerdictBadge code={v.result.verdict.code} />{v.policyCustom && <span>{t("threshold.withYours")}</span>}<span className="label">{t("run.verdictLabel", { n: v.number, policy: v.policyVersion })}</span></div>
+          <StandardVerdict custom={v.policyCustom ?? false} standard={v.result.standard} />
+          <Thresholds scope="deals" id={dealId} initialVersion={v.policyVersion} />
           {v.policyDraft && <p className="label">{t("run.draftPolicy")}</p>}
           <p className="h-display">{vt.headline}</p>
           <p className="muted" style={{ fontSize: 16 }}>{vt.explanation}</p>
@@ -160,7 +163,7 @@ export function Run({ dealId }: { dealId: string }) {
                 {v.result.scenarios.map((s) => (
                   <tr key={s.key} className={s.key === "combined" ? "emph" : ""}>
                     <th scope="row" style={{ fontFamily: "var(--sans)", fontWeight: s.key === "base" || s.key === "combined" ? 600 : 400 }}>
-                      {L.stress(s.key, s.label)}{s.key === "combined" && <span className="faint" style={{ fontWeight: 400 }}>{t("run.readByGates")}</span>}
+                      {v.policy?.custom && v.policy.stresses.some((stress) => stress.key === s.key) ? stressLabel(v.policy.stresses.find((stress) => stress.key === s.key)!, i.lang, v.standardPolicy?.stresses.find((stress) => stress.key === s.key)) : L.stress(s.key, s.label)}{s.key === "combined" && <span className="faint" style={{ fontWeight: 400 }}>{t("run.readByGates")}</span>}
                     </th>
                     {stressKeys.map((k) => { const m = metric(k, s); return <td key={k} className="r"><MetricValue {...m} /></td>; })}
                   </tr>

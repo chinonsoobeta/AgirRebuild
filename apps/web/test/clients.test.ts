@@ -11,18 +11,21 @@ import { ClientConfirmation, TableProposal } from "../src/routes/review.tsx";
 import { ClientsPanel, LogoPanel } from "../src/routes/settings.tsx";
 import { Invite } from "../src/routes/invite.tsx";
 import { Reports } from "../src/routes/reports.tsx";
+import { Thresholds, StandardVerdict } from "../src/components/thresholds.tsx";
+import { THRESHOLDS } from "@agir/contracts";
 import { build, type Lang } from "../src/i18n.tsx";
 
 // Card 89c: the screens of a broker's client. Mocks follow apps/web/test/run.test.ts.
 const state = vi.hoisted(() => ({ lang: "en" as Lang, role: "client", me: undefined as unknown, meError: null as unknown, invite: undefined as unknown, inviteError: null as unknown,
   session: null as null | {workspaceId:string;setWorkspace:ReturnType<typeof vi.fn>}, dealSnapshot: undefined as unknown, effects: [] as (()=>void)[],
+  thresholds: undefined as any,
   clients: [] as unknown[], invites: [] as unknown[], artifacts: [] as unknown[], secret: "", options: [] as { queryKey: unknown[] }[],
   hooks: [] as unknown[], index: 0, nodes: [] as { tag: string; props: Record<string, any> }[], invalidate: vi.fn(async () => {}), navigate: vi.fn() }));
 vi.mock("@tanstack/react-query", () => ({
   useQuery: (options: { queryKey: unknown[] }) => {
     state.options.push(options);
     const key = options.queryKey[0];
-    return key === "me" ? { data: state.me, error: state.meError, isLoading: false } : key === "invite" ? { data: state.invite, error: state.inviteError }
+    return key === "thresholds" ? { data: state.thresholds } : key === "me" ? { data: state.me, error: state.meError, isLoading: false } : key === "invite" ? { data: state.invite, error: state.inviteError }
       : key === "deal-clients" ? { data: state.clients } : key === "invites" ? { data: state.invites } : key === "artifacts" ? { data: state.artifacts }
       : key === "deal" ? {data:state.dealSnapshot} : key === "share-links" ? { data: [] } : {};
   },
@@ -331,5 +334,44 @@ describe("card 97c deal rendering", () => {
       render(createElement(Probe));state.effects.forEach(effect=>effect());
       expect(state.session.setWorkspace).not.toHaveBeenCalled();
     } finally {state.session=null;state.effects=[];state.dealSnapshot=undefined;}
+  });
+});
+
+
+describe("card 96c thresholds", () => {
+  const setup = () => {
+    const version = "rental-hold-insured-draft";
+    const row = THRESHOLDS[version]!.find((row) => row.path === "gates.dcrAfterRefinanceMin")!;
+    state.thresholds = { policies: [{ version, thresholds: [{ ...row, value: 1.05, layer: "workspace", looser: true, stressRemoved: true, workspace: { value: 1.05, setBy: "owner", setByName: "Dana Analyst", setAt: "2026-10-19T12:00:00Z", reason: "Owner credit decision" }, deal: null }] }] };
+  };
+  it("non-owners see standards, metadata and flags without editing controls", () => {
+    setup(); state.role = "admin";
+    const html = render(createElement(Thresholds, { scope: "workspaces", id: "ws" }));
+    expect(text(html)).toContain("Looser than Agir's standard");
+    expect(text(html)).toContain("Looser than CMHC's cited rule");
+    expect(text(html)).toContain("Stress removed");
+    expect(text(html)).toContain("Dana Analyst");
+    expect(html).not.toContain('type="number"');
+    expect(html).not.toContain('type="submit"');
+  });
+  it("owners get bounds and a required reason, with the inherited workspace value on a deal", () => {
+    setup(); state.role = "owner";
+    const html = render(createElement(Thresholds, { scope: "deals", id: "deal" }));
+    expect(html).toContain('type="number"');
+    expect(html).toContain('min="0.5"');
+    expect(html).toContain('max="3"');
+    expect(state.nodes.some((node) => node.tag === "input" && node.props.name === "reason" && node.props.required === true)).toBe(true);
+    expect(text(html)).toContain("Workspace value");
+  });
+  it("renders the standard verdict only for custom runs, with cited failures first", () => {
+    const standard: any = { policyVersion: "rental-hold-insured-draft", verdict: { code: "REJECT", gates: [{ key: "development_spread", label: "Development spread", status: "failed", threshold: 100, unit: "bps" }, { key: "dcr_after_refinance", label: "Coverage after refinance (DCR)", status: "failed", threshold: 1.1, unit: "x" }] }, checks: [] };
+    expect(render(createElement(StandardVerdict, { custom: false, standard }))).toBe("");
+    const html = text(render(createElement(StandardVerdict, { custom: true, standard })));
+    expect(html).toContain("Under Agir's standard thresholds: Reject");
+    expect(html.indexOf("Coverage after refinance")).toBeLessThan(html.indexOf("Development spread"));
+    state.lang = "fr";
+    const fr = text(render(createElement(StandardVerdict, { custom: true, standard })));
+    expect(fr).toContain("Selon les seuils standard d'Agir");
+    expect(fr).not.toContain("Under Agir");
   });
 });
