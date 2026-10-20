@@ -1,5 +1,8 @@
 // Report wording, side by side. Human-entered names and notes are printed as recorded.
 export const TEXT = {
+  mliSelect: ["CMHC MLI Select, {0} points", "SCHL MLI Select, {0} points"],
+  mliStandardTerm: ["CMHC MLI Standard, {0}-year term", "SCHL MLI Standard, terme de {0} ans"],
+  mliStandardNoTerm: ["CMHC MLI Standard, term not stated", "SCHL MLI Standard, terme non précisé"],
   "approve": ["Approve", "Approuver"],
   "approveConditions": ["Approve with conditions", "Approuver sous conditions"],
   "reject": ["Reject", "Rejeter"],

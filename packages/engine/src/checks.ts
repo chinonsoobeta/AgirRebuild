@@ -18,6 +18,17 @@ function agrees(stated: number, computed: number, tolPct: number): boolean {
 export function runChecks(input: EngineInput, L: Ledger, policy: Policy, contractualDscr: number | null): Check[] {
   const out: Check[] = [];
 
+  // Limits belong to the stored policy: older insured runs replay without these checks.
+  if (policy.refinanceLimits && (input.refinance?.insurancePremiumPct ?? 0) > 0) {
+    const limits = policy.refinanceLimits;
+    const units = input.revenue.reduce((n, r) => n + r.units, 0);
+    const points = input.refinance?.mliSelectPoints ?? 0;
+    const tier = [...limits.select].sort((a,b) => b.minPoints-a.minPoints).find(t => points >= t.minPoints) ?? limits.standard;
+    if (units < limits.minUnits) out.push({ key: "insured_min_units", kind: "bound", severity: "error", expected: limits.minUnits, actual: units, message: `CMHC multi-unit insurance needs at least ${limits.minUnits} units; the deal has ${units}.` });
+    if (L.refinance && L.refinance.newAmount > L.refinance.value * tier.maxLtvPct / 100 + 0.005) out.push({ key: "refinance_ltv_limit", kind: "bound", severity: "error", expected: tier.maxLtvPct, actual: L.refinance.value > 0 ? L.refinance.newAmount / L.refinance.value * 100 : undefined, message: `The refinance loan before premium exceeds the ${tier.maxLtvPct}% loan-to-value limit.` });
+    if (input.refinance!.amortYears > tier.maxAmortYears) out.push({ key: "refinance_amort_limit", kind: "bound", severity: "error", expected: tier.maxAmortYears, actual: input.refinance!.amortYears, message: `Refinance amortization exceeds the ${tier.maxAmortYears}-year limit.` });
+  }
+
   // ---- Bounds -----------------------------------------------------------------
   if (L.commitments > 0 && L.commitments >= L.tdc) {
     out.push({

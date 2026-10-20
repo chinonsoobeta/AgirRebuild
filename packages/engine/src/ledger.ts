@@ -94,7 +94,7 @@ export type Ledger = {
   /** A held deal only: the months from the refinance month (up to 12, fewer if the hold ends first). */
   afterRefinance: { months: number; noi: number; debtService: number; sizingDebtService: number } | null;
   /** `net` is cash: the loan less the payoff. `premium` is the mortgage insurance added to the balance (0 when none is stated). */
-  refinance: { month: number; newAmount: number; payoff: number; net: number; premium: number } | null;
+  refinance: { value: number; month: number; newAmount: number; payoff: number; net: number; premium: number } | null;
   sizingDsByYear: number[];
   contractualDsByYear: number[];
   seniorSizingYear1: number;
@@ -391,7 +391,7 @@ export function buildLedger(input: EngineInput): Ledger {
         if (senior) live.splice(live.indexOf(senior), 1, replacement);
         else live.push(replacement);
         refinanceNet = newAmount - payoff;
-        refinance = { month: m, newAmount, payoff, net: refinanceNet, premium };
+        refinance = { value, month: m, newAmount, payoff, net: refinanceNet, premium };
       }
       for (const l of live) {
         if (l.balance <= 0) continue;

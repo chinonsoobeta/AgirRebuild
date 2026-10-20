@@ -59,7 +59,7 @@ export type EngineInput = {
   sellingCostsPct: number;
   senior: Omit<LoanTerms, "amortYears"> & { amortYears?: number };
   mezzanine?: LoanTerms;
-  refinance?: { month: number; amount?: number; ltvPct?: number; ratePct: number; amortYears: number; ioMonths: number; /** Added to the loan; present only when stated. */ insurancePremiumPct?: number };
+  refinance?: { month: number; amount?: number; ltvPct?: number; ratePct: number; amortYears: number; ioMonths: number; /** Added to the loan; present only when stated. */ insurancePremiumPct?: number; mliSelectPoints?: number; termYears?: number };
   /** The deal is kept and refinanced, not sold. Set only when the flag is 1; absent otherwise, so a sale deal's input hashes as before. */
   exit?: "refinance_hold" | "for_sale";
   /** Present exactly when units are sold individually, with no rental operations. */

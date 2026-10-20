@@ -23,6 +23,7 @@ export const FR_FIELDS: Record<string, string> = {
   gp_promote_pct: "Intéressement du commandité au-delà du rendement privilégié", stated_total_cost: "Coût total déclaré du projet",
   stated_ltc_pct: "Ratio prêt-coût déclaré", stated_interest_reserve: "Réserve d'intérêts déclarée",
   development_charges: "Redevances de développement", land_transfer_tax: "Droits de mutation immobilière", gst_hst_net: "TPS/TVH nette des remboursements",
+  refinance_mli_select_points: "Points MLI Select", refinance_term_years: "Durée du prêt de refinancement",
   property_tax_annual: "Taxe foncière (par année)", refinance_insurance_premium_pct: "Prime d'assurance hypothécaire du refinancement",
 };
 
@@ -143,7 +144,7 @@ export function numberFormat(lang: Lang) {
       case "bps": return fr ? `${n0.format(Math.round(v))} pb` : `${n0.format(Math.round(v))} bps`;
       case "months": return fr ? `${n0.format(v)} mois` : `${n0.format(v)} mo`;
       case "years": return fr ? `${nMax2.format(v)} ${v === 1 ? "an" : "ans"}` : `${nMax2.format(v)} yr`;
-      case "units": case "count": return n0.format(v);
+      case "points": case "units": case "count": return n0.format(v);
       case "sf": return fr ? `${n0.format(Math.round(v))} pi²` : `${n0.format(Math.round(v))} SF`;
       // Whole dollars stay whole; a rent with cents shows both digits ($3,095.20, not $3,095.2).
       case "$/unit/mo": case "$/mo": { const n = Number.isInteger(v) ? n0 : n2; return fr ? `${n.format(v)} $/mois` : `$${n.format(v)}/mo`; }
@@ -255,6 +256,9 @@ export function checkText(lang: Lang, f: ReturnType<typeof numberFormat>, gate: 
   const e = c.expected;
   const a = c.actual;
   switch (c.key) {
+    case "insured_min_units": return `L’assurance multilogement de la SCHL exige au moins ${f.value(e,"units")} ; le projet en compte ${f.value(a,"units")}.`;
+    case "refinance_ltv_limit": return `Le prêt de refinancement avant la prime dépasse le plafond prêt-valeur de ${pct(e)}.`;
+    case "refinance_amort_limit": return `L’amortissement du refinancement dépasse le plafond de ${f.value(e,"years")}.`;
     case "debt_exceeds_cost":
       return `Les engagements de dette de ${$(a)} couvrent la totalité du coût de ${$(e)}. Les fonds propres seraient nuls ou négatifs : cette structure de capital ne peut pas exister.`;
     case "ltc_ceiling":
@@ -331,6 +335,8 @@ export const FR_ABSENT: Record<string, string> = {
   gst_hst_net: "aucune déclarée",
   property_tax_annual: "comprise dans les charges d'exploitation, ou aucune",
   refinance_insurance_premium_pct: "aucune assurance hypothécaire",
+  refinance_mli_select_points: "MLI Standard (sans points MLI Select)",
+  refinance_term_years: "non précisée",
   lp_share_pct: "aucun partage entre commanditaires et commandité",
   stated_total_cost: "rien à vérifier",
   stated_ltc_pct: "rien à vérifier",

@@ -901,7 +901,7 @@ describe("card 60: a deal that is kept and refinanced runs under its own policy"
     const id = (await call(hal, "POST", `/api/workspaces/${workspace}/deals`, { name: "Fictional IO Lantern Rental", assetType: "Multifamily", location: "Invented Borough", province: "AB" })).json.id;
     await fill(id, true);
     await put(id, "senior_io_months", 24);
-    if (premium > 0) await put(id, "refinance_insurance_premium_pct", premium);
+    if (premium > 0) { await put(id, "refinance_insurance_premium_pct", premium); await put(id, "refinance_mli_select_points", 50); }
     const run = await call(hal, "POST", `/api/deals/${id}/runs`);
     expect(run.status).toBe(200);
     const [row] = await db.query<any>(`select policy_version, policy_hash from runs where id = $1`, [run.json.id]);
@@ -915,6 +915,7 @@ describe("card 60: a deal that is kept and refinanced runs under its own policy"
     const id = (await call(hal, "POST", `/api/workspaces/${workspace}/deals`, { name: "Fictional Juniper Lantern Rental", assetType: "Multifamily", location: "Invented Borough", province: "AB" })).json.id;
     await fill(id, true);
     await put(id, "refinance_insurance_premium_pct", 4);
+    await put(id, "refinance_mli_select_points", 50);
     const run = await call(hal, "POST", `/api/deals/${id}/runs`);
     expect(run.status).toBe(200);
     const [row] = await db.query<any>(`select policy_version, policy_hash from runs where id = $1`, [run.json.id]);
@@ -927,6 +928,7 @@ describe("card 60: a deal that is kept and refinanced runs under its own policy"
     const insuredDeal = (await call(hal, "POST", `/api/workspaces/${workspace}/deals`, { name: "Fictional Insured Fourplex", assetType: "Multifamily", location: "Invented Township", province: "AB" })).json.id;
     await fill(insuredDeal, true);
     await put(insuredDeal, "refinance_insurance_premium_pct", 4);
+    await put(insuredDeal, "refinance_mli_select_points", 50);
     const r = await call(hal, "POST", `/api/deals/${insuredDeal}/runs`);
     expect(r.status).toBe(200);
     const insuredRun = r.json.id;

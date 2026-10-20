@@ -83,6 +83,8 @@ export function validateInput(input: EngineInput): void {
     const hasLtv = r.ltvPct !== undefined;
     if (hasAmount === hasLtv) p.push("give the refinance either a loan amount or a loan-to-value, not both or neither");
     loan("refinance loan", { amount: r.amount ?? 1, ratePct: r.ratePct, amortYears: r.amortYears, ioMonths: r.ioMonths });
+    if (r.mliSelectPoints !== undefined && !intIn(r.mliSelectPoints, 0, 150)) p.push("MLI Select points must be a whole number from 0 to 150");
+    if (r.termYears !== undefined && !intIn(r.termYears, 1, 40)) p.push("refinance term must be a whole number from 1 to 40");
     if (r.insurancePremiumPct !== undefined && (!finite(r.insurancePremiumPct) || r.insurancePremiumPct < 0 || r.insurancePremiumPct > 10)) {
       p.push("refinance insurance premium must be a number from 0 to 10");
     }

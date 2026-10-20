@@ -87,6 +87,7 @@ const UNIT_MAP: Record<FieldUnit, Parameters<typeof formatValue>[1] | "flag"> = 
   months: "months",
   years: "years",
   units: "units",
+  points: "points",
   sf: "sf",
   "$/unit/mo": "$/mo",
   "$/sf/yr": "$/sf",
@@ -675,6 +676,13 @@ export function buildModel(x: ArtifactInput): DocModel {
     blocks.push({ type: "table", caption: sale ? reportText(f.lang, "debt") : reportText(f.lang, "debtCoverage"), columns: [{ label: reportText(f.lang, "term") }, { label: reportText(f.lang, "value"), numeric: true }], rows: debtRows });
     // Beside the refinance loan: the premium is added to it, not paid in cash.
     if (i.refinance?.insurancePremiumPct !== undefined) {
+      if (i.refinance.insurancePremiumPct > 0) {
+        const points = i.refinance.mliSelectPoints;
+        const term = i.refinance.termYears;
+        blocks.push({ type: "paragraph", text: (points ?? 0) >= 50
+          ? reportText(f.lang, "mliSelect", f.input(points!, "points", "refinance_mli_select_points"))
+          : term !== undefined ? reportText(f.lang, "mliStandardTerm", f.input(term, "points", "refinance_term_years")) : reportText(f.lang, "mliStandardNoTerm") });
+      }
       blocks.push({ type: "paragraph", text: reportText(f.lang, "premium", f.input(i.refinance.insurancePremiumPct, "%", "refinance_insurance_premium_pct"), f.metric("base", "refinance_premium_added")) });
     }
     blocks.push(sourcesAndUses(f, x), ...mezzAccrual(f, r), ...(sale ? [unitSales(f, x), saleResults(f, x), SALE_OPERATIONS(f.lang)] : [operations(f, x), annual(f, r, true)]), stresses(f, r, held, sale));

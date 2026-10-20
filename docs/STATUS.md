@@ -275,3 +275,7 @@ Where the code showed a better route than [the plan](plan-small-developers.md), 
 - Legal: wording that a memo is not an appraisal or advice; a privacy notice and terms under PIPEDA.
 - Accounts: Stripe, Canadian hosting, and GST/HST registration for Agir's own sales.
 - Pricing: $99 to $299 per deal is a hypothesis to test with the first customers.
+
+## Card 94b — cited insured product floors (2026-10-19)
+
+Local draft for human review: Select points and Standard term choose the cited 1.10x / 1.20x / 1.30x floors. Stored-policy limits check minimum units, refinance LTV before premium, and amortization. Readiness requires the Standard term for 7+ units. Owner review is required for the existing-property LTV choice; no credit sign-off is implied.

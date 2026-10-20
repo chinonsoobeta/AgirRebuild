@@ -11,7 +11,7 @@ export type ProvenanceEntry = { text: string; ref: string };
 
 const money0 = new Intl.NumberFormat("en-US", { maximumFractionDigits: 0 });
 
-export function formatValue(value: number, unit: MetricUnit | "$" | "%" | "x" | "sf" | "units" | "units/mo" | "months" | "years" | "$/mo" | "$/sf"): string {
+export function formatValue(value: number, unit: MetricUnit | "$" | "%" | "x" | "sf" | "units" | "units/mo" | "months" | "years" | "$/mo" | "$/sf" | "points"): string {
   switch (unit) {
     case "$":
       return (value < 0 ? "-$" : "$") + money0.format(Math.abs(Math.round(value)));
@@ -21,6 +21,7 @@ export function formatValue(value: number, unit: MetricUnit | "$" | "%" | "x" | 
       return value.toFixed(2) + "x";
     case "bps":
       return Math.round(value) + " bps";
+    case "points":
     case "count":
     case "units":
       return money0.format(Math.round(value));

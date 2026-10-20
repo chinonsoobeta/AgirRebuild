@@ -78,6 +78,7 @@ export type Policy = {
   agreementTolerancePct: number;
   sourcePrecedence: readonly string[];
   stresses: readonly StressPreset[];
+  refinanceLimits?: { select: readonly { minPoints: number; maxLtvPct: number; maxAmortYears: number }[]; standard: { maxLtvPct: number; maxAmortYears: number }; minUnits: number };
 };
 
 const { version: _v, gates: _g, ...SHARED } = POLICY_V1;
@@ -96,12 +97,32 @@ export const RENTAL_HOLD_DRAFT: Policy = {
   gateKeys: ["development_spread", "dcr_after_refinance", "stressed_sizing_dscr", "stressed_unrealized_equity_multiple"],
 };
 
-/** For a held deal whose refinance is insured (a premium is stated): its DCR gate and base sizing warning are 1.10x (owner decisions 2026-10-17). */
+// CMHC, read 2026-10-19:
+// https://www.cmhc-schl.gc.ca/professionals/project-funding-and-mortgage-financing/mortgage-loan-insurance/multi-unit-insurance/mliselect
+// https://assets.cmhc-schl.gc.ca/sf/project/cmhc/pdfs/content/en/standard-rental-housing.pdf
+// Draft credit choice for owner review: existing-property LTV against the refinance value.
+const REFINANCE_LIMITS: NonNullable<Policy["refinanceLimits"]> = {
+  select: [{ minPoints: 50, maxLtvPct: 85, maxAmortYears: 40 }, { minPoints: 70, maxLtvPct: 95, maxAmortYears: 45 }, { minPoints: 100, maxLtvPct: 95, maxAmortYears: 50 }],
+  standard: { maxLtvPct: 85, maxAmortYears: 40 }, minUnits: 5,
+};
+/** MLI Select: at least 50 stated points, with a 1.10x DCR floor. */
 export const RENTAL_HOLD_INSURED_DRAFT: Policy = {
   ...RENTAL_HOLD_DRAFT,
   version: "rental-hold-insured-draft",
   gates: { ...RENTAL_HOLD_DRAFT.gates, dcrAfterRefinanceMin: 1.1 },
   baseSizingDscrFloor: 1.1,
+  refinanceLimits: REFINANCE_LIMITS,
+};
+
+export const RENTAL_HOLD_INSURED_STANDARD_DRAFT: Policy = {
+  ...RENTAL_HOLD_INSURED_DRAFT,
+  version: "rental-hold-insured-standard-draft",
+  gates: { ...RENTAL_HOLD_DRAFT.gates, dcrAfterRefinanceMin: 1.2 }, baseSizingDscrFloor: 1.2,
+};
+export const RENTAL_HOLD_INSURED_STANDARD_SHORT_DRAFT: Policy = {
+  ...RENTAL_HOLD_INSURED_STANDARD_DRAFT,
+  version: "rental-hold-insured-standard-short-draft",
+  gates: { ...RENTAL_HOLD_DRAFT.gates, dcrAfterRefinanceMin: 1.3 }, baseSizingDscrFloor: 1.3,
 };
 
 /** Selling units: the owner's seven shocks and four proposed credit gates. */
@@ -127,6 +148,8 @@ export const POLICIES: Readonly<Record<string, Policy>> = {
   [POLICY_V1.version]: POLICY_V1,
   [RENTAL_HOLD_DRAFT.version]: RENTAL_HOLD_DRAFT,
   [RENTAL_HOLD_INSURED_DRAFT.version]: RENTAL_HOLD_INSURED_DRAFT,
+  [RENTAL_HOLD_INSURED_STANDARD_DRAFT.version]: RENTAL_HOLD_INSURED_STANDARD_DRAFT,
+  [RENTAL_HOLD_INSURED_STANDARD_SHORT_DRAFT.version]: RENTAL_HOLD_INSURED_STANDARD_SHORT_DRAFT,
   [FOR_SALE_DRAFT.version]: FOR_SALE_DRAFT,
 };
 
@@ -141,5 +164,8 @@ export function policyFor(input: EngineInput): Policy {
   if (input.exit !== "refinance_hold") return POLICY_V1;
   // A stated premium identifies an insured refinance; there is no financing-type field.
   const premium = input.refinance?.insurancePremiumPct;
-  return typeof premium === "number" && premium > 0 ? RENTAL_HOLD_INSURED_DRAFT : RENTAL_HOLD_DRAFT;
+  if (!(typeof premium === "number" && premium > 0)) return RENTAL_HOLD_DRAFT;
+  if ((input.refinance?.mliSelectPoints ?? 0) >= 50) return RENTAL_HOLD_INSURED_DRAFT;
+  const units = input.revenue.reduce((n, r) => n + r.units, 0);
+  return units <= 6 || (input.refinance?.termYears ?? 0) >= 10 ? RENTAL_HOLD_INSURED_STANDARD_DRAFT : RENTAL_HOLD_INSURED_STANDARD_SHORT_DRAFT;
 }

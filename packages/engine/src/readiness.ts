@@ -206,9 +206,18 @@ export function assemble(rows: readonly AssumptionRow[]): { readiness: Readiness
     }
   }
 
+  const insuredStandardTermRequired = (values.get("refinance_insurance_premium_pct") ?? 0) > 0
+    && (values.get("refinance_mli_select_points") ?? 0) < 50
+    && [...values].filter(([key]) => key.startsWith("unit_count|")).reduce((n, [, count]) => n + count, 0) >= 7;
+  if (insuredStandardTermRequired && !has("refinance_term_years") && !isBlockedKey("refinance_term_years")) {
+    missing.push({ fieldKey: "refinance_term_years", label: FIELD_BY_KEY.get("refinance_term_years")!.label });
+  }
+
   // ---- Not found: an optional line no document gave. Shown, never counted as a value ----
   const positive = (key: string) => (values.get(key) ?? 0) > 0;
   const parentAbsent: Record<string, boolean> = {
+    refinance_mli_select_points: !positive("refinance_insurance_premium_pct"),
+    refinance_term_years: !positive("refinance_insurance_premium_pct") || insuredStandardTermRequired,
     refinance_amount: !has("refinance_month"),
     refinance_ltv_pct: !has("refinance_month"),
     refinance_io_months: !has("refinance_month"),
@@ -315,6 +324,8 @@ export function assemble(rows: readonly AssumptionRow[]): { readiness: Readiness
             ratePct: n("refinance_rate_pct"),
             amortYears: n("refinance_amort_years", 30),
             ioMonths: n("refinance_io_months"),
+            ...(has("refinance_mli_select_points") ? { mliSelectPoints: n("refinance_mli_select_points") } : {}),
+            ...(has("refinance_term_years") ? { termYears: n("refinance_term_years") } : {}),
             ...(has("refinance_insurance_premium_pct") ? { insurancePremiumPct: n("refinance_insurance_premium_pct") } : {}),
           },
         }

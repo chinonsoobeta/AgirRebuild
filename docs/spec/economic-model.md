@@ -193,11 +193,21 @@ version.
 
 ## Canadian cost lines and mortgage insurance
 
+**Card 94 — draft insured products (owner review required).** A positive premium and at least 50 stated MLI Select points selects the Select draft: post-refinance DCR gate and base sizing floor 1.10x. Otherwise the insured product is Standard: 5–6 units use 1.20x; 7+ units use 1.20x for a term of at least 10 years, or 1.30x for a shorter term. Readiness requires the term for 7+ Standard units. CMHC multi-unit insurance needs at least five units; 2–4-unit lender terms stay entered by a person.
+
+| Product | Minimum points | Maximum LTV | Maximum amortization |
+|---|---|---|---|
+| Standard | — | 85% | 40 years |
+| Select | 50 | 85% | 40 years |
+| Select | 70 | 95% | 45 years |
+| Select | 100 | 95% | 50 years |
+
+Sources, read 2026-10-19: [CMHC MLI Select](https://www.cmhc-schl.gc.ca/professionals/project-funding-and-mortgage-financing/mortgage-loan-insurance/multi-unit-insurance/mliselect) and [Standard Rental Housing](https://assets.cmhc-schl.gc.ca/sf/project/cmhc/pdfs/content/en/standard-rental-housing.pdf). The highest qualifying points tier applies. LTV uses the loan **before** capitalized premium. **Draft credit choice for owner review:** Select tiers use CMHC's existing-property LTV column against the refinance value. Standard also uses the existing-property amortization limit. Limits reside in the stored policy; older insured runs become stale and replay under their stored policy. `policy-v1` is unchanged.
+
+
 Card 61. A small Canadian builder's budget has lines Agir could not name, and the CMHC-insured take-out loan
 that keeps most rentals alive carries an insurance premium that is added to the loan. This section adds them as
-values a person enters. **There are no defaults, no rates and no tables here**: every value is entered by a
-person, and the cited, dated tables (mortgage insurance terms, provincial land transfer tax, rebates) come later,
-from a person. Review offers the premium only once a refinance month is stated.
+values a person enters. Cited tables propose values for explicit acceptance in Review; no value is applied silently. Review offers the premium only once a refinance month is stated.
 
 **Reading (card 61b).** Development charges and land transfer tax are read from documents (`extractable: true`), into
 their own fields and no longer under other costs. Their aliases moved from `other_cost` ("development charges",

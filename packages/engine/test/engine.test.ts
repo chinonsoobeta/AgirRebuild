@@ -6,6 +6,7 @@ import { createHash } from "node:crypto";
 import { readFileSync, readdirSync } from "node:fs";
 import { join } from "node:path";
 import { allocate, applyStress, assemble, buildLedger, canonicalJson, gateSpecs, grid, heldPartnerReturns, irrRoots, levelPayment, runWaterfall, tornado, underwrite, validateInput, EngineInputError } from "../src/index.ts";
+import { runChecks } from "../src/checks.ts";
 import { allEquityDeal, developmentDeal } from "./fixtures.ts";
 
 const metric = (r: RunResult, key: string, scenario = "base") =>
@@ -341,7 +342,7 @@ describe("quick-start templates", () => {
   });
 
   describe("kept and refinanced (task 75)", () => {
-    const heldFields = ["senior_io_months", "refinance_month", "refinance_amount", "refinance_ltv_pct", "refinance_rate_pct", "refinance_amort_years", "refinance_io_months", "refinance_insurance_premium_pct"];
+    const heldFields = ["senior_io_months", "refinance_month", "refinance_amount", "refinance_ltv_pct", "refinance_rate_pct", "refinance_amort_years", "refinance_io_months", "refinance_insurance_premium_pct", "refinance_mli_select_points", "refinance_term_years"];
     const heldRowsFor = (key: "multiplex" | "apartment", changes: Record<string, number | undefined> = {}) => {
       const values: Record<string, number | undefined> = {
         refinance_and_hold: 1, senior_io_months: 18, refinance_month: 18, refinance_amount: 1_600_000,
@@ -372,8 +373,26 @@ describe("quick-start templates", () => {
         const { input } = assemble(heldRowsFor(key, { refinance_insurance_premium_pct: premium }));
         expect(input).not.toBeNull();
         const policy = policyFor(input!);
-        expect(policy.version).toBe(premium === undefined ? "rental-hold-draft" : "rental-hold-insured-draft");
-        expect(contracts.VERDICT_CODES).toContain(underwrite(input!, policy).verdict.code);
+        expect(policy.version).toBe(premium === undefined ? "rental-hold-draft" : "rental-hold-insured-standard-draft");
+        const run = underwrite(input!, policy);
+        expect(contracts.VERDICT_CODES).toContain(run.verdict.code);
+        if (premium && key === "multiplex") expect(run.checks).toContainEqual(expect.objectContaining({key:"insured_min_units",severity:"error"}));
+      }
+    });
+    test("card 94b requires the term for 7+ Standard units and hides choices without insurance", () => {
+      const rows=heldRowsFor("apartment",{refinance_insurance_premium_pct:4}).map(r=>r.fieldKey === "unit_count" ? {...r,valueNumeric:6}:r);
+      expect(assemble(rows).readiness.missing.map(r=>r.fieldKey)).toContain("refinance_term_years");
+      const term={fieldKey:"refinance_term_years",itemKey:null,status:"approved" as const,valueNumeric:10};
+      expect(assemble([...rows,term]).input!.refinance).toMatchObject({termYears:10});
+      const points={...term,fieldKey:"refinance_mli_select_points",valueNumeric:50};
+      expect(assemble([...rows,points]).input!.refinance).toMatchObject({mliSelectPoints:50});
+      expect(assemble([...rows,{...points,status:"needs_review"}]).input).toBeNull();
+      for (const premium of [undefined,0]) {
+        const result=assemble(heldRowsFor("apartment",{refinance_insurance_premium_pct:premium}));
+        expect(result.readiness.choices.map(r=>r.fieldKey)).not.toContain("refinance_mli_select_points");
+        expect(result.readiness.choices.map(r=>r.fieldKey)).not.toContain("refinance_term_years");
+        expect(result.input!.refinance).not.toHaveProperty("mliSelectPoints");
+        expect(result.input!.refinance).not.toHaveProperty("termYears");
       }
     });
     test.each(RENTAL_TEMPLATES.map((t) => [t.key] as const))("%s can size the held refinance by loan-to-value", (key) => {
@@ -876,7 +895,7 @@ describe("exit by refinancing and holding (card 60)", () => {
     const insured = POLICIES["rental-hold-insured-draft"]!;
     const ioDeal = (amortYears?: number, ratePct = 6): EngineInput => {
       const base = byAmount();
-      return { ...base, senior: { amount: 600_000, ratePct, ioMonths: 12, ...(amortYears === undefined ? {} : { amortYears }) }, refinance: { ...base.refinance!, insurancePremiumPct: 4 } };
+      return { ...base, senior: { amount: 600_000, ratePct, ioMonths: 12, ...(amortYears === undefined ? {} : { amortYears }) }, refinance: { ...base.refinance!, insurancePremiumPct: 4, mliSelectPoints: 50 } };
     };
     test.each([
       ["conventional hold", byAmount(), "rental-hold-draft"],
@@ -887,7 +906,7 @@ describe("exit by refinancing and holding (card 60)", () => {
     });
 
     test("this build has policy v1 (pinned), the two held drafts and the for-sale draft", () => {
-      expect(Object.keys(POLICIES)).toEqual(["policy-v1", "rental-hold-draft", "rental-hold-insured-draft", "for-sale-draft"]);
+      expect(Object.keys(POLICIES)).toEqual(["policy-v1", "rental-hold-draft", "rental-hold-insured-draft", "rental-hold-insured-standard-draft", "rental-hold-insured-standard-short-draft", "for-sale-draft"]);
       expect(sha(POLICIES["policy-v1"])).toBe("9f95780101a9ecfe6444c47dd319c1cb8d77251d60700a1a4dde1733055296b9");
     });
 
@@ -943,10 +962,58 @@ describe("exit by refinancing and holding (card 60)", () => {
     });
   });
 
+  describe("card 94b insured product and limits", () => {
+    const insured = (units = 12, points?: number, termYears?: number): EngineInput => {
+      const input = byLtv();
+      input.revenue = [{ ...input.revenue[0]!, units }];
+      input.refinance = { ...input.refinance!, insurancePremiumPct: 4, ...(points === undefined ? {} : {mliSelectPoints:points}), ...(termYears === undefined ? {} : {termYears}) };
+      return input;
+    };
+    test.each([[12,50,undefined,1.1],[6,undefined,undefined,1.2],[12,undefined,10,1.2],[12,undefined,5,1.3],[12,undefined,undefined,1.3]])("%s units, points %s, term %s gives floor %s", (units,points,term,floor) => {
+      const policy = policyFor(insured(units,points,term));
+      expect(policy.gates.dcrAfterRefinanceMin).toBe(floor);
+      expect(policy.baseSizingDscrFloor).toBe(floor);
+    });
+    test("minimum units is an error below five, not at five", () => {
+      for (const units of [4,5]) {
+        const input=insured(units);
+        expect(underwrite(input,policyFor(input)).checks.some(c=>c.key === "insured_min_units" && c.severity === "error")).toBe(units === 4);
+      }
+    });
+    test.each([[undefined,85,40],[50,85,40],[70,95,45],[100,95,50]])("tier %s has a cents boundary and an amortization boundary", (points,maxLtv,maxAmort) => {
+      const input=insured(12,points,10);
+      input.refinance!.amortYears=maxAmort;
+      const value=buildLedger(input).refinance!.value;
+      delete input.refinance!.ltvPct;
+      for (const delta of [-0.01,0,0.01]) {
+        input.refinance!.amount=value*maxLtv/100+delta;
+        expect(underwrite(input,policyFor(input)).checks.some(c=>c.key === "refinance_ltv_limit")).toBe(delta > 0);
+      }
+      input.refinance!.amount=value*0.75;
+      for (const years of [maxAmort-1,maxAmort,maxAmort+1]) {
+        input.refinance!.amortYears=years;
+        if (years > 50) expect(()=>validateInput(input)).toThrow(EngineInputError);
+        expect(runChecks(input,buildLedger(input),policyFor(input),null).some(c=>c.key === "refinance_amort_limit")).toBe(years>maxAmort);
+      }
+    });
+    test("an older stored insured policy replays without new limits and has a different hash", () => {
+      const { refinanceLimits: _limits, ...old } = RENTAL_HOLD_INSURED_DRAFT;
+      expect(sha(old)).not.toBe(sha(RENTAL_HOLD_INSURED_DRAFT));
+      const input=insured(4,50);
+      input.refinance!.ltvPct=96;
+      expect(contracts.runPolicy({policy:old},old.version)).toBe(old);
+      expect(underwrite(input,old).checks.some(c=>["insured_min_units","refinance_ltv_limit","refinance_amort_limit"].includes(c.key))).toBe(false);
+    });
+    test.each([["mliSelectPoints",-1],["mliSelectPoints",151],["mliSelectPoints",50.5],["termYears",0],["termYears",41],["termYears",5.5]] as const)("rejects invalid %s = %s", (key,value) => {
+      const input=insured(); input.refinance![key]=value;
+      expect(()=>validateInput(input)).toThrow(EngineInputError);
+    });
+  });
+
   describe("insured base-case floor (task 70)", () => {
     test("the insured draft is selected for a premium, and its gate and warning floors are 1.10x", () => {
       const base = byAmount();
-      const input = { ...base, refinance: { ...base.refinance!, insurancePremiumPct: 4 } };
+      const input = { ...base, refinance: { ...base.refinance!, insurancePremiumPct: 4, mliSelectPoints: 50 } };
       expect(policyFor(input)).toBe(RENTAL_HOLD_INSURED_DRAFT);
       expect(RENTAL_HOLD_INSURED_DRAFT.baseSizingDscrFloor).toBe(1.1);
       expect(RENTAL_HOLD_INSURED_DRAFT.gates.dcrAfterRefinanceMin).toBe(1.1);
@@ -955,7 +1022,7 @@ describe("exit by refinancing and holding (card 60)", () => {
     test("base sizing between 1.10x and 1.20x warns only on the conventional held deal", () => {
       const base = byAmount();
       const conventional: EngineInput = { ...base, refinance: { ...base.refinance!, month: 0 }, revenue: base.revenue.map((r) => ({ ...r, rentMonthly: 560 })) };
-      const insured: EngineInput = { ...conventional, refinance: { ...conventional.refinance!, insurancePremiumPct: 4 } };
+      const insured: EngineInput = { ...conventional, refinance: { ...conventional.refinance!, insurancePremiumPct: 4, mliSelectPoints: 50 } };
       const insuredRun = underwrite(insured, policyFor(insured));
       const conventionalRun = underwrite(conventional, policyFor(conventional));
       for (const run of [insuredRun, conventionalRun]) {
@@ -1175,21 +1242,22 @@ describe("exit by refinancing and holding (card 60)", () => {
 
   describe("policy", () => {
     test.each([
-      ["a held deal with premium 4", { ...byAmount(), refinance: { ...byAmount().refinance!, insurancePremiumPct: 4 } }, "rental-hold-insured-draft"],
+      ["a held deal with premium 4", { ...byAmount(), refinance: { ...byAmount().refinance!, insurancePremiumPct: 4, mliSelectPoints: 50 } }, "rental-hold-insured-draft"],
       ["a held deal without a premium", byAmount(), "rental-hold-draft"],
       ["a held deal with premium 0", { ...byAmount(), refinance: { ...byAmount().refinance!, insurancePremiumPct: 0 } }, "rental-hold-draft"],
       ["a held deal without refinance", { ...byAmount(), refinance: undefined }, "rental-hold-draft"],
-      ["a sale deal with premium 4", { ...byAmount(), exit: undefined, refinance: { ...byAmount().refinance!, insurancePremiumPct: 4 } }, "policy-v1"],
+      ["a sale deal with premium 4", { ...byAmount(), exit: undefined, refinance: { ...byAmount().refinance!, insurancePremiumPct: 4, mliSelectPoints: 50 } }, "policy-v1"],
     ] as const)("policyFor selects the policy for %s (task 67)", (_label, input, version) => {
       expect(policyFor(input).version).toBe(version);
     });
 
-    test("the insured draft changes only its version and its two 1.10x floors, and is registered (task 67)", () => {
+    test("the Select draft has its two 1.10x floors, cited limits, and registration (card 94b)", () => {
       expect(RENTAL_HOLD_INSURED_DRAFT).toEqual({
         ...RENTAL_HOLD_DRAFT,
         version: "rental-hold-insured-draft",
         gates: { ...RENTAL_HOLD_DRAFT.gates, dcrAfterRefinanceMin: 1.1 },
         baseSizingDscrFloor: 1.1,
+        refinanceLimits: { minUnits: 5, standard: {maxLtvPct:85,maxAmortYears:40}, select: [{minPoints:50,maxLtvPct:85,maxAmortYears:40},{minPoints:70,maxLtvPct:95,maxAmortYears:45},{minPoints:100,maxLtvPct:95,maxAmortYears:50}] },
       });
       expect(POLICIES["rental-hold-insured-draft"]).toBe(RENTAL_HOLD_INSURED_DRAFT);
     });
@@ -1199,7 +1267,7 @@ describe("exit by refinancing and holding (card 60)", () => {
       // Tuned only rentMonthly from 1,000 to 560: NOI = 47,200. With premium 4%, DCR = 47,200 / 41,600 = 1.1346153846;
       // without the premium, DCR = 47,200 / 40,000 = 1.18. Both are strictly between 1.10 and 1.20.
       const conventional: EngineInput = { ...base, revenue: base.revenue.map((r) => ({ ...r, rentMonthly: 560 })) };
-      const insured: EngineInput = { ...conventional, refinance: { ...conventional.refinance!, insurancePremiumPct: 4 } };
+      const insured: EngineInput = { ...conventional, refinance: { ...conventional.refinance!, insurancePremiumPct: 4, mliSelectPoints: 50 } };
       const insuredRun = underwrite(insured, policyFor(insured));
       const conventionalRun = underwrite(conventional, policyFor(conventional));
       const insuredDcr = v(insuredRun, "dcr_after_refinance");
@@ -1373,14 +1441,14 @@ describe("Canadian cost lines and a mortgage insurance premium, as entered value
       expect(canonicalJson(input)).not.toMatch(/developmentCharges|landTransferTax|gstHstNet|propertyTaxAnnual|insurancePremiumPct|undefined/);
     });
     test("a stated value is set, and a stated 0 is a value", () => {
-      const { readiness, input } = assemble(rows({ ...refi, development_charges: 50_000, land_transfer_tax: 0, gst_hst_net: 30_000, property_tax_annual: 12_000, refinance_insurance_premium_pct: 4 }));
+      const { readiness, input } = assemble(rows({ ...refi, development_charges: 50_000, land_transfer_tax: 0, gst_hst_net: 30_000, property_tax_annual: 12_000, refinance_insurance_premium_pct: 4, refinance_term_years: 10 }));
       expect(readiness.status).toBe("ready");
       expect(input!.budget).toEqual({ land: 1_000_000, hard: 0, soft: 0, contingency: 0, other: 0, developmentCharges: 50_000, landTransferTax: 0, gstHstNet: 30_000 });
       expect(input!.propertyTaxAnnual).toBe(12_000);
       expect(input!.refinance!.insurancePremiumPct).toBe(4);
     });
     test("a premium with no refinance month is not put on the input, as refinance_io_months is not", () => {
-      const { input } = assemble(rows({ refinance_io_months: 6, refinance_insurance_premium_pct: 4 }));
+      const { input } = assemble(rows({ refinance_io_months: 6, refinance_insurance_premium_pct: 4, refinance_term_years: 10 }));
       expect(input!.refinance).toBeUndefined();
       expect(canonicalJson(input)).not.toMatch(/insurancePremiumPct/);
     });
@@ -1565,7 +1633,7 @@ describe("Canadian cost lines and a mortgage insurance premium, as entered value
       ...extra,
     });
     const refi = { month: 12, ratePct: 0, amortYears: 20, ioMonths: 0 };
-    const amount4 = () => rental({ ...refi, amount: 1_000_000, insurancePremiumPct: 4 });
+    const amount4 = () => rental({ ...refi, amount: 1_000_000, insurancePremiumPct: 4, mliSelectPoints: 50 });
     const amount0 = () => rental({ ...refi, amount: 1_000_000 });
 
     test("a 4% premium on a $1,000,000 refinance gives a balance of $1,040,000", () => {
@@ -1610,7 +1678,7 @@ describe("Canadian cost lines and a mortgage insurance premium, as entered value
     });
     test("a loan sized by loan-to-value is sized before the premium", () => {
       // Forward NOI 100,000 / 10% = 1,000,000 of value; 80% gives a loan of 800,000, then x 1.04 = 832,000.
-      const i = rental({ ...refi, ltvPct: 80, insurancePremiumPct: 4 });
+      const i = rental({ ...refi, ltvPct: 80, insurancePremiumPct: 4, mliSelectPoints: 50 });
       const r = underwrite(i, POLICY_V1);
       expect(v(r, "refinance_net_proceeds")).toBeCloseTo(800_000 - 570_000, 6);
       expect(v(r, "refinance_premium_added")).toBeCloseTo(32_000, 6);
@@ -1618,7 +1686,7 @@ describe("Canadian cost lines and a mortgage insurance premium, as entered value
     });
     test("in a held deal the coverage after the refinance and the debt at T use the balance with the premium", () => {
       const held = (r: NonNullable<EngineInput["refinance"]>) => { const i = rental(r, { exit: "refinance_hold" }); return underwrite(i, policyFor(i)); };
-      const a = held({ ...refi, amount: 1_000_000, insurancePremiumPct: 4 });
+      const a = held({ ...refi, amount: 1_000_000, insurancePremiumPct: 4, mliSelectPoints: 50 });
       const b = held({ ...refi, amount: 1_000_000 });
       // Months 12 to 23: NOI 100,000; sizing debt service 12 x 1,040,000 / 240 = 52,000. DCR = 100,000 / 52,000 = 1.9231. Without: 100,000 / 50,000 = 2.
       expect(v(a, "dcr_after_refinance")).toBeCloseTo(100_000 / 52_000, 9);

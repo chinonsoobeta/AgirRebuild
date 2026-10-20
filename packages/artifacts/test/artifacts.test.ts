@@ -587,7 +587,7 @@ describe("a deal that is kept and refinanced (card 60)", () => {
   test.each(["ic_memo", "lender_package", "model_export"] as const)("the insured %s shows its policy, 1.10x gate and draft label with clean provenance (task 67)", async (kind) => {
     const x = holdInput(kind);
     x.deal = { ...x.deal, name: "Fictional Insured Rental", location: "Invented Township" };
-    x.input = { ...x.input, refinance: { ...x.input.refinance!, insurancePremiumPct: 4 } };
+    x.input = { ...x.input, refinance: { ...x.input.refinance!, insurancePremiumPct: 4, mliSelectPoints: 50 } };
     x.policy = policyFor(x.input);
     x.result = underwrite(x.input, x.policy);
     x.run = { ...x.run, policyVersion: x.policy.version, policyHash: createHash("sha256").update(canonicalJson(x.policy)).digest("hex") };
@@ -1468,5 +1468,22 @@ describe("card 93c draft French reports", () => {
     expect(text).not.toContain(check.message);
     expect(text).toContain("Aucun montant de fonds propres n'est indiqué");
     expect(canonicalJson(x.result)).toBe(before);
+  });
+});
+
+
+describe("card 94b report insured product", () => {
+  test.each(["en", "fr"] as const)("%s names Select points or Standard term with provenance", lang => {
+    for (const points of [50, undefined]) {
+      const x = mapleInput("lender_package");
+      x.lang = lang;
+      x.input = {...x.input, exit:"refinance_hold", refinance:{month:40,ltvPct:75,ratePct:5,amortYears:30,ioMonths:0,insurancePremiumPct:4,...(points === undefined ? {termYears:10} : {mliSelectPoints:points})}};
+      x.policy=policyFor(x.input); x.result=underwrite(x.input,x.policy);
+      const model=buildModel(x), text=visibleText(renderHtml(model));
+      expect(text).toContain(points === undefined ? "MLI Standard" : "MLI Select, 50 points");
+      expect(text).toContain(points === undefined ? (lang === "en" ? "10-year term" : "terme de 10 ans") : "50 points");
+      expect(verifyProvenance(text,model.formatter.manifest).orphans).toEqual([]);
+    }
+    expect(formatValue(50,"points")).toBe("50");
   });
 });

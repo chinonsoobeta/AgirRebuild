@@ -1203,6 +1203,8 @@ const ASK: Record<string, [[string, string?], [string, string?]]> = {
   refinance_amount: [["What will the refinance loan amount be?", "Give this amount or the loan-to-value below, not both."], ["Quel sera le montant du prêt de refinancement ?", "Indiquez ce montant ou le ratio prêt-valeur ci-dessous, pas les deux."]],
   refinance_ltv_pct: [["What loan-to-value will the refinance use?", "Give this percentage or the loan amount above, not both."], ["Quel ratio prêt-valeur sera utilisé pour le refinancement ?", "Indiquez ce pourcentage ou le montant du prêt ci-dessus, pas les deux."]],
   refinance_rate_pct: [["What is the refinance loan's interest rate?"], ["Quel est le taux d'intérêt du prêt de refinancement ?"]],
+  refinance_mli_select_points: [["How many MLI Select points are stated?"], ["Combien de points MLI Select sont déclarés ?"]],
+  refinance_term_years: [["What is the refinance loan term in years?"], ["Quelle est la durée du prêt de refinancement en années ?"]],
   refinance_amort_years: [["Over how many years is the refinance loan paid down?"], ["Sur combien d'années le prêt de refinancement est-il amorti ?"]],
   refinance_io_months: [["For how many months is the refinance loan interest-only?", "Leave blank if there is no interest-only period."], ["Pendant combien de mois le prêt de refinancement est-il à intérêts seulement ?", "Laissez vide s'il n'y a pas de période à intérêts seulement."]],
   refinance_insurance_premium_pct: [["What is the refinance mortgage insurance premium?", "For an insured (CMHC) loan. Leaving this blank means no mortgage insurance."], ["Quelle est la prime d'assurance hypothécaire du refinancement ?", "Pour un prêt assuré (SCHL). Laisser ce champ vide signifie aucune assurance hypothécaire."]],
