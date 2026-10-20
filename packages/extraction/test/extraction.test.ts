@@ -7098,3 +7098,100 @@ describe("card 116: budget words, tax basis and one label per figure", () => {
     for (const input of [`${l}: $760,000`, `Note, ${l} $760,000; fin.`, `S:${l}|760000`]) check(input, "-");
   });
 });
+
+
+describe("card 116 audit: cost exclusions, narrow guards and per-lot notes", () => {
+  const read = (input: string) => {
+    const parts = input.split(" // ");
+    if (/^S(?:\([^)]*\))?:/.test(parts[0]!)) {
+      const name = /^S\(([^)]*)\):/.exec(parts[0]!)?.[1] ?? "Base";
+      return extractCandidates({ kind: "xlsx", lines: [], tables: [{ name, rows: parts.map((p, r) => p.replace(/^S(?:\([^)]*\))?:/, "").split("|").map((v, c) => ({ text: v.trim(), ref: `${String.fromCharCode(65 + c)}${r + 1}`, ...(/^\d+$/.test(v.trim()) ? { number: Number(v) } : {}) }))) }], pageCount: 1, needsOcr: false, fullText: "" });
+    }
+    return extractCandidates({ kind: "pdf", lines: parts.map((text, i) => ({ text, location: `page 1, line ${i + 1}` })), tables: [], pageCount: 1, needsOcr: false, fullText: parts.join("\n") });
+  };
+  const check = (input: string, expected: string) => {
+    const r = read(input);
+    const got = r.candidates.map((c) => `${c.fieldKey}=${c.value}`).sort();
+    if (expected.startsWith("!")) expect(r.candidates.filter((c) => expected.slice(1).split(",").includes(c.fieldKey!))).toEqual([]);
+    else expect(got).toEqual(expected === "-" ? [] : expected.split(" ").sort());
+  };
+  test.each([
+    ["Miscellaneous income: $4,000", "!other_cost"],
+    ["Miscellaneous revenue: $4,000", "!other_cost"],
+    ["Revenus divers : 4 000 $", "!other_cost"],
+    ["Misc. revenue per year: $4,000", "!other_cost"],
+    ["Miscellaneous proceeds: $4,000", "!other_cost"],
+    ["Recettes diverses par année : 4 000 $", "!other_cost"],
+    ["Other project income: $4,000", "!other_cost"],
+    ["Other project proceeds: $4,000", "!other_cost"],
+    ["Autres revenus du projet : 4 000 $", "!other_cost"],
+    ["Remaining project cash after closing: $70,000", "!other_cost"],
+    ["Remaining project cash left after closing: $70,000", "!other_cost"],
+    ["Trésorerie restante après la clôture : 70 000 $", "!other_cost"],
+    ["Paper loss on the sale: $30,000", "!soft_cost"],
+    ["Paper loss: $30,000", "!soft_cost"],
+    ["Perte sur papier : 30 000 $", "!soft_cost"],
+    ["Leasing advice commission: $12,000", "!soft_cost"],
+    ["Professional advice commission: $12,000", "!soft_cost"],
+    ["Commission de conseil en location : 12 000 $", "!soft_cost"],
+    ["Advisor's success fee on the loan: $30,000", "!soft_cost"],
+    ["Loan advice success fee: $30,000", "!soft_cost"],
+    ["Honoraires de conseil pour le prêt : 30 000 $", "!soft_cost"],
+    ["Enveloppe globale des loyers : 240 000 $", "!stated_total_cost"],
+    ["Entire rent budget: $240,000", "!stated_total_cost"],
+    ["Enveloppe complète des loyers : 240 000 $", "!stated_total_cost"],
+    ["Enveloppe globale du prêt : 2 000 000 $", "!stated_total_cost"],
+    ["Entire loan budget: $2,000,000", "!stated_total_cost"],
+    ["Enveloppe globale des prêts : 2 000 000 $", "!stated_total_cost"],
+    ["Total operating budget: $85,000", "!stated_total_cost"],
+    ["Entire operating budget: $85,000", "!stated_total_cost"],
+    ["Enveloppe globale d’exploitation : 85 000 $", "!stated_total_cost"],
+    ["Enveloppe globale des capitaux propres : 500 000 $", "!stated_total_cost"],
+    ["Entire equity budget: $500,000", "!stated_total_cost"],
+    ["Enveloppe globale des fonds propres : 500 000 $", "!stated_total_cost"],
+    ["Enveloppe globale de la mise de fonds : 500 000 $", "!stated_total_cost"],
+    ["Price escalation contingency: $95,000", "contingency=95000"],
+    ["Contingency for price increases: $95,000", "contingency=95000"],
+    ["Imprévus pour hausse des prix : 95 000 $", "contingency=95000"],
+    ["Contingency per lender requirement: $95,000", "contingency=95000"],
+    ["Contingency per the contract: $95,000", "contingency=95000"],
+    ["Imprévus selon le prêteur : 95 000 $", "contingency=95000"],
+    ["Value-engineered hard costs: $1,450,000", "hard_cost=1450000"],
+    ["Value-engineered construction: $1,450,000", "hard_cost=1450000"],
+    ["Travaux optimisés : 1 450 000 $", "hard_cost=1450000"],
+    ["Construction start to finish budget: $1,450,000", "hard_cost=1450000"],
+    ["Construction starts with this budget: $1,450,000", "hard_cost=1450000"],
+    ["Construction du début à la fin : 1 450 000 $", "hard_cost=1450000"],
+    ["Interior finish package: $1,450,000", "hard_cost=1450000"],
+    ["Construction finish budget: $1,450,000", "hard_cost=1450000"],
+    ["Travaux de finition : 1 450 000 $", "hard_cost=1450000"],
+    ["Hard costs per the GC contract: $1,450,000", "hard_cost=1450000"],
+    ["Construction per the contract: $1,450,000", "hard_cost=1450000"],
+    ["Travaux selon le contrat : 1 450 000 $", "hard_cost=1450000"],
+    ["Land (per the agreement of purchase and sale): $600,000", "land_cost=600000"],
+    ["Land purchase per the agreement: $600,000", "land_cost=600000"],
+    ["Achat du terrain selon l’accord : 600 000 $", "land_cost=600000"],
+    ["S(Envelope):parcel draw|650000", "land_cost=650000"],
+    ["S(Budget):Land draw|650000", "land_cost=650000"],
+    ["S(Budget):Tirage terrain|650000", "land_cost=650000"],
+    ["Weekly draw: $40,000", "-"],
+    ["Monthly draw: $40,000", "-"],
+    ["Tirage mensuel : 40 000 $", "-"],
+    ["Construction loan draw this month: $250,000", "-"],
+    ["Lender draw: $250,000", "-"],
+    ["Tirage du prêt ce mois : 250 000 $", "-"],
+    ["First draw: $300,000", "-"],
+    ["Next draw: $300,000", "-"],
+    ["Premier tirage : 300 000 $", "-"],
+  ])("%s", check);
+  test.each(["S(Timeline):Construction starts|2027-05-03", "S(Timeline):Construction finish|2028", "S(Calendrier):Début construction|2027-06-01"])("date or year: %s", (input) => {
+    const r = read(input);
+    expect(r.candidates).toEqual([]);
+    expect(r.other.some((c) => /budget line/.test(c.note ?? ""))).toBe(false);
+  });
+  test.each(["S(Ledger):Purchase price per lot|200000", "S(Ledger):Land cost per lot|200000", "S(Registre):Prix d'achat par lot|200000", "3 lots at $143,333 each", "Land cost: $143,333 each", "3 lots à 143 333 $ chacun"])("per-lot note: %s", (input) => {
+    const r = read(input);
+    expect(r.candidates).toEqual([]);
+    expect(r.other.map((c) => c.note)).toContain("A per-door share of a cost, not the line's total; enter the total");
+  });
+});

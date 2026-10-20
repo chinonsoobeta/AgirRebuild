@@ -533,7 +533,7 @@ const TOTAL_AFTER_RE = /^\s*(?:in\s+|au\s+)?total\b/i;
 
 /** A money figure priced for one lot, door or unit: "$160,000 each", "95 000 $ par porte". */
 function perUnit(text: string, t: NumberToken, label = ""): boolean {
-  return t.unit === "$" && t.value !== null && (EACH_RE.test(text.slice(t.end)) || PER_DOOR_LABEL_RE.test(label));
+  return t.value !== null && ((t.unit === "$" && EACH_RE.test(text.slice(t.end))) || ((t.unit === "$" || t.unit === null) && PER_DOOR_LABEL_RE.test(label)));
 }
 
 /** The clause a figure is in: from the last comma, semicolon, parenthesis or "and" before it to the first one after it. */
@@ -934,7 +934,7 @@ function readSentence(sentence: { text: string; start: number }, para0: Paragrap
       other(t, "line:prose", DEPOSIT_NOTE);
       return;
     }
-    if (mapped.kind === "field" && PER_UNIT_FIELDS.has(mapped.fieldKey) && perUnit(text, t, BUDGET_LINES.has(mapped.fieldKey) ? usedLabel : "")) {
+    if (((mapped.kind === "field" && PER_UNIT_FIELDS.has(mapped.fieldKey)) || (mapped.kind === "unmapped" && /\b(?:lots?|parcelles?)\b/.test(fold(usedLabel)))) && perUnit(text, t, mapped.kind === "field" && BUDGET_LINES.has(mapped.fieldKey) ? usedLabel : "")) {
       other(t, "line:prose", PER_UNIT_NOTE);
       const total = totalOf(text, t, tokens);
       if (total) totalLabels.set(total, usedLabel);
@@ -1953,7 +1953,7 @@ function fromTable(table0: Table, result: ExtractionResult, notes: string[] = []
             break;
           }
           // A budget or financing figure whose own cell says it is per door is a share, not the line: the next cell for the same line is read instead (task 68).
-          if (mapped.kind === "field" && PER_UNIT_FIELDS.has(mapped.fieldKey) && perUnit(cell.text, t)) {
+          if (mapped.kind === "field" && PER_UNIT_FIELDS.has(mapped.fieldKey) && perUnit(cell.text, t, BUDGET_LINES.has(mapped.fieldKey) ? labelCell.text : "")) {
             result.other.push({ ...base, fieldKey: null, itemKey: null, value: t.value, unitSeen: t.unit, note: PER_UNIT_NOTE });
             const field = mapped.fieldKey;
             const item = mapped.itemKey;
