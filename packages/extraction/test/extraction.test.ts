@@ -7,6 +7,15 @@ import { loadOracles, toNormalized } from "./oracle.ts";
 
 const key = (f: string, i: string | null) => (i ? `${f}|${i}` : f);
 
+const contentScopeCases: { name: string; lines: string[]; expected: [string, number][] }[] = [
+  { name: "card English insured summary", lines: ["Birchwood Row | insured mortgage summary", "Permanent loan funds at the refinance in month 30 after construction start.", "Sizing loan-to-value: 75% of appraised value.", "Annual interest rate: 4.15%.", "Amortization: 45 years.", "Interest-only period: 0 months; payments start at the refinance."], expected: [["refinance_month", 30], ["refinance_ltv_pct", 75], ["refinance_rate_pct", 4.15], ["refinance_amort_years", 45], ["refinance_io_months", 0]] },
+  { name: "card French insured summary", lines: ["Résidences du Ruisseau - sommaire du prêt assuré", "Le refinancement a lieu au mois 30 après le début des travaux.", "Amortissement : 45 ans.", "Période d’intérêt seulement : 0 mois; les versements commencent au refinancement."], expected: [["refinance_amort_years", 45], ["refinance_io_months", 0]] },
+  { name: "Cypress payment overview", lines: ["Cypress Steps | financing overview", "Refinance in month 32 after construction start.", "Monthly payments begin at the refinance.", "Interest rate: 5.05%.", "Amortization: 35 years.", "Interest-only period: 2 months.", "Sizing loan-to-value: 70%."], expected: [["refinance_month", 32], ["refinance_rate_pct", 5.05], ["refinance_amort_years", 35], ["refinance_io_months", 2], ["refinance_ltv_pct", 70]] },
+  { name: "Hawthorn funding overview", lines: ["Hawthorn Place | lender overview", "The permanent loan funds at the refinance in month 34.", "The refinance starts the payment schedule.", "Interest rate: 4.85%.", "Amortization: 40 years.", "Interest-only period: 3 months."], expected: [["refinance_month", 34], ["refinance_rate_pct", 4.85], ["refinance_amort_years", 40], ["refinance_io_months", 3]] },
+  { name: "sommaire des Lilas", lines: ["Les Lilas | aperçu financier", "Le refinancement est prévu au mois 28 après le début des travaux.", "Les versements mensuels débutent au refinancement.", "Taux d'intérêt : 4,35 %.", "Amortissement : 35 ans.", "Période d’intérêt seulement : 1 mois."], expected: [["refinance_rate_pct", 4.35], ["refinance_amort_years", 35], ["refinance_io_months", 1]] },
+  { name: "sommaire des Érables", lines: ["Cour des Érables | aperçu du dossier", "Le refinancement aura lieu au mois 33 après le début des travaux.", "Le calendrier des paiements commence au refinancement.", "Taux d'intérêt : 4,60 %.", "Amortissement : 40 ans.", "Période d’intérêt seulement : 3 mois."], expected: [["refinance_rate_pct", 4.6], ["refinance_amort_years", 40], ["refinance_io_months", 3]] },
+];
+
 for (const deal of loadOracles()) {
   describe(`reference deal: ${deal.name}`, () => {
     const all: SourcedCandidate[] = [];
@@ -495,6 +504,14 @@ describe("parsers keep a document's structure", () => {
     expect(proposals.filter((p) => p.status === "conflicting")).toEqual([]);
   });
 
+  test.each(contentScopeCases)("card 98 plain Word paragraphs: $name", async ({ lines, expected }) => {
+    const d = await parseDocument(await docx(lines.map(para).join("")), "summary.docx");
+    expect(d.lines.map((line) => line.text)).toEqual(lines);
+    const r = extractCandidates(d);
+    expect(r.candidates.map((c) => [c.fieldKey, c.value])).toEqual(expect.arrayContaining(expected));
+    expect(r.candidates.some((c) => c.fieldKey?.startsWith("senior_"))).toBe(false);
+  });
+
   // A run of text, struck through when `struck` is true.
   const run = (t: string, struck = false) => `<w:r>${struck ? "<w:rPr><w:strike/></w:rPr>" : ""}<w:t xml:space="preserve">${esc(t)}</w:t></w:r>`;
   const runs = (...r: string[]) => `<w:p>${r.join("")}</w:p>`;
@@ -869,6 +886,45 @@ describe("which loan a term belongs to, and the words small developers use", () 
   });
 
   describe("loan scope", () => {
+    test.each(contentScopeCases)("card 98 content scope: $name", ({ lines, expected }) => {
+      const r = read(...lines);
+      expect(pick(r)).toEqual(expect.arrayContaining(expected));
+      expect(r.candidates.some((c) => c.fieldKey?.startsWith("senior_"))).toBe(false);
+    });
+    test.each([
+      { name: "insured construction", lines: ["Ridgeview Commons - CMHC-insured construction loan", "Construction loan amount: $6,400,000.", "Interest rate: 6.10%.", "Interest-only during construction: 24 months."], expected: [["senior_loan_amount", 6400000], ["senior_rate_pct", 6.1], ["senior_io_months", 24]] },
+      { name: "one refinance line", lines: ["Maple Court - project summary", "We plan to refinance in month 36 once stabilized.", "Interest rate: 6.50%.", "Amortization: 25 years."], expected: [["refinance_month", 36], ["senior_rate_pct", 6.5], ["senior_amort_years", 25]] },
+      { name: "mixed loan sentences", lines: ["Financing summary", "Construction loan: $5,000,000 at 6.10%.", "Refinance in month 30 at 4.15%, amortized over 45 years."], expected: [["senior_loan_amount", 5000000], ["refinance_month", 30], ["refinance_rate_pct", 4.15], ["refinance_amort_years", 45]] },
+      { name: "construction-period interest", lines: ["Oak Lane - financing notes", "Refinance in month 30.", "Payments start at the refinance.", "Interest rate: 6.25% during construction.", "Amortization: 30 years."], expected: [["refinance_month", 30], ["senior_rate_pct", 6.25], ["senior_amort_years", 30]] },
+    ])("card 98 baseline pin: $name", ({ lines, expected }) => expect(pick(read(...lines))).toEqual(expected));
+    test.each([
+      ["Refinance in month 31.", "If the refinance closes late, the payment date may move."],
+      ["Payments begin at the refinance.", "Unless the permanent loan funds, we will keep the present schedule."],
+      ["Le refinancement est prévu au mois 29.", "Si le refinancement est retardé, le calendrier sera revu."],
+      ["Les paiements commencent au refinancement.", "À moins que le prêt permanent soit accordé, le calendrier restera provisoire."],
+      ["Refinance in month 31; the refinance begins the payment schedule."],
+      ["Le refinancement est prévu au mois 29; les versements commencent au refinancement."],
+    ])("card 98 counts distinct unconditional lines: %s", (...lines) => {
+      const r = read("Project financing overview", ...lines, "Interest rate: 6.2%.", "Amortization: 25 years.");
+      expect(pick(r)).toEqual(expect.arrayContaining([["senior_rate_pct", 6.2], ["senior_amort_years", 25]]));
+      expect(r.candidates.some((c) => c.fieldKey === "refinance_rate_pct" || c.fieldKey === "refinance_amort_years")).toBe(false);
+    });
+    test.each([
+      "The construction facility remains available for the project.",
+      "A mezzanine loan remains outstanding on this property.",
+      "Le prêt de construction demeure disponible pour le projet.",
+      "Un prêt de second rang demeure en place pour cet immeuble.",
+      "Interest is payable during construction.",
+      "The budget includes construction interest.",
+      "Construction draws incur interest each month.",
+      "Les intérêts sont payables pendant la construction.",
+      "Le budget comprend les intérêts de construction.",
+    ])("card 98 a competing loan or construction-interest context blocks inference: %s", (context) => {
+      const r = read("Project financing overview", "Refinance in month 31.", "Payments begin at the refinance.", context, "Interest rate: 6.2%.", "Amortization: 25 years.");
+      expect(pick(r)).toEqual(expect.arrayContaining([["senior_rate_pct", 6.2], ["senior_amort_years", 25]]));
+      expect(r.candidates.some((c) => c.fieldKey === "refinance_rate_pct" || c.fieldKey === "refinance_amort_years")).toBe(false);
+    });
+
     test("a mezzanine email's generic labels are the mezzanine loan, and beside a senior term sheet they cause no conflict", () => {
       const mezz = read("Subject: second mortgage offer", "Amount: $450,000", "Rate: 11.5% per annum", "Interest-only: 36 months", "Amortization: 25 years", "Loan-to-value: 75%");
       expect(pick(mezz)).toEqual([["mezz_loan_amount", 450_000], ["mezz_rate_pct", 11.5], ["mezz_io_months", 36], ["mezz_amort_years", 25]]);

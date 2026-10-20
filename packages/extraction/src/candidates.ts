@@ -172,11 +172,16 @@ const tableRank = (t: Table): Scope | null => {
   return null;
 };
 
+// A loan named only inside a condition does not establish a sentence or document scope.
+const unconditioned = (x: string) => x.replace(/(?:^|[\s,;(])(?:if|unless|should|until|in case|si|sauf si|à moins qu\S*|a moins qu\S*)\s[^,;]*/giu, " ");
+
 /**
- * The loan each line is about, set only by a title or heading: one of the first three lines or a "Subject:" / "Re:" / "Objet :" line
+ * The loan each line is about, set by a title or heading: one of the first three lines or a "Subject:" / "Re:" / "Objet :" line
  * (forward and reply prefixes stripped, any length, numbers allowed), or a short line with no number and no sentence end.
- * A body sentence never changes it, and a heading that names two loans sets none. A document whose headings name no loan
- * is about the loan its rank row names, else leaves the scope unstated (generic terms still default to senior).
+ * A heading that names two loans sets none. A document whose headings name no loan uses its rank row, if any.
+ * Only without either, two distinct unconditional refinance lines establish refinance scope, provided no line names
+ * a senior/mezzanine loan or construction-period interest. Otherwise scope stays unstated (generic terms default to senior).
+ * Inline labels and per-sentence loan names still take precedence over this document fallback.
  */
 function lineScopes(doc: NormalizedDocument, format: DocumentFormat, rank: Scope | null): (Scope | undefined)[] {
   let first = 0;
@@ -201,6 +206,12 @@ function lineScopes(doc: NormalizedDocument, format: DocumentFormat, rank: Scope
   });
   const named = headings.some((h) => h !== null && scopeIn(h, false) !== null);
   let scope: Scope | undefined = named ? undefined : (rank ?? undefined);
+  if (!named && !rank) {
+    const refinanceLines = doc.lines.filter((line) => scopesIn(unconditioned(line.text)).includes("refinance")).length;
+    const blocked = doc.lines.some((line) => scopesIn(line.text).some((loan) => loan !== "refinance")
+      || /\b(during construction|construction (?:interest|draws?)|pendant la construction|interets? de construction)\b/.test(fold(line.text)));
+    if (refinanceLines >= 2 && !blocked) scope = "refinance";
+  }
   return headings.map((h) => {
     if (h !== null) scope = scopeIn(h, !rank || named) ?? scope;
     return scope;
@@ -767,7 +778,6 @@ function readSentence(sentence: { text: string; start: number }, para0: Paragrap
   const RATE_WORD: Record<Scope, string> = { senior: "senior rate", mezzanine: "mezzanine rate", refinance: "take-out rate" };
   // A sentence that names a non-senior loan carries it: the loan a clause names holds until a clause names another.
   // A loan named only inside a condition ("if the take-out does not fund, we amortize over 25 years") is not the loan the terms belong to.
-  const unconditioned = (x: string) => x.replace(/(?:^|[\s,;(])(?:if|unless|should|until|in case|si|sauf si|à moins qu\S*|a moins qu\S*)\s[^,;]*/giu, " ");
   const loanSentence = scopesIn(unconditioned(text)).some((s) => s !== "senior");
   let sentenceLoan: Scope | null = null;
   tokens.forEach((t, i) => {
