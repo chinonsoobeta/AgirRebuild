@@ -277,6 +277,8 @@ const REPLACED_LOAN_AFTER_RE = new RegExp(String.raw`^\s+${REPLACED_LOAN}`);
 const FIGURE_NOUN_RE = /\b(?:estimates?|amounts?|figures?|quotes?|budgets?|rates?|numbers?|costs?|montants?|estimations?|taux|chiffres?|couts?|soumissions?)\b/;
 const NOT_PART_NOTE = "Marked as not part of this deal";
 const MEMO_SECTION_RE = /^(?:memos?|notes?|info|for information|pour memoire|pour information)\s*:?$/;
+// "Notes" or "Info" alone may be a sheet's only category column, holding its inputs; it marks rows only beside another category.
+const WEAK_MEMO_SECTION_RE = /^(?:notes?|info)\s*:?$/;
 // "taxes excluded" and "excluded: HST" describe an amount's basis, not the row.
 const TAX_WORDS = String.raw`(?:taxes?|hst|gst|pst|qst|tps|tvq|tva|vat|sales tax)`;
 const EXCLUDED_WORD = String.raw`exclu(?:ded|e?s?)`;
@@ -299,7 +301,7 @@ const NOT_PART_RE = new RegExp(
     String.raw`\bnot (?:a |an )?(?:currently )?(?:modell?ed )?input\b`,
     String.raw`\bnot currently modell?ed\b`,
     String.raw`\b(?:for (?:information|reference) only|memo items?|pour information seulement)\b`,
-    String.raw`\bmemo only\b|\(\s*memo\s*\)|^\s*memo\s*:|\bpour memoire\b|(?<![\w.@/])p\.m\.(?![\w@/])`,
+    String.raw`\bmemo only\b|\(\s*memo\s*\)|^\s*memo\s*:|\bpour memoire\b|(?<!\d\s?)(?<![\w.@/])p\.m\.(?![\w@/])`,
     String.raw`\bnot (?:included in the total|in (?:the )?total)\b|\bhors total\b|\bnon inclus(?:e|es|s)? dans le total\b`,
     String.raw`\bnot (?:a )?part of\b`,
     String.raw`\bnot included in (?:the |this |our |that )?(?:project|deal|transaction|budget|scope)\b`,
@@ -585,12 +587,15 @@ const corrects = (gap: string, prev: NumberToken, t: NumberToken) => (CORRECTION
 
 const CHANGE_FROM_RE = /(?<![\p{L}])(?:moved|went|increased|decreased|revised|changed|rose|fell|passe|pass[ée]e?s?)\s+(?:from|de|d['’])\s*$/iu;
 
+const DASH_REMARK_RE = /^(?:that|this|which|it|these|those|ce|cela|ceci|c['’ ]?est|qui|soit)\b|\b(?:not|pas|non|n['’]t)\b/;
 /** A figure-first dash item (or run of items), never a correction after a labelled amount. */
 function figureDashItems(text: string, format: DocumentFormat): { token: NumberToken; label: string }[] | null {
   const tokens = tokenize(text, format);
   if (!tokens.length || text.slice(0, tokens[0]!.start).trim()) return null;
   const items = tokens.map((token, i) => ({ token, label: /^\s+[—–]\s+(\p{L}.*)$/u.exec(text.slice(token.end, tokens[i + 1]?.start ?? text.length))?.[1]?.trim() }));
-  return items.every((x) => x.label) ? items as { token: NumberToken; label: string }[] : null;
+  // A clause after the dash ("that is what the lender asked for", "pas la durée des travaux") is a remark, not the figure's label.
+  const remark = (label: string) => DASH_REMARK_RE.test(fold(label));
+  return items.every((x) => x.label && !remark(x.label)) ? items as { token: NumberToken; label: string }[] : null;
 }
 
 function readSentence(sentence: { text: string; start: number }, para0: Paragraph, result: ExtractionResult, carried: string | null = null) {
@@ -1864,10 +1869,11 @@ function fromTable(table0: Table, result: ExtractionResult, notes: string[] = []
       // The item a block heading named, until a blank row or a total row.
       let block = s.item;
       const valueFirstSection = isValueFirstSection(s.rows, result.format);
+      const otherCategory = (cat: string) => [...catOf.values()].some((c) => fold(c) !== fold(cat));
       s.rows.forEach((row0) => {
         const cat = catOf.get(row0);
         // A Notes category marks only this row; an ordinary document title "Notes" does not exclude its inputs.
-        const catExcluded = !!cat && (markedNotPart(cat) || MEMO_SECTION_RE.test(fold(cat)));
+        const catExcluded = !!cat && (markedNotPart(cat) || (MEMO_SECTION_RE.test(fold(cat)) && (!WEAK_MEMO_SECTION_RE.test(fold(cat)) || otherCategory(cat))));
         const scope = (cat && scopeIn(cat)) || s.scope;
         const loanContext = s.loanScope || !!(cat && scopeIn(cat));
         if (!s.excluded && !catExcluded && namedRow(row0, table, result)) return;

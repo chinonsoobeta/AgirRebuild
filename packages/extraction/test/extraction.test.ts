@@ -6645,3 +6645,28 @@ describe("card 114: memo lines, the second loan, and figure — label lists", ()
     expect(pick(read("Please use 9 - this replaces the teaser."))).toEqual([]);
   });
 });
+
+describe("card 114 audit: a memo word, a second loan and a dash item stay what they were", () => {
+  const read = (...lines: string[]) => extractCandidates({ kind: "pdf", lines: lines.map((text, i) => ({ text, location: `page 1, line ${i + 1}` })), tables: [], pageCount: 1, needsOcr: false, fullText: lines.join("\n") });
+  const sheet = (rows: (string | number)[][]) => extractCandidates({ kind: "xlsx", lines: [], tables: [{ name: "Base", rows: rows.map((row, i) => row.map((v, c): Cell => ({ text: String(v), ref: `${String.fromCharCode(65 + c)}${i + 1}`, ...(typeof v === "number" ? { number: v } : {}) }))) }], pageCount: 1, needsOcr: false, fullText: "" });
+  const pick = (r: ReturnType<typeof read>) => r.candidates.map((c) => [c.fieldKey, c.value]);
+  test.each(["Site meeting at 3 p.m. Land cost: $600,000", "Call at 2 p.m.; land cost is $600,000", "Réunion à 14 h, 3 p.m. : coût du terrain 600 000 $"])("a time of day is no memo mark: %s", (line) => {
+    expect(pick(read(line))).toContainEqual(["land_cost", 600000]);
+  });
+  test.each(["Notes", "Info", "Note"])("a sheet whose only category is %s reads its rows", (cat) => {
+    const r = sheet([[cat, "Build period in months", 18], [cat, "Hold in years", 7], [cat, "Exit cap", "5.5%"]]);
+    expect(pick(r)).toEqual([["construction_months", 18], ["hold_years", 7], ["exit_cap_rate_pct", 5.5]]);
+  });
+  test.each([
+    "5% — that is what the lender asked for, not our exit cap",
+    "6% — this was the exit cap last year, not today's",
+    "18 months — which the lender will not accept as the build period",
+    "5 % — c'est le taux de capitalisation du prêteur, pas le nôtre",
+    "18 mois — pas la durée des travaux",
+  ])("a dash followed by a sentence is no label: %s", (line) => {
+    expect(pick(read(line))).toEqual([]);
+  });
+  test.each(["Taux du deuxième étage : 5 %", "Rate on the second phase: 5%", "Amortization of the second building: 10 years", "Intérêt du deuxième trimestre : 5 %"])("a second floor, phase or building is no second loan: %s", (line) => {
+    expect(pick(read(line)).filter(([k]) => String(k).startsWith("mezz"))).toEqual([]);
+  });
+});
