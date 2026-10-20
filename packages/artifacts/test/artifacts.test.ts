@@ -1506,7 +1506,7 @@ describe("card 97c report rendering", () => {
   test("renames DSCR only for rendering and lets provenance tables break between pages", () => {
     const x=mapleInput("lender_package");
     x.assumptions[0]={...x.assumptions[0]!,sponsorStated:true};
-    x.assumptions.push({...x.assumptions[0]!,fieldKey:"land_transfer_tax",label:"Land transfer tax",sourceKind:"table",sponsorStated:false,source:"From a published table: Fictional published source"});
+    x.assumptions.push({...x.assumptions[0]!,fieldKey:"land_transfer_tax",label:"Land transfer tax",sourceKind:"table",sponsorStated:false,source:"Published table: Fictional published source"});
     const stored=canonicalJson(x.result),model=buildModel(x),html=renderHtml(model),text=visibleText(html);
     expect(text).not.toMatch(/\bDSCR\b/);
     expect(text).toContain("DCR");

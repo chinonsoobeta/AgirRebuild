@@ -2971,9 +2971,11 @@ describe("card 94c table proposals", () => {
     expect(JSON.parse(stored.source_table)).toMatchObject({tableId:land.tableId,optionKey:option.key});
     const a=(await review(d)).assumptions.find((a:any)=>a.fieldKey === land.fieldKey);
     expect(a.sponsorStated).toBe(false);
-    expect(a.source).toContain("From a published table: Service Nova Scotia");
-    expect(a.source).toContain("Accepted by Table Proposals Owner.");
-    expect(a.source).toContain("Computed from the stated Land cost.");
+    expect(a.tableSource.title).toBe(land.title);
+    expect(a.reason).toContain(land.title);
+    expect(a.source).toContain("Published table: Service Nova Scotia");
+    expect(a.source).toContain("· accepted by Table Proposals Owner");
+    expect(a.source).toContain("· uses stated: Land cost");
     for (const [fieldKey,value] of [["hard_cost",1000000],["soft_cost",100000],["contingency",50000],["construction_months",12],["lease_up_months",6],["hold_years",5],["stabilized_occupancy_pct",95],["expense_ratio_pct",30],["exit_cap_rate_pct",5],["selling_costs_pct",0],["senior_loan_amount",0],["refinance_rate_pct",4],["development_charges",0]] as [string,number][]) expect((await call(owner,"POST",`/api/deals/${d}/values`,{fieldKey,value,reason:"Fictional table report setup"})).status).toBe(200);
     expect((await call(owner,"POST",`/api/deals/${d}/values`,{fieldKey:"unit_rent_monthly",itemKey:"Residential",value:2000,reason:"Fictional table report rent"})).status).toBe(200);
     const made=await call(owner,"POST",`/api/deals/${d}/runs`);expect(made.status).toBe(200);
@@ -2983,7 +2985,7 @@ describe("card 94c table proposals", () => {
     const {buildModel,renderHtml,visibleText}=await import("@agir/artifacts");
     const text=visibleText(renderHtml(buildModel({kind:"lender_package",deal:{name:"Fictional table report",assetType:"Multifamily",location:"Halifax",province:"NS",currency:"CAD"},run:{id:made.json.id,runNumber:1,createdAt:"2026-10-20",engineVersion:view.engineVersion,policyVersion:view.policyVersion,policyHash:"p",inputHash:view.inputHash,resultHash:view.resultHash},...snap,result:view.result,assumptions:snap.assumptions.map((a:any)=>({...a,unit:a.fieldKey === "land_transfer_tax" ? "$" : "units"})),decision:null})));
     expect(text).toContain("Taken from published tables");
-    expect(text).toContain("From a published table: Service Nova Scotia");
+    expect(text).toContain("Published table: Service Nova Scotia");
     const copied=(await call(owner,"POST",`/api/deals/${d}/copy`,{name:"Fictional table copy"})).json.id;
     expect(copied).toBeTruthy();
     expect((await db.query<any>(`select source_table from assumptions where deal_id=$1 and field_key='land_transfer_tax'`,[copied]))[0].source_table).toBe(stored.source_table);

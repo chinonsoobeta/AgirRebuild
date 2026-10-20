@@ -89,3 +89,14 @@ One intermediate gate failed because test formatting accidentally added spaces i
 - Narrow Review layout is checked with the permitted CSS assertion, not a live 597 px browser measurement.
 - The workspace-switch regression uses the real `useDeal` hook with mocked session/query/effect execution.
 - No remaining implementation question is open. Blind-set rescoring and human migration review remain outside this local verification.
+
+## Post-audit corrections — 2026-10-19
+
+The owner's four corrections supersede the broad EGI fallback, the water/wastewater alias, and the longer published-table source wording described above.
+
+- EGI percentages now require a cost label: management/fee/variable labels map to variable_expense_pct; total/operating-expense labels map to expense_ratio_pct. An EGI basis alone does not choose either field. Regression cases cover the supplied total-expense, management-fee and vacancy examples plus English/French variants.
+- Removed only water and wastewater charges from development_charges. Operating-budget water charges are not read as development charges; capital cost charges still are.
+- Word cause: the parser retained the complete Heading 1, Title, and bold paragraph text. The existing scope reader already assigned rate and amortization to refinance fields. The missing candidate was “Interest-only period: none.”: the reader expected a numeric token and emitted nothing for none. It now passes explicit none through the existing scoped mapper as zero months, accepting only IO fields. No parser or alias workaround was needed. Each Word case also combines its candidates with a separate construction term sheet and checks for no conflicts and no senior fields from the take-out document.
+- Updated source labels to the exact shorter English/French wording, with no added final stop or title. The conditional prerequisite labels are unchanged. Conflict-side wording is Published table / Tableau publié. The table title remains in the saved reason and source snapshot, covered in the acceptance test.
+
+Verification: whole extraction file (`VITEST_MAX_WORKERS=1 npx vitest run packages/extraction/test/extraction.test.ts`) passed 655 tests. PR gate (`VITEST_MAX_WORKERS=2 npm run gate -- --tier=pr`) passed both typechecks and 1,784 tests across 15 files, including the whole API file. `git diff --check` passed. No engine/result or reference-deal pins were changed. No network, push, migration, dependency, or service was added for these corrections.

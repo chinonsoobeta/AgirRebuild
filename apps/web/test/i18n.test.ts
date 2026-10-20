@@ -3,7 +3,7 @@ import type { EngineInput, ReadinessItem } from "@agir/contracts";
 import { assemble, validateInput, EngineInputError } from "../../../packages/engine/src/index.ts";
 import validateSource from "../../../packages/engine/src/validate.ts?raw";
 import { allEquityDeal } from "../../../packages/engine/test/fixtures.ts";
-import { FIELDS, METRICS, POLICIES, landTransferTaxOptions, gstHstNetOptions } from "@agir/contracts";
+import { FIELDS, METRICS, POLICIES, tableSourceLabel, landTransferTaxOptions, gstHstNetOptions } from "@agir/contracts";
 import { SF_PER_M2 } from "@agir/numbers";
 import { reviewWaiting } from "../src/components/ui.tsx";
 import { approvable, enteredInUnit, foreignIn, keepsWithReason } from "../src/routes/review.tsx";
@@ -11,6 +11,14 @@ import { describeEvent } from "../src/routes/audit.tsx";
 import { build, checkText, dealStatus, translateMessage, verdictText, type Key } from "../src/i18n.tsx";
 
 describe("a run's source labels in French", () => {
+  it("uses the owner's short bilingual published-table labels", () => {
+    const source = { tableId: "premium", optionKey: "select", publisher: "CMHC", title: "Title retained in the source snapshot", effective: "2025-07-14", acceptedBy: "Dana Analyst", fields: ["refinance_ltv_pct", "refinance_amort_years", "refinance_mli_select_points"] };
+    expect(tableSourceLabel(source)).toBe("Published table: CMHC, effective 2025-07-14 · accepted by Dana Analyst · uses stated: Refinance loan-to-value, Refinance amortization, MLI Select points");
+    expect(tableSourceLabel(source, "fr")).toBe("Tableau publié : CMHC, en vigueur le 2025-07-14 · accepté par Dana Analyst · selon les valeurs déclarées : Ratio prêt-valeur du refinancement, Amortissement du refinancement, Points MLI Select");
+    expect(tableSourceLabel({ ...source, fields: [] })).toBe("Published table: CMHC, effective 2025-07-14 · accepted by Dana Analyst");
+    expect(translateMessage("Published table")).toBe("Tableau publié");
+  });
+
   it("translates the line a value was read from", () => {
     expect(translateMessage("plans.txt, line 2")).toBe("plans.txt, ligne 2");
     expect(translateMessage("memo.pdf, page 3, line 14")).toBe("memo.pdf, page 3, ligne 14");

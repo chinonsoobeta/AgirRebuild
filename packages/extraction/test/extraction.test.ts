@@ -400,6 +400,8 @@ describe("parsers keep a document's structure", () => {
     const zip = new JSZip();
     zip.file("[Content_Types].xml", `<?xml version="1.0" encoding="UTF-8"?><Types xmlns="http://schemas.openxmlformats.org/package/2006/content-types"><Default Extension="rels" ContentType="application/vnd.openxmlformats-package.relationships+xml"/><Default Extension="xml" ContentType="application/xml"/><Override PartName="/word/document.xml" ContentType="application/vnd.openxmlformats-officedocument.wordprocessingml.document.main+xml"/></Types>`);
     zip.file("_rels/.rels", `<?xml version="1.0" encoding="UTF-8"?><Relationships xmlns="http://schemas.openxmlformats.org/package/2006/relationships"><Relationship Id="rId1" Type="http://schemas.openxmlformats.org/officeDocument/2006/relationships/officeDocument" Target="word/document.xml"/></Relationships>`);
+    zip.file("word/_rels/document.xml.rels", `<?xml version="1.0" encoding="UTF-8"?><Relationships xmlns="http://schemas.openxmlformats.org/package/2006/relationships"><Relationship Id="styles" Type="http://schemas.openxmlformats.org/officeDocument/2006/relationships/styles" Target="styles.xml"/></Relationships>`);
+    zip.file("word/styles.xml", `<w:styles xmlns:w="http://schemas.openxmlformats.org/wordprocessingml/2006/main"><w:style w:type="paragraph" w:styleId="Heading1"><w:name w:val="heading 1"/></w:style><w:style w:type="paragraph" w:styleId="Title"><w:name w:val="Title"/></w:style></w:styles>`);
     zip.file("word/document.xml", `<?xml version="1.0" encoding="UTF-8"?><w:document xmlns:w="http://schemas.openxmlformats.org/wordprocessingml/2006/main"><w:body>${body}</w:body></w:document>`);
     return new Uint8Array(await zip.generateAsync({ type: "uint8array" }));
   }
@@ -476,6 +478,21 @@ describe("parsers keep a document's structure", () => {
   test("a take-out loan's rows in a Word table are the refinance, not the senior loan", async () => {
     const d = await parseDocument(await docx(table([["Loan amount", "$2,000,000"], ["Interest rate", "5.85%"]]) + table([["Take-out loan amount", "$2,600,000"], ["Take-out interest rate", "4.55%"], ["Take-out amortization", "40 years"]])), "m.docx");
     expect(extractCandidates(d).candidates.map((c) => [c.fieldKey, c.value])).toEqual([["senior_loan_amount", 2_000_000], ["senior_rate_pct", 5.85], ["refinance_amount", 2_600_000], ["refinance_rate_pct", 4.55], ["refinance_amort_years", 40]]);
+  });
+
+  test.each(["Heading1", "Title", "bold"])("a Word %s take-out heading keeps all terms separate from construction", async (style) => {
+    const heading = style === "bold"
+      ? '<w:p><w:r><w:rPr><w:b/></w:rPr><w:t>Insured take-out commitment</w:t></w:r></w:p>'
+      : `<w:p><w:pPr><w:pStyle w:val="${style}"/></w:pPr><w:r><w:t>Insured take-out commitment</w:t></w:r></w:p>`;
+    const d = await parseDocument(await docx(heading + para("Interest rate: 4.40% fixed for the loan.") + para("Amortization: 40 years.") + para("Interest-only period: none.")), "permanent.docx");
+    expect(d.lines.map((line) => line.text)).toEqual(["Insured take-out commitment", "Interest rate: 4.40% fixed for the loan.", "Amortization: 40 years.", "Interest-only period: none."]);
+    const takeout = extractCandidates(d);
+    expect(takeout.candidates.map((c) => [c.fieldKey, c.value])).toEqual([["refinance_rate_pct", 4.4], ["refinance_amort_years", 40], ["refinance_io_months", 0]]);
+    expect(takeout.candidates.some((c) => c.fieldKey?.startsWith("senior_"))).toBe(false);
+    const construction = extractCandidates(await parseDocument(await docx(para("Construction term sheet") + para("Interest rate: 6.10%") + para("Amortization: 25 years.") + para("Interest-only period: 18 months.")), "construction.docx"));
+    expect(construction.candidates.map((c) => [c.fieldKey, c.value])).toEqual([["senior_rate_pct", 6.1], ["senior_amort_years", 25], ["senior_io_months", 18]]);
+    const proposals = consolidate([...takeout.candidates.map((c) => ({ ...c, documentId: "permanent", documentName: "permanent.docx" })), ...construction.candidates.map((c) => ({ ...c, documentId: "construction", documentName: "construction.docx" }))]);
+    expect(proposals.filter((p) => p.status === "conflicting")).toEqual([]);
   });
 
   // A run of text, struck through when `struck` is true.
@@ -5049,7 +5066,6 @@ describe("card 97e general Canadian reading rules", () => {
     ["Development cost charges budget: $52,800", "development_charges", 52800],
     ["Capital cost charges payable: $41,200", "development_charges", 41200],
     ["Capital cost contribution allowed: $37,600", "development_charges", 37600],
-    ["Water and wastewater charges total: $29,700", "development_charges", 29700],
     ["Redevances de développement prévues : 36 900,00 $ CAD", "development_charges", 36900],
   ])("Canadian cost name: %s", (line, field, value) => expect(values(read([line as string]))).toEqual([[field, value]]));
   test.each([
@@ -5066,10 +5082,29 @@ describe("card 97e general Canadian reading rules", () => {
     ["The lender requires a minimum debt coverage ratio covenant of 1.31x.", 1.31],
   ])("a covenant is a lender limit that is read: %s", (line, value) => expect(values(read([line as string]))).toEqual([["min_dscr_covenant", value]]));
   test.each([
-    ["Operating provision: 4% of effective gross income", 4],
-    ["Recurring expense allowance: 6% of EGI", 6],
-    ["Provision d'exploitation : 3 % du revenu brut effectif", 3],
-    ["Gestion locative : 5 % du revenu brut effectif", 5],
-  ])("a stated percentage of EGI is a variable expense: %s", (line, value) => expect(values(read([line as string]))).toEqual([["variable_expense_pct", value]]));
+    ["Total expenses are 35% of EGI.", "expense_ratio_pct", 35],
+    ["Management fee: 4% of effective gross income", "variable_expense_pct", 4],
+    ["Property management fee: 5% of EGI", "variable_expense_pct", 5],
+    ["Fee: 2% of EGI", "variable_expense_pct", 2],
+    ["Variable: 6% of EGI", "variable_expense_pct", 6],
+    ["Gestion locative : 5 % du revenu brut effectif", "variable_expense_pct", 5],
+    ["Frais de gestion : 4 % du revenu brut effectif", "variable_expense_pct", 4],
+    ["Dépenses : 32 % du revenu brut effectif", "expense_ratio_pct", 32],
+    ["Charges d'exploitation : 34 % du revenu brut effectif", "expense_ratio_pct", 34],
+    ["Operating expenses: 33% of EGI", "expense_ratio_pct", 33],
+    ["OPEX: 31% of EGI", "expense_ratio_pct", 31],
+    ["Expenses: 36% of EGI", "expense_ratio_pct", 36],
+  ])("an EGI percentage uses its own cost label: %s", (line, field, value) => {
+    const r = read([line as string]);
+    expect(values(r)).toEqual([[field, value]]);
+    expect(r.candidates.some((c) => c.fieldKey === (field === "variable_expense_pct" ? "expense_ratio_pct" : "variable_expense_pct"))).toBe(false);
+  });
+  test.each(["Vacancy allowance: 3% of effective gross income", "Operating provision: 4% of effective gross income", "Recurring expense allowance: 6% of EGI", "Provision d'exploitation : 3 % du revenu brut effectif"])("an EGI basis alone does not name an expense input: %s", (line) => {
+    expect(read([line]).candidates.some((c) => c.fieldKey === "variable_expense_pct" || c.fieldKey === "expense_ratio_pct")).toBe(false);
+  });
+  test("water charges in an operating budget are not development charges", () => {
+    expect(read(["Operating budget", "Water and wastewater charges: $9,600"]).candidates.some((c) => c.fieldKey === "development_charges")).toBe(false);
+    expect(values(read(["Capital cost charges: $132,000"]))).toEqual([["development_charges", 132000]]);
+  });
   test.each(["Operating provision: 4% of equity", "Provision d'exploitation : 3 % des fonds propres"])("does not turn another basis into EGI: %s", (line) => expect(read([line]).candidates.some((c) => c.fieldKey === "variable_expense_pct")).toBe(false));
 });

@@ -1283,7 +1283,7 @@ const SALE_SHARES: Record<string, string> = {
 };
 
 const FR_REASONS: [RegExp, string | ((m: RegExpMatchArray) => string)][] = [
-  [/^From a published table$/, "Tiré d’un tableau publié"],
+  [/^Published table$/, "Tableau publié"],
   [/^This table option is not available\. Review the current proposals\.$/, "Cette option du tableau n’est pas disponible. Consultez les propositions actuelles."],
   [/^approve the unit counts first$/, "Approuvez d’abord les nombres de logements"],
   [/^British Columbia$/, "Colombie-Britannique"],

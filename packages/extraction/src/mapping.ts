@@ -126,6 +126,8 @@ const WEAK_MONEY = new Set(["lot", "site", "parking", "laundry", "storage", "sta
 // These name a field only when the figure's own words say what it is a share of: "management 4% of EGI", never "management 1.5% of equity".
 const EGI_BASE_ALIASES = new Set(["management", "gestion", "depenses"]);
 const EGI_AFTER_RE = /^\s*(?:of|on|de|des|du|d)\s+(?:the\s+|les?\s+|la\s+)?(?:egi|effective gross|gross (?:revenue|income)|revenu brut effectif|revenues?|revenus?)\b/;
+const STATED_EGI_AFTER_RE = /^\s*(?:of\s+(?:the\s+)?(?:effective gross income|egi)|du\s+revenu brut effectif)\b/;
+const VARIABLE_COST_RE = /\b(management|fees?|variables?|frais de gestion|gestion)\b/;
 // The limited partners' own share needs no word before it but an article: "return to limited partners 8%" is the return.
 const LP_ALIASES = new Set(["limited partners", "lp", "lps", "commanditaires", ...FIELD_BY_KEY.get("lp_share_pct")!.aliases.filter((a) => /^(?:lps?|limited partners|commanditaires) (?:supply|supplies|provides?|funds?|contributes?|apportent|fournissent|financent)$/.test(a))]);
 const LP_LEAD_RE = /^(?:\s|the|our|le|la|les|notre|nos)*$/;
@@ -222,7 +224,8 @@ function lenderFigure(rawLabel: string, t: NumberToken, opts: MapOptions): strin
   const listed = INCLUDING_RE.test(before) || BUDGET_NAME_RE.test(before);
   const rentShaped = t.unit === "$/sf" || t.unit === "$/m2";
   if (t.unit !== "%" && (TI_RE.test(plain) || TI_AFTER_RE.test(tail) || (rentShaped && (ALLOWANCE_RE.test(plain) || ALLOWANCE_AFTER_RE.test(tail))))) return "A tenant improvement allowance, not rent";
-  if (!opts.budget && ((FEE_RE.test(without(plain, FEE_RE)) && !listed) || FEE_AFTER_RE.test(tail))) return "A fee or premium, not an input";
+  const variableEgi = t.unit === "%" && VARIABLE_COST_RE.test(plain) && STATED_EGI_AFTER_RE.test(foldText(opts.after ?? ""));
+  if (!opts.budget && !variableEgi && ((FEE_RE.test(without(plain, FEE_RE)) && !listed) || FEE_AFTER_RE.test(tail))) return "A fee or premium, not an input";
   // A leased or occupied share (in its own label or right after it) with a condition marker in its clause is the lender's condition.
   const after = prose && at >= 0 ? (ctx.slice(at + raw.length).split(/[,;.]/)[0] ?? "") : "";
   if (t.unit === "%" && (LEASED_RE.test(plain) || LEASED_RE.test(after.split(" ").slice(0, 6).join(" "))) && CONDITION_RE.test(`${plain} ${after}`)) return LENDER_CONDITION;
@@ -891,8 +894,12 @@ function mapLabel(rawLabel: string, t: NumberToken, opts: MapOptions = {}): Mapp
     return notAssumed(item.def.key) ?? { kind: "field", fieldKey: item.def.key, itemKey: typed ?? item.itemKey, value: item.value, unitSeen: item.unitSeen };
   }
   if (best) return notAssumed(best.def.key) ?? { kind: "field", fieldKey: best.def.key, itemKey: null, value: best.value, unitSeen: best.unitSeen };
-  // An explicit EGI basis states a variable expense even without a catalogue label.
-  if (t.unit === "%" && /^\s*(?:of\s+(?:the\s+)?(?:effective gross income|egi)|du\s+revenu brut effectif)\b/.test(foldText(opts.after ?? ""))) return asField(FIELD_BY_KEY.get("variable_expense_pct")!) ?? { kind: "unmapped" };
+  // An EGI basis supplies the unit, but the cost's own label must identify the field.
+  if (t.unit === "%" && STATED_EGI_AFTER_RE.test(foldText(opts.after ?? ""))) {
+    const key = VARIABLE_COST_RE.test(label) ? "variable_expense_pct"
+      : /\b(expenses|opex|depenses|charges d exploitation)\b/.test(label) ? "expense_ratio_pct" : null;
+    if (key) return asField(FIELD_BY_KEY.get(key)!) ?? { kind: "unmapped" };
+  }
   if (item) {
     return notAssumed(item.def.key) ?? { kind: "field", fieldKey: item.def.key, itemKey: "All units", value: item.value, unitSeen: item.unitSeen };
   }

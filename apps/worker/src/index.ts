@@ -243,7 +243,7 @@ const sameValues = (a: { value: number }[] | null, b: { value: number }[] | null
 };
 
 /** How a settled value is named beside the documents that disagree with it. */
-const settledLabel = (e: { source_kind: string }) => (e.source_kind === "default" ? "Default accepted" : e.source_kind === "analyst" ? "Entered by an analyst" : e.source_kind === "table" ? "From a published table" : "Approved earlier");
+const settledLabel = (e: { source_kind: string }) => (e.source_kind === "default" ? "Default accepted" : e.source_kind === "analyst" ? "Entered by an analyst" : e.source_kind === "table" ? "Published table" : "Approved earlier");
 
 /** Fold every live document's values into the review queue. Never approves anything. */
 export async function reconcileDeal(db: Db, dealId: string) {

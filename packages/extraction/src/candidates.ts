@@ -562,6 +562,15 @@ function readSentence(sentence: { text: string; start: number }, para0: Paragrap
   // A whole sentence that states a flag outright ("Draws follow an S-curve") is the flag; numbers in it are read as usual.
   const stated = para0.excluded || markedNotPart(text) ? null : flagSentence(text);
   if (stated) result.candidates.push({ fieldKey: stated.fieldKey, itemKey: null, value: stated.value, raw: stated.raw, unitSeen: "flag", location: locationOf(0), context: sentence.text.slice(0, 240), rule: "line:flag" });
+  // An explicit absence of an interest-only period is zero months, in the loan's own scope.
+  if (colonAt > 0 && /^\s*none[.!]?\s*$/i.test(text.slice(colonAt + 1)) && !para.excluded && !markedNotPart(text)) {
+    const zero: NumberToken = { raw: text.slice(colonAt + 1).trim(), start: colonAt + 1, end: text.length, value: 0, unit: "months", currency: false, currencyCode: null, scaled: false };
+    const mapped = mapToken(label, zero, { scope: para.scope });
+    if (mapped.kind === "field" && /^(senior|mezz|refinance)_io_months$/.test(mapped.fieldKey)) {
+      record(result, mapped, zero, { raw: zero.raw, location: locationOf(colonAt), context: sentence.text.slice(0, 240), rule: "line:label-value" });
+      return;
+    }
+  }
   let tokens = tokenize(text, result.format);
   // A number that is part of a street address is not a value.
   const addresses = tokens.filter((t) => isAddress(text, t));

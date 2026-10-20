@@ -120,6 +120,6 @@ export function gstHstNetOptions({ province, units, selling, asOf }: { province:
 export type TableSource = { tableId: string; optionKey: string; publisher: string; title: string; effective: string; fields: string[]; acceptedBy: string };
 export function tableSourceLabel(s: TableSource, lang: "en" | "fr" = "en"): string {
   const fields=s.fields.map(key=>lang === "fr" ? FR_FIELDS[key] ?? FIELD_BY_KEY.get(key)?.label ?? key : FIELD_BY_KEY.get(key)?.label ?? key).join(", ");
-  const label=lang === "fr" ? `Tiré d’un tableau publié : ${s.publisher}, ${s.title}, en vigueur le ${s.effective}. Accepté par ${s.acceptedBy}.` : `From a published table: ${s.publisher}, ${s.title}, effective ${s.effective}. Accepted by ${s.acceptedBy}.`;
-  return label + (fields ? lang === "fr" ? ` Calculé à partir de : ${fields}.` : ` Computed from the stated ${fields}.` : "");
+  const label=lang === "fr" ? `Tableau publié : ${s.publisher}, en vigueur le ${s.effective} · accepté par ${s.acceptedBy}` : `Published table: ${s.publisher}, effective ${s.effective} · accepted by ${s.acceptedBy}`;
+  return label + (fields ? lang === "fr" ? ` · selon les valeurs déclarées : ${fields}` : ` · uses stated: ${fields}` : "");
 }
