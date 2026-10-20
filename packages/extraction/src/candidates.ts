@@ -2,7 +2,7 @@ import { CONCEPTS, LOAN_NOUN, STATED_TOTAL } from "./concepts.ts";
 import { FIELD_BY_KEY, OUTPUT_LIKE_PHRASES } from "@agir/contracts";
 import { detectFormat, normalizeText, SF_PER_M2, tokenize, unitTypesIn, wholeUnitType, type CurrencyCode, type DocumentFormat, type NumberToken } from "@agir/numbers";
 import type { Cell, NormalizedDocument, Table } from "./document.ts";
-import { BASIS_AFTER_RE, CREDIT_NOTE, REPLACED_LOAN, DEPOSIT_NOTE, DEPOSIT_RE, LTV_BASIS, canonicalItem, costSentence, currencyOf, flagRead, flagSentence, hasPhrase, isExitCapLabel, isTakeoutTimingLabel, isPlainRentLabel, loanNameOnly, loanTerm, mapToken, normalizeLabel, OLD_SHEET_RE, rankScope, SCENARIO_SHEET_NOTE, SCENARIO_SHEET_RE, SUPERSEDED_LABEL_NOTE, scopeIn, scopesIn, withCurrency, type MapOptions, type Mapped, type Scope } from "./mapping.ts";
+import { BASIS_AFTER_RE, CREDIT_NOTE, REPLACED_LOAN, DEPOSIT_NOTE, DEPOSIT_RE, LTV_BASIS, canonicalItem, costSentence, currencyOf, flagRead, flagSentence, hasPhrase, isExitCapLabel, isTakeoutTimingLabel, isPlainRentLabel, loanNameOnly, loanTerm, mapToken, normalizeLabel, withoutTaxBasis, OLD_SHEET_RE, rankScope, SCENARIO_SHEET_NOTE, SCENARIO_SHEET_RE, SUPERSEDED_LABEL_NOTE, scopeIn, scopesIn, withCurrency, type MapOptions, type Mapped, type Scope } from "./mapping.ts";
 
 /** One value found in one document, with where it came from and why it was (or was not) mapped. */
 export type Candidate = {
@@ -591,7 +591,13 @@ const DASH_REMARK_RE = /^(?:that|this|which|it|these|those|ce|cela|ceci|c['’ ]
 /** A figure-first dash item (or run of items), never a correction after a labelled amount. */
 function figureDashItems(text: string, format: DocumentFormat): { token: NumberToken; label: string }[] | null {
   const tokens = tokenize(text, format);
-  if (!tokens.length || text.slice(0, tokens[0]!.start).trim()) return null;
+  if (!tokens.length) return null;
+  const bullet = /^[—–-]$/.test(text.slice(0, tokens[0]!.start).trim());
+  if (bullet && tokens.every((t) => t.currency || t.unit === "$")) {
+    const items = tokens.map((token, i) => ({ token, label: text.slice(token.end, tokens[i + 1]?.start ?? text.length).replace(/\s*[—–-]\s*$/, "").trim() }));
+    return items.every((x) => /^\p{L}/u.test(x.label) && !DASH_REMARK_RE.test(fold(x.label))) ? items : null;
+  }
+  if (text.slice(0, tokens[0]!.start).trim()) return null;
   const items = tokens.map((token, i) => ({ token, label: /^\s+[—–]\s+(\p{L}.*)$/u.exec(text.slice(token.end, tokens[i + 1]?.start ?? text.length))?.[1]?.trim() }));
   // A clause after the dash ("that is what the lender asked for", "pas la durée des travaux") is a remark, not the figure's label.
   const remark = (label: string) => DASH_REMARK_RE.test(fold(label));
@@ -650,7 +656,7 @@ function readSentence(sentence: { text: string; start: number }, para0: Paragrap
   const dashItems = figureDashItems(text, result.format);
   if (dashItems) {
     for (const { token, label } of dashItems) {
-      const mapped = mapToken(label, token, { prose: true, labelAfter: true, scope: para.scope, context: label, quote });
+      const mapped = mapToken(label, token, { scope: para.scope, budgetConcept: true, context: label, quote });
       record(result, mapped, token, { raw: token.raw, location: locationOf(token.start), context: `${token.raw} — ${label}`, rule: "line:prose" });
     }
     return;
@@ -746,7 +752,7 @@ function readSentence(sentence: { text: string; start: number }, para0: Paragrap
     // A label that names nothing for any number ("Financing: a loan of ...") is an introduction: what follows is prose.
     const scope = para.scope;
     // A label for a unit field never names an item unless it is a unit type; the clause after the colon is then read as prose, its own unit types naming the items.
-    const opt = (t: NumberToken): MapOptions => ({ scope, seniorHeading: scope === "senior", quote, budgetConcept: true, after: text.slice(t.end), gap: text.slice(colon + 1, t.start) });
+    const opt = (t: NumberToken): MapOptions => ({ scope, seniorHeading: scope === "senior", quote, budgetConcept: true, after: text.slice(t.end, tokens[tokens.indexOf(t) + 1]?.start ?? text.length), gap: text.slice(colon + 1, t.start) });
     const first = tokens.map((t) => mapToken(label, t, opt(t))).find((m) => m.kind === "field");
     const unitField = first?.kind === "field" && first.itemKey !== null && UNIT_FIELDS.has(first.fieldKey);
     const labelTypes = unitTypesIn(label);
@@ -785,9 +791,9 @@ function readSentence(sentence: { text: string; start: number }, para0: Paragrap
           continue;
         }
         // After the first figure, one whose own words just before it name a different field ("at an exit cap of 5.5%") is read by that field; one with no words of its own stays with the label.
-        const own: Mapped | null = used && i > 0 ? mapToken(text.slice(tokens[i - 1]!.end, t.start), t, { scope, quote, budgetConcept: true, after: text.slice(t.end), prose: true, context: text }) : null;
+        const own: Mapped | null = used && i > 0 ? mapToken(text.slice(tokens[i - 1]!.end, t.start).replace(/^[\s,;]*(?:and|et|puis)?\s*/i, ""), t, { scope, quote, budgetConcept: true, after: text.slice(t.end, tokens[i + 1]?.start ?? text.length), prose: true, context: text }) : null;
         // A part the colon's budget line includes ("Hard costs: $X, including contingency of $Y") is inside that line, not a line of its own.
-        const inside: boolean = usedKey !== null && BUDGET_LINES.has(usedKey) && PART_OF_RE.test(fold(text.slice(colon + 1, t.start)));
+        const inside: boolean = usedKey !== null && BUDGET_LINES.has(usedKey) && PART_OF_RE.test(fold(withoutTaxBasis(text.slice(colon + 1, t.start))));
         const loan = i > 0 ? amounts.get(tokens[i - 1]!) : undefined;
         const beside = loan && t.unit === "%" && RATE_BESIDE_RE.test(text.slice(tokens[i - 1]!.end, t.start)) && !RATE_BASIS_RE.test(fold(text.slice(t.end, tokens[i + 1]?.start ?? text.length)))
           ? loanTerm(text.slice(tokens[i - 1]!.end, t.start), text.slice(t.end, tokens[i + 1]?.start ?? text.length), t, loan) : null;
@@ -864,7 +870,7 @@ function readSentence(sentence: { text: string; start: number }, para0: Paragrap
       from = t.end;
       return;
     }
-    let opts: MapOptions = { prose: true, scope: para.scope, budgetConcept: text.includes(":"), loanContext: para.scope !== undefined || conceptScope !== undefined || conceptLoan, conceptScope, seniorHeading: para.scope === "senior", context: text, quote, after: text.slice(t.end) };
+    let opts: MapOptions = { prose: true, scope: para.scope, budgetConcept: true, loanContext: para.scope !== undefined || conceptScope !== undefined || conceptLoan, conceptScope, seniorHeading: para.scope === "senior", context: text, quote, after: isMoney(t) ? afterFigure : text.slice(t.end) };
     let usedLabel = totalLabels.get(t) ?? label;
     if (loanSentence) {
       const named = scopesIn(unconditioned(label));
@@ -992,7 +998,7 @@ function conceptLinesInBudget(doc: NormalizedDocument, result: ExtractionResult,
     const sum = all.reduce((n, c) => n + c.value!, 0);
     const parts = unread.filter((u) => !(all.length >= 3 && u.value! >= sum - u.value!));
     // A block naming two or more cost fields lists cost lines, one per field: its unnamed lines are other costs, not more of these.
-    const fields = new Set(read.map((c) => c.fieldKey).filter((k) => CONCEPT_COSTS.has(k ?? "")));
+    const fields = new Set(read.map((c) => c.fieldKey).filter((k) => BUDGET_FIELDS.has(k ?? "")));
     for (const c of read) {
       if (c.rule !== "concept" || !CONCEPT_COSTS.has(c.fieldKey ?? "")) continue;
       if ((parts.length > 0 && fields.size < 2) || read.filter((x) => x.fieldKey === c.fieldKey).length > 1) withheld.add(c);
@@ -1626,14 +1632,14 @@ function fromBudget(table: Table, headerRow: number, roles: BudgetRoles, result:
 }
 
 // A word that opens a section of a sheet: a first column of these (or of any few repeated words) is a category column.
-const SECTION_WORD_RE = /^(?:uses?|sources?|hard|soft|finance|financing|financement|revenues?|revenus?|income|assumptions?|operating|opex|timing|inputs?|budget|emplois|hypotheses|land|terrain|acquisition|contingenc(?:y|ies)|imprevus|aleas|reserve|totals?|subtotal|sous-total|grand total|frais de financement|indirects|directs|construction|costs?|couts?|loan|equity|capital|exit|memos?|notes?|info|for information|pour memoire|pour information)\b/;
+const SECTION_WORD_RE = /^(?:uses?|sources?|hard|soft|finance|financing|financement|revenues?|revenus?|income|assumptions?|operating|opex|timing|inputs?|project|projet|travaux|budget|emplois|hypotheses|land|terrain|acquisition|contingenc(?:y|ies)|imprevus|aleas|reserve|totals?|subtotal|sous-total|grand total|frais de financement|indirects|directs|construction|costs?|couts?|loan|equity|capital|exit|memos?|notes?|info|for information|pour memoire|pour information)\b/;
 
 const filledCells = (row: Cell[]) => row.filter((c) => c.text.trim() || c.number !== undefined);
 
 // These structural budget categories name a cost line when the description itself names none.
 function budgetCategory(raw: string): string | null {
   const category = normalizeLabel(raw).label;
-  if (/^(?:hard(?: costs)?|construction|directs|couts directs)$/.test(category)) return "hard_cost";
+  if (/^(?:hard(?: costs)?|construction|travaux|directs|couts directs)$/.test(category)) return "hard_cost";
   if (/^(?:soft(?: costs)?|indirects|couts indirects)$/.test(category)) return "soft_cost";
   if (/^(?:land|terrain|acquisition)$/.test(category)) return "land_cost";
   // "Reserve" alone is not named: replacement, operating and interest reserves are not the contingency.
@@ -1642,7 +1648,7 @@ function budgetCategory(raw: string): string | null {
 
 function costCategory(raw: string): boolean {
   const label = normalizeLabel(raw).label;
-  return budgetCategory(raw) !== null || /^(?:uses?|costs?|budget|emplois|couts|totals?|subtotal|sous-total|grand total)$/.test(label);
+  return budgetCategory(raw) !== null || /^(?:uses?|costs?|project|projet|budget|emplois|couts|totals?|subtotal|sous-total|grand total)$/.test(label);
 }
 
 const CONCEPT_BESIDE_UNREAD_NOTE = "Other lines beside it name no field, so this line may be only part of its cost; enter the field by hand";
@@ -1930,7 +1936,7 @@ function fromTable(table0: Table, result: ExtractionResult, notes: string[] = []
           const t = cellToken(cell, result.format);
           if (!t) continue;
           const base = { raw: t.raw, location: cell.ref, context: rowContext(table.name, cat, row, labelCell, cell), rule: "table:label-value" };
-          let mapped = mapToken(relative ? labelCell.text.replace(BLOCK_RELATIVE_RE, "") : labelCell.text, t, { scope, loanContext, ahead: cell.text.slice(0, t.start), after: cell.text.slice(t.end), quote: quoteDocs.has(result) });
+          let mapped = mapToken(relative ? labelCell.text.replace(BLOCK_RELATIVE_RE, "") : labelCell.text, t, { scope, loanContext, budgetConcept: filledCells(row).length === 2 && !s.rows.some((r) => TOTAL_RE.test(labelOf(r, result.format)?.text ?? "")), ahead: cell.text.slice(0, t.start), after: cell.text.slice(t.end), quote: quoteDocs.has(result) });
           if (mapped.kind !== "field" && t.value !== null && (t.unit === "$" || t.currency) && closesUses(labelCell.text, read)) mapped = mapToken("total project cost", t, { scope: s.scope });
           if (block && mapped.kind === "field" && BLOCK_FIELDS.has(mapped.fieldKey) && !(mapped.itemKey && unitTypesIn(mapped.itemKey).length > 0)) mapped = { ...mapped, itemKey: block };
           if (relative && mapped.kind === "field" && mapped.fieldKey === "stabilized_occupancy_pct") mapped = { ...mapped, fieldKey: "item_occupancy_pct", itemKey: block! };

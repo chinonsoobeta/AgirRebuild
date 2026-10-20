@@ -15,6 +15,16 @@ export const LOAN_PERIOD = /\b(?:repayment (?:schedule|years)|years to repay (?:
 // v6/v8/v9/v10 totals: a named cost subtotal still belongs to that cost.
 // Card 115 audit: "stated total" and "total déclaré" alone, or of the project or its costs; "Stated total rent" is not the project's.
 export const STATED_TOTAL = /\b(?:stated project subtotal|project subtotal|(?:stated total|total declare)(?=\s*$|\s+(?:project|cost|costs|of (?:the )?(?:project|uses|costs)|budget|du projet|des couts|des emplois)\b)|total uses|all-in uses|sum of uses|total des emplois|somme des emplois)\b/;
+// Card 116: project total words qualify the budget, never a loan, rent or equity total.
+export const PROJECT_TOTAL = /\b(?:(?:whole|entire|total|complete|all-in|global)\s+(?:(?:project|job|investment)\s+)?(?:budget|envelope|investment|project cost|job cost)|(?:project|job)\s+(?:whole|entire|total|complete|all-in|global)\s+(?:budget|envelope|cost)|uses\s+(?:at (?:close|closing)|closed|brought forward|carried forward|stated)|closing uses total|enveloppe\s+(?:complete|globale|budgetaire)|cout global|total investissement)\b/;
+export const PROPERTY_WORD = /\b(?:sites?|lots?|land|dirt|ground|parcels?|property|house|building|shell|immeuble|fonds|propriete|batisse|terrain)\b/;
+export const ACQUISITION_WORD = /\b(?:purchas\w*|acquisition|acquir\w*|buy|buying|bought|paid for|closing|consideration|allocation|cheque|price|basis|under contract|achat|achet\w*|acquis\w*|prix|cloture)\b/;
+export const RISK_WORD = /\b(?:risk|surprises?|unknown\w*|unforeseen\w*|spare|just-in-case|unspent|uncommitted|extra work|imprevus|aleas)\b/;
+export const HOLDING_WORD = /\b(?:allowance|money|pot|provision|sleeve|cushion|buffer|held back|fund|sum|somme|reserve|coussin)\b/;
+export const RESIDUAL_COST = /\b(?:everything else|miscellaneous|misc|sundry|odd costs?|non-GC|non-?trade|(?:other|remaining) project (?:charges|bills|cash|spend|costs)|unallocated(?: project)? (?:charges|bills|costs)|autres debours|frais divers)\b/i;
+export const NOT_THIS_COST = /\b(?:values?|apprais\w*|assess\w*|valuation|valeur|land lease|ground rent|bail foncier|loyer du terrain|another (?:project|job)|other (?:project|job)(?! (?:charges|bills|cash|spend|costs))|autre projet|last year|prior year|previous year|an dernier|annee (?:derniere|precedente)|neighbou?r|voisin\w*|previous owner|ancien proprietaire|paid to date|payes? a ce jour|payee?s? a ce jour|to complete|a terminer|per (?:unit|suite|lot)|par (?:unite|logement|lot)|deposits?|depots?|draws?|tirages?|starts?|finish|debut)\b/;
+export const NOT_RISK_COST = /\b(?:du marche|prices?|rent|loyers?|ratios?|rates?|taux|dscr|dcr|months?|years?|mois|ans?|per|par|insurance|assurance|claim|operating|replacement|interest|lease-up|deficit|exploitation|remplacement|interets?|mise en location)\b/;
+
 export const DEBT_SERVICE = /\b(?:debt service|service de la dette|annual payment|mortgage payment)\b/;
 
 // Words that make a budget line something else: a total of several lines, a loan named with a cost word ("Construction principal"),
@@ -65,23 +75,28 @@ export const CONCEPTS: readonly {
   // Vague paraphrases in those sets are not concept words. Tax, finance and operating items remain excluded.
   {
     fieldKey: "land_cost", unit: "$", budget: true,
-    words: [/\b(?:(?:building|property|site) (?:purchase|acquisition)|land|lots?(?! de travaux)|parcels?|site acquisition|acquisition|property purchase|purchase of (?:the )?(?:site|building|property)|ground|terrain|parcelle|achat du (?:terrain|lot|immeuble)|achat de l immeuble)\b/],
-    exclude: /\b(?:transfer tax|ltt|droits de mutation|interest|interets?|carrying|value|apprais\w*|deposit|depot|survey|arpentage|loan|lender|financing|pret|preteur|financement)\b/,
+    words: [/\b(?:purchase (?:basis|consideration|allocation)|the purchase|(?:dirt|ground) (?:cost|deal|price|basis))\b/, new RegExp(`^(?=.*${PROPERTY_WORD.source})(?=.*${ACQUISITION_WORD.source})`), /\b(?:(?:building|property|site) (?:purchase|acquisition)|land|lots?(?! de travaux)|parcels?|site acquisition|acquisition|property purchase|purchase of (?:the )?(?:site|building|property)|ground|terrain|parcelle|achat du (?:terrain|lot|immeuble)|achat de l immeuble)\b/],
+    exclude: /\b(?:transfer tax|ltt|droits de mutation|interest|interets?|carrying|extras?|value|apprais\w*|deposit|depot|survey|arpentage|loan|lender|financing|pret|preteur|financement)\b/,
   },
   {
     fieldKey: "hard_cost", unit: "$", budget: true,
-    words: [/\b(?:construction|build|works|trades|framing|envelope|finishes|fit-out|fitout|shell|contractor|structure|site services|servicing|sitework|travaux|charpente|enveloppe|finitions|entrepreneur|chantier)\b/, /(?<!purchase of the )(?<!purchase of )\bbuilding\b(?!\s+(?:purchase|acquisition|price|basis))/],
-    exclude: /\b(?:loans?|interest|insurance|management|supervision|fees?|permits?|design|drawings|period|months?|prets?|interets?|assurance|gestion|honoraires|permis)\b/,
+    words: [/\b(?:work order|suite installation|ouvrage|transformation|marche de travaux)\b/, /^(?=.*\b(?:gc|general contractor|crew|builder|trades?|conversion|renovation|installation|fit-up)\b)(?=.*\b(?:contracts?|lump sum|payments?|bill|price|spend|envelope|sum|cost)\b)/, /\b(?:construction|build|works|trades|framing|envelope|finishes|fit-out|fitout|shell|contractor|structure|site services|servicing|sitework|travaux|charpente|enveloppe|finitions|entrepreneur|chantier)\b/, /(?<!purchase of the )(?<!purchase of )\bbuilding\b(?!\s+(?:purchase|acquisition|price|basis))/],
+    exclude: /\b(?:unallocated|loans?|rents?|monthly|loyers?|mensuel\w*|quotes?|interest|insurance|management|supervision|fees?|permits?|design|drawings|period|months?|prets?|interets?|assurance|gestion|honoraires|permis)\b/,
   },
   {
     fieldKey: "soft_cost", unit: "$", budget: true,
-    words: [/\b(?:architect\w*|engineer\w*|design|drawings|plans|consultants?|permits?|approvals?|legal|accounting|surveys?|studies|project management|development management|professional fees|honoraires|etudes|permis|conception|juridique\w*|comptable\w*)\b/],
+    words: [/\b(?:paper|paperwork|advis[eo]rs?|outside services|professional[- ]services|development services|advice|consents|fees outside (?:the )?gc|soft (?:spend|charges)|services professionnels|demarches|frais (?:de )?professionnels|professional(?: and)? (?:approval|people|spend))\b/, /\b(?:architect\w*|engineer\w*|design|drawings|plans|consultants?|permits?|approvals?|legal|accounting|surveys?|studies|project management|development management|professional fees|honoraires|etudes|permis|conception|juridique\w*|comptable\w*)\b/],
     exclude: /\b(?:development charges|dc|levies|interest|financing|frais de financement|redevances|interets?|loan|lender|pret|preteur|courtage|courtiers?|garanties?|gestion|dossier|engagement|banques?|financements?|hypothecaires?)\b/,
   },
   {
     fieldKey: "contingency", unit: "$", budget: true,
-    words: [/\b(?:contingenc(?:y|ies)|buffer|cushion|overrun allowance|allowance for (?:overruns|unknowns)|unallocated|unforeseen|risk allowance|imprevus|aleas|provision pour (?:depassements|imprevus)|marge pour imprevus)\b/],
+    words: [new RegExp(`^(?=.*${RISK_WORD.source})(?=.*${HOLDING_WORD.source})`), /\b(?:contingenc(?:e|es|y|ies)|buffer|cushion|overrun allowance|allowance for (?:overruns|unknowns)|unforeseen|risk allowance|imprevus|aleas|provision pour (?:depassements|imprevus)|marge pour imprevus)\b/],
     exclude: /\b(?:operating|replacement|interest|lease-up|deficit|exploitation|remplacement|interets?|mise en location)\b/,
+  },
+  {
+    fieldKey: "other_cost", unit: "$", budget: true,
+    words: [RESIDUAL_COST],
+    exclude: /\b(?:loan|lender|financing|interest|pret|preteur|financement|interets?|reserve|provision|allowance|fund)\b/,
   },
   // Card 110 sources: v8/v9 for construction, lease-up, occupancy, exit cap and expense ratio;
   // v8 for hold and both growth fields. Card 111: in prose, words after a figure with a stated unit may name an assumption (never a loan or budget line).

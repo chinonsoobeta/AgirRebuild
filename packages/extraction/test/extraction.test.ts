@@ -6051,8 +6051,11 @@ describe("card 109 audit: a concept names a line only when the line is that cost
     "Financement des travaux : 2 050 000 $",
   ])("a loan named with a cost word is never the cost: %s", (line) => expect(concept(read(line))).toEqual([]));
 
+  test("the total job envelope names the project total (card 116)", () => {
+    expect(pick(read("Total job envelope: $750,000"))).toEqual([["stated_total_cost", 750_000]]);
+  });
+
   test.each([
-    "Total job envelope: $750,000",
     "Overall construction envelope: $750,000",
     "All-in build budget: $750,000",
     "Enveloppe totale des travaux : 750 000 $",
@@ -6089,11 +6092,11 @@ describe("card 109 audit: a concept names a line only when the line is that cost
     expect(r.candidates.filter((c) => c.rule === "concept")).toEqual([]);
   });
   test("text lines: an unnamed figure that is the total of the lines beside it does not stop them", () => {
-    expect(concept(lines("Building purchase basis: $870,000; Conversion works: $1,750,000; Architect studies: $210,000; Project uses stated: $3,130,000.")).sort()).toEqual([["hard_cost", 1_750_000], ["land_cost", 870_000], ["soft_cost", 210_000]]);
+    expect(pick(lines("Building purchase basis: $870,000; Conversion works: $1,750,000; Architect studies: $210,000; Project uses stated: $3,130,000.")).sort()).toEqual([["hard_cost", 1_750_000], ["land_cost", 870_000], ["soft_cost", 210_000], ["stated_total_cost", 3_130_000]]);
     expect(concept(lines("Lot purchase: $600,000", "Framing and finishes: $1,450,000", "All uses: $2,050,000")).sort()).toEqual([["hard_cost", 1_450_000], ["land_cost", 600_000]]);
   });
   test("text lines: a block naming several cost fields lists one line per field, so an unnamed line beside them is another cost", () => {
-    expect(concept(lines("Lot purchase: $620,000", "Construction allowance: $650,000", "Design and permits: $125,000", "Money held for surprises: $65,000", "Whole project budget: $1,460,000")).sort()).toEqual([["hard_cost", 650_000], ["land_cost", 620_000], ["soft_cost", 125_000]]);
+    expect(pick(lines("Lot purchase: $620,000", "Construction allowance: $650,000", "Design and permits: $125,000", "Money held for surprises: $65,000", "Whole project budget: $1,460,000")).sort()).toEqual([["contingency", 65_000], ["hard_cost", 650_000], ["land_cost", 620_000], ["soft_cost", 125_000], ["stated_total_cost", 1_460_000]]);
     expect(concept(lines("Achat du lot : 160 000 $", "Pose des logements : 480 000 $", "Approbations et conception : 75 000 $")).sort()).toEqual([["land_cost", 160_000], ["soft_cost", 75_000]]);
   });
   test("an alias read keeps its field when the description also has a second concept", () => {
@@ -6308,13 +6311,16 @@ describe("card 111: clauses whose label follows the number; number words for rat
   });
 
   test.each([
-    ["The Uses brought forward: $5,260,000 is the stated envelope;", 5_260_000],
     ["The property is valued at $9,000,000 by the lender.", 9_000_000],
     ["We wired $2,000,000 to the bank.", 2_000_000],
   ] as [string, number][])("words after a money figure do not name it by concept: %s", (line, value) => {
     const r = read(line);
     expect(r.candidates.filter((c) => c.rule === "concept")).toEqual([]);
     expect(r.other.some((o) => o.value === value)).toBe(true);
+  });
+
+  test("a brought-forward uses label names the total before the figure (card 116)", () => {
+    expect(pick(read("The Uses brought forward: $5,260,000 is the stated envelope;"))).toEqual([["stated_total_cost", 5_260_000]]);
   });
 
   // Rule 2. Sources: v4 ("On garde l'immeuble sept ans"); "sell after" from the card's table.
@@ -6823,5 +6829,272 @@ describe("card 115 audit: a partner's cash, a rent total and a rate reset are no
   // "Senior rate after renewal" and "Senior rate step-up" are read by the alias layer on main too; not this card's.
   test.each(["First rate reset: 6.5%", "Taux prioritaire à la révision : 6,9 %", "Sr pricing at renewal: 6.9%"])("a later reset or renewal rate is not the loan's rate: %s", (line) => {
     expect(pick(read(line)).map(([k]) => k)).not.toContain("senior_rate_pct");
+  });
+});
+
+describe("card 116: budget words, tax basis and one label per figure", () => {
+  const read = (input: string) => {
+    const parts = input.split(" // ");
+    if (/^S(?:\([^)]*\))?:/.test(parts[0]!)) {
+      const name = /^S\(([^)]*)\):/.exec(parts[0]!)?.[1] ?? "Base";
+      return extractCandidates({ kind: "xlsx", lines: [], tables: [{ name, rows: parts.map((p, r) => p.replace(/^S(?:\([^)]*\))?:/, "").split("|").map((v, c) => ({ text: v.trim(), ref: `${String.fromCharCode(65 + c)}${r + 1}`, ...(/^\d+$/.test(v.trim()) ? { number: Number(v) } : {}) }))) }], pageCount: 1, needsOcr: false, fullText: "" });
+    }
+    return extractCandidates({ kind: "pdf", lines: parts.map((text, i) => ({ text, location: `page 1, line ${i + 1}` })), tables: [], pageCount: 1, needsOcr: false, fullText: parts.join("\n") });
+  };
+  const check = (input: string, expected: string) => {
+    const r = read(input);
+    const got = r.candidates.map((c) => `${c.fieldKey}=${c.value}`).sort();
+    if (expected.startsWith("!")) expect(r.candidates.filter((c) => expected.slice(1).split(",").includes(c.fieldKey!))).toEqual([]);
+    else expect(got).toEqual(expected === "-" ? [] : expected.split(" ").sort());
+  };
+  // All requested table examples, including their sheet, mixed-clause and refusal forms.
+  const requested: [string, string][] = [
+    ["Buying the dirt: $680,000", "land_cost=680000"],
+    ["Dirt cost: $680,000", "land_cost=680000"],
+    ["Site basis: $680,000", "land_cost=680000"],
+    ["Purchase basis: $680,000", "land_cost=680000"],
+    ["Purchase consideration: $680,000", "land_cost=680000"],
+    ["The acquisition consideration is $680,000.", "land_cost=680000"],
+    ["Purchase allocation: $680,000", "land_cost=680000"],
+    ["The assembled parcel price is $680,000.", "land_cost=680000"],
+    ["Ground deal: $680,000", "land_cost=680000"],
+    ["Lot-rights cheque: $680,000", "land_cost=680000"],
+    ["Site cheque: $680,000", "land_cost=680000"],
+    ["House purchase money: $680,000", "land_cost=680000"],
+    ["Shell purchase: $680,000", "land_cost=680000"],
+    ["Property closing dollars: $680,000", "land_cost=680000"],
+    ["Acquired site, all-in: $680,000", "land_cost=680000"],
+    ["Land bought for $680,000", "land_cost=680000"],
+    ["The purchase is under contract at $680,000.", "land_cost=680000"],
+    ["Price paid for the lot: $680,000", "land_cost=680000"],
+    ["Cost to buy the property: $680,000", "land_cost=680000"],
+    ["Prix du fonds : 680 000 $", "land_cost=680000"],
+    ["Prix de l'immeuble acquis : 680 000 $", "land_cost=680000"],
+    ["Terrain à la clôture : 680 000 $", "land_cost=680000"],
+    ["Coût d'acquisition du site : 680 000 $", "land_cost=680000"],
+    ["Achat de la propriété : 680 000 $", "land_cost=680000"],
+    ["Prix payé pour le lot : 680 000 $", "land_cost=680000"],
+    ["S:Buying the dirt|680000", "land_cost=680000"],
+    ["S:Site basis|680000", "land_cost=680000"],
+    ["S:Prix du fonds|680000", "land_cost=680000"],
+    ["Build contract: $1,450,000", "hard_cost=1450000"],
+    ["BUILD CONTRACT $1,450,000", "hard_cost=1450000"],
+    ["GC lump sum: $1,450,000", "hard_cost=1450000"],
+    ["The signed work order: $1,450,000", "hard_cost=1450000"],
+    ["Crew contract: $1,450,000", "hard_cost=1450000"],
+    ["Build payments: $1,450,000", "hard_cost=1450000"],
+    ["Build bill: $1,450,000", "hard_cost=1450000"],
+    ["Hard build spend: $1,450,000", "hard_cost=1450000"],
+    ["Hard-cost envelope: $1,450,000", "hard_cost=1450000"],
+    ["Suite installation: $1,450,000", "hard_cost=1450000"],
+    ["Conversion contract: $1,450,000", "hard_cost=1450000"],
+    ["Conversion works: $1,450,000", "hard_cost=1450000"],
+    ["Renovation cost: $1,450,000", "hard_cost=1450000"],
+    ["The builder's fixed price: $1,450,000", "hard_cost=1450000"],
+    ["Ouvrage : 1 450 000 $", "hard_cost=1450000"],
+    ["Marché de travaux : 1 450 000 $", "hard_cost=1450000"],
+    ["Transformation : 1 450 000 $", "hard_cost=1450000"],
+    ["Coût de construction : 1 450 000 $", "hard_cost=1450000"],
+    ["Prix forfaitaire de l'entrepreneur : 1 450 000 $", "hard_cost=1450000"],
+    ["S:GC lump sum|1450000", "hard_cost=1450000"],
+    ["S:Build PAYMENTS|1450000", "hard_cost=1450000"],
+    ["S:Marché de travaux|1450000", "hard_cost=1450000"],
+    ["The build ex-GST: $1,450,000", "hard_cost=1450000"],
+    ["Build incl. HST: $1,450,000", "hard_cost=1450000"],
+    ["Construction contract net of GST: $1,450,000", "hard_cost=1450000"],
+    ["Hard cost signed ex GST: $1,450,000", "hard_cost=1450000"],
+    ["Trade contracts taxed: $1,450,000", "hard_cost=1450000"],
+    ["Conversion works including unrecoverable HST are $1,450,000.", "hard_cost=1450000"],
+    ["Construction, tax-inclusive: $1,450,000", "hard_cost=1450000"],
+    ["Hard costs before GST: $1,450,000", "hard_cost=1450000"],
+    ["Travaux hors TVH : 1 450 000 $", "hard_cost=1450000"],
+    ["Travaux sans TPS-TVQ : 1 450 000 $", "hard_cost=1450000"],
+    ["Travaux taxes incluses : 1 450 000 $", "hard_cost=1450000"],
+    ["Chantier TTC : 1 450 000 $", "hard_cost=1450000"],
+    ["Transformation TTC : 1 450 000 $", "hard_cost=1450000"],
+    ["Construction avant taxes : 1 450 000 $", "hard_cost=1450000"],
+    ["Honoraires taxes incluses : 210 000 $", "soft_cost=210000"],
+    ["Frais professionnels TTC : 210 000 $", "soft_cost=210000"],
+    ["Fees and design taxed: $210,000", "soft_cost=210000"],
+    ["Soft charges incl GST: $210,000", "soft_cost=210000"],
+    ["S:The build, ex-GST|1450000", "hard_cost=1450000"],
+    ["S:Travaux hors TVH|1450000", "hard_cost=1450000"],
+    ["Paperwork and people: $210,000", "soft_cost=210000"],
+    ["Paper side: $210,000", "soft_cost=210000"],
+    ["Design/admin bundle: $210,000", "soft_cost=210000"],
+    ["Advisers and approvals: $210,000", "soft_cost=210000"],
+    ["Outside services: $210,000", "soft_cost=210000"],
+    ["Fees outside the GC: $210,000", "soft_cost=210000"],
+    ["Professional-services budget: $210,000", "soft_cost=210000"],
+    ["Development services pot: $210,000", "soft_cost=210000"],
+    ["Project advice allowance: $210,000", "soft_cost=210000"],
+    ["Soft spend agreed: $210,000", "soft_cost=210000"],
+    ["Consultants etc.: $210,000", "soft_cost=210000"],
+    ["Honoraires et démarches : 210 000 $", "soft_cost=210000"],
+    ["Services professionnels : 210 000 $", "soft_cost=210000"],
+    ["Frais de professionnels et autorisations : 210 000 $", "soft_cost=210000"],
+    ["S:paperwork + people|210000", "soft_cost=210000"],
+    ["S:Fees outside GC|210000", "soft_cost=210000"],
+    ["Just-in-case pot: $95,000", "contingency=95000"],
+    ["Spare allowance: $95,000", "contingency=95000"],
+    ["Money held for surprises: $95,000", "contingency=95000"],
+    ["Held back for surprises: $95,000", "contingency=95000"],
+    ["Unknown-work allowance: $95,000", "contingency=95000"],
+    ["Unforeseen-work money: $95,000", "contingency=95000"],
+    ["Unspent allowance: $95,000", "contingency=95000"],
+    ["Unspent risk provision: $95,000", "contingency=95000"],
+    ["Risk provision: $95,000", "contingency=95000"],
+    ["Risk money: $95,000", "contingency=95000"],
+    ["Construction risk sleeve: $95,000", "contingency=95000"],
+    ["Extra work allowance: $95,000", "contingency=95000"],
+    ["Uncommitted building allowance: $95,000", "contingency=95000"],
+    ["Weather cushion: $95,000", "contingency=95000"],
+    ["Contg. buffer: $95,000", "contingency=95000"],
+    ["Réserve aléas : 95 000 $", "contingency=95000"],
+    ["Aléas séparés : 95 000 $", "contingency=95000"],
+    ["Somme pour les surprises : 95 000 $", "contingency=95000"],
+    ["Réserve pour travaux imprévus : 95 000 $", "contingency=95000"],
+    ["S:just-in-case pot|95000", "contingency=95000"],
+    ["S:Unspent risk money|95000", "contingency=95000"],
+    ["Everything else paid: $45,000", "other_cost=45000"],
+    ["Misc project bills: $45,000", "other_cost=45000"],
+    ["Non-GC extras: $45,000", "other_cost=45000"],
+    ["Nontrade spend: $45,000", "other_cost=45000"],
+    ["Remaining project charges: $45,000", "other_cost=45000"],
+    ["Other project cash: $45,000", "other_cost=45000"],
+    ["Unallocated project charges: $45,000", "other_cost=45000"],
+    ["Odd costs: $45,000", "other_cost=45000"],
+    ["Autres débours : 45 000 $", "other_cost=45000"],
+    ["Frais divers du projet : 45 000 $", "other_cost=45000"],
+    ["S:everything else paid|45000", "other_cost=45000"],
+    ["Whole project budget: $2,400,000", "stated_total_cost=2400000"],
+    ["Total job envelope: $2,400,000", "stated_total_cost=2400000"],
+    ["Project uses stated: $2,400,000.", "stated_total_cost=2400000"],
+    ["Uses at close: $2,400,000", "stated_total_cost=2400000"],
+    ["All uses closed: $2,400,000", "stated_total_cost=2400000"],
+    ["Closing uses total: $2,400,000", "stated_total_cost=2400000"],
+    ["The uses brought forward: $2,400,000 is the stated envelope.", "stated_total_cost=2400000"],
+    ["All-in project cost: $2,400,000", "stated_total_cost=2400000"],
+    ["Enveloppe complète : 2 400 000 $", "stated_total_cost=2400000"],
+    ["Total investissement : 2 400 000 $", "stated_total_cost=2400000"],
+    ["Coût global inscrit : 2 400 000 $", "stated_total_cost=2400000"],
+    ["Coût total du projet : 2 400 000 $", "stated_total_cost=2400000"],
+    ["S:Uses at close|2400000", "stated_total_cost=2400000"],
+    ["Paper side $330,000, weather cushion $190,000, other project cash $70,000, all ex-GST.", "soft_cost=330000 contingency=190000 other_cost=70000"],
+    ["Ground deal $390,000, crew contract ex-GST $1,550,000;", "land_cost=390000 hard_cost=1550000"],
+    ["Prix du fonds 500 000 $ et ouvrage hors TVH 2 000 000 $ ;", "land_cost=500000 hard_cost=2000000"],
+    ["Allow design, fees and approvals of $175,000 and the unallocated buffer of $115,000.", "soft_cost=175000 contingency=115000"],
+    ["– $2,150,000 Hard build spend // – $230,000 Professional and approval spend // – $130,000 Construction cushion", "hard_cost=2150000 soft_cost=230000 contingency=130000"],
+    ["S:Uses|Site purchase agreed|610000 // S:Hard|Construction contract net GST|1450000 // S:Uses|Professional and permit allowance|85000 // S:Uses|Uncommitted building allowance|55000", "land_cost=610000 hard_cost=1450000 soft_cost=85000 contingency=55000"],
+    ["S(Emplois):Projet|Acquisition du terrain|620000 // S:Travaux|Marché de travaux hors TPS et TVQ|3450000 // S:Projet|Honoraires et démarches|310000 // S:Projet|Réserve pour imprévus|220000 // S:Projet|Total des emplois|4600000", "land_cost=620000 hard_cost=3450000 soft_cost=310000 contingency=220000 stated_total_cost=4600000"],
+    ["Land value appraised: $900,000", "-"],
+    ["Assessed value of the lot: $700,000", "-"],
+    ["Deposit paid on the land: $50,000", "-"],
+    ["Construction loan draw: $400,000", "-"],
+    ["Hard costs paid to date: $600,000", "-"],
+    ["Cost to complete: $850,000", "-"],
+    ["Build cost per suite: $240,000", "-"],
+    ["Price per lot in the comparable sale: $610,000", "-"],
+    ["GST on the build: $72,500", "-"],
+    ["HST payable: $72,500", "-"],
+    ["GST rebate: $24,000", "-"],
+    ["Sale price of the units: $3,900,000", "-"],
+    ["Lender fee: $20,000", "-"],
+    ["Cushion over the DSCR: 0.15", "-"],
+    ["Weather delay: 3 months", "-"],
+    ["Dirt hauling per load: $450", "-"],
+    ["Insurance claim held back for surprises: $15,000", "-"],
+    ["Seller's cushion on the price: $30,000", "-"],
+    ["Rent buffer per month: $1,200", "-"],
+    ["Last year's build cost on the other project: $1,300,000", "-"],
+    ["The neighbour paid $650,000 for their lot.", "-"],
+    ["Valeur marchande du terrain : 900 000 $", "-"],
+    ["Dépôt sur le terrain : 50 000 $", "-"],
+    ["Travaux payés à ce jour : 600 000 $", "-"],
+    ["TVH sur les travaux : 72 500 $", "-"],
+    ["Remboursement de TPS : 24 000 $", "-"],
+    ["Coût par logement : 240 000 $", "-"],
+    ["Total loan commitment: $2,000,000", "!stated_total_cost"],
+    ["Total rent roll: $24,000", "!stated_total_cost"],
+    ["Total equity in: $900,000", "!stated_total_cost"],
+    ["Enveloppe du prêt : 2 000 000 $", "!stated_total_cost"],
+    ["Build period cushion: 2 months", "!hard_cost"],
+    ["Land lease payment: $24,000", "!land_cost"],
+    ["Interest reserve cushion: $90,000", "!contingency"],
+    ["Operating reserve buffer: $40,000", "!contingency"],
+    ["Our fee for the advice: $25,000", "!soft_cost"],
+  ];
+  test.each(requested)("requested: %s", check);
+  // Independent vocabulary combinations: three English and three French labels per naming rule.
+  const own: [string, string][] = [
+    // 1. Acquisition + property; purchase basis alone.
+    ["Parcel consideration", "land_cost"], ["Buying a shell", "land_cost"], ["House closing cheque", "land_cost"],
+    ["Acquisition de la bâtisse", "land_cost"], ["Prix de la propriété", "land_cost"], ["Achat du fonds", "land_cost"],
+    // 2. Builder + contract/price, including stand-alone French work nouns.
+    ["Trades lump sum", "hard_cost"], ["Renovation payments", "hard_cost"], ["Fit-up contract", "hard_cost"],
+    ["Ouvrage prévu", "hard_cost"], ["Transformation prévue", "hard_cost"], ["Marché de travaux signé", "hard_cost"],
+    // 3. Professional and paper costs.
+    ["Paperwork budget", "soft_cost"], ["Professional advice", "soft_cost"], ["Development services spend", "soft_cost"],
+    ["Démarches prévues", "soft_cost"], ["Services professionnels prévus", "soft_cost"], ["Frais professionnels du projet", "soft_cost"],
+    // 4. Risk + holding, ahead of a build word.
+    ["Renovation surprises fund", "contingency"], ["Unknown work pot", "contingency"], ["Uncommitted crew allowance", "contingency"],
+    ["Somme pour aléas", "contingency"], ["Coussin pour surprises", "contingency"], ["Réserve pour travaux imprévus prévue", "contingency"],
+    // 5. Residual project costs, distinct from a holding provision.
+    ["Sundry project bills", "other_cost"], ["Non-trade project spend", "other_cost"], ["Unallocated bills", "other_cost"],
+    ["Autres débours prévus", "other_cost"], ["Frais divers prévus", "other_cost"], ["Frais divers de la transformation", "other_cost"],
+    // 6. Project totals, distinct from loan/rent/equity totals.
+    ["Entire job budget", "stated_total_cost"], ["Complete investment envelope", "stated_total_cost"], ["Uses carried forward", "stated_total_cost"],
+    ["Enveloppe globale prévue", "stated_total_cost"], ["Enveloppe budgétaire prévue", "stated_total_cost"], ["Coût global du projet", "stated_total_cost"],
+    // 7. Strip the basis before naming the line.
+    ["Crew contract including non-recoverable GST", "hard_cost"], ["Paperwork tax-inclusive", "soft_cost"], ["Parcel consideration excl. HST", "land_cost"],
+    ["Ouvrage HT", "hard_cost"], ["Démarches TTC", "soft_cost"], ["Transformation hors TPS et TVQ", "hard_cost"],
+  ];
+  test.each(own)("own label: %s", (label, field) => check(`${label}: $760,000`, `${field}=760000`));
+  test.each(own)("own clause: %s", (label, field) => check(`Note, ${label} $760,000; documents attached.`, `${field}=760000`));
+  test.each(own)("own sheet: %s", (label, field) => check(`S:${label}|760000`, `${field}=760000`));
+  // Two independent traps for each numbered rule, exercised in all three forms.
+  const traps = [
+    "Market value of the property purchase", "Valeur au rôle du terrain", // 1
+    "Crew contract paid to date", "Ouvrage par logement", // 2
+    "Lender professional services fee", "Frais professionnels de financement", // 3
+    "Risk buffer on the rent", "Coussin sur le taux", // 4
+    "Misc project bills paid to date", "Frais divers par logement", // 5
+    "Entire loan budget", "Enveloppe globale du prêt", // 6
+    "GST on crew contract", "TVH sur la transformation", // 7
+    "Previous owner paid for the house", "Achat du terrain de l autre projet", // 8
+    "Paperwork and risk provision combined", "Ouvrage et démarches combinés", // 9
+    "Hard costs per suite", "Travaux payés à ce jour", // 10
+    "Purchase consideration and renovation contract", "Prix du fonds et services professionnels", // 11
+  ];
+  test.each(traps)("own shown label: %s", (label) => check(`${label}: $760,000`, /loan|prêt/.test(label) ? "!stated_total_cost" : "-"));
+  test.each(traps)("own shown clause: %s", (label) => check(`Note, ${label} $760,000; documents attached.`, /loan|prêt/.test(label) ? "!stated_total_cost" : "-"));
+  test.each(traps)("own shown sheet: %s", (label) => check(`S:${label}|760000`, /loan|prêt/.test(label) ? "!stated_total_cost" : "-"));
+  // 8. Not this deal's cost: three EN/FR variants in every format.
+  test.each(["Parcel purchase deposit", "Crew draw", "Hard cost to complete", "Dépôt pour acquisition du fonds", "Transformation payée à ce jour", "Prix par logement"])("shown in every form: %s", (l) => {
+    for (const input of [`${l}: $760,000`, `Note, ${l} $760,000; fin.`, `S:${l}|760000`]) check(input, "-");
+  });
+  test.each(["Crew contract including tax", "Crew contract excluding VAT", "Transformation avant TVA"])("generic tax basis: %s", (label) => check(`${label}: $760,000`, "hard_cost=760000"));
+  test.each(["VAT on crew contract", "TVA sur la transformation"])("a sales tax stays shown: %s", (label) => {
+    const r = read(`${label}: $76,000`);
+    expect(r.candidates).toEqual([]);
+    expect(r.other.map((c) => c.note)).toContain("A sales tax line; enter GST/HST net of rebates, or label it");
+  });
+  // 9. Each figure has its own label, including shared tax tails and bullet-first runs.
+  test.each([", ", "; ", " and ", " et ", " puis "])("local labels separated by %s", (sep) => {
+    check(`Paperwork $760,000${sep}risk money $80,000${sep}nontrade spend $40,000, all ex-GST.`, "soft_cost=760000 contingency=80000 other_cost=40000");
+    check(`Prix du fonds 760 000 $${sep}ouvrage hors TVH 80 000 $${sep}démarches 40 000 $.`, "land_cost=760000 hard_cost=80000 soft_cost=40000");
+  });
+  test.each(["–", "—", "-"])("figure-first bullet %s", (bullet) => check(`${bullet} $760,000 Crew contract // ${bullet} $80,000 Démarches // ${bullet} $40,000 Risk provision`, "hard_cost=760000 soft_cost=80000 contingency=40000"));
+  test("a colon on each label and a tax basis keep later figures independent", () => {
+    check("Purchase allocation: $760,000, Build incl taxes: $1,700,000, Paperwork and consultants: $240,000 and Risk money: $80,000.", "land_cost=760000 hard_cost=1700000 soft_cost=240000 contingency=80000");
+    check("Prix du fonds : 760 000 $, Ouvrage taxes incluses : 1 700 000 $, Démarches : 240 000 $ et Réserve aléas : 80 000 $.", "land_cost=760000 hard_cost=1700000 soft_cost=240000 contingency=80000");
+  });
+  // 10. Category descriptions take precedence; categories fill only an unnamed description.
+  test.each(["Projet", "Project", "Budget", "Emplois", "Uses", "Travaux"])("category %s", (cat) => {
+    check(`S:${cat}|Parcel purchase|760000 // S:Hard|Unspent surprises allowance|80000 // S:${cat}|Démarches|40000`, "land_cost=760000 contingency=80000 soft_cost=40000");
+  });
+  // 11. Exactly one meaning, regardless of language or format.
+  test.each(["Land purchase and crew contract", "Paperwork plus risk fund", "Renovation contract and outside services", "Prix du fonds et ouvrage", "Démarches et réserve aléas", "Transformation et services professionnels"])("ambiguous: %s", (l) => {
+    for (const input of [`${l}: $760,000`, `Note, ${l} $760,000; fin.`, `S:${l}|760000`]) check(input, "-");
   });
 });
