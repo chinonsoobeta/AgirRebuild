@@ -3,7 +3,7 @@ import type { EngineInput, ReadinessItem } from "@agir/contracts";
 import { assemble, validateInput, EngineInputError } from "../../../packages/engine/src/index.ts";
 import validateSource from "../../../packages/engine/src/validate.ts?raw";
 import { allEquityDeal } from "../../../packages/engine/test/fixtures.ts";
-import { FIELDS, METRICS, POLICIES } from "@agir/contracts";
+import { FIELDS, METRICS, POLICIES, landTransferTaxOptions, gstHstNetOptions } from "@agir/contracts";
 import { SF_PER_M2 } from "@agir/numbers";
 import { reviewWaiting } from "../src/components/ui.tsx";
 import { approvable, enteredInUnit, foreignIn, keepsWithReason } from "../src/routes/review.tsx";
@@ -864,4 +864,29 @@ it("card 93b: Approve all excludes OCR sources but keeps text sources", () => {
     { sourceKind: "document", sources: [{ document_name: "typed.txt" }] },
   ] as any;
   expect(approvable(rows)).toEqual([rows[1]]);
+});
+
+
+describe("card 97a proposal translations", () => {
+  it("translates every fixed land label and note, retaining published municipality names", () => {
+    const published=["Manitoba","Halifax Regional Municipality","Ville de Québec 2026","Montréal 2026","Toronto","AB","NL","SK"];
+    for (const province of ["BC","MB","ON","QC","NB","PE","SK","AB","NL"]) {
+      const result=landTransferTaxOptions({province,value:750000,asOf:"2026-10-20"});
+      if (!("options" in result)) throw new Error(result.unavailable);
+      for (const option of result.options) {
+        if (!published.includes(option.label)) expect(translateMessage(option.label),option.label).not.toBe(option.label);
+        if (option.note) expect(translateMessage(option.note),option.note).not.toBe(option.note);
+      }
+    }
+  });
+  it.each(["ON","NB","PE"])("translates the %s rental rebate label and all conditions", province => {
+    const result=gstHstNetOptions({province,units:12,selling:false,asOf:"2026-10-20"});
+    if (!("options" in result)) throw new Error(result.unavailable);
+    for (const option of result.options) {
+      expect(translateMessage(option.label)).not.toBe(option.label);
+      const fr=translateMessage(option.note!);
+      expect(fr).not.toBe(option.note);
+      expect(fr).not.toMatch(/At least|Provincial part|construction begins|completion before/);
+    }
+  });
 });

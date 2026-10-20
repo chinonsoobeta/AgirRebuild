@@ -258,6 +258,7 @@ export async function reviewView(tx: Db, dealId: string, asOf: string) {
   const province = deal?.province;
   const approved = assumptions.filter(a => ENGINE_READABLE_STATUSES.includes(a.status) && a.value !== null);
   const value = (key: string) => approved.find(a => a.field_key === key && !a.item_key)?.value ?? undefined;
+  const unapprovedUnits = assumptions.some(a => a.field_key === "unit_count" && !ENGINE_READABLE_STATUSES.includes(a.status));
   const units = approved.filter(a => a.field_key === "unit_count" && a.item_key).reduce((n,a) => n + a.value!,0);
   const offered = new Set([...readiness.notFound,...readiness.choices].map(r => r.fieldKey));
   const proposals: Proposal[] = [];
@@ -266,7 +267,7 @@ export async function reviewView(tx: Db, dealId: string, asOf: string) {
     const options = "options" in result ? result.options.map(o => {
       // Keep the conditions visible before acceptance and in the recorded reason.
       const label = o.label + (o.note ? ` — ${o.note}` : "");
-      return {label,value:o.value,reason:`Proposed from ${t!.publisher}, ${t!.title} (effective ${t!.effective}, read ${t!.readOn}): ${label}.`};
+      return {label,value:o.value,reason:`Proposed from ${t!.publisher}, ${t!.title} (effective ${t!.effective}, read ${t!.readOn}): ${label}${label.endsWith(".") ? "" : "."}`};
     }) : [];
     proposals.push({...meta,options,...("unavailable" in result ? {unavailable:result.unavailable} : {})});
   };
@@ -274,10 +275,10 @@ export async function reviewView(tx: Db, dealId: string, asOf: string) {
     const land = value("land_cost");
     propose("land_transfer_tax", province ? landTable(province,asOf) : undefined, !province ? {unavailable:"the deal has no province"} : land === undefined ? {unavailable:"state the land cost first"} : landTransferTaxOptions({province,value:land,asOf}));
   }
-  if (offered.has("gst_hst_net")) propose("gst_hst_net",GST_HST,!province ? {unavailable:"the deal has no province"} : gstHstNetOptions({province,units,selling:value("sell_units") === 1,asOf}));
+  if (offered.has("gst_hst_net")) propose("gst_hst_net",GST_HST,!province ? {unavailable:"the deal has no province"} : unapprovedUnits ? {unavailable:"approve the unit counts first"} : gstHstNetOptions({province,units,selling:value("sell_units") === 1,asOf}));
   if (offered.has("refinance_insurance_premium_pct")) {
     const ltvPct=value("refinance_ltv_pct"), amortYears=value("refinance_amort_years");
-    const premium = !province ? {unavailable:"the deal has no province"} : units < 5 ? {unavailable:"CMHC multi-unit insurance needs at least 5 units; enter the premium yourself"}
+    const premium = !province ? {unavailable:"the deal has no province"} : unapprovedUnits ? {unavailable:"approve the unit counts first"} : units < 5 ? {unavailable:"CMHC multi-unit insurance needs at least 5 units; enter the premium yourself"}
       : ltvPct === undefined || value("refinance_amount") !== undefined ? {unavailable:"the table needs a loan-to-value"}
       : amortYears === undefined ? {unavailable:"state the refinance amortization first"}
       : cmhcPremium({ltvPct,amortYears,points:value("refinance_mli_select_points"),asOf});

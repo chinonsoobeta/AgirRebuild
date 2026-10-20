@@ -279,6 +279,9 @@ describe("card 94c table proposal controls", () => {
     const element=createElement(TableProposal,{proposal:p,unit:"$",onUse,busy:false});
     const html=render(element);
     expect(html).toContain("<select");
+    expect(html).toContain('<option value="" selected="">Choose…</option>');
+    expect(text(html)).not.toContain("Proposed: $");
+    expect(buttons("Use this")[0]!.props.disabled).toBe(true);
     const select=state.nodes.find(n=>n.tag === "select")!;
     expect(select.props["aria-label"]).toBeTruthy();
     select.props.onChange({target:{value:"1"}}); render(element);

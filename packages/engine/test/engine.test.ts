@@ -386,6 +386,7 @@ describe("quick-start templates", () => {
       expect(assemble([...rows,term]).input!.refinance).toMatchObject({termYears:10});
       const points={...term,fieldKey:"refinance_mli_select_points",valueNumeric:50};
       expect(assemble([...rows,points]).input!.refinance).toMatchObject({mliSelectPoints:50});
+      expect(assemble([...rows,points]).readiness.choices.map(r=>r.fieldKey)).not.toContain("refinance_term_years");
       expect(assemble([...rows,{...points,status:"needs_review"}]).input).toBeNull();
       for (const premium of [undefined,0]) {
         const result=assemble(heldRowsFor("apartment",{refinance_insurance_premium_pct:premium}));

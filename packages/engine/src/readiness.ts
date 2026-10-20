@@ -217,7 +217,7 @@ export function assemble(rows: readonly AssumptionRow[]): { readiness: Readiness
   const positive = (key: string) => (values.get(key) ?? 0) > 0;
   const parentAbsent: Record<string, boolean> = {
     refinance_mli_select_points: !positive("refinance_insurance_premium_pct"),
-    refinance_term_years: !positive("refinance_insurance_premium_pct") || insuredStandardTermRequired,
+    refinance_term_years: !positive("refinance_insurance_premium_pct") || (values.get("refinance_mli_select_points") ?? 0) >= 50 || insuredStandardTermRequired,
     refinance_amount: !has("refinance_month"),
     refinance_ltv_pct: !has("refinance_month"),
     refinance_io_months: !has("refinance_month"),

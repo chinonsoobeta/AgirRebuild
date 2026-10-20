@@ -2946,6 +2946,18 @@ describe("card 94c table proposals", () => {
     expect(accepted.proposals.some((p:any)=>p.fieldKey === premium.fieldKey)).toBe(false);
     expect(accepted.assumptions.find((a:any)=>a.fieldKey === premium.fieldKey)).toMatchObject({value:5.49,status:"approved",reason:premium.options[0].reason});
   });
+  test("card 97a asks to approve unit counts before proposing GST or insurance", async () => {
+    const d=await make("NS");
+    await db.query(`update assumptions set status='needs_review' where deal_id=$1 and field_key='unit_count'`,[d]);
+    const r=await review(d);
+    for (const field of ["gst_hst_net","refinance_insurance_premium_pct"]) expect(r.proposals.find((p:any)=>p.fieldKey === field)).toMatchObject({options:[],unavailable:"approve the unit counts first"});
+  });
+  test("card 97a appends only one full stop to a note", async () => {
+    const r=await review(await make("NB"));
+    const option=r.proposals.find((p:any)=>p.fieldKey === "land_transfer_tax").options[0];
+    expect(option.label.endsWith(".")).toBe(true);
+    expect(option.reason).toBe(`Proposed from Government of New Brunswick, Real Property Transfer Tax Act (effective 2016-04-01, read 2026-10-19): ${option.label}`);
+  });
   test("withholds every proposal at the re-check date", async () => {
     const d=await make("NS"); date="2027-01-02";
     try {

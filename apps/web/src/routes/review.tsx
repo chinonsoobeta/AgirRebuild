@@ -137,17 +137,17 @@ function UseAs({ o, items, onSave, busy }: { o: ReviewData["other"][number]; ite
 export function TableProposal({ proposal, unit, onUse, busy }: { proposal: import("@agir/contracts").Proposal; unit: string; onUse: (b: {fieldKey: string; value: number; reason: string}) => void; busy: boolean }) {
   const { t, f, msg, lang } = useI18n();
   const { role } = useSession();
-  const [selected,setSelected] = useState(0);
+  const [selected,setSelected] = useState(proposal.options.length === 1 ? "0" : "");
   if (proposal.unavailable) return <p className="small muted">{msg(proposal.unavailable)}</p>;
-  const option = proposal.options[selected] ?? proposal.options[0];
-  if (!option) return null;
+  const option = selected === "" ? undefined : proposal.options[Number(selected)];
   const amount = (n: number) => unit === "$" ? new Intl.NumberFormat(lang === "fr" ? "fr-CA" : "en-CA",{style:"currency",currency:"CAD",currencyDisplay:"narrowSymbol",minimumFractionDigits:2,maximumFractionDigits:2}).format(n) : f.value(n,unit);
   return <div className="stack small" style={{gap:8}}>
-    <div>{t("review.proposed",{value:amount(option.value),publisher:proposal.publisher,date:proposal.effective})}{" "}<a href={proposal.url} target="_blank" rel="noreferrer">{t("review.proposalSource")}</a></div>
-    {proposal.options.length > 1 ? <select aria-label={t("review.proposalOption")} value={selected} onChange={e=>setSelected(Number(e.target.value))}>
-      {proposal.options.map((o,index)=><option key={index} value={index}>{o.label} — {amount(o.value)}</option>)}
-    </select> : <span>{option.label}</span>}
-    {canEdit(role) && <div><button className="btn quiet small" type="button" disabled={busy} onClick={()=>onUse({fieldKey:proposal.fieldKey,value:option.value,reason:option.reason})}>{t("review.useProposal")}</button></div>}
+    <div>{t("review.proposed",{value:option ? amount(option.value) : "—",publisher:proposal.publisher,date:proposal.effective})}{" "}<a href={proposal.url} target="_blank" rel="noreferrer">{t("review.proposalSource")}</a></div>
+    {proposal.options.length > 1 ? <select aria-label={t("review.proposalOption")} value={selected} onChange={e=>setSelected(e.target.value)}>
+      <option value="">{t("review.proposalPlaceholder")}</option>
+      {proposal.options.map((o,index)=><option key={index} value={index}>{o.label.split(" — ").map(msg).join(" — ")} — {amount(o.value)}</option>)}
+    </select> : <span>{option?.label.split(" — ").map(msg).join(" — ")}</span>}
+    {canEdit(role) && <div><button className="btn quiet small" type="button" disabled={busy || !option} onClick={()=>option && onUse({fieldKey:proposal.fieldKey,value:option.value,reason:option.reason})}>{t("review.useProposal")}</button></div>}
   </div>;
 }
 
