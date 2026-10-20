@@ -886,6 +886,68 @@ describe("which loan a term belongs to, and the words small developers use", () 
   });
 
   describe("loan scope", () => {
+    test.each([
+      { name: "card construction commitment", lines: ["Northgate Capital | Indicative construction terms", "Construction commitment: $3,900,000", "Rate: 6.90%", "Interest-only period: 36 months from construction start", "The facility is repaid in full at the refinance.", "Loan term: 40 months; covers the refinance."], amount: 3900000, rate: 6.9, io: 36 },
+      { name: "card engagement de construction", lines: ["Prêteur Nord | Modalités indicatives de construction", "Engagement de construction : 3 900 000 $", "Taux : 6,90 %", "Période d’intérêt seulement : 36 mois après le début de la construction", "Le prêt est remboursé en entier au refinancement.", "Durée : 40 mois; couvre le refinancement."], amount: 3900000, rate: 6.9, io: 36 },
+      { name: "Stonebridge construction advance", lines: ["Stonebridge Credit | construction advance overview", "Loan amount: $2,600,000", "Rate: 6.40%", "Interest-only period: 30 months", "The advance ends at the refinance.", "The permanent loan will settle the balance."], amount: 2600000, rate: 6.4, io: 30 },
+      { name: "Willow construction lender", lines: ["Willow Lending | construction lender offer", "Construction commitment: $4,200,000", "Rate: 7.10%", "Interest-only period: 24 months", "The refinance pays the balance.", "Repayment is scheduled at the permanent loan closing."], amount: 4200000, rate: 7.1, io: 24 },
+      { name: "avance de construction des Pins", lines: ["Crédit des Pins | avance de construction", "Engagement de construction : 2 600 000 $", "Taux : 6,40 %", "Période d’intérêt seulement : 30 mois", "Cette avance prend fin au refinancement.", "Le prêt permanent réglera le solde."], amount: 2600000, rate: 6.4, io: 30 },
+      { name: "financement de construction du Parc", lines: ["Banque du Parc | financement de construction", "Engagement de prêt de construction : 4 200 000 $", "Taux : 7,10 %", "Période d’intérêt seulement : 24 mois", "Le solde est payable au refinancement.", "Le prêt permanent permettra le remboursement."], amount: 4200000, rate: 7.1, io: 24 },
+    ])("card 98r construction terms stay senior: $name", ({ lines, amount, rate, io }) => {
+      const r = read(...lines);
+      expect(pick(r)).toEqual([["senior_loan_amount", amount], ["senior_rate_pct", rate], ["senior_io_months", io]]);
+      expect(r.candidates.some((c) => c.fieldKey?.startsWith("refinance_"))).toBe(false);
+    });
+    test.each([
+      "construction start", "construction starts", "construction started", "construction begins", "construction completion", "construction completes", "construction completed", "construction commencement", "construction end",
+      "le début de la construction", "la fin de la construction", "l’achèvement de la construction",
+    ])("card 98r a milestone does not block content scope: %s", (milestone) => {
+      const french = /^(le |la |l’)/.test(milestone);
+      const r = french
+        ? read("Aperçu du financement", `Le refinancement est prévu au mois 30 après ${milestone}.`, "Les versements commencent au refinancement.", "Taux : 4,15 %", "Amortissement : 40 ans", "Période d’intérêt seulement : 0 mois")
+        : read("Project funding overview", `Refinance in month 30 after ${milestone}.`, "Payments begin at the refinance.", "Rate: 4.15%", "Amortization: 40 years", "Interest-only period: 0 months");
+      expect(pick(r)).toEqual(expect.arrayContaining([["refinance_rate_pct", 4.15], ["refinance_amort_years", 40], ["refinance_io_months", 0]]));
+      expect(r.candidates.some((c) => c.fieldKey?.startsWith("senior_"))).toBe(false);
+    });
+    test.each([
+      "Construction starts next spring; the construction lender will confirm the date.",
+      "Le début de la construction est prévu au printemps; le financement de construction sera confirmé.",
+    ])("card 98r a milestone does not hide another construction use: %s", (context) => {
+      const r = read("Project funding overview", "Refinance in month 30.", "Payments begin at the refinance.", context, "Rate: 6.30%", "Amortization: 25 years");
+      expect(pick(r)).toEqual([["refinance_month", 30], ["senior_rate_pct", 6.3], ["senior_amort_years", 25]]);
+    });
+    test.each(["Coûts de construction : 3 900 000 $", "Coûts de construction : 2 600 000 $", "Construction costs: $4,200,000"])("card 98r construction costs remain hard costs: %s", (line) => {
+      const r = read(line);
+      expect(r.candidates).toHaveLength(1);
+      expect(r.candidates[0]!.fieldKey).toBe("hard_cost");
+    });
+    test.each([
+      ["Take-out commitment", "Rate: 4.15%.", "Minimum DCR covenant: 1.10x.", 4.15, 1.1],
+      ["Permanent mortgage offer", "Rate: 4.45%.", "Minimum DSCR: 1.22x.", 4.45, 1.22],
+      ["Take-out financing", "Rate: 4.80%.", "Debt service coverage covenant: 1.18x.", 4.8, 1.18],
+      ["Engagement de prêt permanent", "Taux : 4,45 %.", "CCD minimal : 1,22x.", 4.45, 1.22],
+      ["Offre de refinancement", "Taux : 4,80 %.", "Ratio de couverture de la dette minimum : 1,18x.", 4.8, 1.18],
+    ])("card 98r a take-out covenant remains deal-level: %s", (heading, rateLine, covenantLine, rate, covenant) => {
+      expect(pick(read(heading as string, rateLine as string, covenantLine as string))).toEqual([["refinance_rate_pct", rate], ["min_dscr_covenant", covenant]]);
+    });
+    test.each(contentScopeCases)("card 98r a content-scoped take-out also reads its covenant: $name", ({ lines, expected }) => {
+      const french = lines.some((line) => line.includes("refinancement"));
+      const r = read(...lines, french ? "CCD minimal : 1,15x" : "CMHC minimum debt coverage covenant: 1.15x");
+      expect(pick(r)).toEqual(expect.arrayContaining([...expected, ["min_dscr_covenant", 1.15]]));
+      expect(r.candidates.some((c) => c.fieldKey?.startsWith("senior_"))).toBe(false);
+    });
+    test.each([
+      ["Mezzanine term sheet", "Minimum DSCR: 1.30x"],
+      ["Second mortgage offer", "Minimum DCR covenant: 1.25x"],
+      ["Offre de prêt de second rang", "CCD minimal : 1,25x"],
+      ["Financement mezzanine", "Ratio de couverture de la dette minimum : 1,30x"],
+    ])("card 98r mezzanine still refuses the covenant: %s", (heading, line) => {
+      const r = read(heading, line);
+      expect(r.candidates.some((c) => c.fieldKey === "min_dscr_covenant")).toBe(false);
+      expect(r.other).toHaveLength(1);
+      expect(r.other[0]!.note).toContain("mezzanine loan");
+    });
+
     test.each(contentScopeCases)("card 98 content scope: $name", ({ lines, expected }) => {
       const r = read(...lines);
       expect(pick(r)).toEqual(expect.arrayContaining(expected));

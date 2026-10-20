@@ -180,7 +180,7 @@ const unconditioned = (x: string) => x.replace(/(?:^|[\s,;(])(?:if|unless|should
  * (forward and reply prefixes stripped, any length, numbers allowed), or a short line with no number and no sentence end.
  * A heading that names two loans sets none. A document whose headings name no loan uses its rank row, if any.
  * Only without either, two distinct unconditional refinance lines establish refinance scope, provided no line names
- * a senior/mezzanine loan or construction-period interest. Otherwise scope stays unstated (generic terms default to senior).
+ * a senior/mezzanine loan or a use of construction other than a date/milestone. Otherwise scope stays unstated (generic terms default to senior).
  * Inline labels and per-sentence loan names still take precedence over this document fallback.
  */
 function lineScopes(doc: NormalizedDocument, format: DocumentFormat, rank: Scope | null): (Scope | undefined)[] {
@@ -209,7 +209,8 @@ function lineScopes(doc: NormalizedDocument, format: DocumentFormat, rank: Scope
   if (!named && !rank) {
     const refinanceLines = doc.lines.filter((line) => scopesIn(unconditioned(line.text)).includes("refinance")).length;
     const blocked = doc.lines.some((line) => scopesIn(line.text).some((loan) => loan !== "refinance")
-      || /\b(during construction|construction (?:interest|draws?)|pendant la construction|interets? de construction)\b/.test(fold(line.text)));
+      || /\bconstruction\b/.test(fold(line.text).replace(
+        /\b(?:construction\s+(?:start(?:s|ed)?|begins|completion|completes|completed|commencement|end)|(?:debut|fin|achevement)\s+de la construction)\b/g, " ")));
     if (refinanceLines >= 2 && !blocked) scope = "refinance";
   }
   return headings.map((h) => {

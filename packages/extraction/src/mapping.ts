@@ -68,7 +68,8 @@ export function rankScope(label: string, value: string): Scope | null {
 // The scope's own field for each senior-loan field a generic label can reach. A field the scope's loan lacks has no entry.
 const SCOPE_FIELD: Record<Exclude<Scope, "senior">, Record<string, string>> = {
   mezzanine: { senior_loan_amount: "mezz_loan_amount", senior_rate_pct: "mezz_rate_pct", senior_amort_years: "mezz_amort_years", senior_io_months: "mezz_io_months" },
-  refinance: { senior_loan_amount: "refinance_amount", senior_rate_pct: "refinance_rate_pct", senior_amort_years: "refinance_amort_years", senior_io_months: "refinance_io_months" },
+  // The minimum DCR covenant applies to the whole hold, including the refinance loan.
+  refinance: { min_dscr_covenant: "min_dscr_covenant", senior_loan_amount: "refinance_amount", senior_rate_pct: "refinance_rate_pct", senior_amort_years: "refinance_amort_years", senior_io_months: "refinance_io_months" },
 };
 // What a loan-to-value is taken of: "of the lender's valuation", "of appraised value", "de la valeur établie par le prêteur".
 export const LTV_BASIS = String.raw`(?:of|de|du)\s+(?:the\s+|la\s+|l['’\s]+)?(?:(?:lender|bank|preteur|banque)['’\s]+s?\s*)?(?:valuation|appraised value|appraisal|valeur\s+(?:etablie|determinee|fixee|evaluee)\s+par\s+(?:le\s+)?(?:preteur|banque)|valeur\s+d['’\s]+evaluation|valeur\s+evaluee)`;
