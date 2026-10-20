@@ -5479,3 +5479,40 @@ describe("card 102: the build period and the lease-up, in common English and Que
   test.each([["Units: 24", "All units", 24], ["Studios: 12 units", "Studio", 12]])("a count is still a count: %s", (line, item, n) => expect(read(line).candidates.map((c) => [c.fieldKey, c.itemKey, c.value])).toEqual([["unit_count", item, n]]));
   test("rent growth is not a rent-up", () => expect(pick(read("Rent growth: 3%"))).toEqual([["rent_growth_pct", 3]]));
 });
+
+describe("card 102 audit: a loan's term named after its figure, a figure the sentence says is not a field, and \"to fill\"", () => {
+  const read = (...lines: string[]) => extractCandidates({ kind: "pdf", lines: lines.map((text, i) => ({ text, location: `page 1, line ${i + 1}` })), tables: [], pageCount: 1, needsOcr: false, fullText: lines.join("\n") });
+  const pick = (r: ReturnType<typeof read>) => r.candidates.map((c) => [c.fieldKey, c.value]);
+  const TERM = "A loan's term, not the build period, hold or amortization";
+  test.each([
+    ["Do not treat the 24-month legal term as either IO or build time.", 24], ["Do not treat the 36-month legal term as either IO or build time.", 36],
+    ["Never count the 30-month loan term as letting time.", 30], ["Please do not read the 20-month facility term as build time.", 20],
+    ["The 18-month maturity is not the construction period.", 18], ["A 27-month outside maturity applies; it is not the lease-up.", 27],
+    ["Ne pas traiter le terme de 24 mois comme la durée du chantier.", 24], ["L'échéance de 36 mois n'est pas la période de location.", 36],
+    ["Le prêt a une échéance de 30 mois; ne pas la compter comme durée des travaux.", 30],
+  ])("a loan's term named by its own words is shown, not read: %s", (line, n) => {
+    const r = read(line);
+    expect(pick(r)).toEqual([]);
+    expect(r.other.find((o) => o.value === n)?.note).toBe(TERM);
+  });
+  test.each([
+    "The lease-up is not 6 months; it is 9 months.", "Do not treat 14 months as the build time.", "Never count 4 months of leasing as the lease-up.",
+    "La période de location n'est pas 6 mois; elle est de 9 mois.", "Ne pas traiter 14 mois comme la durée du chantier.",
+  ])("a figure the sentence says is not a field gives nothing from it: %s", (line) => {
+    const r = read(line);
+    expect(r.candidates.some((c) => c.value === 6 || c.value === 14 || c.value === 4)).toBe(false);
+  });
+  test("the other clause of a negated sentence still reads", () => {
+    expect(pick(read("The lease-up is not 6 months; it is 9 months."))).toEqual([]);
+    expect(pick(read("Construction will take 16 months, not counting the permit wait."))).toEqual([["construction_months", 16]]);
+    expect(pick(read("Build time: 16 months"))).toEqual([["construction_months", 16]]);
+    expect(pick(read("Interest-only: 24 months"))).toEqual([["senior_io_months", 24]]);
+  });
+  test.each([
+    ["6 months to fill.", 6], ["8 months to fill the units", 8], ["We allow 7 months to fill the building.", 7], ["Plan 9 months to fill the project.", 9],
+    ["We expect 5 months to fill the suites.", 5], ["5 mois pour remplir les logements", 5], ["Comptez 4 mois pour remplir l'immeuble.", 4],
+  ])("\"to fill\" a building or its units is the lease-up: %s", (line, n) => expect(pick(read(line))).toEqual([["lease_up_months", n]]));
+  test.each(["We need 6 months to fill the staff positions.", "Allow 3 months to fill the retention pond.", "Il faut 2 mois pour remplir les formulaires du permis."])("\"to fill\" anything else is not the lease-up: %s", (line) => {
+    expect(read(line).candidates.some((c) => c.fieldKey === "lease_up_months")).toBe(false);
+  });
+});

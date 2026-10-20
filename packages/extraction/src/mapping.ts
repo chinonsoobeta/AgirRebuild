@@ -167,7 +167,8 @@ const CAPPED_COST_RE = /\b(hard costs?|construction costs?|building costs?|contr
 const LOAN_WORD_RE = /\b(loan|loans|mortgage|financing|advance|pret|hypotheque|financement)\b/;
 const COVERAGE_RE = /\b(dscr|dcr|debt (?:service )?coverage|couverture|rcsd|rcd|ccd)\b/;
 const TERM_RE = /\b(term|terme|maturity|matures?|echeance|duree du pret)\b/;
-const TERM_AFTER_RE = /^\s*(loan |initial |renewal |fixed |conversion )?(term|terme)\b/;
+// Up to two words may stand between the figure and the term ("24-month legal term", "18-month maturity").
+const TERM_AFTER_RE = /^\s*(?:(?!(?:of|de|du|d|to|as|and|et|or|ou|then|puis|is|est|for|pour)\b)[a-z]+ ){0,2}(term|terme|maturity|echeance)\b/;
 const AMORT_RE = /\bamorti[sz]\w*/;
 const IO_RE = /\b(interest[- ]only|io|interets? seulement)\b/;
 // A partner's return, never a loan's rate; the preferred-return words read as that field, a promote is only shown.
@@ -531,10 +532,13 @@ const VACANCY_RE = /\b(vacancy(?! rate)|(?<!taux de )vacance|inoccupation)\b/;
 // A duration labelled by the words right after it: "16 months to build", "huit mois pour louer"; not a loan's, fee's or incentive's months ("of construction interest", "de location gratuite").
 const NOT_PERIOD_AFTER = String.raw`(?!\s+(?:loans?|financing|facility|interest|insurance|warranty|commissions?|fees?|costs?|incentives?|free|reserves?|permits?|pret|financement|interets?|assurance|garantie|frais|couts?|gratuite?s?|permis))`;
 const BUILD_AFTER_RE = new RegExp(String.raw`^\s*(?:to build|of building|on site|de (?:construction|travaux|chantier))\b${NOT_PERIOD_AFTER}`);
-const LEASE_AFTER_RE = new RegExp(String.raw`^\s*(?:to (?:lease(?: up)?|let|fill)|of (?:lease[- ]?up|leasing|letting)|pour (?:louer|remplir)|de (?:mise en )?location)\b${NOT_PERIOD_AFTER}`);
+// "to fill" only alone or before the building or its units ("7 months to fill the building"), never "to fill the staff positions".
+const LEASE_AFTER_RE = new RegExp(String.raw`^\s*(?:to (?:lease(?: up)?|let)|of (?:lease[- ]?up|leasing|letting)|pour louer|de (?:mise en )?location)\b${NOT_PERIOD_AFTER}|^\s*(?:to fill|pour remplir)(?:\s*$|\s+(?:the |les |l )?(?:units?|suites?|apartments?|building|project|logements|unites|appartements|immeuble|projet)\b)`);
 // A pace ("2 units per month", "3 ventes par mois") is never a count of units.
 const PACE_AFTER_RE = /^\s*(units?|unites?|sales|ventes)?\s*(?:per|a|par|\/)\s*(?:month|mois)\b/;
 const PACE_NOTE = "A sales pace, not the number of units";
+const NOT_AS_RE = /\b(?:do not|don t|never|not to be|must not|should not|ne pas|ne jamais|ne doit pas|ne doivent pas)\s+(?:\w+\s+){0,2}?(?:treat|read|use|count|consider|traiter|lire|utiliser|compter|considerer)\w*\b|\b(?:is not|are not|n est pas|ne sont pas)(?:\s+(?:a|an|the|un|une|de|d))?\s+#|#\s+(?:\w+\s+){0,2}?(?:is not|are not|n est pas|ne sont pas)\b/;
+const NOT_AS_NOTE = "The sentence says this figure is not to be read as that; it is not taken";
 const LEASE_TERM_RE = /\b(?:leases?|bail|baux)\b(?![- ]?up)/;
 // Before a loose build or lease-up word, a start, a wait, a warranty, an insurance or a notice: "Début du chantier", "Délai avant les travaux", "Garantie du chantier".
 const NOT_PERIOD_BEFORE_RE = /\b(?:start|begins?|commencement|debut|demarrage|before|prior to|until|avant|jusqu|warranty|garantie|insurance|assurance|notice|preavis|fees?|frais)\b/;
@@ -750,6 +754,8 @@ function mapLabel(rawLabel: string, t: NumberToken, opts: MapOptions = {}): Mapp
   if (pace && (t.unit === "units" || (t.unit === null && pace[1]))) return { kind: "ignored", reason: PACE_NOTE };
   const lender = lenderFigure(rawLabel, t, opts);
   if (lender) return { kind: "ignored", reason: lender };
+  // A sentence that says not to treat its figure as something, or that the figure is not something, gives nothing from it ("#" stands for the figure).
+  if (opts.context !== undefined && NOT_AS_RE.test(foldText(`${opts.context.slice(0, t.start).split(/[,;.]/).pop() ?? ""} # ${(opts.after ?? "").split(/[,;.]/)[0] ?? ""}`))) return { kind: "ignored", reason: NOT_AS_NOTE };
   // Unless the figure's own clause names the preferred return ("a preferred return of 8% to the investors").
   const prefLead = () => FIELD_BY_KEY.get("preferred_return_pct")!.aliases.some((a) => hasPhrase(normalizeLabel(rawLabel.split(/[,;]/).pop() ?? "").label, a));
   if (t.unit === "%" && SHARE_TO_RE.test(foldText(opts.after ?? "")) && !prefLead()) return { kind: "ignored", reason: "A share of distributions, not the preferred return" };
