@@ -156,7 +156,17 @@ export function createApp({ db, store, secureCookies, demoSignIn = false, trustP
         storage_key: string | null; run_number: number; deal_name: string; expires_at: string | null }>(
         `select * from fn_open_share_link($1, $2)`, [sha256(c.req.param("secret")!), what]);
       if (!link) return c.json({ error: "This link is not available. It may have expired or been revoked." }, 404);
-      if (what === "page") return c.json({ deal: link.deal_name, kind: link.kind, format: link.format, runNumber: link.run_number, expiresAt: link.expires_at });
+      if (what === "page") {
+        const [run] = await db.query<{ result: import("@agir/contracts").RunResult; input_snapshot: { policy?: Policy; standardPolicy?: Policy; policyChanges?: import("@agir/contracts").PolicyChange[] } }>(`select result,input_snapshot from runs where id=$1`, [link.run_id]);
+        let standardFailures: { en: string[]; fr: string[] } | undefined;
+        if (run?.input_snapshot.policy?.custom) {
+          const { Formatter, customThresholdBlocks } = await import("@agir/artifacts");
+          const x = { ...run.input_snapshot, policy: run.input_snapshot.policy, result: run.result };
+          const failures = (lang: "en" | "fr") => customThresholdBlocks(new Formatter(run.result,lang,x.policy.maxLtcPct),x).flatMap((block) => block.type === "checks" ? block.items.filter((item) => item.lenderCited).map((item) => item.text) : []);
+          standardFailures = { en: failures("en"), fr: failures("fr") };
+        }
+        return c.json({ deal: link.deal_name, kind: link.kind, format: link.format, runNumber: link.run_number, expiresAt: link.expires_at, ...(standardFailures ? { standardFailures } : {}) });
+      }
       if (what === "file") {
         const [artifact] = await db.query<{ lang: "en" | "fr" }>(`select lang from artifacts where id = $1`, [link.artifact_id]);
         return fileResponse({ ...link, deal: link.deal_name, lang: artifact?.lang }, c.req.query("inline") === "1");
@@ -242,7 +252,7 @@ export function createApp({ db, store, secureCookies, demoSignIn = false, trustP
       await as(c, async (tx) => {
         const [member] = await tx.query<{ role: string }>(`select m.role from workspace_members m ${scope === "deal" ? "join deals d on d.workspace_id=m.workspace_id" : ""} where ${scope === "workspace" ? "m.workspace_id" : "d.id"}=$1 and m.user_id=agir_uid()`, [id]);
         if (member?.role !== "owner") throw new HttpError(403,"Your role in this workspace does not allow this action");
-        const threshold = THRESHOLDS[body.policyVersion]?.find((threshold) => threshold.path === body.path);
+        const threshold = Object.hasOwn(THRESHOLDS,body.policyVersion) ? THRESHOLDS[body.policyVersion]!.find((threshold) => threshold.path === body.path) : undefined;
         const error = validateThreshold(body.policyVersion,body.path,body.value === null ? threshold?.standard : body.value);
         if (error) throw new HttpError(422,error.en,{fr:error.fr});
         await tx.query(`select fn_set_policy_value($1,$2,$3,$4,$5,$6)`, [scope,id,body.policyVersion,body.path,body.value,body.reason]);

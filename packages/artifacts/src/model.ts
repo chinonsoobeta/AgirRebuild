@@ -2,7 +2,7 @@
 // and the inputs that run used, and from nothing else: it never recomputes a
 // verdict, a gate or a metric.
 
-import { tableSourceLabel, type TableSource, FR_ABSENT, CURRENCY_NAMES, FIELD_BY_KEY, placeLabel, type Currency, type EngineInput, type FieldUnit, type Policy, type RunResult, type VerdictCode } from "@agir/contracts";
+import { THRESHOLDS, checkText, numberFormat, plainTerm, type PolicyChange, tableSourceLabel, type TableSource, FR_ABSENT, CURRENCY_NAMES, FIELD_BY_KEY, placeLabel, type Currency, type EngineInput, type FieldUnit, type Policy, type RunResult, type VerdictCode } from "@agir/contracts";
 import { createHash } from "node:crypto";
 import { runWaterfall, heldPartnerReturns, breakeven, canonicalJson, ENGINE_VERSION, type BreakevenEcho, type BreakevenRow } from "@agir/engine";
 import { Formatter, formatValue } from "./format.ts";
@@ -31,6 +31,8 @@ export type ArtifactInput = {
   input: EngineInput;
   /** The policy the run was made under (the run stores its version and hash); only the build decision reads it. */
   policy: Policy;
+  standardPolicy?: Policy;
+  policyChanges?: PolicyChange[];
   assumptions: {
     fieldKey: string;
     itemKey: string | null;
@@ -60,7 +62,7 @@ export type Block =
   | { type: "verdict"; code: VerdictCode; label: string; headline: string; explanation: string }
   | { type: "stats"; items: { label: string; value: string }[] }
   | { type: "table"; columns: { label: string; numeric?: boolean }[]; rows: string[][]; strong?: number[]; caption?: string; long?: boolean }
-  | { type: "checks"; items: { tone: "pass" | "warning" | "error"; text: string }[] };
+  | { type: "checks"; items: { tone: "pass" | "warning" | "error"; text: string; lenderCited?: boolean }[] };
 
 export type DocModel = {
   lang: "en" | "fr";
@@ -181,6 +183,43 @@ const isHeld = (x: ArtifactInput) => x.input.exit === "refinance_hold";
 /** Under a draft policy, said once beside the verdict. */
 function draftLine(x: ArtifactInput): Block[] {
   return x.policy.draft ? [{ type: "paragraph", text: reportText(x.lang ?? "en", "draftPolicy") }] : [];
+}
+
+/** The stored comparison and who changed each boundary; absent means byte-identical legacy output. */
+export function customThresholdBlocks(f: Formatter, x: Pick<ArtifactInput,"policy" | "result" | "standardPolicy" | "policyChanges">): Block[] {
+  if (!x.policy.custom) return [];
+  const standard = x.result.standard;
+  if (!standard || !x.standardPolicy) throw new Error("Custom thresholds require the stored standard comparison");
+  const changes = x.policyChanges ?? [];
+  const rows = changes.map((change,index) => {
+    const threshold = THRESHOLDS[x.policy.version]!.find((threshold) => threshold.path === change.path)!;
+    const flags = [change.looser && reportText(f.lang,"thresholdLooser"), change.looser && change.lenderCited && reportText(f.lang,"thresholdCited"), change.stressRemoved && reportText(f.lang,"thresholdRemoved")].filter(Boolean).join(" · ");
+    return [f.ident(threshold.label[f.lang],`policyChanges.${index}.path`), f.threshold(change.value,threshold.unit,`policyChanges.${index}.value`), f.threshold(change.standard,threshold.unit,`policyChanges.${index}.standard`),
+      reportText(f.lang,change.layer === "workspace" ? "thresholdWorkspace" : "thresholdDeal"),
+      `${f.ident(change.setBy ?? change.setById,`policyChanges.${index}.setBy`)} · ${f.ident(change.setAt.slice(0,10),`policyChanges.${index}.setAt`)}`,
+      f.ident(change.reason,`policyChanges.${index}.reason`), flags];
+  });
+  const failed = standard.verdict.gates.filter((gate) => !["passed","not_applicable"].includes(gate.status));
+  const insured = standard.policyVersion.startsWith("rental-hold-insured");
+  const items: { tone: "error" | "warning"; text: string; lenderCited?: boolean }[] = failed.map((gate) => {
+    const value = f.run(gate.threshold,gate.unit,`standard.verdict.gates.${gate.key}.threshold`);
+    const label = f.gate(gate.key,gate.label);
+    return { tone: "error", lenderCited: insured && gate.key === "dcr_after_refinance", text: insured && gate.key === "dcr_after_refinance" ? reportText(f.lang,"failsCmhc",value,label) : `${label} ≥ ${value}` };
+  });
+  for (const check of standard.checks.filter((check) => check.severity === "error")) {
+    const text = f.ident(plainTerm(f.lang,checkText(f.lang,numberFormat(f.lang),(key,en) => f.gate(key,en),check,x.standardPolicy.maxLtcPct)),`standard.check.${check.key}`);
+    items.push({ tone:"error", lenderCited: ["insured_min_units","refinance_ltv_limit","refinance_amort_limit"].includes(check.key), text: ["insured_min_units","refinance_ltv_limit","refinance_amort_limit"].includes(check.key) ? reportText(f.lang,"failsCmhcCheck",text) : text });
+  }
+  // Base sizing is a warning, so it is not among the stored standard error checks. Its recorded base metric is policy-independent.
+  const sizing = x.result.scenarios[0]?.metrics.find((metric) => metric.key === "sizing_dscr");
+  if (insured && sizing?.value !== null && sizing?.value !== undefined && sizing.value < x.standardPolicy.baseSizingDscrFloor) {
+    items.push({ tone:"warning", lenderCited: true, text: reportText(f.lang,"failsCmhc",f.run(x.standardPolicy.baseSizingDscrFloor,"x","standardPolicy.baseSizingDscrFloor"),THRESHOLDS[x.policy.version]!.find((threshold) => threshold.path === "baseSizingDscrFloor")!.label[f.lang]) });
+  }
+  items.sort((a,b) => Number(Boolean(b.lenderCited))-Number(Boolean(a.lenderCited)));
+  return [{ type:"heading", text:reportText(f.lang,"customThresholds") },
+    { type:"table", caption:reportText(f.lang,"customThresholds"), long:true, columns:["term","yourThreshold","standardThreshold","thresholdLayer","thresholdSetter","thresholdReason","thresholdFlags"].map((key) => ({label:reportText(f.lang,key as Parameters<typeof reportText>[1])})),rows },
+    { type:"paragraph", text:reportText(f.lang,"standardThresholdVerdict",VERDICT_LABEL(f.lang)[standard.verdict.code]) },
+    { type:"checks", items }];
 }
 
 /** The hold measures, then the unrealized multiple and IRR with the stated value, each under its own label. */
@@ -542,14 +581,14 @@ export function buildModel(x: ArtifactInput): DocModel {
     const heldSplit = isHeld(x) && x.input.waterfall !== undefined;
     if (!heldSplit && (!lp || lp.status === "NOT_APPLICABLE")) throw new PartnerMemoUnavailableError();
   }
-  const f = new Formatter(x.result, x.lang ?? "en", x.policy.maxLtcPct);
+  const f = new Formatter(x.result, x.lang ?? "en", x.policy.maxLtcPct, x.policy.custom ? {policy:x.policy,standardPolicy:x.standardPolicy,changes:x.policyChanges} : undefined);
   const r = x.result;
   const date = f.ident(x.run.createdAt.slice(0, 10), "run.date");
   const runLabel = f.ident(reportText(f.lang, "run", String(x.run.runNumber)), "run.number");
   const verdict: Block = {
     type: "verdict",
     code: r.verdict.code,
-    label: VERDICT_LABEL(f.lang)[r.verdict.code],
+    label: VERDICT_LABEL(f.lang)[r.verdict.code] + (x.policy.custom ? ` · ${reportText(f.lang,"withCustomThresholds")}` : ""),
     headline: f.text(r.verdict.headline, "verdict.headline"),
     explanation: f.text(r.verdict.explanation, "verdict.explanation"),
   };
@@ -557,7 +596,7 @@ export function buildModel(x: ArtifactInput): DocModel {
   const sale = isSale(x);
   const held = !sale && isHeld(x);
   if (x.kind === "ic_memo") {
-    blocks.push(verdict, ...draftLine(x), ...sponsorStatedBlocks(f, x), ...tableValueBlocks(f,x));
+    blocks.push(verdict, ...draftLine(x), ...customThresholdBlocks(f,x), ...sponsorStatedBlocks(f, x), ...tableValueBlocks(f,x));
     blocks.push({
       type: "stats",
       items: sale ? saleStats(f) : held
@@ -580,9 +619,9 @@ export function buildModel(x: ArtifactInput): DocModel {
     blocks.push({ type: "heading", text: reportText(f.lang, "checks") }, checks(f, r));
     blocks.push(...notFoundBlocks(f, x), inputsAppendix(f, x));
   } else if (x.kind === "partner_memo" && held) {
-    blocks.push(verdict, ...draftLine(x), ...sponsorStatedBlocks(f, x), ...tableValueBlocks(f,x), ...heldPartnerBlocks(f, x));
+    blocks.push(verdict, ...draftLine(x), ...customThresholdBlocks(f,x), ...sponsorStatedBlocks(f, x), ...tableValueBlocks(f,x), ...heldPartnerBlocks(f, x));
   } else if (x.kind === "partner_memo") {
-    blocks.push(verdict, ...draftLine(x), ...sponsorStatedBlocks(f, x), ...tableValueBlocks(f,x));
+    blocks.push(verdict, ...draftLine(x), ...customThresholdBlocks(f,x), ...sponsorStatedBlocks(f, x), ...tableValueBlocks(f,x));
     blocks.push({ type: "stats", items: ["equity_multiple", "equity_irr", "lp_irr", "gp_irr"].map((key) => ({
       label: f.metricOf("base", key).label, value: f.metric("base", key),
     })) });
@@ -620,7 +659,7 @@ export function buildModel(x: ArtifactInput): DocModel {
     if (sale) blocks.push(SALE_OPERATIONS(f.lang));
     blocks.push(...notFoundBlocks(f, x), { type: "paragraph", muted: true, text: reportText(f.lang, "inputSources") });
   } else if (x.kind === "build_decision") {
-    blocks.push(verdict, ...draftLine(x), ...sponsorStatedBlocks(f, x), ...tableValueBlocks(f,x));
+    blocks.push(verdict, ...draftLine(x), ...customThresholdBlocks(f,x), ...sponsorStatedBlocks(f, x), ...tableValueBlocks(f,x));
     blocks.push({
       type: "stats",
       items: sale ? saleStats(f, false) : held
@@ -643,7 +682,7 @@ export function buildModel(x: ArtifactInput): DocModel {
     }
     blocks.push(...notFoundBlocks(f, x), { type: "paragraph", muted: true, text: reportText(f.lang, "inputSources") });
   } else {
-    blocks.push(verdict, ...draftLine(x), ...sponsorStatedBlocks(f, x), ...tableValueBlocks(f,x));
+    blocks.push(verdict, ...draftLine(x), ...customThresholdBlocks(f,x), ...sponsorStatedBlocks(f, x), ...tableValueBlocks(f,x));
     if (held) blocks.push({ type: "stats", items: heldStats(f) });
     const i = x.input;
     const debtRows: string[][] = [];

@@ -3077,6 +3077,9 @@ describe("card 96b owner thresholds", () => {
     for (const session of [viewer, admin]) expect((await set("workspaces", workspace, 1.4, undefined, session)).status).toBe(403);
     expect((await set("workspaces", workspace, 1.4, " ")).status).toBe(422);
     expect((await call(owner, "POST", `/api/workspaces/${workspace}/thresholds`, { policyVersion: version, path: "agreementTolerancePct", value: 2, reason: "Do not allow a looser tolerance" })).status).toBe(422);
+    for (const policyVersion of ["unknown", "__proto__", "constructor"]) {
+      expect((await call(owner,"POST",`/api/workspaces/${workspace}/thresholds`,{policyVersion,path,value:1.4,reason:"Unknown policy must be refused"})).status).toBe(422);
+    }
     expect((await set("workspaces", workspace, 1.4)).status).toBe(200);
     const view = await call(viewer, "GET", `/api/workspaces/${workspace}/thresholds`);
     expect(view.status).toBe(200);
@@ -3114,4 +3117,23 @@ describe("card 96b owner thresholds", () => {
     expect((await call(owner, "GET", `/api/runs/${made.json.id}`)).json.staleReasons).toContain("The policy thresholds changed after this run.");
     expect((await call(owner, "GET", `/api/deals/${id}`)).json.run.fresh).toBe(false);
   });
+  test("card 96d shared pages retain the cited failures even when owner thresholds allow the DCR", async () => {
+    const version = "rental-hold-insured-draft";
+    expect((await call(owner,"POST",`/api/workspaces/${workspace}/thresholds`,{policyVersion:version,path:"gates.dcrAfterRefinanceMin",value:1.05,reason:"Owner rental credit threshold"})).status).toBe(200);
+    const d = (await call(owner,"POST",`/api/workspaces/${workspace}/deals`,{name:"Halifax-style custom rental",assetType:"Multifamily",location:"Halifax",province:"NS"})).json.id;
+    const values: [string,number,string?][] = [["land_cost",1000000],["hard_cost",0],["soft_cost",0],["contingency",0],["construction_months",0],["lease_up_months",0],["hold_years",3],["unit_count",12,"Residential"],["unit_rent_monthly",97.5,"Residential"],["stabilized_occupancy_pct",100],["expense_ratio_pct",0],["exit_cap_rate_pct",2],["selling_costs_pct",0],["senior_loan_amount",0],["refinance_and_hold",1],["refinance_month",12],["refinance_amount",500000],["refinance_rate_pct",0],["refinance_amort_years",40],["refinance_io_months",0],["refinance_insurance_premium_pct",4],["refinance_mli_select_points",50]];
+    for (const [fieldKey,value,itemKey] of values) expect((await call(owner,"POST",`/api/deals/${d}/values`,{fieldKey,value,itemKey,reason:"Fictional custom rental setup"})).status).toBe(200);
+    const made = await call(owner,"POST",`/api/deals/${d}/runs`); expect(made.status).toBe(200);
+    expect((await call(owner,"POST",`/api/runs/${made.json.id}/artifacts`,{kind:"lender_package",format:"docx"})).status).toBe(200);
+    await work();
+    const artifact = (await call(owner,"GET",`/api/deals/${d}/artifacts`)).json[0];
+    expect(artifact.status).toBe("ready");
+    const link = await call(owner,"POST",`/api/artifacts/${artifact.id}/share-links`,{term:"7d"}); expect(link.status).toBe(200);
+    const page = await call(null,"GET",link.json.url.replace(/^\/s\//,"/api/share/"));
+    expect(page.status).toBe(200);
+    expect(page.json.standardFailures.en.join(" ")).toContain("Fails CMHC's 1.10x");
+    expect(page.json.standardFailures.fr.join(" ")).toContain("SCHL");
+    expect(page.json.standardFailures.fr.join(" ")).not.toContain("Fails CMHC");
+  });
+
 });

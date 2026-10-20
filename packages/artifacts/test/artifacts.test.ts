@@ -1,5 +1,5 @@
 import { describe, expect, test } from "vitest";
-import { plainTerm, FIELD_BY_KEY, POLICY_V1, policyFor, type EngineInput } from "@agir/contracts";
+import { effectivePolicy, plainTerm, FIELD_BY_KEY, POLICY_V1, policyFor, type EngineInput } from "@agir/contracts";
 import { createHash } from "node:crypto";
 import { readFileSync } from "node:fs";
 import { crc32, deflateSync } from "node:zlib";
@@ -1532,5 +1532,89 @@ describe("card 97c report rendering", () => {
     expect(text).toContain(lang === "en" ? "10-year term" : "durée de 10 ans");
     expect(model.formatter.manifest).toContainEqual({text:"10",ref:"input:refinance_term_years",unit:"years"});
     expect(verifyProvenance(text,model.formatter.manifest).orphans).toEqual([]);
+  });
+});
+
+describe("card 96d custom thresholds", () => {
+  const customInput = (lang: "en" | "fr" = "en"): ArtifactInput => {
+    const x = mapleInput("lender_package");
+    const input: EngineInput = { ...allEquityDeal(), holdYears: 3, exit: "refinance_hold", exitCapPct: 2,
+      revenue: [{ key: "Residential", label: "Residential", basis: "per_unit", units: 12, rentMonthly: 97.5 }],
+      refinance: { month: 12, amount: 500000, ratePct: 0, amortYears: 40, ioMonths: 0, insurancePremiumPct: 4, mliSelectPoints: 50 } };
+    const base = policyFor(input);
+    const note = { value: 1.05, setBy: "owner-id", setAt: "2026-10-19T12:00:00Z", reason: "Owner credit decision" };
+    const effective = effectivePolicy(base, { [base.version]: { "gates.dcrAfterRefinanceMin": note, "stresses.rate.rateBps": { ...note, value: 0 }, "stresses.combined.rateBps": { ...note, value: 100 } } }, {});
+    const standard = underwrite(input, base), result = underwrite(input, effective.policy);
+    result.standard = { policyVersion: base.version, verdict: standard.verdict, checks: standard.checks.filter((c) => c.severity === "error") };
+    return { ...x, lang, input, policy: effective.policy, result, standardPolicy: base,
+      policyChanges: effective.changes.map((change) => ({ ...change, setBy: "Dana Analyst" })) };
+  };
+  test("the same insured deal without overrides retains its pre-96d text pin", () => {
+    const x = customInput();
+    const plain = { ...x, policy: x.standardPolicy!, result: underwrite(x.input,x.standardPolicy!), standardPolicy: undefined, policyChanges: undefined };
+    const text = visibleText(renderHtml(buildModel(plain)));
+    expect(createHash("sha256").update(text).digest("hex")).toBe("9239c2cfd02fa36fe5a3b19676df9053589dd8fdcfd9fbf22e496426b557e411");
+  });
+  test("prints the changed value and failed cited standard for a 1.08x DCR, with traceable numbers", () => {
+    const x = customInput();
+    expect(x.result.verdict.gates.find((g) => g.key === "dcr_after_refinance")).toMatchObject({ status: "passed", actual: expect.closeTo(1.08, 8) });
+    expect(x.result.standard!.verdict.gates.find((g) => g.key === "dcr_after_refinance")).toMatchObject({ status: "failed", threshold: 1.1 });
+    const model = buildModel(x), text = visibleText(renderHtml(model));
+    expect(text).toContain("Custom thresholds");
+    expect(text).toContain("Fails CMHC's 1.10x");
+    expect(text).toContain("Dana Analyst");
+    expect(text).toContain("1.05x");
+    expect(text).toContain("Removed by Dana Analyst on 2026-10-19");
+    expect(text).toContain("rate +100 bps");
+    const table = model.blocks.find((b) => b.type === "table" && b.caption === "Custom thresholds");
+    expect(table).toMatchObject({ long: true });
+    expect(verifyProvenance(text,model.formatter.manifest).orphans).toEqual([]);
+  });
+  test("the French custom block has translated labels, flags and comparison", () => {
+    const x = customInput("fr"), model = buildModel(x);
+    const start = model.blocks.findIndex((b) => b.type === "heading" && b.text === "Seuils personnalisés");
+    expect(start).toBeGreaterThanOrEqual(0);
+    const block = model.blocks.slice(start,start + 4);
+    const text = JSON.stringify(block);
+    expect(text).toContain("Selon les seuils standard d'Agir");
+    expect(text).toContain("Plus souple que la règle citée de la SCHL");
+    expect(text).not.toMatch(/Custom thresholds|Your value|Agir standard|Under Agir|Looser than|Workspace|Removed by|Fails CMHC/);
+    expect(verifyProvenance(visibleText(renderHtml(model)),model.formatter.manifest).orphans).toEqual([]);
+  });
+  test.each(["ic_memo","build_decision","lender_package","model_export"] as const)("%s places the disclosure immediately after the draft line", (kind) => {
+    const model = buildModel({ ...customInput(), kind });
+    expect(model.blocks.slice(0,3).map((b) => b.type)).toEqual(["verdict","paragraph","heading"]);
+    expect(model.blocks[2]).toMatchObject({ text: "Custom thresholds" });
+  });
+  test("the lender package retains the cited failure even when every custom gate approves", () => {
+    const x = customInput(), base = x.standardPolicy!;
+    const values = Object.fromEntries(x.policyChanges!.map((change) => [change.path,{value:change.value,setBy:change.setById,setAt:change.setAt,reason:change.reason}]));
+    const note = {setBy:"owner-id",setAt:"2026-10-19T12:00:00Z",reason:"Owner permits the weaker return hurdles"};
+    values["gates.developmentSpreadMinBps"] = {...note,value:-500};
+    values["gates.stressedUnrealizedMultipleMin"] = {...note,value:0};
+    const effective = effectivePolicy(base,{[base.version]:values},{});
+    const result = underwrite(x.input,effective.policy); result.standard = x.result.standard;
+    expect(result.verdict.code).toBe("APPROVE");
+    const model = buildModel({...x,policy:effective.policy,result,policyChanges:effective.changes.map((change) => ({...change,setBy:"Dana Analyst"}))});
+    expect(visibleText(renderHtml(model))).toContain("Fails CMHC's 1.10x");
+    expect(verifyProvenance(visibleText(renderHtml(model)),model.formatter.manifest).orphans).toEqual([]);
+  });
+  test("the held partner memo includes the same first-page disclosure", () => {
+    const x = customInput();
+    const input = {...x.input,waterfall:{lpSharePct:90,preferredReturnPct:8,gpPromotePct:20}};
+    const result = underwrite(input,x.policy), standard = underwrite(input,x.standardPolicy!);
+    result.standard = {policyVersion:x.standardPolicy!.version,verdict:standard.verdict,checks:standard.checks.filter((check) => check.severity === "error")};
+    const model = buildModel({...x,kind:"partner_memo",input,result});
+    expect(model.blocks[2]).toMatchObject({type:"heading",text:"Custom thresholds"});
+    expect(verifyProvenance(visibleText(renderHtml(model)),model.formatter.manifest).orphans).toEqual([]);
+  });
+  test("the model export also includes the custom comparison on its Summary sheet", async () => {
+    const ExcelJS = (await import("exceljs")).default;
+    const wb = new ExcelJS.Workbook();
+    await wb.xlsx.load(Buffer.from((await renderArtifact({ ...customInput(), kind: "model_export" }, "xlsx")).bytes) as never);
+    const text = JSON.stringify(wb.worksheets[0]!.getSheetValues());
+    expect(text).toContain("Custom thresholds");
+    expect(text).toContain("Fails CMHC's 1.10x");
+    expect(text).toContain("Dana Analyst");
   });
 });

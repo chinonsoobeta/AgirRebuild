@@ -1,6 +1,19 @@
 import { plainTerm } from "@agir/contracts";
 // Report wording, side by side. Human-entered names and notes are printed as recorded.
 export const TEXT = {
+  customThresholds: ["Custom thresholds", "Seuils personnalisés"],
+  yourThreshold: ["Your value", "Votre valeur"], standardThreshold: ["Agir standard", "Standard d'Agir"],
+  thresholdLayer: ["Set at", "Défini dans"], thresholdSetter: ["Set by and date", "Auteur et date"],
+  thresholdReason: ["Reason", "Motif"], thresholdFlags: ["Flags", "Indications"],
+  thresholdWorkspace: ["Workspace", "Espace de travail"], thresholdDeal: ["Deal", "Projet"],
+  thresholdLooser: ["Looser than Agir's standard", "Plus souple que le standard d'Agir"],
+  thresholdCited: ["Looser than CMHC's cited rule", "Plus souple que la règle citée de la SCHL"],
+  thresholdRemoved: ["Stress removed", "Stress retiré"],
+  standardThresholdVerdict: ["Under Agir's standard thresholds: {0}", "Selon les seuils standard d'Agir : {0}"],
+  failsCmhc: ["Fails CMHC's {0} {1}", "Ne respecte pas la règle citée de la SCHL de {0} : {1}"],
+  failsCmhcCheck: ["Fails CMHC's rule: {0}", "Ne respecte pas la règle citée de la SCHL : {0}"],
+  stressRemovedBy: ["Removed by {0} on {1}", "Retiré par {0} le {1}"],
+  withCustomThresholds: ["with your thresholds", "avec vos seuils"],
   publishedTables: ["Taken from published tables", "Tiré de tableaux publiés"],
   mliSelect: ["CMHC MLI Select, {0} points", "SCHL MLI Select, {0} points"],
   mliStandardTerm: ["CMHC MLI Standard, {0}-year term", "SCHL MLI Standard, durée de {0} ans"],

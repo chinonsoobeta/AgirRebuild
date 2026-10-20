@@ -98,7 +98,7 @@ export type Artifact = { lang: "en" | "fr"; id: string; kind: string; format: st
 export type ShareTerm = "24h" | "7d" | "30d" | "none";
 export type ShareLink = { id: string; artifact_id: string; kind: string; format: string; run_number: number; term: ShareTerm; expires_at: string | null; created_at: string;
   created_by: string | null; revoked_at: string | null; revoked_by: string | null; openings: number; last_opened_at: string | null };
-export type SharedReport = { deal: string; kind: string; format: string; runNumber: number; expiresAt: string | null };
+export type SharedReport = { standardFailures?: { en: string[]; fr: string[] }; deal: string; kind: string; format: string; runNumber: number; expiresAt: string | null };
 export type DealClient = { id: string; name: string; email: string; assigned_at: string };
 export type ClientInvite = { id: string; created_at: string; expires_at: string; created_by: string | null; used_at: string | null; used_by: string | null; revoked_at: string | null; revoked_by: string | null };
 export type InvitePeek = { workspace: string; deal: string };

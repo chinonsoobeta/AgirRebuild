@@ -1,6 +1,7 @@
 import { plainTerm, FIELD_BY_KEY, placeLabel } from "@agir/contracts";
 import { heldPartnerReturns, runWaterfall } from "@agir/engine";
-import { confirmationLabel, DRAFT_POLICY_LINE, notFoundSentence, type ArtifactInput } from "./model.ts";
+import { Formatter } from "./format.ts";
+import { customThresholdBlocks, confirmationLabel, DRAFT_POLICY_LINE, notFoundSentence, type ArtifactInput } from "./model.ts";
 
 /**
  * The model export: every number of the run as a number, never as text, so an
@@ -13,6 +14,7 @@ export async function renderXlsx(x: ArtifactInput): Promise<Uint8Array> {
   wb.creator = "Agir";
   wb.created = new Date(x.run.createdAt);
   const r = x.result;
+  const customFormatter = x.policy.custom ? new Formatter(x.result,x.lang ?? "en",x.policy.maxLtcPct,{policy:x.policy,standardPolicy:x.standardPolicy,changes:x.policyChanges}) : undefined;
   const sale = x.input.exit === "for_sale";
   const fmt = (unit: string) => (unit === "$" ? '"$"#,##0;[Red]-"$"#,##0' : unit === "%" ? '0.00"%"' : unit === "x" ? '0.00"x"' : unit === "bps" ? '0" bps"' : "#,##0");
   const head = (ws: import("exceljs").Worksheet, cols: string[]) => {
@@ -33,6 +35,13 @@ export async function renderXlsx(x: ArtifactInput): Promise<Uint8Array> {
   summary.addRow(["Result hash", x.run.resultHash]);
   summary.addRow([]);
   summary.addRow(["Verdict", r.verdict.code, plainTerm("en",r.verdict.headline)]).font = { bold: true };
+  if (x.policy.custom) {
+    for (const block of customThresholdBlocks(customFormatter!,x)) {
+      if (block.type === "heading" || block.type === "paragraph") summary.addRow([block.text]);
+      else if (block.type === "table") { summary.addRow(block.columns.map((column) => column.label)); for (const row of block.rows) summary.addRow(row); }
+      else if (block.type === "checks") for (const item of block.items) summary.addRow([item.text]);
+    }
+  }
   summary.addRow([]);
   head(summary, ["Gate", "Scenario", "Threshold", "Actual", "Outcome"]);
   for (const g of r.verdict.gates) {
@@ -48,7 +57,7 @@ export async function renderXlsx(x: ArtifactInput): Promise<Uint8Array> {
   summary.columns.forEach((c) => (c.width = 26));
 
   const metrics = wb.addWorksheet("Metrics");
-  head(metrics, ["Metric", "Unit", ...r.scenarios.map((s) => s.label), "Formula"]);
+  head(metrics, ["Metric", "Unit", ...r.scenarios.map((s) => customFormatter?.stress(s.key,s.label) ?? s.label), "Formula"]);
   if (sale) metrics.addRow(["Metrics marked not applicable are omitted: The units are sold; there is no rental income."]);
   for (const m of r.scenarios[0]!.metrics) {
     if (sale && m.status === "NOT_APPLICABLE" && m.reason === "The units are sold; there is no rental income.") continue;

@@ -353,6 +353,10 @@ describe("share links on the web (task 86b)", () => {
     expect(vi.mocked(api.post).mock.calls.some(([path]) => path === "/share-links/active/revoke")).toBe(true);
     expect(queryState.invalidate.mock.calls.length).toBeGreaterThan(0);
   });
+  it("lists lender-cited standard failures on a custom shared report page", async () => {
+    queryState.shared = { ...queryState.shared as object, standardFailures: { en: ["Fails CMHC's 1.10x coverage rule"], fr: ["Ne respecte pas la règle de la SCHL de 1,10x"] } };
+    expect(await sharePage()).toContain("Fails CMHC&#x27;s 1.10x coverage rule");
+  });
   it("hides the Shared links table when there are no links", () => { expect(render()).not.toContain("Shared links"); });
   it.each(["pdf", "docx"])("the public %s page has its metadata, downloads and appropriate Open button, without requesting me", async (format) => {
     queryState.shared = { ...queryState.shared as object, format };

@@ -1,11 +1,11 @@
-import { buildModel, type ArtifactInput } from "./model.ts";
+import { customThresholdBlocks, buildModel, type ArtifactInput } from "./model.ts";
 import { renderHtml, visibleText } from "./html.ts";
 import { htmlToPdf } from "./pdf.ts";
 import { docxText, renderDocx } from "./docx.ts";
 import { renderXlsx } from "./xlsx.ts";
 import { verifyProvenance, type ProvenanceReport } from "./provenance.ts";
 
-export { buildModel, renderHtml, visibleText, htmlToPdf, renderDocx, renderXlsx, verifyProvenance };
+export { customThresholdBlocks, buildModel, renderHtml, visibleText, htmlToPdf, renderDocx, renderXlsx, verifyProvenance };
 export type { ArtifactInput, ProvenanceReport };
 export { findChromium, RendererUnavailableError } from "./pdf.ts";
 export { Formatter, formatValue } from "./format.ts";

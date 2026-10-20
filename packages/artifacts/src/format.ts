@@ -4,7 +4,7 @@
 // approved input, a gate threshold, or simple arithmetic over those. The
 // final scan (provenance.ts) then refuses any digit the manifest cannot explain.
 
-import { FR_FIELDS, FR_METRICS, STRESS, GATES, plainTerm, numberFormat, checkText, verdictText, type Metric, type MetricUnit, type RunResult } from "@agir/contracts";
+import { stressLabel, THRESHOLDS, type Policy, type PolicyChange, FR_FIELDS, FR_METRICS, STRESS, GATES, plainTerm, numberFormat, checkText, verdictText, type Metric, type MetricUnit, type RunResult } from "@agir/contracts";
 import { reportText } from "./text.ts";
 
 export type ProvenanceEntry = { text: string; ref: string; unit?: "years" };
@@ -45,7 +45,7 @@ export function formatValue(value: number, unit: MetricUnit | "$" | "%" | "x" | 
 export class Formatter {
   readonly manifest: ProvenanceEntry[] = [];
 
-  constructor(private readonly result: RunResult, readonly lang: "en" | "fr" = "en", private readonly ltcCeiling = 85) {}
+  constructor(private readonly result: RunResult, readonly lang: "en" | "fr" = "en", private readonly ltcCeiling = 85, private readonly custom?: { policy: Policy; standardPolicy?: Policy; changes?: PolicyChange[] }) {}
 
   private value(value: number, unit: Parameters<typeof formatValue>[1]): string {
     return this.lang === "fr" ? numberFormat("fr").value(value, unit) : formatValue(value, unit);
@@ -60,7 +60,13 @@ export class Formatter {
   }
 
   stress(key: string, en: string): string {
-    return plainTerm(this.lang, this.lang === "fr" ? STRESS[key]?.[1] ?? en : en);
+    const preset = this.custom?.policy.stresses.find((stress) => stress.key === key);
+    const label = preset ? stressLabel(preset,this.lang,this.custom?.standardPolicy?.stresses.find((stress) => stress.key === key)) : this.lang === "fr" ? STRESS[key]?.[1] ?? en : en;
+    const removed = this.custom?.changes?.filter((change) => change.stressRemoved && change.path.startsWith(`stresses.${key}.`)) ?? [];
+    return plainTerm(this.lang,label) + removed.map((change) => {
+      const field = key === "combined" ? `${THRESHOLDS[this.custom!.policy.version]!.find((threshold) => threshold.path === change.path)!.label[this.lang]}: ` : "";
+      return ` · ${field}${reportText(this.lang,"stressRemovedBy",change.setBy ?? change.setById,change.setAt.slice(0,10))}`;
+    }).join("");
   }
 
   private record(text: string, ref: string, unit?: "years"): string {
@@ -88,6 +94,14 @@ export class Formatter {
   run(value: number | null, unit: Parameters<typeof formatValue>[1], ref: string): string {
     if (value === null || !Number.isFinite(value)) return reportText(this.lang, "notMeaningful");
     return this.record(this.value(value, unit), `run:${ref}`);
+  }
+
+  /** Exact owner threshold from the stored policy-change snapshot, without rounding its decision boundary. */
+  threshold(value: number, unit: string, ref: string): string {
+    const text = String(value).replace(".",this.lang === "fr" ? "," : ".");
+    const translated = this.lang === "fr" ? ({bps:"pb",years:"ans",months:"mois",units:"logements",gates:"critères"} as Record<string,string>)[unit] ?? unit : unit;
+    const suffix = unit === "x" || (unit === "%" && this.lang === "en") ? translated : ` ${translated}`;
+    return this.record(text + suffix,`run:${ref}`);
   }
 
   /** An approved input. */
