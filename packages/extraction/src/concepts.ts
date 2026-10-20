@@ -46,7 +46,8 @@ export const MONTH_INDEX = /\b(?:month|mois)\s*:?\s*$|\b(?:at|in|by|from|until|a
 export const OCCUPANCY_WORD = /\b(?:occupancy|occupied|filled|fill|let|letting|leasing|leased|rented|occupation)\b/;
 export const SETTLED_WORD = /\b(?:stabili[sz]\w*|stab|settled|steady|mature|normal|long-run|long-term|target|planned|a maturite|de croisiere|a terme|retenue|regime(?: stable| etabli)?)\b/;
 export const GROWTH_WORD = /\b(?:growth|uplift|steps?|drift|increase|escalation|grown(?: at)?|indexation|hausse|croissance)\b/;
-export const ASSUMPTION_HISTORY = /\b(?:actual|historic(?:al)?|last year|prior year|seller s|previous owner|old owner|old building|comparables?|market|area|neighbou?rhood|peak|reel(?:le)?s?|l an dernier|historique|marche)\b/;
+// Card 117 audit: "actual" or "réelle" beside a stabilization word is this building's stabilized state (card 105), not history.
+export const ASSUMPTION_HISTORY = /\b(?:actual(?! stabili)|historic(?:al)?|last year|prior year|seller s|previous owner|old owner|old building|comparables?|market|area|neighbou?rhood|peak|(?<!stabilisee )reel(?:le)?s?(?! stabili)|l an dernier|historique|marche)\b/;
 
 export const CONCEPTS: readonly {
   fieldKey: string;

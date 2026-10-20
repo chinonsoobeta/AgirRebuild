@@ -5715,7 +5715,7 @@ describe("card 105 audit: stabilization named, presale and resale-price caps", (
   const read = (...lines: string[]) => extractCandidates({ kind: "pdf", lines: lines.map((text, i) => ({ text, location: `page 1, line ${i + 1}` })), tables: [], pageCount: 1, needsOcr: false, fullText: lines.join("\n") });
   const pick = (r: ReturnType<typeof read>) => r.candidates.map((c) => [c.fieldKey, c.value]);
   const LOAN = "Construction loan: $5,000,000";
-  test.each(["Initial stabilized occupancy: 95%", "Occupation stabilisée initiale : 95 %"])("a label that names stabilization is not an early occupancy: %s", (line) => {
+  test.each(["Actual stabilized occupancy: 95%", "Initial stabilized occupancy: 95%", "Occupation stabilisée initiale : 95 %", "Occupation stabilisée réelle : 95 %"])("a label that names stabilization is not an early occupancy: %s", (line) => {
     expect(pick(read(LOAN, line))).toEqual([["senior_loan_amount", 5_000_000], ["stabilized_occupancy_pct", 95]]);
   });
   test.each(["Pre-sale cap: 25%", "Pre sale cap: 30%", "Presales cap: 60%", "Pre-sales cap rate: 5.5%"])("a presale cap is not the exit cap: %s", (line) => {
@@ -7306,7 +7306,8 @@ describe("card 117: operating assumptions in plain words", () => {
       : { kind: "pdf", lines: parts.map((text, i) => ({ text, location: `page 1, line ${i + 1}` })), tables: [], pageCount: 1, needsOcr: false, fullText: parts.join("\n") });
   };
   test.each([
-    ["Actual stabilized occupancy: 95%", "-"],
+    ["Actual occupancy last year: 95%", "-"],
+    ["Occupation réelle du vendeur : 70 %", "-"],
     ["Parking cash per-stall monthly: $450", "-"],
     ["Recettes accessoires par-casier par mois : 450 $", "-"],
     ["Laundry cash monthly: $450 per unit", "-"],
