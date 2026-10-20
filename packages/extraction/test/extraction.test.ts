@@ -5585,7 +5585,7 @@ describe("card 104: the minimum coverage covenant in ordinary lender wording", (
     ["DCR floor: 1.20x", 1.2], ["DSCR floor: 1.25x", 1.25], ["Required coverage: 1.20x", 1.2], ["Coverage requirement: 1.20x", 1.2],
     ["Covenant: DCR of 1.20x tested annually", 1.2], ["Maintenance DCR floor 1.25x applies through operations", 1.25], ["The borrower must maintain a DSCR of 1.25x.", 1.25],
     ["Minimum coverage: 1.20x", 1.2], ["Debt coverage ratio: 1.20x minimum", 1.2],
-    ["Lender's required DCR: 1.30x", 1.3], ["DSCR test: 1.20x", 1.2], ["DSCR must be at least 1.25x.", 1.25], ["Debt service coverage threshold: 1.10x", 1.1],
+    ["Lender's required DCR: 1.30x", 1.3], ["DSCR must be at least 1.25x.", 1.25], ["Debt service coverage threshold: 1.10x", 1.1],
     ["DSCR: minimum 1.20x", 1.2], ["The borrower shall maintain a DCR of 1.15 throughout the term.", 1.15], ["Coverage floor of 1.25x, tested quarterly", 1.25],
   ])("English: %s", (line, value) => expect(pick(read(LOAN, line as string))).toEqual([["senior_loan_amount", 5_000_000], ["min_dscr_covenant", value]]));
   test.each([
@@ -5630,6 +5630,13 @@ describe("card 104: the minimum coverage covenant in ordinary lender wording", (
   ])("a requirement stated as a floor not to cross: %s", (line, value) => expect(pick(read(LOAN, line as string))).toEqual([["senior_loan_amount", 5_000_000], ["min_dscr_covenant", value]]));
   test.each(["DSCR fell below 1.20x in the stress case", "The DCR dropped below 1.15x last year.", "Le RCD est descendu sous 1,20 l'an dernier."])("a coverage that fell is a result, not the covenant: %s", (line) => {
     expect(covenant(read(LOAN, line))).toBe(false);
+  });
+  test.each([
+    "DSCR test: 1.20x", "Credit test DCR 1.15x", "Sizing test: DSCR 1.25x", "Test de RCD avant la reprise : 1,15x", "The 1.10x coverage test belongs to the permanent lender, not to us.",
+    "Take-out test: debt coverage of 1.20x", "DCR tested at 1.18x for the first advance", "Test de couverture du prêteur permanent : 1,20x", "RCD testé à 1,25x pour le dimensionnement",
+  ])("a test alone is not the covenant: %s", (line) => expect(covenant(read(LOAN, line))).toBe(false));
+  test.each([["Covenant: DCR of 1.20x tested annually", 1.2], ["Minimum DSCR test: 1.20x", 1.2], ["Test du RCD minimal : 1,20x", 1.2], ["DSCR floor test: 1.25x", 1.25]])("a test with a requirement word still reads: %s", (line, value) => {
+    expect(pick(read(LOAN, line as string))).toEqual([["senior_loan_amount", 5_000_000], ["min_dscr_covenant", value]]);
   });
   test("a coverage limit of another kind keeps the limit note", () => {
     expect(read(LOAN, "Minimum interest coverage: 1.50x").other.find((o) => o.value === 1.5)?.note).toBe("A lender's limit, not the deal's figure");

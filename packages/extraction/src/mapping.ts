@@ -169,7 +169,7 @@ const COVERAGE_RE = /\b(dscr|dcr|debt (?:service )?coverage|couverture|rcsd|rcd|
 // Card 104: a coverage ratio named with a requirement ("DCR floor: 1.20x", "must maintain a DSCR of 1.25x", "Seuil du RCD : 1,20x") is the minimum covenant;
 // for it the lender's limit is the value. A result (projected, actual, stabilized, underwritten, stressed), another coverage or a test of something else never is.
 const COVENANT_RATIO_RE = /\b(dscr|dcr|debt (?:service )?coverage|coverage|couverture|rcsd|rcd|ccd)\b/;
-const COVENANT_NEED_RE = /\b(floors?|minimum|min|required|requirements?|covenants?|tests?|must maintain|maintain|at least|not less than|no less than|thresholds?|hurdles?|plancher|seuil|minimale?|exigee?|requise?|exigences?|clauses?|au moins|maintenir|(?:must|shall|may) not (?:fall|drop|go) below|not be less than|ne (?:doit |doivent )?pas (?:etre inferieure? a|descendre (?:sous|en dessous de)))\b/;
+const COVENANT_NEED_RE = /\b(floors?|minimum|min|required|requirements?|covenants?|must maintain|maintain|at least|not less than|no less than|thresholds?|hurdles?|plancher|seuil|minimale?|exigee?|requise?|exigences?|clauses?|au moins|maintenir|(?:must|shall|may) not (?:fall|drop|go) below|not be less than|ne (?:doit |doivent )?pas (?:etre inferieure? a|descendre (?:sous|en dessous de)))\b/;
 // A bare number right after one of these is an index ("year 1", "phase 2", "l'an 2"), never a coverage ratio.
 const INDEX_BEFORE_RE = /\b(?:year|yr|month|mo|an|annee|mois|phase|tranche|period|periode)\s*$/;
 const indexFigure = (rawLabel: string, t: NumberToken) => t.unit === null && INDEX_BEFORE_RE.test(foldText(rawLabel).replace(/[^a-z0-9\s]/g, " "));
