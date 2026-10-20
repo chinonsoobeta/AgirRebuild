@@ -5397,6 +5397,22 @@ describe("card 101: the take-out's month, written as a timing label or as a loan
     "Lease-up months before refinance: 12 months", "Date de reprise des travaux : 18 mois",
     "A new construction loan replaces the bridge loan at month 3.", "Le prêt permanent remplace le prêt de construction.",
   ])("not a refinance month: %s", (line) => expect(read(HEAD, line).candidates.some((c) => c.fieldKey === "refinance_month")).toBe(false));
+  test.each([
+    "Take-out timing: 24 months after completion", "Refinance date: 18 months after stabilization", "Take-out month: 6 months after substantial completion",
+    "Mois de la reprise : 12 mois après la fin des travaux", "Date du refinancement : 18 mois suivant la stabilisation", "Moment de la reprise : 6 mois à compter de l'achèvement",
+  ])("a month counted from a later event is shown, not read: %s", (line) => {
+    const r = read(HEAD, line);
+    expect(pick(r)).toEqual([["senior_loan_amount", 5000000]]);
+    expect(r.other.some((o) => o.note === "A month counted from a later event, not the project month; enter the project month")).toBe(true);
+  });
+  test.each([
+    ["Take-out timing: 30 months after construction start", 30], ["Refinance month: 30 months from first advance", 30], ["Mois de la reprise : 30 mois après le début des travaux", 30],
+    ["Refinance in month 30 after construction start.", 30],
+  ])("a month counted from the project's start is read: %s", (line, month) => expect(pick(read(HEAD, line))).toEqual([["senior_loan_amount", 5000000], ["refinance_month", month]]));
+  test.each(["Refi notice month: 3 months", "Take-out deadline month: 36 months", "Refinance outside date: 36 months", "Take-out latest date: 36 months", "Date limite de reprise : 36 mois"])("a notice, deadline or outside date is not the refinance month: %s", (line) => {
+    expect(read(HEAD, line).candidates.some((c) => c.fieldKey === "refinance_month")).toBe(false);
+  });
+  test.each([["Take-out planned month: 24 months", 24], ["Refinance expected date: 26 months", 26], ["Mois prévu de la reprise : 24 mois", 24]])("a planned take-out month is read: %s", (line, month) => expect(pick(read(HEAD, line))).toEqual([["senior_loan_amount", 5000000], ["refinance_month", month]]));
   test("a figure-like noun after the replaced loan keeps the replace rule", () => {
     const r = read(HEAD, "Our updated lender quote replaces the construction loan estimate of $4,600,000.");
     expect(pick(r)).toEqual([["senior_loan_amount", 5000000]]);

@@ -81,7 +81,11 @@ const REPAY_RE = /\b(repa\w+|refinanc\w*|take-?out|rembours\w+)\b/;
 export const REPLACED_LOAN = String.raw`(?:(?:the|a|an|our|its|their|existing|current|le|la|l|notre|son|sa|leur|actuel\w*)['’\s]+)*(?:construction (?:loan|facility|financing|mortgage)|interim (?:loan|financing|facility)|bridge (?:loan|financing|facility)|pret (?:de construction|interimaire|relais)|financement (?:temporaire|interimaire|de construction))\b`;
 const REPLACE_LOAN_RE = new RegExp(String.raw`\b(?:replac\w*|remplac\w*)\s+${REPLACED_LOAN}`);
 // A take-out timing label ("Take-out month", "Refinance closing month", "Mois de la reprise"); not a term, amortization, IO, lock, maturity or period.
-const TAKEOUT_TIMING_RE = /\b(?:take-?out|take out|refi|refinanc\w*|permanent loan)(?:\s+[a-z-]+)?\s+(?:month|mo|timing|date)$|\b(?:mois|moment|date)(?:\s+[a-z]+)?\s+(?:de la |du |de |d )?(?:reprise|refinancement)(?!\s+(?:des?\s+|du\s+|de la\s+)?(?:travaux|chantier|construction|possession|bail|baux|terrain))\b/;
+const TAKEOUT_TIMING_RE = /\b(?:take-?out|take out|refi|refinanc\w*|permanent loan)(?:\s+(?:closing|target|targeted|expected|planned|scheduled|anticipated|estimated|funding))?\s+(?:month|mo|timing|date)$|\b(?:mois|moment|date)(?:\s+(?:prevue?|cible|visee))?\s+(?:de la |du |de |d )?(?:reprise|refinancement)(?!\s+(?:des?\s+|du\s+|de la\s+)?(?:travaux|chantier|construction|possession|bail|baux|terrain))\b/;
+// A month counted from a later event ("24 months after completion") is not the project month; one counted from the project's or the loan's start is.
+const LATER_EVENT_RE = /^\s*(?:after|following|from|post|since|past|beyond|once|apres|suivant|a compter de|a partir de|des)\b/;
+const PROJECT_START_RE = /\b(?:construction start|start of construction|commencement of construction|first (?:advance|draw)|loan closing|financial close|closing|debut de la construction|debut des travaux|premier deboursement|cloture du financement)\b/;
+const LATER_EVENT_NOTE = "A month counted from a later event, not the project month; enter the project month";
 const TAKEOUT_NOT_RE = /\b(term|amorti[sz]\w*|interest[- ]only|io|lock|maturity|duree|echeance|periode)\b/;
 const FUNDING_RE = /\b(fund\w*|repa\w+|clos\w*|advance\w*|draw\w*|financement|remboursement|prise de possession)\b/;
 const CAP_RE = /\b(cap rate|capitali[sz]ation rate|taux de capitalisation)\b/;
@@ -812,8 +816,11 @@ function mapLabel(rawLabel: string, t: NumberToken, opts: MapOptions = {}): Mapp
   // The month a loan is repaid or refinanced ("repaid at month 26"), whichever loan the section is about.
   const ordinalMonth = t.unit === "months" && (/^\d+$/.test(t.raw) || /^\d+(e|er|eme)\s+mois/i.test(t.raw));
   const replaces = REPLACE_LOAN_RE.exec(label);
+  const sinceAfter = foldText((opts.after ?? "").split(/[,;.]/)[0] ?? "");
+  // Only for a timing label: "refinance in month 36 once stabilized" names the project month.
+  const refiMonth = (): Mapped => LATER_EVENT_RE.test(sinceAfter) && !PROJECT_START_RE.test(sinceAfter) ? { kind: "ignored", reason: LATER_EVENT_NOTE } : asField(FIELD_BY_KEY.get("refinance_month")!) ?? { kind: "unmapped" };
   if (ordinalMonth && (REPAY_RE.test(label) || (replaces && SCOPE_WORDS.refinance.test(label.slice(0, replaces.index))))) return asField(FIELD_BY_KEY.get("refinance_month")!) ?? { kind: "unmapped" };
-  if (t.unit === "months" && TAKEOUT_TIMING_RE.test(label) && !TAKEOUT_NOT_RE.test(label)) return asField(FIELD_BY_KEY.get("refinance_month")!) ?? { kind: "unmapped" };
+  if (t.unit === "months" && TAKEOUT_TIMING_RE.test(label) && !TAKEOUT_NOT_RE.test(label)) return refiMonth();
   // Bare amounts need a stated loan scope; the implicit senior default alone is not enough.
   if ((scope !== "senior" || opts.seniorHeading) && BARE_AMOUNT_RE.test(label)) return asField(scoped("senior_loan_amount")) ?? { kind: "unmapped" };
   if (scope !== "senior") {
