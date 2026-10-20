@@ -821,6 +821,34 @@ describe("card 113: a workspace remembers a person's label for the same unnamed 
   });
 });
 
+describe("card 113 audit: in team review a remembered label is still its author's own", () => {
+  test("approving a material value that only one's remembered label supports waits for someone else", async () => {
+    const w = (await call(alice, "POST", "/api/workspaces", { name: "Memory team" })).json.id;
+    expect((await call(alice, "POST", `/api/workspaces/${w}/members`, { email: "bob@example.com", role: "analyst" })).status).toBe(200);
+    expect((await call(alice, "POST", `/api/workspaces/${w}/review-mode`, { mode: "team" })).status).toBe(200);
+    const deal = async (name: string, text: string) => {
+      const d = (await call(alice, "POST", `/api/workspaces/${w}/deals`, { name, assetType: "Multifamily", location: "Regina", province: "SK" })).json.id as string;
+      expect((await call(alice, "PUT", `/api/deals/${d}/documents?name=gauge.txt`, undefined, new TextEncoder().encode(text))).status).toBe(200);
+      return d;
+    };
+    const first = await deal("Team memory A", "Gauge: 5.25%\n");
+    const second = await deal("Team memory B", "Gauge: 5.40%\n");
+    await work();
+    const fig = (await call(alice, "GET", `/api/deals/${first}/review`)).json.other.find((o: any) => o.raw === "5.25%");
+    expect((await call(alice, "POST", `/api/deals/${first}/figure-labels`, { documentId: fig.documentId, figureId: fig.figureId, fieldKey: "exit_cap_rate_pct" })).status).toBe(200);
+    await work();
+    const byField = async () => (await call(alice, "GET", `/api/deals/${second}/review`)).json.assumptions.find((x: any) => x.fieldKey === "exit_cap_rate_pct");
+    const a = await byField();
+    expect(a).toMatchObject({ status: "needs_review", value: 5.4 });
+    expect(a.sources[0]).toMatchObject({ rule: "remembered" });
+    expect((await call(alice, "POST", `/api/assumptions/${a.id}/review`, { action: "approve", version: a.version })).status).toBe(200);
+    const waiting = await byField();
+    expect(waiting.status).toBe("awaiting_second_approval");
+    expect((await call(bob, "POST", `/api/assumptions/${a.id}/review`, { action: "second_approve", version: waiting.version })).status).toBe(200);
+    expect(await byField()).toMatchObject({ status: "approved", value: 5.4 });
+  });
+});
+
 describe("task 59: a person working alone is not blocked on day one", () => {
   const modeOf = async (s: Session) => (await call(s, "GET", "/api/me")).json.workspaces[0];
   const newDeal = async (s: Session, w: string, name: string) =>

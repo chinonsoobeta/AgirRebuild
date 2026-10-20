@@ -290,7 +290,7 @@ export async function reconcileDeal(db: Db, dealId: string) {
     // Card 113: a label the workspace remembers, for an offered figure no person labelled whose own label and unit match it. It crosses the
     // boundary a suggestion does, whatever the suggestions switch says; no model is involved. The memory's own source is labelled, so skipped.
     const memory = new Map(
-      (await tx.query<{ phrase: string; unit: string; field_key: string; item_key: string }>(`select phrase, unit, field_key, item_key from label_memory where workspace_id = $1`, [deal.workspace_id]))
+      (await tx.query<{ phrase: string; unit: string; field_key: string; item_key: string; created_by: string }>(`select phrase, unit, field_key, item_key, created_by from label_memory where workspace_id = $1`, [deal.workspace_id]))
         .map((m) => [`${m.phrase}|${m.unit}`, m]),
     );
     const offered = unlabelled.filter(offerable);
@@ -301,10 +301,15 @@ export async function reconcileDeal(db: Db, dealId: string) {
       if (personLabelled.has(f)) return [];
       const phrase = labelPhrase(f);
       const m = phrase === null ? undefined : memory.get(`${phrase}|${labelUnit(f.unitSeen)}`);
-      return m ? [{ id: offeredId[i]!, fieldKey: m.field_key, itemKey: m.item_key || null }] : [];
+      return m ? [{ id: offeredId[i]!, fieldKey: m.field_key, itemKey: m.item_key || null, by: m.created_by }] : [];
     });
-    const { kept: remembered, dropped: rememberedDropped } = applySuggestions(sourced, offered, recalled, { rule: "remembered", note: REMEMBERED_NOTE });
-    const rememberedIds = recalled.filter((r) => !rememberedDropped.some((d) => d.id === r.id)).map((r) => r.id);
+    // Audit: a remembered label is still its author's, so in team review that person cannot approve a value only it supports (agir_own_label).
+    // applySuggestions keeps recalled items in order, and each figure is recalled once, so the kept ones line up with the undropped ids.
+    const recall = applySuggestions(sourced, offered, recalled, { rule: "remembered", note: REMEMBERED_NOTE });
+    const rememberedDropped = recall.dropped;
+    const keptRecalls = recalled.filter((r) => !rememberedDropped.some((d) => d.id === r.id));
+    const rememberedIds = keptRecalls.map((r) => r.id);
+    const remembered = recall.kept.map((k, i) => ({ ...k, labelledBy: keptRecalls[i]!.by }));
     if (on) {
       const stored = await tx.query<{ response: unknown[] }>(
         `select s.response from label_suggestions s join documents d on d.id = s.document_id

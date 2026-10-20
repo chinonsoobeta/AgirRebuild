@@ -85,5 +85,14 @@ begin
       'remembered', exists (select 1 from jsonb_array_elements(a.sources) e where e->>'rule' = 'remembered')));
 end $$;
 
+-- Audit of card 113: a remembered label is still its author's own. In team review a material value that only the caller's own
+-- label or remembered label supports waits for someone else (0010's agir_own_label, with the remembered rule added).
+create or replace function agir_own_label(a assumptions, v double precision) returns boolean
+language sql stable security definer set search_path = public as $$
+  select exists (select 1 from jsonb_array_elements(a.sources) e where abs((e->>'value')::double precision - v) <= 1e-9 * greatest(1, abs(v)))
+    and not exists (select 1 from jsonb_array_elements(a.sources) e where abs((e->>'value')::double precision - v) <= 1e-9 * greatest(1, abs(v))
+      and (e->>'rule' is null or e->>'rule' not in ('labelled', 'remembered') or e->>'labelled_by' is distinct from agir_uid()::text))
+$$;
+
 revoke execute on all functions in schema public from public;
 grant execute on function fn_label_figure(uuid, text, text, text, text, text), fn_unlabel_figure(uuid, text) to agir_app;
