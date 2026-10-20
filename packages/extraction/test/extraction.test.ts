@@ -7195,3 +7195,105 @@ describe("card 116 audit: cost exclusions, narrow guards and per-lot notes", () 
     expect(r.other.map((c) => c.note)).toContain("A per-door share of a cost, not the line's total; enter the total");
   });
 });
+
+describe("card 116b: per-dwelling figures are shares, never budget totals", () => {
+  const note = "A per-door share of a cost, not the line's total; enter the total";
+  const read = (input: string) => {
+    const parts = input.split(" // ");
+    return extractCandidates(input.startsWith("S:")
+      ? { kind: "xlsx", lines: [], tables: [{ name: "Budget", rows: parts.map((p, r) => p.replace(/^S:/, "").split("|").map((v, c) => ({ text: v.trim(), ref: `${String.fromCharCode(65 + c)}${r + 1}`, ...(/^\d+$/.test(v.trim()) ? { number: Number(v) } : {}) }))) }], pageCount: 1, needsOcr: false, fullText: "" }
+      : { kind: "pdf", lines: parts.map((text, i) => ({ text, location: `page 1, line ${i + 1}` })), tables: [], pageCount: 1, needsOcr: false, fullText: parts.join("\n") });
+  };
+  const share = (input: string, value = 330000) => {
+    const r = read(input);
+    expect(r.candidates.filter((c) => c.value === value), input).toEqual([]);
+    expect(r.other.filter((c) => c.value === value).map((c) => c.note), input).toContain(note);
+  };
+  test.each([
+    "Build cost per house: $330,000",
+    "Construction contract per dwelling: $330,000",
+    "Hard cost per townhome: $330,000",
+    "Hard costs per unit: $330,000",
+    "GC price per suite: $330,000",
+    "Build price for each townhouse: $330,000",
+    "Each home costs $330,000 to build.",
+    "Hard cost/unit: $330,000",
+    "Hard cost (per unit): $330,000",
+    "Coût de construction par maison : 330 000 $",
+    "Travaux par logement : 330 000 $",
+    "Prix forfaitaire par maison en rangée : 330 000 $",
+    "Travaux pour chaque unité : 330 000 $",
+    "S:Build cost per townhouse|330000",
+    "S:Hard|Per-home build contract|330000",
+  ])("reported share: %s", (input) => share(input));
+  test.each([
+    ["Works per apartment: $180,000", 180000],
+    ["Land per townhouse: $90,000", 90000],
+    ["Lot price per home: $90,000", 90000],
+    ["Soft costs per unit: $20,000", 20000],
+    ["Soft costs per door: $20,000", 20000],
+    ["Contingency per home: $10,000", 10000],
+    ["Terrain par unité : 90 000 $", 90000],
+  ] as const)("reported share: %s", share);
+
+  const dwellings = ["lot", "door", "unit", "suite", "home", "house", "townhouse", "townhome", "row house", "dwelling", "apartment", "condo", "porte", "logement", "unité", "maison", "maison en rangée", "maison de ville", "appartement", "terrain"];
+  test.each(dwellings)("dwelling word in lines, prose and rows: %s", (word) => {
+    share(`Hard cost per ${word}: $330,000`);
+    share(`Construction costs $330,000 per ${word}.`);
+    share(`S:Build cost per ${word}|330000`);
+  });
+  const forms = ["per townhouse", "par maison de ville", "each townhouses", "for each row houses", "pour chaque maisons en rangée", "chaque appartements", "/condo", "(per dwelling)", "townhomes each", "maisons de ville chacune", "chaque terrains", "per-home", "par-logement"];
+  test.each(forms)("share form in lines, prose and rows: %s", (form) => {
+    share(`Hard cost ${form}: $330,000`);
+    share(`Construction ${form} costs $330,000.`);
+    share(`S:Build cost ${form}|330000`);
+  });
+  test.each([
+    "Construction costs $330,000 for each townhouse.",
+    "Travaux : 330 000 $ pour chaque maison en rangée",
+    "Travaux : 330 000 $ chaque appartement",
+    "Construction costs $330,000 (per dwelling).",
+    "Each dwelling costs $330,000 to build.",
+    "Chaque maison coûte 330 000 $ en travaux.",
+    "S:330000|Build cost per dwelling // 20000|Soft costs per home",
+    "S:330000|Travaux par maison // 20000|Frais indirects par logement",
+    "S:Item|Amount // Build cost per townhome|330000",
+    "S:Item|Amount // Travaux par maison de ville|330000",
+    "S:Hard per dwelling|Build cost|330000 // Hard per dwelling|Soft costs|20000 // Hard per dwelling|Contingency|10000",
+    "S:Travaux par maison en rangée|Construction|330000 // Travaux par maison en rangée|Fondations|20000 // Travaux par maison en rangée|Finition|10000",
+    "S:Hard per home|Build cost|330000|note // Hard per home|Soft costs|20000|note // Hard per home|Contingency|10000|note",
+  ])("share in amount cell, headed budget or category: %s", (input) => share(input));
+
+  test.each([
+    ["Build cost for the whole row of townhouses: $1,980,000", "hard_cost", 1980000],
+    ["Hard cost, six homes in total: $1,980,000", "hard_cost", 1980000],
+    ["Hard costs (6 units): $1,980,000", "hard_cost", 1980000],
+    ["Travaux pour les six maisons : 1 980 000 $", "hard_cost", 1980000],
+    ["Land for the six-home site: $540,000", "land_cost", 540000],
+    ["Soft costs, per the consultant's estimate: $120,000", "soft_cost", 120000],
+    ["Hard cost per the GC contract: $1,980,000", "hard_cost", 1980000],
+    ["Travaux par l'entrepreneur général : 1 980 000 $", "hard_cost", 1980000],
+    ["Construction costs $1,980,000 for all six dwellings.", "hard_cost", 1980000],
+    ["Coût de construction pour toutes les maisons : 1 980 000 $", "hard_cost", 1980000],
+    ["S:Hard cost (6 townhouses)|1980000", "hard_cost", 1980000],
+    ["S:Travaux par l'entrepreneur|1980000", "hard_cost", 1980000],
+    ["S:Soft costs per the consultant's estimate|120000", "soft_cost", 120000],
+    ["S:Land / terrain|540000", "land_cost", 540000],
+    ["S:Item|Amount // Land / terrain|540000", "land_cost", 540000],
+    ["S:Travaux / Construction|1980000", "hard_cost", 1980000],
+    ["Hard cost per household: $1,980,000", "hard_cost", 1980000],
+  ] as const)("total or according to stays read: %s", (input, fieldKey, value) => {
+    const r = read(input);
+    expect(r.candidates.map((c) => [c.fieldKey, c.value])).toContainEqual([fieldKey, value]);
+    expect(r.other.filter((c) => c.value === value).map((c) => c.note)).not.toContain(note);
+  });
+  test.each([
+    "Land and hard costs: $1,980,000",
+    "Terrain et travaux : 1 980 000 $",
+    "S:Land and hard costs|1980000",
+  ])("several fields stay shown: %s", (input) => {
+    const r = read(input);
+    expect(r.candidates).toEqual([]);
+    expect(r.other.some((c) => c.value === 1980000)).toBe(true);
+  });
+});

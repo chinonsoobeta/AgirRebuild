@@ -520,11 +520,11 @@ function shareBases(text: string, tokens: NumberToken[], scope: Scope): [number,
   return bases;
 }
 
-// Money followed by one of these is a price for one lot, door or unit.
-const PER_DOOR_WORD = String.raw`(?:lot|door|unit|suite|home|house|porte|logement|unit[ée]|terrain)`;
-const EACH_RE = new RegExp(String.raw`^\s*(?:each|apiece|chacune?|(?:per|par|an?|\/)[\s-]*(?!lot\s+of\b)${PER_DOOR_WORD})(?![\p{L}])`, "iu");
-// A label that says the figure is per door ("Hard cost per door", "Coût par logement").
-const PER_DOOR_LABEL_RE = new RegExp(String.raw`(?:per|par|each|chaque)[\s-]*${PER_DOOR_WORD}(?![\p{L}])`, "iu");
+// A dwelling named before or after a price makes it a share of the line's total.
+const PER_DOOR_WORD = String.raw`(?:lots?|doors?|units?|suites?|homes?|houses?|townhouses?|townhomes?|row[\s-]+houses?|dwellings?|apartments?|condos?|portes?|logements?|unit[ée]s?|maisons?(?:[\s-]+(?:en[\s-]+rang[ée]es?|de[\s-]+ville))?|appartements?|terrains?)`;
+const PER_DOOR_FORM = String.raw`(?:(?:per|par|each|chaque|for\s+each|pour\s+chaque)[\s-]*(?!lot\s+of\b)${PER_DOOR_WORD}|${PER_DOOR_WORD}\s+(?:each|chacune?))`;
+const EACH_RE = new RegExp(String.raw`^\s*\(?\s*(?:${PER_DOOR_FORM}|each|apiece|chacune?|(?:an?|/)[\s-]*(?!lot\s+of\b)${PER_DOOR_WORD})(?![\p{L}])\)?`, "iu");
+const PER_DOOR_LABEL_RE = new RegExp(String.raw`(?:(?<![\p{L}])${PER_DOOR_FORM}|/${PER_DOOR_WORD})(?![\p{L}])`, "iu");
 const BUDGET_LINES = new Set(["land_cost", "hard_cost", "soft_cost", "contingency", "other_cost"]);
 const PER_UNIT_FIELDS = new Set(["land_cost", "hard_cost", "soft_cost", "contingency", "other_cost", "senior_loan_amount", "mezz_loan_amount", "refinance_amount", "equity_amount"]);
 const TOTAL_WORD = String.raw`(?:for(?:\s+a)?(?:\s+total)?(?:\s+of)?|pour(?:\s+un\s+total\s+de)?|soit|totall?ing|in\s+total|total(?:\s+of)?|=)`;
@@ -698,6 +698,12 @@ function readSentence(sentence: { text: string; start: number }, para0: Paragrap
   for (const t of unadjusted) other(t, "line:prose", "A rate before an adjustment, not the loan's rate");
   tokens = tokens.filter((t) => !unadjusted.includes(t));
   const colon = text.indexOf(":");
+  // A dwelling count inside a budget label describes its total, not a preceding value.
+  if (colon > 0 && budgetFieldOf(text.slice(0, colon)) !== null) {
+    const counts = tokens.filter((t) => t.end <= colon && t.unit === "units");
+    for (const t of counts) other(t, "line:label-value", "A dwelling count in the budget label, not its amount");
+    tokens = tokens.filter((t) => !counts.includes(t));
+  }
   // A figure said to be part of a budget field is shown, not added. A figure that lists two or more budget fields after it is a total of them: the stated total cost when its own label names a cost, total or budget, else shown only.
   const parts = new Set<NumberToken>();
   tokens.forEach((t, i) => {
@@ -934,7 +940,8 @@ function readSentence(sentence: { text: string; start: number }, para0: Paragrap
       other(t, "line:prose", DEPOSIT_NOTE);
       return;
     }
-    if (((mapped.kind === "field" && PER_UNIT_FIELDS.has(mapped.fieldKey)) || (mapped.kind === "unmapped" && /\b(?:lots?|parcelles?)\b/.test(fold(usedLabel)))) && perUnit(text, t, mapped.kind === "field" && BUDGET_LINES.has(mapped.fieldKey) ? usedLabel : "")) {
+    const budgetShare = perUnit(text, t, usedLabel) && budgetFieldOf(`${usedLabel} ${afterFigure}`.replace(PER_DOOR_LABEL_RE, " ")) !== null;
+    if ((((mapped.kind === "field" && PER_UNIT_FIELDS.has(mapped.fieldKey)) || (mapped.kind === "unmapped" && /\b(?:lots?|parcelles?)\b/.test(fold(usedLabel)))) && perUnit(text, t, mapped.kind === "field" && BUDGET_LINES.has(mapped.fieldKey) ? usedLabel : "")) || budgetShare) {
       other(t, "line:prose", PER_UNIT_NOTE);
       const total = totalOf(text, t, tokens);
       if (total) totalLabels.set(total, usedLabel);
@@ -1495,7 +1502,7 @@ function fromBudget(table: Table, headerRow: number, roles: BudgetRoles, result:
       continue;
     }
     // An amount whose own cell says it is per door is a share, not the line: it is shown and never read, summed or totalled.
-    if (perUnit(amountCell.text, t)) {
+    if (perUnit(amountCell.text, t, displayLabel)) {
       result.other.push({ fieldKey: null, itemKey: null, value: t.value, raw: t.raw, unitSeen: t.unit, location: amountCell.ref, context: `${table.name}: ${displayLabel}`, rule: "table:budget", note: PER_UNIT_NOTE });
       continue;
     }
@@ -1674,7 +1681,7 @@ function categoryCells(rows: Cell[][], format: DocumentFormat): Map<Cell[], Cell
   const key = (c: Cell) => fold(c.text).replace(/\s+/g, " ").trim();
   const cats = new Map<string, number>();
   for (const f of found) cats.set(key(f.a), (cats.get(key(f.a)) ?? 0) + 1);
-  if (cats.size > 8 || [...cats].some(([k, n]) => k.split(" ").length > 3 || (n < 2 && !SECTION_WORD_RE.test(k)))) return out;
+  if (cats.size > 8 || [...cats].some(([k, n]) => (k.split(" ").length > 3 && !PER_DOOR_LABEL_RE.test(k)) || (n < 2 && !SECTION_WORD_RE.test(k)))) return out;
   if (new Set(found.map((f) => key(f.b))).size <= found.length / 2) return out;
   for (const f of found) out.set(f.r, f.a);
   return out;
@@ -1953,10 +1960,12 @@ function fromTable(table0: Table, result: ExtractionResult, notes: string[] = []
             break;
           }
           // A budget or financing figure whose own cell says it is per door is a share, not the line: the next cell for the same line is read instead (task 68).
-          if (mapped.kind === "field" && PER_UNIT_FIELDS.has(mapped.fieldKey) && perUnit(cell.text, t, BUDGET_LINES.has(mapped.fieldKey) ? labelCell.text : "")) {
+          const shareLabel = `${cat ?? ""} ${labelCell.text} ${row.slice(row.indexOf(labelCell) + 1, row.indexOf(cell)).filter((c) => !cellToken(c, result.format)).map((c) => c.text).join(" ")}`;
+          const shareField = perUnit(cell.text, t, shareLabel) ? budgetFieldOf(shareLabel.replace(PER_DOOR_LABEL_RE, " ")) : null;
+          if ((mapped.kind === "field" && PER_UNIT_FIELDS.has(mapped.fieldKey) && perUnit(cell.text, t, BUDGET_LINES.has(mapped.fieldKey) ? shareLabel : "")) || shareField !== null) {
             result.other.push({ ...base, fieldKey: null, itemKey: null, value: t.value, unitSeen: t.unit, note: PER_UNIT_NOTE });
-            const field = mapped.fieldKey;
-            const item = mapped.itemKey;
+            const field = mapped.kind === "field" ? mapped.fieldKey : shareField;
+            const item = mapped.kind === "field" ? mapped.itemKey : null;
             const lineCell: Cell | undefined = after.slice(after.indexOf(cell) + 1).find((c) => {
               const x = wholeUnitType(c.text) ? null : cellToken(c, result.format);
               if (!x || x.value === null || perUnit(c.text, x) || isDeposit(c.text, x)) return false;
