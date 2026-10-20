@@ -6804,3 +6804,24 @@ describe("card 115: loan ranks, plain terms and stated totals", () => {
     expect(r.candidates.find((c) => c.fieldKey === "stated_total_cost")?.note).toBe(total === 1_330_000 ? undefined : "The printed total does not equal the sum of its lines (1,330,000)");
   });
 });
+
+describe("card 115 audit: a partner's cash, a rent total and a rate reset are not the loan or the project", () => {
+  const read = (...lines: string[]) => extractCandidates({ kind: "pdf", lines: lines.map((text, i) => ({ text, location: `page 1, line ${i + 1}` })), tables: [], pageCount: 1, needsOcr: false, fullText: lines.join("\n") });
+  const pick = (r: ReturnType<typeof read>) => r.candidates.map((c) => [c.fieldKey, c.value]);
+  test.each(["Stated total rent: $24,000", "Stated total parking income: $9,600", "Total déclaré des loyers : 24 000 $", "Stated total equity: $900,000"])("a stated total of something else is not the project's: %s", (line) => {
+    expect(pick(read(line)).map(([k]) => k)).not.toContain("stated_total_cost");
+  });
+  test("a stated count of units keeps its field", () => {
+    expect(pick(read("Stated total units: 12"))).toEqual([["unit_count", 12]]);
+  });
+  test.each(["Stated total: $4,449,000", "Stated total project cost: $4,449,000", "Total déclaré : 4 449 000 $", "Stated project subtotal: $4,449,000"])("the project's stated total still reads: %s", (line) => {
+    expect(pick(read(line))).toEqual([["stated_total_cost", 4449000]]);
+  });
+  test.each(["Senior partner cash: $300,000", "Senior sponsor funds: $300,000", "Senior investor dollars: $300,000", "Fonds du promoteur prioritaire : 300 000 $", "Senior loan: $2,000,000 // Owner's own money: $300,000"])("an owner's or partner's money is never the loan: %s", (...lines) => {
+    expect(pick(read(...lines[0]!.split(" // "))).filter(([k, v]) => k === "senior_loan_amount" && v === 300000)).toEqual([]);
+  });
+  // "Senior rate after renewal" and "Senior rate step-up" are read by the alias layer on main too; not this card's.
+  test.each(["First rate reset: 6.5%", "Taux prioritaire à la révision : 6,9 %", "Sr pricing at renewal: 6.9%"])("a later reset or renewal rate is not the loan's rate: %s", (line) => {
+    expect(pick(read(line)).map(([k]) => k)).not.toContain("senior_rate_pct");
+  });
+});

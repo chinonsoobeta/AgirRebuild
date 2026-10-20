@@ -13,7 +13,8 @@ export const NOT_THE_LOAN_AFTER = /^\W*(?:(?:which|that|but)\s+(?:was|is)\s+)?(?
 export const SENIOR_RANK = /\b(?:sr|senior|first[- ]charge|first (?=(?:money|principal|amort\w*|io|interest|rate|coupon|charge|lender|loan|mortgage)\b)|the first is|(?:dette|pret|interet|taux|amort\w*)\s+prioritaire|prioritaire\s+(?:dette|pret|interet|taux|amort\w*))\b/;
 export const LOAN_PERIOD = /\b(?:repayment (?:schedule|years)|years to repay (?:the )?principal|free-principal|no-principal|principal holiday|franchise de capital|interets? seuls|periode sans capital)\b/;
 // v6/v8/v9/v10 totals: a named cost subtotal still belongs to that cost.
-export const STATED_TOTAL = /\b(?:stated project subtotal|project subtotal|stated total|total declare|total uses|all-in uses|sum of uses|total des emplois|somme des emplois)\b/;
+// Card 115 audit: "stated total" and "total déclaré" alone, or of the project or its costs; "Stated total rent" is not the project's.
+export const STATED_TOTAL = /\b(?:stated project subtotal|project subtotal|(?:stated total|total declare)(?=\s*$|\s+(?:project|cost|costs|of (?:the )?(?:project|uses|costs)|budget|du projet|des couts|des emplois)\b)|total uses|all-in uses|sum of uses|total des emplois|somme des emplois)\b/;
 export const DEBT_SERVICE = /\b(?:debt service|service de la dette|annual payment|mortgage payment)\b/;
 
 // Words that make a budget line something else: a total of several lines, a loan named with a cost word ("Construction principal"),
@@ -43,12 +44,12 @@ export const CONCEPTS: readonly {
   {
     fieldKey: "senior_loan_amount", unit: "$",
     words: [LOAN_NOUN, /\b(?:amount|principal|advance|size|commitment|granted|dollars|funds|money|cash|authorization|committed|dette|montant|capital|accord\w*)\b/],
-    exclude: /\b(?:apprais\w*|evalu\w*|alternat\w*|rough|uncommitted|hypothetical|indicative|floated|(?:sub|sous-)?totals?|line of credit|credit line|marge de credit|ligne de credit|fees?|interests?|reserves?|holdbacks?|draw\w*|to date|balances?|payments?|deposits?|equity|officer|union|valuation|valued|value|frais|interets?|retenues?|soldes?|versements?|depots?|capitaux propres|capital propre|tire\w*|a ce jour)\b/,
+    exclude: /\b(?:apprais\w*|evalu\w*|alternat\w*|rough|uncommitted|hypothetical|indicative|floated|(?:sub|sous-)?totals?|line of credit|credit line|marge de credit|ligne de credit|fees?|interests?|reserves?|holdbacks?|draw\w*|to date|balances?|payments?|deposits?|equity|officer|union|valuation|valued|value|frais|interets?|retenues?|soldes?|versements?|depots?|capitaux propres|capital propre|tire\w*|a ce jour|partners?|sponsors?|own|investors?|promoteurs?|associes?|commanditaires?|investisseurs?)\b/,
   },
   {
     fieldKey: "senior_rate_pct", unit: "%",
     words: [/\b(?:rate|interest|int|coupon|pricing|charge|cost of borrowing|taux|interet)\b/],
-    exclude: /\b(?:to[- ]value|to[- ]cost|ltv|ltc|fees?|spread|over prime|premium|insurance|dscr|dcr|holdbacks?|frais|prime d assurance|ratio|partners?|investors?|commanditaires?|associes?|investisseurs?|retard|arrerages|defaut|deposits?|depots?|ownership|carried|partnership|pret[- ](?:valeur|cout)|ecart|au dessus du taux preferentiel)\b/,
+    exclude: /\b(?:to[- ]value|to[- ]cost|ltv|ltc|fees?|spread|over prime|premium|insurance|dscr|dcr|holdbacks?|frais|prime d assurance|ratio|partners?|investors?|commanditaires?|associes?|investisseurs?|retard|arrerages|defaut|deposits?|depots?|ownership|carried|partnership|pret[- ](?:valeur|cout)|ecart|au dessus du taux preferentiel|resets?|renewal|renouvel\w*|revision|step[- ]?ups?)\b/,
   },
   {
     fieldKey: "senior_amort_years", unit: "years",
