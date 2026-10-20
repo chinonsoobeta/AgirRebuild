@@ -227,6 +227,61 @@ describe("a figure in another currency is never the value (decision 7)", () => {
     expect(cell({ text: "1000000", number: 1_000_000, unit: "$", currency: "USD", ref: "B2" })).toMatchObject({ unitSeen: "USD" });
     expect(cell({ text: "1000000", number: 1_000_000, unit: "$", ref: "B2" })).toMatchObject({ unitSeen: "$" });
   });
+  describe("card 99: a currency stated for a column, a table or the document applies to figures with no mark of their own", () => {
+    const c = (text: string, ref: string, extra: Partial<Cell> = {}): Cell => ({ text, ref, ...extra });
+    const num = (n: number, ref: string, extra: Partial<Cell> = {}): Cell => ({ text: String(n), number: n, ref, ...extra });
+    const budget = (name: string, header: Cell[], rows: Cell[][]): NormalizedDocument => ({ ...doc([]), kind: "xlsx", tables: [{ name, rows: [header, ...rows] } as Table] });
+    const seen = (d: NormalizedDocument, field = "land_cost") => extractCandidates(d).candidates.find((x) => x.fieldKey === field)?.unitSeen;
+    const rows = (sheet = "S") => [[c("Land cost", `${sheet}!A2`), num(900_000, `${sheet}!B2`)], [c("Hard cost", `${sheet}!A3`), num(3_200_000, `${sheet}!B3`)]];
+    test("a column header names the currency", () => {
+      expect(seen(budget("Costs", [c("Item", "A1"), c("Amount (USD)", "B1")], rows()))).toBe("USD");
+      expect(seen(budget("Costs", [c("Item", "A1"), c("US$", "B1")], rows()))).toBe("USD");
+      expect(seen(budget("Costs", [c("Item", "A1"), c("Amount (CAD)", "B1")], rows()))).toBe("CAD");
+      expect(seen(budget("Costs", [c("Item", "A1"), c("Montant ($ US)", "B1")], rows()))).toBe("USD");
+      expect(seen(budget("Costs", [c("Item", "A1"), c("Amount", "B1")], rows()))).not.toMatch(/USD|CAD|AUD/);
+    });
+    test("a sheet name or a whole-table statement names the currency", () => {
+      expect(seen(budget("Costs (USD)", [c("Item", "A1"), c("Amount", "B1")], rows()))).toBe("USD");
+      const titled: NormalizedDocument = { ...doc([]), kind: "xlsx", tables: [{ name: "Costs", rows: [[c("All figures in US dollars", "A1")], [c("Item", "A2"), c("Amount", "B2")], ...rows()] } as Table] };
+      expect(seen(titled)).toBe("USD");
+    });
+    test("a document statement names the currency of its line figures, in English and French", () => {
+      expect(seen(doc(["All amounts in US dollars.", "Land cost: $900,000"]))).toBe("USD");
+      expect(seen(doc(["Currency: USD", "Land cost: $900,000"]))).toBe("USD");
+      expect(seen(doc(["Tous les montants sont en dollars américains.", "Coût du terrain : 900 000 $"]))).toBe("USD");
+      expect(seen(doc(["Devise : USD", "Coût du terrain : 900 000 $"]))).toBe("USD");
+      expect(seen(doc(["Montants en $ US", "Coût du terrain : 900 000 $"]))).toBe("USD");
+      expect(seen(doc(["Figures in CA$", "Land cost: $900,000"]))).toBe("CAD");
+      expect(seen(doc(["All figures are in Australian dollars.", "Land cost: $900,000"]))).toBe("AUD");
+      expect(seen(budget("Costs", [c("Item", "A1"), c("C$", "B1")], rows()))).toBe("CAD");
+      const summed = extractCandidates(doc(["All amounts in US dollars.", "Division Amount", "Framing $400,000", "Mechanical $200,000", "Total hard cost $650,000"])).candidates.filter((x) => x.fieldKey === "hard_cost");
+      expect(summed.map((x) => x.rule)).toEqual(["table:budget-sum", "table:budget-total"]);
+      expect(summed.map((x) => x.unitSeen)).toEqual(summed.map(() => "USD"));
+    });
+    test("the figure's own mark, its number format and a nearer sub-header win", () => {
+      expect(seen(budget("Costs", [c("Item", "A1"), c("Amount (USD)", "B1")], [[c("Land cost", "A2"), c("CA$900,000", "B2")]]))).toBe("CAD");
+      expect(seen(budget("Costs", [c("Item", "A1"), c("Amount (USD)", "B1")], [[c("Land cost", "A2"), num(900_000, "B2", { unit: "$", currency: "CAD" })]]))).toBe("CAD");
+      const split = budget("Costs", [c("Item", "A1"), c("Amount (USD)", "B1")], [[c("Hard cost", "A2"), num(3_200_000, "B2")], [c("Item", "A3"), c("Amount (CAD)", "B3")], [c("Land cost", "A4"), num(900_000, "B4")]]);
+      expect(seen(split, "land_cost")).toBe("CAD");
+      expect(seen(split, "hard_cost")).toBe("USD");
+    });
+    test("no single stated currency, no currency: two statements, or a line that holds a number", () => {
+      expect(seen(doc(["All amounts in US dollars.", "All amounts in Canadian dollars.", "Land cost: $900,000"]))).toBe("$");
+      expect(seen(doc(["Land cost in US dollars converted at 1.36: $1,224,000"]))).not.toBe("USD");
+      expect(seen(doc(["All amounts in dollars.", "Land cost: $900,000"]))).toBe("$");
+    });
+    test("a row label that names a currency beside its own figure, or a long note, is no column header", () => {
+      const labelled = budget("Costs", [c("Item", "A1"), c("Amount", "B1"), c("Paid", "C1")], [[c("Deposit", "A2"), c("Soft cost (USD)", "B2"), num(150_000, "C2")], [c("Land cost", "A3"), num(900_000, "B3")]]);
+      expect(seen(labelled)).toBe("$");
+      const noted = budget("Costs", [c("Item", "A1"), c("Amount", "B1")], [[c("Item", "A2"), c("The vendor was paid in US dollars last year", "B2")], [c("Land cost", "A3"), num(900_000, "B3")]]);
+      expect(seen(noted)).toBe("$");
+    });
+    test("a header-USD figure in a CAD deal conflicts, as any USD figure does", () => {
+      const d = budget("Costs", [c("Item", "A1"), c("Amount (USD)", "B1")], rows());
+      const p = land(consolidate(extractCandidates(d).candidates.map((x) => ({ ...x, documentId: "b", documentName: "b" })), "CAD"));
+      expect(p).toMatchObject({ status: "conflicting", value: null, reason: "A document states this in USD; this deal is in CAD. Enter the amount in CAD." });
+    });
+  });
   test("parsing a workbook: only an explicit currency in the number format is carried", async () => {
     const ExcelJS = (await import("exceljs")).default;
     const wb = new ExcelJS.Workbook();

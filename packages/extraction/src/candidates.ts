@@ -1,5 +1,5 @@
 import { FIELD_BY_KEY, OUTPUT_LIKE_PHRASES } from "@agir/contracts";
-import { detectFormat, normalizeText, SF_PER_M2, tokenize, unitTypesIn, wholeUnitType, type DocumentFormat, type NumberToken } from "@agir/numbers";
+import { detectFormat, normalizeText, SF_PER_M2, tokenize, unitTypesIn, wholeUnitType, type CurrencyCode, type DocumentFormat, type NumberToken } from "@agir/numbers";
 import type { Cell, NormalizedDocument, Table } from "./document.ts";
 import { BASIS_AFTER_RE, CREDIT_NOTE, DEPOSIT_NOTE, DEPOSIT_RE, LTV_BASIS, canonicalItem, costSentence, currencyOf, flagRead, flagSentence, hasPhrase, isExitCapLabel, isPlainRentLabel, loanNameOnly, loanTerm, mapToken, normalizeLabel, OLD_SHEET_RE, rankScope, SCENARIO_SHEET_NOTE, SCENARIO_SHEET_RE, SUPERSEDED_LABEL_NOTE, scopeIn, scopesIn, withCurrency, type MapOptions, type Mapped, type Scope } from "./mapping.ts";
 
@@ -2019,6 +2019,58 @@ function applyScales(doc: NormalizedDocument, result: ExtractionResult) {
   });
 }
 
+// ---- A currency stated for a column, a table or the whole document (card 99) ------------------------------------
+// The currencies `codeOf` knows, written as a code, a marked dollar or in words. "Dollars" or "$" alone names none.
+const STATED_CURRENCY: [CurrencyCode, RegExp][] = [
+  ["USD", /(?<![a-z])(?:usd|us\s?\$|u\.?s\.?\s+dollars?|american dollars?|\$\s?us(?![a-z])|dollars? americains?|dollars? des etats-unis)(?![a-z])/],
+  ["CAD", /(?<![a-z])(?:cad|ca\s?\$|c\$|can\s?\$|canadian dollars?|\$\s?can?(?![a-z])|dollars? canadiens?)(?![a-z])/],
+  ["AUD", /(?<![a-z])(?:aud|a\$|australian dollars?|\$\s?au(?![a-z])|dollars? australiens?)(?![a-z])/],
+];
+/** The one currency a piece of text names, or null when it names none or more than one. */
+function namedCurrency(text: string): CurrencyCode | null {
+  const f = fold(text);
+  const named = STATED_CURRENCY.filter(([, re]) => re.test(f)).map(([code]) => code);
+  return named.length === 1 ? named[0]! : null;
+}
+// "All amounts in US dollars", "Figures are in USD", "Currency: USD", "Tous les montants sont en dollars américains", "Devise : USD".
+const CURRENCY_STATEMENT_RE = /^\s*(?:(?:all|every|the)\s+)?(?:(?:dollar\s+)?amounts?|figures?|values?|numbers?|prices?|costs?)\s+(?:(?:are|is|shown|stated|expressed|given|written)\s+)*(?:in)\s|^\s*(?:(?:tous\s+)?les\s+)?(?:montants?|chiffres?|valeurs?|prix|couts?)\s+(?:(?:sont|est|exprimes?|indiques?|donnes?)\s+)*(?:en)\s|^\s*(?:currency|devise|monnaie)\s*:/;
+function currencyStatement(text: string, format: DocumentFormat): CurrencyCode | null {
+  return CURRENCY_STATEMENT_RE.test(fold(text)) && tokenize(text, format).length === 0 ? namedCurrency(text) : null;
+}
+
+/** A money figure with no currency of its own takes the one its column header, its table, or the document states. */
+function applyStatedCurrency(doc: NormalizedDocument, result: ExtractionResult) {
+  const docCodes = new Set(doc.lines.map((l) => currencyStatement(l.text, result.format)).filter((c): c is CurrencyCode => c !== null));
+  const docCode = docCodes.size === 1 ? [...docCodes][0]! : null;
+  const byRef = new Map<string, CurrencyCode | null>();
+  for (const table of doc.tables) {
+    const statements = new Set(table.rows.flat().filter((cell) => cell.number === undefined).map((cell) => currencyStatement(cell.text, result.format)).filter((c): c is CurrencyCode => c !== null));
+    const tableCode = namedCurrency(table.name) ?? (statements.size === 1 ? [...statements][0]! : null);
+    const header: (CurrencyCode | null)[] = [];
+    const plain = (cell: Cell) => cell.number === undefined && tokenize(cell.text, result.format, true).length === 0;
+    table.rows.forEach((row) => {
+      // A header row holds no figure. Its short cells that name a currency set their column's for the rows under it.
+      const headerRow = row.every(plain);
+      row.forEach((cell, col) => {
+        const code = headerRow && cell.text.trim().split(/\s+/).length <= 5 && !currencyStatement(cell.text, result.format) ? namedCurrency(cell.text) : null;
+        if (code) header[col] = code;
+        else byRef.set(cell.ref, header[col] ?? tableCode ?? docCode);
+      });
+    });
+  }
+  const apply = (c: Candidate) => {
+    const def = c.fieldKey ? FIELD_BY_KEY.get(c.fieldKey) : undefined;
+    const money = (c.unitSeen ?? "").startsWith("$") || (def?.unit === "$" && c.unitSeen === "number");
+    if (!money || currencyOf(c.unitSeen)) return;
+    const locs = byRef.has(c.location) ? [c.location] : c.location.split(/,\s(?!line\s\d)/);
+    const codes = new Set(locs.map((l) => (byRef.has(l) ? byRef.get(l)! : docCode)));
+    const code = codes.size === 1 ? [...codes][0]! : null;
+    if (code) c.unitSeen = c.unitSeen === "number" ? code : withCurrency(c.unitSeen!, code);
+  };
+  result.candidates.forEach(apply);
+  result.other.forEach(apply);
+}
+
 /** Every candidate value in one document. Deterministic: no model is consulted. */
 export function extractCandidates(doc0: NormalizedDocument): ExtractionResult {
   const result: ExtractionResult = { format: detectFormat(doc0.fullText), candidates: [], other: [], notes: [...(doc0.notes ?? [])] };
@@ -2057,6 +2109,7 @@ export function extractCandidates(doc0: NormalizedDocument): ExtractionResult {
     result.candidates.splice(before).forEach((c) => result.other.push({ ...c, fieldKey: null, itemKey: null, note }));
   }
   applyScales(doc, result);
+  applyStatedCurrency(doc, result);
   const aside = (c: Candidate, note: string) => result.other.push({ ...c, fieldKey: null, itemKey: null, note });
   // A later revision of a builder's quote supersedes the earlier ones; a revision heading on its own line names the revision of the lines under it.
   const heading = new Map<string, number>();
