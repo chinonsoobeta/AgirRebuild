@@ -4,7 +4,7 @@
 // but it never becomes an input.
 
 import { FIELD_BY_KEY, FIELDS, OUTPUT_LIKE_PHRASES, type FieldDef } from "@agir/contracts";
-import { CONCEPTS, LOAN_ANAPHOR, LOAN_NOUN, MAIN_LENDER, MONTH_INDEX, NOT_A_BUDGET_LINE, NOT_CHOSEN_AFTER, NOT_THE_DEALS_ASSUMPTION, NOT_THE_LOAN_AFTER, WHERE_IT_SITS } from "./concepts.ts";
+import { CONCEPTS, LOAN_ANAPHOR, LOAN_NOUN, MAIN_LENDER, MONTH_INDEX, NOT_A_BUDGET_LINE, NOT_CHOSEN_AFTER, LEAVING_AFTER, NOT_THE_DEALS_ASSUMPTION, NOT_THE_LOAN_AFTER, WHERE_IT_SITS } from "./concepts.ts";
 import { canonicalItem, codeOf, parenType, SF_PER_M2, unitTypesIn, wholeUnitType, type CurrencyCode, type NumberToken } from "@agir/numbers";
 
 // canonicalItem and itemFold live in @agir/numbers so the engine can use the same fold.
@@ -810,7 +810,7 @@ function conceptField(rawLabel: string, t: NumberToken, opts: MapOptions): Mappe
   const assumptionLabel = ((afterLabel ? label.split(/\band\b|\bet\b/)[0] : label.split(/\band\b|\bet\b/).pop()) ?? "").trim();
   const assumptionContext = normalizeLabel(afterLabel ? `${lead} ${rawLabel}` : rawLabel.split(/[,;]/).pop() ?? "").label;
   // The whole label and the words after the figure: an alternative, a loan's period or a month number is never the deal's assumption.
-  const assumption = !NOT_THE_DEALS_ASSUMPTION.test(folded) && !LOAN_NOUN.test(folded) && !NOT_CHOSEN_AFTER.test(foldText(opts.after ?? ""))
+  const assumption = !NOT_THE_DEALS_ASSUMPTION.test(folded) && !LOAN_NOUN.test(folded) && !NOT_CHOSEN_AFTER.test(foldText(opts.after ?? "")) && !LEAVING_AFTER.test(foldText(opts.after ?? ""))
     && !(unit === "months" && MONTH_INDEX.test(folded));
   const fits = CONCEPTS.filter((c) => c.unit === unit && (c.assumption
     ? assumption && !opts.budget && c.words.some((w) => w.test(assumptionLabel)) && ((c.with ?? []).every((w) => w.test(assumptionLabel)) || !!c.basisAfter?.test(foldText(opts.after ?? ""))) && !c.exclude.test(assumptionContext)

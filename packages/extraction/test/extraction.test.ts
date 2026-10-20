@@ -6404,3 +6404,39 @@ describe("card 111: clauses whose label follows the number; number words for rat
     expect(read("Five and a half of the suites are let.").candidates).toEqual([]);
   });
 });
+
+describe("card 111 audit: words after a duration name the deal's own schedule only", () => {
+  const lines = (...texts: string[]) => extractCandidates({ kind: "pdf", lines: texts.map((text, i) => ({ text, location: `page 1, line ${i + 1}` })), tables: [], pageCount: 1, needsOcr: false, fullText: texts.join("\n") });
+  const concept = (r: ReturnType<typeof lines>) => r.candidates.filter((c) => c.rule === "concept").map((c) => [c.fieldKey, c.value]);
+
+  test.each([
+    "Our last building took 14 months of site works.",
+    "On our last job we needed 6 months to find tenants.",
+    "Notre dernier immeuble a demandé 6 mois pour trouver des locataires.",
+  ])("the sponsor's last project is not this deal: %s", (line) => expect(concept(lines(line))).toEqual([]));
+
+  test.each([
+    "The tenant has 6 months to vacate the site.",
+    "The existing tenants get 3 months to move out.",
+    "Le locataire actuel a 6 mois pour quitter les lieux.",
+    "Residents receive 4 months of relocation support.",
+  ])("a sitting tenant's notice is not the lease-up: %s", (line) => expect(concept(lines(line))).toEqual([]));
+
+  test.each([
+    "The city needs 4 months of review for the site plan.",
+    "Expect 5 months of rezoning before the site is ready.",
+    "La ville prévoit 4 mois d'examen du plan de site.",
+  ])("a city's review is not the build period: %s", (line) => expect(concept(lines(line))).toEqual([]));
+
+  test.each([
+    "Take-out terms: 24 months from first construction draw;",
+    "Permanent loan: 27 months from first construction draw.",
+    "Relais permanent : 26 mois à compter du premier tirage de construction;",
+    "Conversion deadline: 30 months after the first construction advance.",
+  ])("a lender's deadline counted from a draw is not the build period: %s", (line) => expect(concept(lines(line))).toEqual([]));
+
+  test("the deal's own schedule still reads", () => {
+    expect(concept(lines("Expect 18 months of construction, then 6 months to fill the 12 units."))).toEqual([["lease_up_months", 6]]);
+    expect(concept(lines("The schedule allows 16 months of site works and then 5 months to find tenants."))).toEqual([["construction_months", 16], ["lease_up_months", 5]]);
+  });
+});

@@ -16,8 +16,10 @@ export const WHERE_IT_SITS = /\s+(?:already|included|inclu\w*|compris\w*|deja|wi
 
 // Card 110 audit. An assumption concept never takes: an alternative, rejected or earlier figure; a loan's period
 // (repayment, amortization, a lender's requirement); or a month number, which is a point in time, not a duration.
-export const NOT_THE_DEALS_ASSUMPTION = /\b(?:alternat\w*|option(?:al)?|declined|rejected|abandon\w*|earlier|previous|prior|former|old|sketch|instead|faster|accelerated?|accelere\w*|refus\w*|ancien\w*|precedent\w*|variante|repa(?:y|id)\w*|repayment|rembours\w*|amort\w*|principal|visits?|visite|inspections?|tours?|meetings?|reunion|(?:has|have|had)\s+(?:\w+\s+)?(?:held|kept|owned)|experience|track record|portfolio|since)\b/;
+export const NOT_THE_DEALS_ASSUMPTION = /\b(?:alternat\w*|option(?:al)?|declined|rejected|abandon\w*|earlier|previous|prior|former|old|sketch|instead|faster|accelerated?|accelere\w*|refus\w*|ancien\w*|precedent\w*|variante|repa(?:y|id)\w*|repayment|rembours\w*|amort\w*|principal|visits?|visite|inspections?|tours?|meetings?|reunion|(?:has|have|had)\s+(?:\w+\s+)?(?:held|kept|owned)|experience|track record|portfolio|since|last|dernier\w*|existing|actuel\w*|current|vacate|move out|evict\w*|relocat\w*|quitter|demenag\w*)\b/;
 export const NOT_CHOSEN_AFTER = /^\W*(?:[a-z]+\s+){0,4}(?:declined|rejected|dropped|abandoned|not (?:adopted|used|chosen|retained)|refus\w*|abandonn\w*|ecart\w*)/;
+// Card 111 audit: a sitting tenant's time to leave ("6 months to vacate") is a notice, not the lease-up.
+export const LEAVING_AFTER = /^\W*(?:[a-z]+\s+){0,2}(?:vacate|move out|leave|quitter|demenag\w*)\b/;
 export const MONTH_INDEX = /\b(?:month|mois)\s*:?\s*$|\b(?:at|in|by|from|until|au|en|du|des le)\s+(?:(?:the|project|le)\s+)?(?:month|mois)\b/;
 
 export const CONCEPTS: readonly {
@@ -78,7 +80,7 @@ export const CONCEPTS: readonly {
     fieldKey: "construction_months", unit: "months", assumption: true,
     // Card 111 (v4, v5): a span from the foundations to occupancy is the build.
     words: [/\b(?:build|construction|works|site|crew|delivery|program(?:me)?|conversion|renovation|fit-out|chantier|travaux|transformation)\b/, /\bfrom (?:the )?(?:foundations?|shovels?(?: in the ground)?|ground-?breaking|excavation|mobili[sz]ation) to (?:the )?(?:occupancy|completion|handover|delivery|substantial completion)\b|\b(?:de|des|du) (?:la |les )?(?:fondations?|excavation|mobilisation|debut des travaux) (?:a|au|jusqu a) (?:la |l )?(?:occupation|livraison|fin des travaux)\b/],
-    exclude: /\b(?:loans?|interest|reserves?|terms?|lock|permits?|approval|wait|holdbacks?|warranty|lease|let|tenants?|prets?|interets?|permis|attente|garantie|retenue|insurance|assurance|starts?|debut|avant|commencement|construction month)\b/,
+    exclude: /\b(?:loans?|interest|reserves?|terms?|lock|permits?|approval|wait|holdbacks?|warranty|lease|let|tenants?|prets?|interets?|permis|attente|garantie|retenue|insurance|assurance|starts?|debut|avant|commencement|construction month|reviews?|examen|revue|(?:re-?)?zoning|zonage|draws?|tirages?|take-?out|relais|deadline|echeance)\b/,
   },
   {
     fieldKey: "lease_up_months", unit: "months", assumption: true,
