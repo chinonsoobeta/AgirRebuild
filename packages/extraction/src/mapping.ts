@@ -4,7 +4,7 @@
 // but it never becomes an input.
 
 import { FIELD_BY_KEY, FIELDS, OUTPUT_LIKE_PHRASES, type FieldDef } from "@agir/contracts";
-import { ACQUISITION_WORD, PROPERTY_WORD, RISK_WORD, HOLDING_WORD, RESIDUAL_COST, NOT_THIS_COST, NOT_RISK_COST, NOT_PROJECT_TOTAL, PROJECT_TOTAL, CONCEPTS, SENIOR_RANK, LOAN_PERIOD, STATED_TOTAL, DEBT_SERVICE, LOAN_ANAPHOR, LOAN_NOUN, MAIN_LENDER, MONTH_INDEX, NOT_A_BUDGET_LINE, NOT_CHOSEN_AFTER, LEAVING_AFTER, NOT_THE_DEALS_ASSUMPTION, NOT_THE_LOAN_AFTER, WHERE_IT_SITS } from "./concepts.ts";
+import { ASSUMPTION_HISTORY, OCCUPANCY_WORD, SETTLED_WORD, ACQUISITION_WORD, PROPERTY_WORD, RISK_WORD, HOLDING_WORD, RESIDUAL_COST, NOT_THIS_COST, NOT_RISK_COST, NOT_PROJECT_TOTAL, PROJECT_TOTAL, CONCEPTS, SENIOR_RANK, LOAN_PERIOD, STATED_TOTAL, DEBT_SERVICE, LOAN_ANAPHOR, LOAN_NOUN, MAIN_LENDER, MONTH_INDEX, NOT_A_BUDGET_LINE, NOT_CHOSEN_AFTER, LEAVING_AFTER, NOT_THE_DEALS_ASSUMPTION, NOT_THE_LOAN_AFTER, WHERE_IT_SITS } from "./concepts.ts";
 import { canonicalItem, codeOf, parenType, SF_PER_M2, unitTypesIn, wholeUnitType, type CurrencyCode, type NumberToken } from "@agir/numbers";
 
 // canonicalItem and itemFold live in @agir/numbers so the engine can use the same fold.
@@ -94,8 +94,12 @@ export function isTakeoutTimingLabel(raw: string): boolean {
   return /\b(months?|mo|mois)\b/.test(label) && TAKEOUT_TIMING_RE.test(label) && !TAKEOUT_NOT_RE.test(label);
 }
 const FUNDING_RE = /\b(fund\w*|repa\w+|clos\w*|advance\w*|draw\w*|financement|remboursement|prise de possession)\b/;
-const CAP_RE = /\b(cap rate|capitali[sz]ation rate|taux de capitalisation)\b/;
-const EXIT_RE = /\b(sell|sale|sold|exit|reversion|disposition|disposal|terminal|outgoing|going-out|eventual sale|on sale|depart|sortie|vente|vendre|vendrons|vendons|revente)\b/;
+export function isOperatingTarget(raw: string): boolean {
+  const label = normalizeLabel(raw).label;
+  return (OCCUPANCY_WORD.test(label) && SETTLED_WORD.test(label)) || /\b(?:lease-up|letting|tenanting|to lease|to let)\b/.test(label);
+}
+const CAP_RE = /\b(cap rate|capitali[sz]ation(?: rate)?|taux de capitalisation)\b/;
+const EXIT_RE = /\b(end|terminale|cession|sell|sale|sold|exit|reversion|disposition|disposal|terminal|outgoing|going-out|eventual sale|on sale|depart|sortie|vente|vendre|vendrons|vendons|revente)\b/;
 const VALUE_RE = /\b(value|valeur)\b/;
 
 /** An explicitly named exit cap-rate label; valuation can qualify this input, but a stated value cannot. */
@@ -108,7 +112,7 @@ export function isExitCapLabel(raw: string): boolean {
 const ANNUAL_RE = /\b(annual|annually|yearly|per year|a year|each year|annuel|annuelle|par an|par annee)\b|\/\s?(yr|year|an|annee)\b/;
 const PER_UNIT_RE = /\b(per (unit|suite|door|home|dwelling)|each|par (logement|unite|local))\b/;
 const PER_AREA_RE = /\b(sf|psf|sq ft|square f\w+|pi2|pied carre|m2|psm|sqm|metre carre|square met(re|er))\b/;
-const MONTHLY_RE = /\b(monthly|per month|mensuel|mensuelle|par mois)\b|\/\s?(mo|month|mois)\b/;
+const MONTHLY_RE = /\b(monthly|per month|a month|mensuels?|mensuelles?|par mois)\b|\/\s?(mo|month|mois)\b/;
 const RENT_WORD_RE = /\b(rents?|loyers?)\b/;
 // A plain-language rent per unit (task 55): "monthly rent for each home", "annual lease per dwelling", "loyer demande par logement". "Price" and "asking" alone need a period word, and a sale, a fee or a per-area label is no rent.
 const PLAIN_RENT_RE = /\b(?:rents?|leases?(?!-?\s?up)|prices?|asking|loyers?|locations?)\b(?:\s+[a-z0-9$%/-]+){0,5}?\s+(?:for each|each|per|par)\s+(?:home|unit|suite|dwelling|door|logement|unite|local|appartement)s?\b(?:\s+(?:monthly|per month|a month|mensuel(?:le)?|par mois|annual(?:ly)?|yearly|per year|a year|par an|par annee))?$/;
@@ -416,9 +420,9 @@ function convert(def: FieldDef, t: NumberToken, label: string, labelUnit: LabelU
   const u = t.unit;
   switch (def.unit) {
     case "$":
+      // A monthly total of other income is twelve months of it. Per-item figures are refused before mapping.
+      if (def.key === "other_income_annual" && (u === "$/mo" || MONTHLY_RE.test(label)) && (t.currency || u === "$" || u === "$/mo" || (!prose && u === null))) return { value: v * 12, unitSeen: "$/mo" };
       if (u === "$" || labelUnit === "$") return { value: v, unitSeen: "$" };
-      // A monthly figure for the whole of the other income is twelve months of it; one per stall or per unit is not stated as a total.
-      if (u === "$/mo" && def.key === "other_income_annual" && /\b(income|revenues?|revenus?)\b/.test(label)) return { value: v * 12, unitSeen: "$/mo" };
       // In prose a bare number is never money (a year, a count): tables and label/value lines keep the rule.
       if (u === null && !prose && Math.abs(v) >= 1000) return { value: v, unitSeen: "number" };
       return null;
@@ -750,6 +754,8 @@ export function mapToken(rawLabel: string, t: NumberToken, opts: MapOptions = {}
     if (unitTypesIn(clause).length || /\b(sale|sell|sold|buyer|resale|vente|acheteur|revente)\b/.test(clause)) return { kind: "unmapped" };
   }
   const named = normalizeLabel(rawLabel).label;
+  const assumptionKeys = CONCEPTS.filter(c => c.assumption).map(c => c.fieldKey);
+  if (/\b(?:per|par|each|chaque)[ -]+(?:stall|locker|unit|place|casier|unite)s?\b/.test(`${named} ${normalizeLabel((opts.after ?? "").split(/[,;]/)[0] ?? "").label}`) && /\b(?:parking|laundry|storage|locker|stationnement|buanderie|accessoires)\b/.test(named)) return { kind: "ignored", reason: "Other income per stall, locker or unit, not the total" };
   if ((t.unit === "$" || t.currency || t.unit === null) && /\b(?:draws?|tirages?)\b/.test(named) && (/\b(?:loans?|facilit(?:y|ies)|lenders?|prets?|preteurs?)\b/.test(named) || /\b(?:construction draws?|tirages? de construction|weekly|monthly|this month|first|next|draw number|hebdomadaire|mensuel|ce mois|premier|prochain|tirage numero)\b/.test(named))) return { kind: "ignored", reason: "A draw, not the loan amount or a budget line" };
   if ((t.unit === "$" || t.currency || (t.unit === null && t.value !== null && Math.abs(t.value) >= 1000)) && DEBT_SERVICE.test(named)) return { kind: "ignored", reason: "Debt service or a payment, not a loan amount" };
   if (/^(?:(?:its|their) (?:interest(?: rate)?|rate|amorti[sz]ation)|(?:son|leur) (?:taux|interet|amortissement)|sa duree d amortissement)$/.test(named)) return { kind: "ignored", reason: "Which loan this belongs to is not stated" };
@@ -757,10 +763,25 @@ export function mapToken(rawLabel: string, t: NumberToken, opts: MapOptions = {}
   if ([...named.matchAll(INCLUDED_IN_RE)].some((x) => { const rest = named.slice(x.index + x[0].length); return ALL_ALIASES.some((a) => `${rest} `.startsWith(`${a} `)); })) return { kind: "ignored", reason: INCLUDED_NOTE };
   const budgetLabel = named.split(COVER_LIST_RE)[0] ?? named;
   const joined = budgetLabel.split(/\b(?:and|et)\b/).map((part) => budgetConcepts(part));
+  const assumptionParts = normalizeLabel(rawLabel.split(/[,;]/).pop() ?? "").label.split(/\b(?:and|et)\b/);
+  if (!/\b(?:interest|interets?|loan|pret)\b/.test(named) && assumptionParts.length > 1 && assumptionParts.every(part => CONCEPTS.some(c => c.assumption && (c.unit === t.unit) && c.words.some(w => w.test(part)))) && new Set(assumptionParts.flatMap(part => CONCEPTS.filter(c => c.assumption && c.unit === t.unit && c.words.some(w => w.test(part))).map(c => c.fieldKey))).size > 1) return { kind: "unmapped" };
   let m = mapSigned(rawLabel, t, opts);
+  if (OCCUPANCY_WORD.test(named) && SETTLED_WORD.test(named) && m.kind === "field" && m.fieldKey === "item_occupancy_pct") {
+    m = { ...m, fieldKey: "stabilized_occupancy_pct", itemKey: null };
+  }
   // A description naming two cost fields by concept is shown, unless its own words already name its field.
   if (m.kind === "unmapped" && !opts.quote && (opts.budget || opts.budgetConcept) && t.unit === "$" && !/%/.test(opts.gap ?? opts.ahead ?? "") && joined.length === 2 && joined.every((part) => part.length === 1) && joined[0]![0]!.fieldKey !== joined[1]![0]!.fieldKey) return { kind: "ignored", reason: "This description names more than one budget field; enter each line separately" };
-  if (m.kind === "unmapped" || (m.kind === "ignored" && m.unitMismatch)) m = conceptField(rawLabel, t, opts) ?? m;
+  if (m.kind === "unmapped" || (m.kind === "ignored" && m.unitMismatch) || (m.kind === "ignored" && m.reason === "A fee or premium, not an input" && /\b(?:frais courants|frais annuels|selling-cost)\b/.test(named))) m = conceptField(rawLabel, t, opts) ?? m;
+  if (m.kind === "field" && assumptionKeys.includes(m.fieldKey) && ASSUMPTION_HISTORY.test(folded)) return { kind: "ignored", reason: "History or another property's figure, not this deal's assumption" };
+  if (m.kind === "field" && (m.fieldKey === "fixed_opex_annual" || m.fieldKey === "selling_costs_pct")) {
+    // A named exclusion does not turn an operating total into the excluded item.
+    const own = named.replace(/\b(?:excluding|without|hors|sans) (?:property tax(?:es)?|insurance|assurance|taxes foncieres)\b/g, " ");
+    const fieldKey = m.fieldKey;
+    const concept = CONCEPTS.find(c => c.fieldKey === fieldKey)!;
+    if (concept.exclude.test(own)) return { kind: "ignored", reason: "A separate cost item, not this operating or selling cost assumption" };
+  }
+  if (m.kind === "field" && m.fieldKey === "construction_months" && /\b(?:wait|warranty|attente|garantie)\b/.test(named)) return { kind: "ignored", reason: "A wait or warranty, not the work period" };
+  if (m.kind === "field" && m.fieldKey === "lease_up_months" && /\b(?:commercial lease|bail|lease term)\b/.test(named)) return { kind: "ignored", reason: "A lease term, not the lease-up" };
   // Acquisition and risk holdings take precedence over builder words in the same label.
   if (m.kind === "field" && ["land_cost", "hard_cost", "soft_cost", "contingency", "other_cost", "stated_total_cost"].includes(m.fieldKey)) {
     const own = normalizeLabel(rawLabel).label;
@@ -829,7 +850,7 @@ function conceptField(rawLabel: string, t: NumberToken, opts: MapOptions): Mappe
   if (!afterLabel && opts.prose && opts.context && !foldText(withoutTaxBasis(opts.context.slice(0, t.start)).replace(/,\s*all-in\s*:?\s*$/i, "")).trimEnd().endsWith(foldText(rawLabel).trim())) return null;
   const lead = afterLabel ? (opts.lead ?? "").split(/[,;]/).pop() ?? "" : "";
   const { label, labelUnit, labelCode } = normalizeLabel(opts.prose && !afterLabel ? rawLabel.split(/[,;]/).pop() ?? "" : rawLabel);
-  const unit = t.unit ?? labelUnit ?? (!opts.prose && Math.abs(t.value) >= 1000 ? "$" : null);
+  const unit = (t.unit === "$/mo" ? "$" : t.unit) ?? labelUnit ?? (!opts.prose && Math.abs(t.value) >= 1000 ? "$" : null);
   const budget = unit === "$" && !opts.quote && (opts.budget || opts.budgetConcept) && !/%/.test(opts.gap ?? opts.ahead ?? "");
   const meanings = budget ? budgetConcepts(label) : [];
   if (meanings.length > 1) return { kind: "ignored", reason: "This description names more than one budget field; enter each line separately" };
@@ -841,12 +862,12 @@ function conceptField(rawLabel: string, t: NumberToken, opts: MapOptions): Mappe
   // After the figure, the words before it in its clause still carry the guards.
   const folded = foldText(afterLabel ? `${lead} ${rawLabel}` : rawLabel);
   const budgetLine = budget && !NOT_A_BUDGET_LINE.test(folded) && !LOAN_NOUN.test(folded);
-  const assumptionLabel = ((afterLabel ? label.split(/\band\b|\bet\b/)[0] : label.split(/\band\b|\bet\b/).pop()) ?? "").trim();
+  const assumptionLabel = label;
   const assumptionContext = normalizeLabel(afterLabel ? `${lead} ${rawLabel}` : rawLabel.split(/[,;]/).pop() ?? "").label;
   // The whole label and the words after the figure: an alternative, a loan's period or a month number is never the deal's assumption.
-  const assumption = !NOT_THE_DEALS_ASSUMPTION.test(folded) && !LOAN_NOUN.test(folded) && !NOT_CHOSEN_AFTER.test(foldText(opts.after ?? "")) && !LEAVING_AFTER.test(foldText(opts.after ?? ""))
+  const assumption = !NOT_THE_DEALS_ASSUMPTION.test(folded) && !ASSUMPTION_HISTORY.test(folded) && !LOAN_NOUN.test(folded) && !(unit === "years" && /\b(?:commercial lease|bail)\b/.test(normalizeLabel(`${opts.lead ?? ""} ${opts.context ?? rawLabel}`).label)) && !NOT_CHOSEN_AFTER.test(foldText(opts.after ?? "")) && !LEAVING_AFTER.test(foldText(opts.after ?? ""))
     && !(unit === "months" && MONTH_INDEX.test(folded));
-  const fits = CONCEPTS.filter((c) => c.unit === unit && (c.assumption
+  const fits = CONCEPTS.filter((c) => (c.unit === unit || (c.assumption && c.unit === "months" && unit === "years")) && (c.assumption
     ? assumption && !opts.budget && c.words.some((w) => w.test(assumptionLabel)) && ((c.with ?? []).every((w) => w.test(assumptionLabel)) || !!c.basisAfter?.test(foldText(opts.after ?? ""))) && !c.exclude.test(assumptionContext)
     // Only an assumption or a rate in an established loan context is named after its figure: a loan noun ("$9,000,000 by the lender") or a budget word ("is the stated envelope") there does not name the figure.
     : (!afterLabel || (c.fieldKey === "senior_rate_pct" && opts.loanContext)) && (c.budget ? budgetLine && meanings.includes(c) && (c.fieldKey !== "land_cost" || !opts.prose || ACQUISITION_WORD.test(label) || /\b(?:dirt|ground) (?:cost|deal|price|basis)\b/.test(label)) : loan && c.words.some((w) => w.test(label))) && !c.exclude.test(c.budget || afterLabel ? folded : label)));
@@ -897,7 +918,7 @@ function mapLabel(rawLabel: string, t: NumberToken, opts: MapOptions = {}): Mapp
   const cover = COVER_LIST_RE.exec(label);
   if (cover && cover.index > 0 && BUDGET_NAME_RE.test(label.slice(0, cover.index))) label = label.slice(0, cover.index).trim();
   const timingLabel = `${rawLabel} ${opts.gap ?? ""}`;
-  const output = OUTPUT_LIKE_PHRASES.find((p) => hasPhrase(label, p) && !(p === "valuation" && isExitCapLabel(rawLabel)) && !((p === "target" || p === "cible") && isTakeoutTimingLabel(timingLabel)));
+  const output = OUTPUT_LIKE_PHRASES.find((p) => hasPhrase(label, p) && !(p === "valuation" && isExitCapLabel(rawLabel)) && !((p === "target" || p === "cible") && (isTakeoutTimingLabel(timingLabel) || isOperatingTarget(rawLabel))));
   if (output) return { kind: "ignored", reason: `"${rawLabel.trim()}" is an output figure, which is never taken as an input` };
   if (t.value === null) return { kind: "ignored", reason: t.refusal ?? "The number could not be read without guessing" };
   // Appraisal cost items are shown separately; only a stated operating-cost total is read.
@@ -997,6 +1018,7 @@ function mapLabel(rawLabel: string, t: NumberToken, opts: MapOptions = {}): Mapp
   // A cap rate is the exit rate only when the sentence is about a sale; alone it may be the going-in rate.
   if ((CAP_RE.test(label) || (t.unit === "%" && CAP_AFTER_RE.test(foldText(opts.after ?? "")))) && !FIELD_BY_KEY.get("exit_cap_rate_pct")!.aliases.some((a) => hasPhrase(label, a))) {
     const ctx = normalizeLabel(opts.context ?? rawLabel).label;
+    if (EXIT_RE.test(ctx) && /\b(?:going-in|entry|purchase|acquisition|achat|entree|market|marche)\b/.test(label)) return { kind: "ignored", reason: "A purchase or market cap, not the exit cap" };
     // A sale that already happened ("the duplex next door sold at a 4.9% cap") is a comparable, not this deal's exit.
     if (/\b(?:sold|traded|vendue?s?)\b/.test(foldText(rawLabel.split(/[.;]/).pop() ?? ""))) return { kind: "ignored", reason: "A completed sale's cap rate, not this deal's exit" };
     if (EXIT_RE.test(ctx) && VALUE_RE.test(ctx)) return { kind: "ignored", reason: "This sentence names a value as well as a cap rate; the figure is not taken as an input" };

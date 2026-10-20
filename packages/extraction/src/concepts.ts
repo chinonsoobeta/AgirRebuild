@@ -42,6 +42,12 @@ export const NOT_CHOSEN_AFTER = /^\W*(?:[a-z]+\s+){0,4}(?:declined|rejected|drop
 export const LEAVING_AFTER = /^\W*(?:[a-z]+\s+){0,2}(?:vacate|move out|leave|quitter|demenag\w*)\b/;
 export const MONTH_INDEX = /\b(?:month|mois)\s*:?\s*$|\b(?:at|in|by|from|until|au|en|du|des le)\s+(?:(?:the|project|le)\s+)?(?:month|mois)\b/;
 
+// Card 117: settled occupancy and growth words apply in either order.
+export const OCCUPANCY_WORD = /\b(?:occupancy|occupied|filled|fill|let|letting|leasing|leased|rented|occupation)\b/;
+export const SETTLED_WORD = /\b(?:stabili[sz]\w*|stab|settled|steady|mature|normal|long-run|long-term|target|planned|a maturite|de croisiere|a terme|retenue|regime(?: stable| etabli)?)\b/;
+export const GROWTH_WORD = /\b(?:growth|uplift|steps?|drift|increase|escalation|grown(?: at)?|indexation|hausse|croissance)\b/;
+export const ASSUMPTION_HISTORY = /\b(?:actual|historic(?:al)?|last year|prior year|seller s|previous owner|old owner|old building|comparables?|market|area|neighbou?rhood|peak|reel(?:le)?s?|l an dernier|historique|marche)\b/;
+
 export const CONCEPTS: readonly {
   fieldKey: string;
   budget?: true;
@@ -104,31 +110,31 @@ export const CONCEPTS: readonly {
   {
     fieldKey: "construction_months", unit: "months", assumption: true,
     // Card 111 (v4, v5): a span from the foundations to occupancy is the build.
-    words: [/\b(?:build|construction|works|site|crew|delivery|program(?:me)?|conversion|renovation|fit-out|chantier|travaux|transformation)\b/, /\bfrom (?:the )?(?:foundations?|shovels?(?: in the ground)?|ground-?breaking|excavation|mobili[sz]ation) to (?:the )?(?:occupancy|completion|handover|delivery|substantial completion)\b|\b(?:de|des|du) (?:la |les )?(?:fondations?|excavation|mobilisation|debut des travaux) (?:a|au|jusqu a) (?:la |l )?(?:occupation|livraison|fin des travaux)\b/],
-    exclude: /\b(?:loans?|interest|reserves?|terms?|lock|permits?|approval|wait|holdbacks?|warranty|lease|let|tenants?|prets?|interets?|permis|attente|garantie|retenue|insurance|assurance|starts?|debut|avant|commencement|construction month|reviews?|examen|revue|(?:re-?)?zoning|zonage|draws?|tirages?|take-?out|relais|deadline|echeance)\b/,
+    words: [/\b(?:build|construction|works|work period|trades|installation|fit-up|site|crew|delivery|program(?:me)?|conversion|renovation|fit-out|chantier|travaux|transformation)\b/, /\bfrom (?:the )?(?:foundations?|shovels?(?: in the ground)?|ground-?breaking|excavation|mobili[sz]ation) to (?:the )?(?:occupancy|completion|handover|delivery|substantial completion)\b|\b(?:de|des|du) (?:la |les )?(?:fondations?|excavation|mobilisation|debut des travaux) (?:a|au|jusqu a) (?:la |l )?(?:occupation|livraison|fin des travaux)\b/],
+    exclude: /\b(?:loans?|interest|reserves?|terms?|lock|permits?|approval|wait|holdbacks?|warranty|lease|let|tenants?|prets?|interets?|permis|attente|garantie|retenue|insurance|assurance|starts?|debut|avant|commencement|fixed through|post-completion|construction month|fill|tenanting|remplissage|reviews?|examen|revue|(?:re-?)?zoning|zonage|draws?|tirages?|take-?out|relais|deadline|echeance)\b/,
   },
   {
     fieldKey: "lease_up_months", unit: "months", assumption: true,
     // Card 111 (v4): "pour remplir les logements"; "locataires" is the French for tenants.
-    words: [/\b(?:lease-up|leasing|letting|let-up|fill|tenants?|tenant-finding|absorption|rent-up|mise en location|location|remplir|locataires?)\b/],
-    exclude: /\b(?:loans?|terms?|lock|free rent|rent-free|notice|lease term|bail|prets?|loyer gratuit|franchise de loyer|preavis|location du terrain|free|incentives?|gratuite?s?|incitati\w*)\b/,
+    words: [/\b(?:lease-up|leasing|letting|tenanting|let-up|fill|tenants?|tenant-finding|absorption|rent-up|mise en location|location|remplir|remplissage|to lease|to let|locataires?)\b/],
+    exclude: /\b(?:loans?|terms?|permits?|permis|lock|free rent|rent-free|notice|lease term|bail|prets?|loyer gratuit|franchise de loyer|preavis|location du terrain|free|incentives?|gratuite?s?|incitati\w*)\b/,
   },
   {
     fieldKey: "stabilized_occupancy_pct", unit: "%", assumption: true,
-    words: [/\b(?:occupancy|occupied|fill|let|leased|letting level|occupation)\b/],
-    with: [/\b(?:settled|stabili[sz]\w*|steady|mature|normal|long-run|a maturite|regime)\b/],
+    words: [OCCUPANCY_WORD],
+    with: [SETTLED_WORD],
     exclude: /\b(?:covenant|lender|condition|market|area|comparable|current|today|existing|in[- ]place|breakeven|vacancy|actuel\w*|marche|preteur|clause|seuil de rentabilite)\b/,
   },
   {
     fieldKey: "exit_cap_rate_pct", unit: "%", assumption: true,
     words: [/\b(?:cap|capitali[sz](?:ation|ing))\b/],
-    with: [/\b(?:exit|sale|sell|disposal|disposition|reversion|terminal|outgoing|going-out|eventual|revente|sortie|vente|depart)\b/],
+    with: [/\b(?:end|exit|sale|sell|disposal|disposition|cession|reversion|terminale?|outgoing|going-out|eventual|revente|sortie|vente|depart)\b/],
     exclude: /\b(?:going-in|entry|purchase|acquisition|in[- ]place|current|market|comparable|sold|traded|achat|entree|actuel\w*|marche)\b/,
   },
   {
     fieldKey: "expense_ratio_pct", unit: "%", assumption: true,
-    words: [/\b(?:operating|opex|running|run (?:the |a |this )?building|expenses?|costs?|charges|exploitation|depenses)\b/],
-    with: [/\b(?:share|ratio|percentage|take|slice|load|deduction|allowance|pourcentage|part|sur (?:les )?(?:recettes|revenus))\b/],
+    words: [/\b(?:operating|opex|running|maintenance|upkeep|frais courants|run (?:the |a |this )?building|expenses?|costs?|charges|exploitation|depenses)\b/],
+    with: [/\b(?:share|fraction|ratio|percentage|proportion|take|slice|load|deduction|allowance|pourcentage|part|(?:against|of|rapportees? aux|rapportes? aux|sur (?:les )?) (?:egi|effective income|income|receipts|revenue|collections|recettes|revenus))\b/],
     basisAfter: /^\s*(?:of (?:the )?(?:egi|income|collections|revenue|receipts)|(?:des?|du|sur les) (?:recettes|revenus))\b/,
     exclude: /\b(?:management fee|vacancy|tax|insurance|growth|increase|escalation|inflation|frais de gestion|assurance|taxes?|croissance|hausse|vacance|recurring|sell\w*|sale|exit|brokerage|commissions?|disposition|vente|courtage)\b/,
   },
@@ -140,14 +146,32 @@ export const CONCEPTS: readonly {
   },
   {
     fieldKey: "rent_growth_pct", unit: "%", assumption: true,
-    words: [/\b(?:rents?|loyers?)\b/],
-    with: [/\b(?:growth|uplift|increase|escalation|indexation|hausse|croissance)\b/],
+    words: [/\b(?:rents?|asking|loyers?)\b/],
+    with: [GROWTH_WORD],
     exclude: /\b(?:expenses?|costs?|charges|market|comparable|cap|depenses|couts?|marche)\b/,
   },
   {
     fieldKey: "expense_growth_pct", unit: "%", assumption: true,
-    words: [/\b(?:expenses?|costs?|opex|charges|depenses|couts?)\b/],
-    with: [/\b(?:growth|uplift|increase|escalation|inflation|hausse|croissance)\b/],
+    words: [/\b(?:expenses?|costs?|overhead|running-bill|frais courants|opex|charges|depenses|couts?)\b/],
+    with: [new RegExp(`${GROWTH_WORD.source}|\\binflation\\b`)],
     exclude: /\b(?:rents?|loyers?|market|comparable|construction|hard|build|marche)\b/,
+  },
+  {
+    fieldKey: "fixed_opex_annual", unit: "$", assumption: true,
+    words: [/\b(?:overhead|operating|opex|running bill|operating pot|charges|exploitation|frais d exploitation)\b/],
+    with: [/\b(?:fixed|annual|yearly|per year|fixes?|annuels?|annuelles?|par an)\b/],
+    exclude: /\b(?:tax(?:es)?|insurance|management fee|fees?|reserve|debt|impot|assurance|frais de gestion|dette)\b/,
+  },
+  {
+    fieldKey: "other_income_annual", unit: "$", assumption: true,
+    words: [/\b(?:parking|laundry|storage|lockers?|extras|ancillary|side|accessoires|stationnement|buanderie|entreposage)\b/],
+    with: [/\b(?:income|revenue|cash|proceeds|receipts|collected|add|revenus|recettes|yearly|annual|par annee|par mois)\b/],
+    exclude: /\b(?:per|par|each|chaque) (?:stall|locker|unit|place|casier|unite)s?\b/,
+  },
+  {
+    fieldKey: "selling_costs_pct", unit: "%", assumption: true,
+    words: [/\b(?:sale|sell|selling|disposal|exit|cession|vente)\b/],
+    with: [/\b(?:friction|transaction|costs?|allowance|couts?|frais)\b/],
+    exclude: /\b(?:purchase|lease|leasing|brokerage|commission|achat|location)\b/,
   },
 ];

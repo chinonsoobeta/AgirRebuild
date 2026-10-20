@@ -1,8 +1,8 @@
-import { CONCEPTS, LOAN_NOUN, STATED_TOTAL } from "./concepts.ts";
+import { GROWTH_WORD, CONCEPTS, LOAN_NOUN, STATED_TOTAL } from "./concepts.ts";
 import { FIELD_BY_KEY, OUTPUT_LIKE_PHRASES } from "@agir/contracts";
 import { detectFormat, normalizeText, SF_PER_M2, tokenize, unitTypesIn, wholeUnitType, type CurrencyCode, type DocumentFormat, type NumberToken } from "@agir/numbers";
 import type { Cell, NormalizedDocument, Table } from "./document.ts";
-import { BASIS_AFTER_RE, CREDIT_NOTE, REPLACED_LOAN, DEPOSIT_NOTE, DEPOSIT_RE, LTV_BASIS, canonicalItem, costSentence, currencyOf, flagRead, flagSentence, hasPhrase, isExitCapLabel, isTakeoutTimingLabel, isPlainRentLabel, loanNameOnly, loanTerm, mapToken, normalizeLabel, withoutTaxBasis, OLD_SHEET_RE, rankScope, SCENARIO_SHEET_NOTE, SCENARIO_SHEET_RE, SUPERSEDED_LABEL_NOTE, scopeIn, scopesIn, withCurrency, type MapOptions, type Mapped, type Scope } from "./mapping.ts";
+import { BASIS_AFTER_RE, CREDIT_NOTE, REPLACED_LOAN, DEPOSIT_NOTE, DEPOSIT_RE, LTV_BASIS, canonicalItem, costSentence, currencyOf, flagRead, flagSentence, hasPhrase, isOperatingTarget, isExitCapLabel, isTakeoutTimingLabel, isPlainRentLabel, loanNameOnly, loanTerm, mapToken, normalizeLabel, withoutTaxBasis, OLD_SHEET_RE, rankScope, SCENARIO_SHEET_NOTE, SCENARIO_SHEET_RE, SUPERSEDED_LABEL_NOTE, scopeIn, scopesIn, withCurrency, type MapOptions, type Mapped, type Scope } from "./mapping.ts";
 
 /** One value found in one document, with where it came from and why it was (or was not) mapped. */
 export type Candidate = {
@@ -361,9 +361,10 @@ function sentenceRefusal(text: string): string | null {
   const basis = new RegExp(String.raw`(?<=\d\s?%\s+)${LTV_BASIS}(?![a-z0-9]|\s+(?:of|at|is|was|de|a)?\s*[$\d])`, "g");
   const label = normalizeLabel(fold(text).replace(basis, " ")).label;
   const capLabel = text.includes(":") && isExitCapLabel(text.slice(0, text.indexOf(":")));
-  const output = OUTPUT_LIKE_PHRASES.find((p) => hasPhrase(label, p) && !(p === "valuation" && capLabel) && !((p === "target" || p === "cible") && isTakeoutTimingLabel(text)));
+  const output = OUTPUT_LIKE_PHRASES.find((p) => hasPhrase(label, p) && !(p === "valuation" && capLabel) && !((p === "target" || p === "cible") && (isTakeoutTimingLabel(text) || isOperatingTarget(text))));
   if (output) return `This sentence names an output figure ("${output}"), which is never taken as an input`;
   const f = fold(text);
+  if (/^footnote\s+\d+\s*:/.test(f)) return "A numbered footnote, not an assumption label";
   const hedge = HEDGE_RE.exec(f);
   if (hedge) return `A hedged figure ("${hedge[0]}") is not a value; enter the figure to use`;
   const other = BORROWED_RE.exec(f);
@@ -521,7 +522,7 @@ function shareBases(text: string, tokens: NumberToken[], scope: Scope): [number,
 }
 
 // A dwelling named before or after a price makes it a share of the line's total.
-const PER_DOOR_WORD = String.raw`(?:lots?|doors?|units?|suites?|homes?|houses?|townhouses?|townhomes?|row[\s-]+houses?|dwellings?|apartments?|condos?|portes?|logements?|unit[ée]s?|maisons?(?:[\s-]+(?:en[\s-]+rang[ée]es?|de[\s-]+ville))?|appartements?|terrains?)`;
+const PER_DOOR_WORD = String.raw`(?:lots?|doors?|units?|suites?|homes?|houses?|townhouses?|townhomes?|row[\s-]+(?:houses?|homes?)|semis?(?:-detached)?|duplex(?:es)?|triplex(?:es)?|fourplex(?:es)?|plex|jumel[ée]s?|maisons?[\s-]+jumel[ée]es?|unifamiliales?|dwellings?|apartments?|condos?|portes?|logements?|unit[ée]s?|maisons?(?:[\s-]+(?:en[\s-]+rang[ée]es?|de[\s-]+ville))?|appartements?|terrains?)`;
 const PER_DOOR_FORM = String.raw`(?:(?:per|par|each|chaque|for\s+each|pour\s+chaque)[\s-]*(?!lot\s+of\b)${PER_DOOR_WORD}|${PER_DOOR_WORD}\s+(?:each|chacune?))`;
 const EACH_RE = new RegExp(String.raw`^\s*\(?\s*(?:${PER_DOOR_FORM}|each|apiece|chacune?|(?:an?|/)[\s-]*(?!lot\s+of\b)${PER_DOOR_WORD})(?![\p{L}])\)?`, "iu");
 const PER_DOOR_LABEL_RE = new RegExp(String.raw`(?:(?<![\p{L}])${PER_DOOR_FORM}|/${PER_DOOR_WORD})(?![\p{L}])`, "iu");
@@ -845,6 +846,7 @@ function readSentence(sentence: { text: string; start: number }, para0: Paragrap
   const totalLabels = new Map<NumberToken, string>();
   // The loan a figure's label named by itself ("mezz $650k"): a percentage right after it, with no loan of its own, is that loan's rate.
   let carry: { scope: Scope; at: number } | null = null;
+  let previousGrowth: string | null = null;
   let lastRead: { label: string; key: string; t: NumberToken } | null = null;
   const RATE_WORD: Record<Scope, string> = { senior: "senior rate", mezzanine: "mezzanine rate", refinance: "take-out rate" };
   // A sentence that names a non-senior loan carries it: the loan a clause names holds until a clause names another.
@@ -878,6 +880,8 @@ function readSentence(sentence: { text: string; start: number }, para0: Paragrap
     }
     let opts: MapOptions = { prose: true, scope: para.scope, budgetConcept: true, loanContext: para.scope !== undefined || conceptScope !== undefined || conceptLoan, conceptScope, seniorHeading: para.scope === "senior", context: text, quote, after: isMoney(t) ? afterFigure : text.slice(t.end) };
     let usedLabel = totalLabels.get(t) ?? label;
+    // A shared growth verb qualifies the expense clause after the rent figure.
+    if (previousGrowth !== null && /^\s*(?:annually|yearly|par an)?\s*(?:and|et)\s+(?:expenses?|costs?|overhead|charges|depenses)\b/i.test(fold(label)) && GROWTH_WORD.test(fold(previousGrowth))) { usedLabel += " growth"; opts = { ...opts, context: undefined }; }
     if (loanSentence) {
       const named = scopesIn(unconditioned(label));
       sentenceLoan = named.length === 1 ? named[0]! : named.length > 1 ? null : sentenceLoan;
@@ -954,6 +958,7 @@ function readSentence(sentence: { text: string; start: number }, para0: Paragrap
     // A loan noun attached to this amount overrides equity words left before it.
     if (mapped.kind === "field" && mapped.fieldKey === "equity_amount" && /^\s*(?:(?:of|de|du|the|un|une)\s+)*(?:construction\s+)?(?:facility|loan|mortgage|pret|financement)\b/.test(fold(afterFigure))) mapped = { kind: "unmapped" };
     carry = named && mapped.kind === "field" && isMoney(t) ? { scope: named, at: i } : null;
+    previousGrowth = mapped.kind === "field" && mapped.fieldKey === "rent_growth_pct" ? usedLabel : null;
     lastRead = mapped.kind === "field" && isMoney(t) ? { label: usedLabel, key: mapped.fieldKey, t } : null;
     if (mapped.kind === "field" && AMOUNT_SCOPE[mapped.fieldKey]) conceptLoan = true;
     record(result, mapped, t, { raw: t.raw, location: where, context, rule: "line:prose" });
