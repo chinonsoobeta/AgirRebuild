@@ -131,7 +131,7 @@ const STABILIZED_RE = /\b(stabili[sz]ed|stabilisee?|projected|pro forma|projete\
 
 // Words too common to name a field alone. Each loses to any longer alias in the label, must stand at the end of the label
 // (or before "income"/"amount"), and never matches inside a longer word.
-const LOOSE_ALIASES = new Set(["management", "gestion", "depenses", "limited partners", "lp", "lps", "commanditaires", "loan", "pret", "mortgage", "rate", "taux", "interest", "interet", "construction", "location", "build", "travaux", "leasing", "lot", "site", "contribute", "invest", "apport", "other", "autres", "parking", "laundry", "storage", "stationnement", "buanderie", "rangement"]);
+const LOOSE_ALIASES = new Set(["management", "gestion", "depenses", "limited partners", "lp", "lps", "commanditaires", "loan", "pret", "mortgage", "rate", "taux", "interest", "interet", "construction", "location", "build", "travaux", "leasing", "chantier", "letting", "lot", "site", "contribute", "invest", "apport", "other", "autres", "parking", "laundry", "storage", "stationnement", "buanderie", "rangement"]);
 // These name a field only for a money figure of at least $1,000: "lot 7" is a lot number, "storage $75" may be one locker.
 const WEAK_MONEY = new Set(["lot", "site", "parking", "laundry", "storage", "stationnement", "buanderie", "rangement"]);
 // These name a field only when the figure's own words say what it is a share of: "management 4% of EGI", never "management 1.5% of equity".
@@ -444,7 +444,7 @@ export type MapOptions = {
 };
 
 // What may follow a loose alias before the number: "income", "amount", or a verb phrase ("is planned at", "should take", "est de").
-const FILLER = "is|are|was|were|will|be|been|should|shall|to|take|takes|taking|planned|scheduled|expected|estimated|set|budgeted|for|at|of|about|approximately|around|a|an|the|total|only|currently|now|income|revenue|revenues|revenu|revenus|amount|montant|est|sont|sera|seront|durera|prevu|prevue|prevus|de|du|d|environ|devrait|dure|au|aux|fixe|fixee|represente";
+const FILLER = "is|are|was|were|will|be|been|should|shall|to|take|takes|taking|planned|scheduled|expected|estimated|set|budgeted|for|at|of|about|approximately|around|a|an|the|total|only|currently|now|income|revenue|revenues|revenu|revenus|amount|montant|est|sont|sera|seront|durera|prevu|prevue|prevus|de|du|d|environ|devrait|dure|au|aux|fixe|fixee|represente|prend|prendra|prennent|prendront|s (?:etaler|echelonner|etendr)(?:a|ont)(?: sur)?";
 const FILLER_RE = new RegExp(`^(\\s(${FILLER}))*$`);
 const RATE_FILLER_RE = new RegExp(`^(\\s(${FILLER}|${RATE_QUALIFIER}))*$`);
 
@@ -528,9 +528,16 @@ const CAP_AFTER_RE = /^\s*cap\b(?!\s+(?:of|on)\b)/;
 // A promote tier from the second up.
 const LATER_TIER_RE = /\b(?:tier\s*(?:[2-9]|ii|iii|iv|two|three|four)|(?:2nd|3rd|[4-9]th|second|third|fourth)\s+tier|palier\s*(?:[2-9]|ii|iii|iv|deux|trois|quatre)|(?:[2-9]e|[2-9]eme|deuxieme|troisieme|quatrieme)\s+palier)\b/;
 const VACANCY_RE = /\b(vacancy(?! rate)|(?<!taux de )vacance|inoccupation)\b/;
-// A duration labelled by the words right after it: "16 months to build", "huit mois pour louer".
-const BUILD_AFTER_RE = /^\s*to build\b/;
-const LEASE_AFTER_RE = /^\s*(?:to lease(?: up)?|pour louer)\b/;
+// A duration labelled by the words right after it: "16 months to build", "huit mois pour louer"; not a loan's, fee's or incentive's months ("of construction interest", "de location gratuite").
+const NOT_PERIOD_AFTER = String.raw`(?!\s+(?:loans?|financing|facility|interest|insurance|warranty|commissions?|fees?|costs?|incentives?|free|reserves?|permits?|pret|financement|interets?|assurance|garantie|frais|couts?|gratuite?s?|permis))`;
+const BUILD_AFTER_RE = new RegExp(String.raw`^\s*(?:to build|of building|on site|de (?:construction|travaux|chantier))\b${NOT_PERIOD_AFTER}`);
+const LEASE_AFTER_RE = new RegExp(String.raw`^\s*(?:to (?:lease(?: up)?|let|fill)|of (?:lease[- ]?up|leasing|letting)|pour (?:louer|remplir)|de (?:mise en )?location)\b${NOT_PERIOD_AFTER}`);
+// A pace ("2 units per month", "3 ventes par mois") is never a count of units.
+const PACE_AFTER_RE = /^\s*(units?|unites?|sales|ventes)?\s*(?:per|a|par|\/)\s*(?:month|mois)\b/;
+const PACE_NOTE = "A sales pace, not the number of units";
+const LEASE_TERM_RE = /\b(?:leases?|bail|baux)\b(?![- ]?up)/;
+// Before a loose build or lease-up word, a start, a wait, a warranty, an insurance or a notice: "Début du chantier", "Délai avant les travaux", "Garantie du chantier".
+const NOT_PERIOD_BEFORE_RE = /\b(?:start|begins?|commencement|debut|demarrage|before|prior to|until|avant|jusqu|warranty|garantie|insurance|assurance|notice|preavis|fees?|frais)\b/;
 // A figure about the market, not the deal.
 const MARKET_RE = /\b(market|submarket|sub-market|city|area|zone|neighbou?rhood|region|cmhc|average|avg|comparables?|comps?|marche|secteur|quartier|schl|moyenne|moyen)\b/;
 const MARKET_NOTE = "A market statistic, not the deal's assumption";
@@ -738,6 +745,9 @@ function mapLabel(rawLabel: string, t: NumberToken, opts: MapOptions = {}): Mapp
   if (t.unit === "%" && MORTGAGE_INSURANCE_RE.test(label) && /\b(?:premiums?|primes?|insurance|assurance)\b/.test(label)) return { kind: "ignored", reason: "Mortgage insurance premium: enter it on Review as the refinance mortgage insurance premium" };
   // A building's total monthly rent is not the rent of one unit (card 69 audit; the prose path has its own rule).
   if (t.unit !== "%" && /\b(?:(?:total|gross|aggregate) monthly rents?|loyers? mensuels? totaux?|loyer mensuel total)\b/.test(label)) return { kind: "ignored", reason: "A total of all units' rents, not a rent per unit" };
+  // From the figure's own unit word on: "3 unités" may be read as "3 unit" followed by "és".
+  const pace = PACE_AFTER_RE.exec(foldText(`${t.raw.replace(/^[\d\s.,]+/, "")}${opts.after ?? ""}`));
+  if (pace && (t.unit === "units" || (t.unit === null && pace[1]))) return { kind: "ignored", reason: PACE_NOTE };
   const lender = lenderFigure(rawLabel, t, opts);
   if (lender) return { kind: "ignored", reason: lender };
   // Unless the figure's own clause names the preferred return ("a preferred return of 8% to the investors").
@@ -777,7 +787,10 @@ function mapLabel(rawLabel: string, t: NumberToken, opts: MapOptions = {}): Mapp
   // A label that is only a loan's name: money is that loan's amount, a percentage its rate, and a duration its interest-only period or amortization.
   const named = loanNameOnly(rawLabel);
   // Not when words come between the label and its figure ("Take-out: a credit union at 4.4%"): that line is a sentence.
-  if (named && foldText(opts.gap ?? "").replace(LOAN_FILLER, " ").replace(/[^a-z0-9]+/g, " ").trim() === "") {
+  // A lease named in the figure's clause ("Commercial lease: 10 years", "Bail : 5 ans de location") gives its term, not the lease-up.
+  const leaseTerm = LEASE_TERM_RE.test(opts.context === undefined ? label : normalizeLabel(opts.context.slice(0, t.start).split(/[,;.]/).pop() ?? "").label);
+  const namedAlone = named && foldText(opts.gap ?? "").replace(LOAN_FILLER, " ").replace(/[^a-z0-9]+/g, " ").trim() === "";
+  if (namedAlone) {
     const own = (key: string) => FIELD_BY_KEY.get(named === "senior" ? key : SCOPE_FIELD[named][key] ?? key)!;
     const after = foldText(opts.after ?? "");
     const field =
@@ -792,7 +805,8 @@ function mapLabel(rawLabel: string, t: NumberToken, opts: MapOptions = {}): Mapp
 
   if (t.unit === "months" || t.unit === "years") {
     const after = foldText((opts.after ?? "").split(/[,;.]/)[0] ?? "");
-    const key = BUILD_AFTER_RE.test(after) ? "construction_months" : LEASE_AFTER_RE.test(after) ? "lease_up_months" : null;
+    // Not a loan's months ("Construction loan: 24 months to build") nor a lease's years ("Commercial lease: 10 years to let").
+    const key = namedAlone ? null : BUILD_AFTER_RE.test(after) ? "construction_months" : LEASE_AFTER_RE.test(after) && !leaseTerm ? "lease_up_months" : null;
     const m = key && asField(FIELD_BY_KEY.get(key)!);
     if (m) return m;
   }
@@ -863,6 +877,7 @@ function mapLabel(rawLabel: string, t: NumberToken, opts: MapOptions = {}): Mapp
   let aliasOnly: { def: FieldDef; alias: string } | null = null;
   for (const { def, alias, at, c } of hits) {
     if (LOOSE_ALIASES.has(alias) && (blocked || specific || !standsLast(label, at, alias) || (RATE_ALIASES.has(alias) && NOT_A_LOAN_INTEREST.test(label)))) continue;
+    if (LOOSE_ALIASES.has(alias) && (def.key === "construction_months" || def.key === "lease_up_months") && (namedAlone || NOT_PERIOD_BEFORE_RE.test(label.slice(0, at[0])) || (def.key === "lease_up_months" && leaseTerm))) continue;
     if (!c) {
       if (!aliasOnly || alias.length > aliasOnly.alias.length) aliasOnly = { def, alias };
       continue;

@@ -5440,3 +5440,42 @@ describe("card 101: the take-out's month, written as a timing label or as a loan
     expect(mezz.other.find((o) => o.value === 11)?.note).toBe(REPLACED);
   });
 });
+
+describe("card 102: the build period and the lease-up, in common English and Quebec French wording", () => {
+  const read = (...lines: string[]) => extractCandidates({ kind: "pdf", lines: lines.map((text, i) => ({ text, location: `page 1, line ${i + 1}` })), tables: [], pageCount: 1, needsOcr: false, fullText: lines.join("\n") });
+  const pick = (r: ReturnType<typeof read>) => r.candidates.map((c) => [c.fieldKey, c.value]);
+  const has = (line: string, key: string) => read(line).candidates.some((c) => c.fieldKey === key);
+  test.each([
+    ["Chantier : 16 mois", 16], ["Le chantier prendra dix-sept mois.", 17], ["Le chantier prend 16 mois", 16], ["Les travaux s'échelonneront sur 18 mois.", 18],
+    ["Le chantier s'étalera sur 14 mois.", 14], ["Les travaux s'étendront sur 20 mois.", 20], ["Durée du chantier : 15 mois", 15], ["Durée des travaux de construction : 19 mois", 19],
+    ["Calendrier des travaux : 21 mois", 21], ["Build window: 15 months", 15], ["Build time: 13 months", 13], ["Time to build: 18 months", 18],
+    ["Construction timeline: 22 months", 22], ["Construction program: 17 months", 17], ["Construction programme: 16 months", 16],
+  ])("the build period: %s", (line, months) => expect(pick(read(line))).toEqual([["construction_months", months]]));
+  test.each([
+    ["Letting period: 5 months", 5], ["Initial letting: 7 months", 7], ["Letting: 6 months", 6], ["Absorption locative : 6 mois", 6], ["Rent-up: 8 months", 8],
+    ["Rent up: 9 months", 9], ["Rent-up period: 10 months", 10], ["Période d'absorption locative : 11 mois", 11], ["Location initiale des logements : 6 mois", 6],
+    ["Délai de location : 4 mois", 4],
+  ])("the lease-up: %s", (line, months) => expect(pick(read(line))).toEqual([["lease_up_months", months]]));
+  test.each([
+    ["We expect 15 months of construction, then 5 months to let.", 15, 5],
+    ["Échéancier : 16 mois de construction, puis 6 mois de location.", 16, 6],
+    ["Plan on 14 months of building, then 6 months of lease-up.", 14, 6],
+    ["About 16 months on site, then 7 months to fill the building.", 16, 7],
+    ["Prévoir 18 mois de travaux, puis 8 mois de mise en location.", 18, 8],
+    ["Comptez 20 mois de chantier; ensuite 5 mois pour remplir l'immeuble.", 20, 5],
+    ["Plan 13 months on site and 9 months of leasing.", 13, 9],
+    ["Allow 12 months of building, then 4 months of letting.", 12, 4],
+  ])("the noun after the number names the period: %s", (line, build, lease) => expect(pick(read(line))).toEqual([["construction_months", build], ["lease_up_months", lease]]));
+  test.each(["Chantier : 1 200 000 $", "Construction loan term: 24 months", "Prêt de construction, terme : 24 mois", "Garantie du chantier : 12 mois", "Assurance chantier : 18 mois",
+    "Début du chantier : mois 3", "Délai avant le chantier : 4 mois", "Construction start: month 4", "Construction loan: 24 months of construction", "Prêt de construction : 24 mois de chantier",
+    "Interest reserve: 18 months of construction interest", "We budget 24 months of construction financing.", "Construction loan: 16 months to build"])("not the build period: %s", (line) => expect(has(line, "construction_months")).toBe(false));
+  test.each(["Letting fee: 2 months", "Notice period before letting: 2 months", "Incitatif : 1 mois de location gratuite.", "We offer 2 months of leasing incentives.", "Lease term: 10 years",
+    "Initial letting term: 10 years", "Commercial lease: 10 years to let", "Bail commercial : 10 ans pour louer", "Bail : 5 ans de location", "Absorption: 2 units per month", "Absorption: 3 sales per month", "Rent up 3% per year"])("not the lease-up: %s", (line) => expect(has(line, "lease_up_months")).toBe(false));
+  test.each(["Absorption: 2 units per month", "Sales pace: 4 units per month", "Absorption: 5 units a month", "Pace: 2 units/month", "Absorption : 3 unités par mois", "Rythme : 2 ventes par mois"])("a pace is not a count: %s", (line) => {
+    const r = read(line);
+    expect(pick(r)).toEqual([]);
+    expect(r.other.some((o) => o.note === "A sales pace, not the number of units")).toBe(true);
+  });
+  test.each([["Units: 24", "All units", 24], ["Studios: 12 units", "Studio", 12]])("a count is still a count: %s", (line, item, n) => expect(read(line).candidates.map((c) => [c.fieldKey, c.itemKey, c.value])).toEqual([["unit_count", item, n]]));
+  test("rent growth is not a rent-up", () => expect(pick(read("Rent growth: 3%"))).toEqual([["rent_growth_pct", 3]]));
+});
