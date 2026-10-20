@@ -5553,3 +5553,25 @@ describe("card 103: French budget words for soft costs and contingency", () => {
     expect(read(line).candidates.some((c) => c.fieldKey === "contingency")).toBe(false);
   });
 });
+
+describe("card 103 audit: a part included in a line, and the writer's own fee, are not that line", () => {
+  const read = (...lines: string[]) => extractCandidates({ kind: "pdf", lines: lines.map((text, i) => ({ text, location: `page 1, line ${i + 1}` })), tables: [], pageCount: 1, needsOcr: false, fullText: lines.join("\n") });
+  const pick = (r: ReturnType<typeof read>) => r.candidates.map((c) => [c.fieldKey, c.value]);
+  test.each([
+    ["Contribution de réseau comprise dans les honoraires : 18 000,50 $.", 18_000.5], ["Contribution déjà incluse aux honoraires : 22 500 $.", 22_500],
+    ["Permit fees included in soft costs: $35,000", 35_000], ["Les frais de permis compris dans les honoraires : 35 000 $", 35_000],
+    ["Survey costs, part of the soft costs: $12,000", 12_000], ["Testing allowance within the contingency: $40,000", 40_000],
+    ["Frais d'arpentage inclus dans les coûts indirects : 9 000 $", 9_000], ["Étude de sol, fait partie des honoraires : 14 000 $", 14_000],
+    ["Winter heating already in hard costs: $55,000", 55_000], ["Signage covered by the contingency: $8,000", 8_000], ["Clôture de chantier déjà dans les imprévus : 6 000 $", 6_000],
+  ])("a part said to be included in a line is not that line: %s", (line, n) => {
+    const r = read(line);
+    expect(pick(r)).toEqual([]);
+    expect(r.other.find((o) => o.value === n)?.note).toBe("A part included in another line, not that line");
+  });
+  test.each([["Nos honoraires : 4 500 $", 4_500], ["Our professional fees: $4,500", 4_500], ["Mes honoraires pour ce mandat : 2 000 $", 2_000], ["Notre honoraires : 3 200 $", 3_200], ["My fees: $1,800", 1_800]])("the writer's own fee is not the project's soft costs: %s", (line, n) => {
+    const r = read(line);
+    expect(r.candidates.some((c) => c.fieldKey === "soft_cost")).toBe(false);
+    expect(r.other.find((o) => o.value === n)?.note).toBe("The writer's own fee, not the project's soft costs");
+  });
+  test.each([["Honoraires : 240 000 $", 240_000], ["Soft costs: $450,000", 450_000], ["Professional fees: $310,000", 310_000], ["Soft costs (including permits): $500,000", 500_000]])("the line itself still reads: %s", (line, n) => expect(pick(read(line))).toEqual([["soft_cost", n]]));
+});

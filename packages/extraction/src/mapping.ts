@@ -677,6 +677,12 @@ function budgetShapeNote(rawLabel: string, after: string, value: number): string
  * A negative other cost is read only when its own label says it is a credit (then it is the other costs, with a note);
  * a negative figure that does not say so is refused. Nothing is inferred from a sign, and no sign is flipped.
  */
+// A part the label says sits inside a line ("Permit fees included in soft costs", "comprise dans les honoraires") is not that line.
+const INCLUDED_IN_RE = /\b(?:included in|includes in|part of|within|inside|already in|covered by|compris\w* dans|inclus\w* (?:dans|aux|au)|fait partie d(?:e|es|u)?|deja dans)(?: (?:the|les?|la|l|des|du|d))?\s+/g;
+const INCLUDED_NOTE = "A part included in another line, not that line";
+// The writer's own fee ("Nos honoraires", "Our professional fees") is a quote for a mandate, not the project's soft costs.
+const WRITER_FEE_RE = /\b(?:nos|notre|mes|mon|our|my) (?:professional )?(?:honoraires|fees)\b/;
+
 export function mapToken(rawLabel: string, t: NumberToken, opts: MapOptions = {}): Mapped {
   // A sales tax line, or a rebate of one, is refused before any credit rule reads it; a cost that only states its tax basis is read.
   const folded = foldText(rawLabel);
@@ -685,6 +691,9 @@ export function mapToken(rawLabel: string, t: NumberToken, opts: MapOptions = {}
     const clause = normalizeLabel(`${rawLabel.split(/[,;]/).pop() ?? ""} ${(opts.after ?? "").split(/[,;]|\b(?:and|et)\b/)[0] ?? ""}`).label;
     if (unitTypesIn(clause).length || PER_UNIT_RE.test(clause) || /\b(sale|sell|sold|buyer|resale|vente|acheteur|revente)\b/.test(clause)) return { kind: "unmapped" };
   }
+  const named = normalizeLabel(rawLabel).label;
+  if (WRITER_FEE_RE.test(named)) return { kind: "ignored", reason: "The writer's own fee, not the project's soft costs" };
+  if ([...named.matchAll(INCLUDED_IN_RE)].some((x) => { const rest = named.slice(x.index + x[0].length); return ALL_ALIASES.some((a) => `${rest} `.startsWith(`${a} `)); })) return { kind: "ignored", reason: INCLUDED_NOTE };
   const m = mapSigned(rawLabel, t, opts);
   // A figure its field could never hold is shown, never read: nothing is flipped, rescaled or clamped.
   if (m.kind !== "field") return m;
