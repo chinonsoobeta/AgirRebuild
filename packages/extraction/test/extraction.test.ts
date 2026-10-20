@@ -5826,7 +5826,7 @@ describe("card 107: a budget category column names its lines", () => {
   test.each([
     [["Construction", "Framing and envelope", 800_000], ["Soft costs", "Consultants and filings", 100_000], ["Acquisition", "Parcel conveyance", 300_000], ["Contingencies", "Unallocated cushion", 50_000]],
     [["Coûts directs", "Structure et enveloppe", 800_000], ["Coûts indirects", "Études et autorisations", 100_000], ["Terrain", "Acte de vente du lot", 300_000], ["Aléas", "Marge pour surprises", 50_000]],
-    [["Hard costs", "Masonry contract", 800_000], ["Indirects", "Planning advisers", 100_000], ["Land", "Deed transfer", 300_000], ["Réserve", "Somme non affectée", 50_000]],
+    [["Hard costs", "Masonry contract", 800_000], ["Indirects", "Planning advisers", 100_000], ["Land", "Deed transfer", 300_000], ["Contingency", "Somme non affectée", 50_000]],
   ] as Row[][])("own category variants: %j", (...rows) => expect(pick(sheet(rows))).toEqual([["hard_cost", 800_000], ["soft_cost", 100_000], ["land_cost", 300_000], ["contingency", 50_000]]));
   test("an excluded category never contributes to the live budget", () => {
     expect(pick(sheet([["Hard", "Live framing", 800_000], ["Soft", "Live studies", 100_000], ["Retired", "Hard costs", 900_000], ["Retired", "Soft costs", 120_000]]))).toEqual([["hard_cost", 800_000], ["soft_cost", 100_000]]);
@@ -5854,4 +5854,30 @@ describe("card 107: a budget category column names its lines", () => {
     expect(r.other.some((o) => o.note?.startsWith("A sales tax line"))).toBe(true);
   });
   test("the stated project total remains an input in prose", () => expect(pick(read("Total project cost: $1,820,000"))).toEqual([["stated_total_cost", 1_820_000]]));
+});
+
+describe("card 107 audit: a category keeps the line's own guards, reserves stay unnamed, blank columns", () => {
+  const sheet = (rows: (string | number)[][], name = "Budget") => extractCandidates({ kind: "xlsx", lines: [], tables: [{ name, rows: rows.map((row, i) => row.map((v, c): Cell => ({ text: String(v), ref: `${String.fromCharCode(65 + c)}${i + 1}`, ...(typeof v === "number" ? { number: v } : {}) }))) }], pageCount: 1, needsOcr: false, fullText: "" });
+  const pick = (r: ReturnType<typeof sheet>) => r.candidates.map((c) => [c.fieldKey, c.value]);
+  test("a fee or an amount drawn to date under a category is not that cost", () => {
+    const r = sheet([["Land", "Parcel", 600_000], ["Construction", "Trades", 1_450_000], ["Construction", "Draws to date", 1_000_000], ["Construction", "Lender fee", 50_000], ["Hard", "Envelope", 300_000], ["Hard", "Interest during construction", 80_000]]);
+    expect(pick(r)).toEqual([["land_cost", 600_000], ["hard_cost", 1_750_000]]);
+    expect(r.other.map((o) => o.value)).toEqual(expect.arrayContaining([1_000_000, 50_000, 80_000]));
+  });
+  test.each(["Reserve", "Réserve"])("a %s category names no contingency (replacement, operating and interest reserves)", (cat) => {
+    expect(pick(sheet([["Land", "Parcel", 600_000], ["Hard", "Trades", 1_450_000], [cat, "Operating deficit reserve", 100_000], [cat, "Replacement reserve", 40_000]]))).toEqual([["land_cost", 600_000], ["hard_cost", 1_450_000]]);
+  });
+  test("blank cells between the description and the amount", () => {
+    expect(pick(sheet([["Hard", "Trades package", "", "", 1_450_000], ["Hard", "Servicing", "", "", 120_000], ["Soft", "Design fees", "", "", 210_000], ["Total", "Total project cost", "", "", 1_780_000]]))).toEqual([["hard_cost", 1_570_000], ["soft_cost", 210_000], ["stated_total_cost", 1_780_000]]);
+  });
+  test("a note column between them still keeps the sheet out of the category sums", () => {
+    expect(pick(sheet([["Hard", "Trades package", "fixed", 1_450_000], ["Hard", "Servicing", "quote", 120_000], ["Soft", "Design fees", "est", 210_000]]))).toEqual([]);
+  });
+});
+
+describe("card 107 audit: the verb to retire a loan is not a retired sheet", () => {
+  const read = (...ls: string[]) => extractCandidates({ kind: "pdf", lines: ls.map((text) => ({ text, location: "page 1" })), tables: [], pageCount: 1, needsOcr: false, fullText: ls.join("\n") });
+  test.each(["Take-out loan to retire the construction facility: $5,200,000", "Take-out loan, which retires the construction facility: $5,200,000"])("%s", (line) => {
+    expect(read("Construction loan: $5,000,000", line).candidates.map((c) => [c.fieldKey, c.value])).toEqual([["senior_loan_amount", 5_000_000], ["refinance_amount", 5_200_000]]);
+  });
 });

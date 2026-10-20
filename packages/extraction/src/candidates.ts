@@ -282,9 +282,9 @@ const TAX_BASIS_RE = new RegExp(String.raw`\b${TAX_WORDS}\s+(?:(?:is|are|est|son
 const NOT_PART_RE = new RegExp(
   [
     String.raw`\b${EXCLUDED_WORD}\b`,
-    String.raw`\b(?:retired|retiree?s?|replaced)\b`,
-    // Folded "remplacé" is also the verb "remplace"; a label ending is the exclusion, not "remplace le prêt".
-    String.raw`\bremplacee?s?\b(?=\s*(?:$|[:;,)]))`,
+    String.raw`\b(?:retired|replaced)\b`,
+    // Folded "retiré" and "remplacé" are also the verbs "retire" and "remplace"; a label ending is the exclusion, not "to retire the loan".
+    String.raw`\b(?:retiree?s?|remplacee?s?)\b(?=\s*(?:$|[:;,)]))`,
     String.raw`\billustrati(?:ve|fs?|ves|ons?)\b`,
     // A scenario other than the base case: "not the base case", a lender's, downside or alternate case, a sensitivity.
     String.raw`\bnot (?:the |our |a )?base(?: |-)?case\b`,
@@ -1424,7 +1424,11 @@ function fromBudget(table: Table, headerRow: number, roles: BudgetRoles, result:
     let mapped = quoted?.kind === "field" && quoted.quote ? quoted : mapToken(closing ? "total project cost" : isTotal && /development|project/i.test(labelCell.text) ? labelCell.text : labelText, moneyToken, { scope, budget: true });
     // Only an unnamed line inherits its category. A named field or an explicit refusal keeps its own meaning.
     const categoryKey = category && budgetCategory(category);
-    if (mapped.kind === "unmapped" && categoryKey) mapped = mapToken(FIELD_BY_KEY.get(categoryKey)!.aliases[0]!, moneyToken, { scope, budget: true });
+    // The line's own words still apply their guards (a fee, interest, an amount to date): the category is read with them.
+    if (mapped.kind === "unmapped" && categoryKey) {
+      const inherited = mapToken(`${FIELD_BY_KEY.get(categoryKey)!.aliases[0]!} - ${labelCell.text}`, moneyToken, { scope, budget: true });
+      if (inherited.kind === "ignored" || (inherited.kind === "field" && inherited.fieldKey === categoryKey)) mapped = inherited;
+    }
     if (mapped.kind !== "field" || FIELD_BY_KEY.get(mapped.fieldKey)?.unit !== "$") {
       const shown: Candidate = {
         fieldKey: null,
@@ -1509,13 +1513,16 @@ function fromBudget(table: Table, headerRow: number, roles: BudgetRoles, result:
 // A word that opens a section of a sheet: a first column of these (or of any few repeated words) is a category column.
 const SECTION_WORD_RE = /^(?:uses?|sources?|hard|soft|finance|financing|financement|revenues?|revenus?|income|assumptions?|operating|opex|timing|emplois|hypotheses|land|terrain|acquisition|contingenc(?:y|ies)|imprevus|aleas|reserve|totals?|subtotal|sous-total|grand total|frais de financement|indirects|directs|construction|costs?|couts?|loan|equity|capital|exit)\b/;
 
+const filledCells = (row: Cell[]) => row.filter((c) => c.text.trim() || c.number !== undefined);
+
 // These structural budget categories name a cost line when the description itself names none.
 function budgetCategory(raw: string): string | null {
   const category = normalizeLabel(raw).label;
   if (/^(?:hard(?: costs)?|construction|directs|couts directs)$/.test(category)) return "hard_cost";
   if (/^(?:soft(?: costs)?|indirects|couts indirects)$/.test(category)) return "soft_cost";
   if (/^(?:land|terrain|acquisition)$/.test(category)) return "land_cost";
-  return /^(?:contingenc(?:y|ies)|imprevus|aleas|reserve)$/.test(category) ? "contingency" : null;
+  // "Reserve" alone is not named: replacement, operating and interest reserves are not the contingency.
+  return /^(?:contingenc(?:y|ies)|imprevus|aleas)$/.test(category) ? "contingency" : null;
 }
 
 /**
@@ -1706,8 +1713,11 @@ function fromTable(table0: Table, result: ExtractionResult, notes: string[] = []
     }
     else if (s.budget) fromBudget(part, 0, s.budget, result, s.scope, s.excluded);
     // A detected category budget uses the same sums and total checks as a headed budget.
-    else if (s.rows.some((row) => budgetCategory(catOf.get(row) ?? "")) && s.rows.every((row) => row.length === 2 && catOf.has(row))) {
-      fromBudget(part, -1, { label: 0, amount: 1 }, result, s.scope, s.excluded, catOf);
+    // Empty cells between the line and its amount are skipped; a note or a second figure keeps the sheet out.
+    else if (s.rows.some((row) => budgetCategory(catOf.get(row) ?? "")) && s.rows.every((row) => filledCells(row).length === 2 && catOf.has(row))) {
+      const rows = s.rows.map(filledCells);
+      rows.forEach((row, i) => catOf.set(row, catOf.get(s.rows[i]!)!));
+      fromBudget({ ...part, rows }, -1, { label: 0, amount: 1 }, result, s.scope, s.excluded, catOf);
     }
     else {
       // A plain two-column sheet: each row is "label: value". Money rows that name nothing are the lines of the next total or subtotal row.
