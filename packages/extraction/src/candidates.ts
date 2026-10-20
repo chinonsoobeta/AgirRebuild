@@ -435,6 +435,11 @@ function clauseItem(text: string, t: NumberToken, lead: string | null = null): M
 }
 
 const SHARE_NOTE = "A share of another figure, not that figure";
+// "Construction loan: $X at Y%": a percentage right after a loan's amount, joined by "at", "à" or "au taux de", is that loan's rate unless a basis follows it.
+const AMOUNT_SCOPE: Record<string, Scope> = { senior_loan_amount: "senior", mezz_loan_amount: "mezzanine", refinance_amount: "refinance" };
+const RATE_BESIDE_RE = /^\s*(?:at|à|a|au taux de)\s*$/i;
+// An interest-only word after it ("at 11% interest only") leaves the figure unread, as before.
+const RATE_BASIS_RE = /^\s*(?:of|de|du|des|d)\b|\b(?:ltv|ltc|loan[- ]to|ratio|dcr|dscr|pret[- ]valeur|rpv|interest[- ]only|io|interets? seulement)\b/;
 const LATER_FIGURE_NOTE = "A later figure in this row; Agir reads one figure per row. Label it if it is the one to use";
 const PER_UNIT_NOTE = "A per-door share of a cost, not the line's total; enter the total";
 const STRUCK_NOTE = "Struck through in the document; the figure written in its place replaces it";
@@ -709,6 +714,7 @@ function readSentence(sentence: { text: string; start: number }, para0: Paragrap
       let used = false;
       let usedKey: string | null = null;
       let refusedPerUnit = false;
+      const amounts = new Map<NumberToken, Scope>();
       let total: NumberToken | null = null;
       const ranged = rangeEnds(text, tokens);
       for (const [i, t] of tokens.entries()) {
@@ -734,7 +740,10 @@ function readSentence(sentence: { text: string; start: number }, para0: Paragrap
         const own: Mapped | null = used && i > 0 ? mapToken(text.slice(tokens[i - 1]!.end, t.start), t, { scope, quote, after: text.slice(t.end), prose: true, context: text }) : null;
         // A part the colon's budget line includes ("Hard costs: $X, including contingency of $Y") is inside that line, not a line of its own.
         const inside: boolean = usedKey !== null && BUDGET_LINES.has(usedKey) && PART_OF_RE.test(fold(text.slice(colon + 1, t.start)));
-        let mapped: Mapped = used ? (own?.kind === "field" && own.fieldKey !== usedKey && !inside ? own : { kind: "unmapped" as const }) : mapToken(label, t, { ...opt(t), ahead: text.slice(colon + 1, t.start) });
+        const loan = i > 0 ? amounts.get(tokens[i - 1]!) : undefined;
+        const beside = loan && t.unit === "%" && RATE_BESIDE_RE.test(text.slice(tokens[i - 1]!.end, t.start)) && !RATE_BASIS_RE.test(fold(text.slice(t.end, tokens[i + 1]?.start ?? text.length)))
+          ? loanTerm(text.slice(tokens[i - 1]!.end, t.start), text.slice(t.end, tokens[i + 1]?.start ?? text.length), t, loan) : null;
+        let mapped: Mapped = beside ?? (used ? (own?.kind === "field" && own.fieldKey !== usedKey && !inside ? own : { kind: "unmapped" as const }) : mapToken(label, t, { ...opt(t), ahead: text.slice(colon + 1, t.start) }));
         // A figure after a correction word is the label's field again, so the two disagree and the conflict is named.
         if (used && mapped.kind === "unmapped" && !inside && corrects(text.slice(tokens[i - 1]!.end, t.start), tokens[i - 1]!, t)) {
           const again = mapToken(label, t, { ...opt(t), ahead: text.slice(colon + 1, t.start) });
@@ -761,6 +770,7 @@ function readSentence(sentence: { text: string; start: number }, para0: Paragrap
           record(result, mapped, t, { raw: t.raw, location: locationOf(t.start), context: context.slice(0, 240), rule: "line:label-value" });
           used = true;
           usedKey ??= mapped.fieldKey;
+          if (AMOUNT_SCOPE[mapped.fieldKey]) amounts.set(t, AMOUNT_SCOPE[mapped.fieldKey]!);
         } else if (!used || t.value !== null) {
           other(t, "line:label-value", mapped.kind === "ignored" ? mapped.reason : used ? "Another number on this line was used" : "No field matches this label");
         }

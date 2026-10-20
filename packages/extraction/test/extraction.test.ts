@@ -1011,7 +1011,7 @@ describe("which loan a term belongs to, and the words small developers use", () 
     test.each([
       { name: "insured construction", lines: ["Ridgeview Commons - CMHC-insured construction loan", "Construction loan amount: $6,400,000.", "Interest rate: 6.10%.", "Interest-only during construction: 24 months."], expected: [["senior_loan_amount", 6400000], ["senior_rate_pct", 6.1], ["senior_io_months", 24]] },
       { name: "one refinance line", lines: ["Maple Court - project summary", "We plan to refinance in month 36 once stabilized.", "Interest rate: 6.50%.", "Amortization: 25 years."], expected: [["refinance_month", 36], ["senior_rate_pct", 6.5], ["senior_amort_years", 25]] },
-      { name: "mixed loan sentences", lines: ["Financing summary", "Construction loan: $5,000,000 at 6.10%.", "Refinance in month 30 at 4.15%, amortized over 45 years."], expected: [["senior_loan_amount", 5000000], ["refinance_month", 30], ["refinance_rate_pct", 4.15], ["refinance_amort_years", 45]] },
+      { name: "mixed loan sentences", lines: ["Financing summary", "Construction loan: $5,000,000 at 6.10%.", "Refinance in month 30 at 4.15%, amortized over 45 years."], expected: [["senior_loan_amount", 5000000], ["senior_rate_pct", 6.1], ["refinance_month", 30], ["refinance_rate_pct", 4.15], ["refinance_amort_years", 45]] },
       { name: "construction-period interest", lines: ["Oak Lane - financing notes", "Refinance in month 30.", "Payments start at the refinance.", "Interest rate: 6.25% during construction.", "Amortization: 30 years."], expected: [["refinance_month", 30], ["senior_rate_pct", 6.25], ["senior_amort_years", 30]] },
     ])("card 98 baseline pin: $name", ({ lines, expected }) => expect(pick(read(...lines))).toEqual(expected));
     test.each([
@@ -5280,4 +5280,76 @@ describe("card 97e general Canadian reading rules", () => {
     expect(values(read(["Capital cost charges: $132,000"]))).toEqual([["development_charges", 132000]]);
   });
   test.each(["Operating provision: 4% of equity", "Provision d'exploitation : 3 % des fonds propres"])("does not turn another basis into EGI: %s", (line) => expect(read([line]).candidates.some((c) => c.fieldKey === "variable_expense_pct")).toBe(false));
+});
+
+describe("card 100: a loan's rate written with a qualifier, as \"interest\", or after the amount", () => {
+  const read = (...lines: string[]) => extractCandidates({ kind: "pdf", lines: lines.map((text, i) => ({ text, location: `page 1, line ${i + 1}` })), tables: [], pageCount: 1, needsOcr: false, fullText: lines.join("\n") });
+  const pick = (r: ReturnType<typeof read>) => r.candidates.map((c) => [c.fieldKey, c.value]);
+  const EN = "Construction loan: $4,200,000";
+  const FR = "Prêt de construction : 4 200 000 $";
+  test.each([
+    [FR, "Taux annuel : 5,40 %"],
+    [FR, "Taux fixe contractuel : 5,40 %"],
+    [FR, "Taux nominal annuel : 5,40 %"],
+    [FR, "Taux effectif : 5,40 %"],
+    [FR, "Taux par an : 5,40 %"],
+    [EN, "Rate, fixed: 5.40%"],
+    [EN, "Rate per annum: 5.40%"],
+    [EN, "Rate all-in: 5.40%"],
+    [EN, "Contract interest: 5.40%"],
+    [EN, "Stated interest: 5.40%"],
+    [EN, "Interest, fixed per annum: 5.40%"],
+    [FR, "Intérêt annuel : 5,40 %"],
+    [FR, "Intérêt contractuel : 5,40 %"],
+    [EN, "The facility bears interest at 5.40% per annum, calculated monthly."],
+    [EN, "The loan will bear interest at 5.40% per annum."],
+    [EN, "Advances under the facility bear interest at 5.40%."],
+    [FR, "Le prêt portera intérêt au taux annuel fixe de 5,40 %, calculé mensuellement."],
+    [FR, "Les avances porteront intérêt au taux fixe de 5,40 %."],
+    [FR, "Le prêt porte intérêt au taux de 5,40 % l'an."],
+    [EN, "Annual fixed rate: 5.40%"],
+    [EN, "Interest: 5.40% per annum"],
+  ])("the senior rate: %s / %s", (head, line) => expect(pick(read(head, line))).toEqual([["senior_loan_amount", 4200000], ["senior_rate_pct", 5.4]]));
+  test("carried interest stays the promote", () => expect(pick(read(EN, "Carried interest: 20%"))).toEqual([["senior_loan_amount", 4200000], ["gp_promote_pct", 20]]));
+  test.each([
+    [["Mezzanine loan: $600,000", "Mezzanine interest: 11.00%"], [["mezz_loan_amount", 600000], ["mezz_rate_pct", 11]]],
+    [["Mezz loan: $600,000", "Mezz interest (fixed): 11.00%"], [["mezz_loan_amount", 600000], ["mezz_rate_pct", 11]]],
+    [["Mezzanine loan", "Annual interest: 11.00%"], [["mezz_rate_pct", 11]]],
+    [["Prêt mezzanine", "Taux annuel : 11,00 %"], [["mezz_rate_pct", 11]]],
+    [["Take-out commitment", "Contract interest: 4.30%"], [["refinance_rate_pct", 4.3]]],
+    [["Permanent loan commitment", "Stated interest: 4.30%"], [["refinance_rate_pct", 4.3]]],
+    [["Engagement de financement de reprise", "Taux annuel : 4,30 %"], [["refinance_rate_pct", 4.3]]],
+    [["Engagement de financement de reprise", "Intérêt contractuel : 4,30 %"], [["refinance_rate_pct", 4.3]]],
+  ])("another loan's rate: %j", (lines, expected) => expect(pick(read(...lines))).toEqual(expected));
+  test.each([
+    ["Construction loan: $4,200,000 at 6.10%.", [["senior_loan_amount", 4200000], ["senior_rate_pct", 6.1]]],
+    ["Prêt de construction : 4 200 000 $ à 6,10 %.", [["senior_loan_amount", 4200000], ["senior_rate_pct", 6.1]]],
+    ["Prêt de construction : 4 200 000 $ au taux de 6,10 %", [["senior_loan_amount", 4200000], ["senior_rate_pct", 6.1]]],
+    ["Senior loan: $4,200,000 at 6.10% fixed", [["senior_loan_amount", 4200000], ["senior_rate_pct", 6.1]]],
+    ["Mezzanine loan: $600,000 at 11%.", [["mezz_loan_amount", 600000], ["mezz_rate_pct", 11]]],
+    ["Prêt mezzanine : 600 000 $ à 11 %", [["mezz_loan_amount", 600000], ["mezz_rate_pct", 11]]],
+    ["Take-out loan: $3,900,000 at 4.30%", [["refinance_amount", 3900000], ["refinance_rate_pct", 4.3]]],
+  ])("the rate beside the amount: %s", (line, expected) => expect(pick(read(line))).toEqual(expected));
+  test.each([
+    "Construction loan: $4,200,000 at 65% of cost.",
+    "Construction loan: $4,200,000 at 65% LTC",
+    "Construction loan: $4,200,000 at 70% LTV",
+    "Construction loan: $4,200,000 at 60% of value",
+    "Construction loan: $4,200,000 at 1.20 DCR",
+    "Construction loan: $4,200,000 with 6.10%",
+    "Construction loan: $4,200,000 at 6.10% interest only",
+    "Prêt de construction : 4 200 000 $ à 6,10 % intérêts seulement",
+    "Prêt de construction : 4 200 000 $ à 65 % du coût",
+    "Prêt de construction : 4 200 000 $ à 75 % de la valeur",
+  ])("a basis or another word beside the amount is not its rate: %s", (line) => expect(pick(read(line))).toEqual([["senior_loan_amount", 4200000]]));
+  test.each([
+    "Ownership interest: 20%", "Partnership interest: 20%", "Equity interest: 20%", "Working interest: 20%", "Minority interest: 20%",
+    "Majority interest: 60%", "Controlling interest: 51%", "LP interest: 90%", "GP interest: 10%", "Profits interest: 15%",
+    "Beneficial interest: 100%", "Participation: 25%", "Participation rate: 25%", "Interest coverage: 150%", "Interest reserve: 5%",
+    "Interest income: 3%", "Intérêt minoritaire : 20 %", "Participation : 25 %", "Taux de participation : 25 %", "Réserve d'intérêts : 5 %",
+    "Revenus d'intérêts : 3 %", "Taux de vacance annuel : 3 %",
+  ])("never a loan rate: %s", (line) => {
+    const r = read(EN, line);
+    expect(r.candidates.some((c) => /_rate_pct$/.test(c.fieldKey ?? ""))).toBe(false);
+  });
 });

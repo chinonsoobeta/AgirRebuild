@@ -121,7 +121,7 @@ const STABILIZED_RE = /\b(stabili[sz]ed|stabilisee?|projected|pro forma|projete\
 
 // Words too common to name a field alone. Each loses to any longer alias in the label, must stand at the end of the label
 // (or before "income"/"amount"), and never matches inside a longer word.
-const LOOSE_ALIASES = new Set(["management", "gestion", "depenses", "limited partners", "lp", "lps", "commanditaires", "loan", "pret", "mortgage", "rate", "taux", "construction", "location", "build", "travaux", "leasing", "lot", "site", "contribute", "invest", "apport", "other", "autres", "parking", "laundry", "storage", "stationnement", "buanderie", "rangement"]);
+const LOOSE_ALIASES = new Set(["management", "gestion", "depenses", "limited partners", "lp", "lps", "commanditaires", "loan", "pret", "mortgage", "rate", "taux", "interest", "interet", "construction", "location", "build", "travaux", "leasing", "lot", "site", "contribute", "invest", "apport", "other", "autres", "parking", "laundry", "storage", "stationnement", "buanderie", "rangement"]);
 // These name a field only for a money figure of at least $1,000: "lot 7" is a lot number, "storage $75" may be one locker.
 const WEAK_MONEY = new Set(["lot", "site", "parking", "laundry", "storage", "stationnement", "buanderie", "rangement"]);
 // These name a field only when the figure's own words say what it is a share of: "management 4% of EGI", never "management 1.5% of equity".
@@ -139,6 +139,10 @@ const EXPENSE_SHARE_ALIASES = new Set(FIELD_BY_KEY.get("expense_ratio_pct")!.ali
 const VARIABLE_RE = /\bvariables?\b/;
 // A "rate" that is not a loan's.
 const NOT_A_LOAN_RATE = /\b(vacancy|growth|discount|tax|exchange|inflation|return|occupancy) rate\b|\b(taux de (croissance|vacance|actualisation|change|rendement|capitalisation|taxation)|taux d (inflation|imposition|occupation))\b|\brate of return\b/;
+// A rate word: it may be followed by a qualifier ("taux annuel", "rate, fixed"), and an interest that is a stake or a reserve is no loan's rate.
+const RATE_ALIASES = new Set(["rate", "taux", "interest", "interet"]);
+const RATE_QUALIFIER = "annual|annuel|annuelle|per annum|par an|l an|nominal|nominale|contractual|contract|contractuel|contractuelle|fixed|stated|all-in|effectif|effective";
+const NOT_A_LOAN_INTEREST = /\b(carried|ownership|partnership|equity|working|minority|majority|controlling|lp|gp|profits?|beneficial) interests?\b|\binterests? (coverage|reserves?|income)\b|\bparticipation\b|\binterets? (minoritaires?|majoritaires?|reportes?)\b|\b(reserves?|revenus?|couverture) (d|des) interets?\b/;
 
 // What a lender writes that looks like an input but is not. Words that are part of a field alias ("minimum DSCR", "construction term loan",
 // "management fee") stay valid: each alias holding one is taken out of the label before the words are looked for.
@@ -428,13 +432,14 @@ export type MapOptions = {
 // What may follow a loose alias before the number: "income", "amount", or a verb phrase ("is planned at", "should take", "est de").
 const FILLER = "is|are|was|were|will|be|been|should|shall|to|take|takes|taking|planned|scheduled|expected|estimated|set|budgeted|for|at|of|about|approximately|around|a|an|the|total|only|currently|now|income|revenue|revenues|revenu|revenus|amount|montant|est|sont|sera|seront|durera|prevu|prevue|prevus|de|du|d|environ|devrait|dure|au|aux|fixe|fixee|represente";
 const FILLER_RE = new RegExp(`^(\\s(${FILLER}))*$`);
+const RATE_FILLER_RE = new RegExp(`^(\\s(${FILLER}|${RATE_QUALIFIER}))*$`);
 
 // A sequencing word after a duration noun ("of lease-up afterwards", "de location ensuite") does not stop the noun labelling the number.
 const SEQUENCE_TAIL_RE = /(\s(then|afterwards?|after that|after (completion|delivery|handover)|ensuite|puis|apres (la )?(livraison|completion)))+$/;
 
 /** Where the loose alias stands in the label: at its end, or followed only by filler words and a sequencing word. */
-function standsLast(label: string, at: [number, number]): boolean {
-  return FILLER_RE.test(label.slice(at[1]).replace(SEQUENCE_TAIL_RE, ""));
+function standsLast(label: string, at: [number, number], alias: string): boolean {
+  return (RATE_ALIASES.has(alias) ? RATE_FILLER_RE : FILLER_RE).test(label.slice(at[1]).replace(SEQUENCE_TAIL_RE, ""));
 }
 
 const HEAD_CONNECTOR_RE = /\b(above|over|after|beyond|au[- ]dela|au[- ]dessus)\b/;
@@ -820,6 +825,8 @@ function mapLabel(rawLabel: string, t: NumberToken, opts: MapOptions = {}): Mapp
       if (EXPENSE_SHARE_ALIASES.has(alias) && VARIABLE_RE.test(label)) continue;
       if (LP_ALIASES.has(alias) && !LP_LEAD_RE.test(label.slice(0, at[0]))) continue;
       if (EGI_BASE_ALIASES.has(alias) && !(t.unit === "%" && EGI_AFTER_RE.test(foldText(opts.after ?? "")))) continue;
+      // "Interest" alone is a loan's rate only as a percentage.
+      if ((alias === "interest" || alias === "interet") && t.unit !== "%") continue;
       let c = compatibleValue(def, t, label, labelUnit, labelCode, prose);
       if (c && WEAK_MONEY.has(alias) && !((t.currency || t.unit === "$" || t.unit === "$/mo" || labelUnit === "$") && c.value >= 1000)) c = null;
       hits.push({ def, alias, at, c });
@@ -836,7 +843,7 @@ function mapLabel(rawLabel: string, t: NumberToken, opts: MapOptions = {}): Mapp
   let best: { def: FieldDef; alias: string; end: number; value: number; unitSeen: string } | null = null;
   let aliasOnly: { def: FieldDef; alias: string } | null = null;
   for (const { def, alias, at, c } of hits) {
-    if (LOOSE_ALIASES.has(alias) && (blocked || specific || !standsLast(label, at))) continue;
+    if (LOOSE_ALIASES.has(alias) && (blocked || specific || !standsLast(label, at, alias) || (RATE_ALIASES.has(alias) && NOT_A_LOAN_INTEREST.test(label)))) continue;
     if (!c) {
       if (!aliasOnly || alias.length > aliasOnly.alias.length) aliasOnly = { def, alias };
       continue;
