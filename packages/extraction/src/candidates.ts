@@ -276,6 +276,7 @@ const REPLACED_LOAN_AFTER_RE = new RegExp(String.raw`^\s+${REPLACED_LOAN}`);
 // "Replaces the construction loan estimate of $4,600,000" replaces a figure.
 const FIGURE_NOUN_RE = /\b(?:estimates?|amounts?|figures?|quotes?|budgets?|rates?|numbers?|costs?|montants?|estimations?|taux|chiffres?|couts?|soumissions?)\b/;
 const NOT_PART_NOTE = "Marked as not part of this deal";
+const MEMO_SECTION_RE = /^(?:memos?|notes?|info|for information|pour memoire|pour information)\s*:?$/;
 // "taxes excluded" and "excluded: HST" describe an amount's basis, not the row.
 const TAX_WORDS = String.raw`(?:taxes?|hst|gst|pst|qst|tps|tvq|tva|vat|sales tax)`;
 const EXCLUDED_WORD = String.raw`exclu(?:ded|e?s?)`;
@@ -298,6 +299,8 @@ const NOT_PART_RE = new RegExp(
     String.raw`\bnot (?:a |an )?(?:currently )?(?:modell?ed )?input\b`,
     String.raw`\bnot currently modell?ed\b`,
     String.raw`\b(?:for (?:information|reference) only|memo items?|pour information seulement)\b`,
+    String.raw`\bmemo only\b|\(\s*memo\s*\)|^\s*memo\s*:|\bpour memoire\b|(?<![\w.@/])p\.m\.(?![\w@/])`,
+    String.raw`\bnot (?:included in the total|in (?:the )?total)\b|\bhors total\b|\bnon inclus(?:e|es|s)? dans le total\b`,
     String.raw`\bnot (?:a )?part of\b`,
     String.raw`\bnot included in (?:the |this |our |that )?(?:project|deal|transaction|budget|scope)\b`,
     String.raw`\bne (?:fait|font) pas partie\b`,
@@ -321,7 +324,7 @@ const ADDRESS_LIKE_RE = /\S*@\S*|(?<![\p{L}\p{N}])[\p{L}\p{N}_-]+(?:\.[\p{L}\p{N
 /** Whether a row, line or heading says, in English or French, that its figures are an example, for reference, or not part of the deal. */
 function markedNotPart(text: string): boolean {
   // A word joined to a dot or an @ with no space is part of an e-mail address, a domain or a web address, not a marker (task 55).
-  const f = fold(text).replace(TAX_BASIS_RE, " ").replace(ADDRESS_LIKE_RE, " ");
+  const f = fold(text).replace(TAX_BASIS_RE, " ").replace(ADDRESS_LIKE_RE, (s, at: number, all: string) => s === "p.m" && all[at + s.length] === "." ? s : " ");
   if (NOT_PART_RE.test(f)) return true;
   return [...f.matchAll(EXAMPLE_RE)].some((m) => !EXAMPLE_BEFORE.test(f.slice(0, m.index)) && !EXAMPLE_AFTER.test(f.slice(m.index! + m[0].length)));
 }
@@ -582,6 +585,14 @@ const corrects = (gap: string, prev: NumberToken, t: NumberToken) => (CORRECTION
 
 const CHANGE_FROM_RE = /(?<![\p{L}])(?:moved|went|increased|decreased|revised|changed|rose|fell|passe|pass[ée]e?s?)\s+(?:from|de|d['’])\s*$/iu;
 
+/** A figure-first dash item (or run of items), never a correction after a labelled amount. */
+function figureDashItems(text: string, format: DocumentFormat): { token: NumberToken; label: string }[] | null {
+  const tokens = tokenize(text, format);
+  if (!tokens.length || text.slice(0, tokens[0]!.start).trim()) return null;
+  const items = tokens.map((token, i) => ({ token, label: /^\s+[—–]\s+(\p{L}.*)$/u.exec(text.slice(token.end, tokens[i + 1]?.start ?? text.length))?.[1]?.trim() }));
+  return items.every((x) => x.label) ? items as { token: NumberToken; label: string }[] : null;
+}
+
 function readSentence(sentence: { text: string; start: number }, para0: Paragraph, result: ExtractionResult, carried: string | null = null) {
   const text = labelValueForm(normalizeText(sentence.text));
   const quote = quoteDocs.has(result);
@@ -629,6 +640,14 @@ function readSentence(sentence: { text: string; start: number }, para0: Paragrap
   const refusal = para0.excluded || markedNotPart(text) ? NOT_PART_NOTE : sentenceRefusal(text);
   if (refusal) {
     for (const t of tokens) other(t, "line:prose", refusal);
+    return;
+  }
+  const dashItems = figureDashItems(text, result.format);
+  if (dashItems) {
+    for (const { token, label } of dashItems) {
+      const mapped = mapToken(label, token, { prose: true, labelAfter: true, scope: para.scope, context: label, quote });
+      record(result, mapped, token, { raw: token.raw, location: locationOf(token.start), context: `${token.raw} — ${label}`, rule: "line:prose" });
+    }
     return;
   }
   // A year is never money: it is shown as a year.
@@ -1460,7 +1479,7 @@ function fromBudget(table: Table, headerRow: number, roles: BudgetRoles, result:
     const t = cellToken(amountCell, result.format);
     if (!t) continue;
     // A row whose own label or note says it is not part of the deal, or one under such a heading, is shown and never read, summed or totalled.
-    if (excluded || (category && markedNotPart(category)) || row.some((c) => markedNotPart(c.text))) {
+    if (excluded || (category && (markedNotPart(category) || MEMO_SECTION_RE.test(fold(category)))) || row.some((c) => markedNotPart(c.text))) {
       result.other.push({ fieldKey: null, itemKey: null, value: t.value, raw: t.raw, unitSeen: t.unit, location: amountCell.ref, context: `${table.name}: ${displayLabel}`, rule: "table:budget", note: NOT_PART_NOTE });
       continue;
     }
@@ -1601,7 +1620,7 @@ function fromBudget(table: Table, headerRow: number, roles: BudgetRoles, result:
 }
 
 // A word that opens a section of a sheet: a first column of these (or of any few repeated words) is a category column.
-const SECTION_WORD_RE = /^(?:uses?|sources?|hard|soft|finance|financing|financement|revenues?|revenus?|income|assumptions?|operating|opex|timing|inputs?|budget|emplois|hypotheses|land|terrain|acquisition|contingenc(?:y|ies)|imprevus|aleas|reserve|totals?|subtotal|sous-total|grand total|frais de financement|indirects|directs|construction|costs?|couts?|loan|equity|capital|exit)\b/;
+const SECTION_WORD_RE = /^(?:uses?|sources?|hard|soft|finance|financing|financement|revenues?|revenus?|income|assumptions?|operating|opex|timing|inputs?|budget|emplois|hypotheses|land|terrain|acquisition|contingenc(?:y|ies)|imprevus|aleas|reserve|totals?|subtotal|sous-total|grand total|frais de financement|indirects|directs|construction|costs?|couts?|loan|equity|capital|exit|memos?|notes?|info|for information|pour memoire|pour information)\b/;
 
 const filledCells = (row: Cell[]) => row.filter((c) => c.text.trim() || c.number !== undefined);
 
@@ -1737,7 +1756,9 @@ type Section = { rows: Cell[][]; scope: Scope; loanScope: boolean; costSection?:
  * cell it is that number's label: "Contingency (5% of hard costs)"). A cell that begins with its figure ("5 % des revenus bruts effectifs") is a value with a qualifier, not a sentence.
  */
 function isSentenceCell(c: Cell, row: Cell[], format: DocumentFormat): boolean {
-  if (c.number !== undefined || row.some((x) => x.number !== undefined) || c.text.trim().split(/\s+/).length < 6) return false;
+  if (c.number !== undefined || row.some((x) => x.number !== undefined)) return false;
+  if (figureDashItems(c.text.trim(), format)) return true;
+  if (c.text.trim().split(/\s+/).length < 6) return false;
   const first = tokenize(c.text, format)[0];
   return !!first && c.text.slice(0, first.start).trim() !== "";
 }
@@ -1845,14 +1866,16 @@ function fromTable(table0: Table, result: ExtractionResult, notes: string[] = []
       const valueFirstSection = isValueFirstSection(s.rows, result.format);
       s.rows.forEach((row0) => {
         const cat = catOf.get(row0);
+        // A Notes category marks only this row; an ordinary document title "Notes" does not exclude its inputs.
+        const catExcluded = !!cat && (markedNotPart(cat) || MEMO_SECTION_RE.test(fold(cat)));
         const scope = (cat && scopeIn(cat)) || s.scope;
         const loanContext = s.loanScope || !!(cat && scopeIn(cat));
-        if (!s.excluded && namedRow(row0, table, result)) return;
+        if (!s.excluded && !catExcluded && namedRow(row0, table, result)) return;
         // A sentence cell is read as a sentence under the scope and exclusion in force for its row; the other cells of the row read as usual.
         const row = row0.filter((c) => !isSentenceCell(c, row0, result.format));
         for (const c of row0) {
           if (row.includes(c)) continue;
-          const para: Paragraph = { text: c.text.trim(), segs: [{ start: 0, location: c.ref }], scope: s.loanScope ? s.scope : undefined, excluded: s.excluded || row.some((x) => markedNotPart(x.text)) };
+          const para: Paragraph = { text: c.text.trim(), segs: [{ start: 0, location: c.ref }], scope: s.loanScope ? s.scope : undefined, excluded: s.excluded || catExcluded || row.some((x) => markedNotPart(x.text)) };
           for (const sentence of sentences(para.text)) readSentence(sentence, para, result);
         }
         if (row.length < row0.length && !row.some((c) => c.text || c.number !== undefined)) return;
@@ -1864,7 +1887,7 @@ function fromTable(table0: Table, result: ExtractionResult, notes: string[] = []
         if (!labelCell) return;
         const after = vf ? [vf.value] : row.slice(row.indexOf(labelCell) + 1);
         // A row that says it is not part of the deal, or one under such a heading, is shown and never read.
-        if (s.excluded || (cat && markedNotPart(cat)) || row.some((c) => markedNotPart(c.text))) {
+        if (s.excluded || catExcluded || row.some((c) => markedNotPart(c.text))) {
           for (const cell of after) {
             const t = cellToken(cell, result.format);
             if (t) result.other.push({ fieldKey: null, itemKey: null, value: t.value, raw: t.raw, unitSeen: t.unit, location: cell.ref, context: rowContext(table.name, cat, row, labelCell, cell), rule: "table:label-value", note: NOT_PART_NOTE });

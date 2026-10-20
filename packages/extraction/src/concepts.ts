@@ -96,13 +96,13 @@ export const CONCEPTS: readonly {
   },
   {
     fieldKey: "exit_cap_rate_pct", unit: "%", assumption: true,
-    words: [/\b(?:cap|capitali[sz]ation)\b/],
+    words: [/\b(?:cap|capitali[sz](?:ation|ing))\b/],
     with: [/\b(?:exit|sale|sell|disposal|disposition|reversion|terminal|outgoing|going-out|eventual|revente|sortie|vente|depart)\b/],
     exclude: /\b(?:going-in|entry|purchase|acquisition|in[- ]place|current|market|comparable|sold|traded|achat|entree|actuel\w*|marche)\b/,
   },
   {
     fieldKey: "expense_ratio_pct", unit: "%", assumption: true,
-    words: [/\b(?:operating|opex|running|expenses?|costs?|charges|exploitation|depenses)\b/],
+    words: [/\b(?:operating|opex|running|run (?:the |a |this )?building|expenses?|costs?|charges|exploitation|depenses)\b/],
     with: [/\b(?:share|ratio|percentage|take|slice|load|deduction|allowance|pourcentage|part|sur (?:les )?(?:recettes|revenus))\b/],
     basisAfter: /^\s*(?:of (?:the )?(?:egi|income|collections|revenue|receipts)|(?:des?|du|sur les) (?:recettes|revenus))\b/,
     exclude: /\b(?:management fee|vacancy|tax|insurance|growth|increase|escalation|inflation|frais de gestion|assurance|taxes?|croissance|hausse|vacance|recurring|sell\w*|sale|exit|brokerage|commissions?|disposition|vente|courtage)\b/,

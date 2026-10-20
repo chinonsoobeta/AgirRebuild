@@ -6522,3 +6522,126 @@ describe("card 112 audit: a suggestion is a label the boundary would keep", () =
     expect(suggestFields({ raw: "95%", context: "Settled occupancy 95%", note: "No field matches this label", unitSeen: "%", value: 95 })).toContain("stabilized_occupancy_pct");
   });
 });
+
+describe("card 114: memo lines, the second loan, and figure — label lists", () => {
+  const read = (...lines: string[]) => extractCandidates({ kind: "pdf", lines: lines.map((text, i) => ({ text, location: `page 1, line ${i + 1}` })), tables: [], pageCount: 1, needsOcr: false, fullText: lines.join("\n") });
+  const sheet = (rows: (string | number)[][]) => extractCandidates({ kind: "xlsx", lines: [], tables: [{ name: "Base", rows: rows.map((row, i) => row.map((v, c): Cell => ({ text: String(v), ref: `${String.fromCharCode(65 + c)}${i + 1}`, ...(typeof v === "number" ? { number: v } : {}) }))) }], pageCount: 1, needsOcr: false, fullText: "" });
+  const pick = (r: ReturnType<typeof read>) => r.candidates.map((c) => [c.fieldKey, c.value]);
+  const base = [["Uses", "Lot acquisition", 600000], ["Uses", "Building works", 1450000], ["Uses", "Architect and permit fees", 210000]];
+  const costs = [["land_cost", 600000], ["hard_cost", 1450000], ["soft_cost", 210000]];
+  const NOT_PART = "Marked as not part of this deal";
+  const UNNAMED = "Which loan this belongs to is not stated";
+  // Rules 1–3 use the card's invented examples and our own variants, no development source set.
+  const memoLabels = [
+    "Framing allowance — memo only", "Framing allowance (memo only)", "Memo: framing allowance", "Charpente — pour mémoire",
+    "Finishes allowance, not included in the total", "Framing allowance for information only", "Framing allowance memo item",
+    "Charpente pour information seulement", "Framing allowance (illustrative)", "Framing allowance (already in building works)", "Charpente déjà incluse dans les travaux",
+    // Own EN and FR variants, exercised as PDF lines and budget rows.
+    "Roof allowance (memo)", "Site services not in the total", "Finishes not in total", "Cladding allowance p.m.",
+    "Toiture hors total", "Finitions non inclus dans le total", "Terrassement pour mémoire", "Charpente p.m.",
+  ];
+  test.each(memoLabels)("memo label is shown, never read or summed: %s", (label) => {
+    const pdf = read(`${label}: $45,000`);
+    expect(pick(pdf)).toEqual([]);
+    // The already-included keeps have their existing, more specific note.
+    if (!/already in|déjà incluse/.test(label)) expect(pdf.other).toEqual(expect.arrayContaining([expect.objectContaining({ value: 45000, note: NOT_PART })]));
+    const x = sheet([...base, ["Uses", label, 45000]]);
+    expect(pick(x)).toEqual(costs);
+    expect(x.other.some((o) => o.value === 45000)).toBe(true);
+    if (!/already in|déjà incluse/.test(label)) expect(x.other.find((o) => o.value === 45000)?.note).toBe(NOT_PART);
+    expect(pick(sheet([["Uses", label, 45000]]))).toEqual([]);
+  });
+  test.each(["Memo", "Notes", "Memos", "Note", "Info", "For information", "Pour mémoire", "Pour information"])("memo category preserves the other rows: %s", (category) => {
+    const r = sheet([...base, [category, "Framing allowance", 45000]]);
+    expect(pick(r)).toEqual(costs);
+    expect(r.other).toEqual(expect.arrayContaining([expect.objectContaining({ value: 45000, note: NOT_PART })]));
+  });
+  test.each([
+    ["Memo", "Roof allowance"], ["Notes", "Site services"], ["For information", "Finishes"],
+    ["Pour mémoire", "Toiture"], ["Pour information", "Terrassement"], ["Note", "Finitions"],
+  ])("own memo section: %s / %s", (category, label) => {
+    expect(pick(sheet([...base, [category, label, 45000]]))).toEqual(costs);
+    const r = read(`${category} (memo only)`, `${label}: $45,000`);
+    expect(pick(r)).toEqual([]);
+    expect(r.other[0]?.note).toBe(NOT_PART);
+  });
+  test("an ordinary Notes document title still permits its stated inputs", () => {
+    expect(pick(read("Notes", "Soft costs: $300,000"))).toEqual([["soft_cost", 300000]]);
+  });
+  test("allowances, actual totals and Input categories retain their meanings", () => {
+    expect(pick(read("Framing allowance: $45,000"))).toEqual([["hard_cost", 45000]]);
+    expect(pick(sheet([...base, ["Hard", "Framing allowance", 45000]]))).toEqual([["land_cost", 600000], ["hard_cost", 1495000], ["soft_cost", 210000]]);
+    expect(pick(sheet([...base, ["Input", "Build period in months", 18]]))).toEqual([...costs, ["construction_months", 18]]);
+    const total = sheet([["Hard", "Building works", 1450000], ["Hard", "Site services", 120000], ["Hard", "Total hard costs", 1570000]]);
+    expect(pick(total)).toEqual([["hard_cost", 1570000]]);
+    expect(total.candidates[0]?.note).toBeUndefined();
+    expect(pick(read("Framing allowance pm: $45,000"))).toEqual([["hard_cost", 45000]]);
+  });
+  const second: [string, string, string, number][] = [
+    ["Deuxième prêt", "300 000 $", "mezz_loan_amount", 300000], ["Taux du deuxième prêt", "11 %", "mezz_rate_pct", 11],
+    ["Amortissement du deuxième prêt", "10 ans", "mezz_amort_years", 10], ["Amortization of the second", "10 years", "mezz_amort_years", 10],
+    ["Taux de la deuxième", "11 %", "mezz_rate_pct", 11], ["Amort. de la deuxième", "10 ans", "mezz_amort_years", 10],
+    ["Second loan rate", "11%", "mezz_rate_pct", 11], ["Rate on the second charge", "11%", "mezz_rate_pct", 11],
+    ["Second mortgage amortization", "10 years", "mezz_amort_years", 10], ["Mezzanine rate", "11%", "mezz_rate_pct", 11],
+    // Own EN and FR variants.
+    ["Interest of the second", "12%", "mezz_rate_pct", 12], ["Rate of the second", "10%", "mezz_rate_pct", 10], ["Amortization on the second", "9 years", "mezz_amort_years", 9],
+    ["Prêt du deuxième rang", "320 000 $", "mezz_loan_amount", 320000], ["Intérêt du deuxième", "12 %", "mezz_rate_pct", 12], ["Amortissement de la deuxième", "9 ans", "mezz_amort_years", 9],
+    ["Prêt de deuxième", "310 000 $", "mezz_loan_amount", 310000],
+  ];
+  test.each(second)("second-loan label in PDF and sheet: %s", (label, value, field, n) => {
+    expect(pick(read(`${label}: ${value}`))).toEqual([[field, n]]);
+    expect(pick(sheet([[label, value]]))).toEqual([[field, n]]);
+    const r = read("Prêt de premier rang : 2 000 000 $", `${label}: ${value}`);
+    expect(pick(r)).toContainEqual([field, n]);
+    expect(r.candidates.some((c) => c.fieldKey?.startsWith("senior_") && c.value === n)).toBe(false);
+  });
+  test.each([
+    ["Its rate", "11%"], ["Its amortization", "10 years"], ["Son taux", "11 %"], ["Sa durée d'amortissement", "10 ans"], ["Their rate", "11%"],
+    // Own anaphor variants in both languages.
+    ["Their amortization", "9 years"], ["Its interest rate", "12%"], ["Their interest", "10%"],
+    ["Son intérêt", "12 %"], ["Son amortissement", "9 ans"], ["Leur taux", "10 %"],
+  ])("a loan anaphor is shown: %s", (label, value) => {
+    for (const r of [read(`${label}: ${value}`), read("Second loan: $300,000", `${label}: ${value}`), sheet([["Second loan", "$300,000"], [label!, value!]])]) {
+      expect(r.candidates.filter((c) => c.value !== 300000)).toEqual([]);
+      expect(r.other.some((o) => o.note === UNNAMED)).toBe(true);
+    }
+  });
+  test("senior words and the stated second loan keep their scope", () => {
+    expect(pick(read("Second loan: $300,000"))).toEqual([["mezz_loan_amount", 300000]]);
+    expect(pick(read("Taux du premier rang : 6,25 %"))).toEqual([["senior_rate_pct", 6.25]]);
+    expect(read("First mortgage rate: 6.25%").candidates.some((c) => c.fieldKey?.startsWith("mezz_"))).toBe(false);
+    expect(pick(read("First mortgage: $2,000,000 at 6.25%, 25-year amortization.", "Amortization of the second: 10 years"))).toContainEqual(["mezz_amort_years", 10]);
+  });
+  // Rule 4 has no source set. Both spaced em and en dashes delimit each figure's own label.
+  const items: [string, string, string, number][] = [
+    ["18 months", "Time to build", "construction_months", 18], ["5 months", "Letting period", "lease_up_months", 5],
+    ["95%", "Occupied share after letting", "stabilized_occupancy_pct", 95], ["33%", "Share of income used to run the building", "expense_ratio_pct", 33],
+    ["5.5%", "Rate for capitalizing the exit income", "exit_cap_rate_pct", 5.5],
+  ];
+  const ownItems: typeof items = [
+    ["17 months", "Site crew schedule", "construction_months", 17], ["6 months", "Tenant-finding window after handover", "lease_up_months", 6],
+    ["34%", "Running costs as a share of collections", "expense_ratio_pct", 34],
+    ["16 mois", "Durée du chantier", "construction_months", 16], ["4 mois", "Délai de mise en location après livraison", "lease_up_months", 4],
+    ["32 %", "Part des charges d'exploitation sur les revenus", "expense_ratio_pct", 32],
+  ];
+  test.each(["—", "–"])("each list figure has its own label (%s)", (dash) => {
+    for (const cases of [items, ownItems.slice(0, 3), ownItems.slice(3)]) {
+      const lines = cases.map(([value, label]) => `${value} ${dash} ${label}`);
+      const wanted = cases.map(([, , field, n]) => [field, n]);
+      expect(pick(read(lines.join(" ")))).toEqual(wanted);
+      expect(pick(read(...lines))).toEqual(wanted);
+      expect(pick(sheet(lines.map((line) => [line])))).toEqual(wanted);
+      expect(pick(sheet([[lines.join(" ")]]))).toEqual(wanted);
+    }
+  });
+  test("an unclear list item stays shown without taking its neighbour's label", () => {
+    const r = read("95% — Occupied share after letting", "33% — A number for later discussion");
+    expect(pick(r)).toEqual([["stabilized_occupancy_pct", 95]]);
+    expect(r.other.some((o) => o.value === 33)).toBe(true);
+  });
+  test("label-first prose and correction dashes retain their reads", () => {
+    expect(pick(read("Occupied share after letting: 95% Share of income used to run the building: 33%"))).toContainEqual(["stabilized_occupancy_pct", 95]);
+    expect(pick(read("Hard costs ex-GST: $990,000 — corrected signed build figure $1,040,000."))).toEqual([["hard_cost", 990000], ["hard_cost", 1040000]]);
+    expect(pick(read("Please use 9 - this replaces the teaser."))).toEqual([]);
+  });
+});
