@@ -1,4 +1,4 @@
-import { FIELD_BY_KEY } from "@agir/contracts";
+import { THRESHOLDS, FIELD_BY_KEY } from "@agir/contracts";
 import { useMutation, useQuery } from "@tanstack/react-query";
 import { api, type AuditEvent } from "../api";
 import { DealHeader, StatusTag, useDeal, useSession } from "../components/ui";
@@ -10,6 +10,12 @@ export function describeEvent(i: I18n, e: AuditEvent): string {
   const kind = (k: string) => (k === "ic_memo" ? i.t("reports.memo") : k === "lender_package" ? i.t("reports.lender") : k === "build_decision" ? i.t("reports.buildDecision") : k === "partner_memo" ? i.t("reports.partnerMemo") : i.t("reports.modelExport"));
   const field = () => i.L.field(p.field, p.item || null);
   switch (e.action) {
+    case "policy.threshold_changed": {
+      const threshold = THRESHOLDS[p.version]?.find((threshold) => threshold.path === p.path);
+      const name = threshold?.label[i.lang] ?? p.path ?? "";
+      const value = p.new == null ? i.t("threshold.inherited") : i.f.value(Number(p.new),threshold?.unit ?? "count");
+      return i.t("audit.thresholdChanged", { name, value, reason: p.reason ?? "" });
+    }
     case "deal.created": return fr ? "A créé le projet" : "Created the deal";
     case "document.uploaded": return fr ? `A téléversé ${p.name}` : `Uploaded ${p.name}`;
     case "document.duplicate_ignored": return fr ? `A téléversé ${p.name} de nouveau ; la copie n'a pas été ajoutée` : `Uploaded ${p.name} again; the copy was not added`;

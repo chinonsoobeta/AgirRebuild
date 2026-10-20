@@ -3044,3 +3044,74 @@ describe("card 94c table proposals", () => {
     expect(p.unavailable).toContain("$7,182");
   });
 });
+
+describe("card 96b owner thresholds", () => {
+  let owner: Session, viewer: Session, admin: Session, workspace: string, id: string, baseline: any;
+  const version = "policy-v1", path = "gates.equityMultipleMin";
+  const set = (scope: "workspaces" | "deals", target: string, value: number | null, reason = "Owner credit threshold decision", session = owner) => call(session, "POST", `/api/${scope}/${target}/thresholds`, { policyVersion: version, path, value, reason });
+  beforeAll(async () => {
+    owner = await signup("threshold-owner96@example.com", "Threshold Owner", "solo");
+    viewer = await signup("threshold-viewer96@example.com", "Threshold Viewer");
+    admin = await signup("threshold-admin96@example.com", "Threshold Admin");
+    workspace = (await call(owner, "GET", "/api/me")).json.workspaces[0].id;
+    for (const [email, role] of [["threshold-viewer96@example.com", "viewer"], ["threshold-admin96@example.com", "admin"]]) expect((await call(owner, "POST", `/api/workspaces/${workspace}/members`, { email, role })).status).toBe(200);
+    id = (await call(owner, "POST", `/api/workspaces/${workspace}/deals`, { name: "Threshold fixture", assetType: "Multifamily" })).json.id;
+    for (const doc of loadOracle("maple-heights").documents) expect((await call(owner, "PUT", `/api/deals/${id}/documents?name=${encodeURIComponent(doc.name)}`, undefined, await documentBytes(doc))).status).toBe(200);
+    await work();
+    for (const a of (await call(owner, "GET", `/api/deals/${id}/review`)).json.assumptions.filter((a: any) => a.status === "needs_review")) expect((await call(owner, "POST", `/api/assumptions/${a.id}/review`, { action: "approve", version: a.version })).status).toBe(200);
+    const made = await call(owner, "POST", `/api/deals/${id}/runs`);
+    expect(made.status).toBe(200);
+    baseline = (await call(owner, "GET", `/api/runs/${made.json.id}`)).json;
+  });
+  test("no override preserves the exact existing hashes and omits standard snapshots", async () => {
+    const original = (await call(alice, "GET", `/api/runs/${run}`)).json;
+    expect(baseline.inputHash).toBe(original.inputHash);
+    expect(baseline.resultHash).toBe(original.resultHash);
+    expect(baseline.result.standard).toBeUndefined();
+    const stored = (await db.query<any>(`select policy_hash,input_snapshot from runs where id=$1`, [baseline.id]))[0];
+    expect(stored.policy_hash).toBe(POLICY_HASHES[version]);
+    expect(stored.input_snapshot.standardPolicy).toBeUndefined();
+    expect(stored.input_snapshot.policyChanges).toBeUndefined();
+  });
+  test("only an owner writes, viewers read, reasons and values are validated, and writes are audited", async () => {
+    for (const session of [viewer, admin]) expect((await set("workspaces", workspace, 1.4, undefined, session)).status).toBe(403);
+    expect((await set("workspaces", workspace, 1.4, " ")).status).toBe(422);
+    expect((await call(owner, "POST", `/api/workspaces/${workspace}/thresholds`, { policyVersion: version, path: "agreementTolerancePct", value: 2, reason: "Do not allow a looser tolerance" })).status).toBe(422);
+    expect((await set("workspaces", workspace, 1.4)).status).toBe(200);
+    const view = await call(viewer, "GET", `/api/workspaces/${workspace}/thresholds`);
+    expect(view.status).toBe(200);
+    const row = view.json.policies.find((p: any) => p.version === version).thresholds.find((t: any) => t.path === path);
+    expect(row).toMatchObject({ standard: 1.5, value: 1.4, looser: true, workspace: { value: 1.4, setByName: "Threshold Owner" } });
+    expect(row.workspace.setAt).toBeTruthy();
+    const events = await db.query<any>(`select payload from audit_events where workspace_id=$1 and action='policy.threshold_changed'`, [workspace]);
+    expect(events.at(-1).payload).toMatchObject({ scope: "workspace", version, path, old: null, new: 1.4 });
+  });
+  test("deal values win and clear back to workspace; copies retain the overrides", async () => {
+    expect((await set("deals", id, 1.3)).status).toBe(200);
+    const get = async () => (await call(viewer, "GET", `/api/deals/${id}/thresholds`)).json.policies.find((p: any) => p.version === version).thresholds.find((t: any) => t.path === path);
+    expect(await get()).toMatchObject({ value: 1.3, layer: "deal", workspace: { value: 1.4 }, deal: { value: 1.3 } });
+    const copied = (await call(owner, "POST", `/api/deals/${id}/copy`, { name: "Threshold copy" })).json.id;
+    expect((await db.query<any>(`select policy_overrides from deals where id=$1`, [copied]))[0].policy_overrides[version][path].value).toBe(1.3);
+    expect((await set("deals", id, null)).status).toBe(200);
+    expect(await get()).toMatchObject({ value: 1.4, layer: "workspace", deal: null });
+  });
+  test("custom runs store both policies, changes and a replayable standard result; value changes alone govern staleness", async () => {
+    const made = await call(owner, "POST", `/api/deals/${id}/runs`);
+    expect(made.status).toBe(200);
+    const view = (await call(owner, "GET", `/api/runs/${made.json.id}`)).json;
+    expect(view.result.standard).toMatchObject({ policyVersion: version, verdict: baseline.result.verdict });
+    expect(view.result.standard.checks.every((c: any) => c.severity === "error")).toBe(true);
+    const stored = (await db.query<any>(`select * from runs where id=$1`, [made.json.id]))[0];
+    expect(stored.input_snapshot.policy).toMatchObject({ custom: true, gates: { equityMultipleMin: 1.4 } });
+    expect(stored.input_snapshot.standardPolicy).toEqual(POLICIES[version]);
+    expect(stored.input_snapshot.policyChanges).toContainEqual(expect.objectContaining({ path, setBy: "Threshold Owner", layer: "workspace" }));
+    expect(stored.policy_hash).toBe(sha256(canonicalJson(stored.input_snapshot.policy)));
+    const audit = (await call(owner, "GET", `/api/runs/${made.json.id}/audit-package`)).json;
+    expect(audit.validation.checks.filter((c: any) => ["signature", "replay"].includes(c.name)).map((c: any) => c.status)).toEqual(["passed", "passed"]);
+    expect((await set("workspaces", workspace, 1.4, "Same threshold with an updated explanation")).status).toBe(200);
+    expect((await call(owner, "GET", `/api/runs/${made.json.id}`)).json.fresh).toBe(true);
+    expect((await set("workspaces", workspace, 1.2)).status).toBe(200);
+    expect((await call(owner, "GET", `/api/runs/${made.json.id}`)).json.staleReasons).toContain("The policy thresholds changed after this run.");
+    expect((await call(owner, "GET", `/api/deals/${id}`)).json.run.fresh).toBe(false);
+  });
+});

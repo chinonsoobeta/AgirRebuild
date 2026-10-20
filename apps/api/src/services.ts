@@ -4,7 +4,7 @@
 
 import { createHash, createHmac } from "node:crypto";
 import {
-  tableSourceLabel, type TableSource,
+  tableSourceLabel, type TableSource, effectivePolicy, THRESHOLDS, type PolicyOverrides, type PolicyChange,
   CMHC_PREMIUM, GST_HST, cmhcPremium, landTable, landTransferTaxOptions, gstHstNetOptions, ENGINE_READABLE_STATUSES, type Proposal, type Table, type TableOption,
   FIELD_BY_KEY,
   FIELD_GROUP_LABELS,
@@ -17,7 +17,7 @@ import {
   type Readiness,
   type RunResult,
 } from "@agir/contracts";
-import { assemble, canonicalJson, ENGINE_VERSION, heldPartnerReturns, replay, underwrite } from "@agir/engine";
+import { assemble, canonicalJson, ENGINE_VERSION, heldPartnerReturns, replay } from "@agir/engine";
 import type { Db } from "@agir/db";
 import { applyLabels, figureOrder, offeredIds, type SourcedCandidate } from "@agir/extraction";
 
@@ -117,6 +117,49 @@ export function sourceLabel(a: AssumptionDb): string {
   return `${s.document_name}, ${s.location}${converted}${labelled}`;
 }
 
+// Threshold metadata is stored beside the policy, so names/reasons never enter its hash.
+async function policyLayers(tx: Db, dealId: string): Promise<{ workspace: PolicyOverrides; deal: PolicyOverrides }> {
+  const [row] = await tx.query<{ workspace: PolicyOverrides; deal: PolicyOverrides }>(`select w.policy_overrides as workspace, d.policy_overrides as deal from deals d join workspaces w on w.id=d.workspace_id where d.id=$1`, [dealId]);
+  if (!row) throw new HttpError(404, "Deal not found");
+  return row;
+}
+async function currentPolicyHash(tx: Db, dealId: string, version: string): Promise<string | undefined> {
+  const base = POLICIES[version];
+  if (!base) return undefined;
+  const layers = await policyLayers(tx, dealId);
+  return sha256(canonicalJson(effectivePolicy(base, layers.workspace, layers.deal).policy));
+}
+export async function thresholdsView(tx: Db, scope: "workspace" | "deal", id: string) {
+  let layers: { workspace: PolicyOverrides; deal: PolicyOverrides };
+  if (scope === "deal") layers = await policyLayers(tx, id);
+  else {
+    const [row] = await tx.query<{ policy_overrides: PolicyOverrides }>(`select policy_overrides from workspaces where id=$1`, [id]);
+    if (!row) throw new HttpError(404, "Workspace not found");
+    layers = { workspace: row.policy_overrides, deal: {} };
+  }
+  const users = await tx.query<{ id: string; name: string }>(`select id,name from users where id = any($1::uuid[])`, [[...new Set(Object.values(layers).flatMap((versions) => Object.values(versions).flatMap((values) => Object.values(values).map((note) => note.setBy))))]]);
+  const names = new Map(users.map((user) => [user.id,user.name]));
+  return { policies: Object.values(POLICIES).map((base) => {
+    const effective = effectivePolicy(base,layers.workspace,layers.deal);
+    return { version: base.version, thresholds: THRESHOLDS[base.version]!.map((threshold) => {
+      const workspace = layers.workspace[base.version]?.[threshold.path], deal = layers.deal[base.version]?.[threshold.path];
+      const change = effective.changes.find((change) => change.path === threshold.path);
+      const named = (note: typeof workspace) => note ? { ...note, setByName: names.get(note.setBy) ?? "—" } : null;
+      return { ...threshold, workspace: named(workspace), deal: named(deal), value: deal?.value ?? workspace?.value ?? threshold.standard,
+        layer: deal ? "deal" : workspace ? "workspace" : null, looser: change?.looser ?? false, stressRemoved: change?.stressRemoved ?? false };
+    }) };
+  }) };
+}
+export function runResult(engineVersion: string, input: EngineInput, policy: Policy, standardPolicy?: Policy): RunResult {
+  const result = replay(engineVersion,input,policy);
+  if (policy.custom) {
+    if (!standardPolicy) throw new Error("A custom run must retain its standard policy");
+    const standard = replay(engineVersion,input,standardPolicy);
+    result.standard = { policyVersion: standardPolicy.version, verdict: standard.verdict, checks: standard.checks.filter((check) => check.severity === "error") };
+  }
+  return result;
+}
+
 // ---- Deal overview ----------------------------------------------------------------
 
 export type DealOverview = Awaited<ReturnType<typeof dealOverview>>;
@@ -148,7 +191,7 @@ export async function dealOverview(tx: Db, dealId: string) {
     [dealId],
   );
   const [{ h }] = (await tx.query<{ h: string }>(`select fn_assumptions_hash($1) as h`, [dealId])) as [{ h: string }];
-  const fresh = latest ? latest.assumptions_hash === h && latest.policy_hash === POLICY_HASHES[latest.policy_version] && latest.engine_version === ENGINE_VERSION : false;
+  const fresh = latest ? latest.assumptions_hash === h && latest.policy_hash === await currentPolicyHash(tx, dealId, latest.policy_version) && latest.engine_version === ENGINE_VERSION : false;
   const [decision] = latest
     ? await tx.query<{ decision: string; created_at: string }>(`select decision, created_at from decisions where run_id = $1 order by created_at desc limit 1`, [latest.id])
     : [];
@@ -392,8 +435,13 @@ export async function createRun(tx: Db, dealId: string) {
   const assumptions = await loadAssumptions(tx, dealId);
   const { readiness, input } = readinessFor(assumptions);
   if (!input) throw new HttpError(409, "Underwriting is blocked until review is clear.", { readiness });
-  const policy = policyFor(input);
-  const result = underwrite(input, policy);
+  const base = policyFor(input);
+  const layers = await policyLayers(tx, dealId);
+  const { policy, changes } = effectivePolicy(base, layers.workspace, layers.deal);
+  const policyHash = sha256(canonicalJson(policy));
+  const result = runResult(ENGINE_VERSION,input,policy,policy.custom ? base : undefined);
+  const setters = changes.length ? await tx.query<{ id: string; name: string }>(`select id,name from users where id=any($1::uuid[])`, [[...new Set(changes.map((change) => change.setById))]]) : [];
+  const policyChanges = changes.map((change) => ({ ...change, setBy: setters.find((user) => user.id === change.setById)?.name ?? "—" }));
   const used = assumptions
     .filter((a) => a.status === "approved" || a.status === "default_accepted")
     .map((a) => ({
@@ -417,15 +465,15 @@ export async function createRun(tx: Db, dealId: string) {
   const payload = {
     engine_version: ENGINE_VERSION,
     policy_version: policy.version,
-    policy_hash: POLICY_HASHES[policy.version],
+    policy_hash: policyHash,
     // The policy itself is stored, so the run replays and renders under it after a draft is edited.
-    input_snapshot: { input, policy, assumptions: used, notFound: readiness.notFound },
+    input_snapshot: { input, policy, assumptions: used, notFound: readiness.notFound, ...(policy.custom ? { standardPolicy: base, policyChanges } : {}) },
     input_hash: inputHash,
     assumptions_hash: h,
     result,
     result_hash: resultHash,
     verdict_code: result.verdict.code,
-    signature: signRun(inputHash, resultHash, POLICY_HASHES[policy.version]!),
+    signature: signRun(inputHash, resultHash, policyHash),
     metrics: flattenMetrics(result),
     gates: result.verdict.gates,
     checks: result.checks,
@@ -438,7 +486,7 @@ export async function runView(tx: Db, runId: string) {
   const [run] = await tx.query<{
     id: string; deal_id: string; run_number: number; engine_version: string; policy_version: string; policy_hash: string;
     input_hash: string; result_hash: string; assumptions_hash: string; verdict_code: string; signature: string; created_at: string;
-    created_by_name: string | null; result: RunResult; input_snapshot: { input: EngineInput; policy?: Policy; assumptions: unknown[] };
+    created_by_name: string | null; result: RunResult; input_snapshot: { input: EngineInput; policy?: Policy; standardPolicy?: Policy; policyChanges?: PolicyChange[]; assumptions: unknown[] };
   }>(
     `select r.*, u.name as created_by_name from runs r left join users u on u.id = r.created_by where r.id = $1`,
     [runId],
@@ -448,7 +496,7 @@ export async function runView(tx: Db, runId: string) {
   const [latest] = await tx.query<{ id: string }>(`select id from latest_runs where deal_id = $1`, [run.deal_id]);
   const staleReasons: string[] = [];
   if (run.assumptions_hash !== h) staleReasons.push("An approved input changed after this run.");
-  if (run.policy_hash !== POLICY_HASHES[run.policy_version]) staleReasons.push("The policy thresholds changed after this run.");
+  if (run.policy_hash !== await currentPolicyHash(tx, run.deal_id, run.policy_version)) staleReasons.push("The policy thresholds changed after this run.");
   if (run.engine_version !== ENGINE_VERSION) staleReasons.push("The engine was updated after this run.");
   const decisions = await tx.query(
     `select d.id, d.decision, d.rationale, d.conditions, d.override_reason, d.created_at, u.name as decided_by
@@ -468,6 +516,7 @@ export async function runView(tx: Db, runId: string) {
     engineVersion: run.engine_version,
     policyVersion: run.policy_version,
     policyDraft: runPolicy(run.input_snapshot, run.policy_version)?.draft === true,
+    ...(run.input_snapshot.policy?.custom ? { policyCustom: true, policy: run.input_snapshot.policy, standardPolicy: run.input_snapshot.standardPolicy, policyChanges: run.input_snapshot.policyChanges } : {}),
     inputHash: run.input_hash,
     resultHash: run.result_hash,
     signed: run.signature.startsWith("dev-unsafe:") ? "development key" : "production key",
@@ -486,7 +535,7 @@ export async function runView(tx: Db, runId: string) {
 export async function auditPackage(tx: Db, runId: string) {
   const [run] = await tx.query<{
     id: string; deal_id: string; run_number: number; engine_version: string; policy_version: string; policy_hash: string; input_hash: string;
-    result_hash: string; signature: string; result: RunResult; input_snapshot: { input: EngineInput; policy?: Policy; assumptions: unknown[] }; created_at: string;
+    result_hash: string; signature: string; result: RunResult; input_snapshot: { input: EngineInput; policy?: Policy; standardPolicy?: Policy; policyChanges?: PolicyChange[]; assumptions: unknown[] }; created_at: string;
   }>(`select * from runs where id = $1`, [runId]);
   if (!run) throw new HttpError(404, "Run not found");
   const [deal] = await tx.query(`select id, name, asset_type, location, currency, country, province from deals where id = $1`, [run.deal_id]);
@@ -504,7 +553,7 @@ export async function auditPackage(tx: Db, runId: string) {
     const policy = runPolicy(run.input_snapshot, run.policy_version);
     // The policy replayed must be the one the run's hash and signature name.
     replayed = policy !== undefined && sha256(canonicalJson(policy)) === run.policy_hash &&
-      sha256(canonicalJson(replay(run.engine_version, run.input_snapshot.input, policy))) === run.result_hash;
+      sha256(canonicalJson(runResult(run.engine_version, run.input_snapshot.input, policy, run.input_snapshot.standardPolicy))) === run.result_hash;
   } catch {
     replayed = false;
   }

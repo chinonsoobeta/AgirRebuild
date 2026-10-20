@@ -13,6 +13,9 @@ type Entry = string | ((p: Record<string, any>) => string | string[]);
 const s = (n: number, one: string, many: string) => (n === 1 ? one : many);
 
 const EN = {
+  "threshold.inherited": "Inherited value",
+  "audit.thresholdChanged": (p: any) => `Changed a policy threshold: ${p.name} = ${p.value}. ${p.reason}`,
+
   "reports.frDraft": "French, draft translation",
   "review.ocr": "Read by OCR: check it against the page",
   "nav.deals": "Deals",
@@ -588,6 +591,9 @@ const EN = {
 export type Key = keyof typeof EN;
 
 const FR: Record<Key, Entry> = {
+  "threshold.inherited": "Valeur héritée",
+  "audit.thresholdChanged": (p: any) => `A modifié un seuil de politique : ${p.name} = ${p.value}. ${p.reason}`,
+
   "reports.frDraft": "Français, traduction provisoire",
   "review.ocr": "Lu par reconnaissance optique : vérifiez-le sur la page",
   "nav.deals": "Projets",

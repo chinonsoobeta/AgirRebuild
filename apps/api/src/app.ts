@@ -3,13 +3,13 @@ import { getConnInfo } from "@hono/node-server/conninfo";
 import { randomBytes } from "node:crypto";
 import { getCookie, setCookie, deleteCookie } from "hono/cookie";
 import { z } from "zod";
-import { COUNTRIES, CURRENCIES, FIELDS, FIELD_GROUP_LABELS, METRICS, POLICIES, POLICY_V1, PROVINCE_CODES, REVIEW_MODES, runPolicy, type EngineInput, type Policy } from "@agir/contracts";
+import { THRESHOLDS, validateThreshold, COUNTRIES, CURRENCIES, FIELDS, FIELD_GROUP_LABELS, METRICS, POLICIES, POLICY_V1, PROVINCE_CODES, REVIEW_MODES, runPolicy, type EngineInput, type Policy } from "@agir/contracts";
 import { asUser, type BlobStore, type Db } from "@agir/db";
 import { breakeven, DRIVERS, driversFor, SALE_DRIVERS, EngineInputError, explore, grid, tornado, type DriverKey, type Shock } from "@agir/engine";
 import { canonicalItem, itemFold, kindOf } from "@agir/extraction";
 import { MAX_UPLOAD_BYTES } from "@agir/worker";
 import { checkPassword, createSession, endSession, hashPassword, rateLimiter, SESSION_DAYS, userForSession } from "./auth.ts";
-import { auditPackage, clientViewer, createRun, dealOverview, hideClientEvents, HttpError, labelRefusal, reviewView, runView, sha256 } from "./services.ts";
+import { thresholdsView, auditPackage, clientViewer, createRun, dealOverview, hideClientEvents, HttpError, labelRefusal, reviewView, runView, sha256 } from "./services.ts";
 
 export type AppDeps = { db: Db; store: BlobStore; secureCookies: boolean; demoSignIn?: boolean; trustProxy?: boolean; now?: () => Date };
 type Env = { Variables: { user: { id: string; email: string; name: string } } };
@@ -233,6 +233,23 @@ export function createApp({ db, store, secureCookies, demoSignIn = false, trustP
     await as(c, (tx) => tx.query(`select fn_clear_logo($1)`, [z.string().uuid().parse(c.req.param("ws"))]));
     return c.json({ ok: true });
   });
+
+  for (const [route, scope, param] of [["/api/workspaces/:ws/thresholds", "workspace", "ws"], ["/api/deals/:id/thresholds", "deal", "id"]] as const) {
+    app.get(route, async (c) => c.json(await as(c, (tx) => thresholdsView(tx,scope,c.req.param(param)!))));
+    app.post(route, async (c) => {
+      const id = z.string().uuid().parse(c.req.param(param));
+      const body = z.object({ policyVersion: z.string(), path: z.string(), value: z.number().nullable(), reason: z.string() }).parse(await c.req.json());
+      await as(c, async (tx) => {
+        const [member] = await tx.query<{ role: string }>(`select m.role from workspace_members m ${scope === "deal" ? "join deals d on d.workspace_id=m.workspace_id" : ""} where ${scope === "workspace" ? "m.workspace_id" : "d.id"}=$1 and m.user_id=agir_uid()`, [id]);
+        if (member?.role !== "owner") throw new HttpError(403,"Your role in this workspace does not allow this action");
+        const threshold = THRESHOLDS[body.policyVersion]?.find((threshold) => threshold.path === body.path);
+        const error = validateThreshold(body.policyVersion,body.path,body.value === null ? threshold?.standard : body.value);
+        if (error) throw new HttpError(422,error.en,{fr:error.fr});
+        await tx.query(`select fn_set_policy_value($1,$2,$3,$4,$5,$6)`, [scope,id,body.policyVersion,body.path,body.value,body.reason]);
+      });
+      return c.json({ ok: true });
+    });
+  }
 
   app.post("/api/workspaces/:ws/review-mode", async (c) => {
     const { mode } = z.object({ mode: z.enum(REVIEW_MODES) }).parse(await c.req.json());
