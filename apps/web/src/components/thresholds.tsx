@@ -21,6 +21,22 @@ export function Thresholds({ scope, id, initialVersion = "" }: { scope: "workspa
   return <details className="panel stack">
     <summary className="h-section">{t("threshold.title")}</summary>
     <ErrorText error={query.error ?? error} />
+    {(query.data?.invalid ?? []).length > 0 && <div className="stack">
+      <p className="why">{t("threshold.invalid")}</p>
+      <ul>{(query.data?.invalid ?? []).map((v) => {
+        const own = (scope === "deals" ? "deal" : "workspace") === v.layer;
+        const clear = (event: FormEvent<HTMLFormElement>) => {
+          event.preventDefault();
+          save.mutate({ policyVersion: v.version, path: v.path, value: null, reason: String(new FormData(event.currentTarget).get("reason")) });
+        };
+        return <li key={`${v.layer}-${v.version}-${v.path}`}>{v.version} · {v.path} = {v.value} ({t(v.layer === "deal" ? "threshold.layerDeal" : "threshold.layerWorkspace")}) · {v.error[lang]}
+          <p className="muted">{v.setByName} · {f.date(v.setAt)} · {v.reason}</p>
+          {role === "owner" && own && <form className="row" onSubmit={clear}>
+            <input aria-label={t("threshold.reason")} className="input" name="reason" required placeholder={t("threshold.reason")} />
+            <button className="btn quiet small" type="submit" value="clear-invalid" disabled={save.isPending}>{t("threshold.clear")}</button>
+          </form>}</li>;
+      })}</ul>
+    </div>}
     {policy && <>
       <label className="field">{t("threshold.strategy")}<select className="select" value={policy.version} onChange={(event) => setChosen(event.target.value)}>{policies.map((policy) => <option key={policy.version} value={policy.version}>{policy.version}</option>)}</select></label>
       <table className="tbl small"><thead><tr><th>{t("threshold.name")}</th><th>{t("threshold.standard")}</th>{scope === "deals" && <th>{t("threshold.workspace")}</th>}<th>{t("threshold.yours")}</th></tr></thead>

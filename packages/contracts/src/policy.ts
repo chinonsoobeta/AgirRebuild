@@ -204,7 +204,9 @@ export type Threshold = {
 };
 export type PolicyValue = { value: number; setBy: string; setAt: string; reason: string };
 export type PolicyOverrides = Record<string, Record<string, PolicyValue>>;
-export type PolicyChange = { path: string; value: number; standard: number; layer: "workspace" | "deal"; setById: string; setAt: string; reason: string; looser: boolean; lenderCited: boolean; stressRemoved: boolean; setBy?: string };
+export type PolicyChange = { path: string; label: { en: string; fr: string }; unit: string; value: number; standard: number; layer: "workspace" | "deal"; setById: string; setAt: string; reason: string; looser: boolean; lenderCited: boolean; stressRemoved: boolean; setBy?: string };
+/** A stored value the policy no longer allows (a draft was edited after it was set). It is left out, and a run is refused until it is changed or cleared. */
+export type InvalidPolicyValue = { path: string; layer: "workspace" | "deal"; value: number; setById: string; setAt: string; reason: string; error: { en: string; fr: string } };
 
 // The owner's inclusive bounds, approved 2026-10-19. No unlisted field is inferred.
 const THRESHOLD_RULES: Record<string, [string, string, string, number, number, boolean]> = {
@@ -264,6 +266,15 @@ export const THRESHOLDS: Readonly<Record<string, readonly Threshold[]>> = Object
     integer, lenderCited, looserDirection: stress ? "magnitude" : field === "agreementTolerancePct" || field.startsWith("max") ? "higher" : "lower" };
 })]));
 
+/** A change's label and unit as the run stored them; for an older snapshot, from today's table, else from the field's rule, so a report never fails on a path a draft edit removed. */
+export function changeMeta(version: string, change: Pick<PolicyChange, "path"> & Partial<Pick<PolicyChange, "label" | "unit">>): { label: { en: string; fr: string }; unit: string } {
+  if (change.label && change.unit !== undefined) return { label: change.label, unit: change.unit };
+  const known = Object.hasOwn(THRESHOLDS, version) ? THRESHOLDS[version]!.find((threshold) => threshold.path === change.path) : undefined;
+  if (known) return { label: known.label, unit: known.unit };
+  const rule = THRESHOLD_RULES[change.path.split(".").at(-1)!];
+  return rule ? { label: { en: rule[0], fr: rule[1] }, unit: rule[2] } : { label: { en: change.path, fr: change.path }, unit: "" };
+}
+
 export function validateThreshold(version: string, path: string, value: unknown): { en: string; fr: string } | null {
   if (!Object.hasOwn(POLICIES, version)) return { en: "Unknown policy version.", fr: "Version de politique inconnue." };
   const threshold = THRESHOLDS[version]!.find((threshold) => threshold.path === path);
@@ -276,24 +287,31 @@ export function validateThreshold(version: string, path: string, value: unknown)
   return null;
 }
 
-export function effectivePolicy(base: Policy, workspace: PolicyOverrides = {}, deal: PolicyOverrides = {}): { policy: Policy; changes: PolicyChange[] } {
-  const workspaceValues = workspace[base.version] ?? {}, dealValues = deal[base.version] ?? {};
-  const values = { ...workspaceValues, ...dealValues };
-  if (Object.keys(values).length === 0) return { policy: base, changes: [] };
-  const policy = structuredClone(base);
-  policy.custom = true;
+export function effectivePolicy(base: Policy, workspace: PolicyOverrides = {}, deal: PolicyOverrides = {}): { policy: Policy; changes: PolicyChange[]; invalid: InvalidPolicyValue[] } {
+  // Workspace first, then deal; a value that no longer fits is reported and skipped, so the layer under it applies.
+  const values: Record<string, PolicyValue & { layer: "workspace" | "deal" }> = {};
+  const invalid: InvalidPolicyValue[] = [];
+  for (const [layer, stored] of [["workspace", workspace], ["deal", deal]] as const) {
+    for (const [path, note] of Object.entries(stored[base.version] ?? {})) {
+      const error = validateThreshold(base.version, path, note.value);
+      if (error) invalid.push({ path, layer, value: note.value, setById: note.setBy, setAt: note.setAt, reason: note.reason, error });
+      else values[path] = { ...note, layer };
+    }
+  }
+  const policy = structuredClone(base) as Policy;
   const changes: PolicyChange[] = [];
   for (const [path, note] of Object.entries(values)) {
-    const error = validateThreshold(base.version, path, note.value);
-    if (error) throw new Error(error.en);
     const threshold = THRESHOLDS[base.version]!.find((threshold) => threshold.path === path)!;
     const location = thresholdLocation(policy, path), original = thresholdLocation(base, path);
     const standard = original.object[original.field] as number;
     location.object[location.field] = note.value;
-    if (note.value !== standard) changes.push({ path, value: note.value, standard, layer: Object.hasOwn(dealValues, path) ? "deal" : "workspace", setById: note.setBy, setAt: note.setAt, reason: note.reason,
+    if (note.value !== standard) changes.push({ path, label: threshold.label, unit: threshold.unit, value: note.value, standard, layer: note.layer, setById: note.setBy, setAt: note.setAt, reason: note.reason,
       looser: threshold.looserDirection === "magnitude" ? Math.abs(note.value) < Math.abs(standard) : threshold.looserDirection === "lower" ? note.value < standard : note.value > standard,
       lenderCited: threshold.lenderCited, stressRemoved: path.startsWith("stresses.") && note.value === 0 });
   }
+  // Every value at its standard is no override: the base policy itself, with its hash, and no standard comparison.
+  if (changes.length === 0) return { policy: base, changes, invalid };
+  policy.custom = true;
   for (const stress of policy.stresses) if (changes.some((change) => change.path.startsWith(`stresses.${stress.key}.`))) stress.label = stressLabel(stress, "en", base.stresses.find((s) => s.key === stress.key));
-  return { policy, changes };
+  return { policy, changes, invalid };
 }

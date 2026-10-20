@@ -105,4 +105,4 @@ export type InvitePeek = { workspace: string; deal: string };
 export type AuditEvent = { seq: number; action: string; entity: string; entity_id: string | null; payload: any; hash: string; created_at: string; actor: string | null };
 
 export type ThresholdNote = import("@agir/contracts").PolicyValue & { setByName: string };
-export type ThresholdView = { policies: { version: string; thresholds: (import("@agir/contracts").Threshold & { workspace: ThresholdNote | null; deal: ThresholdNote | null; value: number; layer: string | null; looser: boolean; stressRemoved: boolean })[] }[] };
+export type ThresholdView = { invalid?: { version: string; path: string; layer: "workspace" | "deal"; value: number; setById: string; setByName: string; setAt: string; reason: string; error: { en: string; fr: string } }[]; policies: { version: string; thresholds: (import("@agir/contracts").Threshold & { workspace: ThresholdNote | null; deal: ThresholdNote | null; value: number; layer: string | null; looser: boolean; stressRemoved: boolean })[] }[] };

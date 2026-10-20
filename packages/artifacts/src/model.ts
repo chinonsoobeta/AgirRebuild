@@ -2,7 +2,7 @@
 // and the inputs that run used, and from nothing else: it never recomputes a
 // verdict, a gate or a metric.
 
-import { THRESHOLDS, checkText, numberFormat, plainTerm, type PolicyChange, tableSourceLabel, type TableSource, FR_ABSENT, CURRENCY_NAMES, FIELD_BY_KEY, placeLabel, type Currency, type EngineInput, type FieldUnit, type Policy, type RunResult, type VerdictCode } from "@agir/contracts";
+import { changeMeta, checkText, numberFormat, plainTerm, type PolicyChange, tableSourceLabel, type TableSource, FR_ABSENT, CURRENCY_NAMES, FIELD_BY_KEY, placeLabel, type Currency, type EngineInput, type FieldUnit, type Policy, type RunResult, type VerdictCode } from "@agir/contracts";
 import { createHash } from "node:crypto";
 import { runWaterfall, heldPartnerReturns, breakeven, canonicalJson, ENGINE_VERSION, type BreakevenEcho, type BreakevenRow } from "@agir/engine";
 import { Formatter, formatValue } from "./format.ts";
@@ -192,7 +192,7 @@ export function customThresholdBlocks(f: Formatter, x: Pick<ArtifactInput,"polic
   if (!standard || !x.standardPolicy) throw new Error("Custom thresholds require the stored standard comparison");
   const changes = x.policyChanges ?? [];
   const rows = changes.map((change,index) => {
-    const threshold = THRESHOLDS[x.policy.version]!.find((threshold) => threshold.path === change.path)!;
+    const threshold = changeMeta(x.policy.version, change);
     const flags = [change.looser && reportText(f.lang,"thresholdLooser"), change.looser && change.lenderCited && reportText(f.lang,"thresholdCited"), change.stressRemoved && reportText(f.lang,"thresholdRemoved")].filter(Boolean).join(" · ");
     return [f.ident(threshold.label[f.lang],`policyChanges.${index}.path`), f.threshold(change.value,threshold.unit,`policyChanges.${index}.value`), f.threshold(change.standard,threshold.unit,`policyChanges.${index}.standard`),
       reportText(f.lang,change.layer === "workspace" ? "thresholdWorkspace" : "thresholdDeal"),
@@ -213,7 +213,7 @@ export function customThresholdBlocks(f: Formatter, x: Pick<ArtifactInput,"polic
   // Base sizing is a warning, so it is not among the stored standard error checks. Its recorded base metric is policy-independent.
   const sizing = x.result.scenarios[0]?.metrics.find((metric) => metric.key === "sizing_dscr");
   if (insured && sizing?.value !== null && sizing?.value !== undefined && sizing.value < x.standardPolicy.baseSizingDscrFloor) {
-    items.push({ tone:"warning", lenderCited: true, text: reportText(f.lang,"failsCmhc",f.run(x.standardPolicy.baseSizingDscrFloor,"x","standardPolicy.baseSizingDscrFloor"),THRESHOLDS[x.policy.version]!.find((threshold) => threshold.path === "baseSizingDscrFloor")!.label[f.lang]) });
+    items.push({ tone:"warning", lenderCited: true, text: reportText(f.lang,"failsCmhc",f.run(x.standardPolicy.baseSizingDscrFloor,"x","standardPolicy.baseSizingDscrFloor"),changeMeta(x.policy.version, { path: "baseSizingDscrFloor" }).label[f.lang]) });
   }
   items.sort((a,b) => Number(Boolean(b.lenderCited))-Number(Boolean(a.lenderCited)));
   return [{ type:"heading", text:reportText(f.lang,"customThresholds") },

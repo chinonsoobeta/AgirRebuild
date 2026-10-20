@@ -139,7 +139,14 @@ export async function thresholdsView(tx: Db, scope: "workspace" | "deal", id: st
   }
   const users = await tx.query<{ id: string; name: string }>(`select id,name from users where id = any($1::uuid[])`, [[...new Set(Object.values(layers).flatMap((versions) => Object.values(versions).flatMap((values) => Object.values(values).map((note) => note.setBy))))]]);
   const names = new Map(users.map((user) => [user.id,user.name]));
-  return { policies: Object.values(POLICIES).map((base) => {
+  // Stored values the policies no longer allow (a draft edited after they were set), including a policy this build no longer has.
+  const invalid = (["workspace", "deal"] as const).flatMap((layer) => Object.entries(layers[layer]).flatMap(([version, values]) => {
+    const base = Object.hasOwn(POLICIES, version) ? POLICIES[version] : undefined;
+    const bad = base ? effectivePolicy(base, layer === "workspace" ? { [version]: values } : {}, layer === "deal" ? { [version]: values } : {}).invalid
+      : Object.entries(values).map(([path, note]) => ({ path, layer, value: note.value, setById: note.setBy, setAt: note.setAt, reason: note.reason, error: { en: "This build has no such policy.", fr: "Cette version n'a pas cette politique." } }));
+    return bad.map((v) => ({ ...v, version, setByName: names.get(v.setById) ?? "—" }));
+  }));
+  return { invalid, policies: Object.values(POLICIES).map((base) => {
     const effective = effectivePolicy(base,layers.workspace,layers.deal);
     return { version: base.version, thresholds: THRESHOLDS[base.version]!.map((threshold) => {
       const workspace = layers.workspace[base.version]?.[threshold.path], deal = layers.deal[base.version]?.[threshold.path];
@@ -437,7 +444,8 @@ export async function createRun(tx: Db, dealId: string) {
   if (!input) throw new HttpError(409, "Underwriting is blocked until review is clear.", { readiness });
   const base = policyFor(input);
   const layers = await policyLayers(tx, dealId);
-  const { policy, changes } = effectivePolicy(base, layers.workspace, layers.deal);
+  const { policy, changes, invalid } = effectivePolicy(base, layers.workspace, layers.deal);
+  if (invalid.length) throw new HttpError(409, `A threshold set for ${base.version} no longer fits this policy: ${invalid.map((v) => `${v.path} (${v.layer})`).join(", ")}. Change or clear it under Thresholds, then run again.`, { invalid });
   const policyHash = sha256(canonicalJson(policy));
   const result = runResult(ENGINE_VERSION,input,policy,policy.custom ? base : undefined);
   const setters = changes.length ? await tx.query<{ id: string; name: string }>(`select id,name from users where id=any($1::uuid[])`, [[...new Set(changes.map((change) => change.setById))]]) : [];

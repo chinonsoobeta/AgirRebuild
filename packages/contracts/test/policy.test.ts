@@ -22,7 +22,7 @@ describe("card 96a stress labels", () => {
   });
 });
 
-import { THRESHOLDS, effectivePolicy, validateThreshold, type PolicyOverrides } from "../src/policy.ts";
+import { THRESHOLDS, changeMeta, effectivePolicy, validateThreshold, type PolicyOverrides } from "../src/policy.ts";
 const version = "rental-hold-insured-draft";
 const entry = (value: number) => ({ value, setBy: "owner-id", setAt: "2026-10-19T12:00:00Z", reason: "Owner credit decision" });
 describe("card 96a owner thresholds", () => {
@@ -62,6 +62,34 @@ describe("card 96a owner thresholds", () => {
     expect(result.changes).toEqual([expect.objectContaining({ path: "gates.dcrAfterRefinanceMin", standard: 1.1, value: 1.08, layer: "deal", setById: "owner-id", looser: true, lenderCited: true, stressRemoved: false })]);
     expect(effectivePolicy(base, workspace, {}).policy.gates.dcrAfterRefinanceMin).toBe(1.05);
     expect(base.gates.dcrAfterRefinanceMin).toBe(1.1);
+  });
+  it("treats values equal to the standard as no override", () => {
+    const base = POLICIES[version]!;
+    const result = effectivePolicy(base, { [version]: { "gates.dcrAfterRefinanceMin": entry(1.1) } }, {});
+    expect(result.policy).toBe(base);
+    expect(result.changes).toEqual([]);
+    expect(result.invalid).toEqual([]);
+  });
+  it("never throws on a stored value a later draft edit no longer allows; it reports it and leaves it out", () => {
+    const base = POLICIES[version]!;
+    const stale = effectivePolicy(base, { [version]: { "gates.removedGateMin": entry(1) } }, {});
+    expect(stale.policy).toBe(base);
+    expect(stale.invalid).toEqual([expect.objectContaining({ path: "gates.removedGateMin", layer: "workspace", value: 1 })]);
+    // A deal value that no longer fits falls back to the workspace value, which still applies.
+    const layered = effectivePolicy(base, { [version]: { "gates.dcrAfterRefinanceMin": entry(1.05) } }, { [version]: { "gates.dcrAfterRefinanceMin": entry(9) } });
+    expect(layered.policy.gates.dcrAfterRefinanceMin).toBe(1.05);
+    expect(layered.changes).toEqual([expect.objectContaining({ layer: "workspace", value: 1.05 })]);
+    expect(layered.invalid).toEqual([expect.objectContaining({ path: "gates.dcrAfterRefinanceMin", layer: "deal", value: 9 })]);
+  });
+  it("records each change's label and unit, so an old run renders after its path is gone", () => {
+    const result = effectivePolicy(POLICIES[version]!, { [version]: { "gates.dcrAfterRefinanceMin": entry(1.05) } }, {});
+    expect(result.changes[0]).toMatchObject({ label: { en: "DCR after refinance", fr: "CCD après refinancement" }, unit: "x" });
+  });
+  it("labels a stored change even when today's policy no longer has its path", () => {
+    expect(changeMeta(version, { path: "gates.dcrAfterRefinanceMin" })).toEqual({ label: { en: "DCR after refinance", fr: "CCD après refinancement" }, unit: "x" });
+    expect(changeMeta(version, { path: "refinanceLimits.select.80.maxLtvPct" }).unit).toBe("%");
+    expect(changeMeta(version, { path: "gates.somethingRemoved" })).toEqual({ label: { en: "gates.somethingRemoved", fr: "gates.somethingRemoved" }, unit: "" });
+    expect(changeMeta(version, { path: "x", label: { en: "Stored", fr: "Stocké" }, unit: "x" }).label.en).toBe("Stored");
   });
   it("flags zero stresses and regenerates actual stress labels", () => {
     const result = effectivePolicy(POLICIES[version]!, { [version]: { "stresses.rate.rateBps": entry(0), "stresses.combined.rateBps": entry(100) } }, {});

@@ -3,7 +3,7 @@ import { getConnInfo } from "@hono/node-server/conninfo";
 import { randomBytes } from "node:crypto";
 import { getCookie, setCookie, deleteCookie } from "hono/cookie";
 import { z } from "zod";
-import { THRESHOLDS, validateThreshold, COUNTRIES, CURRENCIES, FIELDS, FIELD_GROUP_LABELS, METRICS, POLICIES, POLICY_V1, PROVINCE_CODES, REVIEW_MODES, runPolicy, type EngineInput, type Policy } from "@agir/contracts";
+import { validateThreshold, COUNTRIES, CURRENCIES, FIELDS, FIELD_GROUP_LABELS, METRICS, POLICIES, POLICY_V1, PROVINCE_CODES, REVIEW_MODES, runPolicy, type EngineInput, type Policy } from "@agir/contracts";
 import { asUser, type BlobStore, type Db } from "@agir/db";
 import { breakeven, DRIVERS, driversFor, SALE_DRIVERS, EngineInputError, explore, grid, tornado, type DriverKey, type Shock } from "@agir/engine";
 import { canonicalItem, itemFold, kindOf } from "@agir/extraction";
@@ -252,8 +252,8 @@ export function createApp({ db, store, secureCookies, demoSignIn = false, trustP
       await as(c, async (tx) => {
         const [member] = await tx.query<{ role: string }>(`select m.role from workspace_members m ${scope === "deal" ? "join deals d on d.workspace_id=m.workspace_id" : ""} where ${scope === "workspace" ? "m.workspace_id" : "d.id"}=$1 and m.user_id=agir_uid()`, [id]);
         if (member?.role !== "owner") throw new HttpError(403,"Your role in this workspace does not allow this action");
-        const threshold = Object.hasOwn(THRESHOLDS,body.policyVersion) ? THRESHOLDS[body.policyVersion]!.find((threshold) => threshold.path === body.path) : undefined;
-        const error = validateThreshold(body.policyVersion,body.path,body.value === null ? threshold?.standard : body.value);
+        // Clearing is always allowed, so a value a later draft edit no longer accepts can still be removed.
+        const error = body.value === null ? null : validateThreshold(body.policyVersion,body.path,body.value);
         if (error) throw new HttpError(422,error.en,{fr:error.fr});
         await tx.query(`select fn_set_policy_value($1,$2,$3,$4,$5,$6)`, [scope,id,body.policyVersion,body.path,body.value,body.reason]);
       });

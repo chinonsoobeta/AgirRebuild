@@ -363,6 +363,21 @@ describe("card 96c thresholds", () => {
     expect(state.nodes.some((node) => node.tag === "input" && node.props.name === "reason" && node.props.required === true)).toBe(true);
     expect(text(html)).toContain("Workspace value");
   });
+  it("lists a stored value the policy no longer allows, and lets the owner clear it in its own layer", () => {
+    setup();
+    state.thresholds.invalid = [{ version: "rental-hold-insured-draft", path: "gates.removedGateMin", layer: "deal", value: 1, setById: "owner", setByName: "Dana Analyst", setAt: "2026-10-19T12:00:00Z", reason: "Set before a draft edit", error: { en: "This policy path cannot be changed.", fr: "Ce paramètre de politique ne peut pas être modifié." } }];
+    state.role = "admin";
+    let html = render(createElement(Thresholds, { scope: "deals", id: "deal" }));
+    expect(text(html)).toContain("no longer fit");
+    expect(text(html)).toContain("gates.removedGateMin");
+    expect(html).not.toContain('value="clear-invalid"');
+    state.role = "owner";
+    html = render(createElement(Thresholds, { scope: "deals", id: "deal" }));
+    expect(html).toContain('value="clear-invalid"');
+    html = render(createElement(Thresholds, { scope: "workspaces", id: "ws" }));
+    expect(html).not.toContain('value="clear-invalid"');
+    state.thresholds.invalid = [];
+  });
   it("renders the standard verdict only for custom runs, with cited failures first", () => {
     const standard: any = { policyVersion: "rental-hold-insured-draft", verdict: { code: "REJECT", gates: [{ key: "development_spread", label: "Development spread", status: "failed", threshold: 100, unit: "bps" }, { key: "dcr_after_refinance", label: "Coverage after refinance (DCR)", status: "failed", threshold: 1.1, unit: "x" }] }, checks: [] };
     expect(render(createElement(StandardVerdict, { custom: false, standard }))).toBe("");

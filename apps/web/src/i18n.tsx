@@ -14,6 +14,8 @@ const s = (n: number, one: string, many: string) => (n === 1 ? one : many);
 
 const EN = {
   "threshold.citedFailures": "Fails cited lender rules under Agir's standard",
+  "threshold.invalid": "These saved values no longer fit the policy, which changed after they were set. Runs are refused until each is changed or cleared.",
+  "threshold.layerDeal": "deal", "threshold.layerWorkspace": "workspace",
   "threshold.title": "Thresholds", "threshold.strategy": "Strategy", "threshold.name": "Threshold", "threshold.standard": "Agir standard",
   "threshold.workspace": "Workspace value", "threshold.yours": "Your value", "threshold.looser": "Looser than Agir's standard",
   "threshold.cited": "Looser than CMHC's cited rule", "threshold.removed": "Stress removed", "threshold.reason": "Reason (required)",
@@ -600,6 +602,8 @@ export type Key = keyof typeof EN;
 
 const FR: Record<Key, Entry> = {
   "threshold.citedFailures": "Règles citées du prêteur non respectées selon le standard d'Agir",
+  "threshold.invalid": "Ces valeurs enregistrées ne correspondent plus à la politique, modifiée depuis. Les analyses sont refusées tant que chacune n'est pas modifiée ou effacée.",
+  "threshold.layerDeal": "projet", "threshold.layerWorkspace": "espace de travail",
   "threshold.title": "Seuils", "threshold.strategy": "Stratégie", "threshold.name": "Seuil", "threshold.standard": "Standard d'Agir",
   "threshold.workspace": "Valeur de l'espace de travail", "threshold.yours": "Votre valeur", "threshold.looser": "Plus souple que le standard d'Agir",
   "threshold.cited": "Plus souple que la règle citée de la SCHL", "threshold.removed": "Stress retiré", "threshold.reason": "Motif (obligatoire)",

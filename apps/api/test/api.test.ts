@@ -3135,5 +3135,25 @@ describe("card 96b owner thresholds", () => {
     expect(page.json.standardFailures.fr.join(" ")).toContain("SCHL");
     expect(page.json.standardFailures.fr.join(" ")).not.toContain("Fails CMHC");
   });
+  test("card 96 audit: a value equal to the standard is no override; a stale stored value blocks runs but can be seen and cleared", async () => {
+    expect((await set("workspaces", workspace, 1.5, "Back to the standard multiple")).status).toBe(200);
+    const plain = await call(owner, "POST", `/api/deals/${id}/runs`);
+    expect(plain.status).toBe(200);
+    const stored = (await db.query<any>(`select policy_hash,input_snapshot from runs where id=$1`, [plain.json.id]))[0];
+    expect(stored.policy_hash).toBe(POLICY_HASHES[version]);
+    expect(stored.input_snapshot.standardPolicy).toBeUndefined();
+    // A path that a later draft edit removed: the stored value stays, but no longer fits the policy.
+    await db.query(`update deals set policy_overrides = jsonb_set(policy_overrides, '{policy-v1}', coalesce(policy_overrides->'policy-v1','{}'::jsonb) || '{"gates.removedGateMin":{"value":1,"setBy":"00000000-0000-0000-0000-000000000000","setAt":"2026-10-19T12:00:00Z","reason":"Set before a draft edit"}}'::jsonb, true) where id=$1`, [id]);
+    expect((await call(owner, "GET", `/api/deals/${id}`)).status).toBe(200);
+    const view = await call(viewer, "GET", `/api/deals/${id}/thresholds`);
+    expect(view.status).toBe(200);
+    expect(view.json.invalid).toEqual([expect.objectContaining({ version, path: "gates.removedGateMin", layer: "deal", value: 1 })]);
+    const blocked = await call(owner, "POST", `/api/deals/${id}/runs`);
+    expect(blocked.status).toBe(409);
+    expect(blocked.json.error).toContain("gates.removedGateMin");
+    expect((await call(owner, "POST", `/api/deals/${id}/thresholds`, { policyVersion: version, path: "gates.removedGateMin", value: null, reason: "Clear a value the policy no longer has" })).status).toBe(200);
+    expect((await call(viewer, "GET", `/api/deals/${id}/thresholds`)).json.invalid).toEqual([]);
+    expect((await call(owner, "POST", `/api/deals/${id}/runs`)).status).toBe(200);
+  });
 
 });
