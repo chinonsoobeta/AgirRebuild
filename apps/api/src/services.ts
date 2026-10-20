@@ -375,7 +375,7 @@ export async function reviewView(tx: Db, dealId: string, asOf: string) {
       documentId: r.document_id, document_name: r.document_name, raw: r.raw, value: r.value, location: r.location, context: r.context, note: r.note, figureId,
       label: l ? { fieldKey: l.field_key, itemKey: l.item_key || null, by: l.by, at: l.created_at } : null,
       // Card 112: fields a person might label it with. Never stored or read; a click saves an ordinary label.
-      suggestions: l || !figureId || r.value === null ? [] : suggestFields({ raw: r.raw, context: r.context, note: r.note, unitSeen: r.unit_seen }),
+      suggestions: l || !figureId || r.value === null ? [] : suggestFields({ raw: r.raw, context: r.context, note: r.note, unitSeen: r.unit_seen, value: r.value }),
     };
   });
   // Up to three unlabelled figures that may hold a missing input: those it ranks first, then the others, each in the table's order.

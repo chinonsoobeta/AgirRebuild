@@ -6508,3 +6508,17 @@ describe("card 112: ranked field suggestions for a figure the reader could not n
     expect(s("Construction, design, land and contingency: $900,000", "$900,000")).toEqual(one);
   });
 });
+
+describe("card 112 audit: a suggestion is a label the boundary would keep", () => {
+  test("a small bare number is never suggested as a dollar field", () => {
+    const io = suggestFields({ raw: "18", context: "Base: Bank no-principal months 18", note: "No field matches this label", unitSeen: null, value: 18 });
+    expect(io).not.toContain("senior_loan_amount");
+    expect(suggestFields({ raw: "24", context: "Prêt : mois sans capital 24", note: "No field matches this label", unitSeen: null, value: 24 })).not.toContain("senior_loan_amount");
+    expect(suggestFields({ raw: "680000", context: "Base: buying the land 680000", note: "No budget line matches this label", unitSeen: null, value: 680000 })[0]).toBe("land_cost");
+  });
+
+  test("a figure outside a field's bounds is not suggested for it", () => {
+    expect(suggestFields({ raw: "250%", context: "Settled occupancy 250%", note: "No field matches this label", unitSeen: "%", value: 250 })).not.toContain("stabilized_occupancy_pct");
+    expect(suggestFields({ raw: "95%", context: "Settled occupancy 95%", note: "No field matches this label", unitSeen: "%", value: 95 })).toContain("stabilized_occupancy_pct");
+  });
+});

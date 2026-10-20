@@ -179,10 +179,11 @@ const LOOKS_LIKE = /^Looks like (.+), but the number is not written as /;
  * by how many of its words appear (two fitting concepts are both suggested). The figure's unit must fit as a label's does, and an
  * itemized field needs an item name, so it is never suggested. Ties keep the order of FIELDS.
  */
-export function suggestFields(f: { raw: string; context: string; note: string | null; unitSeen?: string | null }): string[] {
+export function suggestFields(f: { raw: string; context: string; note: string | null; unitSeen?: string | null; value?: number | null }): string[] {
   const looks = LOOKS_LIKE.exec(f.note ?? "")?.[1];
   if (!looks && !NO_MATCH_NOTES.includes(f.note ?? "")) return [];
-  const unitSeen = f.unitSeen !== undefined ? f.unitSeen : (tokenize(f.raw, detectFormat(f.raw))[0]?.unit ?? null);
+  const token = f.unitSeen === undefined || f.value === undefined ? tokenize(f.raw, detectFormat(f.raw))[0] : undefined;
+  const unitSeen = f.unitSeen !== undefined ? f.unitSeen : (token?.unit ?? null);
   // The figure's own clause names it best, as for the reader: the words before it, or after it when it leads its clause.
   // Words elsewhere in its context count too, for less, and an exclusion counts only in the clause.
   const at = f.context.indexOf(f.raw);
@@ -197,7 +198,11 @@ export function suggestFields(f: { raw: string; context: string; note: string | 
     if (!c.words.some((w) => w.test(text)) || c.exclude.test(clause)) continue;
     score.set(c.fieldKey, (score.get(c.fieldKey) ?? 0) + 10 * count(c, clause) + count(c, text));
   }
-  return FIELDS.filter((d) => score.has(d.key) && d.extractable && !d.itemized && labelFits(d.unit, unitSeen))
+  // Audit: a suggestion is a label the boundary would keep. A value outside a field's bounds is not offered for it, and a small bare number
+  // ("months 18") is not offered as dollars, although a person may still label it so.
+  const value = f.value !== undefined ? f.value : (token?.value ?? null);
+  const fits = (d: (typeof FIELDS)[number]) => labelFits(d.unit, unitSeen) && (value === null || !outsideBounds(d, value)) && !(unitSeen === null && d.unit.startsWith("$") && value !== null && Math.abs(value) < 1000);
+  return FIELDS.filter((d) => score.has(d.key) && d.extractable && !d.itemized && fits(d))
     .sort((a, b) => score.get(b.key)! - score.get(a.key)!)
     .slice(0, 3)
     .map((d) => d.key);
