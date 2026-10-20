@@ -8,6 +8,7 @@
 // Every run stores the policy it ran under, so editing a draft makes its runs stale but never unreplayable.
 
 import type { EngineInput } from "./results.ts";
+import { STRESS } from "./fr.ts";
 
 export type StressPreset = {
   key: string;
@@ -70,6 +71,8 @@ export type Policy = {
   version: string;
   /** A draft: its thresholds are proposals that credit has not signed. */
   draft?: true;
+  /** Owner-set thresholds; the strategy version remains unchanged. */
+  custom?: true;
   gates: Readonly<Record<string, number>>;
   gateKeys?: readonly string[];
   maxLtcPct: number;
@@ -168,4 +171,129 @@ export function policyFor(input: EngineInput): Policy {
   if ((input.refinance?.mliSelectPoints ?? 0) >= 50) return RENTAL_HOLD_INSURED_DRAFT;
   const units = input.revenue.reduce((n, r) => n + r.units, 0);
   return units <= 6 || (input.refinance?.termYears ?? 0) >= 10 ? RENTAL_HOLD_INSURED_STANDARD_DRAFT : RENTAL_HOLD_INSURED_STANDARD_SHORT_DRAFT;
+}
+
+/** Render the actual stress sizes. Unchanged presets retain their existing labels exactly. */
+export function stressLabel(preset: StressPreset, lang: "en" | "fr" = "en", standard: StressPreset = preset): string {
+  const labels: Record<string, [string, string, string]> = {
+    exitCapBps: ["exit cap", "taux de sortie", "bps"], costPct: ["costs", "coûts", "%"],
+    rateBps: ["rate", "taux", "bps"], rentPct: ["rent", "loyers", "%"],
+    occupancyPts: ["occupancy", "occupation", "pts"], expensePts: ["operating costs", "charges d'exploitation", "pts"],
+    pricePct: ["prices", "prix", "%"], absorptionPct: ["absorption", "rythme de vente", "%"],
+    presalesPts: ["presales", "préventes", "pts"], constructionMonths: ["construction", "construction", "months"],
+  };
+  const idx = lang === "fr" ? 1 : 0;
+  const sizes = Object.entries(preset).filter((entry): entry is [string, number] => typeof entry[1] === "number");
+  const signed = (value: number) => `${value > 0 ? "+" : ""}${String(value).replace(".", lang === "fr" ? "," : ".")}`;
+  if (preset.key === "combined") {
+    if (sizes.every(([field, value]) => standard[field as keyof StressPreset] === value)) return lang === "fr" ? "Combiné" : "Combined";
+    const pieces = sizes.map(([field, value]) => {
+      const [en, fr, unit] = labels[field]!;
+      const suffix = unit === "%" ? (lang === "fr" ? " %" : "%") : ` ${lang === "fr" ? (unit === "bps" ? "pb" : unit === "months" ? "mois" : unit) : unit}`;
+      return `${idx ? fr : en} ${signed(value)}${suffix}`;
+    });
+    return `${lang === "fr" ? "Combiné : " : "Combined: "}${pieces.join(", ")}`;
+  }
+  const template = STRESS[preset.key]?.[idx] ?? preset.label;
+  return sizes.length ? template.replace(/[+-]\d+(?:[.,]\d+)?/, signed(sizes[0]![1])) : template;
+}
+
+export type Threshold = {
+  path: string; label: { en: string; fr: string }; unit: string; standard: number;
+  min: number; max: number; integer: boolean; looserDirection: "lower" | "higher" | "magnitude"; lenderCited: boolean;
+};
+export type PolicyValue = { value: number; setBy: string; setAt: string; reason: string };
+export type PolicyOverrides = Record<string, Record<string, PolicyValue>>;
+export type PolicyChange = { path: string; value: number; standard: number; layer: "workspace" | "deal"; setById: string; setAt: string; reason: string; looser: boolean; lenderCited: boolean; stressRemoved: boolean; setBy?: string };
+
+// The owner's inclusive bounds, approved 2026-10-19. No unlisted field is inferred.
+const THRESHOLD_RULES: Record<string, [string, string, string, number, number, boolean]> = {
+  equityMultipleMin: ["Equity multiple", "Multiple des fonds propres", "x", 0, 5, false],
+  stressedEquityMultipleMin: ["Stressed equity multiple", "Multiple des fonds propres sous stress", "x", 0, 5, false],
+  stressedUnrealizedMultipleMin: ["Stressed unrealized multiple", "Multiple non réalisé sous stress", "x", 0, 5, false],
+  stressedSizingDscrMin: ["Stressed sizing DCR", "CCD de dimensionnement sous stress", "x", .5, 3, false],
+  dcrAfterRefinanceMin: ["DCR after refinance", "CCD après refinancement", "x", .5, 3, false],
+  baseSizingDscrFloor: ["Base sizing DCR floor", "Plancher du CCD de dimensionnement de base", "x", .5, 3, false],
+  profitOnCostMinPct: ["Profit on cost", "Profit sur coût", "%", -50, 100, false],
+  profitOnCostForSaleMinPct: ["Profit on cost, units sold", "Profit sur coût, logements vendus", "%", -50, 100, false],
+  marginOnRevenueMinPct: ["Margin on sales revenue", "Marge sur le revenu des ventes", "%", -50, 100, false],
+  stressedProfitOnCostForSaleMinPct: ["Stressed profit on cost", "Profit sur coût sous stress", "%", -50, 100, false],
+  developmentSpreadMinBps: ["Development spread", "Écart de développement", "bps", -500, 1000, true],
+  maxLtcPct: ["Maximum loan-to-cost", "Ratio prêt-coût maximal", "%", 0, 100, false],
+  maxFailedGatesForConditions: ["Failed gates allowed for conditions", "Critères non respectés admis avec conditions", "gates", 0, 0, true],
+  agreementTolerancePct: ["Agreement tolerance", "Tolérance de concordance", "%", 0, 0, false],
+  maxLtvPct: ["Maximum loan-to-value", "Ratio prêt-valeur maximal", "%", 0, 100, false],
+  maxAmortYears: ["Maximum amortization", "Amortissement maximal", "years", 1, 50, true],
+  minUnits: ["Minimum units", "Nombre minimal de logements", "units", 1, 100, true],
+  exitCapBps: ["Exit cap shock", "Choc du taux de sortie", "bps", 0, 300, true],
+  rateBps: ["Interest rate shock", "Choc du taux d'intérêt", "bps", 0, 500, true],
+  costPct: ["Cost shock", "Choc des coûts", "%", 0, 50, false],
+  expensePts: ["Operating expense shock", "Choc des charges d'exploitation", "pts", 0, 30, false],
+  rentPct: ["Rent shock", "Choc des loyers", "%", -50, 0, false],
+  pricePct: ["Price shock", "Choc des prix", "%", -50, 0, false],
+  occupancyPts: ["Occupancy shock", "Choc de l'occupation", "pts", -50, 0, false],
+  absorptionPct: ["Absorption shock", "Choc du rythme de vente", "%", -90, 0, false],
+  presalesPts: ["Presales shock", "Choc des préventes", "pts", -100, 0, false],
+  constructionMonths: ["Construction delay", "Retard de construction", "months", 0, 36, true],
+};
+function thresholdPaths(policy: Policy): string[] {
+  return [...Object.keys(policy.gates).map((key) => `gates.${key}`), "maxLtcPct", "baseSizingDscrFloor", "maxFailedGatesForConditions", "agreementTolerancePct",
+    ...policy.stresses.flatMap((stress) => Object.entries(stress).filter(([, value]) => typeof value === "number").map(([field]) => `stresses.${stress.key}.${field}`)),
+    ...(policy.refinanceLimits ? ["refinanceLimits.minUnits", ...["maxLtvPct", "maxAmortYears"].flatMap((field) => [`refinanceLimits.standard.${field}`, ...policy.refinanceLimits!.select.map((tier) => `refinanceLimits.select.${tier.minPoints}.${field}`)])] : [])];
+}
+function thresholdLocation(policy: Policy, path: string): { object: Record<string, unknown>; field: string } {
+  const parts = path.split(".");
+  if (parts[0] === "stresses") return { object: policy.stresses.find((stress) => stress.key === parts[1])! as unknown as Record<string, unknown>, field: parts[2]! };
+  if (parts[0] === "refinanceLimits" && parts[1] === "select") return { object: policy.refinanceLimits!.select.find((tier) => tier.minPoints === Number(parts[2]))! as unknown as Record<string, unknown>, field: parts[3]! };
+  let object = policy as unknown as Record<string, unknown>;
+  for (const part of parts.slice(0, -1)) object = object[part] as Record<string, unknown>;
+  return { object, field: parts.at(-1)! };
+}
+export const THRESHOLDS: Readonly<Record<string, readonly Threshold[]>> = Object.fromEntries(Object.values(POLICIES).map((policy) => [policy.version, thresholdPaths(policy).map((path): Threshold => {
+  const field = path.split(".").at(-1)!;
+  const rule = THRESHOLD_RULES[field];
+  if (!rule) throw new Error(`Unlisted threshold: ${policy.version}/${path}`);
+  const [en, fr, unit, min, max, integer] = rule;
+  const location = thresholdLocation(policy, path);
+  const standard = location.object[location.field] as number;
+  const stress = path.startsWith("stresses.");
+  const prefix = stress ? `${path.split(".")[1]}: ` : path.includes(".select.") ? `MLI Select ${path.split(".")[2]}: ` : path.includes(".standard.") ? "MLI Standard: " : "";
+  const lenderCited = path.startsWith("refinanceLimits.") || (policy.version.startsWith("rental-hold-insured") && ["gates.dcrAfterRefinanceMin", "baseSizingDscrFloor"].includes(path));
+  return { path, label: { en: prefix + en, fr: (stress ? `${STRESS[path.split(".")[1]!]?.[1].replace(/\s*[+-]\d.*$/, "")}: ` : prefix) + fr }, unit, standard, min,
+    max: field === "maxFailedGatesForConditions" ? Object.keys(policy.gates).length : field === "agreementTolerancePct" ? standard : max,
+    integer, lenderCited, looserDirection: stress ? "magnitude" : field === "agreementTolerancePct" || field.startsWith("max") ? "higher" : "lower" };
+})]));
+
+export function validateThreshold(version: string, path: string, value: unknown): { en: string; fr: string } | null {
+  if (!Object.hasOwn(POLICIES, version)) return { en: "Unknown policy version.", fr: "Version de politique inconnue." };
+  const threshold = THRESHOLDS[version]!.find((threshold) => threshold.path === path);
+  if (!threshold) return { en: "This policy path cannot be changed.", fr: "Ce paramètre de politique ne peut pas être modifié." };
+  if (typeof value !== "number" || !Number.isFinite(value)) return { en: "Enter a finite number.", fr: "Saisissez un nombre fini." };
+  if (threshold.integer && !Number.isInteger(value)) return { en: "Enter a whole number.", fr: "Saisissez un nombre entier." };
+  if (path.startsWith("stresses.") && value !== 0 && Math.sign(value) !== Math.sign(threshold.standard)) return { en: "Keep the standard stress direction, or enter zero to remove it.", fr: "Conservez le sens du stress standard, ou saisissez zéro pour le retirer." };
+  if (path === "agreementTolerancePct" && value > threshold.standard) return { en: "Agreement tolerance may only get stricter.", fr: "La tolérance de concordance peut seulement être resserrée." };
+  if (value < threshold.min || value > threshold.max) return { en: "This value is outside the allowed range.", fr: "Cette valeur est hors de la plage autorisée." };
+  return null;
+}
+
+export function effectivePolicy(base: Policy, workspace: PolicyOverrides = {}, deal: PolicyOverrides = {}): { policy: Policy; changes: PolicyChange[] } {
+  const workspaceValues = workspace[base.version] ?? {}, dealValues = deal[base.version] ?? {};
+  const values = { ...workspaceValues, ...dealValues };
+  if (Object.keys(values).length === 0) return { policy: base, changes: [] };
+  const policy = structuredClone(base);
+  policy.custom = true;
+  const changes: PolicyChange[] = [];
+  for (const [path, note] of Object.entries(values)) {
+    const error = validateThreshold(base.version, path, note.value);
+    if (error) throw new Error(error.en);
+    const threshold = THRESHOLDS[base.version]!.find((threshold) => threshold.path === path)!;
+    const location = thresholdLocation(policy, path), original = thresholdLocation(base, path);
+    const standard = original.object[original.field] as number;
+    location.object[location.field] = note.value;
+    if (note.value !== standard) changes.push({ path, value: note.value, standard, layer: Object.hasOwn(dealValues, path) ? "deal" : "workspace", setById: note.setBy, setAt: note.setAt, reason: note.reason,
+      looser: threshold.looserDirection === "magnitude" ? Math.abs(note.value) < Math.abs(standard) : threshold.looserDirection === "lower" ? note.value < standard : note.value > standard,
+      lenderCited: threshold.lenderCited, stressRemoved: path.startsWith("stresses.") && note.value === 0 });
+  }
+  for (const stress of policy.stresses) if (changes.some((change) => change.path.startsWith(`stresses.${stress.key}.`))) stress.label = stressLabel(stress, "en", base.stresses.find((s) => s.key === stress.key));
+  return { policy, changes };
 }

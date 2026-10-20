@@ -168,6 +168,8 @@ export type LedgerRow = {
 };
 
 export type RunResult = {
+  /** Present only for a custom policy: the separate verdict and errors under the stored standard. */
+  standard?: { policyVersion: string; verdict: Verdict; checks: Check[] };
   engineVersion: string;
   policyVersion: string;
   /** Base case first, then each stress. */
