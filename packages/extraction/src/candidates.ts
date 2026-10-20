@@ -1,7 +1,7 @@
 import { FIELD_BY_KEY, OUTPUT_LIKE_PHRASES } from "@agir/contracts";
 import { detectFormat, normalizeText, SF_PER_M2, tokenize, unitTypesIn, wholeUnitType, type CurrencyCode, type DocumentFormat, type NumberToken } from "@agir/numbers";
 import type { Cell, NormalizedDocument, Table } from "./document.ts";
-import { BASIS_AFTER_RE, CREDIT_NOTE, DEPOSIT_NOTE, DEPOSIT_RE, LTV_BASIS, canonicalItem, costSentence, currencyOf, flagRead, flagSentence, hasPhrase, isExitCapLabel, isPlainRentLabel, loanNameOnly, loanTerm, mapToken, normalizeLabel, OLD_SHEET_RE, rankScope, SCENARIO_SHEET_NOTE, SCENARIO_SHEET_RE, SUPERSEDED_LABEL_NOTE, scopeIn, scopesIn, withCurrency, type MapOptions, type Mapped, type Scope } from "./mapping.ts";
+import { BASIS_AFTER_RE, CREDIT_NOTE, REPLACED_LOAN, DEPOSIT_NOTE, DEPOSIT_RE, LTV_BASIS, canonicalItem, costSentence, currencyOf, flagRead, flagSentence, hasPhrase, isExitCapLabel, isPlainRentLabel, loanNameOnly, loanTerm, mapToken, normalizeLabel, OLD_SHEET_RE, rankScope, SCENARIO_SHEET_NOTE, SCENARIO_SHEET_RE, SUPERSEDED_LABEL_NOTE, scopeIn, scopesIn, withCurrency, type MapOptions, type Mapped, type Scope } from "./mapping.ts";
 
 /** One value found in one document, with where it came from and why it was (or was not) mapped. */
 export type Candidate = {
@@ -271,6 +271,9 @@ function sentences(text: string): { text: string; start: number }[] {
 }
 
 const fold = (t: string) => t.toLowerCase().normalize("NFD").replace(/[̀-ͯ]/g, "");
+const REPLACED_LOAN_AFTER_RE = new RegExp(String.raw`^\s+${REPLACED_LOAN}`);
+// "Replaces the construction loan estimate of $4,600,000" replaces a figure.
+const FIGURE_NOUN_RE = /\b(?:estimates?|amounts?|figures?|quotes?|budgets?|rates?|numbers?|costs?|montants?|estimations?|taux|chiffres?|couts?|soumissions?)\b/;
 const NOT_PART_NOTE = "Marked as not part of this deal";
 // "taxes excluded" and "excluded: HST" describe an amount's basis, not the row.
 const TAX_WORDS = String.raw`(?:taxes?|hst|gst|pst|qst|tps|tvq|tva|vat|sales tax)`;
@@ -636,7 +639,9 @@ function readSentence(sentence: { text: string; start: number }, para0: Paragrap
     const between = text.slice(a.end, b.start);
     return /^\s*(?:→|->)\s*$/.test(between) || (/^\s+(?:to|à)\s*$/i.test(between) && CHANGE_FROM_RE.test(text.slice(0, a.start)));
   });
-  const replaced = tokens.filter((t) => revised.includes(t) || (replacing && t.start >= replacing.index + replacing[0].length) || (replacedBy && t.end <= replacedBy.index));
+  // When the verb replaces a loan ("replaces the construction loan at month 28"), the figures after it are read normally.
+  const loanReplaced = (t: NumberToken) => { const between = folded.slice(replacing!.index + replacing![0].length, t.start); return REPLACED_LOAN_AFTER_RE.test(between) && !FIGURE_NOUN_RE.test(between); };
+  const replaced = tokens.filter((t) => revised.includes(t) || (replacing && t.start >= replacing.index + replacing[0].length && !loanReplaced(t)) || (replacedBy && t.end <= replacedBy.index));
   for (const t of replaced) other(t, "line:prose", "A later figure in the same sentence replaces this one");
   tokens = tokens.filter((t) => !replaced.includes(t));
   // A rate that an adjustment follows ("6.65% base less a 25 bps buy-down") is the figure before it, not the loan's rate.

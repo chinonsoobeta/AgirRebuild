@@ -5367,3 +5367,60 @@ describe("card 100: a loan's rate written with a qualifier, as \"interest\", or 
     expect(pick(read("LP preferred return: 8%"))).toEqual([["preferred_return_pct", 8]]);
   });
 });
+
+describe("card 101: the take-out's month, written as a timing label or as a loan that replaces another", () => {
+  const read = (...lines: string[]) => extractCandidates({ kind: "pdf", lines: lines.map((text, i) => ({ text, location: `page 1, line ${i + 1}` })), tables: [], pageCount: 1, needsOcr: false, fullText: lines.join("\n") });
+  const pick = (r: ReturnType<typeof read>) => r.candidates.map((c) => [c.fieldKey, c.value]);
+  const HEAD = "Construction loan: $5,000,000";
+  const REPLACED = "A later figure in the same sentence replaces this one";
+  test.each([
+    ["Refinance in month 28.", 28],
+    ["A take-out loan repays the construction loan in month 28.", 28],
+    ["The permanent loan replaces the construction facility at month 28.", 28],
+    ["Le prêt permanent remplace le prêt de construction au mois 28.", 28],
+    ["The take-out mortgage will replace the interim loan in month 30.", 30],
+    ["A refinance loan replaces our bridge loan at month 26.", 26],
+    ["Le financement permanent remplace le prêt intérimaire au mois 30.", 30],
+    ["Le prêt de reprise remplacera le financement temporaire au mois 26.", 26],
+    ["Take-out month: 24 months", 24],
+    ["Refinance closing month: 30 months", 30],
+    ["Take-out timing: 24 months", 24],
+    ["Mois de la reprise : 24 mois", 24],
+    ["Refi date: month 26", 26],
+    ["Permanent loan timing: 22 months", 22],
+    ["Moment du refinancement : 26 mois", 26],
+    ["Date prévue du refinancement : mois 30", 30],
+  ])("the refinance month: %s", (line, month) => expect(pick(read(HEAD, line))).toEqual([["senior_loan_amount", 5000000], ["refinance_month", month]]));
+  test.each([
+    "Take-out loan term: 24 months", "Refinance interest-only period: 24 months", "Take-out IO months: 24 months", "Take-out rate lock: 6 months",
+    "Refinance maturity date: 60 months", "Durée du refinancement : 24 mois", "Échéance de la reprise : 60 mois", "Période de reprise : 24 mois",
+    "Lease-up months before refinance: 12 months", "Date de reprise des travaux : 18 mois",
+    "A new construction loan replaces the bridge loan at month 3.", "Le prêt permanent remplace le prêt de construction.",
+  ])("not a refinance month: %s", (line) => expect(read(HEAD, line).candidates.some((c) => c.fieldKey === "refinance_month")).toBe(false));
+  test("a figure-like noun after the replaced loan keeps the replace rule", () => {
+    const r = read(HEAD, "Our updated lender quote replaces the construction loan estimate of $4,600,000.");
+    expect(pick(r)).toEqual([["senior_loan_amount", 5000000]]);
+    expect(r.other.find((o) => o.value === 4600000)?.note).toBe(REPLACED);
+  });
+  test("a permanent loan that replaces another names no figure by itself", () => expect(pick(read(HEAD, "Le prêt permanent remplace le prêt de construction."))).toEqual([["senior_loan_amount", 5000000]]));
+  test("a refinance amortization stays the refinance amortization", () => expect(pick(read(HEAD, "Refinance amortization: 30 years"))).toEqual([["senior_loan_amount", 5000000], ["refinance_amort_years", 30]]));
+  test("a replacement loan is the take-out loan; the construction loan stays senior", () => {
+    expect(pick(read(HEAD, "Replacement loan: $3,200,000", "Replacement interest: 5.40%", "Replacement amortization: 30 years")))
+      .toEqual([["senior_loan_amount", 5000000], ["refinance_amount", 3200000], ["refinance_rate_pct", 5.4], ["refinance_amort_years", 30]]);
+    expect(pick(read(HEAD, "Replacement mortgage: $3,200,000", "Replacement rate: 5.40%"))).toEqual([["senior_loan_amount", 5000000], ["refinance_amount", 3200000], ["refinance_rate_pct", 5.4]]);
+    expect(pick(read("Prêt de construction : 5 000 000 $", "Prêt de remplacement : 3 200 000 $", "Financement de remplacement, taux : 5,40 %")))
+      .toEqual([["senior_loan_amount", 5000000], ["refinance_amount", 3200000], ["refinance_rate_pct", 5.4]]);
+  });
+  test.each(["Replacement reserve: $250 per unit", "Replacement cost: $6,100,000", "Roof replacement: $90,000", "Remplacement des fenêtres : 80 000 $", "Réserve de remplacement : 300 $ par logement"])("not the take-out loan: %s", (line) => {
+    expect(read(HEAD, line).candidates.some((c) => /^refinance_/.test(c.fieldKey ?? ""))).toBe(false);
+  });
+  test("a figure that replaces another figure keeps today's rule", () => {
+    const r = read("Revised hard cost $1,710,000 replaces our earlier $1,560,000.");
+    expect(pick(r)).toEqual([["hard_cost", 1710000]]);
+    expect(r.other.find((o) => o.value === 1560000)?.note).toBe(REPLACED);
+    const fr = read("Le coût de construction révisé de 1 710 000 $ remplace notre montant précédent de 1 560 000 $.");
+    expect(fr.other.find((o) => o.value === 1560000)?.note).toBe(REPLACED);
+    const mezz = read("the mezz term sheet came in at 1,150 bps, that replaces the 11% I mentioned");
+    expect(mezz.other.find((o) => o.value === 11)?.note).toBe(REPLACED);
+  });
+});

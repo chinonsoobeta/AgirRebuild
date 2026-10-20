@@ -40,7 +40,7 @@ export type Scope = "senior" | "mezzanine" | "refinance";
 
 const SCOPE_WORDS: Record<Scope, RegExp> = {
   mezzanine: /\b(mezzanine|mezz|second mortgage|2nd mortgage|second charge|second[- ]ranking|second[- ]position|junior|subordinate loan|deuxieme rang|deuxieme hypotheque|pret de second rang|second rang|(?:mic|mortgage investment corporation) (?:second|2nd)|private second|(?<=\b(?:mortgages?|loans?|charges?|lenders?|hypotheques?|prets?)\b.{0,80})(?:the\s+)?second(?=\s*(?:is\b|:|\$))|^\s*second\s*$|preteur prive de second rang)\b/,
-  refinance: /\b(take-?out|take out|refi|refinanc\w*|permanent loan|permanent financing|exit financing|long[- ]term mortgage|pret permanent|financement permanent|financement de sortie|permanent (?:mortgage|debt|facility|lender)|permanent (?=(?:io|interest|amorti[sz]\w*|repayment|rate|term)\b)|conversion (?:rate|coupon)|converts? to (?:(?:an?|the) )?(?:\$|\d|(?:[a-z-]+ ){0,2}(?:loan|mortgage|debt|financing|facility|rate))|term[- ]out|hypotheque permanente|pret a terme|reprise(?!\s+(?:des?\s+|du\s+|de la\s+)?(?:travaux|chantier|construction|possession|bail|baux|terrain)))\b/,
+  refinance: /\b(take-?out|take out|refi|refinanc\w*|permanent loan|permanent financing|exit financing|long[- ]term mortgage|pret permanent|financement permanent|financement de sortie|permanent (?:mortgage|debt|facility|lender)|permanent (?=(?:io|interest|amorti[sz]\w*|repayment|rate|term)\b)|conversion (?:rate|coupon)|converts? to (?:(?:an?|the) )?(?:\$|\d|(?:[a-z-]+ ){0,2}(?:loan|mortgage|debt|financing|facility|rate))|term[- ]out|hypotheque permanente|pret a terme|reprise(?!\s+(?:des?\s+|du\s+|de la\s+)?(?:travaux|chantier|construction|possession|bail|baux|terrain))|replacement (?:loan|debt|financing|facility|mortgage|lender|interest|rate|amorti[sz]ation|amount)|(?:pret|financement) de remplacement)\b/,
   senior: /\b(senior|construction (?:loan|facility)|first mortgage|premier rang|pret de construction)\b/,
 };
 const TERM_SHEET_RE = /\b(term sheet|feuille de modalites)\b/;
@@ -77,6 +77,12 @@ const LTV_BASIS_AFTER_RE = new RegExp(String.raw`^\s*${LTV_BASIS}(?![a-z0-9]|\s+
 const LTV_RE = /\b(loan to value|loan-to-value|ltv|ratio pret valeur|ratio pret-valeur|rpv)\b/;
 const BARE_AMOUNT_RE = /^(amount|facility amount|loan amount|principal|montant|montant du pret)$/;
 const REPAY_RE = /\b(repa\w+|refinanc\w*|take-?out|rembours\w+)\b/;
+// A take-out loan that replaces the construction loan ("the permanent loan replaces the construction facility at month 28"): the verb repays a loan.
+export const REPLACED_LOAN = String.raw`(?:(?:the|a|an|our|its|their|existing|current|le|la|l|notre|son|sa|leur|actuel\w*)['’\s]+)*(?:construction (?:loan|facility|financing|mortgage)|interim (?:loan|financing|facility)|bridge (?:loan|financing|facility)|pret (?:de construction|interimaire|relais)|financement (?:temporaire|interimaire|de construction))\b`;
+const REPLACE_LOAN_RE = new RegExp(String.raw`\b(?:replac\w*|remplac\w*)\s+${REPLACED_LOAN}`);
+// A take-out timing label ("Take-out month", "Refinance closing month", "Mois de la reprise"); not a term, amortization, IO, lock, maturity or period.
+const TAKEOUT_TIMING_RE = /\b(?:take-?out|take out|refi|refinanc\w*|permanent loan)(?:\s+[a-z-]+)?\s+(?:month|mo|timing|date)$|\b(?:mois|moment|date)(?:\s+[a-z]+)?\s+(?:de la |du |de |d )?(?:reprise|refinancement)(?!\s+(?:des?\s+|du\s+|de la\s+)?(?:travaux|chantier|construction|possession|bail|baux|terrain))\b/;
+const TAKEOUT_NOT_RE = /\b(term|amorti[sz]\w*|interest[- ]only|io|lock|maturity|duree|echeance|periode)\b/;
 const FUNDING_RE = /\b(fund\w*|repa\w+|clos\w*|advance\w*|draw\w*|financement|remboursement|prise de possession)\b/;
 const CAP_RE = /\b(cap rate|capitali[sz]ation rate|taux de capitalisation)\b/;
 const EXIT_RE = /\b(sell|sale|sold|exit|reversion|disposition|sortie|vente|vendre|vendrons|vendons|revente)\b/;
@@ -805,7 +811,9 @@ function mapLabel(rawLabel: string, t: NumberToken, opts: MapOptions = {}): Mapp
   }
   // The month a loan is repaid or refinanced ("repaid at month 26"), whichever loan the section is about.
   const ordinalMonth = t.unit === "months" && (/^\d+$/.test(t.raw) || /^\d+(e|er|eme)\s+mois/i.test(t.raw));
-  if (ordinalMonth && REPAY_RE.test(label)) return asField(FIELD_BY_KEY.get("refinance_month")!) ?? { kind: "unmapped" };
+  const replaces = REPLACE_LOAN_RE.exec(label);
+  if (ordinalMonth && (REPAY_RE.test(label) || (replaces && SCOPE_WORDS.refinance.test(label.slice(0, replaces.index))))) return asField(FIELD_BY_KEY.get("refinance_month")!) ?? { kind: "unmapped" };
+  if (t.unit === "months" && TAKEOUT_TIMING_RE.test(label) && !TAKEOUT_NOT_RE.test(label)) return asField(FIELD_BY_KEY.get("refinance_month")!) ?? { kind: "unmapped" };
   // Bare amounts need a stated loan scope; the implicit senior default alone is not enough.
   if ((scope !== "senior" || opts.seniorHeading) && BARE_AMOUNT_RE.test(label)) return asField(scoped("senior_loan_amount")) ?? { kind: "unmapped" };
   if (scope !== "senior") {
