@@ -651,9 +651,9 @@ describe("a deal that is kept and refinanced (card 60)", () => {
   describe("the reports for a deal that sells its units (task 80)", () => {
     test.each([
     // card 97c: DSCR→DCR rename only; text otherwise identical to `29531862e11b0510111895565f213a8c2d4975d8f2fe79d694e646e4f056f404`
-    ["ic_memo", "22e94946039c8786f9a8793faf7c7d1686ed3bae5b8b7977ea14a4c79c7df731"], 
+    ["ic_memo", "22e94946039c8786f9a8793faf7c7d1686ed3bae5b8b7977ea14a4c79c7df731"],
     // card 97c: DSCR→DCR rename only; text otherwise identical to `d605a268e8b161c97f6b79a3855f06c93aa3bc3f9a7b0e283b8671c0c8a4b98f`
-    ["build_decision", "61757e6912b7e04bbcee1c3fe37927271b3da4409678b6d8446d535771888a08"], 
+    ["build_decision", "61757e6912b7e04bbcee1c3fe37927271b3da4409678b6d8446d535771888a08"],
     // card 97c: DSCR→DCR rename only; text otherwise identical to `4cf6ef2277600502cf073624101fc3988664370849ef77e986513ebe66afb08a`
     ["lender_package", "a0cc7a283f1ce22d258878b616a500a5eaafc457f2cc6169abb023d08d0e609b"]] as const)("the existing held %s text is byte-identical", (kind, hash) => {
       expect(createHash("sha256").update(textOf(holdInput(kind)).text).digest("hex")).toBe(hash);
@@ -738,9 +738,9 @@ const saleTable = (model: ReturnType<typeof buildModel>, caption: string) => {
 describe("the reports for a deal that sells its units (task 80)", () => {
   test.each([
     // card 97c: DSCR→DCR rename only; text otherwise identical to `fa9dd2f818ca58ba1500ec30db01d5171229546e8828b96d74e9f0138bf93812`
-    ["ic_memo", "200c7159ce649a03fff64ef222399b755da85112d8fce957b0f6df3ea69ff7c4"], 
+    ["ic_memo", "200c7159ce649a03fff64ef222399b755da85112d8fce957b0f6df3ea69ff7c4"],
     // card 97c: DSCR→DCR rename only; text otherwise identical to `64389bea70bedfb6f257617d58cc54d1bfff3bf08f55eb90e2f967f1d91736d0`
-    ["build_decision", "161df3ae41c30a1322c47bf6b2cb6d4b4b7c18b34de0dbc177b2e819aca70fd9"], 
+    ["build_decision", "161df3ae41c30a1322c47bf6b2cb6d4b4b7c18b34de0dbc177b2e819aca70fd9"],
     // card 97c: DSCR→DCR rename only; text otherwise identical to `5f81e68b930e8735a4036eba356bad6242bc1e05cdaa3ca89a84a69f47dd208c`
     ["lender_package", "be3357a81416eb58bb60c7147850071e584947e517fa7b5e77e3f44bd5cf9641"]] as const)("the existing Maple Heights %s text is byte-identical", (kind, hash) => {
     expect(createHash("sha256").update(visibleText(renderHtml(buildModel(mapleInput(kind))))).digest("hex")).toBe(hash);
