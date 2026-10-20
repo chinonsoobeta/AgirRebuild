@@ -1,6 +1,6 @@
 import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
 import { useEffect, useRef, useState, type FormEvent, type ReactNode } from "react";
-import { FIELDS } from "@agir/contracts";
+import { FIELDS, tableSourceLabel } from "@agir/contracts";
 import { SF_PER_M2 } from "@agir/numbers";
 import { api, type Assumption, type Review as ReviewData, type Source } from "../api";
 import { Banner, canEdit, DealHeader, ErrorText, Glossary, StatusTag, useDeal, useSession } from "../components/ui";
@@ -134,7 +134,7 @@ function UseAs({ o, items, onSave, busy }: { o: ReviewData["other"][number]; ite
 }
 
 /** The same proposed-value controls in Not found and Choices. Acceptance uses the existing entry mutation. */
-export function TableProposal({ proposal, unit, onUse, busy }: { proposal: import("@agir/contracts").Proposal; unit: string; onUse: (b: {fieldKey: string; value: number; reason: string}) => void; busy: boolean }) {
+export function TableProposal({ proposal, unit, onUse, busy }: { proposal: import("@agir/contracts").Proposal; unit: string; onUse: (b: {fieldKey: string; tableId: string; optionKey: string}) => void; busy: boolean }) {
   const { t, f, msg, lang } = useI18n();
   const { role } = useSession();
   const [selected,setSelected] = useState(proposal.options.length === 1 ? "0" : "");
@@ -147,7 +147,7 @@ export function TableProposal({ proposal, unit, onUse, busy }: { proposal: impor
       <option value="">{t("review.proposalPlaceholder")}</option>
       {proposal.options.map((o,index)=><option key={index} value={index}>{o.label.split(" — ").map(msg).join(" — ")} — {amount(o.value)}</option>)}
     </select> : <span>{option?.label.split(" — ").map(msg).join(" — ")}</span>}
-    {canEdit(role) && <div><button className="btn quiet small" type="button" disabled={busy || !option} onClick={()=>option && onUse({fieldKey:proposal.fieldKey,value:option.value,reason:option.reason})}>{t("review.useProposal")}</button></div>}
+    {canEdit(role) && <div><button className="btn quiet small" type="button" disabled={busy || !option} onClick={()=>option && onUse({fieldKey:proposal.fieldKey,tableId:proposal.tableId,optionKey:option.key})}>{t("review.useProposal")}</button></div>}
   </div>;
 }
 
@@ -182,6 +182,10 @@ export function Review({ dealId }: { dealId: string }) {
       setEditing(null);
       return refresh();
     },
+  });
+  const acceptTable = useMutation({
+    mutationFn: (b: {fieldKey:string;tableId:string;optionKey:string}) => api.post(`/deals/${dealId}/proposals/accept`,b),
+    onSuccess: () => refresh(),
   });
   const enter = useMutation({
     mutationFn: (b: { fieldKey: string; itemKey?: string | null; value: number; reason: string }) => api.post(`/deals/${dealId}/values`, b),
@@ -497,6 +501,11 @@ export function Review({ dealId }: { dealId: string }) {
             </div>
           )}
 
+          {(r.tableNotices ?? []).map(p=><div className="card" key={p.fieldKey}>
+            <p>{t("review.tableNow",{value:f.value(p.options[0]?.value,FIELDS.find(d=>d.key === p.fieldKey)?.unit ?? "$")})}</p>
+            <TableProposal proposal={p} unit={FIELDS.find(d=>d.key === p.fieldKey)?.unit ?? "$"} onUse={b=>acceptTable.mutate(b)} busy={acceptTable.isPending} />
+          </div>)}
+          <ErrorText error={acceptTable.error} />
           {r.notFound.length > 0 && (
             <div className="card">
               <div className="row"><span style={{ fontSize: 17, fontWeight: 600 }}>{t("review.notFound")}</span></div>
@@ -509,7 +518,7 @@ export function Review({ dealId }: { dealId: string }) {
                       <span>{t("review.notFoundLine", { field: name(m), meaning: L.absent(m.fieldKey) })}</span>
                       {editable && entering !== id && <button className="btn quiet small" type="button" onClick={() => setEntering(id)}>{t("review.notFoundEnter")}</button>}
                     </div>
-                    {r.proposals?.find(p=>p.fieldKey === m.fieldKey) && <TableProposal key={r.proposals.find(p=>p.fieldKey === m.fieldKey)!.tableId} proposal={r.proposals.find(p=>p.fieldKey === m.fieldKey)!} unit={m.unit} onUse={b=>enter.mutate(b)} busy={enter.isPending} />}
+                    {r.proposals?.find(p=>p.fieldKey === m.fieldKey) && <TableProposal key={r.proposals.find(p=>p.fieldKey === m.fieldKey)!.tableId} proposal={r.proposals.find(p=>p.fieldKey === m.fieldKey)!} unit={m.unit} onUse={b=>acceptTable.mutate(b)} busy={acceptTable.isPending} />}
                     {entering === id && entryForm(m, id, <label htmlFor={id} className="sr-only">{name(m)}</label>)}
                   </div>
                 );
@@ -530,7 +539,7 @@ export function Review({ dealId }: { dealId: string }) {
                       {editable && entering !== id && <button className="btn quiet small" type="button" onClick={() => setEntering(id)}>{m.unit === "flag" ? t("review.choiceEnter") : t("review.notFoundEnter")}</button>}
                     </div>
                     {L.help(m.fieldKey, m.help) && <span className="help">{L.help(m.fieldKey, m.help)}</span>}
-                    {r.proposals?.find(p=>p.fieldKey === m.fieldKey) && <TableProposal key={r.proposals.find(p=>p.fieldKey === m.fieldKey)!.tableId} proposal={r.proposals.find(p=>p.fieldKey === m.fieldKey)!} unit={m.unit} onUse={b=>enter.mutate(b)} busy={enter.isPending} />}
+                    {r.proposals?.find(p=>p.fieldKey === m.fieldKey) && <TableProposal key={r.proposals.find(p=>p.fieldKey === m.fieldKey)!.tableId} proposal={r.proposals.find(p=>p.fieldKey === m.fieldKey)!} unit={m.unit} onUse={b=>acceptTable.mutate(b)} busy={acceptTable.isPending} />}
                     {/* A Yes/No choice is named by its radiogroup; a number needs a label of its own. */}
                     {entering === id && entryForm(m, id, m.unit === "flag" ? <span className="sr-only">{name(m)}</span> : <label htmlFor={id} className="sr-only">{name(m)}</label>)}
                   </div>
@@ -614,7 +623,7 @@ export function Review({ dealId }: { dealId: string }) {
                     <td>{name(a)}</td>
                     <td className="r num">{f.value(a.value, a.unit)}</td>
                     <td className="small muted">
-                      {a.sourceKind === "default" ? <StatusTag tone="pass" glyph={I.Bookmark}>{t("review.defaultAccepted")}</StatusTag> : a.sourceKind === "analyst" ? t("review.enteredByShort", { who: a.decidedBy }) : a.sources[0]?.document_name}
+                      {a.tableSource ? tableSourceLabel(a.tableSource,lang) : a.sourceKind === "default" ? <StatusTag tone="pass" glyph={I.Bookmark}>{t("review.defaultAccepted")}</StatusTag> : a.sourceKind === "analyst" ? t("review.enteredByShort", { who: a.decidedBy }) : a.sources[0]?.document_name}
                       {a.confirmedByReview ? <span>{t("review.confirmedByReview", { date: f.date(a.secondApprovedAt!) })}</span> : a.secondApprover && <span>{t("review.confirmedBy", { who: a.secondApprover })}</span>}
                       {a.sponsorStated && <div>{t("review.statedBy", { who: a.decidedBy })}</div>}
                       {a.clientConfirmedAt && <ClientConfirmation a={a} isClient={role === "client"} meId={me.user.id} />}
@@ -672,7 +681,7 @@ export function Review({ dealId }: { dealId: string }) {
           {focused ? (
             <>
               <strong>{name(focused)}</strong>
-              {focused.sources.length ? focused.sources.slice(0, 4).map((src, n) => <Quote key={n} s={src} currency={dealCurrency} />) : <p className="small muted">{focused.sourceKind === "default" ? t("review.namedDefault") : t("review.enteredByShort", { who: focused.decidedBy ?? "—" })}</p>}
+              {focused.sources.length ? focused.sources.slice(0, 4).map((src, n) => <Quote key={n} s={src} currency={dealCurrency} />) : <p className="small muted">{focused.tableSource ? tableSourceLabel(focused.tableSource,lang) : focused.sourceKind === "default" ? t("review.namedDefault") : t("review.enteredByShort", { who: focused.decidedBy ?? "—" })}</p>}
             </>
           ) : (
             <p className="small muted">{t("review.selectValue")}</p>

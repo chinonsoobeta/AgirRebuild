@@ -40,6 +40,11 @@ export async function renderXlsx(x: ArtifactInput): Promise<Uint8Array> {
     row.getCell(3).numFmt = fmt(g.unit);
     row.getCell(4).numFmt = fmt(g.unit);
   }
+  const tableValues=x.assumptions.filter(a=>a.sourceKind === "table");
+  if (tableValues.length) {
+    summary.addRow([]); summary.addRow(["Taken from published tables"]);
+    for (const a of tableValues) summary.addRow([FIELD_BY_KEY.get(a.fieldKey)?.label ?? a.fieldKey,a.value,a.source]);
+  }
   summary.columns.forEach((c) => (c.width = 26));
 
   const metrics = wb.addWorksheet("Metrics");

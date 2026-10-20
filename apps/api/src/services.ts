@@ -4,6 +4,7 @@
 
 import { createHash, createHmac } from "node:crypto";
 import {
+  tableSourceLabel, type TableSource,
   CMHC_PREMIUM, GST_HST, cmhcPremium, landTable, landTransferTaxOptions, gstHstNetOptions, ENGINE_READABLE_STATUSES, type Proposal, type Table, type TableOption,
   FIELD_BY_KEY,
   FIELD_GROUP_LABELS,
@@ -58,7 +59,8 @@ type AssumptionDb = {
   status: AssumptionStatus;
   value: number | null;
   pending_value: number | null;
-  source_kind: "document" | "analyst" | "default";
+  source_kind: "document" | "analyst" | "default" | "table";
+  source_table: string | null;
   /** unit_seen is the unit the document wrote; sources recorded before it was kept have none. */
   sources: { document_id: string; document_name: string; value: number; location: string; raw: string; unit_seen?: string | null; context: string; rule?: string; ocr?: boolean; labelled_by?: string }[];
   conflict_values: { value: number; documents: string[] }[] | null;
@@ -98,7 +100,12 @@ function readinessFor(rows: AssumptionDb[]): { readiness: Readiness; input: Engi
   );
 }
 
+function tableSource(a: AssumptionDb): TableSource | undefined {
+  return a.source_kind === "table" && a.source_table ? {...JSON.parse(a.source_table),acceptedBy:a.decided_by_name ?? "—"} : undefined;
+}
 export function sourceLabel(a: AssumptionDb): string {
+  const published=tableSource(a);
+  if (published) return tableSourceLabel(published);
   if (a.source_kind === "default") return "Default accepted";
   if (a.source_kind === "analyst") return `Entered by ${a.decided_by_name ?? "an analyst"}${a.reason ? `: ${a.reason}` : ""}`;
   const s = a.sources[0];
@@ -261,13 +268,15 @@ export async function reviewView(tx: Db, dealId: string, asOf: string) {
   const unapprovedUnits = assumptions.some(a => a.field_key === "unit_count" && !ENGINE_READABLE_STATUSES.includes(a.status));
   const units = approved.filter(a => a.field_key === "unit_count" && a.item_key).reduce((n,a) => n + a.value!,0);
   const offered = new Set([...readiness.notFound,...readiness.choices].map(r => r.fieldKey));
+  const savedTables=approved.filter(a=>a.source_kind === "table");
+  for (const a of savedTables) offered.add(a.field_key);
   const proposals: Proposal[] = [];
   const propose = (fieldKey: string, t: Table | undefined, result: {options: TableOption[]} | {unavailable: string}) => {
     const meta = {fieldKey,tableId:t?.id ?? fieldKey,title:t?.title ?? FIELD_BY_KEY.get(fieldKey)!.label,publisher:t?.publisher ?? "",url:t?.url ?? "",effective:t?.effective ?? ""};
     const options = "options" in result ? result.options.map(o => {
       // Keep the conditions visible before acceptance and in the recorded reason.
       const label = o.label + (o.note ? ` — ${o.note}` : "");
-      return {label,value:o.value,reason:`Proposed from ${t!.publisher}, ${t!.title} (effective ${t!.effective}, read ${t!.readOn}): ${label}${label.endsWith(".") ? "" : "."}`};
+      return {key:o.key,label,value:o.value,reason:`Proposed from ${t!.publisher}, ${t!.title} (effective ${t!.effective}, read ${t!.readOn}): ${label}${label.endsWith(".") ? "" : "."}`};
     }) : [];
     proposals.push({...meta,options,...("unavailable" in result ? {unavailable:result.unavailable} : {})});
   };
@@ -283,6 +292,16 @@ export async function reviewView(tx: Db, dealId: string, asOf: string) {
       : amortYears === undefined ? {unavailable:"state the refinance amortization first"}
       : cmhcPremium({ltvPct,amortYears,points:value("refinance_mli_select_points"),asOf});
     propose("refinance_insurance_premium_pct",CMHC_PREMIUM,"value" in premium ? {options:[{key:"cmhc",label:premium.label,value:premium.value}]} : premium);
+  }
+  const tableNotices: Proposal[] = [];
+  for (let index=proposals.length-1; index>=0; index--) {
+    const proposal=proposals[index]!;
+    const saved=savedTables.find(a=>a.field_key === proposal.fieldKey);
+    if (!saved) continue;
+    proposals.splice(index,1);
+    const source=tableSource(saved)!;
+    const option=proposal.options.find(o=>o.key === source.optionKey);
+    if (option && (option.value !== saved.value || proposal.effective !== source.effective || proposal.tableId !== source.tableId)) tableNotices.unshift({...proposal,options:[option]});
   }
   const viewer = await clientViewer(tx, dealId);
   const rows = await tx.query<{ id: string; document_id: string; document_name: string; raw: string; value: number | null; unit_seen: string | null; location: string; context: string; note: string | null }>(
@@ -310,6 +329,7 @@ export async function reviewView(tx: Db, dealId: string, asOf: string) {
   return {
     readiness,
     proposals,
+    tableNotices,
     assumptions: assumptions.map((a) => {
       const def = FIELD_BY_KEY.get(a.field_key)!;
       return {
@@ -326,6 +346,8 @@ export async function reviewView(tx: Db, dealId: string, asOf: string) {
         value: a.value,
         pendingValue: a.pending_value,
         sourceKind: a.source_kind,
+        source: sourceLabel(a),
+        ...(tableSource(a) ? {tableSource:tableSource(a)} : {}),
         sources: a.sources,
         conflictValues: a.conflict_values,
         reason: a.reason,
@@ -381,6 +403,7 @@ export async function createRun(tx: Db, dealId: string) {
       value: a.value!,
       sourceKind: a.source_kind,
       source: sourceLabel(a),
+      ...(tableSource(a) ? {tableSource:tableSource(a)} : {}),
       sponsorStated: a.sponsor_stated,
       confirmedBy: a.second_approver_name,
       confirmedByReview: a.confirmed_by_review,

@@ -460,6 +460,22 @@ export function createApp({ db, store, secureCookies, demoSignIn = false, trustP
     return c.json(r);
   });
 
+  app.post("/api/deals/:id/proposals/accept", async c => {
+    const body=z.object({fieldKey:z.string(),tableId:z.string(),optionKey:z.string()}).parse(await c.req.json());
+    const result=await as(c,async tx=>{
+      // Recompute from the currently approved inputs under the current clock.
+      const view=await reviewView(tx,c.req.param("id"),now().toISOString().slice(0,10));
+      const proposal=[...view.proposals,...view.tableNotices].find(p=>p.fieldKey === body.fieldKey && p.tableId === body.tableId);
+      const option=proposal?.options.find(o=>o.key === body.optionKey);
+      if (!proposal || proposal.unavailable || !option) throw new HttpError(422,"This table option is not available. Review the current proposals.");
+      const fields=body.fieldKey === "land_transfer_tax" ? ["land_cost"] : body.fieldKey === "refinance_insurance_premium_pct" ? ["refinance_ltv_pct","refinance_amort_years",...(view.assumptions.some(a=>a.fieldKey === "refinance_mli_select_points" && a.status === "approved") ? ["refinance_mli_select_points"] : [])] : ["unit_count"];
+      const source=JSON.stringify({tableId:proposal.tableId,optionKey:option.key,publisher:proposal.publisher,title:proposal.title,effective:proposal.effective,fields});
+      const [row]=await tx.query(`select (a).status from (select fn_enter_table_value($1,$2,null,$3,$4,$5) a) x`,[c.req.param("id"),body.fieldKey,option.value,option.reason,source]);
+      return row;
+    });
+    return c.json(result);
+  });
+
   app.post("/api/deals/:id/values", async (c) => {
     const body = z
       .object({ fieldKey: z.string(), itemKey: z.string().max(60).nullable().optional(), value: z.number().finite(), reason: z.string().max(2000) })

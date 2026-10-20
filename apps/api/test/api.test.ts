@@ -2958,6 +2958,62 @@ describe("card 94c table proposals", () => {
     expect(option.label.endsWith(".")).toBe(true);
     expect(option.reason).toBe(`Proposed from Government of New Brunswick, Real Property Transfer Tax Act (effective 2016-04-01, read 2026-10-19): ${option.label}`);
   });
+  test("card 97b accepts a server-computed table value in solo and preserves its provenance in reports", async () => {
+    const d=await make("NS");
+    const land=(await review(d)).proposals.find((p:any)=>p.fieldKey === "land_transfer_tax");
+    const option=land.options.find((o:any)=>o.label === "Halifax Regional Municipality");
+    expect(option.key).toBeTruthy();
+    const body={fieldKey:land.fieldKey,tableId:land.tableId,optionKey:option.key};
+    expect((await call(owner,"POST",`/api/deals/${d}/proposals/accept`,{...body,optionKey:"tampered"})).status).toBe(422);
+    expect((await call(owner,"POST",`/api/deals/${d}/proposals/accept`,{...body,value:999})).json.status).toBe("approved");
+    const [stored]=await db.query<any>(`select source_kind,source_table,value from assumptions where deal_id=$1 and field_key='land_transfer_tax'`,[d]);
+    expect(stored).toMatchObject({source_kind:"table",value:11250});
+    expect(JSON.parse(stored.source_table)).toMatchObject({tableId:land.tableId,optionKey:option.key});
+    const a=(await review(d)).assumptions.find((a:any)=>a.fieldKey === land.fieldKey);
+    expect(a.sponsorStated).toBe(false);
+    expect(a.source).toContain("From a published table: Service Nova Scotia");
+    expect(a.source).toContain("Accepted by Table Proposals Owner.");
+    expect(a.source).toContain("Computed from the stated Land cost.");
+    for (const [fieldKey,value] of [["hard_cost",1000000],["soft_cost",100000],["contingency",50000],["construction_months",12],["lease_up_months",6],["hold_years",5],["stabilized_occupancy_pct",95],["expense_ratio_pct",30],["exit_cap_rate_pct",5],["selling_costs_pct",0],["senior_loan_amount",0],["refinance_rate_pct",4],["development_charges",0]] as [string,number][]) expect((await call(owner,"POST",`/api/deals/${d}/values`,{fieldKey,value,reason:"Fictional table report setup"})).status).toBe(200);
+    expect((await call(owner,"POST",`/api/deals/${d}/values`,{fieldKey:"unit_rent_monthly",itemKey:"Residential",value:2000,reason:"Fictional table report rent"})).status).toBe(200);
+    const made=await call(owner,"POST",`/api/deals/${d}/runs`);expect(made.status).toBe(200);
+    const view=(await call(owner,"GET",`/api/runs/${made.json.id}`)).json;
+    expect(view.inputs.find((a:any)=>a.fieldKey === land.fieldKey)).toMatchObject({sourceKind:"table",sponsorStated:false,source:a.source});
+    const snap=(await db.query<any>(`select input_snapshot from runs where id=$1`,[made.json.id]))[0].input_snapshot;
+    const {buildModel,renderHtml,visibleText}=await import("@agir/artifacts");
+    const text=visibleText(renderHtml(buildModel({kind:"lender_package",deal:{name:"Fictional table report",assetType:"Multifamily",location:"Halifax",province:"NS",currency:"CAD"},run:{id:made.json.id,runNumber:1,createdAt:"2026-10-20",engineVersion:view.engineVersion,policyVersion:view.policyVersion,policyHash:"p",inputHash:view.inputHash,resultHash:view.resultHash},...snap,result:view.result,assumptions:snap.assumptions.map((a:any)=>({...a,unit:a.fieldKey === "land_transfer_tax" ? "$" : "units"})),decision:null})));
+    expect(text).toContain("Taken from published tables");
+    expect(text).toContain("From a published table: Service Nova Scotia");
+    const copied=(await call(owner,"POST",`/api/deals/${d}/copy`,{name:"Fictional table copy"})).json.id;
+    expect(copied).toBeTruthy();
+    expect((await db.query<any>(`select source_table from assumptions where deal_id=$1 and field_key='land_transfer_tax'`,[copied]))[0].source_table).toBe(stored.source_table);
+  });
+  test("card 97b material table values require a second approver in team mode", async () => {
+    const d=await make("NS");
+    const premium=(await review(d)).proposals.find((p:any)=>p.fieldKey === "refinance_insurance_premium_pct");
+    expect((await call(owner,"POST",`/api/workspaces/${workspace}/review-mode`,{mode:"team"})).status).toBe(200);
+    try {
+      expect((await call(owner,"POST",`/api/workspaces/${workspace}/members`,{email:"bob@example.com",role:"admin"})).status).toBe(200);
+      for (const a of (await review(d)).assumptions.filter((a:any)=>a.status === "awaiting_second_approval")) expect((await call(bob,"POST",`/api/assumptions/${a.id}/review`,{action:"second_approve",version:a.version})).status).toBe(200);
+      const result=await call(owner,"POST",`/api/deals/${d}/proposals/accept`,{fieldKey:premium.fieldKey,tableId:premium.tableId,optionKey:premium.options[0].key});
+      expect(result).toMatchObject({status:200,json:{status:"awaiting_second_approval"}});
+      const a=(await review(d)).assumptions.find((a:any)=>a.fieldKey === premium.fieldKey);
+      expect(a).toMatchObject({sourceKind:"table",sponsorStated:false});
+      expect((await call(owner,"POST",`/api/assumptions/${a.id}/review`,{action:"second_approve",version:a.version})).status).toBe(403);
+      expect((await call(bob,"POST",`/api/assumptions/${a.id}/review`,{action:"second_approve",version:a.version})).json.status).toBe("approved");
+    } finally {await call(owner,"POST",`/api/workspaces/${workspace}/review-mode`,{mode:"solo"});}
+  });
+  test("card 97b an accepted premium gets a nonblocking updated-table proposal after its LTV changes", async () => {
+    const d=await make("NS"); const p=(await review(d)).proposals.find((p:any)=>p.fieldKey === "refinance_insurance_premium_pct");
+    expect((await call(owner,"POST",`/api/deals/${d}/proposals/accept`,{fieldKey:p.fieldKey,tableId:p.tableId,optionKey:p.options[0].key})).status).toBe(200);
+    const ltv=(await review(d)).assumptions.find((a:any)=>a.fieldKey === "refinance_ltv_pct");
+    expect((await call(owner,"POST",`/api/assumptions/${ltv.id}/review`,{action:"modify",value:80,reason:"Fictional revised loan to value",version:ltv.version})).status).toBe(200);
+    const changed=await review(d);
+    expect(changed.tableNotices.find((p:any)=>p.fieldKey === "refinance_insurance_premium_pct").options[0].value).toBe(4.59);
+    expect(changed.readiness.missing.some((m:any)=>m.fieldKey === p.fieldKey)).toBe(false);
+    expect((await call(owner,"POST",`/api/deals/${d}/proposals/accept`,{fieldKey:p.fieldKey,tableId:p.tableId,optionKey:p.options[0].key})).status).toBe(200);
+    expect((await review(d)).tableNotices).toEqual([]);
+  });
   test("withholds every proposal at the re-check date", async () => {
     const d=await make("NS"); date="2027-01-02";
     try {

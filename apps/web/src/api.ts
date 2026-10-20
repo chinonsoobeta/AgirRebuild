@@ -60,7 +60,7 @@ export type DocumentRow = {
 export type Source = { document_id: string; document_name: string; value: number; location: string; raw: string; unit_seen?: string | null; context: string; rule?: string; ocr?: boolean; note?: string };
 export type Assumption = {
   id: string; fieldKey: string; itemKey: string | null; label: string; group: string; groupLabel: string; unit: string; material: boolean;
-  conservative: "max" | "min" | null; status: string; value: number | null; pendingValue: number | null; sourceKind: "document" | "analyst" | "default";
+  conservative: "max" | "min" | null; status: string; value: number | null; pendingValue: number | null; sourceKind: "document" | "analyst" | "default" | "table"; source?: string; tableSource?: import("@agir/contracts").TableSource;
   sources: Source[]; conflictValues: { value: number; documents: string[] }[] | null; reason: string | null; decidedBy: string | null;
   decidedById: string | null; decidedAt: string | null; secondApprover: string | null; confirmedByReview: boolean; secondApprovedAt: string | null; sponsorStated: boolean;
   /** The deal's client said the broker's value is right (card 89); not an independent confirmation. A client cannot see another client's name. */
@@ -69,6 +69,7 @@ export type Assumption = {
 export type ReadinessItem = { fieldKey: string; itemKey?: string; label: string; detail?: string };
 export type Review = {
   proposals: import("@agir/contracts").Proposal[];
+  tableNotices: import("@agir/contracts").Proposal[];
   readiness: { status: "ready" | "blocked"; missing: ReadinessItem[]; conflicting: ReadinessItem[]; pending: ReadinessItem[]; impossible: ReadinessItem[]; notFound: ReadinessItem[]; choices: ReadinessItem[]; defaultable: string[] };
   assumptions: Assumption[];
   missing: (ReadinessItem & { unit: string; material: boolean; default: number | null; help: string | null; groupLabel: string })[];
@@ -87,7 +88,7 @@ export type RunView = {
     annual: { year: number; gpr: number; egi: number; opex: number; noi: number; debtService: number; sizingDebtService: number; cashFlow: number }[];
     warnings: { key: string; message: string }[];
   };
-  inputs: { fieldKey: string; itemKey: string | null; label: string; value: number; sourceKind: string; source: string; sponsorStated: boolean; confirmedBy: string | null; confirmedByReview: boolean; confirmedAt: string | null }[];
+  inputs: { fieldKey: string; itemKey: string | null; label: string; value: number; sourceKind: string; source: string; tableSource?: import("@agir/contracts").TableSource; sponsorStated: boolean; confirmedBy: string | null; confirmedByReview: boolean; confirmedAt: string | null }[];
   decisions: { id: string; decision: string; rationale: string; conditions: string | null; override_reason: string | null; created_at: string; decided_by: string }[];
   heldPartners?: { lpIrr: number | null; gpIrr: number | null; promote: number; paidLp: number; paidGp: number; paidPromote: number };
 };

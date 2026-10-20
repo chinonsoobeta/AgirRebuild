@@ -263,7 +263,7 @@ describe("the logo section of settings (task 89d)", () => {
 
 
 describe("card 94c table proposal controls", () => {
-  const proposal = (options = [{label:"CMHC MLI Select, 50 points",value:5.49,reason:"Proposed from CMHC, Multi-unit Fees and Premiums (effective 2025-07-14, read 2026-10-19): CMHC MLI Select, 50 points."}]) => ({fieldKey:"refinance_insurance_premium_pct",tableId:"cmhc-premium",title:"Multi-unit Fees and Premiums",publisher:"CMHC",url:"https://example.test/official",effective:"2025-07-14",options});
+  const proposal = (options = [{key:"cmhc",label:"CMHC MLI Select, 50 points",value:5.49,reason:"Proposed from CMHC, Multi-unit Fees and Premiums (effective 2025-07-14, read 2026-10-19): CMHC MLI Select, 50 points."}]) => ({fieldKey:"refinance_insurance_premium_pct",tableId:"cmhc-premium",title:"Multi-unit Fees and Premiums",publisher:"CMHC",url:"https://example.test/official",effective:"2025-07-14",options});
   it("shows a single proposal with source and accepts its exact value and reason", () => {
     state.role="owner"; const onUse=vi.fn(), p=proposal();
     const html=render(createElement(TableProposal,{proposal:p,unit:"%",onUse,busy:false}));
@@ -271,11 +271,11 @@ describe("card 94c table proposal controls", () => {
     expect(html).toContain('href="https://example.test/official"');
     expect(buttons("Use this")).toHaveLength(1);
     buttons("Use this")[0]!.props.onClick();
-    expect(onUse).toHaveBeenCalledWith({fieldKey:p.fieldKey,value:5.49,reason:p.options[0]!.reason});
+    expect(onUse).toHaveBeenCalledWith({fieldKey:p.fieldKey,tableId:p.tableId,optionKey:"cmhc"});
   });
   it("offers a labelled select and accepts the chosen option", () => {
     state.role="analyst"; const onUse=vi.fn();
-    const p=proposal([{label:"Ontario, outside Toronto",value:16475,reason:"First official option"},{label:"Toronto",value:32950,reason:"Second official option"}]);
+    const p=proposal([{key:"on",label:"Ontario, outside Toronto",value:16475,reason:"First official option"},{key:"toronto",label:"Toronto",value:32950,reason:"Second official option"}]);
     const element=createElement(TableProposal,{proposal:p,unit:"$",onUse,busy:false});
     const html=render(element);
     expect(html).toContain("<select");
@@ -286,7 +286,7 @@ describe("card 94c table proposal controls", () => {
     expect(select.props["aria-label"]).toBeTruthy();
     select.props.onChange({target:{value:"1"}}); render(element);
     buttons("Use this")[0]!.props.onClick();
-    expect(onUse).toHaveBeenCalledWith({fieldKey:p.fieldKey,value:32950,reason:"Second official option"});
+    expect(onUse).toHaveBeenCalledWith({fieldKey:p.fieldKey,tableId:p.tableId,optionKey:"toronto"});
   });
   it("displays an unavailable proposal without acceptance", () => {
     state.role="owner";

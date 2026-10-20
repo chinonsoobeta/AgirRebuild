@@ -251,6 +251,7 @@ const EN = {
   "review.nMissing": (p) => `${p.n} missing`,
   "review.acceptDefaults": (p) => `Accept ${p.n} ${s(p.n, "default", "defaults")}`,
   "review.missingBody": (p) => `No document states these. Enter each value and say where it comes from${p.defaults ? ", or accept the named defaults, which every report will disclose" : ""}.`,
+  "review.tableNow": (p) => `The table now gives ${p.value}`,
   "review.proposed": (p) => `Proposed: ${p.value} — ${p.publisher}, effective ${p.date}`,
   "review.proposalSource": "Source",
   "review.proposalPlaceholder": "Choose…",
@@ -832,6 +833,7 @@ const FR: Record<Key, Entry> = {
   "review.acceptDefaults": (p) => `Accepter ${p.n} ${s(p.n, "valeur par défaut", "valeurs par défaut")}`,
   "review.missingBody": (p) =>
     `Aucun document ne les indique. Saisissez chaque valeur et précisez sa provenance${p.defaults ? ", ou acceptez les valeurs par défaut nommées, que chaque rapport divulguera" : ""}.`,
+  "review.tableNow": (p) => `Le tableau donne maintenant ${p.value}`,
   "review.proposed": (p) => `Proposition : ${p.value} — ${p.publisher}, en vigueur le ${p.date}`,
   "review.proposalSource": "Source",
   "review.proposalPlaceholder": "Choisir…",
@@ -1281,6 +1283,8 @@ const SALE_SHARES: Record<string, string> = {
 };
 
 const FR_REASONS: [RegExp, string | ((m: RegExpMatchArray) => string)][] = [
+  [/^From a published table$/, "Tiré d’un tableau publié"],
+  [/^This table option is not available\. Review the current proposals\.$/, "Cette option du tableau n’est pas disponible. Consultez les propositions actuelles."],
   [/^approve the unit counts first$/, "Approuvez d’abord les nombres de logements"],
   [/^British Columbia$/, "Colombie-Britannique"],
   [/^Ontario, outside Toronto$/, "Ontario, hors de Toronto"],

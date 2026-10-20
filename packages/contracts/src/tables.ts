@@ -1,3 +1,6 @@
+import { FIELD_BY_KEY } from "./fields.ts";
+import { FR_FIELDS } from "./fr.ts";
+
 /** Official schedules read on 2026-10-19. Proposals only: a person accepts or enters a value. */
 export type Table = { id: string; title: string; publisher: string; url: string; effective: string; readOn: string; recheckBy: string; status: "official" };
 const table = (id: string, title: string, publisher: string, url: string, effective: string, recheckBy = "2027-01-01"): Table =>
@@ -25,7 +28,7 @@ export const GST_HST = table("gst-hst-pbrh", "Purpose-built rental housing rebat
 export const TABLES: readonly Table[] = [CMHC_PREMIUM, ...Object.values(LAND_TABLES), GST_HST];
 export const tableCurrent = (t: Table, asOf: string): boolean => asOf >= t.effective && asOf < t.recheckBy;
 const expired = { unavailable: "The table is not effective yet or is past its re-check date; enter the value yourself." };
-export type Proposal = { fieldKey: string; tableId: string; title: string; publisher: string; url: string; effective: string; options: { label: string; value: number; reason: string }[]; unavailable?: string };
+export type Proposal = { fieldKey: string; tableId: string; title: string; publisher: string; url: string; effective: string; options: { key: string; label: string; value: number; reason: string }[]; unavailable?: string };
 export type TableOption = { key: string; label: string; value: number; note?: string };
 type Options = { options: TableOption[] } | { unavailable: string };
 
@@ -111,4 +114,12 @@ export function gstHstNetOptions({ province, units, selling, asOf }: { province:
     + (province === "NB" ? " Provincial part only if construction begins after 2024-11-14 and before 2028 and completes before 2030." : "")
     + (province === "PE" ? " Provincial part is rebated up to $35,000 per unit only for completion before 2029." : "");
   return { options: [{key:"pbrh",label:"Qualifying purpose-built rental rebate",value:0,note}] };
+}
+
+/** The source snapshot belongs to the accepted value, even when a later table is re-dated. */
+export type TableSource = { tableId: string; optionKey: string; publisher: string; title: string; effective: string; fields: string[]; acceptedBy: string };
+export function tableSourceLabel(s: TableSource, lang: "en" | "fr" = "en"): string {
+  const fields=s.fields.map(key=>lang === "fr" ? FR_FIELDS[key] ?? FIELD_BY_KEY.get(key)?.label ?? key : FIELD_BY_KEY.get(key)?.label ?? key).join(", ");
+  const label=lang === "fr" ? `Tiré d’un tableau publié : ${s.publisher}, ${s.title}, en vigueur le ${s.effective}. Accepté par ${s.acceptedBy}.` : `From a published table: ${s.publisher}, ${s.title}, effective ${s.effective}. Accepted by ${s.acceptedBy}.`;
+  return label + (fields ? lang === "fr" ? ` Calculé à partir de : ${fields}.` : ` Computed from the stated ${fields}.` : "");
 }

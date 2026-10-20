@@ -2,7 +2,7 @@
 // and the inputs that run used, and from nothing else: it never recomputes a
 // verdict, a gate or a metric.
 
-import { FR_ABSENT, CURRENCY_NAMES, FIELD_BY_KEY, placeLabel, type Currency, type EngineInput, type FieldUnit, type Policy, type RunResult, type VerdictCode } from "@agir/contracts";
+import { tableSourceLabel, type TableSource, FR_ABSENT, CURRENCY_NAMES, FIELD_BY_KEY, placeLabel, type Currency, type EngineInput, type FieldUnit, type Policy, type RunResult, type VerdictCode } from "@agir/contracts";
 import { createHash } from "node:crypto";
 import { runWaterfall, heldPartnerReturns, breakeven, canonicalJson, ENGINE_VERSION, type BreakevenEcho, type BreakevenRow } from "@agir/engine";
 import { Formatter, formatValue } from "./format.ts";
@@ -37,7 +37,8 @@ export type ArtifactInput = {
     label: string;
     unit: FieldUnit;
     value: number;
-    sourceKind: "document" | "analyst" | "default";
+    sourceKind: "document" | "analyst" | "default" | "table";
+    tableSource?: TableSource;
     source: string;
     /** Absent on runs made before solo review: read as false and null. */
     sponsorStated?: boolean;
@@ -304,7 +305,7 @@ export function confirmationLabel(a: Assumption, id: (text: string, ref: string)
 
 function inputRow(f: Formatter, a: Assumption): string[] {
   const note = confirmationLabel(a, (t, ref) => f.ident(t, ref), f.lang);
-  return [f.ident(a.itemKey ? `${f.field(a.fieldKey, a.label)} (${a.itemKey === "All units" ? reportText(f.lang, "allUnits") : a.itemKey})` : f.field(a.fieldKey, a.label), `field.${a.fieldKey}`), inputValue(f, a), f.ident(reportSource(f.lang, a.source), `source.${a.fieldKey}`) + (note ? ` · ${note}` : "")];
+  return [f.ident(a.itemKey ? `${f.field(a.fieldKey, a.label)} (${a.itemKey === "All units" ? reportText(f.lang, "allUnits") : a.itemKey})` : f.field(a.fieldKey, a.label), `field.${a.fieldKey}`), inputValue(f, a), f.ident(a.tableSource ? tableSourceLabel(a.tableSource,f.lang) : reportSource(f.lang, a.source), `source.${a.fieldKey}`) + (note ? ` · ${note}` : "")];
 }
 
 const INPUT_COLUMNS = (lang: "en" | "fr") => [{ label: reportText(lang, "input") }, { label: reportText(lang, "value"), numeric: true }, { label: reportText(lang, "source") }];
@@ -315,9 +316,9 @@ function inputsAppendix(f: Formatter, x: ArtifactInput): Block {
 
 /** The inputs a sponsor stated and nobody else confirmed, up front; nothing when there are none. */
 function sponsorStatedBlocks(f: Formatter, x: ArtifactInput): Block[] {
-  const stated = x.assumptions.filter((a) => a.sponsorStated);
+  const stated = x.assumptions.filter((a) => a.sourceKind !== "table" && a.sponsorStated);
   if (stated.length === 0) return [];
-  const material = x.assumptions.filter((a) => a.sponsorStated || a.confirmedBy || a.confirmedByReview || FIELD_BY_KEY.get(a.fieldKey)?.material).length;
+  const material = x.assumptions.filter((a) => a.sourceKind !== "table" && (a.sponsorStated || a.confirmedBy || a.confirmedByReview || FIELD_BY_KEY.get(a.fieldKey)?.material)).length;
   const n = f.ident(String(stated.length), "sponsorStated.count");
   const m = f.ident(String(material), "materialInputs.count");
   const byClient = stated.filter((a) => a.clientConfirmedAt).length;
@@ -330,6 +331,11 @@ function sponsorStatedBlocks(f: Formatter, x: ArtifactInput): Block[] {
     },
     { type: "table", columns: INPUT_COLUMNS(f.lang), rows: stated.map((a) => inputRow(f, a)) },
   ];
+}
+
+function tableValueBlocks(f: Formatter, x: ArtifactInput): Block[] {
+  const rows=x.assumptions.filter(a=>a.sourceKind === "table");
+  return rows.length ? [{type:"heading",text:reportText(f.lang,"publishedTables")},{type:"table",columns:INPUT_COLUMNS(f.lang),rows:rows.map(a=>inputRow(f,a))}] : [];
 }
 
 /** The one sentence for a line no document gave: a template, with no number. */
@@ -551,7 +557,7 @@ export function buildModel(x: ArtifactInput): DocModel {
   const sale = isSale(x);
   const held = !sale && isHeld(x);
   if (x.kind === "ic_memo") {
-    blocks.push(verdict, ...draftLine(x), ...sponsorStatedBlocks(f, x));
+    blocks.push(verdict, ...draftLine(x), ...sponsorStatedBlocks(f, x), ...tableValueBlocks(f,x));
     blocks.push({
       type: "stats",
       items: sale ? saleStats(f) : held
@@ -574,9 +580,9 @@ export function buildModel(x: ArtifactInput): DocModel {
     blocks.push({ type: "heading", text: reportText(f.lang, "checks") }, checks(f, r));
     blocks.push(...notFoundBlocks(f, x), inputsAppendix(f, x));
   } else if (x.kind === "partner_memo" && held) {
-    blocks.push(verdict, ...draftLine(x), ...sponsorStatedBlocks(f, x), ...heldPartnerBlocks(f, x));
+    blocks.push(verdict, ...draftLine(x), ...sponsorStatedBlocks(f, x), ...tableValueBlocks(f,x), ...heldPartnerBlocks(f, x));
   } else if (x.kind === "partner_memo") {
-    blocks.push(verdict, ...draftLine(x), ...sponsorStatedBlocks(f, x));
+    blocks.push(verdict, ...draftLine(x), ...sponsorStatedBlocks(f, x), ...tableValueBlocks(f,x));
     blocks.push({ type: "stats", items: ["equity_multiple", "equity_irr", "lp_irr", "gp_irr"].map((key) => ({
       label: f.metricOf("base", key).label, value: f.metric("base", key),
     })) });
@@ -614,7 +620,7 @@ export function buildModel(x: ArtifactInput): DocModel {
     if (sale) blocks.push(SALE_OPERATIONS(f.lang));
     blocks.push(...notFoundBlocks(f, x), { type: "paragraph", muted: true, text: reportText(f.lang, "inputSources") });
   } else if (x.kind === "build_decision") {
-    blocks.push(verdict, ...draftLine(x), ...sponsorStatedBlocks(f, x));
+    blocks.push(verdict, ...draftLine(x), ...sponsorStatedBlocks(f, x), ...tableValueBlocks(f,x));
     blocks.push({
       type: "stats",
       items: sale ? saleStats(f, false) : held
@@ -637,7 +643,7 @@ export function buildModel(x: ArtifactInput): DocModel {
     }
     blocks.push(...notFoundBlocks(f, x), { type: "paragraph", muted: true, text: reportText(f.lang, "inputSources") });
   } else {
-    blocks.push(verdict, ...draftLine(x), ...sponsorStatedBlocks(f, x));
+    blocks.push(verdict, ...draftLine(x), ...sponsorStatedBlocks(f, x), ...tableValueBlocks(f,x));
     if (held) blocks.push({ type: "stats", items: heldStats(f) });
     const i = x.input;
     const debtRows: string[][] = [];

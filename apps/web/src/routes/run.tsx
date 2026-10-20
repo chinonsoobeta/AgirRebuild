@@ -1,3 +1,4 @@
+import { tableSourceLabel } from "@agir/contracts";
 import { Link } from "@tanstack/react-router";
 import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
 import { Fragment, useState } from "react";
@@ -255,7 +256,7 @@ export function Run({ dealId }: { dealId: string }) {
             <table className="tbl" style={{ marginTop: 12 }}>
               <tbody>
                 {v.inputs.map((x, n) => (
-                  <tr key={n}><td className="small">{L.field(x.fieldKey, x.itemKey)}<div className="faint">{i.msg(x.source)}{x.sponsorStated ? ` · ${t("run.notConfirmed")}` : x.confirmedByReview ? ` · ${t("run.confirmedByReview", { date: f.date(x.confirmedAt!) })}` : x.confirmedBy ? ` · ${t("run.confirmedBy", { who: x.confirmedBy })}` : ""}</div></td><td className="r num small">{f.value(x.value, FIELD_BY_KEY.get(x.fieldKey)?.unit ?? "count")}</td></tr>
+                  <tr key={n}><td className="small">{L.field(x.fieldKey, x.itemKey)}<div className="faint">{x.tableSource ? tableSourceLabel(x.tableSource,i.lang) : i.msg(x.source)}{x.sponsorStated ? ` · ${t("run.notConfirmed")}` : x.confirmedByReview ? ` · ${t("run.confirmedByReview", { date: f.date(x.confirmedAt!) })}` : x.confirmedBy ? ` · ${t("run.confirmedBy", { who: x.confirmedBy })}` : ""}</div></td><td className="r num small">{f.value(x.value, FIELD_BY_KEY.get(x.fieldKey)?.unit ?? "count")}</td></tr>
                 ))}
               </tbody>
             </table>
