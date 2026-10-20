@@ -3266,9 +3266,9 @@ describe("one sentence may state several terms of one loan", () => {
     expect(pick(ltv)).toEqual([["mezz_loan_amount", 240_000], ["mezz_rate_pct", 11.5]]);
     expect(ltv.other.map((o) => o.value)).toEqual([75]);
   });
-  test("negative: a sentence that names no loan reads as it did", () => {
+  test("negative: a sentence that names no loan's rank reads as it did; a first mortgage is ranked (card 108)", () => {
     expect(pick(read("The lender will advance $240,000 at 11.5% fixed, amortized over 15 years."))).toEqual([]);
-    expect(pick(read("The first mortgage will advance $5,000,000 at 6.2%, amortized over 30 years."))).toEqual([]);
+    expect(pick(read("The first mortgage will advance $5,000,000 at 6.2%, amortized over 30 years."))).toEqual([["senior_loan_amount", 5_000_000], ["senior_amort_years", 30]]);
   });
 });
 
@@ -5879,5 +5879,76 @@ describe("card 107 audit: the verb to retire a loan is not a retired sheet", () 
   const read = (...ls: string[]) => extractCandidates({ kind: "pdf", lines: ls.map((text) => ({ text, location: "page 1" })), tables: [], pageCount: 1, needsOcr: false, fullText: ls.join("\n") });
   test.each(["Take-out loan to retire the construction facility: $5,200,000", "Take-out loan, which retires the construction facility: $5,200,000"])("%s", (line) => {
     expect(read("Construction loan: $5,000,000", line).candidates.map((c) => [c.fieldKey, c.value])).toEqual([["senior_loan_amount", 5_000_000], ["refinance_amount", 5_200_000]]);
+  });
+});
+
+describe("card 108: loan terms named by concept and unit", () => {
+  const read = (...lines: string[]) => extractCandidates({ kind: "pdf", lines: lines.map((text, i) => ({ text, location: `page 1, line ${i + 1}` })), tables: [], pageCount: 1, needsOcr: false, fullText: lines.join("\n") });
+  const sheet = (heading: string | null, rows: [string, string][]) => extractCandidates({ kind: "xlsx", lines: [], tables: [{ name: "Financing", rows: [...(heading ? [[{ text: heading, ref: "A1" }]] : []), ...rows.map((row, i) => row.map((text, c): Cell => ({ text, ref: `${String.fromCharCode(65 + c)}${i + 2}` })))] }], pageCount: 1, needsOcr: false, fullText: "" });
+  const pick = (r: ReturnType<typeof read>) => r.candidates.map((c) => [c.fieldKey, c.value]);
+  const four = [["senior_loan_amount", 2_000_000], ["senior_rate_pct", 6.1], ["senior_amort_years", 25], ["senior_io_months", 18]];
+  test.each([
+    "Senior loan: $2,000,000, interest rate 6.1%, amortization 25 years, interest-only period 18 months",
+    "Lender advance granted $2,000,000, Yearly charge on the advance 6.1%, Years to repay the advance 25 years, Months before repayment begins 18 months",
+    "Prêt de construction accordé 2 000 000 $, Taux annuel consenti 6,1 %, Amortissement prévu 25 ans, Intérêts seulement 18 mois",
+    "Senior lender terms: advance $2,000,000; annual charge 6.1%; repaid over 25 years; 18 months interest only.",
+  ])("the four requested terms: %s", (line) => expect(pick(read(line))).toEqual(four));
+  test("a bank facility's repayment term stays refused", () => {
+    const r = read("Bank facility $2,000,000, coupon on the facility 6.1%, facility repayment term 25 years, facility interest-only 18 months");
+    expect(pick(r)).toEqual([four[0], four[1], four[3]]);
+    expect(r.other.find((c) => c.value === 25)?.note).toBe("A loan's term, not the build period, hold or amortization");
+  });
+  test("the second lender's amount and amortization share its mezzanine scope", () => expect(pick(read("Construction loan: $5,000,000", "Second lender: $300,000, rate 10%, amortized over 20 years"))).toEqual([["senior_loan_amount", 5_000_000], ["mezz_loan_amount", 300_000], ["mezz_rate_pct", 10], ["mezz_amort_years", 20]]));
+  test("a first-mortgage section scopes short table labels", () => expect(pick(sheet("First mortgage", [["Advance", "2000000"], ["Charge", "6.1%"], ["Repayment period", "25 years"], ["Interest-only months", "18"]]))).toEqual(four));
+  const variants: [string, string, string, number][] = [
+    ["Bank facility granted", "$2,000,000", "senior_loan_amount", 2_000_000], ["Lender advance approved", "$2,000,000", "senior_loan_amount", 2_000_000], ["Financing size authorized", "$2,000,000", "senior_loan_amount", 2_000_000],
+    ["Avance bancaire accordée", "2 000 000 $", "senior_loan_amount", 2_000_000], ["Capital du financement consenti", "2 000 000 $", "senior_loan_amount", 2_000_000], ["Crédit bancaire octroyé", "2 000 000 $", "senior_loan_amount", 2_000_000],
+    ["Annual charge on the facility", "6.1%", "senior_rate_pct", 6.1], ["Cost of borrowing for the advance", "6.1%", "senior_rate_pct", 6.1], ["Charge on bank financing", "6.1%", "senior_rate_pct", 6.1],
+    ["Taux annuel consenti par la banque", "6,1 %", "senior_rate_pct", 6.1], ["Intérêt annuel appliqué au crédit", "6,1 %", "senior_rate_pct", 6.1], ["Taux applicable au financement", "6,1 %", "senior_rate_pct", 6.1],
+    ["Bank advance repaid over", "25 years", "senior_amort_years", 25], ["Facility repaid over", "25 years", "senior_amort_years", 25], ["Mortgage paid down over", "25 years", "senior_amort_years", 25],
+    ["Remboursement de l'avance sur", "25 ans", "senior_amort_years", 25], ["Crédit remboursé sur", "25 ans", "senior_amort_years", 25], ["Capital du prêt remboursable sur", "25 ans", "senior_amort_years", 25],
+    ["Facility before repayment begins", "18 months", "senior_io_months", 18], ["Mortgage before repayment begins", "18 months", "senior_io_months", 18], ["Bank financing interest only", "18 months", "senior_io_months", 18],
+    ["Avance sans remboursement de capital", "18 mois", "senior_io_months", 18], ["Crédit sans remboursement de capital", "18 mois", "senior_io_months", 18], ["Financement sans remboursement de capital", "18 mois", "senior_io_months", 18],
+  ];
+  test.each(variants)("own label line: %s", (label, value, field, n) => expect(pick(read(`${label}: ${value}`))).toEqual([[field, n]]));
+  test.each(variants)("own comma-list clause: %s", (label, value, field, n) => expect(pick(read(`First mortgage, ${label} ${value}, supporting documents attached.`))).toEqual([[field, n]]));
+  test.each(variants)("own sheet row: %s", (label, value, field, n) => expect(pick(sheet("First mortgage", [[label, value]]))).toEqual([[field, n]]));
+  test.each(["Lender fee: $20,000", "Loan-to-cost 70%", "Spread over prime 1.5%", "Loan term: 5 years", "Interest reserve: $150,000", "Drawn to date $1,000,000", "Monthly payment $11,000", "Frais du prêteur : 20 000 $", "Ratio prêt-coût : 70 %", "Écart au-dessus du taux préférentiel : 1,5 %", "Durée du prêt : 5 ans", "Réserve d'intérêts : 150 000 $", "Avance tirée à ce jour : 1 000 000 $", "Versement mensuel : 11 000 $"])("a required exclusion stays shown: %s", (line) => {
+    const r = read("First mortgage", line);
+    expect(r.candidates.filter((c) => /^(senior|mezz|refinance)_/.test(c.fieldKey ?? ""))).toEqual([]);
+    expect([...r.other, ...r.candidates].length).toBeGreaterThan(0);
+  });
+  test.each(["Facility holdback: $50,000", "Lender balance: $900,000", "Bank deposit: $40,000", "Mortgage equity: $500,000", "Loan fee charge: 1%", "Loan insurance charge: 2%", "Bank spread charge: 1.5%", "Mortgage DCR charge: 1.2%", "Loan repayment maturity: 5 years", "Bank repayment renewal: 3 years", "Facility before repayment begins - term: 18 months", "Advance draw before repayment begins: 12 months", "Retenue bancaire : 50 000 $", "Solde du crédit : 900 000 $", "Dépôt bancaire : 40 000 $", "Capital propre du financement : 500 000 $", "Charge du prêt - frais : 1 %", "Charge du prêt - prime d'assurance : 2 %", "Charge du crédit - ratio : 70 %", "Remboursement du prêt à l'échéance : 5 ans", "Prêt sans remboursement de capital - terme : 18 mois"])("own exclusion variant: %s", (line) => expect(read("First mortgage", line).candidates.filter((c) => /^(senior|mezz|refinance)_/.test(c.fieldKey ?? ""))).toEqual([]));
+  test.each(["Months before repayment begins: 18 months", "Annual charge: 6.1%", "Repaid over: 25 years", "Montant consenti : 2 000 000 $", "Charge annuelle : 6,1 %", "Remboursé sur : 25 ans"])("no loan name or scope gives no concept read: %s", (line) => expect(pick(read(line))).toEqual([]));
+  test("a generic sheet's default senior scope is not a loan heading", () => expect(pick(sheet(null, [["Charge", "6.1%"], ["Repayment period", "25 years"], ["Unallocated sum", "2000000"]]))).toEqual([]));
+  test.each(["Permanent lender", "Take-out lender", "Prêt permanent", "Financement de sortie"])("a take-out heading gives refinance fields: %s", (heading) => expect(pick(read(heading, "Advance granted: $2,000,000", "Annual charge: 6.1%", "Repaid over: 25 years", "Months before repayment begins: 18 months"))).toEqual(four.map(([key, value]) => [(key === "senior_loan_amount" ? "refinance_amount" : String(key).replace("senior_", "refinance_")), value])));
+  test("a concept read is counted separately and aliases keep their existing rule", () => {
+    expect(read("Bank facility granted: $2,000,000").candidates[0]?.rule).toBe("concept");
+    expect(read("Senior loan: $2,000,000").candidates[0]?.rule).toBe("line:label-value");
+    expect(sheet("First mortgage", [["Charge", "6.1%"]]).candidates[0]?.rule).toBe("concept");
+  });
+});
+
+describe("card 108 audit: a loan noun alone is not the loan", () => {
+  const read = (...lines: string[]) => extractCandidates({ kind: "pdf", lines: lines.map((text, i) => ({ text, location: `page 1, line ${i + 1}` })), tables: [], pageCount: 1, needsOcr: false, fullText: lines.join("\n") });
+  const sheet = (rows: [string, number][]) => extractCandidates({ kind: "xlsx", lines: [], tables: [{ name: "Budget", rows: rows.map(([l, v], i) => [{ text: l, ref: `A${i + 1}` }, { text: String(v), number: v, ref: `B${i + 1}` }]) }], pageCount: 1, needsOcr: false, fullText: "" });
+  const pick = (r: ReturnType<typeof read>) => r.candidates.map((c) => [c.fieldKey, c.value]);
+  test.each([
+    "Note: the lender's appraiser valued it at $5,150,000 on completion.",
+    "For the record, the bank's appraisal came in at $5,150,000 stabilized.",
+    "The broker mentioned an alternative advance of $2,300,000, never committed.",
+    "A rough alternate bank figure of $2,300,000 was floated but not committed.",
+    "Le prêteur a fait évaluer l'immeuble à 5 150 000 $.",
+    "Line of credit: $500,000",
+    "Marge de crédit : 500 000 $",
+  ])("only the stated loan is read: %s", (line) => expect(pick(read("Construction loan: $2,450,000", line))).toEqual([["senior_loan_amount", 2_450_000]]));
+  test.each(["Subtotal before financing", "Total excluding financing costs", "Sous-total avant financement"])("a budget total that names financing is not the loan: %s", (label) => {
+    expect(pick(sheet([["Hard costs", 3_000_000], ["Soft costs", 500_000], [label, 3_500_000]])).filter(([k]) => /loan|refinance/.test(String(k)))).toEqual([]);
+  });
+  test.each([
+    ["Prêt mezzanine : 450 000 $", "Le prêteur principal (Banque Fictive) propose 2 950 000 $."],
+    ["Mezzanine loan: $450,000", "Our main lender is offering $2,950,000."],
+  ])("the main lender is the senior loan, even in a mezzanine document: %s", (mezz, line) => {
+    expect(pick(read(mezz, line)).sort()).toEqual([["mezz_loan_amount", 450_000], ["senior_loan_amount", 2_950_000]]);
   });
 });

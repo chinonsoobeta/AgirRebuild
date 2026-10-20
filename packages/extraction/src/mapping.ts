@@ -4,6 +4,7 @@
 // but it never becomes an input.
 
 import { FIELD_BY_KEY, FIELDS, OUTPUT_LIKE_PHRASES, type FieldDef } from "@agir/contracts";
+import { CONCEPTS, LOAN_ANAPHOR, LOAN_NOUN, MAIN_LENDER, NOT_THE_LOAN_AFTER } from "./concepts.ts";
 import { canonicalItem, codeOf, parenType, SF_PER_M2, unitTypesIn, wholeUnitType, type CurrencyCode, type NumberToken } from "@agir/numbers";
 
 // canonicalItem and itemFold live in @agir/numbers so the engine can use the same fold.
@@ -12,7 +13,7 @@ export { canonicalItem, itemFold } from "@agir/numbers";
 export type LabelUnit = "$" | "%" | "months" | "years" | "sf" | "m2" | "x" | null;
 
 export type Mapped =
-  | { kind: "field"; fieldKey: string; itemKey: string | null; value: number; unitSeen: string; quote?: true; note?: string }
+  | { kind: "field"; fieldKey: string; itemKey: string | null; value: number; unitSeen: string; quote?: true; concept?: true; note?: string }
   | { kind: "ignored"; reason: string }
   | { kind: "unmapped" };
 
@@ -470,6 +471,10 @@ export type MapOptions = {
   scope?: Scope;
   /** A line has an explicit senior-loan heading, rather than a table's default senior scope. */
   seniorHeading?: boolean;
+  /** Explicit loan context, rather than an implicit default senior scope. */
+  loanContext?: boolean;
+  /** A loan label before the colon governs concepts across that line's semicolon-separated clauses. */
+  conceptScope?: Scope;
   /** A budget table's row: "Other" names a cost here. */
   budget?: boolean;
   /** The sentence the label came from, for words about a sale that sit outside the label. */
@@ -735,7 +740,8 @@ export function mapToken(rawLabel: string, t: NumberToken, opts: MapOptions = {}
   const named = normalizeLabel(rawLabel).label;
   if (WRITER_FEE_RE.test(named)) return { kind: "ignored", reason: "The writer's own fee, not the project's soft costs" };
   if ([...named.matchAll(INCLUDED_IN_RE)].some((x) => { const rest = named.slice(x.index + x[0].length); return ALL_ALIASES.some((a) => `${rest} `.startsWith(`${a} `)); })) return { kind: "ignored", reason: INCLUDED_NOTE };
-  const m = mapSigned(rawLabel, t, opts);
+  let m = mapSigned(rawLabel, t, opts);
+  if (m.kind === "unmapped") m = conceptField(rawLabel, t, opts) ?? m;
   // A figure its field could never hold is shown, never read: nothing is flipped, rescaled or clamped.
   if (m.kind !== "field") return m;
   const def = FIELD_BY_KEY.get(m.fieldKey);
@@ -762,6 +768,29 @@ export function mapToken(rawLabel: string, t: NumberToken, opts: MapOptions = {}
     if (WAIVED_RE.test(words) && !NET_OF_RE.test(words) && (m.fieldKey === "land_transfer_tax" || !SALES_TAX_EXEMPT_RE.test(words))) return { kind: "ignored", reason: WAIVED_NOTE };
   }
   return def && outsideBounds(def, m.value) ? { kind: "ignored", reason: `The figure is outside what ${def.label} can hold` } : m;
+}
+
+// One shared matcher: exactly one compatible concept, with the same scope and value conversion as aliases.
+function conceptField(rawLabel: string, t: NumberToken, opts: MapOptions): Mapped | null {
+  if (t.value === null) return null;
+  // A concept labels the figure before it; following-label and correction probes must not steal a neighboring figure.
+  if (opts.prose && opts.context && !foldText(opts.context.slice(0, t.start)).trimEnd().endsWith(foldText(rawLabel).trim())) return null;
+  const { label, labelUnit, labelCode } = normalizeLabel(opts.prose ? rawLabel.split(/[,;]/).pop() ?? "" : rawLabel);
+  // A budget table's row is a cost line, never a loan.
+  if (opts.budget) return null;
+  const namedScope: Scope | null = MAIN_LENDER.test(label) ? "senior" : scopeIn(label);
+  if (!LOAN_NOUN.test(label) && !namedScope && !(opts.loanContext ?? opts.scope !== undefined)) return null;
+  // "The lender will advance…": a loan named before, so its rank must come from the line, its heading or the document.
+  if (opts.prose && !namedScope && !opts.loanContext && LOAN_ANAPHOR.test(label) && !scopeIn(opts.context?.slice(0, t.start) ?? "", false)) return null;
+  if (NOT_THE_LOAN_AFTER.test(foldText(opts.after ?? ""))) return null;
+  const unit = t.unit ?? labelUnit ?? (!opts.prose && Math.abs(t.value) >= 1000 ? "$" : null);
+  const fits = CONCEPTS.filter((c) => c.unit === unit && c.words.some((w) => w.test(label)) && !c.exclude.test(label));
+  if (fits.length !== 1) return null;
+  const scope = namedScope ?? opts.conceptScope ?? opts.scope ?? "senior";
+  const key = fits[0]!.fieldKey;
+  const def = FIELD_BY_KEY.get(scope === "senior" ? key : SCOPE_FIELD[scope][key] ?? key)!;
+  const c = compatibleValue(def, t, label, labelUnit, labelCode, opts.prose);
+  return c ? { kind: "field", fieldKey: def.key, itemKey: null, ...c, concept: true } : null;
 }
 
 /** Whether a value is outside the field's own `integer`, `min` and `max`; one check for the reader and for suggestions. */

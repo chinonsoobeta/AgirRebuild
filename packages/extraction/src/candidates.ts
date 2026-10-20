@@ -1,3 +1,4 @@
+import { LOAN_NOUN } from "./concepts.ts";
 import { FIELD_BY_KEY, OUTPUT_LIKE_PHRASES } from "@agir/contracts";
 import { detectFormat, normalizeText, SF_PER_M2, tokenize, unitTypesIn, wholeUnitType, type CurrencyCode, type DocumentFormat, type NumberToken } from "@agir/numbers";
 import type { Cell, NormalizedDocument, Table } from "./document.ts";
@@ -112,7 +113,7 @@ const SUPERSEDED_NOTE = "Superseded by a later revision of this quote";
 
 function record(result: ExtractionResult, mapped: Mapped, token: NumberToken, base: Base) {
   if (mapped.kind === "field") {
-    result.candidates.push({ ...base, rule: mapped.quote ? base.rule.replace(/:[^:]*$/, ":quote-total") : base.rule, fieldKey: mapped.fieldKey, itemKey: mapped.itemKey, value: mapped.value, unitSeen: mapped.unitSeen, ...(mapped.note ? { note: mapped.note } : {}) });
+    result.candidates.push({ ...base, rule: mapped.concept ? "concept" : mapped.quote ? base.rule.replace(/:[^:]*$/, ":quote-total") : base.rule, fieldKey: mapped.fieldKey, itemKey: mapped.itemKey, value: mapped.value, unitSeen: mapped.unitSeen, ...(mapped.note ? { note: mapped.note } : {}) });
   } else {
     result.other.push({
       ...base,
@@ -574,6 +575,7 @@ function readSentence(sentence: { text: string; start: number }, para0: Paragrap
   const label = text.slice(0, Math.max(text.indexOf(":"), 0));
   const inline = label.split(/\s+/).length <= 8 ? scopeIn(label, false) : null;
   const para = inline ? { ...para0, scope: inline } : para0;
+  const conceptScope = scopeIn(para0.text.slice(0, Math.max(para0.text.indexOf(":"), 0)), false) ?? undefined;
   const locationOf = (pos: number) => para.segs.reduce((loc, g) => (g.start <= sentence.start + pos ? g.location : loc), para.segs[0]!.location);
   // A Yes/No answer after a flag's label is the flag.
   const colonAt = text.indexOf(":");
@@ -717,7 +719,7 @@ function readSentence(sentence: { text: string; start: number }, para0: Paragrap
       proseFrom = colon + 1;
       lead = labelTypes[0] ?? null;
       bareCount = true;
-    } else if (tokens.every((t) => mapToken(label, t, opt(t)).kind === "unmapped")) proseFrom = colon + 1;
+    } else if ((first?.kind === "field" && first.concept && LOAN_NOUN.test(fold(text.slice(colon + 1, tokens[0]!.start)))) || tokens.every((t) => mapToken(label, t, opt(t)).kind === "unmapped")) proseFrom = colon + 1;
     else {
       let used = false;
       let usedKey: string | null = null;
@@ -799,6 +801,7 @@ function readSentence(sentence: { text: string; start: number }, para0: Paragrap
   // A loan named only inside a condition ("if the take-out does not fund, we amortize over 25 years") is not the loan the terms belong to.
   const loanSentence = scopesIn(unconditioned(text)).some((s) => s !== "senior");
   let sentenceLoan: Scope | null = null;
+  let conceptLoan = false;
   tokens.forEach((t, i) => {
     const where = locationOf(t.start);
     if (ranged.has(i)) {
@@ -818,7 +821,7 @@ function readSentence(sentence: { text: string; start: number }, para0: Paragrap
       from = t.end;
       return;
     }
-    let opts: MapOptions = { prose: true, scope: para.scope, seniorHeading: para.scope === "senior", context: text, quote, after: text.slice(t.end) };
+    let opts: MapOptions = { prose: true, scope: para.scope, loanContext: para.scope !== undefined || conceptScope !== undefined || conceptLoan, conceptScope, seniorHeading: para.scope === "senior", context: text, quote, after: text.slice(t.end) };
     let usedLabel = totalLabels.get(t) ?? label;
     if (loanSentence) {
       const named = scopesIn(unconditioned(label));
@@ -895,6 +898,7 @@ function readSentence(sentence: { text: string; start: number }, para0: Paragrap
     if (mapped.kind === "field" && mapped.fieldKey === "equity_amount" && /^\s*(?:(?:of|de|du|the|un|une)\s+)*(?:construction\s+)?(?:facility|loan|mortgage|pret|financement)\b/.test(fold(afterFigure))) mapped = { kind: "unmapped" };
     carry = named && mapped.kind === "field" && isMoney(t) ? { scope: named, at: i } : null;
     lastRead = mapped.kind === "field" && isMoney(t) ? { label: usedLabel, key: mapped.fieldKey, t } : null;
+    if (mapped.kind === "field" && AMOUNT_SCOPE[mapped.fieldKey]) conceptLoan = true;
     record(result, mapped, t, { raw: t.raw, location: where, context, rule: "line:prose" });
   });
 }
@@ -1626,7 +1630,7 @@ function isValueFirstSection(rows: Cell[][], format: DocumentFormat): boolean {
   return first >= 2 && first > last;
 }
 
-type Section = { rows: Cell[][]; scope: Scope; excluded: boolean; rent?: Roles; budget?: BudgetRoles; item?: string; suites?: true };
+type Section = { rows: Cell[][]; scope: Scope; loanScope: boolean; excluded: boolean; rent?: Roles; budget?: BudgetRoles; item?: string; suites?: true };
 
 /**
  * A sheet may stack sections. A row that is itself a header (a rent roll's or a budget's) ends the section before it and starts
@@ -1643,7 +1647,7 @@ function isSentenceCell(c: Cell, row: Cell[], format: DocumentFormat): boolean {
   return !!first && c.text.slice(0, first.start).trim() !== "";
 }
 
-function fromTable(table0: Table, result: ExtractionResult, notes: string[] = [], scope0: Scope = "senior") {
+function fromTable(table0: Table, result: ExtractionResult, notes: string[] = [], scope0?: Scope) {
   // A category column beside the line items is set aside; its word stays with the row (task 55).
   const cats = categoryCells(table0.rows, result.format);
   const catOf = new Map<Cell[], string>();
@@ -1655,7 +1659,8 @@ function fromTable(table0: Table, result: ExtractionResult, notes: string[] = []
     return kept;
   }) };
   // A rank row names the loan for the whole table, the rows above it too; a section label below still overrides it.
-  let scope = tableRank(table) ?? scope0;
+  let scope = tableRank(table) ?? scope0 ?? "senior";
+  let loanScope = tableRank(table) !== null || scope0 !== undefined;
   let labelled = false;
   // A sheet name or a section label that marks what follows as not part of the deal.
   // A sheet named as not part of the deal stays so throughout; a section label inside it cannot undo it.
@@ -1663,7 +1668,7 @@ function fromTable(table0: Table, result: ExtractionResult, notes: string[] = []
   let excluded = sheetExcluded;
   const sections: Section[] = [];
   if (fromTypeColumns(table, result)) return;
-  let cur: Section = { rows: [], scope, excluded };
+  let cur: Section = { rows: [], scope, loanScope, excluded };
   const close = () => {
     if (cur.rows.length > 0) sections.push(cur);
   };
@@ -1671,7 +1676,7 @@ function fromTable(table0: Table, result: ExtractionResult, notes: string[] = []
     const numeric = row.some((c) => c.number !== undefined);
     if (suiteHeader(row)) {
       close();
-      cur = { rows: [], scope, excluded, suites: true };
+      cur = { rows: [], scope, loanScope, excluded, suites: true };
       suiteRolls.add(result);
       return;
     }
@@ -1680,7 +1685,7 @@ function fromTable(table0: Table, result: ExtractionResult, notes: string[] = []
     if (rent || budget) {
       if (!cur.rent && !cur.budget && sections.length === 0 && !labelled) cur.rows = [];
       close();
-      cur = { rows: [row], scope, excluded, ...(rent ? { rent } : { budget: budget! }) };
+      cur = { rows: [row], scope, loanScope, excluded, ...(rent ? { rent } : { budget: budget! }) };
       return;
     }
     const item = numeric ? null : blockHeading(row, table.rows[at + 1], scope, result.format);
@@ -1688,16 +1693,18 @@ function fromTable(table0: Table, result: ExtractionResult, notes: string[] = []
       close();
       labelled = true;
       excluded = sheetExcluded || markedNotPart(item);
-      cur = { rows: [], scope, excluded, item };
+      cur = { rows: [], scope, loanScope, excluded, item };
       return;
     }
     const label = sectionLabel(row);
     if (label !== null) {
       close();
-      scope = scopeIn(label) ?? scope;
+      const named = scopeIn(label);
+      scope = named ?? scope;
+      loanScope ||= named !== null;
       labelled = true;
       excluded = sheetExcluded || markedNotPart(label);
-      cur = { rows: [], scope, excluded };
+      cur = { rows: [], scope, loanScope, excluded };
       return;
     }
     cur.rows.push(row);
@@ -1730,12 +1737,13 @@ function fromTable(table0: Table, result: ExtractionResult, notes: string[] = []
       s.rows.forEach((row0) => {
         const cat = catOf.get(row0);
         const scope = (cat && scopeIn(cat)) || s.scope;
+        const loanContext = s.loanScope || !!(cat && scopeIn(cat));
         if (!s.excluded && namedRow(row0, table, result)) return;
         // A sentence cell is read as a sentence under the scope and exclusion in force for its row; the other cells of the row read as usual.
         const row = row0.filter((c) => !isSentenceCell(c, row0, result.format));
         for (const c of row0) {
           if (row.includes(c)) continue;
-          const para: Paragraph = { text: c.text.trim(), segs: [{ start: 0, location: c.ref }], scope: s.scope, excluded: s.excluded || row.some((x) => markedNotPart(x.text)) };
+          const para: Paragraph = { text: c.text.trim(), segs: [{ start: 0, location: c.ref }], scope: s.loanScope ? s.scope : undefined, excluded: s.excluded || row.some((x) => markedNotPart(x.text)) };
           for (const sentence of sentences(para.text)) readSentence(sentence, para, result);
         }
         if (row.length < row0.length && !row.some((c) => c.text || c.number !== undefined)) return;
@@ -1762,7 +1770,7 @@ function fromTable(table0: Table, result: ExtractionResult, notes: string[] = []
         }
         // The note for a figure the row's label does not read: why the label does not fit it.
         const laterNote = (c: Cell, x: NumberToken): string => {
-          const m = mapToken(relative ? labelCell.text.replace(BLOCK_RELATIVE_RE, "") : labelCell.text, x, { scope, ahead: c.text.slice(0, x.start), after: c.text.slice(x.end), quote: quoteDocs.has(result) });
+          const m = mapToken(relative ? labelCell.text.replace(BLOCK_RELATIVE_RE, "") : labelCell.text, x, { scope, loanContext, ahead: c.text.slice(0, x.start), after: c.text.slice(x.end), quote: quoteDocs.has(result) });
           return m.kind === "ignored" ? m.reason : m.kind === "field" ? LATER_FIGURE_NOTE : "No field matches this label";
         };
         // Each figure after the one the label used or showed is shown, never read (task 65); a row of years adds none.
@@ -1783,7 +1791,7 @@ function fromTable(table0: Table, result: ExtractionResult, notes: string[] = []
           const t = cellToken(cell, result.format);
           if (!t) continue;
           const base = { raw: t.raw, location: cell.ref, context: rowContext(table.name, cat, row, labelCell, cell), rule: "table:label-value" };
-          let mapped = mapToken(relative ? labelCell.text.replace(BLOCK_RELATIVE_RE, "") : labelCell.text, t, { scope, ahead: cell.text.slice(0, t.start), after: cell.text.slice(t.end), quote: quoteDocs.has(result) });
+          let mapped = mapToken(relative ? labelCell.text.replace(BLOCK_RELATIVE_RE, "") : labelCell.text, t, { scope, loanContext, ahead: cell.text.slice(0, t.start), after: cell.text.slice(t.end), quote: quoteDocs.has(result) });
           if (mapped.kind !== "field" && t.value !== null && (t.unit === "$" || t.currency) && closesUses(labelCell.text, read)) mapped = mapToken("total project cost", t, { scope: s.scope });
           if (block && mapped.kind === "field" && BLOCK_FIELDS.has(mapped.fieldKey) && !(mapped.itemKey && unitTypesIn(mapped.itemKey).length > 0)) mapped = { ...mapped, itemKey: block };
           if (relative && mapped.kind === "field" && mapped.fieldKey === "stabilized_occupancy_pct") mapped = { ...mapped, fieldKey: "item_occupancy_pct", itemKey: block! };
@@ -1807,7 +1815,7 @@ function fromTable(table0: Table, result: ExtractionResult, notes: string[] = []
             const lineCell: Cell | undefined = after.slice(after.indexOf(cell) + 1).find((c) => {
               const x = wholeUnitType(c.text) ? null : cellToken(c, result.format);
               if (!x || x.value === null || perUnit(c.text, x) || isDeposit(c.text, x)) return false;
-              const m = mapToken(relative ? labelCell.text.replace(BLOCK_RELATIVE_RE, "") : labelCell.text, x, { scope, ahead: c.text.slice(0, x.start), after: c.text.slice(x.end), quote: quoteDocs.has(result) });
+              const m = mapToken(relative ? labelCell.text.replace(BLOCK_RELATIVE_RE, "") : labelCell.text, x, { scope, loanContext, ahead: c.text.slice(0, x.start), after: c.text.slice(x.end), quote: quoteDocs.has(result) });
               return m.kind === "field" && m.fieldKey === field && m.itemKey === item;
             });
             if (!lineCell) {
@@ -1881,8 +1889,8 @@ function headerColumns(text: string, roleOf: (h: string) => string | null, ref: 
  * Each table is rebuilt as a Table, so the same finders read it as read a spreadsheet's. Returns the table with
  * the lines after it (where a note may say what the rent column is per), and the lines it consumed.
  */
-function textTables(doc: NormalizedDocument, format: DocumentFormat, scopes: (Scope | undefined)[], excluded: boolean[]): { tables: { table: Table; notes: string[]; scope: Scope }[]; used: Set<number> } {
-  const out: { table: Table; notes: string[]; scope: Scope }[] = [];
+function textTables(doc: NormalizedDocument, format: DocumentFormat, scopes: (Scope | undefined)[], excluded: boolean[]): { tables: { table: Table; notes: string[]; scope: Scope | undefined }[]; used: Set<number> } {
+  const out: { table: Table; notes: string[]; scope: Scope | undefined }[] = [];
   const used = new Set<number>();
   const lines = doc.lines;
   for (let i = 0; i < lines.length - 1; i++) {
@@ -1944,7 +1952,7 @@ function textTables(doc: NormalizedDocument, format: DocumentFormat, scopes: (Sc
     }
     if (rows.length === 0) continue;
     used.add(i);
-    out.push({ table: { name: `Table at ${head.location}`, rows: [cols, ...rows] }, notes: lines.slice(j, j + 4).map((l) => l.text), scope: scopes[i] ?? "senior" });
+    out.push({ table: { name: `Table at ${head.location}`, rows: [cols, ...rows] }, notes: lines.slice(j, j + 4).map((l) => l.text), scope: scopes[i] });
     i = j - 1;
   }
   return { tables: out, used };
@@ -2145,7 +2153,7 @@ export function extractCandidates(doc0: NormalizedDocument): ExtractionResult {
   const documentScope = documentScopes.length === 1 ? documentScopes[0] : undefined;
   for (const t of doc.tables) {
     const [before, beforeOther] = [result.candidates.length, result.other.length];
-    fromTable(t, result, notes, (t.at ? scopes[t.at - 1] : documentScope) ?? "senior");
+    fromTable(t, result, notes, t.at ? scopes[t.at - 1] : documentScope);
     // A sheet named old, original, prior or archive holds no current figures: what it gave is shown, not read.
     // A sheet named for a scenario (downside, lender case) holds no base-case figures either (task 56).
     const old = OLD_SHEET_RE.test(fold(t.name));
