@@ -5784,3 +5784,74 @@ describe("card 106: French loan interest word order and target take-out months",
     expect(pick(r)).toEqual([[key, n]]);
   });
 });
+
+describe("card 107: a budget category column names its lines", () => {
+  type Row = [string, string, number | string];
+  const sheet = (rows: Row[], name = "Budget", section?: string) => extractCandidates({ kind: "xlsx", lines: [], tables: [{ name, rows: [...(section ? [[{ text: section, ref: "A0" }]] : []), ...rows.map((row, i) => row.map((v, c): Cell => ({ text: String(v), ref: `${String.fromCharCode(65 + c)}${i + 1}`, ...(typeof v === "number" ? { number: v } : {}) })))] }], pageCount: 1, needsOcr: false, fullText: "" });
+  const read = (text: string) => extractCandidates({ kind: "pdf", lines: [{ text, location: "page 1" }], tables: [], pageCount: 1, needsOcr: false, fullText: text });
+  const pick = (r: ReturnType<typeof sheet>) => r.candidates.map((c) => [c.fieldKey, c.value]);
+  const en: Row[] = [["Hard", "Fourplex trades package before HST", 1_450_000], ["Hard", "Site servicing and hookups", 120_000], ["Soft", "Architect, engineers and city permits", 210_000], ["Soft", "Legal and accounting", 40_000]];
+  const fr: Row[] = [["Directs", "Lots de travaux avant TPS", 1_450_000], ["Directs", "Raccordements et desserte", 120_000], ["Indirects", "Architecte, ingénieurs et permis municipaux", 210_000], ["Indirects", "Services juridiques et comptables", 40_000]];
+  test.each([["English", en], ["French", fr]] as const)("S1 sums the category rows with both refs: %s", (_, rows) => {
+    const r = sheet([...rows]);
+    expect(pick(r)).toEqual([["hard_cost", 1_570_000], ["soft_cost", 250_000]]);
+    expect(r.candidates.map((c) => [c.rule, c.location])).toEqual([["table:budget-sum", "C1, C2"], ["table:budget-sum", "C3, C4"]]);
+    expect(r.candidates[0]!.context).toContain(rows[0]![1]);
+    expect(r.candidates[0]!.context).toContain(rows[0]![0]);
+  });
+  test.each([["English", en, "Land", "Contingency"], ["French", fr, "Terrain", "Imprévus"]] as const)("S2 single land and contingency categories do not break detection: %s", (_, rows, land, reserve) => {
+    expect(pick(sheet([[land, "Parcel purchase", 600_000], ...rows, [reserve, "Owner reserve for surprises", 90_000]]))).toEqual([["land_cost", 600_000], ["hard_cost", 1_570_000], ["soft_cost", 250_000], ["contingency", 90_000]]);
+  });
+  const subtotal = (french: boolean, total = 1_570_000): Row[] => french
+    ? [["Directs", "Coûts directs - bâtiment", 1_450_000], ["Directs", "Coûts directs - raccordements", 120_000], ["Directs", "Sous-total directs", total], ["Indirects", "Coûts indirects - conception", 210_000], ["Indirects", "Coûts indirects - juristes", 40_000], ["Total", "Coût total du projet", 1_820_000]]
+    : [["Hard", "Hard costs - building", 1_450_000], ["Hard", "Hard costs - site work", 120_000], ["Hard", "Hard subtotal", total], ["Soft", "Soft costs - design", 210_000], ["Soft", "Soft costs - legal", 40_000], ["Total", "Total project cost", 1_820_000]];
+  test.each([false, true])("S3 checks subtotals rather than adding them (French=%s)", (french) => expect(pick(sheet(subtotal(french)))).toEqual([["hard_cost", 1_570_000], ["soft_cost", 250_000], ["stated_total_cost", 1_820_000]]));
+  test.each([false, true])("a wrong subtotal retains the existing mismatch note (French=%s)", (french) => {
+    const r = sheet(subtotal(french, 1_600_000));
+    expect(r.candidates.filter((c) => c.fieldKey === "hard_cost").map((c) => [c.value, c.note])).toEqual([[1_570_000, undefined], [1_600_000, "The printed total does not equal the sum of its lines (1,570,000)"]]);
+  });
+  test.each(["Retired", "Remplacé", "Retirée", "Retirés", "Remplacées", "Replaced", "Retired estimate", "Replaced budget", "Budget retiré", "Estimation remplacée", "Superseded", "Old budget", "Previous", "Archive", "Ancien budget", "Prior version"])("an excluded sheet supplies neither category nor plain costs: %s", (name) => {
+    expect(pick(sheet(en, name))).toEqual([]);
+    expect(pick(sheet([["Hard costs", "Trade package", 500_000]], name))).toEqual([]);
+    const plain = extractCandidates({ kind: "xlsx", lines: [], tables: [{ name, rows: [[{ text: "Hard costs", ref: "A1" }, { text: "500000", number: 500_000, ref: "B1" }]] }], pageCount: 1, needsOcr: false, fullText: "" });
+    expect(pick(plain)).toEqual([]);
+  });
+  test.each(["Retired", "Remplacé", "Not part of the project", "Ne fait pas partie du projet"])("section exclusions still apply: %s", (section) => expect(pick(sheet(en, "Budget", section))).toEqual([]));
+  test.each(["Uses", "Costs", "Sources", "Emplois", "Coûts"])("generic category %s adds no field", (cat) => {
+    expect(pick(sheet([[cat, "Land", 600_000], [cat, "Hard costs", 1_450_000], [cat, "Soft costs", 210_000], [cat, "Fresh wording with no field", 30_000]]))).toEqual([["land_cost", 600_000], ["hard_cost", 1_450_000], ["soft_cost", 210_000]]);
+  });
+  test("a description's own field wins and partial explicit rows join the category sums", () => {
+    expect(pick(sheet([["Hard", "Hard costs", 1_450_000], ["Hard", "Site work", 120_000], ["Soft", "Soft costs", 210_000], ["Soft", "Legal", 40_000], ["Soft", "Contingency on design", 20_000]]))).toEqual([["hard_cost", 1_570_000], ["soft_cost", 250_000], ["contingency", 20_000]]);
+  });
+  test.each([
+    [["Construction", "Framing and envelope", 800_000], ["Soft costs", "Consultants and filings", 100_000], ["Acquisition", "Parcel conveyance", 300_000], ["Contingencies", "Unallocated cushion", 50_000]],
+    [["Coûts directs", "Structure et enveloppe", 800_000], ["Coûts indirects", "Études et autorisations", 100_000], ["Terrain", "Acte de vente du lot", 300_000], ["Aléas", "Marge pour surprises", 50_000]],
+    [["Hard costs", "Masonry contract", 800_000], ["Indirects", "Planning advisers", 100_000], ["Land", "Deed transfer", 300_000], ["Réserve", "Somme non affectée", 50_000]],
+  ] as Row[][])("own category variants: %j", (...rows) => expect(pick(sheet(rows))).toEqual([["hard_cost", 800_000], ["soft_cost", 100_000], ["land_cost", 300_000], ["contingency", 50_000]]));
+  test("an excluded category never contributes to the live budget", () => {
+    expect(pick(sheet([["Hard", "Live framing", 800_000], ["Soft", "Live studies", 100_000], ["Retired", "Hard costs", 900_000], ["Retired", "Soft costs", 120_000]]))).toEqual([["hard_cost", 800_000], ["soft_cost", 100_000]]);
+  });
+  test("per-door, percent and currency handling remain separate", () => {
+    const r = sheet([["Hard", "Per-door amount", "$10,000 per door"], ["Hard", "Allowance share", "5%"], ["Hard", "Canadian work", "CAD 800,000"], ["Hard", "Foreign work", "USD 90,000"], ["Soft", "Advisers", 100_000]]);
+    expect(r.candidates.filter((c) => c.fieldKey === "hard_cost").map((c) => [c.value, c.unitSeen])).toEqual([[800_000, "CAD"], [90_000, "USD"]]);
+    expect(r.candidates.some((c) => c.value === 10_000 || c.value === 5)).toBe(false);
+    expect(r.other.some((o) => o.value === 10_000 && o.note?.includes("per"))).toBe(true);
+  });
+  test.each([
+    ["Construction costs before taxes: $2,000,000", "hard_cost"], ["Coûts de construction hors taxes : 2 000 000 $", "hard_cost"],
+    ["Hard costs excluding HST: $2,000,000", "hard_cost"], ["Hard costs (net of GST): $2,000,000", "hard_cost"], ["Soft costs incl. HST: $2,000,000", "soft_cost"],
+    ["Construction costs excluding taxes: $2,000,000", "hard_cost"], ["Construction costs net of taxes: $2,000,000", "hard_cost"], ["Construction costs ex taxes: $2,000,000", "hard_cost"],
+    ["Coûts de construction avant taxes : 2 000 000 $", "hard_cost"], ["Coûts de construction taxes en sus : 2 000 000 $", "hard_cost"], ["Coûts de construction taxes incluses : 2 000 000 $", "hard_cost"],
+  ])("a tax qualifier preserves its cost line: %s", (line, key) => expect(pick(read(line))).toEqual([[key, 2_000_000]]));
+  test.each(["Property taxes during construction: $40,000", "Construction costs - property taxes: $40,000", "Coûts de construction - taxes foncières : 40 000 $", "Construction costs before taxes - property taxes: $40,000"])("a real property-tax carrying cost stays refused: %s", (line) => {
+    const r = read(line);
+    expect(pick(r)).toEqual([]);
+    expect(r.other.some((o) => o.note === "A carrying cost; label it under the cost line it belongs to")).toBe(true);
+  });
+  test("a sales tax line stays refused", () => {
+    const r = read("HST on hard costs: $260,000");
+    expect(pick(r)).toEqual([]);
+    expect(r.other.some((o) => o.note?.startsWith("A sales tax line"))).toBe(true);
+  });
+  test("the stated project total remains an input in prose", () => expect(pick(read("Total project cost: $1,820,000"))).toEqual([["stated_total_cost", 1_820_000]]));
+});

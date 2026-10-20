@@ -634,7 +634,7 @@ const LOAN_FEE_WORD_RE = /(?:^|[^a-z])(?:fees?|frais)(?![a-z])/;
 const LOAN_AMOUNTS = new Set(["senior_loan_amount", "mezz_loan_amount", "refinance_amount"]);
 const INTEREST_ONLY_RE = /interest[- ]only|interets? seulement/g;
 const CARRYING_RE = /(?:^|[^a-z])(?:insurance|assurances?|utilities|services publics|property taxes?|taxes|taxe fonciere|taxes foncieres|carrying costs?|holding costs?|couts? de portage)(?![a-z])/;
-const TAXES_BASIS_RE = /(?:^|[^a-z])taxes\s+(?:included|extra|inclus\w*|en sus)(?![a-z])/;
+const TAXES_BASIS_RE = /\b(?:(?:before|excluding|net of|ex|hors|avant)\s+taxes|taxes\s+(?:included|extra|inclus\w*|en sus))\b/g;
 const TRANSFER_TAX_RE = /(?:land|property) transfer taxes?/g;
 const INTEREST_FEE_FIELDS = new Set(["land_cost", "hard_cost", "soft_cost", "contingency", "development_charges", "land_transfer_tax", "senior_loan_amount", "mezz_loan_amount", "refinance_amount"]);
 const CARRYING_FIELDS = new Set(["land_cost", "hard_cost", "soft_cost", "contingency", "development_charges", "land_transfer_tax"]);
@@ -748,8 +748,8 @@ export function mapToken(rawLabel: string, t: NumberToken, opts: MapOptions = {}
     if (INTEREST_FEE_FIELDS.has(def.key) && INTEREST_WORD_RE.test(own(INTEREST_WORD_RE))) return { kind: "ignored", reason: INTEREST_NOTE };
     const fee = LOAN_AMOUNTS.has(def.key) ? LOAN_FEE_WORD_RE : FEE_WORD_RE;
     if (INTEREST_FEE_FIELDS.has(def.key) && def.key !== "soft_cost" && fee.test(own(fee))) return { kind: "ignored", reason: "A fee or premium, not an input" };
-    const carrying = label.replace(TRANSFER_TAX_RE, " ");
-    if (CARRYING_FIELDS.has(def.key) && CARRYING_RE.test(without(carrying, CARRYING_RE, def.aliases)) && !TAXES_BASIS_RE.test(carrying)) return { kind: "ignored", reason: CARRYING_NOTE };
+    const carrying = label.replace(TRANSFER_TAX_RE, " ").replace(TAXES_BASIS_RE, " ");
+    if (CARRYING_FIELDS.has(def.key) && CARRYING_RE.test(without(carrying, CARRYING_RE, def.aliases))) return { kind: "ignored", reason: CARRYING_NOTE };
   }
   // Card 61c: a budget label that is two lines, a rebate, or an amount paid so far is shown, never read as the line it names.
   if (def?.group === "budget" && m.itemKey === null) {
