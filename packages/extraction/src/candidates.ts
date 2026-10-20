@@ -708,7 +708,7 @@ function readSentence(sentence: { text: string; start: number }, para0: Paragrap
     // A label that names nothing for any number ("Financing: a loan of ...") is an introduction: what follows is prose.
     const scope = para.scope;
     // A label for a unit field never names an item unless it is a unit type; the clause after the colon is then read as prose, its own unit types naming the items.
-    const opt = (t: NumberToken): MapOptions => ({ scope, seniorHeading: scope === "senior", quote, after: text.slice(t.end), gap: text.slice(colon + 1, t.start) });
+    const opt = (t: NumberToken): MapOptions => ({ scope, seniorHeading: scope === "senior", quote, budgetConcept: true, after: text.slice(t.end), gap: text.slice(colon + 1, t.start) });
     const first = tokens.map((t) => mapToken(label, t, opt(t))).find((m) => m.kind === "field");
     const unitField = first?.kind === "field" && first.itemKey !== null && UNIT_FIELDS.has(first.fieldKey);
     const labelTypes = unitTypesIn(label);
@@ -747,7 +747,7 @@ function readSentence(sentence: { text: string; start: number }, para0: Paragrap
           continue;
         }
         // After the first figure, one whose own words just before it name a different field ("at an exit cap of 5.5%") is read by that field; one with no words of its own stays with the label.
-        const own: Mapped | null = used && i > 0 ? mapToken(text.slice(tokens[i - 1]!.end, t.start), t, { scope, quote, after: text.slice(t.end), prose: true, context: text }) : null;
+        const own: Mapped | null = used && i > 0 ? mapToken(text.slice(tokens[i - 1]!.end, t.start), t, { scope, quote, budgetConcept: true, after: text.slice(t.end), prose: true, context: text }) : null;
         // A part the colon's budget line includes ("Hard costs: $X, including contingency of $Y") is inside that line, not a line of its own.
         const inside: boolean = usedKey !== null && BUDGET_LINES.has(usedKey) && PART_OF_RE.test(fold(text.slice(colon + 1, t.start)));
         const loan = i > 0 ? amounts.get(tokens[i - 1]!) : undefined;
@@ -821,7 +821,7 @@ function readSentence(sentence: { text: string; start: number }, para0: Paragrap
       from = t.end;
       return;
     }
-    let opts: MapOptions = { prose: true, scope: para.scope, loanContext: para.scope !== undefined || conceptScope !== undefined || conceptLoan, conceptScope, seniorHeading: para.scope === "senior", context: text, quote, after: text.slice(t.end) };
+    let opts: MapOptions = { prose: true, scope: para.scope, budgetConcept: text.includes(":"), loanContext: para.scope !== undefined || conceptScope !== undefined || conceptLoan, conceptScope, seniorHeading: para.scope === "senior", context: text, quote, after: text.slice(t.end) };
     let usedLabel = totalLabels.get(t) ?? label;
     if (loanSentence) {
       const named = scopesIn(unconditioned(label));
@@ -916,6 +916,49 @@ function countedType(text: string, tokens: NumberToken[]): string | null {
 }
 
 /** Prose: sentences of text, each read on its own. Lines in `skip` were read as table rows. */
+const CONCEPT_COSTS = new Set(["land_cost", "hard_cost", "soft_cost", "contingency"]);
+
+/**
+ * Text lines of a budget (card 109 audit). A line named only by a cost concept ("Framing: $400,000") may be one of several lines of its field.
+ * Beside another line of its field, or beside an unnamed money figure in a block that names no other cost field, it is shown, not read.
+ * An unnamed figure at least the sum of the others in a block of three or more is their total and stops nothing.
+ */
+function conceptLinesInBudget(doc: NormalizedDocument, result: ExtractionResult, from: number, otherFrom: number) {
+  const index = new Map(doc.lines.map((l, i) => [l.location, i]));
+  const money = (c: Candidate) => c.value !== null && !!c.unitSeen?.includes("$");
+  const byLine = new Map<number, { read: Candidate[]; unread: Candidate[] }>();
+  const at = (c: Candidate) => {
+    const i = index.get(c.location);
+    if (i === undefined || !money(c)) return null;
+    return byLine.get(i) ?? byLine.set(i, { read: [], unread: [] }).get(i)!;
+  };
+  for (const c of result.candidates.slice(from)) at(c)?.read.push(c);
+  for (const o of result.other.slice(otherFrom)) if (o.note === "No field matches this label") at(o)?.unread.push(o);
+  const blocks: number[][] = [];
+  for (const i of [...byLine.keys()].sort((a, b) => a - b)) {
+    const last = blocks.at(-1);
+    if (last && last.at(-1) === i - 1) last.push(i);
+    else blocks.push([i]);
+  }
+  const withheld = new Set<Candidate>();
+  for (const block of blocks) {
+    const read = block.flatMap((i) => byLine.get(i)!.read);
+    const unread = block.flatMap((i) => byLine.get(i)!.unread);
+    const all = [...read, ...unread];
+    const sum = all.reduce((n, c) => n + c.value!, 0);
+    const parts = unread.filter((u) => !(all.length >= 3 && u.value! >= sum - u.value!));
+    // A block naming two or more cost fields lists cost lines, one per field: its unnamed lines are other costs, not more of these.
+    const fields = new Set(read.map((c) => c.fieldKey).filter((k) => CONCEPT_COSTS.has(k ?? "")));
+    for (const c of read) {
+      if (c.rule !== "concept" || !CONCEPT_COSTS.has(c.fieldKey ?? "")) continue;
+      if ((parts.length > 0 && fields.size < 2) || read.filter((x) => x.fieldKey === c.fieldKey).length > 1) withheld.add(c);
+    }
+  }
+  if (withheld.size === 0) return;
+  result.candidates = result.candidates.filter((c) => !withheld.has(c));
+  for (const c of withheld) result.other.push({ ...c, fieldKey: null, itemKey: null, note: CONCEPT_BESIDE_UNREAD_NOTE });
+}
+
 function fromLines(doc: NormalizedDocument, result: ExtractionResult, skip: Set<number>, scopes: (Scope | undefined)[], excluded: boolean[]) {
   for (const para of paragraphs(doc, skip, scopes, excluded)) {
     // A type named after a count labels the per-unit rents of the clauses after it in the same line (task 55).
@@ -1360,10 +1403,14 @@ function fromBudget(table: Table, headerRow: number, roles: BudgetRoles, result:
   // line mapped to X, and raise both when they disagree. A line that maps to no
   // field, between the header (or the previous total) and a total row for X, is a component of X.
   // A line in another currency is never added to the deal's own: sums are kept per field and currency.
-  const components = new Map<string, { fieldKey: string; unitSeen: string; sum: number; refs: string[]; labels: string[]; rows: { value: number; ref: string; label: string }[]; credit?: true }>();
+  const components = new Map<string, { fieldKey: string; unitSeen: string; sum: number; refs: string[]; labels: string[]; rows: { value: number; ref: string; label: string }[]; credit?: true; concept?: true; alias?: true }>();
   const totals: Candidate[] = [];
   let started = false;
   let segment: { value: number; unitSeen: string; ref: string; label: string; shown: Candidate }[] = [];
+  // Since the last total: whether an unread line was seen, and the fields a concept named. A concept line beside unread lines
+  // that no total adds up may be only part of its field ("Framing" beside "Mechanical"), so it is shown, not read.
+  let unreadInRun = false;
+  const conceptInRun = new Set<string>();
   for (let r = headerRow + 1; r < table.rows.length; r++) {
     const row = table.rows[r]!;
     const labelCell = row[roles.label];
@@ -1415,7 +1462,8 @@ function fromBudget(table: Table, headerRow: number, roles: BudgetRoles, result:
     }
     const categoryTotal = category && TOTAL_RE.test(category);
     const trailingTotal = category ? /\b(?:sub-?total|sous-?total|total)\s*$/i : null;
-    const isTotal = TOTAL_RE.test(labelCell.text) || !!categoryTotal || !!trailingTotal?.test(labelCell.text);
+    const usesTotal = USES_TOTAL_RE.test(labelCell.text.trim());
+    const isTotal = usesTotal || TOTAL_RE.test(labelCell.text) || !!categoryTotal || !!trailingTotal?.test(labelCell.text);
     // Unread rows with nothing read or totalled above them are the whole table's breakdown of its first total.
     const bare = !started;
     if (isTotal) started = true;
@@ -1425,12 +1473,12 @@ function fromBudget(table: Table, headerRow: number, roles: BudgetRoles, result:
     const moneyToken: NumberToken = { ...t, currency: true, unit: t.unit ?? "$" };
     const quoted = quoteDocs.has(result) ? mapToken(labelCell.text, moneyToken, { scope, budget: true, quote: true }) : null;
     const closing = isTotal && closesUses(labelCell.text, [...components.values()].map((c) => c.fieldKey)) && table.rows.slice(r + 1).every((x) => !x[roles.amount] || !cellToken(x[roles.amount]!, result.format));
-    let mapped = quoted?.kind === "field" && quoted.quote ? quoted : mapToken(closing ? "total project cost" : isTotal && /development|project/i.test(labelCell.text) ? labelCell.text : labelText, moneyToken, { scope, budget: true });
+    let mapped = quoted?.kind === "field" && quoted.quote ? quoted : mapToken(closing || usesTotal ? "total project cost" : isTotal && /development|project/i.test(labelCell.text) ? labelCell.text : labelText, moneyToken, { scope, budget: true, quote: quoteDocs.has(result) });
     // Only an unnamed line inherits its category. A named field or an explicit refusal keeps its own meaning.
     const categoryKey = category && budgetCategory(category);
     // The line's own words still apply their guards (a fee, interest, an amount to date): the category is read with them.
     if (mapped.kind === "unmapped" && categoryKey) {
-      const inherited = mapToken(`${FIELD_BY_KEY.get(categoryKey)!.aliases[0]!} - ${labelCell.text}`, moneyToken, { scope, budget: true });
+      const inherited = mapToken(`${FIELD_BY_KEY.get(categoryKey)!.aliases[0]!} - ${labelCell.text}`, moneyToken, { scope, budget: true, quote: quoteDocs.has(result) });
       if (inherited.kind === "ignored" || (inherited.kind === "field" && inherited.fieldKey === categoryKey)) mapped = inherited;
     }
     if (mapped.kind !== "field" || FIELD_BY_KEY.get(mapped.fieldKey)?.unit !== "$") {
@@ -1445,7 +1493,10 @@ function fromBudget(table: Table, headerRow: number, roles: BudgetRoles, result:
         rule: "table:budget",
         note: mapped.kind === "ignored" ? mapped.reason : "No budget line matches this label",
       };
-      if (mapped.kind === "unmapped" && !isTotal && t.value !== null) segment.push({ value: t.value, unitSeen: withCurrency("$", t.currencyCode), ref: amountCell.ref, label: labelCell.text, shown });
+      if (mapped.kind === "unmapped" && !isTotal && t.value !== null) {
+        segment.push({ value: t.value, unitSeen: withCurrency("$", t.currencyCode), ref: amountCell.ref, label: labelCell.text, shown });
+        unreadInRun = true;
+      }
       result.other.push(shown);
       continue;
     }
@@ -1467,8 +1518,14 @@ function fromBudget(table: Table, headerRow: number, roles: BudgetRoles, result:
       acc.labels.push(label);
       acc.rows.push({ value, ref, label });
       if (mapped.note) acc.credit = true;
+      if (mapped.concept) acc.concept = true; else acc.alias = true;
       components.set(ck, acc);
     };
+    if (isTotal) {
+      unreadInRun = false;
+      conceptInRun.clear();
+    }
+    if (isTotal && mapped.fieldKey === "stated_total_cost") { totals.push(cand); continue; }
     if (isTotal && mapped.fieldKey !== "stated_total_cost") {
       totals.push(cand);
       // The unread rows are the subtotal's parts only when they add up to it, with the rows already read as its field (those are then not the whole of it); otherwise the subtotal is read alone.
@@ -1486,10 +1543,19 @@ function fromBudget(table: Table, headerRow: number, roles: BudgetRoles, result:
       }
       continue;
     }
-    // A row that is read ends the run of unread rows.
-    segment = [];
-    started = true;
+    // A row that is read ends the run of unread rows. A row named only by a concept is one of the run's lines, so a total below still adds up the unread lines around it.
+    if (mapped.concept) conceptInRun.add(`${mapped.fieldKey}|${cand.unitSeen}`);
+    else {
+      segment = [];
+      started = true;
+    }
     add(mapped.value, cand.unitSeen!, amountCell.ref, displayLabel);
+  }
+  if (unreadInRun) for (const key of conceptInRun) {
+    const acc = components.get(key);
+    if (!acc || acc.alias) continue;
+    components.delete(key);
+    for (const r of acc.rows) result.other.push({ fieldKey: null, itemKey: null, value: r.value, raw: String(r.value), unitSeen: "$", location: r.ref, context: `${table.name}: ${r.label}`, rule: "table:budget", note: CONCEPT_BESIDE_UNREAD_NOTE });
   }
   for (const acc of components.values()) {
     result.candidates.push({
@@ -1506,16 +1572,16 @@ function fromBudget(table: Table, headerRow: number, roles: BudgetRoles, result:
     });
   }
   for (const t of totals) {
-    const comp = components.get(`${t.fieldKey}|${t.unitSeen}`);
-    if (!comp) result.candidates.push(t);
-    else if (Math.abs(comp.sum - (t.value ?? 0)) > 1) {
-      result.candidates.push({ ...t, note: `The printed total does not equal the sum of its lines (${comp.sum.toLocaleString("en-US")})` });
-    }
+    const comp = t.fieldKey === "stated_total_cost"
+      ? { sum: [...components.values()].filter((c) => c.unitSeen === t.unitSeen && FIELD_BY_KEY.get(c.fieldKey)?.group === "budget").reduce((sum, c) => sum + c.sum, 0) }
+      : components.get(`${t.fieldKey}|${t.unitSeen}`);
+    const differs = comp && Math.abs(comp.sum - (t.value ?? 0)) > 1;
+    if (!comp || t.fieldKey === "stated_total_cost" || differs) result.candidates.push({ ...t, ...(differs ? { note: `The printed total does not equal the sum of its lines (${comp.sum.toLocaleString("en-US")})` } : {}) });
   }
 }
 
 // A word that opens a section of a sheet: a first column of these (or of any few repeated words) is a category column.
-const SECTION_WORD_RE = /^(?:uses?|sources?|hard|soft|finance|financing|financement|revenues?|revenus?|income|assumptions?|operating|opex|timing|emplois|hypotheses|land|terrain|acquisition|contingenc(?:y|ies)|imprevus|aleas|reserve|totals?|subtotal|sous-total|grand total|frais de financement|indirects|directs|construction|costs?|couts?|loan|equity|capital|exit)\b/;
+const SECTION_WORD_RE = /^(?:uses?|sources?|hard|soft|finance|financing|financement|revenues?|revenus?|income|assumptions?|operating|opex|timing|inputs?|budget|emplois|hypotheses|land|terrain|acquisition|contingenc(?:y|ies)|imprevus|aleas|reserve|totals?|subtotal|sous-total|grand total|frais de financement|indirects|directs|construction|costs?|couts?|loan|equity|capital|exit)\b/;
 
 const filledCells = (row: Cell[]) => row.filter((c) => c.text.trim() || c.number !== undefined);
 
@@ -1528,6 +1594,15 @@ function budgetCategory(raw: string): string | null {
   // "Reserve" alone is not named: replacement, operating and interest reserves are not the contingency.
   return /^(?:contingenc(?:y|ies)|imprevus|aleas)$/.test(category) ? "contingency" : null;
 }
+
+function costCategory(raw: string): boolean {
+  const label = normalizeLabel(raw).label;
+  return budgetCategory(raw) !== null || /^(?:uses?|costs?|budget|emplois|couts|totals?|subtotal|sous-total|grand total)$/.test(label);
+}
+
+const CONCEPT_BESIDE_UNREAD_NOTE = "Other lines beside it name no field, so this line may be only part of its cost; enter the field by hand";
+
+const USES_TOTAL_RE = /^(?:sum of uses|total uses|uses total|total des emplois|somme des emplois)$/i;
 
 /**
  * In a sheet with no header row, a first text column of a few short words, each repeated or opening a section, beside a column of distinct line items
@@ -1630,7 +1705,7 @@ function isValueFirstSection(rows: Cell[][], format: DocumentFormat): boolean {
   return first >= 2 && first > last;
 }
 
-type Section = { rows: Cell[][]; scope: Scope; loanScope: boolean; excluded: boolean; rent?: Roles; budget?: BudgetRoles; item?: string; suites?: true };
+type Section = { rows: Cell[][]; scope: Scope; loanScope: boolean; costSection?: boolean; categoryBudget?: boolean; excluded: boolean; rent?: Roles; budget?: BudgetRoles; item?: string; suites?: true };
 
 /**
  * A sheet may stack sections. A row that is itself a header (a rent roll's or a budget's) ends the section before it and starts
@@ -1661,6 +1736,7 @@ function fromTable(table0: Table, result: ExtractionResult, notes: string[] = []
   // A rank row names the loan for the whole table, the rows above it too; a section label below still overrides it.
   let scope = tableRank(table) ?? scope0 ?? "senior";
   let loanScope = tableRank(table) !== null || scope0 !== undefined;
+  let costSection = false;
   let labelled = false;
   // A sheet name or a section label that marks what follows as not part of the deal.
   // A sheet named as not part of the deal stays so throughout; a section label inside it cannot undo it.
@@ -1668,7 +1744,7 @@ function fromTable(table0: Table, result: ExtractionResult, notes: string[] = []
   let excluded = sheetExcluded;
   const sections: Section[] = [];
   if (fromTypeColumns(table, result)) return;
-  let cur: Section = { rows: [], scope, loanScope, excluded };
+  let cur: Section = { rows: [], scope, loanScope, costSection, excluded };
   const close = () => {
     if (cur.rows.length > 0) sections.push(cur);
   };
@@ -1676,7 +1752,7 @@ function fromTable(table0: Table, result: ExtractionResult, notes: string[] = []
     const numeric = row.some((c) => c.number !== undefined);
     if (suiteHeader(row)) {
       close();
-      cur = { rows: [], scope, loanScope, excluded, suites: true };
+      cur = { rows: [], scope, loanScope, costSection, excluded, suites: true };
       suiteRolls.add(result);
       return;
     }
@@ -1685,7 +1761,7 @@ function fromTable(table0: Table, result: ExtractionResult, notes: string[] = []
     if (rent || budget) {
       if (!cur.rent && !cur.budget && sections.length === 0 && !labelled) cur.rows = [];
       close();
-      cur = { rows: [row], scope, loanScope, excluded, ...(rent ? { rent } : { budget: budget! }) };
+      cur = { rows: [row], scope, loanScope, costSection, excluded, ...(rent ? { rent } : { budget: budget! }) };
       return;
     }
     const item = numeric ? null : blockHeading(row, table.rows[at + 1], scope, result.format);
@@ -1693,7 +1769,7 @@ function fromTable(table0: Table, result: ExtractionResult, notes: string[] = []
       close();
       labelled = true;
       excluded = sheetExcluded || markedNotPart(item);
-      cur = { rows: [], scope, loanScope, excluded, item };
+      cur = { rows: [], scope, loanScope, costSection, excluded, item };
       return;
     }
     const label = sectionLabel(row);
@@ -1702,16 +1778,29 @@ function fromTable(table0: Table, result: ExtractionResult, notes: string[] = []
       const named = scopeIn(label);
       scope = named ?? scope;
       loanScope ||= named !== null;
+      costSection = costCategory(label);
       labelled = true;
       excluded = sheetExcluded || markedNotPart(label);
-      cur = { rows: [], scope, loanScope, excluded };
+      cur = { rows: [], scope, loanScope, costSection, excluded };
       return;
     }
     cur.rows.push(row);
   });
   close();
   let rollSeen = false;
-  for (const s of sections) {
+  const runs = sections.flatMap((section) => {
+    if (section.rent || section.budget || section.suites) return [section];
+    const parts: Section[] = [];
+    for (const row of section.rows) {
+      const cat = catOf.get(row);
+      const budget = (cat ? costCategory(cat) : section.costSection) && filledCells(row).length === 2;
+      const last = parts.at(-1);
+      if (last && !!last.categoryBudget === !!budget) last.rows.push(row);
+      else parts.push({ ...section, rows: [row], categoryBudget: !!budget });
+    }
+    return parts;
+  });
+  for (const s of runs) {
     const part = { ...table, rows: s.rows };
     if (s.suites) continue;
     if (s.rent) {
@@ -1721,9 +1810,9 @@ function fromTable(table0: Table, result: ExtractionResult, notes: string[] = []
     else if (s.budget) fromBudget(part, 0, s.budget, result, s.scope, s.excluded);
     // A detected category budget uses the same sums and total checks as a headed budget.
     // Empty cells between the line and its amount are skipped; a note or a second figure keeps the sheet out.
-    else if (s.rows.some((row) => budgetCategory(catOf.get(row) ?? "")) && s.rows.every((row) => filledCells(row).length === 2 && catOf.has(row))) {
+    else if (s.categoryBudget) {
       const rows = s.rows.map(filledCells);
-      rows.forEach((row, i) => catOf.set(row, catOf.get(s.rows[i]!)!));
+      rows.forEach((row, i) => { const cat = catOf.get(s.rows[i]!); if (cat) catOf.set(row, cat); });
       fromBudget({ ...part, rows }, -1, { label: 0, amount: 1 }, result, s.scope, s.excluded, catOf);
     }
     else {
@@ -2143,7 +2232,9 @@ export function extractCandidates(doc0: NormalizedDocument): ExtractionResult {
   doc.lines.forEach((l, i) => {
     if (!excluded[i] && !text.used.has(i) && namedLine(l.text, l.location, result)) text.used.add(i);
   });
+  const [linesFrom, linesOtherFrom] = [result.candidates.length, result.other.length];
   fromLines(doc, result, text.used, scopes, excluded);
+  conceptLinesInBudget(doc, result, linesFrom, linesOtherFrom);
   for (const t of text.tables) fromTable(t.table, result, t.notes, t.scope);
   // A Word file's paragraphs may carry the note about a rent column ("Retail rents are ..."); there is no order between them and its tables.
   const notes = doc.kind === "docx" ? doc.lines.map((l) => l.text) : [];

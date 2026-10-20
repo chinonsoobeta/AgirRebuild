@@ -4,7 +4,7 @@
 // but it never becomes an input.
 
 import { FIELD_BY_KEY, FIELDS, OUTPUT_LIKE_PHRASES, type FieldDef } from "@agir/contracts";
-import { CONCEPTS, LOAN_ANAPHOR, LOAN_NOUN, MAIN_LENDER, NOT_THE_LOAN_AFTER } from "./concepts.ts";
+import { CONCEPTS, LOAN_ANAPHOR, LOAN_NOUN, MAIN_LENDER, NOT_A_BUDGET_LINE, NOT_THE_LOAN_AFTER, WHERE_IT_SITS } from "./concepts.ts";
 import { canonicalItem, codeOf, parenType, SF_PER_M2, unitTypesIn, wholeUnitType, type CurrencyCode, type NumberToken } from "@agir/numbers";
 
 // canonicalItem and itemFold live in @agir/numbers so the engine can use the same fold.
@@ -274,7 +274,9 @@ function lenderFigure(rawLabel: string, t: NumberToken, opts: MapOptions): strin
   if (t.unit !== "%" && (TI_RE.test(plain) || TI_AFTER_RE.test(tail) || (rentShaped && (ALLOWANCE_RE.test(plain) || ALLOWANCE_AFTER_RE.test(tail))))) return "A tenant improvement allowance, not rent";
   const variableEgi = t.unit === "%" && VARIABLE_COST_RE.test(plain) && STATED_EGI_AFTER_RE.test(foldText(opts.after ?? ""));
   // A share named "honoraires" is a percentage fee, never the soft-cost line.
-  if (!opts.budget && !variableEgi && ((FEE_RE.test(without(plain, FEE_RE, t.unit === "%" ? NAMED_ALIASES : ALL_ALIASES)) && !listed) || FEE_AFTER_RE.test(tail))) return "A fee or premium, not an input";
+  const meanings = (opts.budget || opts.budgetConcept) && money ? budgetConcepts(plain) : [];
+  const designFee = meanings.length === 1 && meanings[0]!.fieldKey === "soft_cost" && !meanings[0]!.exclude.test(foldText(rawLabel));
+  if (!opts.budget && !variableEgi && !designFee && ((FEE_RE.test(without(plain, FEE_RE, t.unit === "%" ? NAMED_ALIASES : ALL_ALIASES)) && !listed) || FEE_AFTER_RE.test(tail))) return "A fee or premium, not an input";
   // A leased or occupied share (in its own label or right after it) with a condition marker in its clause is the lender's condition.
   const after = prose && at >= 0 ? (ctx.slice(at + raw.length).split(/[,;.]/)[0] ?? "") : "";
   if (t.unit === "%" && (LEASED_RE.test(plain) || LEASED_RE.test(after.split(" ").slice(0, 6).join(" "))) && CONDITION_RE.test(`${plain} ${after}`)) return LENDER_CONDITION;
@@ -477,6 +479,8 @@ export type MapOptions = {
   conceptScope?: Scope;
   /** A budget table's row: "Other" names a cost here. */
   budget?: boolean;
+  /** A money label in text may use the budget concepts; arbitrary plain-sheet labels may not. */
+  budgetConcept?: boolean;
   /** The sentence the label came from, for words about a sale that sit outside the label. */
   context?: string;
   /** The words just after the number in its line, for what the figure is a share of ("4% of EGI") or what it measures ("24 months IO"). */
@@ -615,7 +619,7 @@ export const CREDIT_NOTE = "A credit: reduces total cost";
 export const NEGATIVE_NOTE = "A negative figure that does not say it is a credit";
 
 // A label that says the figure is a credit. Folded (no accents, lower case) text.
-const CREDIT_WORD_RE = /(?:^|[^a-z])(?:credits?|credited|rebates?|refunds?|refunded|reimbursements?|reimbursed|remises?|remboursements?|rembourse|ristournes?|subvention deduite|subventions? (?:nette )?(?:deduite|qui reduit les couts)|aide financiere (?:deduite|qui reduit les couts)|grant applied)(?![a-z])/;
+const CREDIT_WORD_RE = /(?:^|[^a-z])(?:credits?|credited|rebates?|refunds?|refunded|reimbursements?|reimbursed|remises?|remboursements?|rembourse(?:e|s|es)?|ristournes?|subvention deduite|subventions? (?:nette )?(?:deduite|qui reduit les couts)|aide financiere (?:deduite|qui reduit les couts)|grant applied)(?![a-z])/;
 // Credit words that are not a credit against the cost: a loan line, a rating, a loss allowance, a tax credit, a restoration.
 const NOT_CREDIT_RE = /(?:line|lines|letter|letters|facility|facilities|marge|ligne|lettre|facilite|carte|card|tax|taxe|impot|impots)\s+(?:of\s+|de\s+|d\s+)?credits?(?![a-z])|credits?\s+(?:facility|facilities|union|rating|check|checks|score|loss|losses|risk|agreement|committee|card|bureau|enhancement|insurance|line|lines|support|policy|quality|worthiness|de risque|d impot)|cooperative de credit|remises?\s+(?:en etat|a neuf|en forme|des cles|de cles|des plans|de prix)/;
 // A cost waived or exempted, and the words that make a figure what is paid after it. Folded text.
@@ -740,7 +744,11 @@ export function mapToken(rawLabel: string, t: NumberToken, opts: MapOptions = {}
   const named = normalizeLabel(rawLabel).label;
   if (WRITER_FEE_RE.test(named)) return { kind: "ignored", reason: "The writer's own fee, not the project's soft costs" };
   if ([...named.matchAll(INCLUDED_IN_RE)].some((x) => { const rest = named.slice(x.index + x[0].length); return ALL_ALIASES.some((a) => `${rest} `.startsWith(`${a} `)); })) return { kind: "ignored", reason: INCLUDED_NOTE };
+  const budgetLabel = named.split(COVER_LIST_RE)[0] ?? named;
+  const joined = budgetLabel.split(/\b(?:and|et)\b/).map((part) => budgetConcepts(part));
   let m = mapSigned(rawLabel, t, opts);
+  // A description naming two cost fields by concept is shown, unless its own words already name its field.
+  if (m.kind === "unmapped" && !opts.quote && (opts.budget || opts.budgetConcept) && t.unit === "$" && !/%/.test(opts.gap ?? opts.ahead ?? "") && joined.length === 2 && joined.every((part) => part.length === 1) && joined[0]![0]!.fieldKey !== joined[1]![0]!.fieldKey) return { kind: "ignored", reason: "This description names more than one budget field; enter each line separately" };
   if (m.kind === "unmapped") m = conceptField(rawLabel, t, opts) ?? m;
   // A figure its field could never hold is shown, never read: nothing is flipped, rescaled or clamped.
   if (m.kind !== "field") return m;
@@ -770,25 +778,34 @@ export function mapToken(rawLabel: string, t: NumberToken, opts: MapOptions = {}
   return def && outsideBounds(def, m.value) ? { kind: "ignored", reason: `The figure is outside what ${def.label} can hold` } : m;
 }
 
+// Budget concepts count the meanings before exclusions, so "construction and permits" cannot silently become soft costs.
+function budgetConcepts(label: string) {
+  const head = label.replace(WHERE_IT_SITS, "");
+  return CONCEPTS.filter((c) => c.budget && c.words.some((w) => w.test(head)));
+}
+
 // One shared matcher: exactly one compatible concept, with the same scope and value conversion as aliases.
 function conceptField(rawLabel: string, t: NumberToken, opts: MapOptions): Mapped | null {
   if (t.value === null) return null;
-  // A concept labels the figure before it; following-label and correction probes must not steal a neighboring figure.
   if (opts.prose && opts.context && !foldText(opts.context.slice(0, t.start)).trimEnd().endsWith(foldText(rawLabel).trim())) return null;
   const { label, labelUnit, labelCode } = normalizeLabel(opts.prose ? rawLabel.split(/[,;]/).pop() ?? "" : rawLabel);
-  // A budget table's row is a cost line, never a loan.
-  if (opts.budget) return null;
-  const namedScope: Scope | null = MAIN_LENDER.test(label) ? "senior" : scopeIn(label);
-  if (!LOAN_NOUN.test(label) && !namedScope && !(opts.loanContext ?? opts.scope !== undefined)) return null;
-  // "The lender will advance…": a loan named before, so its rank must come from the line, its heading or the document.
-  if (opts.prose && !namedScope && !opts.loanContext && LOAN_ANAPHOR.test(label) && !scopeIn(opts.context?.slice(0, t.start) ?? "", false)) return null;
-  if (NOT_THE_LOAN_AFTER.test(foldText(opts.after ?? ""))) return null;
   const unit = t.unit ?? labelUnit ?? (!opts.prose && Math.abs(t.value) >= 1000 ? "$" : null);
-  const fits = CONCEPTS.filter((c) => c.unit === unit && c.words.some((w) => w.test(label)) && !c.exclude.test(label));
+  const budget = unit === "$" && !opts.quote && (opts.budget || opts.budgetConcept) && !/%/.test(opts.gap ?? opts.ahead ?? "");
+  const meanings = budget ? budgetConcepts(label) : [];
+  if (meanings.length > 1) return { kind: "ignored", reason: "This description names more than one budget field; enter each line separately" };
+  const namedScope: Scope | null = MAIN_LENDER.test(label) ? "senior" : scopeIn(label);
+  const loan = !opts.budget && (LOAN_NOUN.test(label) || namedScope || (opts.loanContext ?? opts.scope !== undefined))
+    && !(opts.prose && !namedScope && !opts.loanContext && LOAN_ANAPHOR.test(label) && !scopeIn(opts.context?.slice(0, t.start) ?? "", false))
+    && !NOT_THE_LOAN_AFTER.test(foldText(opts.after ?? ""));
+  const folded = foldText(rawLabel);
+  const budgetLine = budget && !NOT_A_BUDGET_LINE.test(folded) && !LOAN_NOUN.test(folded);
+  const fits = CONCEPTS.filter((c) => c.unit === unit && (c.budget ? budgetLine && meanings.includes(c) : loan && c.words.some((w) => w.test(label))) && !c.exclude.test(c.budget ? folded : label));
   if (fits.length !== 1) return null;
+  const chosen = fits[0]!;
+  if (chosen.budget && (t.currencyCode ?? labelCode) && (t.currencyCode ?? labelCode) !== "CAD") return { kind: "ignored", reason: "An amount in another currency" };
   const scope = namedScope ?? opts.conceptScope ?? opts.scope ?? "senior";
-  const key = fits[0]!.fieldKey;
-  const def = FIELD_BY_KEY.get(scope === "senior" ? key : SCOPE_FIELD[scope][key] ?? key)!;
+  const key = chosen.fieldKey;
+  const def = FIELD_BY_KEY.get(chosen.budget || scope === "senior" ? key : SCOPE_FIELD[scope][key] ?? key)!;
   const c = compatibleValue(def, t, label, labelUnit, labelCode, opts.prose);
   return c ? { kind: "field", fieldKey: def.key, itemKey: null, ...c, concept: true } : null;
 }

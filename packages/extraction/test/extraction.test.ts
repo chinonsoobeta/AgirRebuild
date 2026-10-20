@@ -775,8 +775,9 @@ describe("tables written as lines of text, and what a table's rows mean", () => 
     const r = t([["Framing", 400_000], ["Mechanical", 200_000], ["Total des coûts directs", 650_000]]);
     expect(r.candidates.map((c) => [c.fieldKey, c.value])).toEqual([["hard_cost", 600_000], ["hard_cost", 650_000]]);
     const none = t([["Framing", 400_000], ["Mechanical", 200_000]]);
+    // Card 109 audit: framing names hard costs, but beside an unnamed line and no total it may be only part of them.
     expect(none.candidates).toEqual([]);
-    expect(none.other.map((o) => o.value)).toEqual([400_000, 200_000]);
+    expect(none.other.map((o) => o.value).sort()).toEqual([200_000, 400_000]);
     // Within a dollar is the same figure.
     expect(t([["Framing", 400_000], ["Mechanical", 200_000.5], ["Total hard cost", 600_000]]).candidates.map((c) => c.value)).toHaveLength(1);
   });
@@ -2209,11 +2210,12 @@ describe("totals and their parts", () => {
 
   test("a subtotal that its unread rows do not add up to is read alone; the rows stay shown", () => {
     const r = budget(["Poste", "Montant ($)"], ["Terrain", 485_000], ["Entrepreneur général", 3_100_000], ["Architecture", 120_000], ["Ingénierie", 180_000], ["Assurances", 155_000], ["Total des coûts indirects", 455_000]);
-    expect(pick(r)).toEqual([["land_cost", 485_000], ["soft_cost", 455_000]]);
-    for (const v of [3_100_000, 120_000, 180_000, 155_000]) expect(noteOf(r, v)).toBe(NOT_SHOWN);
+    expect(pick(r)).toEqual([["land_cost", 485_000], ["hard_cost", 3_100_000], ["soft_cost", 455_000]]);
+    // Card 109 names the contractor and architecture; the remaining parts now agree with the soft subtotal.
+    for (const v of [180_000, 155_000]) expect(noteOf(r, v)).toBe("No budget line matches this label");
     const en = budget(["Item", "Amount"], ["Land", 100_000], ["General contractor lump sum", 900_000], ["Architecture", 50_000], ["Engineering", 30_000], ["Total soft costs", 80_000]);
-    expect(pick(en)).toEqual([["land_cost", 100_000], ["soft_cost", 80_000]]);
-    expect(noteOf(en, 900_000)).toBe(NOT_SHOWN);
+    expect(pick(en)).toEqual([["land_cost", 100_000], ["hard_cost", 900_000], ["soft_cost", 80_000]]);
+    expect(en.other).toEqual([]);
   });
   test("a table of only unread rows under one total is that total's breakdown: a difference is raised, as before", () => {
     const r = budget(["Item", "Amount"], ["Framing", 400_000], ["Mechanical", 200_000], ["Total hard cost", 650_000]);
@@ -2264,9 +2266,9 @@ describe("totals and their parts", () => {
   test("a subtotal over read and unread rows: they are its parts when they add up, else it is read alone, never a conflict", () => {
     const head: [string, string] = ["Poste", "Montant ($)"];
     const fits = budget(head, ["Terrain", 100_000], ["Entrepreneur général", 900_000], ["Honoraires professionnels", 50_000], ["Architecture", 30_000], ["Ingénierie", 20_000], ["Total des coûts indirects", 100_000]);
-    expect(pick(fits)).toEqual([["land_cost", 100_000], ["soft_cost", 100_000]]);
+    expect(pick(fits)).toEqual([["land_cost", 100_000], ["hard_cost", 900_000], ["soft_cost", 100_000]]);
     const off = budget(head, ["Terrain", 100_000], ["Entrepreneur général", 900_000], ["Honoraires professionnels", 50_000], ["Architecture", 30_000], ["Ingénierie", 20_000], ["Total des coûts indirects", 130_000]);
-    expect(pick(off)).toEqual([["land_cost", 100_000], ["soft_cost", 130_000]]);
+    expect(pick(off)).toEqual([["land_cost", 100_000], ["hard_cost", 900_000], ["soft_cost", 130_000]]);
     for (const v of [50_000, 30_000, 20_000]) expect(noteOf(off, v)).toBe(NOT_SHOWN);
     // Negative: when every row of the run was read, a difference is still a conflict.
     const all = budget(head, ["Honoraires professionnels", 50_000], ["Frais indirects divers", 30_000], ["Total des coûts indirects", 100_000]);
@@ -4736,12 +4738,13 @@ describe("every figure in a table is used or shown (task 65)", () => {
     expect(vanished(named)).toEqual([]);
     expect(shown(named)).toContainEqual(["C3", 4101500, "No budget line matches this label"]);
     expect(extractCandidates(named).other.find((o) => o.location === "C3")!.context).toContain("Total project cost");
-    expect(read(named)).toEqual([]);
+    // Card 109 names framing; the empty-label row remains shown.
+    expect(read(named)).toEqual([["hard_cost", null, 1_000_000, "C2"]]);
     const beside = grid("Budget", [["Item", "Category", "Amount"], ["Framing", "Hard", "$1,000,000"], ["", "Total contract", "$2,148,500"]]);
     expect(vanished(beside)).toEqual([]);
     expect(shown(beside)).toContainEqual(["C3", 2148500, "No budget line matches this label"]);
     expect(extractCandidates(beside).other.find((o) => o.location === "C3")!.context).toContain("Total contract");
-    expect(read(beside)).toEqual([]);
+    expect(read(beside)).toEqual([["hard_cost", null, 1_000_000, "C2"]]);
   });
 
   test("a rent roll's total row is shown with the summary note; its suite numbers are not shown", () => {
@@ -4762,7 +4765,7 @@ describe("every figure in a table is used or shown (task 65)", () => {
     const d = grid("Budget", [["Category", "Item", "Amount", "$ per unit", "% of total"], ["Hard", "Framing", "$1,000,000", "$100,000", "25%"]]);
     expect(vanished(d)).toEqual([]);
     expect(shown(d).filter((s) => s[2] === "Another column of this budget row; not read")).toEqual([["D2", 100000, "Another column of this budget row; not read"], ["E2", 25, "Another column of this budget row; not read"]]);
-    expect(read(d)).toEqual([]);
+    expect(read(d)).toEqual([["hard_cost", null, 1_000_000, "C2"]]);
   });
 
   test("audit of card 65: a unit type's digit is not a figure, and a later figure that names a field says so", () => {
@@ -5950,5 +5953,156 @@ describe("card 108 audit: a loan noun alone is not the loan", () => {
     ["Mezzanine loan: $450,000", "Our main lender is offering $2,950,000."],
   ])("the main lender is the senior loan, even in a mezzanine document: %s", (mezz, line) => {
     expect(pick(read(mezz, line)).sort()).toEqual([["mezz_loan_amount", 450_000], ["senior_loan_amount", 2_950_000]]);
+  });
+});
+
+describe("card 109: budget concepts and mixed category sections", () => {
+  type Row = [string, string, number | string];
+  const read = (text: string) => extractCandidates({ kind: "pdf", lines: [{ text, location: "page 1" }], tables: [], pageCount: 1, needsOcr: false, fullText: text });
+  const sheet = (rows: Row[], name = "Current", section?: string) => extractCandidates({ kind: "xlsx", lines: [], tables: [{ name, rows: [...(section ? [[{ text: section, ref: "A0" }]] : []), ...rows.map((row, i) => row.map((v, c): Cell => ({ text: String(v), ref: `${String.fromCharCode(65 + c)}${i + 1}`, ...(typeof v === "number" ? { number: v } : {}) })))] }], pageCount: 1, needsOcr: false, fullText: "" });
+  const plain = (rows: [string, number | string][], section?: string) => extractCandidates({ kind: "xlsx", lines: [], tables: [{ name: "Current", rows: [...(section ? [[{ text: section, ref: "A0" }]] : []), ...rows.map((row, i) => row.map((v, c): Cell => ({ text: String(v), ref: `${String.fromCharCode(65 + c)}${i + 1}`, ...(typeof v === "number" ? { number: v } : {}) })))] }], pageCount: 1, needsOcr: false, fullText: "" });
+  const pick = (r: ReturnType<typeof read>) => r.candidates.map((c) => [c.fieldKey, c.value]);
+  const en: Row[] = [["Uses", "Lot acquisition and closing", 600_000], ["Uses", "Framing, envelope and finishes", 1_450_000], ["Uses", "Architect and permit fees", 210_000], ["Uses", "Overrun allowance", 90_000]];
+  const fr: Row[] = [["Emplois", "Achat du lot et frais de clôture", 600_000], ["Emplois", "Charpente, enveloppe et finitions", 1_450_000], ["Emplois", "Honoraires d'architecte et permis", 210_000], ["Emplois", "Provision pour dépassements", 90_000]];
+  const costs = [["land_cost", 600_000], ["hard_cost", 1_450_000], ["soft_cost", 210_000], ["contingency", 90_000]];
+  test.each([["EN", en, "Sum of uses"], ["FR", fr, "Somme des emplois"]] as const)("U: %s", (_, rows, total) => expect(pick(sheet([...rows, [rows[0]![0], total, 2_350_000]]))).toEqual([...costs, ["stated_total_cost", 2_350_000]]));
+  test.each([...en, ...fr])("the same budget label in prose: %s | %s", (_, label, value) => expect(pick(read(`${label}: $${value.toLocaleString("en-US")}`))).toEqual([costs[[...en, ...fr].findIndex((r) => r[1] === label) % 4]]));
+  test("M: budget and input runs use their existing readers", () => {
+    const r = sheet([["Uses", "Lot acquisition and closing", 600_000], ["Hard", "Framing, envelope and finishes", 1_450_000], ["Hard", "Site services", 120_000], ["Soft", "Architect and permit fees", 210_000], ["Input", "Build period in months", 18], ["Input", "Hold in years", 7]]);
+    expect(pick(r)).toEqual([["land_cost", 600_000], ["hard_cost", 1_570_000], ["soft_cost", 210_000], ["construction_months", 18], ["hold_years", 7]]);
+    expect(r.candidates.find((c) => c.fieldKey === "hard_cost")?.location).toBe("C2, C3");
+  });
+  test("uses-only categories preserve the input rows too", () => expect(pick(sheet([...en, ["Input", "Build period in months", 18], ["Input", "Lease-up allowance in months", 5], ["Input", "Exit cap", "5.5%"]]))).toEqual([...costs, ["construction_months", 18], ["lease_up_months", 5], ["exit_cap_rate_pct", 5.5]]));
+  test("plain labels continue to supply the bare number's unit", () => expect(pick(plain([["Build period in months", 18], ["Lease-up in months", 5], ["Hold (years)", 7]]))).toEqual([["construction_months", 18], ["lease_up_months", 5], ["hold_years", 7]]));
+  test.each(["Total uses", "Uses total", "Sum of uses", "Total des emplois", "Somme des emplois"])("the section total is kept and checked: %s", (total) => {
+    const r = sheet([...en, ["Uses", total, 2_400_000]]);
+    expect(pick(r)).toEqual([...costs, ["stated_total_cost", 2_400_000]]);
+    expect(r.candidates.at(-1)?.note).toBe("The printed total does not equal the sum of its lines (2,350,000)");
+  });
+  test.each(["Uses", "Costs", "Budget", "Emplois", "Coûts"])("a cost section without a category column: %s", (section) => expect(pick(plain(en.map(([, label, value]) => [label, value]), section))).toEqual(costs));
+  const variants: [string, string, number][] = [
+    ["Parcel acquisition and conveyance", "land_cost", 610_000], ["Ground purchase", "land_cost", 610_000], ["Purchase of the building", "land_cost", 610_000],
+    ["Achat du terrain et clôture", "land_cost", 610_000], ["Parcelle acquise", "land_cost", 610_000], ["Achat de l'immeuble", "land_cost", 610_000],
+    ["Framing trades package", "hard_cost", 1_460_000], ["Shell and fit-out", "hard_cost", 1_460_000], ["Site servicing works", "hard_cost", 1_460_000],
+    ["Charpente et enveloppe", "hard_cost", 1_460_000], ["Travaux de finitions", "hard_cost", 1_460_000], ["Structure par l'entrepreneur", "hard_cost", 1_460_000],
+    ["Engineering studies and approvals", "soft_cost", 220_000], ["Consultants and legal fees", "soft_cost", 220_000], ["Project management services", "soft_cost", 220_000],
+    ["Études et conception", "soft_cost", 220_000], ["Plans et services juridiques", "soft_cost", 220_000], ["Honoraires comptables et permis", "soft_cost", 220_000],
+    ["Unallocated cushion", "contingency", 95_000], ["Allowance for unknowns", "contingency", 95_000], ["Unforeseen risk allowance", "contingency", 95_000],
+    ["Provision pour imprévus", "contingency", 95_000], ["Marge pour imprévus", "contingency", 95_000], ["Aléas non affectés", "contingency", 95_000],
+  ];
+  test.each(variants)("own prose label: %s", (label, key, value) => expect(pick(read(`${label}: $${value.toLocaleString("en-US")}`))).toEqual([[key, value]]));
+  test.each(variants)("own category-sheet label: %s", (label, key, value) => {
+    for (const cat of ["Uses", "Emplois", ...(key === "hard_cost" ? ["Hard"] : key === "soft_cost" ? ["Soft"] : [])]) {
+      const r = sheet([[cat, label, value], ["Input", "Build period in months", 18], ["Input", "Hold (years)", 7]]);
+      expect(r.candidates.some((c) => c.fieldKey === key && c.value === value)).toBe(true);
+    }
+  });
+  // Card 109 audit: "Land and design" keeps its alias read as land (as before card 109); the rule is for labels only concepts name.
+  test.each(["Lot and design", "Construction and permits", "Achat du lot et conception", "Travaux et permis"])("two budget concepts stay shown: %s", (label) => {
+    expect(pick(read(`${label}: $80,000`))).toEqual([]);
+    expect(pick(sheet([["Hard", label, 80_000], ["Hard", "Site services", 120_000], ["Soft", "Architect fees", 210_000]]))).not.toContainEqual(["hard_cost", 200_000]);
+  });
+  test.each(["Land transfer tax", "Construction loan interest", "Lender fee", "Replacement reserve", "Development charges", "Droits de mutation du terrain", "Intérêts du prêt de construction", "Frais du prêteur", "Réserve de remplacement", "Redevances de développement"])("an excluded item never becomes one of the four cost concepts: %s", (label) => {
+    const r = read(`${label}: $20,000`);
+    expect(r.candidates.filter((c) => c.rule === "concept" && ["land_cost", "hard_cost", "soft_cost", "contingency"].includes(c.fieldKey ?? ""))).toEqual([]);
+  });
+  test.each(["Parcel acquisition per door: $30,000", "Framing work paid to date: $40,000", "Architect fees rebate: $5,000", "Unallocated cushion: 5%", "Achat du lot par porte : 30 000 $", "Travaux payés à ce jour : 40 000 $", "Honoraires remboursés : 5 000 $"])("qualified amounts remain shown: %s", (line) => expect(read(line).candidates.filter((c) => c.rule === "concept")).toEqual([]));
+  test.each(["Old budget", "Superseded", "Remplacé", "Retired"])("excluded sheets cannot feed new concepts: %s", (name) => expect(pick(sheet(en, name))).toEqual([]));
+  test.each(["Not part of the project", "Ne fait pas partie du projet"])("excluded cost sections remain excluded: %s", (section) => expect(pick(sheet(en, "Current", section))).toEqual([]));
+  test("a concept-only amount in another currency stays shown", () => {
+    const r = sheet([["Uses", "Framing and finishes", "USD 800,000"], ["Uses", "Architect studies", 100_000], ["Uses", "Overrun allowance", 50_000]]);
+    expect(r.candidates.some((c) => c.value === 800_000)).toBe(false);
+    expect(r.other.some((c) => c.value === 800_000)).toBe(true);
+  });
+  test("plain inputs can separate two budget runs", () => expect(pick(sheet([["Uses", "Parcel acquisition", 600_000], ["Inputs", "Build period in months", 18], ["Hard", "Framing and finishes", 1_450_000], ["Hard", "Site services", 120_000], ["Hypothèses", "Hold (years)", 7]]))).toEqual([["land_cost", 600_000], ["construction_months", 18], ["hard_cost", 1_570_000], ["hold_years", 7]]));
+});
+
+describe("card 109 audit: a concept names a line only when the line is that cost", () => {
+  const read = (text: string) => extractCandidates({ kind: "pdf", lines: [{ text, location: "page 1" }], tables: [], pageCount: 1, needsOcr: false, fullText: text });
+  const table = (...rows: (string | number)[][]) => extractCandidates({ kind: "xlsx", lines: [], tables: [{ name: "Budget", rows: rows.map((r, i) => r.map((x, c): Cell => (typeof x === "number" ? { text: String(x), number: x, ref: `${"ABC"[c]}${i + 1}` } : { text: x, ref: `${"ABC"[c]}${i + 1}` }))) }], pageCount: 1, needsOcr: false, fullText: "" });
+  const pick = (r: ReturnType<typeof read>) => r.candidates.map((c) => [c.fieldKey, c.value]);
+  const costs = ["land_cost", "hard_cost", "soft_cost", "contingency"];
+  const concept = (r: ReturnType<typeof read>) => r.candidates.filter((c) => costs.includes(c.fieldKey ?? "")).map((c) => [c.fieldKey, c.value]);
+
+  test.each([
+    "Recoverable service charges already in consultants etc.: $61,500",
+    "Hydro hookup charges included in site services: $18,000",
+    "Utility deposits within the construction budget: $12,000",
+    "Frais de services déjà inclus dans les honoraires : 61 500 $",
+    "Taxes municipales comprises dans les travaux : 18 000 $",
+    "Site servicing levy: $24,000",
+    "Framing already paid by the owner: $40,000",
+    "Redevance de viabilisation : 24 000 $",
+    "Charpente déjà réglée : 40 000 $",
+  ])("a concept word after in, within or included in names where the figure sits, not what it is; a levy or an amount already settled is not the line: %s", (line) => expect(concept(read(line))).toEqual([]));
+
+  test.each([
+    ["Building purchase basis: $870,000", 870_000],
+    ["Building acquisition price: $640,000", 640_000],
+    ["Property purchase price: $640,000", 640_000],
+  ])("a building bought is land, never construction: %s", (line, value) => expect(concept(read(line))).toEqual([["land_cost", value]]));
+
+  test.each([
+    "Construction principal: $2,050,000",
+    "Construction facility: $2,050,000",
+    "Building mortgage advance: $2,050,000",
+    "Capital du prêt de construction : 2 050 000 $",
+    "Financement des travaux : 2 050 000 $",
+  ])("a loan named with a cost word is never the cost: %s", (line) => expect(concept(read(line))).toEqual([]));
+
+  test.each([
+    "Total job envelope: $750,000",
+    "Overall construction envelope: $750,000",
+    "All-in build budget: $750,000",
+    "Enveloppe totale des travaux : 750 000 $",
+    "Total build envelope: $750,000",
+  ])("a total in cost words is not one line: %s", (line) => expect(concept(read(line)).filter(([k]) => k !== "stated_total_cost")).toEqual([]));
+
+  test("a line named by concept does not split the unnamed lines a subtotal adds up", () => {
+    const r = table(["Poste", "Montant ($)"], ["Fondations et structure", 820_000], ["Enveloppe du bâtiment", 540_000], ["Mécanique et électricité", 610_000], ["Finitions intérieures", 455_000], ["Aménagement extérieur", 95_000], ["Sous-total coûts directs", 2_580_000]);
+    const hard = r.candidates.filter((c) => c.fieldKey === "hard_cost");
+    expect(hard.map((c) => c.value).sort()).toEqual([2_520_000, 2_580_000]);
+    expect(hard.find((c) => c.value === 2_580_000)?.note).toBe("The printed total does not equal the sum of its lines (2,520,000)");
+    const en = table(["Item", "Amount"], ["Framing", 400_000], ["Mechanical", 300_000], ["Finishes", 300_000], ["Total hard costs", 1_000_000]);
+    expect(pick(en)).toEqual([["hard_cost", 1_000_000]]);
+  });
+
+  test.each<[string, number][][]>([
+    [[["Framing", 400_000], ["Mechanical", 200_000]]],
+    [[["Charpente", 400_000], ["Mécanique", 200_000], ["Électricité", 150_000]]],
+    [[["Architect", 80_000], ["Marketing", 20_000], ["Framing", 400_000]]],
+  ])("with no subtotal, a concept line beside unnamed lines is shown, not read as the whole field", (rows) => {
+    const r = table(["Item", "Amount"], ...rows);
+    expect(concept(r)).toEqual([]);
+    expect(r.other.map((o) => o.value).sort()).toEqual(rows.map(([, v]) => v).sort());
+  });
+
+  const lines = (...texts: string[]) => extractCandidates({ kind: "pdf", lines: texts.map((text, i) => ({ text, location: `page 1, line ${i + 1}` })), tables: [], pageCount: 1, needsOcr: false, fullText: texts.join("\n") });
+  test.each([
+    [["Framing: $400,000", "Mechanical: $200,000"]],
+    [["Uses of funds", "Framing: $400,000", "Finishes: $300,000"]],
+    [["Charpente : 400 000 $", "Mécanique : 200 000 $", "Électricité : 150 000 $"]],
+    [["Architect: $50,000", "Marketing: $20,000"]],
+  ])("text lines: a concept line beside unnamed lines of a one-field block, or beside another line of its field, is shown", (texts) => {
+    const r = lines(...texts);
+    expect(r.candidates.filter((c) => c.rule === "concept")).toEqual([]);
+  });
+  test("text lines: an unnamed figure that is the total of the lines beside it does not stop them", () => {
+    expect(concept(lines("Building purchase basis: $870,000; Conversion works: $1,750,000; Architect studies: $210,000; Project uses stated: $3,130,000.")).sort()).toEqual([["hard_cost", 1_750_000], ["land_cost", 870_000], ["soft_cost", 210_000]]);
+    expect(concept(lines("Lot purchase: $600,000", "Framing and finishes: $1,450,000", "All uses: $2,050,000")).sort()).toEqual([["hard_cost", 1_450_000], ["land_cost", 600_000]]);
+  });
+  test("text lines: a block naming several cost fields lists one line per field, so an unnamed line beside them is another cost", () => {
+    expect(concept(lines("Lot purchase: $620,000", "Construction allowance: $650,000", "Design and permits: $125,000", "Money held for surprises: $65,000", "Whole project budget: $1,460,000")).sort()).toEqual([["hard_cost", 650_000], ["land_cost", 620_000], ["soft_cost", 125_000]]);
+    expect(concept(lines("Achat du lot : 160 000 $", "Pose des logements : 480 000 $", "Approbations et conception : 75 000 $")).sort()).toEqual([["land_cost", 160_000], ["soft_cost", 75_000]]);
+  });
+  test("an alias read keeps its field when the description also has a second concept", () => {
+    expect(pick(read("Land and existing building: $520,000"))).toEqual([["land_cost", 520_000]]);
+  });
+  test("text lines: a concept line apart from the unnamed ones is read", () => {
+    expect(concept(lines("Framing package: $400,000", "", "The sponsor met the city planner on Tuesday.", "Marketing: $20,000"))).toEqual([["hard_cost", 400_000]]);
+  });
+
+  test("named lines with no unnamed line beside them are still read", () => {
+    expect(pick(table(["Item", "Amount"], ["Lot purchase", 600_000], ["Framing and finishes", 1_450_000], ["Architect studies", 210_000], ["Overrun allowance", 90_000]))).toEqual([["land_cost", 600_000], ["hard_cost", 1_450_000], ["soft_cost", 210_000], ["contingency", 90_000]]);
   });
 });
