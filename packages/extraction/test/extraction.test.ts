@@ -5743,3 +5743,44 @@ describe("card 105 audit: stabilization named, presale and resale-price caps", (
     expect(pick(read(LOAN, "Sale cap rate 5.5%, going-in 5.0%"))).toEqual([["senior_loan_amount", 5_000_000], ["exit_cap_rate_pct", 5.5]]);
   });
 });
+
+describe("card 106: French loan interest word order and target take-out months", () => {
+  const read = (...lines: string[]) => extractCandidates({ kind: "pdf", lines: lines.map((text, i) => ({ text, location: `page 1, line ${i + 1}` })), tables: [], pageCount: 1, needsOcr: false, fullText: lines.join("\n") });
+  const pick = (r: ReturnType<typeof read>) => r.candidates.map((c) => [c.fieldKey, c.value]);
+  const HEAD = "Construction loan: $5,000,000";
+  test.each([
+    ["Prêt mezzanine : 600 000 $", "Intérêt mezzanine : 11 %"],
+    ["Prêt mezzanine : 600 000 $", "Taux mezzanine : 11 %"],
+    ["Mezzanine loan: $600,000", "Mezzanine interest: 11%"],
+    ["Prêt mezzanine : 600 000 $", "Intérêt du prêt mezzanine : 11 %"],
+    ["Prêt mezzanine : 600 000 $", "Intérêt de la mezzanine : 11 %"],
+    ["Mezzanine loan: $600,000", "Annual mezzanine interest: 11%"],
+    ["Mezzanine loan: $600,000", "Mezzanine interest, fixed: 11%"],
+  ])("a loan's interest: %s / %s", (loan, rate) => expect(pick(read(HEAD, loan, rate))).toEqual([["senior_loan_amount", 5_000_000], ["mezz_loan_amount", 600_000], ["mezz_rate_pct", 11]]));
+  test.each([
+    ["Intérêt du prêt de reprise : 5,25 %", "refinance_rate_pct", 5.25],
+    ["Intérêt du prêt mezzanine annuel : 10,75 %", "mezz_rate_pct", 10.75],
+    ["Intérêt de la mezzanine fixe : 12 %", "mezz_rate_pct", 12],
+  ])("French own scoped-rate variant: %s", (line, key, n) => expect(pick(read(HEAD, line as string))).toEqual([["senior_loan_amount", 5_000_000], [key, n]]));
+  test.each([
+    "Intérêt des commanditaires : 8 %", "Intérêts de retard : 18 %", "Partnership interest: 20%", "Ownership interest: 25%",
+    "Intérêt du prêt mezzanine en défaut : 18 %", "Intérêt de la mezzanine des commanditaires : 8 %",
+  ])("interest that is not the loan rate: %s", (line) => expect(read(HEAD, line).candidates.some((c) => /_rate_pct$/.test(c.fieldKey ?? ""))).toBe(false));
+  test("carried interest keeps its existing promote meaning", () => expect(pick(read(HEAD, "Carried interest: 20%"))).toEqual([["senior_loan_amount", 5_000_000], ["gp_promote_pct", 20]]));
+  const months: [string, number][] = [
+    ["Take-out target month: 26", 26], ["Take-out target: month 26", 26], ["Target refinance month: 26", 26], ["Mois cible de la reprise : 26", 26],
+    ["Refinance in month 28.", 28], ["Take-out month: 24 months", 24],
+    ["Take-out targeted month: 27", 27], ["Planned refinance month: 29", 29], ["Expected take-out month: 31", 31],
+    ["Mois prévu du refinancement : 28", 28], ["Date prévue de la reprise : mois 32", 32],
+  ];
+  test.each(months)("the take-out month: %s", (line, n) => expect(pick(read(HEAD, line))).toEqual([["senior_loan_amount", 5_000_000], ["refinance_month", n]]));
+  test.each(["Target IRR: 18%", "Target equity multiple: 1.9x", "Target yield on cost: 6.5%", "Rendement cible : 18 %", "Target refinance rate: 5%", "Take-out target amount: $3,000,000", "Target construction month: 26", "Take-out target amortization: 30 years", "Target IRR at refinance month: 18%", "Target refinance month: 18%"])("a target other than take-out timing is refused: %s", (line) => expect(pick(read(HEAD, line))).toEqual([["senior_loan_amount", 5_000_000]]));
+  test.each(["Take-out target month: 12 months after completion", "Mois cible de la reprise : 12 mois après la livraison"])("target timing still refuses a later-event offset: %s", (line) => expect(pick(read(HEAD, line))).toEqual([["senior_loan_amount", 5_000_000]]));
+  test.each([
+    ["Intérêt du prêt mezzanine", "11 %", "mezz_rate_pct", 11], ["Intérêt du prêt de reprise", "5,25 %", "refinance_rate_pct", 5.25],
+    ["Take-out target month", "26", "refinance_month", 26], ["Mois cible de la reprise", "26", "refinance_month", 26],
+  ])("the same label in a table: %s", (label, value, key, n) => {
+    const r = extractCandidates({ kind: "docx", lines: [], tables: [{ name: "Terms", rows: [[{ text: label as string, ref: "R1C1" }, { text: value as string, ref: "R1C2" }]] }], pageCount: 1, needsOcr: false, fullText: "" });
+    expect(pick(r)).toEqual([[key, n]]);
+  });
+});
