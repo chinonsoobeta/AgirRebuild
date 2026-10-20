@@ -126,12 +126,15 @@ const LENDER_CONDITION = "A lender's condition, not the occupancy assumption";
 const CONDITION_RE = /\b(minimum|min|at least|before|prior to|until|consecutive months?|in order to|as a condition|conversion|first advance|funding|conditions?|covenants?|required|requires?|au moins|minimale?|avant|prealable\w*|deboursement|advances?|draws?|drawdowns?|disbursements?|holdbacks?|releas(?:es?|ed|ing)|funded|avances?|tirages?|debourse\w*|retenues? de garantie|versements?|libere\w*)\b/;
 // A leased or occupied share with a condition marker is the lender's condition, whatever field it names.
 const LEASED_RE = /\b(pre-?leas\w*|leased|occupied|pre-?lou\w*|loue\w*|occupe\w*|occupancy|occupation)\b/;
+const EARLY_OCCUPANCY_RE = /\b(at (?:completion|delivery|opening|turnover|month \d+)|in year 1|initial(?:e)?|in-place|actual|a la livraison|a l ouverture|at maturity of the loan|a l echeance du pret)\b/;
+const EARLY_OCCUPANCY_NOTE = "An occupancy before stabilization, not the stabilized occupancy";
+const ACCOUNTING_AMORT_RE = /\bamort(?:i[sz]\w*)?\s+(?:of|des?|du|d)\s+(?:(?:financing|project|loan|financement|de financement)\s+)?(?:fees?|costs?|frais|couts?)\b/;
 const CURRENT_RE = /\b(current|currently|today|as of|actuel(?:le)?|en date du)\b/;
 const STABILIZED_RE = /\b(stabili[sz]ed|stabilisee?|projected|pro forma|projete\w*)\b/;
 
 // Words too common to name a field alone. Each loses to any longer alias in the label, must stand at the end of the label
 // (or before "income"/"amount"), and never matches inside a longer word.
-const LOOSE_ALIASES = new Set(["management", "gestion", "depenses", "limited partners", "lp", "lps", "commanditaires", "loan", "pret", "mortgage", "rate", "taux", "interest", "interet", "construction", "location", "build", "travaux", "leasing", "chantier", "letting", "lot", "site", "contribute", "invest", "apport", "other", "autres", "parking", "laundry", "storage", "stationnement", "buanderie", "rangement", "honoraires", "aleas"]);
+const LOOSE_ALIASES = new Set(["management", "gestion", "depenses", "limited partners", "lp", "lps", "commanditaires", "loan", "pret", "mortgage", "rate", "taux", "interest", "interet", "construction", "location", "build", "travaux", "leasing", "chantier", "letting", "lot", "site", "contribute", "invest", "apport", "other", "autres", "parking", "laundry", "storage", "stationnement", "buanderie", "rangement", "honoraires", "aleas", "amort"]);
 // These name a field only for a money figure of at least $1,000: "lot 7" is a lot number, "storage $75" may be one locker.
 const WEAK_MONEY = new Set(["lot", "site", "parking", "laundry", "storage", "stationnement", "buanderie", "rangement"]);
 // These name a field only when the figure's own words say what it is a share of: "management 4% of EGI", never "management 1.5% of equity".
@@ -812,6 +815,13 @@ function mapLabel(rawLabel: string, t: NumberToken, opts: MapOptions = {}): Mapp
     if (!area && ANNUAL_RE.test(`${label} ${foldText(t.raw)}`) && !MONTHLY_RE.test(`${label} ${foldText(t.raw)}`) && !PER_UNIT_RE.test(label)) return { kind: "ignored", reason: ANNUAL_TOTAL_NOTE };
   }
   const where = prose && opts.context ? normalizeLabel(opts.context).label : label;
+  // A fee or cost write-off is not a loan amortization, whether abbreviated or written out.
+  if (ACCOUNTING_AMORT_RE.test(label)) return { kind: "ignored", reason: "An accounting write-off of fees or costs, not a loan amortization" };
+  // These labels name a point before stabilization or the loan's maturity, not stabilized occupancy.
+  // A month/year index is a separate number token, so its occupancy label may precede the previous token.
+  const occupancyLabel = prose && opts.context && /^[\s:]*$/.test(rawLabel)
+    ? normalizeLabel(opts.context.slice(0, t.start).split(/[,;]/).pop() ?? "").label : label;
+  if (t.unit === "%" && LEASED_RE.test(occupancyLabel) && (EARLY_OCCUPANCY_RE.test(occupancyLabel) || (CURRENT_RE.test(occupancyLabel) && !STABILIZED_RE.test(occupancyLabel)))) return { kind: "ignored", reason: EARLY_OCCUPANCY_NOTE };
   const scope: Scope = scopeIn(label) ?? opts.scope ?? "senior";
   const scoped = (key: string): FieldDef => FIELD_BY_KEY.get(scope === "senior" ? key : (SCOPE_FIELD[scope][key] ?? key))!;
   const asField = (def: FieldDef): Mapped | null => {
@@ -979,7 +989,7 @@ function mapLabel(rawLabel: string, t: NumberToken, opts: MapOptions = {}): Mapp
     const clauseText = prose && opts.context && lead ? (foldText(opts.context).split(/[,;]/).find((c) => c.includes(lead)) ?? where) : where;
     if (MARKET_RE.test(`${where} ${normalizeLabel((opts.after ?? "").split(/[,;.]/)[0] ?? "").label}`)) return { kind: "ignored", reason: MARKET_NOTE };
     if (CONDITION_RE.test(normalizeLabel(clauseText).label)) return { kind: "ignored", reason: LENDER_CONDITION };
-    return CURRENT_RE.test(where) && !STABILIZED_RE.test(label) ? { kind: "ignored", reason: "A current occupancy is not the stabilized assumption" } : null;
+    return CURRENT_RE.test(where) && !STABILIZED_RE.test(label) ? { kind: "ignored", reason: EARLY_OCCUPANCY_NOTE } : null;
   };
   // A unit type in parentheses ("End units (3 bed)") names the item.
   const typed = parenType(rawLabel);

@@ -5649,3 +5649,60 @@ describe("card 104: the minimum coverage covenant in ordinary lender wording", (
     expect(pick(read(heading as string, line as string))).toEqual([["min_dscr_covenant", value]]);
   });
 });
+
+describe("card 105: trade shorthand for operating and loan assumptions", () => {
+  const read = (...lines: string[]) => extractCandidates({ kind: "pdf", lines: lines.map((text, i) => ({ text, location: `page 1, line ${i + 1}` })), tables: [], pageCount: 1, needsOcr: false, fullText: lines.join("\n") });
+  const pick = (r: ReturnType<typeof read>) => r.candidates.map((c) => [c.fieldKey, c.value]);
+  const LOAN = "Construction loan: $5,000,000";
+  const positives: [string, string, number][] = [
+    ...["Terminal cap: 5.60%", "Exit cap: 5.60%", "Going-out cap rate: 5.60%", "Taux de capitalisation à la sortie : 5,60 %", "Cap de revente : 5,60 %"].map((s): [string, string, number] => [s, "exit_cap_rate_pct", 5.6]),
+    ["Resale cap: 5.70%", "exit_cap_rate_pct", 5.7], ["Sale cap: 5.70%", "exit_cap_rate_pct", 5.7], ["Reversion cap rate: 5.40%", "exit_cap_rate_pct", 5.4],
+    ...["Stab. occ.: 95%", "Stabilized occ. 95%", "Occupation à maturité : 95 %", "Stabilized occupancy: 95%", "Occupation stabilisée : 95 %"].map((s): [string, string, number] => [s, "stabilized_occupancy_pct", 95]),
+    ["We underwrite stabilized occupancy at 95.5%.", "stabilized_occupancy_pct", 95.5],
+    ...["Expense load: 34%", "Operating expenses: 34% of EGI", "Expense ratio: 34%", "Ratio des dépenses : 34 %"].map((s): [string, string, number] => [s, "expense_ratio_pct", 34]),
+    ...["Amort.: 30 yr", "Sr amort. 30 yr", "Amortization: 30 years", "Amortissement : 30 ans"].map((s): [string, string, number] => [s, "senior_amort_years", 30]),
+    ["Senior amort 25 years", "senior_amort_years", 25], ["Mezz amort.: 10 yr", "mezz_amort_years", 10], ["Take-out amort. 35 yr", "refinance_amort_years", 35],
+  ];
+  test.each(positives)("requested positive: %s", (line, key, value) => {
+    expect(pick(read(LOAN, line))).toEqual([["senior_loan_amount", 5_000_000], [key, value]]);
+  });
+  test.each([
+    "Going-in cap rate: 5.20%", "Cap rate at purchase: 5.20%", "Market cap rate: 5.10%", "Interest rate cap: 7.00%", "Fee cap: 2%", "Cap on cost overruns: 5%", "Sales commission cap: 3%",
+    "Expense load: $420,000", "Rent load factor: 12%", "Amort. of financing fees: 3 yr", "Amortissement des frais : 3 ans",
+    "Amortization of project costs: 4 years", "Amortissement des coûts : 5 ans",
+  ])("requested or accounting refusal: %s", (line) => expect(pick(read(LOAN, line))).toEqual([["senior_loan_amount", 5_000_000]]));
+  const early = [
+    "Occupancy at completion: 60%", "Occupancy at maturity of the loan: 90%", "Current occupancy: 82%",
+    "Occupancy at delivery: 61%", "Occupancy at opening: 62%", "Occupancy at turnover: 63%", "Occupancy at month 6: 64%", "Occupancy in year 1: 65%",
+    "Initial occupancy: 66%", "In-place occupancy: 67%", "Actual occupancy: 68%", "Occupancy today: 69%",
+    "Occupation à la livraison : 70 %", "Occupation à l'ouverture : 71 %", "Occupation actuelle : 72 %", "Occupation initiale : 73 %", "Occupation à l'échéance du prêt : 74 %",
+    "Taux d'occupation actuel : 75 %", "Taux d'occupation initial : 76 %",
+  ];
+  test.each(early)("a non-stabilized occupancy is shown, not read: %s", (line) => {
+    const r = read(LOAN, line);
+    expect(pick(r)).toEqual([["senior_loan_amount", 5_000_000]]);
+    expect(r.other.some((o) => o.note === "An occupancy before stabilization, not the stabilized occupancy")).toBe(true);
+  });
+  test.each(early)("a non-stabilized occupancy table row: %s", (line) => {
+    const [label, value] = line.split(":");
+    const r = extractCandidates({ kind: "docx", lines: [], tables: [{ name: "Assumptions", rows: [[{ text: label!, ref: "R1C1" }, { text: value!, ref: "R1C2" }]] }], pageCount: 1, needsOcr: false, fullText: "" });
+    expect(pick(r)).toEqual([]);
+    expect(r.other.some((o) => o.note === "An occupancy before stabilization, not the stabilized occupancy")).toBe(true);
+  });
+  // Own English and French variants for each rule, exercised as both lines and assumption-table rows.
+  const variants: [string, string, string, number][] = [
+    ["Resale cap rate", "5.85%", "exit_cap_rate_pct", 5.85], ["Reversion cap", "5.45%", "exit_cap_rate_pct", 5.45],
+    ["Taux de capitalisation à la revente", "5,75 %", "exit_cap_rate_pct", 5.75], ["Cap à la revente", "5,35 %", "exit_cap_rate_pct", 5.35], ["Taux de cap à la sortie", "5,25 %", "exit_cap_rate_pct", 5.25], ["Sale cap rate", "5.65%", "exit_cap_rate_pct", 5.65],
+    ["Stabilised occ.", "96%", "stabilized_occupancy_pct", 96], ["Stab. occupancy", "94%", "stabilized_occupancy_pct", 94],
+    ["Occupation de croisière", "97 %", "stabilized_occupancy_pct", 97], ["Taux d'occupation à maturité", "93 %", "stabilized_occupancy_pct", 93],
+    ["Opex load", "32%", "expense_ratio_pct", 32], ["Expense load", "36%", "expense_ratio_pct", 36],
+    ["Charge d'exploitation annuelle", "33 %", "expense_ratio_pct", 33], ["Charge d’exploitation prévue", "37 %", "expense_ratio_pct", 37],
+    ["Amort period", "28 years", "senior_amort_years", 28], ["Senior amort.", "32 yr", "senior_amort_years", 32],
+    ["Amort.", "27 ans", "senior_amort_years", 27], ["Période d'amortissement", "29 ans", "senior_amort_years", 29],
+  ];
+  test.each(variants)("own label line: %s", (label, value, key, n) => expect(pick(read(LOAN, `${label}: ${value}`))).toEqual([["senior_loan_amount", 5_000_000], [key, n]]));
+  test.each(variants)("own assumption-table row: %s", (label, value, key, n) => {
+    const r = extractCandidates({ kind: "docx", lines: [], tables: [{ name: "Assumptions", rows: [[label, value]].map((row, i) => row.map((text, c): Cell => ({ text, ref: `R${i + 1}C${c + 1}` }))) }], pageCount: 1, needsOcr: false, fullText: "" });
+    expect(pick(r)).toEqual([[key, n]]);
+  });
+});
