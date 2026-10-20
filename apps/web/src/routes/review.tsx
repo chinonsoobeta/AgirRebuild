@@ -46,6 +46,7 @@ function Quote({ s, currency }: { s: Source; currency: string | null | undefined
       <div className="source-quote">{i >= 0 ? (<>{s.context.slice(0, i)}<mark>{s.raw}</mark>{s.context.slice(i + s.raw.length)}</>) : s.context}</div>
       {s.ocr && <span className="small" style={{ fontWeight: 600 }}>{t("review.ocr")}</span>}
       {s.rule === "suggested" && <span className="small" style={{ fontWeight: 600 }}>{t("review.suggested")}</span>}
+      {s.rule === "remembered" && s.note && <span className="small" style={{ fontWeight: 600 }}>{msg(s.note)}</span>}
       <span className="small faint">{msg(s.location)}</span>
       {(s.unit_seen?.startsWith("m2") || s.unit_seen?.startsWith("$/m2")) && <span className="small faint">{t("review.fromM2")}</span>}
       {foreignIn(s, currency) && <span className="small faint">{t("review.statedIn", { code: foreignIn(s, currency) })}</span>}

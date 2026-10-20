@@ -720,6 +720,107 @@ describe("card 112: ranked field suggestions in review, and likely figures for e
   });
 });
 
+describe("card 113: a workspace remembers a person's label for the same unnamed label in its next deal", () => {
+  let mw: string, a: string, b: string, read: string, dollars: string, outside: string;
+  const sheet = (rows: string) => new TextEncoder().encode(`Item,Value\n${rows}\n`);
+  const LABEL = `"Marketing window, months",5`;
+  const deal = async (w: string, name: string, rows: string) => {
+    const d = (await call(alice, "POST", `/api/workspaces/${w}/deals`, { name, assetType: "Multifamily", location: "Regina", province: "SK" })).json.id as string;
+    expect((await call(alice, "PUT", `/api/deals/${d}/documents?name=base.csv`, undefined, sheet(rows))).status).toBe(200);
+    return d;
+  };
+  const review = async (d: string) => (await call(alice, "GET", `/api/deals/${d}/review`)).json;
+  const fig = async (d: string, raw: string) => (await review(d)).other.find((o: any) => o.raw === raw);
+  const leaseUp = async (d: string) => (await review(d)).assumptions.find((x: any) => x.fieldKey === "lease_up_months");
+  const reconciles = async (d: string) => (await db.query(`select 1 from audit_events where action = 'assumptions.reconciled' and deal_id = $1`, [d])).length;
+
+  test("labelling it in deal A makes deal B's figure arrive for review, remembered; nothing else is touched", async () => {
+    mw = (await call(alice, "POST", "/api/workspaces", { name: "Label memory" })).json.id;
+    expect((await call(alice, "POST", `/api/workspaces/${mw}/members`, { email: "carol@example.com", role: "viewer" })).status).toBe(200);
+    a = await deal(mw, "Memory A", LABEL);
+    b = await deal(mw, "Memory B", LABEL);
+    read = await deal(mw, "Memory read", `${LABEL}\n"Tenant search, months",6`);
+    dollars = await deal(mw, "Memory dollars", `"Marketing window, months",$5`);
+    const ow = (await call(alice, "POST", "/api/workspaces", { name: "Another broker" })).json.id;
+    outside = await deal(ow, "Memory elsewhere", LABEL);
+    await work();
+    const f = await fig(a, "5");
+    expect(f).toMatchObject({ value: 5, label: null, note: "No field matches this label" });
+    expect(await leaseUp(b)).toBeUndefined();
+    expect(await leaseUp(read)).toMatchObject({ value: 6 });
+    const before = await reconciles(outside);
+    const body = { documentId: f.documentId, figureId: f.figureId, fieldKey: "lease_up_months" };
+    expect((await call(carol, "POST", `/api/deals/${a}/figure-labels`, body)).status).toBe(403);
+    expect(await db.query(`select 1 from label_memory where workspace_id = $1`, [mw])).toHaveLength(0);
+    expect((await call(alice, "POST", `/api/deals/${a}/figure-labels`, body)).status).toBe(200);
+    const [m] = await db.query<any>(`select phrase, unit, field_key, item_key, source_document_id, source_figure_id from label_memory where workspace_id = $1`, [mw]);
+    expect(m).toEqual({ phrase: "marketing window", unit: "none", field_key: "lease_up_months", item_key: "", source_document_id: f.documentId, source_figure_id: f.figureId });
+    const [ev] = await db.query<any>(`select deal_id, payload from audit_events where action = 'label.remembered' and workspace_id = $1`, [mw]);
+    expect(ev).toEqual({ deal_id: a, payload: { phrase: "marketing window", unit: "none", field: "lease_up_months", item: "", figure: f.figureId } });
+    await work();
+    // The labelled figure itself is the person's label, not a remembered one.
+    expect((await leaseUp(a)).sources.map((s: any) => s.rule)).toEqual(["labelled"]);
+    const got = await leaseUp(b);
+    expect(got).toMatchObject({ status: "needs_review", value: 5 });
+    expect(got.sources).toEqual([expect.objectContaining({ rule: "remembered", raw: "5", note: "Labelled the same way before in this workspace; confirm it" })]);
+    const [rec] = await db.query<any>(`select payload from audit_events where action = 'assumptions.reconciled' and deal_id = $1 order by seq desc limit 1`, [b]);
+    expect(rec.payload.remembered).toEqual([{ id: (await fig(b, "5")).figureId, field: "lease_up_months", item: "" }]);
+    // B's reader already read the field: nothing from memory, and the drop is named.
+    expect((await leaseUp(read)).sources.map((s: any) => [s.rule, s.value])).toEqual([["concept", 6]]);
+    const [recRead] = await db.query<any>(`select payload from audit_events where action = 'assumptions.reconciled' and deal_id = $1 order by seq desc limit 1`, [read]);
+    expect(recRead.payload.rememberedDropped).toEqual([expect.objectContaining({ why: "The reader already read this field for the deal" })]);
+    // Written "$5" is another unit: not matched.
+    expect(await leaseUp(dollars)).toBeUndefined();
+    // Another workspace is never touched.
+    expect(await leaseUp(outside)).toBeUndefined();
+    expect(await reconciles(outside)).toBe(before);
+  });
+
+  test("only staff read the memory: a client never does, and nobody writes it except through a label", async () => {
+    // Eve, signed up earlier in this file, becomes a client of deal B (a new sign-up here would meet the sign-up rate limit).
+    expect((await call(alice, "POST", `/api/deals/${b}/clients`, { email: "eve@example.com" })).status).toBe(200);
+    const id = async (email: string) => (await db.query<{ id: string }>(`select id from users where email = $1`, [email]))[0]!.id;
+    const seen = (u: string) => asUser(db, u, (tx) => tx.query(`select phrase from label_memory where workspace_id = $1`, [mw]));
+    expect(await seen(await id("alice@example.com"))).toHaveLength(1);
+    expect(await seen(await id("carol@example.com"))).toHaveLength(1);
+    expect(await seen(await id("eve@example.com"))).toHaveLength(0);
+    await expect(asUser(db, await id("alice@example.com"), (tx) => tx.query(`delete from label_memory where workspace_id = $1`, [mw]))).rejects.toThrow();
+  });
+
+  test("unlabelling in A forgets it, and B's remembered value leaves review at its next reconcile", async () => {
+    const f = await fig(a, "5");
+    expect((await call(carol, "DELETE", `/api/deals/${a}/figure-labels`, { documentId: f.documentId, figureId: f.figureId })).status).toBe(403);
+    expect((await call(alice, "DELETE", `/api/deals/${a}/figure-labels`, { documentId: f.documentId, figureId: f.figureId })).status).toBe(200);
+    expect(await db.query(`select 1 from label_memory where workspace_id = $1`, [mw])).toHaveLength(0);
+    const [ev] = await db.query<any>(`select deal_id, payload from audit_events where action = 'label.forgotten' and workspace_id = $1`, [mw]);
+    expect(ev).toEqual({ deal_id: a, payload: { phrase: "marketing window", unit: "none", field: "lease_up_months", item: "", figure: f.figureId } });
+    await work();
+    const gone = (await review(b)).assumptions.find((x: any) => x.fieldKey === "lease_up_months");
+    expect(gone?.status ?? "rejected").toBe("rejected");
+    const [row] = await db.query<any>(`select status, reason from assumptions where deal_id = $1 and field_key = 'lease_up_months'`, [b]);
+    expect(row).toEqual({ status: "rejected", reason: "The label it was remembered from was removed" });
+  });
+
+  test("a model's suggestion for a figure memory labelled is dropped, and memory applies with suggestions off", async () => {
+    const f = await fig(a, "5");
+    expect((await call(alice, "POST", `/api/deals/${a}/figure-labels`, { documentId: f.documentId, figureId: f.figureId, fieldKey: "lease_up_months" })).status).toBe(200);
+    const target = await fig(b, "5");
+    await db.query(
+      `insert into label_suggestions (document_id, deal_id, workspace_id, model, prompt_hash, request, response, stop_reason, outcome) values ($1, $2, $3, 'claude-fake', 'h', '{}', $4, 'end_turn', 'ok')`,
+      [target.documentId, b, mw, JSON.stringify([{ id: target.figureId, fieldKey: "construction_months" }])],
+    );
+    await reconcileDeal(db, b);
+    expect((await leaseUp(b)).sources.map((s: any) => s.rule)).toEqual(["remembered"]);
+    await db.query(`update workspaces set label_suggestions = true where id = $1`, [mw]);
+    await reconcileDeal(db, b);
+    // Dropped before the boundary, as a person's label drops one: neither kept nor refused for its unit.
+    const [rec] = await db.query<any>(`select payload from audit_events where action = 'assumptions.reconciled' and deal_id = $1 order by seq desc limit 1`, [b]);
+    expect(rec.payload).toMatchObject({ suggested: 0, dropped: [], remembered: [{ id: target.figureId, field: "lease_up_months", item: "" }] });
+    expect((await leaseUp(b)).sources.map((s: any) => s.rule)).toEqual(["remembered"]);
+    await db.query(`update workspaces set label_suggestions = false where id = $1`, [mw]);
+  });
+});
+
 describe("task 59: a person working alone is not blocked on day one", () => {
   const modeOf = async (s: Session) => (await call(s, "GET", "/api/me")).json.workspaces[0];
   const newDeal = async (s: Session, w: string, name: string) =>
@@ -1788,7 +1889,8 @@ describe("card 58b: undoing a label puts back the value the label reopened, when
   });
 
   test("audit of card 58b: the reconcile's audit entry names each value it put back", async () => {
-    const d = await mkDeal(sw, "Undo Audit");
+    // Its own workspace: in sw the earlier label of "Gauge" is remembered (card 113), so this deal's figure would arrive already proposed.
+    const d = await mkDeal((await call(alice, "POST", "/api/workspaces", { name: "Undo audit", reviewMode: "solo" })).json.id, "Undo Audit");
     await upload(d, "notes.txt", "Notes\nGauge: 5.25%\n");
     await enter(d, "exit_cap_rate_pct", 5.5);
     await label(d, "5.25%", "exit_cap_rate_pct");

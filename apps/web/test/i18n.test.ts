@@ -589,6 +589,14 @@ describe("card 58c: every audit action has a sentence in both languages", () => 
       .toEqual(["Labelled a figure as Exit cap rate", "A étiqueté un chiffre comme Taux de capitalisation à la sortie"]);
     expect(say("figure.unlabelled")).toEqual(["Removed a figure's label", "A retiré l'étiquette d'un chiffre"]);
   });
+  it("says a label the workspace remembers, and forgets (card 113)", () => {
+    expect(say("label.remembered", { phrase: "marketing window", unit: "none", field: "lease_up_months", item: "" }))
+      .toEqual(["Remembered the label \"marketing window\" as Lease-up period for this workspace's deals", "A retenu le libellé « marketing window » comme Période de location pour les projets de cet espace"]);
+    expect(say("label.forgotten", { phrase: "marketing window", unit: "none", field: "lease_up_months", item: "" }))
+      .toEqual(["Forgot the label \"marketing window\" as Lease-up period", "A oublié le libellé « marketing window » comme Période de location"]);
+    expect(build("fr", () => {}).msg("Labelled the same way before in this workspace; confirm it")).toBe("Étiqueté de la même façon auparavant dans cet espace ; à confirmer");
+    expect(build("fr", () => {}).msg("The label it was remembered from was removed")).not.toBe("The label it was remembered from was removed");
+  });
   it("says a copy, from both ends", () => {
     expect(say("deal.copied", { name: "Fourplex, variant" })).toEqual(["Copied as Fourplex, variant", "A copié comme Fourplex, variant"]);
     expect(say("deal.created_as_copy", { name: "Fourplex" })).toEqual(["Created as a copy of Fourplex", "A créé comme copie de Fourplex"]);

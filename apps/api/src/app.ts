@@ -449,9 +449,9 @@ export function createApp({ db, store, secureCookies, demoSignIn = false, trustP
     if (FIELDS.find((f) => f.key === b.fieldKey)!.itemized && !b.itemKey?.trim()) throw new HttpError(422, "This field needs an item name");
     await as(c, async (tx) => {
       await ownFigure(tx, c.req.param("id"), b.documentId);
-      const why = await labelRefusal(tx, b.documentId, { id: b.figureId, fieldKey: b.fieldKey, itemKey: b.itemKey });
+      const { why, phrase, unit } = await labelRefusal(tx, b.documentId, { id: b.figureId, fieldKey: b.fieldKey, itemKey: b.itemKey });
       if (why) throw new HttpError(422, why);
-      await tx.query(`select fn_label_figure($1, $2, $3, $4)`, [b.documentId, b.figureId, b.fieldKey, b.itemKey ?? ""]);
+      await tx.query(`select fn_label_figure($1, $2, $3, $4, $5, $6)`, [b.documentId, b.figureId, b.fieldKey, b.itemKey ?? "", phrase, unit]);
     });
     return c.json({ ok: true });
   });

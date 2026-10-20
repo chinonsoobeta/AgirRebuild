@@ -19,7 +19,7 @@ import {
 } from "@agir/contracts";
 import { assemble, canonicalJson, ENGINE_VERSION, heldPartnerReturns, replay } from "@agir/engine";
 import type { Db } from "@agir/db";
-import { applyLabels, figureOrder, offeredIds, suggestFields, type SourcedCandidate } from "@agir/extraction";
+import { applyLabels, figureOrder, labelPhrase, labelUnit, offeredIds, suggestFields, type SourcedCandidate } from "@agir/extraction";
 
 export const sha256 = (s: string) => createHash("sha256").update(s).digest("hex");
 /** The hash of each registered policy, by version. A run is fresh against the hash of the policy it was made under. */
@@ -265,14 +265,16 @@ export async function dealOverview(tx: Db, dealId: string) {
 // ---- Review ---------------------------------------------------------------------------
 
 /** Why the label boundary would drop this label for one of the document's figures, or null when it would keep it (task 58 audit). */
-export async function labelRefusal(tx: Db, documentId: string, label: { id: string; fieldKey: string; itemKey?: string }): Promise<string | null> {
+/** Why a label would be refused (null when it would be kept), and the phrase and unit a workspace remembers it under (card 113). */
+export async function labelRefusal(tx: Db, documentId: string, label: { id: string; fieldKey: string; itemKey?: string }): Promise<{ why: string | null; phrase: string | null; unit: string }> {
   const rows = await tx.query<{ document_id: string; document_name: string; raw: string; value: number | null; unit_seen: string | null; location: string; context: string; note: string | null }>(
     `select c.document_id, d.name as document_name, c.raw, c.value, c.unit_seen, c.location, c.context, c.note
      from candidates c join documents d on d.id = c.document_id where c.document_id = $1 and c.field_key is null`,
     [documentId],
   );
   const figures = figureOrder(rows.map((r) => ({ fieldKey: null, itemKey: null, value: r.value, raw: r.raw, unitSeen: r.unit_seen, location: r.location, context: r.context, rule: "", documentId: r.document_id, documentName: r.document_name }) as SourcedCandidate));
-  return applyLabels(figures, [label]).dropped[0]?.why ?? null;
+  const fig = figures[offeredIds(figures).indexOf(label.id)];
+  return { why: applyLabels(figures, [label]).dropped[0]?.why ?? null, phrase: fig ? labelPhrase(fig) : null, unit: labelUnit(fig?.unitSeen ?? null) };
 }
 
 /**

@@ -100,6 +100,8 @@ export function offeredIds(offered: readonly SourcedCandidate[]): string[] {
   });
 }
 
+export const REMEMBERED_NOTE = "Labelled the same way before in this workspace; confirm it";
+
 /** The unit a figure was written with, without its currency code ("CAD" alone is "$"). */
 const seenUnit = (u: string | null): string | null => {
   if (u === null) return null;
@@ -121,6 +123,7 @@ export function applySuggestions(
   results: readonly SourcedCandidate[],
   offered: readonly SourcedCandidate[],
   suggestions: readonly { id: string; fieldKey: string | "ignore"; itemKey?: string | null }[],
+  as: { rule: "suggested" | "remembered"; note: string } = { rule: "suggested", note: SUGGESTED_NOTE },
 ): { kept: SourcedCandidate[]; dropped: { id: string; why: string }[] } {
   const ids = offeredIds(offered);
   const read = new Set(results.filter((r) => r.fieldKey && r.value !== null).map((r) => `${r.fieldKey}|${(r.itemKey ?? "").toLowerCase()}`));
@@ -139,8 +142,8 @@ export function applySuggestions(
     const def = FIELD_BY_KEY.get(s.fieldKey);
     if (!def) { drop("The key is not in the catalog"); continue; }
     if (!def.extractable) { drop("This field is not read from documents"); continue; }
-    const unit = seenUnit(fig.unitSeen);
-    const fits = unitFits(def.unit, unit);
+    // A remembered label (card 113) replays a person's label on a figure written with the same unit, so it passes the label's unit check.
+    const fits = as.rule === "remembered" ? labelFits(def.unit, fig.unitSeen) : unitFits(def.unit, seenUnit(fig.unitSeen));
     if (!fits) { drop(`The figure's unit (${fig.unitSeen ?? "none"}) does not fit ${def.unit}`); continue; }
     // The field's own bounds: a figure the field could never hold is not that field's figure.
     const v = fig.value!;
@@ -154,7 +157,7 @@ export function applySuggestions(
     }
     if (read.has(`${def.key}|${(itemKey ?? "").toLowerCase()}`)) { drop("The reader already read this field for the deal"); continue; }
     used.add(id);
-    kept.push({ ...fig, fieldKey: def.key, itemKey, rule: "suggested", note: SUGGESTED_NOTE });
+    kept.push({ ...fig, fieldKey: def.key, itemKey, rule: as.rule, note: as.note });
   }
   return { kept, dropped };
 }
@@ -256,4 +259,31 @@ export function withoutLabelled<S extends { id: string }>(figures: readonly Sour
   const offeredId = offeredIds(offered);
   const gone = new Set(offered.flatMap((f, i) => (labelled.has(f) ? [offeredId[i]!] : [])));
   return suggestions.filter((s) => !gone.has(String(s.id)));
+}
+
+/** The unit a remembered label is kept under (card 113): the figure's own, without its currency code, or "none". */
+export const labelUnit = (unitSeen: string | null): string => seenUnit(unitSeen) ?? "none";
+
+const UNIT_WORDS = /\b(?:months?|mos?|years?|yrs?|mois|ans?|annees?|sf|sq ft|sqft|psf|pi|pc|units?|unites?|x|percent|per cent|pour cent|cad|usd|aud)\b/g;
+
+/**
+ * Card 113. The figure's own label, as a workspace remembers it: the words before the figure in its clause, or after it when it leads its clause
+ * (as `suggestFields` takes them); for a table cell, the row's label without the leading "<sheet>: " and without the figure. Folded as `foldText`
+ * folds it, with digits, currency signs, other punctuation and units removed. Null when fewer than two letters are left: it is never remembered.
+ */
+export function labelPhrase({ context, raw, location }: { context: string; raw: string; location: string }): string | null {
+  // A table cell's context is "<table>: <row label> <cells>"; a row label's comma is part of its name, so it is not cut into clauses.
+  const table = /^(.+)!\$?[A-Z]+\$?\d+$/.exec(location)?.[1] ?? /^(Table \d+) R\d+C\d+$/.exec(location)?.[1] ?? (/^[A-Z]{1,3}\d+$/.test(location) ? "CSV" : null);
+  let label: string;
+  if (table !== null) {
+    const row = context.startsWith(`${table}: `) ? context.slice(table.length + 2) : context;
+    const at = row.lastIndexOf(raw);
+    label = at < 0 ? row : row.slice(0, at) + row.slice(at + raw.length);
+  } else {
+    const at = context.indexOf(raw);
+    const before = at < 0 ? context : context.slice(0, at).split(/[,;]/).pop()!;
+    label = before.trim() || context.slice(at + raw.length).split(/[,;.]/)[0]!;
+  }
+  const phrase = foldText(label).replace(/[^\p{L}\s]/gu, " ").replace(UNIT_WORDS, " ").replace(/\s+/g, " ").trim();
+  return (phrase.match(/\p{L}/gu)?.length ?? 0) < 2 ? null : phrase;
 }

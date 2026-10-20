@@ -1,7 +1,7 @@
 import { describe, expect, test, vi } from "vitest";
 import { SF_PER_M2 } from "@agir/numbers";
 import { assemble, type AssumptionRow } from "@agir/engine";
-import { WAIVED_NOTE, applyLabels, itemFold, applySuggestions, consolidate, extractCandidates, offerable, offeredIds, figureOrder, withoutLabelled, normalizeLabel, parseDocument, scoreExtraction, suggestFields, type Cell, type NormalizedDocument, type SourcedCandidate, type Table } from "../src/index.ts";
+import { WAIVED_NOTE, REMEMBERED_NOTE, applyLabels, itemFold, applySuggestions, labelPhrase, labelUnit, consolidate, extractCandidates, offerable, offeredIds, figureOrder, withoutLabelled, normalizeLabel, parseDocument, scoreExtraction, suggestFields, type Cell, type NormalizedDocument, type SourcedCandidate, type Table } from "../src/index.ts";
 import { MAX_PDF_PAGES, pdfPageError, relativeLinks } from "../src/parse.ts";
 import { loadOracles, toNormalized } from "./oracle.ts";
 
@@ -6668,5 +6668,53 @@ describe("card 114 audit: a memo word, a second loan and a dash item stay what t
   });
   test.each(["Taux du deuxième étage : 5 %", "Rate on the second phase: 5%", "Amortization of the second building: 10 years", "Intérêt du deuxième trimestre : 5 %"])("a second floor, phase or building is no second loan: %s", (line) => {
     expect(pick(read(line)).filter(([k]) => String(k).startsWith("mezz"))).toEqual([]);
+  });
+});
+
+describe("card 113: a label's phrase, and a remembered label crossing the suggestion boundary", () => {
+  const p = (context: string, raw: string, location = "page 1, line 1") => labelPhrase({ context, raw, location });
+
+  test("the phrase is the figure's own label, folded, without digits, currency signs or units", () => {
+    expect(p("Tenant search: 5 months", "5 months")).toBe("tenant search");
+    expect(p("The lease-up runs long, with a tenant search of 5 months, then it stabilizes.", "5 months", "paragraph 2")).toBe("with a tenant search of");
+    expect(p("Base: Marketing window, months 5", "5", "Base!B4")).toBe("marketing window");
+    expect(p("CSV: Marketing window, months $5", "$5", "B2")).toBe("marketing window");
+    expect(p("Délai de recherche de locataires : 5 mois", "5 mois")).toBe("delai de recherche de locataires");
+    expect(p("5 months of tenant search, then more", "5 months")).toBe("of tenant search");
+    expect(p("Reserve 2026: $48,000 CAD", "$48,000 CAD")).toBe("reserve");
+  });
+  test("an empty phrase, or one of fewer than two letters, is never remembered", () => {
+    expect(p("5", "5")).toBeNull();
+    expect(p("Base: 5", "5", "Base!B2")).toBeNull();
+    expect(p("A: 5 months", "5 months")).toBeNull();
+    expect(p("$ 12 months: 5", "5")).toBeNull();
+  });
+  test("the unit is the figure's own, without its currency code, or none", () => {
+    expect([labelUnit(null), labelUnit("$ CAD"), labelUnit("months"), labelUnit("$/mo USD")]).toEqual(["none", "$", "months", "$/mo"]);
+  });
+
+  const fig = (context: string, raw: string, value: number, unitSeen: string | null, location: string): SourcedCandidate =>
+    ({ fieldKey: null, itemKey: null, value, raw, unitSeen, location, context, rule: "table:label-value", note: "No field matches this label", documentId: "d1", documentName: "base.xlsx" });
+  const offered = [fig("Base: Marketing window, months 5", "5", 5, null, "Base!B2"), fig("Base: Wing studio count 14", "14", 14, null, "Base!B3"), fig("Base: Sundry 48000", "$48,000", 48_000, "$", "Base!B4"), fig("Base: Settled share 140", "140", 140, null, "Base!B5")];
+  const ids = offeredIds(offered);
+  const read: SourcedCandidate = { fieldKey: "lease_up_months", itemKey: null, value: 6, raw: "6 months", unitSeen: "months", location: "p2", context: "Lease-up: 6 months", rule: "line:label-value", documentId: "d2", documentName: "d2.pdf" };
+  const remember = (s: { id: string; fieldKey: string; itemKey?: string }[], results: SourcedCandidate[] = []) => applySuggestions(results, offered, s, { rule: "remembered", note: REMEMBERED_NOTE });
+
+  test("a remembered label is kept as the figure itself, with its own rule and note, and never approved", () => {
+    const { kept, dropped } = remember([{ id: ids[0]!, fieldKey: "lease_up_months" }]);
+    expect(dropped).toEqual([]);
+    expect(kept).toEqual([{ ...offered[0], fieldKey: "lease_up_months", itemKey: null, rule: "remembered", note: "Labelled the same way before in this workspace; confirm it" }]);
+    expect(consolidate(kept).map((x) => [x.status, x.value])).toEqual([["needs_review", 5]]);
+    // Without the options, a suggestion is unchanged: a bare number is not a suggested month count.
+    expect(applySuggestions([], offered, [{ id: ids[0]!, fieldKey: "lease_up_months" }]).kept).toEqual([]);
+  });
+  test("it is dropped as a suggestion is: a field already read, a unit or bound that does not fit, an item not in the context", () => {
+    expect(remember([{ id: ids[0]!, fieldKey: "lease_up_months" }], [read]).dropped.map((d) => d.why)).toEqual(["The reader already read this field for the deal"]);
+    expect(remember([{ id: ids[2]!, fieldKey: "lease_up_months" }]).dropped[0]!.why).toMatch(/does not fit months/);
+    expect(remember([{ id: ids[0]!, fieldKey: "stabilized_occupancy_pct" }]).kept).toHaveLength(1);
+    expect(remember([{ id: ids[2]!, fieldKey: "stabilized_occupancy_pct" }]).kept).toEqual([]);
+    expect(remember([{ id: ids[1]!, fieldKey: "unit_count", itemKey: "Studio" }]).kept.map((c) => [c.fieldKey, c.itemKey, c.value])).toEqual([["unit_count", "Studio", 14]]);
+    expect(remember([{ id: ids[1]!, fieldKey: "unit_count", itemKey: "2-bed" }]).dropped[0]!.why).toBe("The item name is missing or not in the figure's own context");
+    expect(remember([{ id: ids[3]!, fieldKey: "stabilized_occupancy_pct" }]).dropped[0]!.why).toMatch(/outside what stabilized_occupancy_pct can hold/);
   });
 });

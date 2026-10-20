@@ -60,6 +60,8 @@ export function describeEvent(i: I18n, e: AuditEvent): string {
     case "workspace.created": return fr ? "A créé l'espace de travail" : "Created the workspace";
     case "figure.labelled": return fr ? `A étiqueté un chiffre comme ${field()}` : `Labelled a figure as ${field()}`;
     case "figure.unlabelled": return fr ? "A retiré l'étiquette d'un chiffre" : "Removed a figure's label";
+    case "label.remembered": return fr ? `A retenu le libellé « ${p.phrase} » comme ${field()} pour les projets de cet espace` : `Remembered the label "${p.phrase}" as ${field()} for this workspace's deals`;
+    case "label.forgotten": return fr ? `A oublié le libellé « ${p.phrase} » comme ${field()}` : `Forgot the label "${p.phrase}" as ${field()}`;
     case "deal.copied": return fr ? `A copié comme ${p.name}` : `Copied as ${p.name}`;
     case "deal.created_as_copy": return fr ? `A créé comme copie de ${p.name}` : `Created as a copy of ${p.name}`;
     case "workspace.review_mode_changed": {

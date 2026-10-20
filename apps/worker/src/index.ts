@@ -8,7 +8,7 @@ import { FIELDS, FIELD_BY_KEY, runPolicy, type Currency, type Policy, type Engin
 import { itemFold } from "@agir/numbers";
 import { renderArtifact, RendererUnavailableError, type ArtifactInput } from "@agir/artifacts";
 import { sha256Hex, type BlobStore, type Db } from "@agir/db";
-import { applyLabels, applySuggestions, consolidate, extractCandidates, figureOrder, kindOf, offerable, offeredIds, parseDocument, ocrPdf, withoutLabelled, type SourcedCandidate } from "@agir/extraction";
+import { applyLabels, applySuggestions, consolidate, extractCandidates, figureOrder, kindOf, labelPhrase, labelUnit, offerable, offeredIds, parseDocument, ocrPdf, REMEMBERED_NOTE, withoutLabelled, type SourcedCandidate } from "@agir/extraction";
 
 export const MAX_UPLOAD_BYTES = 75 * 1024 * 1024;
 
@@ -287,16 +287,36 @@ export async function reconcileDeal(db: Db, dealId: string) {
     );
     const labels = labelRows.map((l) => ({ id: l.figure_id, fieldKey: l.field_key, itemKey: l.item_key, by: l.created_by }));
     const { kept: labelled, dropped: labelDropped } = applyLabels(unlabelled, labels);
+    // Card 113: a label the workspace remembers, for an offered figure no person labelled whose own label and unit match it. It crosses the
+    // boundary a suggestion does, whatever the suggestions switch says; no model is involved. The memory's own source is labelled, so skipped.
+    const memory = new Map(
+      (await tx.query<{ phrase: string; unit: string; field_key: string; item_key: string }>(`select phrase, unit, field_key, item_key from label_memory where workspace_id = $1`, [deal.workspace_id]))
+        .map((m) => [`${m.phrase}|${m.unit}`, m]),
+    );
+    const offered = unlabelled.filter(offerable);
+    const offeredId = offeredIds(offered);
+    const figureIds = offeredIds(unlabelled);
+    const personLabelled = new Set(labels.map((l) => unlabelled[figureIds.indexOf(l.id)]).filter(Boolean));
+    const recalled = offered.flatMap((f, i) => {
+      if (personLabelled.has(f)) return [];
+      const phrase = labelPhrase(f);
+      const m = phrase === null ? undefined : memory.get(`${phrase}|${labelUnit(f.unitSeen)}`);
+      return m ? [{ id: offeredId[i]!, fieldKey: m.field_key, itemKey: m.item_key || null }] : [];
+    });
+    const { kept: remembered, dropped: rememberedDropped } = applySuggestions(sourced, offered, recalled, { rule: "remembered", note: REMEMBERED_NOTE });
+    const rememberedIds = recalled.filter((r) => !rememberedDropped.some((d) => d.id === r.id)).map((r) => r.id);
     if (on) {
       const stored = await tx.query<{ response: unknown[] }>(
         `select s.response from label_suggestions s join documents d on d.id = s.document_id
          where s.deal_id = $1 and s.outcome = 'ok' and d.retired_at is null and d.stage = 'extracted' order by s.document_id, s.created_at, s.id`,
         [dealId],
       );
-      const suggestions = withoutLabelled(unlabelled, labels, stored.flatMap((r) => r.response as { id: string; fieldKey: string; itemKey?: string | null }[]));
-      ({ kept, dropped } = applySuggestions(sourced, unlabelled.filter(offerable), suggestions));
+      // A model's suggestion for a figure a person or the workspace's memory labelled is dropped.
+      const suggestions = withoutLabelled(unlabelled, labels, stored.flatMap((r) => r.response as { id: string; fieldKey: string; itemKey?: string | null }[]))
+        .filter((x) => !rememberedIds.includes(String(x.id)));
+      ({ kept, dropped } = applySuggestions(sourced, offered, suggestions));
     }
-    const proposals = consolidate([...sourced, ...kept, ...labelled], deal.currency);
+    const proposals = consolidate([...sourced, ...kept, ...remembered, ...labelled], deal.currency);
     const existing = await tx.query<AssumptionRowDb>(
       `select id, field_key, item_key, status, value, source_kind, sources, conflict_values, reason, version from assumptions where deal_id = $1 for update`,
       [dealId],
@@ -462,7 +482,7 @@ export async function reconcileDeal(db: Db, dealId: string) {
       if (!e.sources?.length && (e.status === "approved" || e.status === "needs_review")) continue;
       // A value whose every source was a model's suggestion leaves because the switch is off, not because a document went.
       const everyRule = (r: string) => !!e.sources?.length && e.sources.every((x) => (x as { rule?: string }).rule === r);
-      const gone = !on && everyRule("suggested") ? "Its label was a model's suggestion, and suggestions are now off" : everyRule("labelled") ? "The label a person gave its figure was removed" : "Its source document was removed";
+      const gone = !on && everyRule("suggested") ? "Its label was a model's suggestion, and suggestions are now off" : everyRule("labelled") ? "The label a person gave its figure was removed" : everyRule("remembered") ? "The label it was remembered from was removed" : "Its source document was removed";
       if (e.status === "needs_review" || e.status === "conflicting") {
         await tx.query(`update assumptions set status = 'rejected', sources = '[]', conflict_values = null, reason = $2, version = version + 1, updated_at = now() where id = $1`, [
           e.id,
@@ -483,7 +503,7 @@ export async function reconcileDeal(db: Db, dealId: string) {
       deal.workspace_id,
       dealId,
       dealId,
-      JSON.stringify({ proposals: proposals.length, changed, ...(restoredValues.length ? { restored: restoredValues.length, restored_values: restoredValues } : {}), ...(on ? { suggested: kept.length, dropped } : {}), ...(labelRows.length ? { labelled: labelled.length, labelDropped } : {}) }),
+      JSON.stringify({ proposals: proposals.length, changed, ...(restoredValues.length ? { restored: restoredValues.length, restored_values: restoredValues } : {}), ...(on ? { suggested: kept.length, dropped } : {}), ...(labelRows.length ? { labelled: labelled.length, labelDropped } : {}), ...(recalled.length ? { remembered: rememberedIds.map((id, i) => ({ id, field: remembered[i]!.fieldKey, item: remembered[i]!.itemKey ?? "" })), rememberedDropped } : {}) }),
     ]);
   });
 }
