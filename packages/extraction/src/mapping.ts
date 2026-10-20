@@ -125,7 +125,7 @@ const LOOSE_ALIASES = new Set(["management", "gestion", "depenses", "limited par
 const WEAK_MONEY = new Set(["lot", "site", "parking", "laundry", "storage", "stationnement", "buanderie", "rangement"]);
 // These name a field only when the figure's own words say what it is a share of: "management 4% of EGI", never "management 1.5% of equity".
 const EGI_BASE_ALIASES = new Set(["management", "gestion", "depenses"]);
-const EGI_AFTER_RE = /^\s*(?:of|on|de|des|du|d)\s+(?:the\s+|les?\s+|la\s+)?(?:egi|effective gross|gross (?:revenue|income)|revenues?|revenus?)\b/;
+const EGI_AFTER_RE = /^\s*(?:of|on|de|des|du|d)\s+(?:the\s+|les?\s+|la\s+)?(?:egi|effective gross|gross (?:revenue|income)|revenu brut effectif|revenues?|revenus?)\b/;
 // The limited partners' own share needs no word before it but an article: "return to limited partners 8%" is the return.
 const LP_ALIASES = new Set(["limited partners", "lp", "lps", "commanditaires", ...FIELD_BY_KEY.get("lp_share_pct")!.aliases.filter((a) => /^(?:lps?|limited partners|commanditaires) (?:supply|supplies|provides?|funds?|contributes?|apportent|fournissent|financent)$/.test(a))]);
 const LP_LEAD_RE = /^(?:\s|the|our|le|la|les|notre|nos)*$/;
@@ -144,7 +144,7 @@ const LIMIT_RE = /\b(maximum|max|not to exceed|not exceed|not more than|at most|
 const CAPPED_RE = /\bcapped\b/;
 const CAPPED_COST_RE = /\b(hard costs?|construction costs?|building costs?|contract|fixed price|price|budget|couts? de construction|travaux|prix)\b/;
 const LOAN_WORD_RE = /\b(loan|loans|mortgage|financing|advance|pret|hypotheque|financement)\b/;
-const COVERAGE_RE = /\b(dscr|dcr|debt service coverage|couverture|rcsd|rcd|ccd)\b/;
+const COVERAGE_RE = /\b(dscr|dcr|debt (?:service )?coverage|couverture|rcsd|rcd|ccd)\b/;
 const TERM_RE = /\b(term|terme|maturity|matures?|echeance|duree du pret)\b/;
 const TERM_AFTER_RE = /^\s*(loan |initial |renewal |fixed |conversion )?(term|terme)\b/;
 const AMORT_RE = /\bamorti[sz]\w*/;
@@ -269,7 +269,10 @@ export function normalizeLabel(raw: string): { label: string; labelUnit: LabelUn
     else if (/^(m²|m2|sq\.? ?m|sqm|square met(re|er)s)$/.test(inner)) labelUnit = "m2";
     else if (/^x$/.test(inner)) labelUnit = "x";
   }
-  const label = fieldThenType(raw)
+  // A comma can introduce a duration unit followed by its timing basis.
+  const duration = raw.match(/,\s*(months?|mos?|mois|years?|yrs?|ans?|années?|annees?)\b/i);
+  if (!labelUnit && duration) labelUnit = /^(m|mo)/i.test(duration[1]!) ? "months" : "years";
+  const label = fieldThenType(duration ? raw.slice(0, duration.index) : raw)
     .replace(/\([^)]*\)/g, " ")
     .replace(/²/g, "2")
     .toLowerCase()
@@ -390,7 +393,7 @@ function convert(def: FieldDef, t: NumberToken, label: string, labelUnit: LabelU
       return null;
     case "x":
       if (u === "x") return { value: v, unitSeen: "x" };
-      if (u === null && (labelUnit === "x" || /\b(dscr|dcr|debt service coverage|couverture du service de la dette|rcsd|rcd|ccd)\b/.test(label))) return { value: v, unitSeen: "number" };
+      if (u === null && (labelUnit === "x" || /\b(dscr|dcr|debt (?:service )?coverage|couverture du service de la dette|rcsd|rcd|ccd)\b/.test(label))) return { value: v, unitSeen: "number" };
       return null;
     default:
       return null;
@@ -888,6 +891,8 @@ function mapLabel(rawLabel: string, t: NumberToken, opts: MapOptions = {}): Mapp
     return notAssumed(item.def.key) ?? { kind: "field", fieldKey: item.def.key, itemKey: typed ?? item.itemKey, value: item.value, unitSeen: item.unitSeen };
   }
   if (best) return notAssumed(best.def.key) ?? { kind: "field", fieldKey: best.def.key, itemKey: null, value: best.value, unitSeen: best.unitSeen };
+  // An explicit EGI basis states a variable expense even without a catalogue label.
+  if (t.unit === "%" && /^\s*(?:of\s+(?:the\s+)?(?:effective gross income|egi)|du\s+revenu brut effectif)\b/.test(foldText(opts.after ?? ""))) return asField(FIELD_BY_KEY.get("variable_expense_pct")!) ?? { kind: "unmapped" };
   if (item) {
     return notAssumed(item.def.key) ?? { kind: "field", fieldKey: item.def.key, itemKey: "All units", value: item.value, unitSeen: item.unitSeen };
   }

@@ -5008,3 +5008,68 @@ describe("card 93b local OCR", () => {
     expect(vi.mocked(createWorker).mock.calls.length).toBe(calls);
   }, 60_000);
 });
+
+describe("card 97e general Canadian reading rules", () => {
+  const read = (lines: string[], tables: Table[] = []) => extractCandidates({
+    kind: "pdf", lines: lines.map((text, i) => ({ text, location: `page 1, line ${i + 1}` })),
+    tables, pageCount: 1, needsOcr: false,
+    fullText: [...lines, ...tables.flatMap((t) => t.rows.map((r) => r.map((c) => c.text).join(" ")))].join("\n"),
+  });
+  const values = (r: ReturnType<typeof read>) => r.candidates.map((c) => [c.fieldKey, c.value]);
+  const terms = [["Interest rate", "4.7%"], ["Amortization", "35 years"], ["Interest-only period", "11 months"], ["Loan-to-value", "80%"]];
+  const grid = (rows: string[][]): Table => ({
+    name: "Committed terms", rows: rows.map((row, i) => row.map((text, j) => ({ text, ref: `A${i}-${j}` }))),
+  });
+  test.each(["Insured take-out commitment for Cedar Walk", "Permanent mortgage commitment for Alder Lane", "Engagement de prêt permanent assuré", "Engagement de financement de reprise"])("%s scopes both lines and unlocated tables to refinance", (title) => {
+    for (const r of [read([title, ...terms.map(([label, value]) => `${label}: ${value}`)]), read([title], [grid(terms)])]) {
+      expect(values(r)).toEqual(expect.arrayContaining([["refinance_rate_pct", 4.7], ["refinance_amort_years", 35], ["refinance_io_months", 11], ["refinance_ltv_pct", 80]]));
+      expect(r.candidates.some((c) => c.fieldKey?.startsWith("senior_"))).toBe(false);
+    }
+  });
+  test.each(["Construction facility commitment", "Feuille de modalités du prêt de construction"])("%s retains construction-loan scope", (title) => {
+    const r = read([title], [grid(terms.slice(0,3))]);
+    expect(values(r)).toEqual(expect.arrayContaining([["senior_rate_pct", 4.7], ["senior_amort_years", 35], ["senior_io_months", 11]]));
+    expect(r.candidates.some((c) => c.fieldKey?.startsWith("refinance_"))).toBe(false);
+  });
+  test.each([
+    ["Refinance month, months following construction commencement: 23", "refinance_month", 23],
+    ["Mois du refinancement, mois depuis le début du chantier : 25", "refinance_month", 25],
+    ["Hold period, years following stabilized operation 8", "hold_years", 8],
+    ["Période de détention, années après la stabilisation : 7", "hold_years", 7],
+    ["Lease-up duration, months after construction completion: 9", "lease_up_months", 9],
+    ["Période de location, mois suivant la fin des travaux : 6", "lease_up_months", 6],
+  ])("a unit stated in the label: %s", (line, field, value) => {
+    const r = read([line as string]);
+    expect(values(r)).toContainEqual([field, value]);
+    expect(r.candidates.some((c) => c.fieldKey === "hard_cost")).toBe(false);
+  });
+  test.each([
+    ["Deed transfer tax payable: $18,600", "land_transfer_tax", 18600],
+    ["Droits de mutation à payer : 12 450,00 $ CAD", "land_transfer_tax", 12450],
+    ["Development cost charges budget: $52,800", "development_charges", 52800],
+    ["Capital cost charges payable: $41,200", "development_charges", 41200],
+    ["Capital cost contribution allowed: $37,600", "development_charges", 37600],
+    ["Water and wastewater charges total: $29,700", "development_charges", 29700],
+    ["Redevances de développement prévues : 36 900,00 $ CAD", "development_charges", 36900],
+  ])("Canadian cost name: %s", (line, field, value) => expect(values(read([line as string]))).toEqual([[field, value]]));
+  test.each([
+    ["Construction commitment: CAD 1,840,000.00", 1840000],
+    ["Construction loan commitment: CA$ 2,375,000", 2375000],
+    ["Construction commitment: 3 460 000,25 $ CAD", 3460000.25],
+  ])("a Canadian currency mark belongs to the whole amount: %s", (line, value) => {
+    const r = read([line as string]);
+    expect(values(r)).toEqual([["senior_loan_amount", value]]);
+    expect(r.candidates[0]!.unitSeen).toBe("CAD");
+  });
+  test.each([
+    ["Lender's minimum debt coverage ratio covenant: 1.24x", 1.24],
+    ["The lender requires a minimum debt coverage ratio covenant of 1.31x.", 1.31],
+  ])("a covenant is a lender limit that is read: %s", (line, value) => expect(values(read([line as string]))).toEqual([["min_dscr_covenant", value]]));
+  test.each([
+    ["Operating provision: 4% of effective gross income", 4],
+    ["Recurring expense allowance: 6% of EGI", 6],
+    ["Provision d'exploitation : 3 % du revenu brut effectif", 3],
+    ["Gestion locative : 5 % du revenu brut effectif", 5],
+  ])("a stated percentage of EGI is a variable expense: %s", (line, value) => expect(values(read([line as string]))).toEqual([["variable_expense_pct", value]]));
+  test.each(["Operating provision: 4% of equity", "Provision d'exploitation : 3 % des fonds propres"])("does not turn another basis into EGI: %s", (line) => expect(read([line]).candidates.some((c) => c.fieldKey === "variable_expense_pct")).toBe(false));
+});

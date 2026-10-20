@@ -96,9 +96,9 @@ const TOKEN_RE = new RegExp(
   "g",
 );
 
-// A currency mark written after the number: "1,200,000 USD", "1 250 000 $ US", "$ CA", "$ CAN", or a
+// A currency mark written after the number: "1,200,000 USD", "1 250 000 $ US", "$ CA", "$ CAN", "$ CAD", or a
 // bare "18,75 $" (French). A bare dollar sign before a digit starts the next figure ("$5 $10"): not a suffix.
-const SUFFIX_RE = /^\s?(USD|CAD|\$\s?US\b|\$\s?CAN?\b|\$(?!\s?\d))/;
+const SUFFIX_RE = /^\s?(USD|CAD|\$\s?US\b|\$\s?(?:CAD|CAN?)\b|\$(?!\s?\d))/;
 
 /** The currency a mark names: "US$", "USD", "$ US" are USD; "CA$", "C$", "CAD", "$ CA" are CAD; "A$" is AUD; a bare "$" names none. */
 export function codeOf(mark: string | undefined): CurrencyCode | null {

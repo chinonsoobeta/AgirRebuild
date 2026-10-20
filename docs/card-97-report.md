@@ -8,7 +8,7 @@ Local branch: `task/97-audit-fixes`, from `main` at `673117c`. No network or pus
 |---|---|
 | 97a — Review proposals | `22c5237ade91feed2dd90cd46e8bbb469357d185` |
 | 97b — Published-table provenance | `084688d2c4cc62dfbafac57688d753fb8c45d26a` |
-| 97c — Rendering | `923eb01` |
+| 97c — Rendering | `923eb01f52e123e1706a10cde10ac623625187c5` |
 
 | Check | Result |
 |---|---|
@@ -17,7 +17,7 @@ Local branch: `task/97-audit-fixes`, from `main` at `673117c`. No network or pus
 | `npx tsc -b` after 97c | Passed; `git checkout -- tsconfig.tsbuildinfo` restored the tracked cache |
 | Artifact and web rendering tests | 149 passed |
 
-97d records these checks and removes trailing whitespace from four approved text-pin lines. It changes no behaviour and adds no test infrastructure.
+97d (`c82891a98b5a8b6682e83c14e98e3ad3e11bf6f9`) records these checks and removes trailing whitespace from four approved text-pin lines. It changes no behaviour and adds no test infrastructure.
 
 ## Approved report-text pins
 
@@ -58,6 +58,29 @@ CamelCase consumers were also updated: web API assumption/run-input types, Revie
 
 Table-source storage: `source_table` is nullable text containing a JSON snapshot of `tableId`, `optionKey`, publisher, title, effective date, and prerequisite field keys. The accepting user is read from the governed row. The acceptance API accepts identifiers only and recomputes value/reason on the server. Table rows do not count as sponsor-stated or in that summary’s material-input denominator.
 
+## 97e reading changes and final verification
+
+Added 30 independently worded cases in the existing extraction test file, covering English/French commitment headings, construction scope preservation, label-stated duration units, the requested Canadian cost names, three Canadian currency forms, lender covenants, EGI percentages, and refusal of unrelated percentage bases. Before implementation, 22 of the 30 new cases failed; the existing 610 cases passed.
+
+The fixes reuse the existing reader and field catalogue:
+
+- An unlocated table inherits the document's loan scope only when the line headings establish one unambiguous scope. A located table keeps its positional scope.
+- A comma-delimited months/years qualifier supplies the duration unit; the field name before it identifies the input, so construction timing words do not become hard costs.
+- Added the missing cost/commitment/covenant aliases; retained the requested aliases already present.
+- Debt coverage covenant wording bypasses the generic lender-limit refusal. A stated EGI basis supplies variable_expense_pct when no more specific compatible field was named.
+- The existing tokenizer already reads CAD and CA$ prefixes. Its suffix expression now also consumes the complete $ CAD marker and preserves the currency code.
+
+| Final check | Result |
+|---|---|
+| `VITEST_MAX_WORKERS=1 npx vitest run packages/extraction/test/extraction.test.ts` | 640 passed |
+| `VITEST_MAX_WORKERS=2 npm run gate -- --tier=pr` | Both typechecks passed; 1,768 tests passed in 15 files |
+| `VITEST_MAX_WORKERS=1 npx vitest run apps/api/test/api.test.ts` | Whole file: 196 passed |
+| `git diff --check` | Passed |
+
+All engine/result and reference-deal pin assertions passed without repinning. The six rental reference-deal pins and stored result labels were not changed. The only changed report-text hashes are the seven explicitly approved above. No blind-set score is claimed; Claude's independent rescoring remains to be done.
+
+One intermediate gate failed because test formatting accidentally added spaces inside ten newly added numeric fixtures. Those strings were restored before the successful final gate; no production rule or existing expectation was changed to accommodate that failure.
+
 ## Human-review points and limitations
 
 - The owner approved the supplied English/French source wording. Migration `0022_table_values.sql` still needs human review.
@@ -65,4 +88,4 @@ Table-source storage: `source_table` is nullable text containing a JSON snapshot
 - Existing manual entry through `/values`, `agir_sponsor_stated`, and non-table assumption hashes retain their prior behaviour.
 - Narrow Review layout is checked with the permitted CSS assertion, not a live 597 px browser measurement.
 - The workspace-switch regression uses the real `useDeal` hook with mocked session/query/effect execution.
-- 97e reading changes and their final verification are pending at this checkpoint.
+- No remaining implementation question is open. Blind-set rescoring and human migration review remain outside this local verification.

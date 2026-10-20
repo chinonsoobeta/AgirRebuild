@@ -2020,9 +2020,12 @@ export function extractCandidates(doc0: NormalizedDocument): ExtractionResult {
   // A Word file's paragraphs may carry the note about a rent column ("Retail rents are ..."); there is no order between them and its tables.
   const notes = doc.kind === "docx" ? doc.lines.map((l) => l.text) : [];
   // A Word table is under the heading above it: the scope in force after the lines that come before it.
+  // Without a table location, use a document-wide loan scope only when it is unambiguous.
+  const documentScopes = [...new Set(scopes.filter((scope) => scope !== undefined))];
+  const documentScope = documentScopes.length === 1 ? documentScopes[0] : undefined;
   for (const t of doc.tables) {
     const [before, beforeOther] = [result.candidates.length, result.other.length];
-    fromTable(t, result, notes, (t.at ? scopes[t.at - 1] : undefined) ?? "senior");
+    fromTable(t, result, notes, (t.at ? scopes[t.at - 1] : documentScope) ?? "senior");
     // A sheet named old, original, prior or archive holds no current figures: what it gave is shown, not read.
     // A sheet named for a scenario (downside, lender case) holds no base-case figures either (task 56).
     const old = OLD_SHEET_RE.test(fold(t.name));
