@@ -4,7 +4,7 @@
 // but it never becomes an input.
 
 import { FIELD_BY_KEY, FIELDS, OUTPUT_LIKE_PHRASES, type FieldDef } from "@agir/contracts";
-import { CONCEPTS, LOAN_ANAPHOR, LOAN_NOUN, MAIN_LENDER, MONTH_INDEX, NOT_A_BUDGET_LINE, NOT_CHOSEN_AFTER, LEAVING_AFTER, NOT_THE_DEALS_ASSUMPTION, NOT_THE_LOAN_AFTER, WHERE_IT_SITS } from "./concepts.ts";
+import { CONCEPTS, SENIOR_RANK, LOAN_PERIOD, STATED_TOTAL, DEBT_SERVICE, LOAN_ANAPHOR, LOAN_NOUN, MAIN_LENDER, MONTH_INDEX, NOT_A_BUDGET_LINE, NOT_CHOSEN_AFTER, LEAVING_AFTER, NOT_THE_DEALS_ASSUMPTION, NOT_THE_LOAN_AFTER, WHERE_IT_SITS } from "./concepts.ts";
 import { canonicalItem, codeOf, parenType, SF_PER_M2, unitTypesIn, wholeUnitType, type CurrencyCode, type NumberToken } from "@agir/numbers";
 
 // canonicalItem and itemFold live in @agir/numbers so the engine can use the same fold.
@@ -41,8 +41,8 @@ export type Scope = "senior" | "mezzanine" | "refinance";
 
 const SCOPE_WORDS: Record<Scope, RegExp> = {
   mezzanine: /\b(mezzanine|mezz|second loan|second mortgage|2nd mortgage|second charge|second[- ]ranking|second[- ]position|junior|subordinate loan|deuxieme pret|pret (?:de|du) deuxieme(?: rang)?|(?:taux|amort\w*|interet) (?:de la|du) deuxieme(?=\s*(?:$|[:;,]|pret|rang|hypotheque|charge))|(?:rate|amorti[sz]ation|interest) (?:of|on) the second(?=\s*(?:$|[:;,]|loan|mortgage|charge|lien))|deuxieme rang|deuxieme hypotheque|pret de second rang|second rang|(?:mic|mortgage investment corporation) (?:second|2nd)|private second|(?<=\b(?:mortgages?|loans?|charges?|lenders?|hypotheques?|prets?)\b.{0,80})(?:the\s+)?second(?=\s*(?:is\b|:|\$))|^\s*second\s*$|(?:the\s+)?second(?=\s+(?:amort\w*|int|interest|rate|coupon|io|lender|loan)\b)|preteur prive de second rang)\b/,
-  refinance: /\b(take-?out|take out|refi|refinanc\w*|permanent loan|permanent financing|exit financing|long[- ]term mortgage|pret permanent|financement permanent|financement de sortie|permanent (?:mortgage|debt|facility|lender)|permanent (?=(?:io|interest|amorti[sz]\w*|repayment|rate|term)\b)|conversion (?:rate|coupon)|converts? to (?:(?:an?|the) )?(?:\$|\d|(?:[a-z-]+ ){0,2}(?:loan|mortgage|debt|financing|facility|rate))|term[- ]out|hypotheque permanente|pret a terme|reprise(?!\s+(?:des?\s+|du\s+|de la\s+)?(?:travaux|chantier|construction|possession|bail|baux|terrain))|replacement (?:loan|debt|financing|facility|mortgage|lender|interest|rate|amorti[sz]ation|amount)|(?:pret|financement) de remplacement)\b/,
-  senior: /\b(senior|construction (?:loan|facility)|first mortgage|premier rang|pret de construction)\b/,
+  refinance: /\b(take-?out|take out|refi|refinanc\w*|permanent loan|(?:dollars|cash|committed|amount|proceeds|montant) permanent|permanent (?=(?:dollars|cash|committed|amount|proceeds|montant)\b)|permanent financing|exit financing|long[- ]term mortgage|pret permanent|financement permanent|financement de sortie|permanent (?:mortgage|debt|facility|lender)|permanent (?=(?:io|interest|amorti[sz]\w*|repayment|rate|term)\b)|conversion (?:rate|coupon)|converts? to (?:(?:an?|the) )?(?:\$|\d|(?:[a-z-]+ ){0,2}(?:loan|mortgage|debt|financing|facility|rate))|term[- ]out|hypotheque permanente|pret a terme|reprise(?!\s+(?:des?\s+|du\s+|de la\s+)?(?:travaux|chantier|construction|possession|bail|baux|terrain))|replacement (?:loan|debt|financing|facility|mortgage|lender|interest|rate|amorti[sz]ation|amount)|(?:pret|financement) de remplacement)\b/,
+  senior: new RegExp(`${SENIOR_RANK.source}|\\b(?:construction (?:loan|facility)|premier rang|pret de construction)\\b`),
 };
 const TERM_SHEET_RE = /\b(term sheet|feuille de modalites)\b/;
 export const foldText = (t: string) => t.toLowerCase().normalize("NFD").replace(/[\u0300-\u036f]/g, "").replace(/[’']/g, " ");
@@ -745,6 +745,7 @@ export function mapToken(rawLabel: string, t: NumberToken, opts: MapOptions = {}
     if (unitTypesIn(clause).length || PER_UNIT_RE.test(clause) || /\b(sale|sell|sold|buyer|resale|vente|acheteur|revente)\b/.test(clause)) return { kind: "unmapped" };
   }
   const named = normalizeLabel(rawLabel).label;
+  if ((t.unit === "$" || t.currency || (t.unit === null && t.value !== null && Math.abs(t.value) >= 1000)) && DEBT_SERVICE.test(named)) return { kind: "ignored", reason: "Debt service or a payment, not a loan amount" };
   if (/^(?:(?:its|their) (?:interest(?: rate)?|rate|amorti[sz]ation)|(?:son|leur) (?:taux|interet|amortissement)|sa duree d amortissement)$/.test(named)) return { kind: "ignored", reason: "Which loan this belongs to is not stated" };
   if (WRITER_FEE_RE.test(named)) return { kind: "ignored", reason: "The writer's own fee, not the project's soft costs" };
   if ([...named.matchAll(INCLUDED_IN_RE)].some((x) => { const rest = named.slice(x.index + x[0].length); return ALL_ALIASES.some((a) => `${rest} `.startsWith(`${a} `)); })) return { kind: "ignored", reason: INCLUDED_NOTE };
@@ -802,9 +803,10 @@ function conceptField(rawLabel: string, t: NumberToken, opts: MapOptions): Mappe
   const meanings = budget ? budgetConcepts(label) : [];
   if (meanings.length > 1) return { kind: "ignored", reason: "This description names more than one budget field; enter each line separately" };
   const namedScope: Scope | null = MAIN_LENDER.test(label) ? "senior" : scopeIn(label);
-  const loan = !opts.budget && (LOAN_NOUN.test(label) || namedScope || (opts.loanContext ?? opts.scope !== undefined))
+  const loan = !opts.budget && (LOAN_NOUN.test(label) || namedScope || LOAN_PERIOD.test(label) || /\bconstruction principal\b/.test(label) || (opts.loanContext ?? opts.scope !== undefined))
     && !(opts.prose && !namedScope && !opts.loanContext && LOAN_ANAPHOR.test(label) && !scopeIn(opts.context?.slice(0, t.start) ?? "", false))
-    && !NOT_THE_LOAN_AFTER.test(foldText(opts.after ?? ""));
+    && !NOT_THE_LOAN_AFTER.test(foldText(opts.after ?? ""))
+    && !(unit === "months" && MONTH_INDEX.test(label));
   // After the figure, the words before it in its clause still carry the guards.
   const folded = foldText(afterLabel ? `${lead} ${rawLabel}` : rawLabel);
   const budgetLine = budget && !NOT_A_BUDGET_LINE.test(folded) && !LOAN_NOUN.test(folded);
@@ -815,8 +817,8 @@ function conceptField(rawLabel: string, t: NumberToken, opts: MapOptions): Mappe
     && !(unit === "months" && MONTH_INDEX.test(folded));
   const fits = CONCEPTS.filter((c) => c.unit === unit && (c.assumption
     ? assumption && !opts.budget && c.words.some((w) => w.test(assumptionLabel)) && ((c.with ?? []).every((w) => w.test(assumptionLabel)) || !!c.basisAfter?.test(foldText(opts.after ?? ""))) && !c.exclude.test(assumptionContext)
-    // Only an assumption is named by words after its figure: a loan noun ("$9,000,000 by the lender") or a budget word ("is the stated envelope") there does not name the figure.
-    : !afterLabel && (c.budget ? budgetLine && meanings.includes(c) : loan && c.words.some((w) => w.test(label))) && !c.exclude.test(c.budget ? folded : label)));
+    // Only an assumption or a rate in an established loan context is named after its figure: a loan noun ("$9,000,000 by the lender") or a budget word ("is the stated envelope") there does not name the figure.
+    : (!afterLabel || (c.fieldKey === "senior_rate_pct" && opts.loanContext)) && (c.budget ? budgetLine && meanings.includes(c) : loan && c.words.some((w) => w.test(label))) && !c.exclude.test(c.budget || afterLabel ? folded : label)));
   if (fits.length !== 1) return null;
   const chosen = fits[0]!;
   // "To fill" after a figure is the lease-up only for the building or its units ("6 months to fill the staff positions" is not).
@@ -988,6 +990,8 @@ function mapLabel(rawLabel: string, t: NumberToken, opts: MapOptions = {}): Mapp
     }
     if (scope === "refinance" && ordinalMonth && FUNDING_RE.test(label)) return asField(FIELD_BY_KEY.get("refinance_month")!) ?? { kind: "unmapped" };
   }
+
+  if (STATED_TOTAL.test(label) && budgetConcepts(label).length === 0) return asField(FIELD_BY_KEY.get("stated_total_cost")!) ?? { kind: "unmapped" };
 
   // Scalars: longest alias found anywhere in the label, among compatible fields (in prose: the alias ending nearest the number).
   type Hit = { def: FieldDef; alias: string; at: [number, number]; c: { value: number; unitSeen: string } | null };

@@ -1,4 +1,4 @@
-import { CONCEPTS, LOAN_NOUN } from "./concepts.ts";
+import { CONCEPTS, LOAN_NOUN, STATED_TOTAL } from "./concepts.ts";
 import { FIELD_BY_KEY, OUTPUT_LIKE_PHRASES } from "@agir/contracts";
 import { detectFormat, normalizeText, SF_PER_M2, tokenize, unitTypesIn, wholeUnitType, type CurrencyCode, type DocumentFormat, type NumberToken } from "@agir/numbers";
 import type { Cell, NormalizedDocument, Table } from "./document.ts";
@@ -1506,8 +1506,9 @@ function fromBudget(table: Table, headerRow: number, roles: BudgetRoles, result:
     }
     const categoryTotal = category && TOTAL_RE.test(category);
     const trailingTotal = category ? /\b(?:sub-?total|sous-?total|total)\s*$/i : null;
+    const statedTotal = STATED_TOTAL.test(normalizeLabel(labelCell.text).label);
     const usesTotal = USES_TOTAL_RE.test(labelCell.text.trim());
-    const isTotal = usesTotal || TOTAL_RE.test(labelCell.text) || !!categoryTotal || !!trailingTotal?.test(labelCell.text);
+    const isTotal = statedTotal || usesTotal || TOTAL_RE.test(labelCell.text) || !!categoryTotal || !!trailingTotal?.test(labelCell.text);
     // Unread rows with nothing read or totalled above them are the whole table's breakdown of its first total.
     const bare = !started;
     if (isTotal) started = true;
@@ -1517,7 +1518,7 @@ function fromBudget(table: Table, headerRow: number, roles: BudgetRoles, result:
     const moneyToken: NumberToken = { ...t, currency: true, unit: t.unit ?? "$" };
     const quoted = quoteDocs.has(result) ? mapToken(labelCell.text, moneyToken, { scope, budget: true, quote: true }) : null;
     const closing = isTotal && closesUses(labelCell.text, [...components.values()].map((c) => c.fieldKey)) && table.rows.slice(r + 1).every((x) => !x[roles.amount] || !cellToken(x[roles.amount]!, result.format));
-    let mapped = quoted?.kind === "field" && quoted.quote ? quoted : mapToken(closing || usesTotal ? "total project cost" : isTotal && /development|project/i.test(labelCell.text) ? labelCell.text : labelText, moneyToken, { scope, budget: true, quote: quoteDocs.has(result) });
+    let mapped = quoted?.kind === "field" && quoted.quote ? quoted : mapToken(closing || usesTotal ? "total project cost" : isTotal && (/development|project/i.test(labelCell.text) || statedTotal) ? labelCell.text : labelText, moneyToken, { scope, budget: true, quote: quoteDocs.has(result) });
     // Only an unnamed line inherits its category. A named field or an explicit refusal keeps its own meaning.
     const categoryKey = category && budgetCategory(category);
     // The line's own words still apply their guards (a fee, interest, an amount to date): the category is read with them.

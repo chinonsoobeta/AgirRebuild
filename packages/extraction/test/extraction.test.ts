@@ -6718,3 +6718,89 @@ describe("card 113: a label's phrase, and a remembered label crossing the sugges
     expect(remember([{ id: ids[3]!, fieldKey: "stabilized_occupancy_pct" }]).dropped[0]!.why).toMatch(/outside what stabilized_occupancy_pct can hold/);
   });
 });
+
+describe("card 115: loan ranks, plain terms and stated totals", () => {
+  const read = (...lines: string[]) => extractCandidates({ kind: "pdf", lines: lines.map((text, i) => ({ text, location: `page 1, line ${i + 1}` })), tables: [], pageCount: 1, needsOcr: false, fullText: lines.join("\n") });
+  const sheet = (rows: [string, string | number][], name = "Base") => extractCandidates({ kind: "xlsx", lines: [], tables: [{ name, rows: rows.map(([label, value], i) => [{ text: label, ref: `A${i + 1}` }, { text: String(value), ref: `B${i + 1}`, ...(typeof value === "number" ? { number: value } : {}) }]) }], pageCount: 1, needsOcr: false, fullText: "" });
+  const pick = (r: ReturnType<typeof read>) => r.candidates.map((c) => [c.fieldKey, c.value]);
+  type Case = [string, string, string, number];
+  const requested: Case[] = [
+    ["Sr loan", "$2,400,000", "senior_loan_amount", 2_400_000], ["Sr rate", "6.2%", "senior_rate_pct", 6.2], ["First charge interest", "7.1%", "senior_rate_pct", 7.1],
+    ["Senior repayment years", "30 years", "senior_amort_years", 30], ["Interest-only period", "18 months", "senior_io_months", 18], ["Amortization", "25 years", "senior_amort_years", 25],
+    ["Stated total project cost", "$4,449,000", "stated_total_cost", 4_449_000],
+    ["Senior dollars", "$2,400,000", "senior_loan_amount", 2_400_000], ["Senior funds committed", "$2,000,000", "senior_loan_amount", 2_000_000],
+    ...["First charge amount", "First-charge principal", "First money committed"].map((l): Case => [l, "$1,300,000", "senior_loan_amount", 1_300_000]),
+    ["Construction principal", "$2,050,000", "senior_loan_amount", 2_050_000], ["Dette prioritaire", "2 400 000 $", "senior_loan_amount", 2_400_000],
+    ["Sr pricing", "6.2%", "senior_rate_pct", 6.2], ["Intérêt prioritaire", "6,25 %", "senior_rate_pct", 6.25],
+    ["Amort. prioritaire", "30 ans", "senior_amort_years", 30], ["Repayment schedule", "25 years", "senior_amort_years", 25], ["First amort years", "30 years", "senior_amort_years", 30],
+    ["Période intérêts seuls", "18 mois", "senior_io_months", 18], ["Franchise de capital", "12 mois", "senior_io_months", 12], ["Senior free-principal months", "18 months", "senior_io_months", 18], ["Principal holiday", "14 months", "senior_io_months", 14], ["No-principal months", "12 months", "senior_io_months", 12], ["Bank no-principal months", "12 months", "senior_io_months", 12],
+    ["Take-out dollars", "$1,600,000", "refinance_amount", 1_600_000], ["Takeout committed cash", "$3,700,000", "refinance_amount", 3_700_000],
+    ["Stated project subtotal", "$1,330,000", "stated_total_cost", 1_330_000], ["Total déclaré", "2 850 000 $", "stated_total_cost", 2_850_000], ["Total uses", "$4,449,000", "stated_total_cost", 4_449_000],
+    ["Equity funds", "$800,000", "equity_amount", 800_000], ["Fonds propres", "800 000 $", "equity_amount", 800_000], ["Mezz dollars", "$400,000", "mezz_loan_amount", 400_000],
+    ["Preferred (priority) return", "8%", "preferred_return_pct", 8], ["Hard cost subtotal", "$1,450,000", "hard_cost", 1_450_000], ["Stated land subtotal", "$600,000", "land_cost", 600_000], ["Senior interest reserve", "$120,000", "stated_interest_reserve", 120_000],
+  ];
+  test.each(requested)("requested line: %s", (l, v, k, n) => expect(pick(read(`${l}: ${v}`))).toEqual([[k, n]]));
+  test.each([["First amort years", 30, "senior_amort_years"], ["Bank no-principal months", 12, "senior_io_months"], ["Take-out dollars", 1_600_000, "refinance_amount"], ["Stated project subtotal", 1_330_000, "stated_total_cost"], ["Total déclaré", 2_850_000, "stated_total_cost"]] as const)("requested numeric sheet: %s", (l, n, k) => expect(pick(sheet([[l, n]]))).toEqual([[k, n]]));
+  test.each([
+    "Senior debt service: $160,000", "Sponsor dollars: $800,000", "First draw: $300,000", "First phase cost: $1,300,000", "Rendement prioritaire : 8 %", "Distribution prioritaire : 8 %", "Repayment of the deposit: 12 months", "Rent-free months: 2 months", "First-year interest: $140,000", "Annual debt service: $160,000", "Senior loan balance at month 18: $2,300,000", "Senior lender fee: $25,000", "Take-out fee: $40,000",
+  ])("requested shown figure: %s", (line) => {
+    const r = read(line);
+    expect(pick(r)).toEqual([]);
+    expect(r.other.length).toBeGreaterThan(0);
+  });
+  // Sources studied: rules 1–4: v5/v8/v9/v10 loan misses; rule 5: v6/v8/v9/v10 totals.
+  // Rules 6–7: the card's exclusions and own adversarial variants, not additional development sets.
+  // Three own English and three own French variants per rule, each exercised in all three forms.
+  const variants: Case[] = [
+    // 1. Rank identifies the loan.
+    ["Sr principal committed", "$2,100,000", "senior_loan_amount", 2_100_000], ["First-charge funds", "$2,100,000", "senior_loan_amount", 2_100_000], ["The first is", "$2,100,000", "senior_loan_amount", 2_100_000],
+    ["Dette prioritaire accordée", "2 100 000 $", "senior_loan_amount", 2_100_000], ["Montant du prêt prioritaire", "2 100 000 $", "senior_loan_amount", 2_100_000], ["Taux prioritaire consenti", "6,25 %", "senior_rate_pct", 6.25],
+    // 2. Plain amount and rate words still need a loan signal.
+    ["Senior cash authorization", "$2,100,000", "senior_loan_amount", 2_100_000], ["Bank funds committed", "$2,100,000", "senior_loan_amount", 2_100_000], ["Sr annual pricing", "6.25%", "senior_rate_pct", 6.25],
+    ["Dette du prêt accordée", "2 100 000 $", "senior_loan_amount", 2_100_000], ["Autorisation du prêt en dollars", "2 100 000 $", "senior_loan_amount", 2_100_000], ["Dette du financement", "2 100 000 $", "senior_loan_amount", 2_100_000],
+    // 3. These repayment/IO descriptions supply their own loan signal.
+    ["Years to repay the principal", "28 years", "senior_amort_years", 28], ["Repayment schedule proposed", "28 years", "senior_amort_years", 28], ["Free-principal period", "16 months", "senior_io_months", 16],
+    ["Période sans capital prévue", "16 mois", "senior_io_months", 16], ["Franchise de capital accordée", "16 mois", "senior_io_months", 16], ["Intérêts seuls prévus", "16 mois", "senior_io_months", 16],
+    // 4. Refinance amount words.
+    ["Takeout cash committed", "$1,700,000", "refinance_amount", 1_700_000], ["Permanent dollars", "$1,700,000", "refinance_amount", 1_700_000], ["Refinance committed funds", "$1,700,000", "refinance_amount", 1_700_000],
+    ["Montant du refinancement prévu", "1 700 000 $", "refinance_amount", 1_700_000], ["Montant permanent accordé", "1 700 000 $", "refinance_amount", 1_700_000], ["Refinancement montant engagé", "1 700 000 $", "refinance_amount", 1_700_000],
+    // 5. Project totals, distinct from a named cost subtotal.
+    ["Project subtotal", "$1,500,000", "stated_total_cost", 1_500_000], ["All-in uses", "$1,500,000", "stated_total_cost", 1_500_000], ["Stated total", "$1,500,000", "stated_total_cost", 1_500_000],
+    ["Total déclaré du projet", "1 500 000 $", "stated_total_cost", 1_500_000], ["Total des emplois", "1 500 000 $", "stated_total_cost", 1_500_000], ["Somme des emplois", "1 500 000 $", "stated_total_cost", 1_500_000],
+  ];
+  test.each(variants)("own label: %s", (l, v, k, n) => expect(pick(read(`${l}: ${v}`))).toEqual([[k, n]]));
+  test.each(variants)("own sheet: %s", (l, v, k, n) => expect(pick(sheet([[l, v]]))).toEqual([[k, n]]));
+  test.each(variants)("own prose clause: %s", (l, v, k, n) => expect(pick(read(`Note, ${l} ${v}; documents attached.`))).toEqual([[k, n]]));
+  const refusals = [
+    // 6. Debt service is never principal, in either language or with a rank.
+    ["Sr debt service", "$170,000"], ["First mortgage payment", "$170,000"], ["Senior annual payment", "$170,000"],
+    ["Service de la dette prioritaire", "170 000 $"], ["Service de la dette bancaire", "170 000 $"], ["Service de la dette du prêt", "170 000 $"],
+    // 7. Ambiguity and the existing guards continue to keep figures shown.
+    ["Senior funds balance", "$2,100,000"], ["Senior cash fee", "$21,000"], ["Repayment schedule for the deposit", "12 months"],
+    ["Solde de la dette prioritaire", "2 100 000 $"], ["Frais du prêt prioritaire", "21 000 $"], ["Franchise de capital du dépôt", "12 mois"],
+    ["Repayment schedule maturity", "5 years"], ["No-principal draw period", "12 months"], ["Principal holiday rent-free", "2 months"],
+    ["Take-out LTV", "75%"], ["Rendement prioritaire", "8%"], ["First floor principal", "$2,100,000"],
+  ];
+  test.each(refusals)("own shown label: %s", (l, v) => expect(pick(read(`${l}: ${v}`))).toEqual([]));
+  test.each(refusals)("own shown sheet: %s", (l, v) => expect(pick(sheet([[l!, v!]]))).toEqual([]));
+  test.each(refusals)("own shown prose: %s", (l, v) => expect(pick(read(`Note, ${l} ${v}; documents attached.`))).toEqual([]));
+  test.each(["Senior and mezz dollars: $400,000", "Dette prioritaire et mezzanine : 400 000 $"])("an ambiguous loan or month index stays shown: %s", (line) => expect(pick(read(line))).toEqual([]));
+  test("a month index does not supply amortization", () => {
+    const r = read("Senior repayment schedule at month 18: 12 months");
+    expect(r.candidates.filter((c) => c.fieldKey === "senior_amort_years")).toEqual([]);
+    expect(r.other.some((c) => c.value === 12)).toBe(true);
+  });
+  test("plain words respect distinct loan scopes", () => {
+    expect(pick(read("Senior dollars: $2,000,000", "Mezz dollars: $400,000"))).toEqual([["senior_loan_amount", 2_000_000], ["mezz_loan_amount", 400_000]]);
+    expect(pick(read("The senior funds are $2,000,000 at 6.25% pricing"))).toEqual([["senior_loan_amount", 2_000_000], ["senior_rate_pct", 6.25]]);
+    expect(pick(read("Mezzanine loan", "Principal holiday: 12 months"))).toEqual([["mezz_io_months", 12]]);
+    expect(pick(read("Permanent loan", "Repayment schedule: 30 years"))).toEqual([["refinance_amort_years", 30]]);
+    expect(read("Take-out LTV: 75%").candidates.filter((c) => c.fieldKey?.endsWith("amount"))).toEqual([]);
+    expect(pick(read("Take-out rate: 4.5%"))).toEqual([["refinance_rate_pct", 4.5]]);
+  });
+  test.each([1_330_000, 1_340_000])("stated subtotal uses the existing sum check: %s", (total) => {
+    const r = sheet([["Uses", ""], ["Land cost", 600_000], ["Hard costs", 600_000], ["Soft costs", 130_000], ["Stated project subtotal", total]]);
+    expect(pick(r)).toEqual([["land_cost", 600_000], ["hard_cost", 600_000], ["soft_cost", 130_000], ["stated_total_cost", total]]);
+    expect(r.candidates.find((c) => c.fieldKey === "stated_total_cost")?.note).toBe(total === 1_330_000 ? undefined : "The printed total does not equal the sum of its lines (1,330,000)");
+  });
+});

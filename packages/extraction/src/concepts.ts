@@ -8,6 +8,14 @@ export const LOAN_ANAPHOR = /\b(?:the|a|an|this|that|our|their|its|le|la|les|l|u
 // A figure said to be uncommitted or an alternative is not the loan: "…, never committed".
 export const NOT_THE_LOAN_AFTER = /^\W*(?:(?:which|that|but)\s+(?:was|is)\s+)?(?:never|not (?:yet )?committed|uncommitted|jamais|non engage)/;
 
+// Card 115: v5/v8/v9/v10 loan labels informed rank and plain loan vocabulary.
+// First phase/draw/year/floor and a partner's priority are not loan ranks.
+export const SENIOR_RANK = /\b(?:sr|senior|first[- ]charge|first (?=(?:money|principal|amort\w*|io|interest|rate|coupon|charge|lender|loan|mortgage)\b)|the first is|(?:dette|pret|interet|taux|amort\w*)\s+prioritaire|prioritaire\s+(?:dette|pret|interet|taux|amort\w*))\b/;
+export const LOAN_PERIOD = /\b(?:repayment (?:schedule|years)|years to repay (?:the )?principal|free-principal|no-principal|principal holiday|franchise de capital|interets? seuls|periode sans capital)\b/;
+// v6/v8/v9/v10 totals: a named cost subtotal still belongs to that cost.
+export const STATED_TOTAL = /\b(?:stated project subtotal|project subtotal|stated total|total declare|total uses|all-in uses|sum of uses|total des emplois|somme des emplois)\b/;
+export const DEBT_SERVICE = /\b(?:debt service|service de la dette|annual payment|mortgage payment)\b/;
+
 // Words that make a budget line something else: a total of several lines, a loan named with a cost word ("Construction principal"),
 // a municipal levy, or an amount already counted or settled elsewhere.
 export const NOT_A_BUDGET_LINE = /\b(?:total|totals|totale?s?|subtotal|sub-total|sous-total|overall|all-in|grand|principal|lev(?:y|ies|ied)|redevances?|already|deja)\b/;
@@ -34,23 +42,23 @@ export const CONCEPTS: readonly {
 }[] = [
   {
     fieldKey: "senior_loan_amount", unit: "$",
-    words: [LOAN_NOUN, /\b(?:amount|principal|advance|size|commitment|granted|montant|capital|accord\w*)\b/],
+    words: [LOAN_NOUN, /\b(?:amount|principal|advance|size|commitment|granted|dollars|funds|money|cash|authorization|committed|dette|montant|capital|accord\w*)\b/],
     exclude: /\b(?:apprais\w*|evalu\w*|alternat\w*|rough|uncommitted|hypothetical|indicative|floated|(?:sub|sous-)?totals?|line of credit|credit line|marge de credit|ligne de credit|fees?|interests?|reserves?|holdbacks?|draw\w*|to date|balances?|payments?|deposits?|equity|officer|union|valuation|valued|value|frais|interets?|retenues?|soldes?|versements?|depots?|capitaux propres|capital propre|tire\w*|a ce jour)\b/,
   },
   {
     fieldKey: "senior_rate_pct", unit: "%",
-    words: [/\b(?:rate|interest|int|coupon|charge|cost of borrowing|taux|interet)\b/],
+    words: [/\b(?:rate|interest|int|coupon|pricing|charge|cost of borrowing|taux|interet)\b/],
     exclude: /\b(?:to[- ]value|to[- ]cost|ltv|ltc|fees?|spread|over prime|premium|insurance|dscr|dcr|holdbacks?|frais|prime d assurance|ratio|partners?|investors?|commanditaires?|associes?|investisseurs?|retard|arrerages|defaut|deposits?|depots?|ownership|carried|partnership|pret[- ](?:valeur|cout)|ecart|au dessus du taux preferentiel)\b/,
   },
   {
     fieldKey: "senior_amort_years", unit: "years",
     words: [/\b(?:amort\w*|repay\w*|repaid|paid down|rembours\w*)\b/],
-    exclude: /\b(?:terms?|maturity|renewal|echeance|termes?|duree du pret|renouvellement)\b/,
+    exclude: /\b(?:terms?|maturity|renewal|draw\w*|deposits?|depots?|rent-free|echeance|termes?|duree du pret|renouvellement)\b/,
   },
   {
     fieldKey: "senior_io_months", unit: "months",
-    words: [/\b(?:interest[- ]only|io|before repayment begins|before amortization|interets? seulement|sans remboursement de capital)\b/],
-    exclude: /\b(?:terms?|maturity|draw\w*|echeance|termes?|tirage\w*)\b/,
+    words: [/\b(?:interest[- ]only|io|before repayment begins|before amortization|free-principal|no-principal|principal holiday|franchise de capital|interets? seuls|periode sans capital|interets? seulement|sans remboursement de capital)\b/],
+    exclude: /\b(?:terms?|maturity|draw\w*|deposits?|depots?|rent-free|echeance|termes?|tirage\w*)\b/,
   },
   // Card 109: v8/v9 labels informed the build/travaux, acquisition, design and contingency vocabulary.
   // Vague paraphrases in those sets are not concept words. Tax, finance and operating items remain excluded.
