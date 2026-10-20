@@ -131,7 +131,7 @@ const STABILIZED_RE = /\b(stabili[sz]ed|stabilisee?|projected|pro forma|projete\
 
 // Words too common to name a field alone. Each loses to any longer alias in the label, must stand at the end of the label
 // (or before "income"/"amount"), and never matches inside a longer word.
-const LOOSE_ALIASES = new Set(["management", "gestion", "depenses", "limited partners", "lp", "lps", "commanditaires", "loan", "pret", "mortgage", "rate", "taux", "interest", "interet", "construction", "location", "build", "travaux", "leasing", "chantier", "letting", "lot", "site", "contribute", "invest", "apport", "other", "autres", "parking", "laundry", "storage", "stationnement", "buanderie", "rangement"]);
+const LOOSE_ALIASES = new Set(["management", "gestion", "depenses", "limited partners", "lp", "lps", "commanditaires", "loan", "pret", "mortgage", "rate", "taux", "interest", "interet", "construction", "location", "build", "travaux", "leasing", "chantier", "letting", "lot", "site", "contribute", "invest", "apport", "other", "autres", "parking", "laundry", "storage", "stationnement", "buanderie", "rangement", "honoraires", "aleas"]);
 // These name a field only for a money figure of at least $1,000: "lot 7" is a lot number, "storage $75" may be one locker.
 const WEAK_MONEY = new Set(["lot", "site", "parking", "laundry", "storage", "stationnement", "buanderie", "rangement"]);
 // These name a field only when the figure's own words say what it is a share of: "management 4% of EGI", never "management 1.5% of equity".
@@ -197,12 +197,15 @@ const PER_INVESTOR_AFTER_RE = /^\s*(per|par)\s+(limited partner|investor|command
 // The lender's own basis for sizing a loan; "we underwrite rents at ..." is the sponsor's and is not here.
 const BASIS_CUE_RE = /\b(?:credit underwriting|underwritten by the (?:lender|bank)|the (?:lender|bank) underwrites|the bank sizes|sized on|lending value|aux fins du pret|valeur de pret|la banque retient)\b/;
 const ALL_ALIASES = [...new Set(FIELDS.flatMap((f) => f.aliases))].sort((a, b) => b.length - a.length);
+const NAMED_ALIASES = ALL_ALIASES.filter((a) => a !== "honoraires");
 
 /** The label with every field alias that holds one of `words` taken out. */
 function without(text: string, words: RegExp, aliases: readonly string[] = ALL_ALIASES): string {
   let out = text;
   for (const a of aliases) {
     if (!words.test(a)) continue;
+    // The loose "honoraires" is the soft-cost line only where it stands last and no lender or broker is named: "Honoraires de courtage" stays a fee.
+    if (a === "honoraires") { if (!FINANCING_FEE_RE.test(out)) out = out.replace(LAST_HONORAIRES_RE, "$1 "); continue; }
     const esc = a.replace(/[.*+?^${}()|[\]\\/]/g, "\\$&");
     out = out.replace(new RegExp(`(^|[^a-z0-9])${esc}(?=$|[^a-z0-9])`, "g"), "$1 ");
   }
@@ -245,7 +248,8 @@ function lenderFigure(rawLabel: string, t: NumberToken, opts: MapOptions): strin
   const rentShaped = t.unit === "$/sf" || t.unit === "$/m2";
   if (t.unit !== "%" && (TI_RE.test(plain) || TI_AFTER_RE.test(tail) || (rentShaped && (ALLOWANCE_RE.test(plain) || ALLOWANCE_AFTER_RE.test(tail))))) return "A tenant improvement allowance, not rent";
   const variableEgi = t.unit === "%" && VARIABLE_COST_RE.test(plain) && STATED_EGI_AFTER_RE.test(foldText(opts.after ?? ""));
-  if (!opts.budget && !variableEgi && ((FEE_RE.test(without(plain, FEE_RE)) && !listed) || FEE_AFTER_RE.test(tail))) return "A fee or premium, not an input";
+  // A share named "honoraires" is a percentage fee, never the soft-cost line.
+  if (!opts.budget && !variableEgi && ((FEE_RE.test(without(plain, FEE_RE, t.unit === "%" ? NAMED_ALIASES : ALL_ALIASES)) && !listed) || FEE_AFTER_RE.test(tail))) return "A fee or premium, not an input";
   // A leased or occupied share (in its own label or right after it) with a condition marker in its clause is the lender's condition.
   const after = prose && at >= 0 ? (ctx.slice(at + raw.length).split(/[,;.]/)[0] ?? "") : "";
   if (t.unit === "%" && (LEASED_RE.test(plain) || LEASED_RE.test(after.split(" ").slice(0, 6).join(" "))) && CONDITION_RE.test(`${plain} ${after}`)) return LENDER_CONDITION;
@@ -447,6 +451,9 @@ export type MapOptions = {
 // What may follow a loose alias before the number: "income", "amount", or a verb phrase ("is planned at", "should take", "est de").
 const FILLER = "is|are|was|were|will|be|been|should|shall|to|take|takes|taking|planned|scheduled|expected|estimated|set|budgeted|for|at|of|about|approximately|around|a|an|the|total|only|currently|now|income|revenue|revenues|revenu|revenus|amount|montant|est|sont|sera|seront|durera|prevu|prevue|prevus|de|du|d|environ|devrait|dure|au|aux|fixe|fixee|represente|prend|prendra|prennent|prendront|s (?:etaler|echelonner|etendr)(?:a|ont)(?: sur)?";
 const FILLER_RE = new RegExp(`^(\\s(${FILLER}))*$`);
+const LAST_HONORAIRES_RE = new RegExp(`(^|[^a-z0-9])honoraires(?=(\\s(${FILLER}))*\\s*$)`);
+// Fees of a financing, a broker or a guarantee are never the soft-cost line.
+const FINANCING_FEE_RE = /\b(courtage|courtiers?|preteurs?|banques?|financements?|garanties?|engagement|dossier|ouverture|hypothecaires?|prets?|lender|broker)\b/;
 const RATE_FILLER_RE = new RegExp(`^(\\s(${FILLER}|${RATE_QUALIFIER}))*$`);
 
 // A sequencing word after a duration noun ("of lease-up afterwards", "de location ensuite") does not stop the noun labelling the number.
@@ -882,7 +889,7 @@ function mapLabel(rawLabel: string, t: NumberToken, opts: MapOptions = {}): Mapp
   let best: { def: FieldDef; alias: string; end: number; value: number; unitSeen: string } | null = null;
   let aliasOnly: { def: FieldDef; alias: string } | null = null;
   for (const { def, alias, at, c } of hits) {
-    if (LOOSE_ALIASES.has(alias) && (blocked || specific || !standsLast(label, at, alias) || (RATE_ALIASES.has(alias) && NOT_A_LOAN_INTEREST.test(label)))) continue;
+    if (LOOSE_ALIASES.has(alias) && (blocked || specific || !standsLast(label, at, alias) || (RATE_ALIASES.has(alias) && NOT_A_LOAN_INTEREST.test(label)) || (alias === "honoraires" && FINANCING_FEE_RE.test(foldText(rawLabel))))) continue;
     if (LOOSE_ALIASES.has(alias) && (def.key === "construction_months" || def.key === "lease_up_months") && (namedAlone || NOT_PERIOD_BEFORE_RE.test(label.slice(0, at[0])) || (def.key === "lease_up_months" && leaseTerm))) continue;
     if (!c) {
       if (!aliasOnly || alias.length > aliasOnly.alias.length) aliasOnly = { def, alias };

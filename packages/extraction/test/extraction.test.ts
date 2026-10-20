@@ -5516,3 +5516,40 @@ describe("card 102 audit: a loan's term named after its figure, a figure the sen
     expect(read(line).candidates.some((c) => c.fieldKey === "lease_up_months")).toBe(false);
   });
 });
+
+describe("card 103: French budget words for soft costs and contingency", () => {
+  const read = (...lines: string[]) => extractCandidates({ kind: "pdf", lines: lines.map((text, i) => ({ text, location: `page 1, line ${i + 1}` })), tables: [], pageCount: 1, needsOcr: false, fullText: lines.join("\n") });
+  const pick = (r: ReturnType<typeof read>) => r.candidates.map((c) => [c.fieldKey, c.value]);
+  const FEE = "A fee or premium, not an input";
+  test.each([
+    ["Honoraires 240 000 $", "soft_cost", 240_000], ["Honoraires et frais 310 000 $", "soft_cost", 310_000], ["Honoraires et frais connexes 185 000 $", "soft_cost", 185_000],
+    ["Frais et honoraires 205 000 $", "soft_cost", 205_000], ["Honoraires professionnels et frais 275 000 $", "soft_cost", 275_000],
+    ["Réserve pour aléas 150 000 $", "contingency", 150_000], ["Aléas 90 000 $", "contingency", 90_000], ["Provision pour imprévus 120 000 $", "contingency", 120_000],
+    ["Réserve aléas 80 000 $", "contingency", 80_000], ["Provision pour aléas 95 000 $", "contingency", 95_000], ["Réserve pour imprévus 70 000 $", "contingency", 70_000],
+    ["Réserve pour contingences 60 000 $", "contingency", 60_000], ["Contingence de construction 110 000 $", "contingency", 110_000],
+  ])("a budget-table row: %s", (row, key, n) => expect(pick(read("Poste Montant", "Coût du terrain 310 000 $", row))).toEqual([["land_cost", 310_000], [key, n]]));
+  test.each([
+    ["Honoraires : 240 000 $", "soft_cost", 240_000], ["Honoraires et frais : 310 000 $", "soft_cost", 310_000], ["Honoraires et frais connexes : 185 000 $", "soft_cost", 185_000],
+    ["Frais et honoraires : 205 000 $", "soft_cost", 205_000], ["Honoraires professionnels et frais : 275 000 $", "soft_cost", 275_000],
+    ["Réserve pour aléas : 150 000 $", "contingency", 150_000], ["Aléas : 90 000 $", "contingency", 90_000], ["Provision pour imprévus : 120 000 $", "contingency", 120_000],
+    ["Réserve aléas : 80 000 $", "contingency", 80_000], ["Provision pour aléas : 95 000 $", "contingency", 95_000], ["Réserve pour imprévus : 70 000 $", "contingency", 70_000],
+    ["Réserve pour contingences : 60 000 $", "contingency", 60_000], ["Contingence de construction : 110 000 $", "contingency", 110_000],
+  ])("a budget line: %s", (line, key, n) => expect(pick(read(line))).toEqual([[key, n]]));
+  test.each([
+    "Honoraires de courtage : 45 000 $", "Honoraires du prêteur : 1 %", "Honoraires du prêteur : 25 000 $", "Frais de financement : 60 000 $", "Honoraires de garantie : 15 000 $",
+    "Honoraires de gestion : 4 %", "Honoraires : 3 %", "Honoraires de gestion : 30 000 $", "Honoraires juridiques du financement : 20 000 $", "Honoraires d'engagement : 0,5 %",
+    "Courtage - honoraires : 40 000 $", "Honoraires (prêteur) : 25 000 $", "Le prêteur exige des honoraires de 1 %.", "Les honoraires du courtier sont de 45 000 $.",
+  ])("a fee that is not the project's soft costs: %s", (line) => expect(read(line).candidates.some((c) => c.fieldKey === "soft_cost")).toBe(false));
+  test.each(["Honoraires de courtage 45 000 $", "Honoraires du prêteur 25 000 $", "Honoraires de garantie 15 000 $", "Frais de financement 60 000 $", "Courtage honoraires 40 000 $", "Honoraires (prêteur) 25 000 $"])("a financing fee row in a budget table is not soft costs: %s", (row) => {
+    expect(read("Poste Montant", "Coût du terrain 310 000 $", row).candidates.some((c) => c.fieldKey === "soft_cost")).toBe(false);
+  });
+  test.each([["Honoraires de gestion : 4 %", 4], ["Honoraires du prêteur : 1 %", 1], ["Honoraires de courtage : 45 000 $", 45_000], ["Honoraires : 3 %", 3], ["Le prêteur exige des honoraires de 1 %.", 1], ["Courtage - honoraires : 40 000 $", 40_000]])("a fee keeps its note: %s", (line, n) => {
+    const r = read(line);
+    expect(pick(r)).toEqual([]);
+    expect(r.other.find((o) => o.value === n)?.note).toBe(FEE);
+  });
+  test("a plain sentence on the fees is still the soft-cost line", () => expect(pick(read("Les honoraires sont de 240 000 $."))).toEqual([["soft_cost", 240_000]]));
+  test.each(["Les aléas climatiques ont retardé le chantier de 3 semaines.", "Aléas climatiques : 2 semaines de retard", "Les aléas du marché ont coûté 40 000 $ au vendeur l'an dernier.", "Aléas de chantier : 12 jours"])("\"aléas\" that is not a cost line is not the contingency: %s", (line) => {
+    expect(read(line).candidates.some((c) => c.fieldKey === "contingency")).toBe(false);
+  });
+});
