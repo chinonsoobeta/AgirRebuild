@@ -6106,3 +6106,132 @@ describe("card 109 audit: a concept names a line only when the line is that cost
     expect(pick(table(["Item", "Amount"], ["Lot purchase", 600_000], ["Framing and finishes", 1_450_000], ["Architect studies", 210_000], ["Overrun allowance", 90_000]))).toEqual([["land_cost", 600_000], ["hard_cost", 1_450_000], ["soft_cost", 210_000], ["contingency", 90_000]]);
   });
 });
+
+describe("card 110: assumptions named by concept and unit", () => {
+  const read = (...lines: string[]) => extractCandidates({ kind: "pdf", lines: lines.map((text, i) => ({ text, location: `page 1, line ${i + 1}` })), tables: [], pageCount: 1, needsOcr: false, fullText: lines.join("\n") });
+  const sheet = (rows: [string, string | number][], name = "Inputs") => extractCandidates({ kind: "xlsx", lines: [], tables: [{ name, rows: [[{ text: "Assumptions", ref: "A1" }], ...rows.map((row, i) => row.map((v, c): Cell => ({ text: String(v), ref: `${String.fromCharCode(65 + c)}${i + 2}`, ...(typeof v === "number" ? { number: v } : {}) })))] }], pageCount: 1, needsOcr: false, fullText: "" });
+  const pick = (r: ReturnType<typeof read>) => r.candidates.map((c) => [c.fieldKey, c.value]);
+  test.each([
+    ["Durée du chantier : 16 mois", "construction_months", 16], ["Délai de mise en location après livraison : 5 mois", "lease_up_months", 5],
+    ["Taux d'occupation en régime de croisière : 95 %", "stabilized_occupancy_pct", 95], ["Taux de capitalisation à la revente : 5,6 %", "exit_cap_rate_pct", 5.6],
+    ["Part des charges d'exploitation sur les revenus : 33 %", "expense_ratio_pct", 33], ["Horizon de détention : 8 ans", "hold_years", 8], ["Frais de vente : 2,5 %", "selling_costs_pct", 2.5],
+    ["Occupied share once settled: 95%", "stabilized_occupancy_pct", 95], ["Disposition costs: 2.5%", "selling_costs_pct", 2.5],
+    ["Framing crew on site: 16 months", "construction_months", 16], ["Tenant-finding window after handover: 5 months", "lease_up_months", 5],
+    ["Running costs as a share of collections: 33%", "expense_ratio_pct", 33], ["Ownership horizon: 8 years", "hold_years", 8], ["Annual rent uplift: 2%", "rent_growth_pct", 2],
+    ["Yearly cost escalation: 3%", "expense_growth_pct", 3], ["Cap rate at disposal: 5.6%", "exit_cap_rate_pct", 5.6],
+  ])("requested label: %s", (line, key, value) => expect(pick(read(line as string))).toEqual([[key, value]]));
+  test("requested sheet rows use their label's unit and keep the occupancy read", () => {
+    expect(pick(sheet([["Months on site", 16], ["Tenant search, months", 5], ["Cap at disposal", "5.6%"], ["Running cost take", "33%"], ["Years held", 8], ["Settled occupancy", "95%"]]))).toEqual([["construction_months", 16], ["lease_up_months", 5], ["exit_cap_rate_pct", 5.6], ["expense_ratio_pct", 33], ["hold_years", 8], ["item_occupancy_pct", 95]]);
+  });
+  test("the requested prose reads only the terms before each figure", () => expect(pick(read("We assume a settled fill of 95%, running costs at 33% of collections and a disposal cap of 5.6%."))).toEqual([["stabilized_occupancy_pct", 95], ["expense_ratio_pct", 33], ["exit_cap_rate_pct", 5.6]]));
+  const variants: [string, string, string, number][] = [
+    ["Site crew schedule", "16 months", "construction_months", 16], ["Conversion programme", "16 months", "construction_months", 16], ["Fit-out delivery window", "16 months", "construction_months", 16],
+    ["Programme de transformation", "16 mois", "construction_months", 16], ["Équipe sur chantier", "16 mois", "construction_months", 16], ["Travaux de rénovation", "16 mois", "construction_months", 16],
+    ["Tenant-finding window after handover", "5 months", "lease_up_months", 5], ["Tenant search window", "5 months", "lease_up_months", 5], ["Let-up allowance", "5 months", "lease_up_months", 5],
+    ["Fenêtre de location après livraison", "5 mois", "lease_up_months", 5], ["Absorption locative prévue", "5 mois", "lease_up_months", 5], ["Mise en location suivant remise", "5 mois", "lease_up_months", 5],
+    ["Settled fill", "95%", "stabilized_occupancy_pct", 95], ["Steady letting level", "95%", "stabilized_occupancy_pct", 95], ["Mature leased share", "95%", "stabilized_occupancy_pct", 95],
+    ["Occupation en régime normal", "95 %", "stabilized_occupancy_pct", 95], ["Taux d'occupation à maturité prévu", "95 %", "stabilized_occupancy_pct", 95], ["Occupation en régime de croisière", "95 %", "stabilized_occupancy_pct", 95],
+    ["Disposal capitalization", "5.6%", "exit_cap_rate_pct", 5.6], ["Eventual sale cap", "5.6%", "exit_cap_rate_pct", 5.6], ["Outgoing cap assumption", "5.6%", "exit_cap_rate_pct", 5.6],
+    ["Capitalisation au départ", "5,6 %", "exit_cap_rate_pct", 5.6], ["Cap pour la vente", "5,6 %", "exit_cap_rate_pct", 5.6], ["Capitalisation à la revente retenue", "5,6 %", "exit_cap_rate_pct", 5.6],
+    ["Running costs take", "33%", "expense_ratio_pct", 33], ["Operating cost slice", "33%", "expense_ratio_pct", 33], ["Expenses percentage of receipts", "33%", "expense_ratio_pct", 33],
+    ["Part des charges sur les recettes", "33 %", "expense_ratio_pct", 33], ["Ratio de charges d'exploitation", "33 %", "expense_ratio_pct", 33], ["Déduction des dépenses sur les recettes", "33 %", "expense_ratio_pct", 33],
+    ["Ownership horizon", "8 years", "hold_years", 8], ["Years held", "8 years", "hold_years", 8], ["Keep ownership", "8 years", "hold_years", 8],
+    ["Horizon pour conserver", "8 ans", "hold_years", 8], ["Durée de détention prévue", "8 ans", "hold_years", 8], ["Garder l'actif", "8 ans", "hold_years", 8],
+    ["Annual rent uplift", "2%", "rent_growth_pct", 2], ["Escalation for rents", "2%", "rent_growth_pct", 2], ["Yearly increase in rents", "2%", "rent_growth_pct", 2],
+    ["Hausse annuelle des loyers", "2 %", "rent_growth_pct", 2], ["Indexation pour les loyers", "2 %", "rent_growth_pct", 2], ["Croissance applicable aux loyers", "2 %", "rent_growth_pct", 2],
+    ["Yearly cost escalation", "3%", "expense_growth_pct", 3], ["Annual cost inflation", "3%", "expense_growth_pct", 3], ["Increase in running expenses", "3%", "expense_growth_pct", 3],
+    ["Hausse annuelle des charges", "3 %", "expense_growth_pct", 3], ["Inflation pour les dépenses", "3 %", "expense_growth_pct", 3], ["Croissance applicable aux coûts", "3 %", "expense_growth_pct", 3],
+  ];
+  test.each(variants)("own label: %s", (label, value, key, n) => expect(pick(read(`${label}: ${value}`))).toEqual([[key, n]]));
+  test.each(variants)("own sheet row: %s", (label, value, key, n) => {
+    const r = sheet([[label, value]]);
+    // Occupancy aliases can already name an item on sheet rows; the concept does not replace that read.
+    expect(r.candidates.map((c) => [c.fieldKey === "item_occupancy_pct" ? "stabilized_occupancy_pct" : c.fieldKey, c.value])).toEqual([[key, n]]);
+  });
+  test.each(variants)("own prose clause: %s", (label, value, key, n) => expect(pick(read(`We assume ${label.toLowerCase()} at ${value}.`))).toEqual([[key, n]]));
+  const exclusions: [string, string][] = [
+    ["construction_months", "Loan term: 24 months"], ["construction_months", "Site interest reserve: 18 months"], ["construction_months", "Crew rate lock: 6 months"], ["construction_months", "Delivery permit wait: 4 months"], ["construction_months", "Works holdback: 12 months"], ["construction_months", "Crew warranty: 12 months"], ["construction_months", "Tenant crew window: 5 months"],
+    ["construction_months", "Travaux du prêt : 24 mois"], ["construction_months", "Réserve d'intérêts du chantier : 18 mois"], ["construction_months", "Chantier en attente de permis : 4 mois"],
+    ["lease_up_months", "Tenant loan term: 24 months"], ["lease_up_months", "Tenant search rate lock: 6 months"], ["lease_up_months", "Tenant free rent: 3 months"], ["lease_up_months", "Tenant notice: 2 months"],
+    ["lease_up_months", "Location du bail : 24 mois"], ["lease_up_months", "Mise en location du prêt : 5 mois"], ["lease_up_months", "Absorption - free rent : 3 mois"],
+    ["stabilized_occupancy_pct", "Settled fill covenant for the lender: 85%"], ["stabilized_occupancy_pct", "Current steady fill: 80%"], ["stabilized_occupancy_pct", "Existing mature fill: 81%"], ["stabilized_occupancy_pct", "Market mature letting level: 90%"], ["stabilized_occupancy_pct", "Breakeven settled fill: 82%"], ["stabilized_occupancy_pct", "Steady fill with vacancy: 83%"],
+    ["stabilized_occupancy_pct", "Occupation actuelle en régime normal : 80 %"], ["stabilized_occupancy_pct", "Occupation à maturité du marché : 90 %"], ["stabilized_occupancy_pct", "Occupation en régime normal du prêteur : 85 %"],
+    ["exit_cap_rate_pct", "Going-in cap rate: 5.1%"], ["exit_cap_rate_pct", "Entry disposal cap: 5.1%"], ["exit_cap_rate_pct", "Purchase disposal capitalization: 5.1%"], ["exit_cap_rate_pct", "Current outgoing cap: 5.1%"], ["exit_cap_rate_pct", "Market disposal cap: 5.1%"], ["exit_cap_rate_pct", "Sold at a disposal cap: 5.1%"], ["exit_cap_rate_pct", "Traded disposal cap: 5.1%"],
+    ["exit_cap_rate_pct", "Cap de départ à l'achat : 5,1 %"], ["exit_cap_rate_pct", "Capitalisation de sortie - acquisition : 5,1 %"], ["exit_cap_rate_pct", "Cap de départ du comparable : 5,1 %"],
+    ["expense_ratio_pct", "Running cost management fee share: 4%"], ["expense_ratio_pct", "Running cost tax take: 5%"], ["expense_ratio_pct", "Running cost insurance slice: 5%"], ["expense_ratio_pct", "Running cost vacancy allowance: 3%"], ["expense_ratio_pct", "Running cost inflation share: 3%"],
+    ["expense_ratio_pct", "Part des charges - frais de gestion : 4 %"], ["expense_ratio_pct", "Ratio des charges - croissance : 3 %"], ["expense_ratio_pct", "Part des charges - assurance : 3 %"],
+    ["hold_years", "Ownership loan term: 5 years"], ["hold_years", "Ownership amortization: 25 years"], ["hold_years", "Ownership warranty: 5 years"], ["hold_years", "Ownership lease: 5 years"],
+    ["hold_years", "Horizon du prêt : 5 ans"], ["hold_years", "Conserver le bail : 5 ans"], ["hold_years", "Garder - amort : 25 ans"],
+    ["rent_growth_pct", "Market rent uplift: 2%"], ["rent_growth_pct", "Comparable rent increase: 2%"], ["rent_growth_pct", "Rent cap growth: 2%"], ["rent_growth_pct", "Rent and cost escalation: 2%"],
+    ["rent_growth_pct", "Hausse des loyers du marché : 2 %"], ["rent_growth_pct", "Croissance des loyers du comparable : 2 %"], ["rent_growth_pct", "Hausse des loyers et charges : 2 %"],
+    ["expense_growth_pct", "Rent and cost escalation: 2%"], ["expense_growth_pct", "Construction cost escalation: 3%"], ["expense_growth_pct", "Comparable cost uplift: 3%"], ["expense_growth_pct", "Hard cost increase: 3%"],
+    ["expense_growth_pct", "Croissance des charges du marché : 3 %"], ["expense_growth_pct", "Hausse des coûts de construction : 3 %"], ["expense_growth_pct", "Hausse des loyers et charges : 3 %"],
+  ];
+  test.each(exclusions)("an exclusion never becomes %s: %s", (key, line) => expect(read(line).candidates.some((c) => c.fieldKey === key && c.rule === "concept")).toBe(false));
+  test.each(["Rate lock: 6 months", "Permit wait: 4 months", "Holdback released after 12 months", "Construction loan interest reserve: 18 months", "Verrouillage du taux : 6 mois", "Attente de permis : 4 mois"])("an unrelated duration stays shown: %s", (line) => {
+    const r = read(line); expect(r.candidates).toEqual([]); expect(r.other.length).toBeGreaterThan(0);
+  });
+  test("the later-label schedule remains for card 111", () => expect(read("The schedule allows 16 months of site works and then 5 months to find tenants.").candidates).toEqual([]));
+  test.each([false, true])("an alias wins over a different concept value regardless of order: %s", (reverse) => {
+    const lines = ["Exit cap rate: 5.5%", "Cap at disposal: 6%"];
+    const r = read(...(reverse ? lines.reverse() : lines));
+    expect(pick(r)).toEqual([["exit_cap_rate_pct", 5.5]]);
+    expect(r.other.some((c) => c.value === 6 && c.note === "Another line already gives this figure")).toBe(true);
+  });
+  test("the same alias preference applies across table and prose", () => {
+    const doc: NormalizedDocument = { kind: "xlsx", lines: [{ text: "Exit cap rate: 5.5%", location: "line 1" }], tables: [{ name: "Inputs", rows: [[{ text: "Cap at disposal", ref: "A1" }, { text: "6%", ref: "B1" }]] }], pageCount: 1, needsOcr: false, fullText: "" };
+    expect(pick(extractCandidates(doc))).toEqual([["exit_cap_rate_pct", 5.5]]);
+  });
+  test("a lender's cap remains a limit", () => expect(read("The lender sets a cap of 75% on loan-to-cost.").other[0]?.note).toBe("A lender's limit, not the deal's figure"));
+});
+
+describe("card 110 audit: an assumption concept takes only the deal's own duration or rate", () => {
+  const lines = (...texts: string[]) => extractCandidates({ kind: "pdf", lines: texts.map((text, i) => ({ text, location: `page 1, line ${i + 1}` })), tables: [], pageCount: 1, needsOcr: false, fullText: texts.join("\n") });
+  const rows = (...rs: (string | number)[][]) => extractCandidates({ kind: "xlsx", lines: [], tables: [{ name: "Base", rows: rs.map((r, i) => r.map((x, c): Cell => (typeof x === "number" ? { text: String(x), number: x, ref: `${"ABC"[c]}${i + 1}` } : { text: x, ref: `${"ABC"[c]}${i + 1}` }))) }], pageCount: 1, needsOcr: false, fullText: "" });
+  const concept = (r: ReturnType<typeof lines>) => r.candidates.filter((c) => c.rule === "concept").map((c) => [c.fieldKey, c.value]);
+
+  test.each([
+    "An alternate accelerated programme of 12 months was declined.",
+    "A faster site programme of 10 months was considered and rejected.",
+    "Option B: build period of 11 months.",
+    "Un chantier accéléré de 12 mois a été refusé.",
+    "L'ancien échéancier prévoyait des travaux de 20 mois.",
+  ])("an alternative, rejected or earlier figure is not the deal's: %s", (line) => expect(concept(lines(line))).toEqual([]));
+
+  test.each([
+    "Conversion occurs at project month 20.",
+    "Delivery month: 22",
+    "Leasing starts in month 19.",
+    "La livraison a lieu au mois 22.",
+  ])("a month number is a point in time, not a duration: %s", (line) => expect(concept(lines(line))).toEqual([]));
+
+  test.each([
+    "Senior repayment horizon: 30 years",
+    "Mortgage holding period: 25 years",
+    "Horizon de remboursement du prêt : 30 ans",
+    "Lender requires a letting period of 6 months",
+  ])("a loan's period is not the deal's assumption (the loan's own concept may still read it): %s", (line) => expect(concept(lines(line)).filter(([k]) => !String(k).startsWith("senior_"))).toEqual([]));
+
+  test("a loan's repayment horizon in a sheet is not the hold", () => {
+    expect(concept(rows(["FIRST repayment horizon years", 30], ["Years of ownership", 7]))).toEqual([["hold_years", 7]]);
+  });
+
+  test.each([
+    "Footnote 1: the exit selling-cost allowance is 2.5%.",
+    "Brokerage cost share on sale: 2%",
+    "Part des frais de vente : 3 %",
+  ])("a selling cost is not the expense ratio: %s", (line) => expect(concept(lines(line)).filter(([k]) => k === "expense_ratio_pct")).toEqual([]));
+
+  test.each([
+    "Site visit lasted 2 months of back-and-forth.",
+    "The site inspection took 3 months.",
+    "Our team has held buildings for 20 years.",
+    "We have kept rentals in our portfolio for 15 years.",
+    "Notre équipe a détenu des immeubles pendant 20 ans.",
+    "La visite du chantier a duré 2 mois.",
+  ])("a visit, an inspection or a track record is not the deal's assumption: %s", (line) => expect(concept(lines(line))).toEqual([]));
+
+  test("the deal's own figures still read", () => {
+    expect(concept(lines("Site programme: 16 months", "Tenant-finding window: 5 months", "Ownership horizon: 8 years", "Running cost share: 33%")).sort()).toEqual([["construction_months", 16], ["expense_ratio_pct", 33], ["hold_years", 8], ["lease_up_months", 5]]);
+  });
+});

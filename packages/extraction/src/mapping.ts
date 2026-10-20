@@ -4,7 +4,7 @@
 // but it never becomes an input.
 
 import { FIELD_BY_KEY, FIELDS, OUTPUT_LIKE_PHRASES, type FieldDef } from "@agir/contracts";
-import { CONCEPTS, LOAN_ANAPHOR, LOAN_NOUN, MAIN_LENDER, NOT_A_BUDGET_LINE, NOT_THE_LOAN_AFTER, WHERE_IT_SITS } from "./concepts.ts";
+import { CONCEPTS, LOAN_ANAPHOR, LOAN_NOUN, MAIN_LENDER, MONTH_INDEX, NOT_A_BUDGET_LINE, NOT_CHOSEN_AFTER, NOT_THE_DEALS_ASSUMPTION, NOT_THE_LOAN_AFTER, WHERE_IT_SITS } from "./concepts.ts";
 import { canonicalItem, codeOf, parenType, SF_PER_M2, unitTypesIn, wholeUnitType, type CurrencyCode, type NumberToken } from "@agir/numbers";
 
 // canonicalItem and itemFold live in @agir/numbers so the engine can use the same fold.
@@ -14,7 +14,7 @@ export type LabelUnit = "$" | "%" | "months" | "years" | "sf" | "m2" | "x" | nul
 
 export type Mapped =
   | { kind: "field"; fieldKey: string; itemKey: string | null; value: number; unitSeen: string; quote?: true; concept?: true; note?: string }
-  | { kind: "ignored"; reason: string }
+  | { kind: "ignored"; reason: string; unitMismatch?: true }
   | { kind: "unmapped" };
 
 // Words that describe a figure rather than name a revenue component.
@@ -95,7 +95,7 @@ export function isTakeoutTimingLabel(raw: string): boolean {
 }
 const FUNDING_RE = /\b(fund\w*|repa\w+|clos\w*|advance\w*|draw\w*|financement|remboursement|prise de possession)\b/;
 const CAP_RE = /\b(cap rate|capitali[sz]ation rate|taux de capitalisation)\b/;
-const EXIT_RE = /\b(sell|sale|sold|exit|reversion|disposition|sortie|vente|vendre|vendrons|vendons|revente)\b/;
+const EXIT_RE = /\b(sell|sale|sold|exit|reversion|disposition|disposal|terminal|outgoing|going-out|eventual sale|on sale|depart|sortie|vente|vendre|vendrons|vendons|revente)\b/;
 const VALUE_RE = /\b(value|valeur)\b/;
 
 /** An explicitly named exit cap-rate label; valuation can qualify this input, but a stated value cannot. */
@@ -262,7 +262,7 @@ function lenderFigure(rawLabel: string, t: NumberToken, opts: MapOptions): strin
   const lastFour = (x: string[]) => (x.join(" ").match(/loan to (?:cost|value)|debt service coverage|\S+/g) ?? []).slice(-4);
   const near = (prose || opts.ahead ? lastFour([...words, ...words_(opts.ahead ?? "").split(" ")]) : words).join(" ");
   const capped = CAPPED_RE.test(near) && !(money && CAPPED_COST_RE.test(plain) && !LOAN_WORD_RE.test(plain));
-  if ((LIMIT_RE.test(without(near.replace(/\b(exit|terminal|reversion|going[- ]out|sortie) cap of\b/g, "$1 cap"), LIMIT_RE)) || capped) && !COVERAGE_RE.test(plain)) return "A lender's limit, not the deal's figure";
+  if ((LIMIT_RE.test(without(near.replace(/\b(exit|terminal|reversion|going[- ]out|outgoing|disposal|disposition|eventual sale|on sale|sale|sell|revente|vente|depart|sortie) cap of\b/g, "$1 cap"), LIMIT_RE)) || capped) && !COVERAGE_RE.test(plain)) return "A lender's limit, not the deal's figure";
   // The figure's own noun decides: an interest-only word before it or right after it makes it the IO period; one further on in the sentence does not.
   const ownIo = IO_RE.test(plain) || IO_START_RE.test(prose && at >= 0 ? ctx.slice(at + raw.length) : foldText(opts.after ?? ""));
   if ((t.unit === "months" || t.unit === "years") && ((TERM_RE.test(without(plain, TERM_RE)) && !AMORT_RE.test(plain)) || TERM_AFTER_RE.test(tail)) && !ownIo) return "A loan's term, not the build period, hold or amortization";
@@ -749,7 +749,7 @@ export function mapToken(rawLabel: string, t: NumberToken, opts: MapOptions = {}
   let m = mapSigned(rawLabel, t, opts);
   // A description naming two cost fields by concept is shown, unless its own words already name its field.
   if (m.kind === "unmapped" && !opts.quote && (opts.budget || opts.budgetConcept) && t.unit === "$" && !/%/.test(opts.gap ?? opts.ahead ?? "") && joined.length === 2 && joined.every((part) => part.length === 1) && joined[0]![0]!.fieldKey !== joined[1]![0]!.fieldKey) return { kind: "ignored", reason: "This description names more than one budget field; enter each line separately" };
-  if (m.kind === "unmapped") m = conceptField(rawLabel, t, opts) ?? m;
+  if (m.kind === "unmapped" || (m.kind === "ignored" && m.unitMismatch)) m = conceptField(rawLabel, t, opts) ?? m;
   // A figure its field could never hold is shown, never read: nothing is flipped, rescaled or clamped.
   if (m.kind !== "field") return m;
   const def = FIELD_BY_KEY.get(m.fieldKey);
@@ -799,13 +799,20 @@ function conceptField(rawLabel: string, t: NumberToken, opts: MapOptions): Mappe
     && !NOT_THE_LOAN_AFTER.test(foldText(opts.after ?? ""));
   const folded = foldText(rawLabel);
   const budgetLine = budget && !NOT_A_BUDGET_LINE.test(folded) && !LOAN_NOUN.test(folded);
-  const fits = CONCEPTS.filter((c) => c.unit === unit && (c.budget ? budgetLine && meanings.includes(c) : loan && c.words.some((w) => w.test(label))) && !c.exclude.test(c.budget ? folded : label));
+  const assumptionLabel = (label.split(/\band\b|\bet\b/).pop() ?? "").trim();
+  const assumptionContext = normalizeLabel(rawLabel.split(/[,;]/).pop() ?? "").label;
+  // The whole label and the words after the figure: an alternative, a loan's period or a month number is never the deal's assumption.
+  const assumption = !NOT_THE_DEALS_ASSUMPTION.test(folded) && !LOAN_NOUN.test(folded) && !NOT_CHOSEN_AFTER.test(foldText(opts.after ?? ""))
+    && !(unit === "months" && MONTH_INDEX.test(folded));
+  const fits = CONCEPTS.filter((c) => c.unit === unit && (c.assumption
+    ? assumption && !opts.budget && c.words.some((w) => w.test(assumptionLabel)) && ((c.with ?? []).every((w) => w.test(assumptionLabel)) || !!c.basisAfter?.test(foldText(opts.after ?? ""))) && !c.exclude.test(assumptionContext)
+    : (c.budget ? budgetLine && meanings.includes(c) : loan && c.words.some((w) => w.test(label))) && !c.exclude.test(c.budget ? folded : label)));
   if (fits.length !== 1) return null;
   const chosen = fits[0]!;
   if (chosen.budget && (t.currencyCode ?? labelCode) && (t.currencyCode ?? labelCode) !== "CAD") return { kind: "ignored", reason: "An amount in another currency" };
   const scope = namedScope ?? opts.conceptScope ?? opts.scope ?? "senior";
   const key = chosen.fieldKey;
-  const def = FIELD_BY_KEY.get(chosen.budget || scope === "senior" ? key : SCOPE_FIELD[scope][key] ?? key)!;
+  const def = FIELD_BY_KEY.get(chosen.budget || chosen.assumption || scope === "senior" ? key : SCOPE_FIELD[scope][key] ?? key)!;
   const c = compatibleValue(def, t, label, labelUnit, labelCode, opts.prose);
   return c ? { kind: "field", fieldKey: def.key, itemKey: null, ...c, concept: true } : null;
 }
@@ -1102,6 +1109,7 @@ function mapLabel(rawLabel: string, t: NumberToken, opts: MapOptions = {}): Mapp
     };
     return {
       kind: "ignored",
+      unitMismatch: true,
       reason: `Looks like ${aliasOnly.def.label.toLowerCase()}, but the number is not written as ${want[aliasOnly.def.unit] ?? aliasOnly.def.unit}. Enter it by hand if it is.`,
     };
   }

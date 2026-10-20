@@ -14,9 +14,18 @@ export const NOT_A_BUDGET_LINE = /\b(?:total|totals|totale?s?|subtotal|sub-total
 // A cost word after "in", "within" or "included in" says where the figure sits, not what it is ("service charges already in consultants").
 export const WHERE_IT_SITS = /\s+(?:already|included|inclu\w*|compris\w*|deja|within|in|into|part of|dans)\b.*$/;
 
+// Card 110 audit. An assumption concept never takes: an alternative, rejected or earlier figure; a loan's period
+// (repayment, amortization, a lender's requirement); or a month number, which is a point in time, not a duration.
+export const NOT_THE_DEALS_ASSUMPTION = /\b(?:alternat\w*|option(?:al)?|declined|rejected|abandon\w*|earlier|previous|prior|former|old|sketch|instead|faster|accelerated?|accelere\w*|refus\w*|ancien\w*|precedent\w*|variante|repa(?:y|id)\w*|repayment|rembours\w*|amort\w*|principal|visits?|visite|inspections?|tours?|meetings?|reunion|(?:has|have|had)\s+(?:\w+\s+)?(?:held|kept|owned)|experience|track record|portfolio|since)\b/;
+export const NOT_CHOSEN_AFTER = /^\W*(?:[a-z]+\s+){0,4}(?:declined|rejected|dropped|abandoned|not (?:adopted|used|chosen|retained)|refus\w*|abandonn\w*|ecart\w*)/;
+export const MONTH_INDEX = /\b(?:month|mois)\s*:?\s*$|\b(?:at|in|by|from|until|au|en|du|des le)\s+(?:(?:the|project|le)\s+)?(?:month|mois)\b/;
+
 export const CONCEPTS: readonly {
   fieldKey: string;
   budget?: true;
+  assumption?: true;
+  with?: readonly RegExp[];
+  basisAfter?: RegExp;
   unit: "$" | "%" | "years" | "months";
   words: readonly RegExp[];
   exclude: RegExp;
@@ -62,5 +71,53 @@ export const CONCEPTS: readonly {
     fieldKey: "contingency", unit: "$", budget: true,
     words: [/\b(?:contingenc(?:y|ies)|buffer|cushion|overrun allowance|allowance for (?:overruns|unknowns)|unallocated|unforeseen|risk allowance|imprevus|aleas|provision pour (?:depassements|imprevus)|marge pour imprevus)\b/],
     exclude: /\b(?:operating|replacement|interest|lease-up|deficit|exploitation|remplacement|interets?|mise en location)\b/,
+  },
+  // Card 110 sources: v8/v9 for construction, lease-up, occupancy, exit cap and expense ratio;
+  // v8 for hold and both growth fields. Number words and labels after a figure stay out.
+  {
+    fieldKey: "construction_months", unit: "months", assumption: true,
+    words: [/\b(?:build|construction|works|site|crew|delivery|program(?:me)?|conversion|renovation|fit-out|chantier|travaux|transformation)\b/],
+    exclude: /\b(?:loans?|interest|reserves?|terms?|lock|permits?|approval|wait|holdbacks?|warranty|lease|let|tenants?|prets?|interets?|permis|attente|garantie|retenue|insurance|assurance|starts?|debut|avant|commencement|construction month)\b/,
+  },
+  {
+    fieldKey: "lease_up_months", unit: "months", assumption: true,
+    words: [/\b(?:lease-up|leasing|letting|let-up|fill|tenants?|tenant-finding|absorption|rent-up|mise en location|location)\b/],
+    exclude: /\b(?:loans?|terms?|lock|free rent|rent-free|notice|lease term|bail|prets?|loyer gratuit|franchise de loyer|preavis|location du terrain)\b/,
+  },
+  {
+    fieldKey: "stabilized_occupancy_pct", unit: "%", assumption: true,
+    words: [/\b(?:occupancy|occupied|fill|let|leased|letting level|occupation)\b/],
+    with: [/\b(?:settled|stabili[sz]\w*|steady|mature|normal|long-run|a maturite|regime)\b/],
+    exclude: /\b(?:covenant|lender|condition|market|area|comparable|current|today|existing|in[- ]place|breakeven|vacancy|actuel\w*|marche|preteur|clause|seuil de rentabilite)\b/,
+  },
+  {
+    fieldKey: "exit_cap_rate_pct", unit: "%", assumption: true,
+    words: [/\b(?:cap|capitali[sz]ation)\b/],
+    with: [/\b(?:exit|sale|sell|disposal|disposition|reversion|terminal|outgoing|going-out|eventual|revente|sortie|vente|depart)\b/],
+    exclude: /\b(?:going-in|entry|purchase|acquisition|in[- ]place|current|market|comparable|sold|traded|achat|entree|actuel\w*|marche)\b/,
+  },
+  {
+    fieldKey: "expense_ratio_pct", unit: "%", assumption: true,
+    words: [/\b(?:operating|opex|running|expenses?|costs?|charges|exploitation|depenses)\b/],
+    with: [/\b(?:share|ratio|percentage|take|slice|load|deduction|allowance|pourcentage|part|sur (?:les )?(?:recettes|revenus))\b/],
+    basisAfter: /^\s*(?:of (?:the )?(?:egi|income|collections|revenue|receipts)|(?:des?|du|sur les) (?:recettes|revenus))\b/,
+    exclude: /\b(?:management fee|vacancy|tax|insurance|growth|increase|escalation|inflation|frais de gestion|assurance|taxes?|croissance|hausse|vacance|recurring|sell\w*|sale|exit|brokerage|commissions?|disposition|vente|courtage)\b/,
+  },
+  {
+    fieldKey: "hold_years", unit: "years", assumption: true,
+    words: [/\b(?:hold|held|holding|ownership|own|horizon|keep|detention|conserver|garder)\b/],
+    exclude: /\b(?:loans?|terms?|amort\w*|warranty|lease|bail|prets?|garantie)\b/,
+  },
+  {
+    fieldKey: "rent_growth_pct", unit: "%", assumption: true,
+    words: [/\b(?:rents?|loyers?)\b/],
+    with: [/\b(?:growth|uplift|increase|escalation|indexation|hausse|croissance)\b/],
+    exclude: /\b(?:expenses?|costs?|charges|market|comparable|cap|depenses|couts?|marche)\b/,
+  },
+  {
+    fieldKey: "expense_growth_pct", unit: "%", assumption: true,
+    words: [/\b(?:expenses?|costs?|opex|charges|depenses|couts?)\b/],
+    with: [/\b(?:growth|uplift|increase|escalation|inflation|hausse|croissance)\b/],
+    exclude: /\b(?:rents?|loyers?|market|comparable|construction|hard|build|marche)\b/,
   },
 ];

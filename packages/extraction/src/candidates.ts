@@ -1,4 +1,4 @@
-import { LOAN_NOUN } from "./concepts.ts";
+import { CONCEPTS, LOAN_NOUN } from "./concepts.ts";
 import { FIELD_BY_KEY, OUTPUT_LIKE_PHRASES } from "@agir/contracts";
 import { detectFormat, normalizeText, SF_PER_M2, tokenize, unitTypesIn, wholeUnitType, type CurrencyCode, type DocumentFormat, type NumberToken } from "@agir/numbers";
 import type { Cell, NormalizedDocument, Table } from "./document.ts";
@@ -2290,6 +2290,14 @@ export function extractCandidates(doc0: NormalizedDocument): ExtractionResult {
     result.candidates.filter(commercial).forEach((c) => aside(c, "An occupancy for the commercial space, not the deal's stabilized occupancy"));
     result.candidates = result.candidates.filter((c) => !commercial(c));
   }
+  // An assumption concept cannot introduce a second value beside a surviving alias read, whichever came first.
+  const assumptionFields = new Set(CONCEPTS.filter((c) => c.assumption).map((c) => c.fieldKey));
+  const aliases = result.candidates.filter((c) => c.rule !== "concept" && assumptionFields.has(c.fieldKey ?? ""));
+  result.candidates = result.candidates.filter((c) => {
+    if (c.rule !== "concept" || !assumptionFields.has(c.fieldKey ?? "") || !aliases.some((a) => a.fieldKey === c.fieldKey && a.value !== c.value)) return true;
+    aside(c, "Another line already gives this figure");
+    return false;
+  });
   // Within one document, the same field and value found twice is one candidate.
   const seen = new Set<string>();
   result.candidates = result.candidates.filter((c) => {
