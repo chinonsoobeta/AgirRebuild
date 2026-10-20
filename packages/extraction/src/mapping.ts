@@ -491,6 +491,9 @@ export type MapOptions = {
   quote?: boolean;
   /** The words between a label and its number ("at least" in "Occupancy: at least 90%"), which may carry a limit. */
   ahead?: string;
+  /** Card 111: the label is the words after a figure with a stated unit, in prose; `lead` is the words before it. */
+  labelAfter?: boolean;
+  lead?: string;
 };
 
 // What may follow a loose alias before the number: "income", "amount", or a verb phrase ("is planned at", "should take", "est de").
@@ -787,8 +790,12 @@ function budgetConcepts(label: string) {
 // One shared matcher: exactly one compatible concept, with the same scope and value conversion as aliases.
 function conceptField(rawLabel: string, t: NumberToken, opts: MapOptions): Mapped | null {
   if (t.value === null) return null;
-  if (opts.prose && opts.context && !foldText(opts.context.slice(0, t.start)).trimEnd().endsWith(foldText(rawLabel).trim())) return null;
-  const { label, labelUnit, labelCode } = normalizeLabel(opts.prose ? rawLabel.split(/[,;]/).pop() ?? "" : rawLabel);
+  // Words after the figure name it only when the figure states its unit; a bare number stays shown.
+  const afterLabel = opts.labelAfter === true;
+  if (afterLabel && !(t.unit === "months" || t.unit === "years" || t.unit === "%" || t.currency)) return null;
+  if (!afterLabel && opts.prose && opts.context && !foldText(opts.context.slice(0, t.start)).trimEnd().endsWith(foldText(rawLabel).trim())) return null;
+  const lead = afterLabel ? (opts.lead ?? "").split(/[,;]/).pop() ?? "" : "";
+  const { label, labelUnit, labelCode } = normalizeLabel(opts.prose && !afterLabel ? rawLabel.split(/[,;]/).pop() ?? "" : rawLabel);
   const unit = t.unit ?? labelUnit ?? (!opts.prose && Math.abs(t.value) >= 1000 ? "$" : null);
   const budget = unit === "$" && !opts.quote && (opts.budget || opts.budgetConcept) && !/%/.test(opts.gap ?? opts.ahead ?? "");
   const meanings = budget ? budgetConcepts(label) : [];
@@ -797,18 +804,26 @@ function conceptField(rawLabel: string, t: NumberToken, opts: MapOptions): Mappe
   const loan = !opts.budget && (LOAN_NOUN.test(label) || namedScope || (opts.loanContext ?? opts.scope !== undefined))
     && !(opts.prose && !namedScope && !opts.loanContext && LOAN_ANAPHOR.test(label) && !scopeIn(opts.context?.slice(0, t.start) ?? "", false))
     && !NOT_THE_LOAN_AFTER.test(foldText(opts.after ?? ""));
-  const folded = foldText(rawLabel);
+  // After the figure, the words before it in its clause still carry the guards.
+  const folded = foldText(afterLabel ? `${lead} ${rawLabel}` : rawLabel);
   const budgetLine = budget && !NOT_A_BUDGET_LINE.test(folded) && !LOAN_NOUN.test(folded);
-  const assumptionLabel = (label.split(/\band\b|\bet\b/).pop() ?? "").trim();
-  const assumptionContext = normalizeLabel(rawLabel.split(/[,;]/).pop() ?? "").label;
+  const assumptionLabel = ((afterLabel ? label.split(/\band\b|\bet\b/)[0] : label.split(/\band\b|\bet\b/).pop()) ?? "").trim();
+  const assumptionContext = normalizeLabel(afterLabel ? `${lead} ${rawLabel}` : rawLabel.split(/[,;]/).pop() ?? "").label;
   // The whole label and the words after the figure: an alternative, a loan's period or a month number is never the deal's assumption.
   const assumption = !NOT_THE_DEALS_ASSUMPTION.test(folded) && !LOAN_NOUN.test(folded) && !NOT_CHOSEN_AFTER.test(foldText(opts.after ?? ""))
     && !(unit === "months" && MONTH_INDEX.test(folded));
   const fits = CONCEPTS.filter((c) => c.unit === unit && (c.assumption
     ? assumption && !opts.budget && c.words.some((w) => w.test(assumptionLabel)) && ((c.with ?? []).every((w) => w.test(assumptionLabel)) || !!c.basisAfter?.test(foldText(opts.after ?? ""))) && !c.exclude.test(assumptionContext)
-    : (c.budget ? budgetLine && meanings.includes(c) : loan && c.words.some((w) => w.test(label))) && !c.exclude.test(c.budget ? folded : label)));
+    // Only an assumption is named by words after its figure: a loan noun ("$9,000,000 by the lender") or a budget word ("is the stated envelope") there does not name the figure.
+    : !afterLabel && (c.budget ? budgetLine && meanings.includes(c) : loan && c.words.some((w) => w.test(label))) && !c.exclude.test(c.budget ? folded : label)));
   if (fits.length !== 1) return null;
   const chosen = fits[0]!;
+  // "To fill" after a figure is the lease-up only for the building or its units ("6 months to fill the staff positions" is not).
+  const afterWords = foldText(opts.after ?? "");
+  if (afterLabel && chosen.fieldKey === "lease_up_months" && /^\s*(?:to fill|pour remplir)\b/.test(afterWords) && !/^\s*(?:to fill|pour remplir)(?:\s*[.;,]?\s*$|\s+(?:the |les |l )?(?:\d+\s+)?(?:units?|suites?|apartments?|building|project|logements|unites|appartements|immeuble|projet)\b)/.test(afterWords)) return null;
+  // Words before the figure that name another field of its unit leave it shown.
+  const leadLabel = normalizeLabel(lead).label;
+  if (afterLabel && CONCEPTS.some((c) => c !== chosen && c.unit === unit && c.words.some((w) => w.test(leadLabel)))) return null;
   if (chosen.budget && (t.currencyCode ?? labelCode) && (t.currencyCode ?? labelCode) !== "CAD") return { kind: "ignored", reason: "An amount in another currency" };
   const scope = namedScope ?? opts.conceptScope ?? opts.scope ?? "senior";
   const key = chosen.fieldKey;

@@ -73,16 +73,18 @@ export const CONCEPTS: readonly {
     exclude: /\b(?:operating|replacement|interest|lease-up|deficit|exploitation|remplacement|interets?|mise en location)\b/,
   },
   // Card 110 sources: v8/v9 for construction, lease-up, occupancy, exit cap and expense ratio;
-  // v8 for hold and both growth fields. Number words and labels after a figure stay out.
+  // v8 for hold and both growth fields. Card 111: in prose, words after a figure with a stated unit may name an assumption (never a loan or budget line).
   {
     fieldKey: "construction_months", unit: "months", assumption: true,
-    words: [/\b(?:build|construction|works|site|crew|delivery|program(?:me)?|conversion|renovation|fit-out|chantier|travaux|transformation)\b/],
+    // Card 111 (v4, v5): a span from the foundations to occupancy is the build.
+    words: [/\b(?:build|construction|works|site|crew|delivery|program(?:me)?|conversion|renovation|fit-out|chantier|travaux|transformation)\b/, /\bfrom (?:the )?(?:foundations?|shovels?(?: in the ground)?|ground-?breaking|excavation|mobili[sz]ation) to (?:the )?(?:occupancy|completion|handover|delivery|substantial completion)\b|\b(?:de|des|du) (?:la |les )?(?:fondations?|excavation|mobilisation|debut des travaux) (?:a|au|jusqu a) (?:la |l )?(?:occupation|livraison|fin des travaux)\b/],
     exclude: /\b(?:loans?|interest|reserves?|terms?|lock|permits?|approval|wait|holdbacks?|warranty|lease|let|tenants?|prets?|interets?|permis|attente|garantie|retenue|insurance|assurance|starts?|debut|avant|commencement|construction month)\b/,
   },
   {
     fieldKey: "lease_up_months", unit: "months", assumption: true,
-    words: [/\b(?:lease-up|leasing|letting|let-up|fill|tenants?|tenant-finding|absorption|rent-up|mise en location|location)\b/],
-    exclude: /\b(?:loans?|terms?|lock|free rent|rent-free|notice|lease term|bail|prets?|loyer gratuit|franchise de loyer|preavis|location du terrain)\b/,
+    // Card 111 (v4): "pour remplir les logements"; "locataires" is the French for tenants.
+    words: [/\b(?:lease-up|leasing|letting|let-up|fill|tenants?|tenant-finding|absorption|rent-up|mise en location|location|remplir|locataires?)\b/],
+    exclude: /\b(?:loans?|terms?|lock|free rent|rent-free|notice|lease term|bail|prets?|loyer gratuit|franchise de loyer|preavis|location du terrain|free|incentives?|gratuite?s?|incitati\w*)\b/,
   },
   {
     fieldKey: "stabilized_occupancy_pct", unit: "%", assumption: true,
@@ -105,7 +107,8 @@ export const CONCEPTS: readonly {
   },
   {
     fieldKey: "hold_years", unit: "years", assumption: true,
-    words: [/\b(?:hold|held|holding|ownership|own|horizon|keep|detention|conserver|garder)\b/],
+    // Card 111 (v4): selling after a period, or keeping the building for it, is the hold.
+    words: [/\b(?:hold|held|holding|ownership|own|horizon|keep|detention|conserver|garder|(?:sell|sale|selling|exit|resale) after|(?:revente|vente|sortie) apres|vendre (?:apres|au bout de)|(?:garde|gardons|garderons|conserve|conservons|conserverons) (?:l|le|la) (?:immeuble|batiment|propriete|actif|projet))\b/],
     exclude: /\b(?:loans?|terms?|amort\w*|warranty|lease|bail|prets?|garantie)\b/,
   },
   {

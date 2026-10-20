@@ -310,6 +310,38 @@ const WORD_RE = new RegExp(
 const WORDS_THEN_PAREN = new RegExp(String.raw`(?<![\p{L}\p{N}-])((?:${TENS})-(?:${DIGIT_WORDS})|${Object.keys(WORD_VALUES).join("|")})\s+$`, "iu");
 const PRECEDING_NUMBER_WORD = /(?:(?:hundred|thousand|million|cents?|mille)\s+(?:and|et)|hundred|thousand|million|cents?|mille|(?<=[\p{L}\p{N}])-)\s*$/iu;
 
+// Card 111. A rate written in words ("five and a half percent", "cinq virgule cinq pour cent") or with a fraction ("5 1/2%", "5½ %") is one figure in %.
+const PCT_MARK = String.raw`(?:\s?%|\s+(?:percent|per\s+cent|pour\s?cent|pct)(?![\p{L}]))`;
+const ONE_DIGIT: Record<string, number> = { zero: 0, zéro: 0, one: 1, un: 1, two: 2, deux: 2, three: 3, trois: 3, four: 4, quatre: 4, five: 5, cinq: 5, six: 6, seven: 7, sept: 7, eight: 8, huit: 8, nine: 9, neuf: 9 };
+const RATE_WHOLE = String.raw`(?:${TENS})-(?:${DIGIT_WORDS})|dix-sept|dix-huit|dix-neuf|${Object.keys(WORD_VALUES).filter((w) => !w.includes("-") && w !== "une").join("|")}`;
+const RATE_PART: Record<string, number> = { "and a half": 0.5, "and a quarter": 0.25, "and three quarters": 0.75, "et demi": 0.5, "et demie": 0.5, "et quart": 0.25, "et trois quarts": 0.75 };
+const RATE_WORD_RE = new RegExp(
+  String.raw`(?<![\p{L}\p{N}-])(${RATE_WHOLE})(?:\s+(and\s+a\s+half|and\s+a\s+quarter|and\s+three\s+quarters|et\s+demie?|et\s+quart|et\s+trois\s+quarts)|\s+(?:point|virgule)\s+((?:${TENS})-(?:${DIGIT_WORDS})|(?:${Object.keys(ONE_DIGIT).join("|")})(?:\s+(?:${Object.keys(ONE_DIGIT).join("|")}))*))?${PCT_MARK}`,
+  "giu",
+);
+// A word that continues a larger number or a range ("twenty five", "five to six", "hundred and five") is not a rate of its own.
+const RATE_CONTINUES = new RegExp(String.raw`(?:\d|(?<![\p{L}])(?:${Object.keys(WORD_VALUES).join("|")}|hundred|thousand|million|cents?|mille))\s*(?:(?:to|and|or|à|a|et|ou|-)\s+)?$`, "iu");
+const FRACTION_PCT_RE = new RegExp(String.raw`(?<![\w.,/$])(\d{1,2})(?:\s+(1\/2|1\/4|3\/4)|\s?([½¼¾]))${PCT_MARK}`, "gu");
+
+function rateTokens(text: string): NumberToken[] {
+  const out: NumberToken[] = [];
+  for (const m of text.matchAll(RATE_WORD_RE)) {
+    if (RATE_CONTINUES.test(text.slice(0, m.index!))) continue;
+    const word = m[1]!.toLowerCase();
+    const [a, b] = word.includes("-") && !word.startsWith("dix") ? word.split("-") : [word, null];
+    let value = b === null ? WORD_VALUES[word]! : WORD_VALUES[a!]! + WORD_VALUES[b]!;
+    if (m[2]) value += RATE_PART[m[2].toLowerCase().replace(/\s+/g, " ")]!;
+    if (m[3]) {
+      const d = m[3].toLowerCase();
+      const parts = d.split(/\s+/);
+      const digits = parts.every((p) => p in ONE_DIGIT) ? parts.map((p) => ONE_DIGIT[p]).join("") : String(WORD_VALUES[d.split("-")[0]!]! + WORD_VALUES[d.split("-")[1]!]!);
+      value = Number(`${value}.${digits}`);
+    }
+    out.push({ raw: m[0], start: m.index!, end: m.index! + m[0].length, value, currency: false, currencyCode: null, unit: "%", scaled: false });
+  }
+  return out;
+}
+
 /** Number words directly followed by a unit word. "one hundred twenty units" is not read: a word that continues a larger number is skipped. */
 function wordTokens(text: string): NumberToken[] {
   const out: NumberToken[] = [];
@@ -362,11 +394,18 @@ export function tokenize(line: string, format: DocumentFormat, cell = false): Nu
     const raw = m[0].trim();
     out.push({ raw, start: m.index!, end: m.index! + m[0].length, value: null, refusal: SPACED_NOTE, currency: /^[$€£]/.test(raw), currencyCode: null, unit: null, scaled: false });
   }
+  const fractions = [...text.matchAll(FRACTION_PCT_RE)].filter((m) => !spaced.some((r) => m.index! < r.index! + r[0].length && m.index! + m[0].length > r.index!));
+  for (const m of fractions) {
+    const value = Number(m[1]) + ({ "1/2": 0.5, "1/4": 0.25, "3/4": 0.75, "½": 0.5, "¼": 0.25, "¾": 0.75 } as Record<string, number>)[m[2] ?? m[3]!]!;
+    out.push({ raw: m[0].trim(), start: m.index!, end: m.index! + m[0].length, value, currency: false, currencyCode: null, unit: "%", scaled: false });
+  }
   for (const m of text.matchAll(TOKEN_RE)) {
     const [whole, paren, sign, cur, core] = m;
     let start = m.index!;
     // Part of a letter-spaced run: refused with the run, never a number of its own.
     if (spaced.some((r) => start < r.index! + r[0].length && start + whole.length > r.index!)) continue;
+    // Part of a fraction rate ("5 1/2%"): one figure, read above.
+    if (fractions.some((r) => start < r.index! + r[0].length && start + whole.length > r.index!)) continue;
     // The tail of a unit phrase ("7 2-bed units") is not a number of its own.
     if (start < reached) continue;
     let end = start + whole.length;
@@ -456,6 +495,7 @@ export function tokenize(line: string, format: DocumentFormat, cell = false): Nu
     });
   }
   // A word token that sits inside a figure already read ("$96,000 a year") is not a second one.
-  const words = wordTokens(text).filter((w) => !out.some((t) => w.start < t.end && t.start < w.end));
+  const rates = rateTokens(text);
+  const words = [...wordTokens(text).filter((w) => !rates.some((t) => w.start < t.end && t.start < w.end)), ...rates].filter((w) => !out.some((t) => w.start < t.end && t.start < w.end));
   return [...out, ...words].sort((a, b) => a.start - b.start);
 }

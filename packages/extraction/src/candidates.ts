@@ -411,12 +411,26 @@ const LINE_TYPE_FIELDS = new Set(["unit_rent_monthly", "rent_psf_annual"]);
 function followingLabel(rest: string, nextFollows = false): string | null {
   if (!/^\s+\S/.test(rest)) return null;
   let cut = rest.length;
-  for (const re of [/[,;:]/, /\s[/|]\s|\s[/|]$|[/|]\s/, /\s(?:and|et)\s/i, /[.!?](?:\s|$)/]) {
+  for (const re of [/[,;:]/, /\s[/|]\s|\s[/|]$|[/|]\s/, /\s(?:and|et|then|puis)\s/i, /\s[-–—]\s/, /[.!?](?:\s|$)/]) {
     const m = re.exec(rest);
     if (m && m.index < cut) cut = m.index;
   }
   if (nextFollows && cut === rest.length) return null;
   return rest.slice(0, cut).trim() ? rest.slice(0, cut) : null;
+}
+
+// Card 111. A number of months or years at a point in time is not a duration: "six months ago", "il y a deux ans", "depuis 3 ans",
+// "since", "for the past", and a sentence that opens "Three months after completion the lender ...".
+const POINT_IN_TIME_NOTE = "A point in time, not a duration";
+const POINT_BEFORE_RE = /(?:^|[^a-z])(?:il y a|depuis|since|for the past)\s*$/;
+const AFTER_EVENT_RE = /^\s+(?:after|following|before|apres|avant)\s+(?:(?:the|la|le|l|les)\s+)?[a-z]+(?:\s+(?:of|de|du|des)\s+(?:(?:the|la|le|l|les)\s+)?[a-z]+)?\s*,?\s+(?:the|a|an|our|we|they|it|le|la|les|l|nous|on|ils|elles|il|elle|notre|un|une)\s+[a-z]/;
+function pointInTime(text: string, t: NumberToken): boolean {
+  if (t.unit !== "months" && t.unit !== "years") return false;
+  const before = fold(text.slice(0, t.start)).replace(/[’']/g, " ");
+  const after = fold(text.slice(t.end)).replace(/[’']/g, " ");
+  // "Il y a 18 mois de travaux": there are eighteen months of works.
+  if (/(?:^|[^a-z])il y a\s*$/.test(before) && /^\s*(?:de|d)\s/.test(after)) return false;
+  return /^\s*ago\b/.test(after) || POINT_BEFORE_RE.test(before) || (/^[\s\-–—•*]*$/.test(before) && AFTER_EVENT_RE.test(after));
 }
 
 /** The clause of a sentence a number stands in: between commas, semicolons and "and" (but not after a hanging hyphen, "one- and two-bedroom"). */
@@ -809,6 +823,11 @@ function readSentence(sentence: { text: string; start: number }, para0: Paragrap
       from = t.end;
       return;
     }
+    if (pointInTime(text, t)) {
+      other(t, "line:prose", POINT_IN_TIME_NOTE);
+      from = t.end;
+      return;
+    }
     // The base of a share ("of hard costs" after "4%") names nothing for the figures after it.
     const afterShare = isMoney(t) && shares.some(([, end]) => t.start >= end);
     const label = shares.reduce((l, [a, b]) => (b > from && a < t.start ? l.slice(0, Math.max(a - from, 0)) + " ".repeat(Math.min(b, t.start) - Math.max(a, from)) + l.slice(Math.min(b, t.start) - from) : l), text.slice(from, t.start));
@@ -844,8 +863,8 @@ function readSentence(sentence: { text: string; start: number }, para0: Paragrap
       if (again.kind === "field" && again.fieldKey === lastRead.key) mapped = again;
     }
     from = t.end;
-    // "to build", "to lease (up)" and "pour louer" right after a duration belong to it alone.
-    const attached = mapped.kind === "field" && (t.unit === "months" || t.unit === "years") ? /^\s*(?:to build|to lease(?: up)?|pour louer)\b/i.exec(text.slice(t.end)) : null;
+    // "to build", "to lease (up)", "pour louer" and "de travaux" right after a duration belong to it alone (card 111: and are not the next figure's label).
+    const attached = mapped.kind === "field" && (t.unit === "months" || t.unit === "years") ? /^\s*(?:to build|to lease(?: up)?|pour louer|de (?:construction|travaux|chantier)|de (?:mise en )?location)\b/i.exec(text.slice(t.end)) : null;
     if (attached) from = t.end + attached[0].length;
     if (afterShare && mapped.kind !== "field") {
       other(t, "line:prose", SHARE_NOTE);
@@ -856,7 +875,8 @@ function readSentence(sentence: { text: string; start: number }, para0: Paragrap
       let after = followingLabel(text.slice(t.end, next?.start ?? text.length));
       // Words that run on into the next figure and name a field for it are that figure's label ("96% with opex load 30%").
       if (after !== null && next && followingLabel(text.slice(t.end, next.start), true) === null && mapToken(after, next, opts).kind === "field") after = null;
-      const viaAfter = after === null ? null : mapToken(after, t, opts);
+      // Card 111: when the words before name nothing, the words after a figure with a stated unit may name it by concept too.
+      const viaAfter = after === null ? null : mapToken(after, t, mapped.kind === "unmapped" ? { ...opts, labelAfter: true, lead: label } : opts);
       if (after !== null && viaAfter!.kind === "field") {
         mapped = viaAfter!;
         usedLabel = after;

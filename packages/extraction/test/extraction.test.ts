@@ -2467,7 +2467,8 @@ describe("totals and their parts", () => {
       expect(pick(r)).toEqual([["senior_rate_pct", 6]]);
       expect(noteOf(r, 2026)).toBe("This is a year, not an amount");
       expect(pick(read("Phase 2. 24 units are planned"))).toEqual([]);
-      expect(pick(read("We expect to close in Late June. 6 months of construction follow"))).toEqual([]);
+      // Card 111: "Late June." is still no label; the words after the figure ("of construction") name it.
+      expect(pick(read("We expect to close in Late June. 6 months of construction follow"))).toEqual([["construction_months", 6]]);
     });
 
     test("a lender's amount and authorised sum, in English and French", () => {
@@ -6171,7 +6172,7 @@ describe("card 110: assumptions named by concept and unit", () => {
   test.each(["Rate lock: 6 months", "Permit wait: 4 months", "Holdback released after 12 months", "Construction loan interest reserve: 18 months", "Verrouillage du taux : 6 mois", "Attente de permis : 4 mois"])("an unrelated duration stays shown: %s", (line) => {
     const r = read(line); expect(r.candidates).toEqual([]); expect(r.other.length).toBeGreaterThan(0);
   });
-  test("the later-label schedule remains for card 111", () => expect(read("The schedule allows 16 months of site works and then 5 months to find tenants.").candidates).toEqual([]));
+  test("the later-label schedule is read since card 111", () => expect(pick(read("The schedule allows 16 months of site works and then 5 months to find tenants."))).toEqual([["construction_months", 16], ["lease_up_months", 5]]));
   test.each([false, true])("an alias wins over a different concept value regardless of order: %s", (reverse) => {
     const lines = ["Exit cap rate: 5.5%", "Cap at disposal: 6%"];
     const r = read(...(reverse ? lines.reverse() : lines));
@@ -6233,5 +6234,173 @@ describe("card 110 audit: an assumption concept takes only the deal's own durati
 
   test("the deal's own figures still read", () => {
     expect(concept(lines("Site programme: 16 months", "Tenant-finding window: 5 months", "Ownership horizon: 8 years", "Running cost share: 33%")).sort()).toEqual([["construction_months", 16], ["expense_ratio_pct", 33], ["hold_years", 8], ["lease_up_months", 5]]);
+  });
+});
+
+describe("card 111: clauses whose label follows the number; number words for rates; points in time", () => {
+  const read = (...lines: string[]) => extractCandidates({ kind: "pdf", lines: lines.map((text, i) => ({ text, location: `page 1, line ${i + 1}` })), tables: [], pageCount: 1, needsOcr: false, fullText: lines.join("\n") });
+  const sheet = (rows: [string, string | number][]) => extractCandidates({ kind: "xlsx", lines: [], tables: [{ name: "Inputs", rows: [[{ text: "Assumptions", ref: "A1" }], ...rows.map((row, i) => row.map((v, c): Cell => ({ text: String(v), ref: `${String.fromCharCode(65 + c)}${i + 2}`, ...(typeof v === "number" ? { number: v } : {}) })))] }], pageCount: 1, needsOcr: false, fullText: "" });
+  const pick = (r: ReturnType<typeof read>) => r.candidates.map((c) => [c.fieldKey, c.value]);
+  const shown = (r: ReturnType<typeof read>) => r.other.map((o) => [o.value, o.note]);
+  const POINT = "A point in time, not a duration";
+
+  // Rule 1. Sources: v4 ("six mois pour remplir", "14 months from foundation to occupancy"), v5 ("from shovels to occupancy permit"), v9 ("- 15 months Construction allowance", "- 5 months Let-up months"), v10 ("- 10 months Conversion months:").
+  test.each([
+    ["The schedule allows 16 months of site works and then 5 months to find tenants.", [["construction_months", 16], ["lease_up_months", 5]]],
+    ["- 15 months Construction allowance in time from mobilisation;", [["construction_months", 15]]],
+    ["- 5 months Let-up months after completion.", [["lease_up_months", 5]]],
+    ["The builder's schedule shows 14 months from foundation to occupancy.", [["construction_months", 14]]],
+    // Own variants.
+    ["The plan gives 12 months of construction, then 4 months of letting.", [["construction_months", 12], ["lease_up_months", 4]]],
+    ["We budget 20 months for the works and then 3 months for absorption.", [["construction_months", 20], ["lease_up_months", 3]]],
+    ["- 14 months Build programme from mobilisation;", [["construction_months", 14]]],
+    ["Count fourteen months from shovels to occupancy.", [["construction_months", 14]]],
+    ["Le calendrier prévoit 16 mois de travaux, puis 5 mois pour trouver des locataires.", [["construction_months", 16], ["lease_up_months", 5]]],
+    ["- 6 mois Mise en location après la livraison.", [["lease_up_months", 6]]],
+    ["Nous comptons 8 mois pour remplir l'immeuble.", [["lease_up_months", 8]]],
+  ] as [string, [string, number][]][])("a label after the figure: %s", (line, expected) => expect(pick(read(line))).toEqual(expected));
+
+  test("six mois pour remplir les logements is the lease-up; the count of 12 stays shown", () => {
+    const r = read("Pour la location, je compte six mois pour remplir les 12 logements après la fin des travaux.");
+    expect(pick(r)).toEqual([["lease_up_months", 6]]);
+    expect(r.other.map((o) => o.value)).toEqual([12]);
+  });
+
+  test.each([
+    ["We expect works over 14 months, then a letting run of 4 months.", [["construction_months", 14], ["lease_up_months", 4]]],
+    ["Build: eighteen months; lease-up: six months.", [["construction_months", 18], ["lease_up_months", 6]]],
+    ["The crew needs a year and a half on site, then two quarters to fill the suites.", [["construction_months", 18], ["lease_up_months", 6]]],
+    ["Durée des travaux : dix-huit mois", [["construction_months", 18]]],
+    ["Hold period: seven years", [["hold_years", 7]]],
+    ["Interest-only period: a year and a half", [["senior_io_months", 18]]],
+    ["On prévoit dix-huit mois de chantier puis six mois de mise en location.", [["construction_months", 18], ["lease_up_months", 6]]],
+    ["Construction period: 18 months (twelve months if the permit is early)", [["construction_months", 18]]],
+  ] as [string, [string, number][]][])("today's reads are kept: %s", (line, expected) => expect(pick(read(line))).toEqual(expected));
+
+  test.each([
+    ["Twelve units, two of them accessible.", [[12, "No field matches this label"]]],
+    ["The building is two years old.", [[2, "No field matches this label"]]],
+    ["Construction period: 16 to 18 months", [[16, "A range is not a value; enter the figure to use"], [18, "A range is not a value; enter the figure to use"]]],
+  ] as [string, [number, string][]][])("today's shown figures keep their notes: %s", (line, expected) => {
+    const r = read(line);
+    expect(r.candidates).toEqual([]);
+    expect(shown(r)).toEqual(expected);
+  });
+
+  test.each([
+    "We give tenant notice 6 months before site works.",
+    "Nous donnons un préavis aux locataires 6 mois avant les travaux.",
+    "Plan for 16 of the suites to be let.",
+    "We carry 18 months of loan interest reserve.",
+    "On prévoit 6 mois de blocage de taux.",
+    "An alternate schedule had 12 months of site works.",
+    "Allow 16 months, the alternative being 10 of works.",
+  ])("rule 1 guards: the figure stays shown: %s", (line) => {
+    const r = read(line);
+    expect(r.candidates.filter((c) => c.fieldKey === "construction_months" || c.fieldKey === "lease_up_months")).toEqual([]);
+    expect(r.other.length).toBeGreaterThan(0);
+  });
+
+  test("a field the words before the figure give is never overridden by the words after it", () => {
+    expect(pick(read("Lease-up of 6 months for the works."))).toEqual([["lease_up_months", 6]]);
+    expect(pick(read("The letting run takes 6 months of site works."))).toEqual([["lease_up_months", 6]]);
+    expect(pick(read("Then afterworks leasing allowance six months after the works."))).toEqual([["lease_up_months", 6]]);
+  });
+
+  test.each([
+    ["The Uses brought forward: $5,260,000 is the stated envelope;", 5_260_000],
+    ["The property is valued at $9,000,000 by the lender.", 9_000_000],
+    ["We wired $2,000,000 to the bank.", 2_000_000],
+  ] as [string, number][])("words after a money figure do not name it by concept: %s", (line, value) => {
+    const r = read(line);
+    expect(r.candidates.filter((c) => c.rule === "concept")).toEqual([]);
+    expect(r.other.some((o) => o.value === value)).toBe(true);
+  });
+
+  // Rule 2. Sources: v4 ("On garde l'immeuble sept ans"); "sell after" from the card's table.
+  test.each([
+    ["We will sell after 7 years at a 5.5% cap.", [["hold_years", 7], ["exit_cap_rate_pct", 5.5]]],
+    ["On garde l'immeuble sept ans, comme prévu.", [["hold_years", 7]]],
+    ["Sale after 8 years.", [["hold_years", 8]]],
+    ["We plan to exit after 10 years.", [["hold_years", 10]]],
+    ["Revente après 7 ans.", [["hold_years", 7]]],
+    ["Nous comptons vendre au bout de 7 ans.", [["hold_years", 7]]],
+    ["Nous gardons l'immeuble dix ans.", [["hold_years", 10]]],
+  ] as [string, [string, number][]][])("selling after a period is the hold: %s", (line, expected) => expect(pick(read(line)).sort()).toEqual(expected.sort()));
+
+  test.each(["Sold 7 years ago.", "The lot was owned for 7 years.", "The sponsor has held rentals for 20 years.", "The seller has owned it 7 years.", "Le vendeur l'a vendu il y a 7 ans."])("rule 2 keeps: no hold from %s", (line) => {
+    expect(read(line).candidates.filter((c) => c.fieldKey === "hold_years")).toEqual([]);
+  });
+
+  // Rule 3. Sources: v4 ("14 months from foundation to occupancy"); the rest from the card's table.
+  test.each([
+    ["Six months ago the sponsor bought the lot.", 6],
+    ["Three months after completion the lender reviews the loan.", 3],
+    ["Twelve months ago we optioned the site.", 12],
+    ["Il y a deux ans, le promoteur a acheté le terrain.", 2],
+    ["Le promoteur possède le terrain depuis 3 ans.", 3],
+    ["The sponsor has owned the land for the past 5 years.", 5],
+    ["Since 2 years the lender has held the loan.", 2],
+    ["Six mois après la livraison, le prêteur révise le prêt.", 6],
+    ["Sold 7 years ago.", 7],
+  ] as [string, number][])("a point in time is shown with its note: %s", (line, value) => {
+    const r = read(line);
+    expect(r.candidates).toEqual([]);
+    expect(shown(r)).toEqual([[value, POINT]]);
+  });
+
+  test("4 years ago is a point in time; the hold of 7 years is still read", () => {
+    const r = read("We bought it 4 years ago and will hold it 7 years.");
+    expect(pick(r)).toEqual([["hold_years", 7]]);
+    expect(shown(r)).toEqual([[4, POINT]]);
+  });
+
+  test("a duration of works said with il y a is not a point in time", () => {
+    const r = read("Il y a 18 mois de travaux prévus.");
+    expect(r.other.some((o) => o.note === POINT)).toBe(false);
+  });
+
+  // Rule 4. No v2–v10 source: from the card's table.
+  test.each([
+    ["Exit cap of five and a half percent.", "exit_cap_rate_pct", 5.5],
+    ["Exit cap rate: five and a half percent", "exit_cap_rate_pct", 5.5],
+    ["Senior coupon of six and a quarter percent", "senior_rate_pct", 6.25],
+    ["Exit cap rate: 5 1/2%", "exit_cap_rate_pct", 5.5],
+    ["Exit cap rate: 5½ %", "exit_cap_rate_pct", 5.5],
+    // Own variants.
+    ["Exit cap rate of five point seven five percent", "exit_cap_rate_pct", 5.75],
+    ["Senior rate: seven per cent", "senior_rate_pct", 7],
+    ["Exit cap: 5 1/4%", "exit_cap_rate_pct", 5.25],
+    ["Taux de capitalisation à la revente : cinq et demi pour cent", "exit_cap_rate_pct", 5.5],
+    ["Taux d'intérêt : six pour cent", "senior_rate_pct", 6],
+    ["Taux d'intérêt : six et quart pour cent", "senior_rate_pct", 6.25],
+    ["Taux de capitalisation à la revente : cinq virgule cinq pour cent", "exit_cap_rate_pct", 5.5],
+    ["Exit cap rate: five and three quarters percent", "exit_cap_rate_pct", 5.75],
+  ] as [string, string, number][])("a rate in words: %s", (line, key, value) => {
+    const r = read(line);
+    expect(pick(r)).toEqual([[key, value]]);
+    expect(r.other).toEqual([]);
+  });
+
+  test("a cap rate in words with no sale word keeps the digits' note", () => {
+    const words = read("Taux de capitalisation de cinq virgule cinq pour cent");
+    const digits = read("Taux de capitalisation de 5,5 %");
+    expect(words.candidates).toEqual([]);
+    expect(shown(words)).toEqual(shown(digits));
+    expect(words.other[0]?.value).toBe(5.5);
+  });
+
+  test("a rate in words in a sheet row", () => {
+    expect(pick(sheet([["Exit cap", "five and a half percent"]]))).toEqual([["exit_cap_rate_pct", 5.5]]);
+    expect(pick(sheet([["Taux d'intérêt", "six et quart pour cent"]]))).toEqual([["senior_rate_pct", 6.25]]);
+  });
+
+  test.each(["Exit cap rate: twenty five percent", "Exit cap rate: five to six percent", "Exit cap rate: between five and six percent", "Exit cap rate: one hundred and five percent"])("words that are part of a larger number or a range are not a rate: %s", (line) => {
+    expect(read(line).candidates).toEqual([]);
+  });
+
+  test("number words with no percent stay what they are", () => {
+    expect(read("Twelve units, two of them accessible.").other.map((o) => o.value)).toEqual([12]);
+    expect(read("Five and a half of the suites are let.").candidates).toEqual([]);
   });
 });
