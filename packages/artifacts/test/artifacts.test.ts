@@ -1,5 +1,5 @@
 import { describe, expect, test } from "vitest";
-import { FIELD_BY_KEY, POLICY_V1, policyFor, type EngineInput } from "@agir/contracts";
+import { plainTerm, FIELD_BY_KEY, POLICY_V1, policyFor, type EngineInput } from "@agir/contracts";
 import { createHash } from "node:crypto";
 import { readFileSync } from "node:fs";
 import { crc32, deflateSync } from "node:zlib";
@@ -141,7 +141,7 @@ describe("artifacts", () => {
     }
     const debt = buildModel(mapleInput("lender_package")).blocks.find((b) => b.type === "table" && b.caption === "Debt and coverage");
     const labels = debt && debt.type === "table" ? debt.rows.map((r) => r[0]) : [];
-    expect(labels).toContain("Interest-only DSCR (year 1)");
+    expect(labels).toContain("Interest-only DCR (year 1)");
     expect(labels).toContain("Cumulative cash shortfall after stabilization");
   });
   test("an invented figure is caught", () => {
@@ -321,7 +321,7 @@ describe("the build decision report", () => {
     expect(model.kicker).toBe("Build decision");
     expect(scan.orphans).toEqual([]);
     const at = (s: string) => text.indexOf(s);
-    const order = ["Yield on cost", "Sizing DSCR (weakest year)", "Weakest stress", "What would change the answer", "Every input and its source"].map(at);
+    const order = ["Yield on cost", "Sizing DCR (weakest year)", "Weakest stress", "What would change the answer", "Every input and its source"].map(at);
     expect(order.every((n) => n >= 0)).toBe(true);
     expect([...order].sort((a, b) => a - b)).toEqual(order);
     expect(text).toContain("Weakest stress: Combined");
@@ -371,7 +371,7 @@ describe("the build decision report", () => {
     for (const r of table(x)) {
       gate = r[0] || gate;
       if (!name.test(r[3]!) || !/^[$\d]/.test(r[5]!)) continue;
-      const key = x.result.verdict.gates.find((g) => g.label === gate)!.key;
+      const key = x.result.verdict.gates.find((g) => plainTerm("en", g.label) === gate)!.key;
       seen.push(r[5]!);
       const after = underwrite(apply(x.input, num(r[5]!), r[3]!), POLICY_V1);
       expect(after.verdict.gates.find((g) => g.key === key)!.status, `${gate}: ${r[3]} at ${r[5]}`).toBe("passed");
@@ -414,7 +414,7 @@ describe("the build decision report", () => {
       if (!/^Rent, all/.test(r[3]!) || !r[5]!.startsWith("+")) continue;
       const k = 1 + Number(r[5]!.slice(1, -1)) / 100;
       const after = underwrite({ ...x.input, revenue: x.input.revenue.map((c) => ({ ...c, rentMonthly: c.rentMonthly && c.rentMonthly * k, rentPsfAnnual: c.rentPsfAnnual && c.rentPsfAnnual * k })) }, POLICY_V1);
-      expect(after.verdict.gates.find((g) => g.label === gate)!.status, `${gate} at ${r[5]}`).toBe("passed");
+      expect(after.verdict.gates.find((g) => plainTerm("en", g.label) === gate)!.status, `${gate} at ${r[5]}`).toBe("passed");
     }
   });
   test("every failing gate shares one table, each gate named once", () => {
@@ -424,7 +424,7 @@ describe("the build decision report", () => {
     const model = buildModel(x);
     expect(model.blocks.filter((b) => b.type === "table" && b.columns[0]!.label === "Gate")).toHaveLength(1);
     const rows = table(x);
-    for (const g of failing) expect(rows.filter((r) => r[0] === g.label)).toHaveLength(1);
+    for (const g of failing) expect(rows.filter((r) => r[0] === plainTerm("en", g.label))).toHaveLength(1);
     expect(rows.filter((r) => r[0] !== "").length).toBe(failing.length);
   });
   test("card 93c: the French worst case fits two pages", async () => {
@@ -649,7 +649,13 @@ describe("a deal that is kept and refinanced (card 60)", () => {
     expect(kinds).not.toContain("sale");
   });
   describe("the reports for a deal that sells its units (task 80)", () => {
-    test.each([["ic_memo", "29531862e11b0510111895565f213a8c2d4975d8f2fe79d694e646e4f056f404"], ["build_decision", "d605a268e8b161c97f6b79a3855f06c93aa3bc3f9a7b0e283b8671c0c8a4b98f"], ["lender_package", "4cf6ef2277600502cf073624101fc3988664370849ef77e986513ebe66afb08a"]] as const)("the existing held %s text is byte-identical", (kind, hash) => {
+    test.each([
+    // card 97c: DSCR→DCR rename only; text otherwise identical to `29531862e11b0510111895565f213a8c2d4975d8f2fe79d694e646e4f056f404`
+    ["ic_memo", "22e94946039c8786f9a8793faf7c7d1686ed3bae5b8b7977ea14a4c79c7df731"], 
+    // card 97c: DSCR→DCR rename only; text otherwise identical to `d605a268e8b161c97f6b79a3855f06c93aa3bc3f9a7b0e283b8671c0c8a4b98f`
+    ["build_decision", "61757e6912b7e04bbcee1c3fe37927271b3da4409678b6d8446d535771888a08"], 
+    // card 97c: DSCR→DCR rename only; text otherwise identical to `4cf6ef2277600502cf073624101fc3988664370849ef77e986513ebe66afb08a`
+    ["lender_package", "a0cc7a283f1ce22d258878b616a500a5eaafc457f2cc6169abb023d08d0e609b"]] as const)("the existing held %s text is byte-identical", (kind, hash) => {
       expect(createHash("sha256").update(textOf(holdInput(kind)).text).digest("hex")).toBe(hash);
     });
   });
@@ -730,7 +736,13 @@ const saleTable = (model: ReturnType<typeof buildModel>, caption: string) => {
 };
 
 describe("the reports for a deal that sells its units (task 80)", () => {
-  test.each([["ic_memo", "fa9dd2f818ca58ba1500ec30db01d5171229546e8828b96d74e9f0138bf93812"], ["build_decision", "64389bea70bedfb6f257617d58cc54d1bfff3bf08f55eb90e2f967f1d91736d0"], ["lender_package", "5f81e68b930e8735a4036eba356bad6242bc1e05cdaa3ca89a84a69f47dd208c"]] as const)("the existing Maple Heights %s text is byte-identical", (kind, hash) => {
+  test.each([
+    // card 97c: DSCR→DCR rename only; text otherwise identical to `fa9dd2f818ca58ba1500ec30db01d5171229546e8828b96d74e9f0138bf93812`
+    ["ic_memo", "200c7159ce649a03fff64ef222399b755da85112d8fce957b0f6df3ea69ff7c4"], 
+    // card 97c: DSCR→DCR rename only; text otherwise identical to `64389bea70bedfb6f257617d58cc54d1bfff3bf08f55eb90e2f967f1d91736d0`
+    ["build_decision", "161df3ae41c30a1322c47bf6b2cb6d4b4b7c18b34de0dbc177b2e819aca70fd9"], 
+    // card 97c: DSCR→DCR rename only; text otherwise identical to `5f81e68b930e8735a4036eba356bad6242bc1e05cdaa3ca89a84a69f47dd208c`
+    ["lender_package", "be3357a81416eb58bb60c7147850071e584947e517fa7b5e77e3f44bd5cf9641"]] as const)("the existing Maple Heights %s text is byte-identical", (kind, hash) => {
     expect(createHash("sha256").update(visibleText(renderHtml(buildModel(mapleInput(kind))))).digest("hex")).toBe(hash);
   });
   test.each(SALE_SLUGS.flatMap((slug) => SALE_KINDS.map((kind) => [slug, kind] as const)))("%s %s has provenance, sale stats and stresses without rental sections", (slug, kind) => {
@@ -1340,8 +1352,9 @@ describe("a report says when a check decides the verdict (task 85a)", () => {
     expect(text.split(message)).toHaveLength(2);
     // The warning is the only change: without it, the text is the card 80 pin.
     const restored = { ...model, blocks: model.blocks.filter((_, n) => n !== at + 2) };
+    // card 97c: DSCR→DCR rename only; text otherwise identical to `c49c28c5eafee7e5d6eb89704d4b04584c7887ecbf5d51bd33160417cf83d17e`
     expect(createHash("sha256").update(visibleText(renderHtml(restored))).digest("hex"))
-      .toBe("c49c28c5eafee7e5d6eb89704d4b04584c7887ecbf5d51bd33160417cf83d17e");
+      .toBe("3377dc48bc5130ccc4b8941ac7ccb38f612e8c939d1ac8a431cb7476c8ef29ae");
     expect(verifyProvenance(text, model.formatter.manifest).orphans).toEqual([]);
   });
   test.each(["engine", "policy"])("the %s notice comes before the warning", (notice) => {
@@ -1481,9 +1494,43 @@ describe("card 94b report insured product", () => {
       x.policy=policyFor(x.input); x.result=underwrite(x.input,x.policy);
       const model=buildModel(x), text=visibleText(renderHtml(model));
       expect(text).toContain(points === undefined ? "MLI Standard" : "MLI Select, 50 points");
-      expect(text).toContain(points === undefined ? (lang === "en" ? "10-year term" : "terme de 10 ans") : "50 points");
+      expect(text).toContain(points === undefined ? (lang === "en" ? "10-year term" : "durée de 10 ans") : "50 points");
       expect(verifyProvenance(text,model.formatter.manifest).orphans).toEqual([]);
     }
     expect(formatValue(50,"points")).toBe("50");
+  });
+});
+
+
+describe("card 97c report rendering", () => {
+  test("renames DSCR only for rendering and lets provenance tables break between pages", () => {
+    const x=mapleInput("lender_package");
+    x.assumptions[0]={...x.assumptions[0]!,sponsorStated:true};
+    x.assumptions.push({...x.assumptions[0]!,fieldKey:"land_transfer_tax",label:"Land transfer tax",sourceKind:"table",sponsorStated:false,source:"From a published table: Fictional published source"});
+    const stored=canonicalJson(x.result),model=buildModel(x),html=renderHtml(model),text=visibleText(html);
+    expect(text).not.toMatch(/\bDSCR\b/);
+    expect(text).toContain("DCR");
+    expect(canonicalJson(x.result)).toBe(stored);
+    const tables=model.blocks.filter(b=>b.type === "table" && !b.caption);
+    expect(tables).toHaveLength(2);
+    for (const table of tables) expect(table).toMatchObject({long:true});
+    expect((html.match(/<section class="tbl long">/g) ?? []).length).toBeGreaterThanOrEqual(2);
+  });
+  test("human-entered source and reason text retains DSCR", () => {
+    const source="DSCR lender note; owner's reason: DSCR checked manually.";
+    for (const lang of ["en","fr"] as const) {
+      const x=mapleInput("lender_package");x.lang=lang;
+      x.assumptions[0]={...x.assumptions[0]!,source};
+      expect(visibleText(renderHtml(buildModel(x)))).toContain(source);
+    }
+  });
+  test.each(["en","fr"] as const)("%s Standard term is a bare integer recorded in years", lang => {
+    const x=mapleInput("lender_package");x.lang=lang;
+    x.input={...x.input,exit:"refinance_hold",refinance:{month:40,ltvPct:75,ratePct:5,amortYears:30,ioMonths:0,insurancePremiumPct:4,termYears:10}};
+    x.policy=policyFor(x.input);x.result=underwrite(x.input,x.policy);
+    const model=buildModel(x),text=visibleText(renderHtml(model));
+    expect(text).toContain(lang === "en" ? "10-year term" : "durée de 10 ans");
+    expect(model.formatter.manifest).toContainEqual({text:"10",ref:"input:refinance_term_years",unit:"years"});
+    expect(verifyProvenance(text,model.formatter.manifest).orphans).toEqual([]);
   });
 });

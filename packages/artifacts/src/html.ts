@@ -50,7 +50,7 @@ function block(b: Block, lang: "en" | "fr"): string {
     case "stats":
       return `<div class="stats">${b.items.map((i) => `<div><span class="label">${esc(i.label)}</span><span class="num big">${esc(i.value)}</span></div>`).join("")}</div>`;
     case "table":
-      return `<section class="tbl${b.rows.length > 12 ? " long" : ""}">${b.caption ? `<h3>${esc(b.caption)}</h3>` : ""}<table><thead><tr>${b.columns
+      return `<section class="tbl${b.long || b.rows.length > 12 ? " long" : ""}">${b.caption ? `<h3>${esc(b.caption)}</h3>` : ""}<table><thead><tr>${b.columns
         .map((c) => `<th class="${c.numeric ? "r" : ""}">${esc(c.label)}</th>`)
         .join("")}</tr></thead><tbody>${b.rows
         .map(

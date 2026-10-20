@@ -183,7 +183,7 @@ dialog form { padding: 24px; display: flex; flex-direction: column; gap: 16px; }
   .rail-foot { margin-left: auto; margin-top: 0; padding: 0; flex-direction: row; align-items: center; gap: 4px; }
   .rail-foot .wide-only { display: none; }
   .rail-foot .btn { padding-left: 8px !important; }
-  .tbl { display: block; overflow-x: auto; max-width: 100%; }
+  .tbl { position: relative; display: block; overflow-x: auto; max-width: 100%; }
   .nav { flex-direction: row; }
   .stepper { grid-template-columns: repeat(5, minmax(120px, 1fr)); overflow-x: auto; }
   .auth { grid-template-columns: minmax(0, 1fr); }

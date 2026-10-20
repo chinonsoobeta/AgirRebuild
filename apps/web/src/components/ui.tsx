@@ -284,9 +284,15 @@ export function DealHeader({ o, active }: { o: DealOverview; active: string }) {
 }
 
 export function useDeal(dealId: string, poll = false) {
-  return useQuery({
+  const {workspaceId,setWorkspace}=useSession();
+  const query=useQuery({
     queryKey: ["deal", dealId],
     queryFn: () => api.get<DealOverview>(`/deals/${dealId}`),
     refetchInterval: (q) => (poll || (q.state.data?.documents.processing ?? 0) > 0 || q.state.data?.updating ? 1500 : false),
   });
+  const dealWorkspace=query.data?.deal.workspace_id;
+  useEffect(()=>{
+    if (dealWorkspace && dealWorkspace !== workspaceId) setWorkspace(dealWorkspace);
+  },[dealWorkspace,workspaceId,setWorkspace]);
+  return query;
 }

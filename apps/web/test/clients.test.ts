@@ -1,6 +1,8 @@
 /// <reference types="node" />
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import { createElement } from "react";
+import { readFileSync } from "node:fs";
+const styles=readFileSync(new URL("../src/styles.css",import.meta.url),"utf8");
 import { randomBytes } from "node:crypto";
 import { renderToStaticMarkup } from "react-dom/server";
 import { api, ApiError, type Assumption } from "../src/api";
@@ -13,6 +15,7 @@ import { build, type Lang } from "../src/i18n.tsx";
 
 // Card 89c: the screens of a broker's client. Mocks follow apps/web/test/run.test.ts.
 const state = vi.hoisted(() => ({ lang: "en" as Lang, role: "client", me: undefined as unknown, meError: null as unknown, invite: undefined as unknown, inviteError: null as unknown,
+  session: null as null | {workspaceId:string;setWorkspace:ReturnType<typeof vi.fn>}, dealSnapshot: undefined as unknown, effects: [] as (()=>void)[],
   clients: [] as unknown[], invites: [] as unknown[], artifacts: [] as unknown[], secret: "", options: [] as { queryKey: unknown[] }[],
   hooks: [] as unknown[], index: 0, nodes: [] as { tag: string; props: Record<string, any> }[], invalidate: vi.fn(async () => {}), navigate: vi.fn() }));
 vi.mock("@tanstack/react-query", () => ({
@@ -21,7 +24,7 @@ vi.mock("@tanstack/react-query", () => ({
     const key = options.queryKey[0];
     return key === "me" ? { data: state.me, error: state.meError, isLoading: false } : key === "invite" ? { data: state.invite, error: state.inviteError }
       : key === "deal-clients" ? { data: state.clients } : key === "invites" ? { data: state.invites } : key === "artifacts" ? { data: state.artifacts }
-      : key === "share-links" ? { data: [] } : {};
+      : key === "deal" ? {data:state.dealSnapshot} : key === "share-links" ? { data: [] } : {};
   },
   useMutation: (options: { mutationFn: (body: any) => Promise<any>; onSuccess?: (data: any) => unknown }) => ({
     mutate: async (body: unknown) => { const data = await options.mutationFn(body); await options.onSuccess?.(data); },
@@ -59,7 +62,7 @@ vi.mock("../src/api", async (original) => {
 });
 vi.mock("react", async (original) => {
   const react = await original<typeof import("react")>();
-  return { ...react, useState: (initial: unknown) => {
+  return { ...react, useContext: (context: any) => state.session ?? react.useContext(context), useEffect: (effect: ()=>void, deps: unknown[]) => state.session ? state.effects.push(effect) : react.useEffect(effect,deps), useState: (initial: unknown) => {
     const n = state.index++;
     if (!(n in state.hooks)) state.hooks[n] = initial;
     return [state.hooks[n], (value: unknown) => { state.hooks[n] = value; }];
@@ -307,5 +310,26 @@ describe("card 94c table proposal controls", () => {
     expect(words).toContain("aucun remboursement intégral de la TVQ");expect(words).toContain("7 182");
     expect(words).toContain("9,975");expect(words).toContain("225 000");
     expect(buttons("Use this")).toHaveLength(0);
+  });
+});
+
+
+describe("card 97c deal rendering", () => {
+  it("contains the absolute Actions label inside the narrow Review scroll box", () => {
+    expect(styles).toMatch(/\.sr-only\s*\{[^}]*position:\s*absolute/);
+    expect(styles).toMatch(/\.tbl\s*\{[^}]*position:\s*relative[^}]*\}/);
+  });
+  it("a deal route switches from workspace X to the deal's workspace Y", async () => {
+    const {useDeal}=await vi.importActual<typeof import("../src/components/ui")>("../src/components/ui");
+    state.session={workspaceId:"X",setWorkspace:vi.fn()};state.effects=[];
+    state.dealSnapshot={deal:{workspace_id:"Y"},documents:{processing:0}};
+    function Probe() {useDeal("solo-deal");return createElement("p",null,"Deal route");}
+    try {
+      render(createElement(Probe));state.effects.forEach(effect=>effect());
+      expect(state.session.setWorkspace).toHaveBeenCalledWith("Y");
+      state.session.workspaceId="Y";state.session.setWorkspace.mockClear();state.effects=[];
+      render(createElement(Probe));state.effects.forEach(effect=>effect());
+      expect(state.session.setWorkspace).not.toHaveBeenCalled();
+    } finally {state.session=null;state.effects=[];state.dealSnapshot=undefined;}
   });
 });

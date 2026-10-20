@@ -7,7 +7,7 @@
 import { FR_FIELDS, FR_METRICS, STRESS, GATES, plainTerm, numberFormat, checkText, verdictText, type Metric, type MetricUnit, type RunResult } from "@agir/contracts";
 import { reportText } from "./text.ts";
 
-export type ProvenanceEntry = { text: string; ref: string };
+export type ProvenanceEntry = { text: string; ref: string; unit?: "years" };
 
 const money0 = new Intl.NumberFormat("en-US", { maximumFractionDigits: 0 });
 
@@ -52,19 +52,19 @@ export class Formatter {
   }
 
   field(key: string, en: string): string {
-    return this.lang === "fr" ? plainTerm("fr", FR_FIELDS[key] ?? en) : en;
+    return plainTerm(this.lang, this.lang === "fr" ? FR_FIELDS[key] ?? en : en);
   }
 
   gate(key: string, en: string): string {
-    return this.lang === "fr" ? plainTerm("fr", GATES[key]?.[1] ?? en) : en;
+    return plainTerm(this.lang, this.lang === "fr" ? GATES[key]?.[1] ?? en : en);
   }
 
   stress(key: string, en: string): string {
-    return this.lang === "fr" ? STRESS[key]?.[1] ?? en : en;
+    return plainTerm(this.lang, this.lang === "fr" ? STRESS[key]?.[1] ?? en : en);
   }
 
-  private record(text: string, ref: string): string {
-    this.manifest.push({ text, ref });
+  private record(text: string, ref: string, unit?: "years"): string {
+    this.manifest.push({ text, ref, ...(unit ? {unit} : {}) });
     return text;
   }
 
@@ -72,7 +72,7 @@ export class Formatter {
     const s = this.result.scenarios.find((x) => x.key === scenario);
     const m = s?.metrics.find((x) => x.key === key);
     if (!m) throw new Error(`The run has no metric ${scenario}.${key}`);
-    return this.lang === "fr" ? { ...m, label: plainTerm("fr", FR_METRICS[m.key]?.[0] ?? m.label) } : m;
+    return {...m,label:plainTerm(this.lang,this.lang === "fr" ? FR_METRICS[m.key]?.[0] ?? m.label : m.label)};
   }
 
   /** A run metric: its value, or the words that say why it has none. Never zero. */
@@ -95,6 +95,11 @@ export class Formatter {
     return this.record(this.value(value, unit), `input:${ref}`);
   }
 
+  /** A bare term in its sentence, retaining years as the recorded input unit. */
+  refinanceTerm(value: number): string {
+    return this.record(numberFormat(this.lang).value(value,"count"),"input:refinance_term_years","years");
+  }
+
   /** Arithmetic over recorded values; the formula is kept with the figure. */
   derived(value: number | null, unit: Parameters<typeof formatValue>[1], formula: string): string {
     if (value === null || !Number.isFinite(value)) return reportText(this.lang, "notMeaningful");
@@ -114,7 +119,7 @@ export class Formatter {
       }
       text = plainTerm("fr", text);
     }
-    return this.record(text, `run:${ref}`);
+    return this.record(plainTerm(this.lang,text), `run:${ref}`);
   }
 
   /** An identifier (hash, run number, date) printed for traceability. */

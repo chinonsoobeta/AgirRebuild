@@ -59,7 +59,7 @@ export type Block =
   | { type: "paragraph"; text: string; muted?: boolean }
   | { type: "verdict"; code: VerdictCode; label: string; headline: string; explanation: string }
   | { type: "stats"; items: { label: string; value: string }[] }
-  | { type: "table"; columns: { label: string; numeric?: boolean }[]; rows: string[][]; strong?: number[]; caption?: string }
+  | { type: "table"; columns: { label: string; numeric?: boolean }[]; rows: string[][]; strong?: number[]; caption?: string; long?: boolean }
   | { type: "checks"; items: { tone: "pass" | "warning" | "error"; text: string }[] };
 
 export type DocModel = {
@@ -329,13 +329,13 @@ function sponsorStatedBlocks(f: Formatter, x: ArtifactInput): Block[] {
       type: "paragraph",
       text: reportText(f.lang, "sponsorSummary", n, m, stated.length === 1 ? "was" : "were", x.kind === "ic_memo" ? "memo" : (x.kind === "build_decision" || x.kind === "partner_memo") ? "report" : "package", client),
     },
-    { type: "table", columns: INPUT_COLUMNS(f.lang), rows: stated.map((a) => inputRow(f, a)) },
+    { type: "table", long:true, columns: INPUT_COLUMNS(f.lang), rows: stated.map((a) => inputRow(f, a)) },
   ];
 }
 
 function tableValueBlocks(f: Formatter, x: ArtifactInput): Block[] {
   const rows=x.assumptions.filter(a=>a.sourceKind === "table");
-  return rows.length ? [{type:"heading",text:reportText(f.lang,"publishedTables")},{type:"table",columns:INPUT_COLUMNS(f.lang),rows:rows.map(a=>inputRow(f,a))}] : [];
+  return rows.length ? [{type:"heading",text:reportText(f.lang,"publishedTables")},{type:"table",long:true,columns:INPUT_COLUMNS(f.lang),rows:rows.map(a=>inputRow(f,a))}] : [];
 }
 
 /** The one sentence for a line no document gave: a template, with no number. */
@@ -687,7 +687,7 @@ export function buildModel(x: ArtifactInput): DocModel {
         const term = i.refinance.termYears;
         blocks.push({ type: "paragraph", text: (points ?? 0) >= 50
           ? reportText(f.lang, "mliSelect", f.input(points!, "points", "refinance_mli_select_points"))
-          : term !== undefined ? reportText(f.lang, "mliStandardTerm", f.input(term, "points", "refinance_term_years")) : reportText(f.lang, "mliStandardNoTerm") });
+          : term !== undefined ? reportText(f.lang, "mliStandardTerm", f.refinanceTerm(term)) : reportText(f.lang, "mliStandardNoTerm") });
       }
       blocks.push({ type: "paragraph", text: reportText(f.lang, "premium", f.input(i.refinance.insurancePremiumPct, "%", "refinance_insurance_premium_pct"), f.metric("base", "refinance_premium_added")) });
     }

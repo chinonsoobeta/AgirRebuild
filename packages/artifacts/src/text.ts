@@ -1,9 +1,10 @@
+import { plainTerm } from "@agir/contracts";
 // Report wording, side by side. Human-entered names and notes are printed as recorded.
 export const TEXT = {
   publishedTables: ["Taken from published tables", "Tiré de tableaux publiés"],
   mliSelect: ["CMHC MLI Select, {0} points", "SCHL MLI Select, {0} points"],
-  mliStandardTerm: ["CMHC MLI Standard, {0}-year term", "SCHL MLI Standard, terme de {0} ans"],
-  mliStandardNoTerm: ["CMHC MLI Standard, term not stated", "SCHL MLI Standard, terme non précisé"],
+  mliStandardTerm: ["CMHC MLI Standard, {0}-year term", "SCHL MLI Standard, durée de {0} ans"],
+  mliStandardNoTerm: ["CMHC MLI Standard, term not stated", "SCHL MLI Standard, durée non précisée"],
   "approve": ["Approve", "Approuver"],
   "approveConditions": ["Approve with conditions", "Approuver sous conditions"],
   "reject": ["Reject", "Rejeter"],
@@ -192,7 +193,7 @@ export const TEXT = {
 } as const;
 
 export function reportText(lang: "en" | "fr", key: keyof typeof TEXT, ...values: string[]): string {
-  return TEXT[key][lang === "fr" ? 1 : 0].replace(/\{(\d+)\}/g, (_, n: string) => values[Number(n)] ?? "");
+  return plainTerm(lang,TEXT[key][lang === "fr" ? 1 : 0]).replace(/\{(\d+)\}/g, (_, n: string) => values[Number(n)] ?? "");
 }
 
 /** Translate only the system wording around a source; retain document names, quotes and a person's reason. */

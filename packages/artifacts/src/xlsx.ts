@@ -1,4 +1,4 @@
-import { FIELD_BY_KEY, placeLabel } from "@agir/contracts";
+import { plainTerm, FIELD_BY_KEY, placeLabel } from "@agir/contracts";
 import { heldPartnerReturns, runWaterfall } from "@agir/engine";
 import { confirmationLabel, DRAFT_POLICY_LINE, notFoundSentence, type ArtifactInput } from "./model.ts";
 
@@ -32,18 +32,18 @@ export async function renderXlsx(x: ArtifactInput): Promise<Uint8Array> {
   summary.addRow(["Input hash", x.run.inputHash]);
   summary.addRow(["Result hash", x.run.resultHash]);
   summary.addRow([]);
-  summary.addRow(["Verdict", r.verdict.code, r.verdict.headline]).font = { bold: true };
+  summary.addRow(["Verdict", r.verdict.code, plainTerm("en",r.verdict.headline)]).font = { bold: true };
   summary.addRow([]);
   head(summary, ["Gate", "Scenario", "Threshold", "Actual", "Outcome"]);
   for (const g of r.verdict.gates) {
-    const row = summary.addRow([g.label, g.scenario, g.threshold, g.actual, g.status]);
+    const row = summary.addRow([plainTerm("en",g.label), g.scenario, g.threshold, g.actual, g.status]);
     row.getCell(3).numFmt = fmt(g.unit);
     row.getCell(4).numFmt = fmt(g.unit);
   }
   const tableValues=x.assumptions.filter(a=>a.sourceKind === "table");
   if (tableValues.length) {
     summary.addRow([]); summary.addRow(["Taken from published tables"]);
-    for (const a of tableValues) summary.addRow([FIELD_BY_KEY.get(a.fieldKey)?.label ?? a.fieldKey,a.value,a.source]);
+    for (const a of tableValues) summary.addRow([plainTerm("en",FIELD_BY_KEY.get(a.fieldKey)?.label ?? a.fieldKey),a.value,a.source]);
   }
   summary.columns.forEach((c) => (c.width = 26));
 
@@ -53,7 +53,7 @@ export async function renderXlsx(x: ArtifactInput): Promise<Uint8Array> {
   for (const m of r.scenarios[0]!.metrics) {
     if (sale && m.status === "NOT_APPLICABLE" && m.reason === "The units are sold; there is no rental income.") continue;
     const row = metrics.addRow([
-      m.label,
+      plainTerm("en",m.label),
       m.unit,
       ...r.scenarios.map((s) => {
         const v = s.metrics.find((z) => z.key === m.key)!;
@@ -144,7 +144,7 @@ export async function renderXlsx(x: ArtifactInput): Promise<Uint8Array> {
     } else {
       for (const key of ["lp_irr", "gp_irr", "gp_promote"]) {
         const metric = r.scenarios.find((s) => s.key === "base")!.metrics.find((m) => m.key === key)!;
-        const row = partners.addRow([metric.label, metric.status === "VALID" ? metric.value : metric.reason]);
+        const row = partners.addRow([plainTerm("en",metric.label), metric.status === "VALID" ? metric.value : metric.reason]);
         row.getCell(2).numFmt = fmt(metric.unit);
       }
     }
@@ -154,7 +154,7 @@ export async function renderXlsx(x: ArtifactInput): Promise<Uint8Array> {
   const inputs = wb.addWorksheet("Inputs");
   head(inputs, ["Field", "Component", "Value", "Unit", "Source", "Confirmation"]);
   for (const a of x.assumptions) {
-    inputs.addRow([FIELD_BY_KEY.get(a.fieldKey)?.label ?? a.fieldKey, a.itemKey ?? "", a.value, a.unit, a.source, confirmationLabel(a)]);
+    inputs.addRow([plainTerm("en",FIELD_BY_KEY.get(a.fieldKey)?.label ?? a.fieldKey), a.itemKey ?? "", a.value, a.unit, a.source, confirmationLabel(a)]);
   }
   inputs.columns.forEach((c, i) => (c.width = i === 4 ? 60 : 22));
 
@@ -167,7 +167,7 @@ export async function renderXlsx(x: ArtifactInput): Promise<Uint8Array> {
 
   const checks = wb.addWorksheet("Checks");
   head(checks, ["Check", "Kind", "Severity", "Message"]);
-  for (const c of r.checks) checks.addRow([c.key, c.kind, c.severity, c.message]);
+  for (const c of r.checks) checks.addRow([c.key, c.kind, c.severity, plainTerm("en",c.message)]);
   checks.getColumn(4).width = 100;
 
   return new Uint8Array(await wb.xlsx.writeBuffer());
