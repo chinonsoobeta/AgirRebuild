@@ -5620,6 +5620,17 @@ describe("card 104: the minimum coverage covenant in ordinary lender wording", (
     const r = extractCandidates({ kind: "docx", lines: [], tables: [{ name: "Terms", rows: [["DCR floor", "1.20x"], ["Seuil du RCD", "1,25x"], ["Projected DSCR", "1.45x"]].map((row, i) => row.map((text, c): Cell => ({ text, ref: `R${i + 1}C${c + 1}` }))) }], pageCount: 1, needsOcr: false, fullText: "" });
     expect(pick(r)).toEqual([["min_dscr_covenant", 1.2], ["min_dscr_covenant", 1.25]]);
   });
+  test.each(["Min DSCR in year 1: 1.28x", "DSCR floor in year 2: 1.25x", "RCD minimal à l'an 2 : 1,25", "Minimum DSCR, phase 2: 1.30x", "Minimum DSCR for tranche 2 of 1.25x", "Seuil du RCD au mois 3 : 1,20x", "Required coverage in period 1: 1.15x"])("a year, month or phase number is never the covenant: %s", (line) => {
+    const r = read(LOAN, line);
+    expect(r.candidates.some((c) => c.fieldKey === "min_dscr_covenant" && Number.isInteger(c.value))).toBe(false);
+  });
+  test.each([
+    ["The DSCR must not fall below 1.20x.", 1.2], ["Coverage shall not be less than 1.20x", 1.2], ["Le RCD ne doit pas être inférieur à 1,20", 1.2],
+    ["The DCR may not drop below 1.15x.", 1.15], ["Debt coverage must not go below 1.25x", 1.25], ["Le ratio de couverture ne doit pas descendre sous 1,25x.", 1.25], ["La couverture ne doit pas être inférieure à 1,10.", 1.1],
+  ])("a requirement stated as a floor not to cross: %s", (line, value) => expect(pick(read(LOAN, line as string))).toEqual([["senior_loan_amount", 5_000_000], ["min_dscr_covenant", value]]));
+  test.each(["DSCR fell below 1.20x in the stress case", "The DCR dropped below 1.15x last year.", "Le RCD est descendu sous 1,20 l'an dernier."])("a coverage that fell is a result, not the covenant: %s", (line) => {
+    expect(covenant(read(LOAN, line))).toBe(false);
+  });
   test("a coverage limit of another kind keeps the limit note", () => {
     expect(read(LOAN, "Minimum interest coverage: 1.50x").other.find((o) => o.value === 1.5)?.note).toBe("A lender's limit, not the deal's figure");
     expect(read("Minimum cash equity of $2,400,000").other.find((o) => o.value === 2_400_000)?.note).toBe("A lender's limit, not the deal's figure");

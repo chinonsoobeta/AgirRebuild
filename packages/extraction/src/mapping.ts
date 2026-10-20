@@ -169,7 +169,11 @@ const COVERAGE_RE = /\b(dscr|dcr|debt (?:service )?coverage|couverture|rcsd|rcd|
 // Card 104: a coverage ratio named with a requirement ("DCR floor: 1.20x", "must maintain a DSCR of 1.25x", "Seuil du RCD : 1,20x") is the minimum covenant;
 // for it the lender's limit is the value. A result (projected, actual, stabilized, underwritten, stressed), another coverage or a test of something else never is.
 const COVENANT_RATIO_RE = /\b(dscr|dcr|debt (?:service )?coverage|coverage|couverture|rcsd|rcd|ccd)\b/;
-const COVENANT_NEED_RE = /\b(floors?|minimum|min|required|requirements?|covenants?|tests?|must maintain|maintain|at least|not less than|no less than|thresholds?|hurdles?|plancher|seuil|minimale?|exigee?|requise?|exigences?|clauses?|au moins|maintenir)\b/;
+const COVENANT_NEED_RE = /\b(floors?|minimum|min|required|requirements?|covenants?|tests?|must maintain|maintain|at least|not less than|no less than|thresholds?|hurdles?|plancher|seuil|minimale?|exigee?|requise?|exigences?|clauses?|au moins|maintenir|(?:must|shall|may) not (?:fall|drop|go) below|not be less than|ne (?:doit |doivent )?pas (?:etre inferieure? a|descendre (?:sous|en dessous de)))\b/;
+// A bare number right after one of these is an index ("year 1", "phase 2", "l'an 2"), never a coverage ratio.
+const INDEX_BEFORE_RE = /\b(?:year|yr|month|mo|an|annee|mois|phase|tranche|period|periode)\s*$/;
+const indexFigure = (rawLabel: string, t: NumberToken) => t.unit === null && INDEX_BEFORE_RE.test(foldText(rawLabel).replace(/[^a-z0-9\s]/g, " "));
+const INDEX_NOTE = "A year, month, phase or tranche number, not a coverage ratio";
 const COVENANT_AFTER_RE = /^\s*(?:minimum|min|floor|required|covenant|minimale?|exigee?|requise?|plancher)\b/;
 // A coverage result or a margin over the covenant; with another coverage or a test of something else, never the covenant.
 const COVERAGE_RESULT = String.raw`projected|pro[- ]?forma|actual|underwritten|calculated|computed|achieved|results?|stress\w*|sensitivit\w*|shocks?|scenarios?|downside|headroom|cushion|buffer|breach\w*|projete\w*|reel\w*|calcule\w*|atteint\w*|resultats?|sensibilite|choc`;
@@ -267,7 +271,7 @@ function lenderFigure(rawLabel: string, t: NumberToken, opts: MapOptions): strin
 
 /** The minimum coverage covenant a ratio's own words state (card 104); null when they state none, or the loan in scope is the mezzanine. */
 function coverageCovenant(rawLabel: string, t: NumberToken, opts: MapOptions): Mapped | null {
-  if (t.value === null || !(t.unit === "x" || (t.unit === null && t.value >= 0.5 && t.value <= 3))) return null;
+  if (t.value === null || !(t.unit === "x" || (t.unit === null && t.value >= 0.5 && t.value <= 3)) || indexFigure(rawLabel, t)) return null;
   const words_ = (x: string) => foldText(x).replace(/[^a-z0-9\s-]/g, " ").replace(/\s+/g, " ").trim();
   // In prose the clause just before the number, in a label the label and the words between it and its figure; then the words right after the figure.
   const own = words_(`${opts.prose ? (rawLabel.split(/[,;(]|\band\b|\bet\b/).pop() ?? "") : rawLabel} ${opts.ahead ?? opts.gap ?? ""}`);
@@ -983,6 +987,7 @@ function mapLabel(rawLabel: string, t: NumberToken, opts: MapOptions = {}): Mapp
     return notAssumed(item.def.key) ?? { kind: "field", fieldKey: item.def.key, itemKey: typed ?? item.itemKey, value: item.value, unitSeen: item.unitSeen };
   }
   // A covenant alias beside a result, a stress or a margin over it ("DSCR covenant headroom") is not the covenant.
+  if (best?.def.key === "min_dscr_covenant" && indexFigure(rawLabel, t)) return { kind: "ignored", reason: INDEX_NOTE };
   if (best?.def.key === "min_dscr_covenant" && COVERAGE_RESULT_RE.test(label)) return { kind: "ignored", reason: "A coverage result or a margin over the covenant, not the minimum covenant" };
   if (best) return notAssumed(best.def.key) ?? { kind: "field", fieldKey: best.def.key, itemKey: null, value: best.value, unitSeen: best.unitSeen };
   // An EGI basis supplies the unit, but the cost's own label must identify the field.
