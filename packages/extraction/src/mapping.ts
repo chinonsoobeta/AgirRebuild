@@ -166,6 +166,15 @@ const CAPPED_RE = /\bcapped\b/;
 const CAPPED_COST_RE = /\b(hard costs?|construction costs?|building costs?|contract|fixed price|price|budget|couts? de construction|travaux|prix)\b/;
 const LOAN_WORD_RE = /\b(loan|loans|mortgage|financing|advance|pret|hypotheque|financement)\b/;
 const COVERAGE_RE = /\b(dscr|dcr|debt (?:service )?coverage|couverture|rcsd|rcd|ccd)\b/;
+// Card 104: a coverage ratio named with a requirement ("DCR floor: 1.20x", "must maintain a DSCR of 1.25x", "Seuil du RCD : 1,20x") is the minimum covenant;
+// for it the lender's limit is the value. A result (projected, actual, stabilized, underwritten, stressed), another coverage or a test of something else never is.
+const COVENANT_RATIO_RE = /\b(dscr|dcr|debt (?:service )?coverage|coverage|couverture|rcsd|rcd|ccd)\b/;
+const COVENANT_NEED_RE = /\b(floors?|minimum|min|required|requirements?|covenants?|tests?|must maintain|maintain|at least|not less than|no less than|thresholds?|hurdles?|plancher|seuil|minimale?|exigee?|requise?|exigences?|clauses?|au moins|maintenir)\b/;
+const COVENANT_AFTER_RE = /^\s*(?:minimum|min|floor|required|covenant|minimale?|exigee?|requise?|plancher)\b/;
+// A coverage result or a margin over the covenant; with another coverage or a test of something else, never the covenant.
+const COVERAGE_RESULT = String.raw`projected|pro[- ]?forma|actual|underwritten|calculated|computed|achieved|results?|stress\w*|sensitivit\w*|shocks?|scenarios?|downside|headroom|cushion|buffer|breach\w*|projete\w*|reel\w*|calcule\w*|atteint\w*|resultats?|sensibilite|choc`;
+const COVERAGE_RESULT_RE = new RegExp(String.raw`\b(?:${COVERAGE_RESULT})\b`);
+const NOT_COVENANT_RE = new RegExp(String.raw`\b(?:${COVERAGE_RESULT}|stabili[sz]\w*|current|in-place|trailing|historical|sweep|trigger|lock-?up|distributions?|interest cover\w*|fixed charge|insurance|hedge|collateral|liquidity|net worth|guarant\w*|equity|rents?|occupancy|ltv|ltc|loan to (?:value|cost)|actuel\w*|couverture (?:des|d) interets?|assurance|liquidite|garant\w*|loyers?|occupation)\b`);
 const TERM_RE = /\b(term|terme|maturity|matures?|echeance|duree du pret)\b/;
 // Up to two words may stand between the figure and the term ("24-month legal term", "18-month maturity").
 const TERM_AFTER_RE = /^\s*(?:(?!(?:of|de|du|d|to|as|and|et|or|ou|then|puis|is|est|for|pour)\b)[a-z]+ ){0,2}(term|terme|maturity|echeance)\b/;
@@ -254,6 +263,18 @@ function lenderFigure(rawLabel: string, t: NumberToken, opts: MapOptions): strin
   const after = prose && at >= 0 ? (ctx.slice(at + raw.length).split(/[,;.]/)[0] ?? "") : "";
   if (t.unit === "%" && (LEASED_RE.test(plain) || LEASED_RE.test(after.split(" ").slice(0, 6).join(" "))) && CONDITION_RE.test(`${plain} ${after}`)) return LENDER_CONDITION;
   return null;
+}
+
+/** The minimum coverage covenant a ratio's own words state (card 104); null when they state none, or the loan in scope is the mezzanine. */
+function coverageCovenant(rawLabel: string, t: NumberToken, opts: MapOptions): Mapped | null {
+  if (t.value === null || !(t.unit === "x" || (t.unit === null && t.value >= 0.5 && t.value <= 3))) return null;
+  const words_ = (x: string) => foldText(x).replace(/[^a-z0-9\s-]/g, " ").replace(/\s+/g, " ").trim();
+  // In prose the clause just before the number, in a label the label and the words between it and its figure; then the words right after the figure.
+  const own = words_(`${opts.prose ? (rawLabel.split(/[,;(]|\band\b|\bet\b/).pop() ?? "") : rawLabel} ${opts.ahead ?? opts.gap ?? ""}`);
+  const next = words_((opts.after ?? "").split(/[,;.(]/)[0] ?? "").split(" ").slice(0, 4).join(" ");
+  if (!COVENANT_RATIO_RE.test(own) || !(COVENANT_NEED_RE.test(own) || COVENANT_AFTER_RE.test(next)) || NOT_COVENANT_RE.test(`${own} ${next}`)) return null;
+  if ((scopeIn(normalizeLabel(rawLabel).label) ?? opts.scope ?? "senior") === "mezzanine") return null;
+  return { kind: "field", fieldKey: "min_dscr_covenant", itemKey: null, value: t.value, unitSeen: t.unit === "x" ? "x" : "number" };
 }
 
 /**
@@ -768,10 +789,13 @@ function mapLabel(rawLabel: string, t: NumberToken, opts: MapOptions = {}): Mapp
   // From the figure's own unit word on: "3 unités" may be read as "3 unit" followed by "és".
   const pace = PACE_AFTER_RE.exec(foldText(`${t.raw.replace(/^[\d\s.,]+/, "")}${opts.after ?? ""}`));
   if (pace && (t.unit === "units" || (t.unit === null && pace[1]))) return { kind: "ignored", reason: PACE_NOTE };
-  const lender = lenderFigure(rawLabel, t, opts);
+  // A minimum coverage covenant is a lender's limit that is read.
+  const covenant = coverageCovenant(rawLabel, t, opts);
+  const lender = covenant ? null : lenderFigure(rawLabel, t, opts);
   if (lender) return { kind: "ignored", reason: lender };
   // A sentence that says not to treat its figure as something, or that the figure is not something, gives nothing from it ("#" stands for the figure).
   if (opts.context !== undefined && NOT_AS_RE.test(foldText(`${opts.context.slice(0, t.start).split(/[,;.]/).pop() ?? ""} # ${(opts.after ?? "").split(/[,;.]/)[0] ?? ""}`))) return { kind: "ignored", reason: NOT_AS_NOTE };
+  if (covenant) return covenant;
   // Unless the figure's own clause names the preferred return ("a preferred return of 8% to the investors").
   const prefLead = () => FIELD_BY_KEY.get("preferred_return_pct")!.aliases.some((a) => hasPhrase(normalizeLabel(rawLabel.split(/[,;]/).pop() ?? "").label, a));
   if (t.unit === "%" && SHARE_TO_RE.test(foldText(opts.after ?? "")) && !prefLead()) return { kind: "ignored", reason: "A share of distributions, not the preferred return" };
@@ -958,6 +982,8 @@ function mapLabel(rawLabel: string, t: NumberToken, opts: MapOptions = {}): Mapp
   if (item && item.itemKey && (!best || item.alias.length >= best.alias.length)) {
     return notAssumed(item.def.key) ?? { kind: "field", fieldKey: item.def.key, itemKey: typed ?? item.itemKey, value: item.value, unitSeen: item.unitSeen };
   }
+  // A covenant alias beside a result, a stress or a margin over it ("DSCR covenant headroom") is not the covenant.
+  if (best?.def.key === "min_dscr_covenant" && COVERAGE_RESULT_RE.test(label)) return { kind: "ignored", reason: "A coverage result or a margin over the covenant, not the minimum covenant" };
   if (best) return notAssumed(best.def.key) ?? { kind: "field", fieldKey: best.def.key, itemKey: null, value: best.value, unitSeen: best.unitSeen };
   // An EGI basis supplies the unit, but the cost's own label must identify the field.
   if (t.unit === "%" && STATED_EGI_AFTER_RE.test(foldText(opts.after ?? ""))) {

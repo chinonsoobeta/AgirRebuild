@@ -5575,3 +5575,59 @@ describe("card 103 audit: a part included in a line, and the writer's own fee, a
   });
   test.each([["Honoraires : 240 000 $", 240_000], ["Soft costs: $450,000", 450_000], ["Professional fees: $310,000", 310_000], ["Soft costs (including permits): $500,000", 500_000]])("the line itself still reads: %s", (line, n) => expect(pick(read(line))).toEqual([["soft_cost", n]]));
 });
+
+describe("card 104: the minimum coverage covenant in ordinary lender wording", () => {
+  const read = (...lines: string[]) => extractCandidates({ kind: "pdf", lines: lines.map((text, i) => ({ text, location: `page 1, line ${i + 1}` })), tables: [], pageCount: 1, needsOcr: false, fullText: lines.join("\n") });
+  const pick = (r: ReturnType<typeof read>) => r.candidates.map((c) => [c.fieldKey, c.value]);
+  const LOAN = "Construction loan: $5,000,000";
+  const covenant = (r: ReturnType<typeof read>) => r.candidates.some((c) => c.fieldKey === "min_dscr_covenant");
+  test.each([
+    ["DCR floor: 1.20x", 1.2], ["DSCR floor: 1.25x", 1.25], ["Required coverage: 1.20x", 1.2], ["Coverage requirement: 1.20x", 1.2],
+    ["Covenant: DCR of 1.20x tested annually", 1.2], ["Maintenance DCR floor 1.25x applies through operations", 1.25], ["The borrower must maintain a DSCR of 1.25x.", 1.25],
+    ["Minimum coverage: 1.20x", 1.2], ["Debt coverage ratio: 1.20x minimum", 1.2],
+    ["Lender's required DCR: 1.30x", 1.3], ["DSCR test: 1.20x", 1.2], ["DSCR must be at least 1.25x.", 1.25], ["Debt service coverage threshold: 1.10x", 1.1],
+    ["DSCR: minimum 1.20x", 1.2], ["The borrower shall maintain a DCR of 1.15 throughout the term.", 1.15], ["Coverage floor of 1.25x, tested quarterly", 1.25],
+  ])("English: %s", (line, value) => expect(pick(read(LOAN, line as string))).toEqual([["senior_loan_amount", 5_000_000], ["min_dscr_covenant", value]]));
+  test.each([
+    ["Ratio de couverture exigé : 1,20", 1.2], ["Seuil du RCD : 1,20x", 1.2], ["Plancher de couverture : 1,20x", 1.2],
+    ["Couverture requise : 1,25x", 1.25], ["RCD exigé : 1,20", 1.2], ["L'emprunteur doit maintenir un RCD de 1,25x.", 1.25], ["Exigence de couverture : 1,15x", 1.15],
+    ["Plancher du RCD : 1,25x", 1.25], ["Le RCD doit être d'au moins 1,20.", 1.2], ["Seuil de couverture minimal : 1,10x", 1.1],
+  ])("French: %s", (line, value) => expect(pick(read(LOAN, line as string))).toEqual([["senior_loan_amount", 5_000_000], ["min_dscr_covenant", value]]));
+  test("keep: a projected DSCR is shown as an output figure, and one at stabilization reads nothing", () => {
+    const projected = read(LOAN, "Projected DSCR: 1.45x");
+    expect(pick(projected)).toEqual([["senior_loan_amount", 5_000_000]]);
+    expect(projected.other.find((o) => o.value === 1.45)?.note).toContain("output figure");
+    expect(pick(read(LOAN, "DSCR at stabilization: 1.38x"))).toEqual([["senior_loan_amount", 5_000_000]]);
+  });
+  test.each([
+    "RCD projeté : 1,45", "DSCR under a 100 bps shock: 1.05x", "Interest coverage ratio: 2.10x", "Minimum interest coverage: 1.50x", "Ratio de couverture des intérêts minimal : 2,0x",
+    "Actual DSCR: 1.32x", "Underwritten DSCR: 1.30x", "Stabilized DSCR at the required rate: 1.40x", "Calculated DCR vs minimum: 1.28x", "DSCR stress test: 1.05x",
+    "RCD réel minimal atteint : 1,32x", "RCD stabilisé exigé : 1,40", "Equity multiple of at least 1.8x", "DCR floor: 75%", "DSCR covenant headroom: 0.25x",
+    "Rent coverage test: 1.15x", "Liquidity coverage minimum 1.5x", "Fixed charge coverage minimum: 1.20x", "Cash sweep trigger DSCR floor: 1.10x",
+    "DSCR test result: 1.35x", "Covenants: DSCR 1.35x projected vs 1.20x required", "Insurance coverage minimum: $2,000,000",
+  ])("never the covenant: %s", (line) => expect(covenant(read(LOAN, line))).toBe(false));
+  test.each(["DSCR: 1.45x (minimum 1.20x)", "DSCR: 1.45x vs 1.20x required", "Coverage: 1.45x against a 1.20x floor", "RCD : 1,45x, minimum 1,20x"])("beside a result, only the minimum is the covenant: %s", (line) => {
+    expect(pick(read(LOAN, line))).toEqual([["senior_loan_amount", 5_000_000], ["min_dscr_covenant", 1.2]]);
+  });
+  test.each([["Minimum DSCR during interest-only period: 1.20x", 1.2], ["Minimum DSCR on in-place rents: 1.20x", 1.2], ["DSCR covenant: 1.20x", 1.2], ["The lender's DSCR threshold is 1.2.", 1.2]])("a covenant still reads: %s", (line, value) => {
+    expect(pick(read(LOAN, line as string))).toEqual([["senior_loan_amount", 5_000_000], ["min_dscr_covenant", value]]);
+  });
+  test("a margin over the covenant is shown, not read", () => {
+    const r = read(LOAN, "DSCR covenant headroom: 0.25x");
+    expect(r.other.find((o) => o.value === 0.25)?.note).toBe("A coverage result or a margin over the covenant, not the minimum covenant");
+  });
+  test("a table row reads the covenant", () => {
+    const r = extractCandidates({ kind: "docx", lines: [], tables: [{ name: "Terms", rows: [["DCR floor", "1.20x"], ["Seuil du RCD", "1,25x"], ["Projected DSCR", "1.45x"]].map((row, i) => row.map((text, c): Cell => ({ text, ref: `R${i + 1}C${c + 1}` }))) }], pageCount: 1, needsOcr: false, fullText: "" });
+    expect(pick(r)).toEqual([["min_dscr_covenant", 1.2], ["min_dscr_covenant", 1.25]]);
+  });
+  test("a coverage limit of another kind keeps the limit note", () => {
+    expect(read(LOAN, "Minimum interest coverage: 1.50x").other.find((o) => o.value === 1.5)?.note).toBe("A lender's limit, not the deal's figure");
+    expect(read("Minimum cash equity of $2,400,000").other.find((o) => o.value === 2_400_000)?.note).toBe("A lender's limit, not the deal's figure");
+  });
+  test.each([["Mezzanine term sheet", "DCR floor: 1.30x"], ["Financement mezzanine", "Seuil du RCD : 1,30x"], ["Second mortgage offer", "Required coverage: 1.25x"]])("mezzanine still refuses the covenant: %s", (heading, line) => {
+    expect(covenant(read(heading, line))).toBe(false);
+  });
+  test.each([["Take-out commitment", "DCR floor: 1.15x", 1.15], ["Offre de refinancement", "Plancher de couverture : 1,20x", 1.2]])("the take-out reads the covenant: %s", (heading, line, value) => {
+    expect(pick(read(heading as string, line as string))).toEqual([["min_dscr_covenant", value]]);
+  });
+});
