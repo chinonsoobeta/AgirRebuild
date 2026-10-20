@@ -142,6 +142,10 @@ const NOT_A_LOAN_RATE = /\b(vacancy|growth|discount|tax|exchange|inflation|retur
 // A rate word: it may be followed by a qualifier ("taux annuel", "rate, fixed"), and an interest that is a stake or a reserve is no loan's rate.
 const RATE_ALIASES = new Set(["rate", "taux", "interest", "interet"]);
 const RATE_QUALIFIER = "annual|annuel|annuelle|per annum|par an|l an|nominal|nominale|contractual|contract|contractuel|contractuelle|fixed|stated|all-in|effectif|effective";
+// Interest on deposits, a partner's capital, a late or default payment, or a rate cap's strike: a rate word beside these is no loan's rate.
+const RATE_WORD_ALIASES = new Set([...RATE_ALIASES, "interest rate", "taux d interet", "au taux de", "contract interest", "interet contractuel"]);
+const NOT_A_LOAN_RATE_CONTEXT = /\b(deposits?|depots?|investors?|investisseurs?|partners?|associes?|commanditaires?|lps?|gp|late|arrears|overdue|retard|arrerages|default|defaut|penalty|penalite|cap|plafond|unreturned|capital account)\b/;
+const NOT_A_LOAN_RATE_NOTE = "Interest on deposits, a partner's capital or a late or default payment, or a rate cap's strike, is not the loan's rate";
 const NOT_A_LOAN_INTEREST = /\b(carried|ownership|partnership|equity|working|minority|majority|controlling|lp|gp|profits?|beneficial) interests?\b|\binterests? (coverage|reserves?|income)\b|\bparticipation\b|\binterets? (minoritaires?|majoritaires?|reportes?)\b|\b(reserves?|revenus?|couverture) (d|des) interets?\b/;
 
 // What a lender writes that looks like an input but is not. Words that are part of a field alias ("minimum DSCR", "construction term loan",
@@ -856,6 +860,7 @@ function mapLabel(rawLabel: string, t: NumberToken, opts: MapOptions = {}): Mapp
   if (t.unit === "%" && best && best.def.group === "senior" && PARTNER_RE.test(partner)) {
     return PARTNER_PREF_RE.test(partner) && !PREF_EQUITY_RE.test(partner) ? asField(FIELD_BY_KEY.get("preferred_return_pct")!) ?? { kind: "unmapped" } : { kind: "ignored", reason: "A partner's return, not a loan's rate" };
   }
+  if (best && best.def.key === "senior_rate_pct" && RATE_WORD_ALIASES.has(best.alias) && NOT_A_LOAN_RATE_CONTEXT.test(label)) return { kind: "ignored", reason: NOT_A_LOAN_RATE_NOTE };
   // A generic senior-loan label under another loan's scope is that loan's; a term it has no field for is shown, not given to the senior loan.
   if (best && best.def.group === "senior" && scope !== "senior") {
     const own = SCOPE_FIELD[scope][best.def.key];

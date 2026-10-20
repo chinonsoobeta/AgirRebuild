@@ -5352,4 +5352,18 @@ describe("card 100: a loan's rate written with a qualifier, as \"interest\", or 
     const r = read(EN, line);
     expect(r.candidates.some((c) => /_rate_pct$/.test(c.fieldKey ?? ""))).toBe(false);
   });
+  test.each([
+    "Deposit interest: 2%", "Purchaser deposits earn interest at 1.5% per annum.", "Investors earn interest at 8%.",
+    "The limited partners receive interest at 8% on unreturned capital.", "Late payment interest: 2% per month", "Default interest: 18%",
+    "Default rate: 18%", "Deposit rate: 2%", "Interest rate cap strike: 7%", "Interest on overdue amounts: 1.5%",
+    "Intérêt sur les dépôts : 2 %", "Taux de pénalité : 18 %", "Les commanditaires reçoivent un intérêt de 8 %", "Taux d'intérêt sur les arrérages : 2 %", "Taux d'intérêt en cas de défaut : 18 %",
+  ])("interest on deposits, a partner's capital or a late or default payment is not the loan's rate: %s", (line) => {
+    const r = read(line);
+    expect(r.candidates.some((c) => /_rate_pct$/.test(c.fieldKey ?? ""))).toBe(false);
+    expect(r.other.length).toBeGreaterThan(0);
+  });
+  test("the promote and the preferred return still read beside a partner's interest", () => {
+    expect(pick(read("Carried interest: 20%"))).toEqual([["gp_promote_pct", 20]]);
+    expect(pick(read("LP preferred return: 8%"))).toEqual([["preferred_return_pct", 8]]);
+  });
 });
