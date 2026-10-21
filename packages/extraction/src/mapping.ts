@@ -4,7 +4,7 @@
 // but it never becomes an input.
 
 import { FIELD_BY_KEY, FIELDS, OUTPUT_LIKE_PHRASES, type FieldDef } from "@agir/contracts";
-import { ASSUMPTION_HISTORY, OCCUPANCY_WORD, SETTLED_WORD, ACQUISITION_WORD, PROPERTY_WORD, RISK_WORD, HOLDING_WORD, RESIDUAL_COST, NOT_THIS_COST, NOT_RISK_COST, NOT_PROJECT_TOTAL, PROJECT_TOTAL, CONCEPTS, SENIOR_RANK, LOAN_PERIOD, STATED_TOTAL, DEBT_SERVICE, LOAN_ANAPHOR, LOAN_NOUN, MAIN_LENDER, MONTH_INDEX, NOT_A_BUDGET_LINE, NOT_CHOSEN_AFTER, LEAVING_AFTER, NOT_THE_DEALS_ASSUMPTION, NOT_THE_LOAN_AFTER, WHERE_IT_SITS } from "./concepts.ts";
+import { ASSUMPTION_HISTORY, OCCUPANCY_WORD, SETTLED_WORD, ACQUISITION_WORD, PROPERTY_WORD, RISK_WORD, HOLDING_WORD, RESIDUAL_COST, NOT_THIS_COST, NOT_RISK_COST, NOT_PROJECT_TOTAL, PROJECT_TOTAL, CONCEPTS, SENIOR_RANK, LOAN_PERIOD, STATED_TOTAL, DEBT_SERVICE, LOAN_NOUN, MAIN_LENDER, MONTH_INDEX, NOT_A_BUDGET_LINE, NOT_CHOSEN_AFTER, LEAVING_AFTER, NOT_THE_DEALS_ASSUMPTION, NOT_THE_LOAN_AFTER, WHERE_IT_SITS } from "./concepts.ts";
 import { canonicalItem, codeOf, parenType, SF_PER_M2, unitTypesIn, wholeUnitType, type CurrencyCode, type NumberToken } from "@agir/numbers";
 
 // canonicalItem and itemFold live in @agir/numbers so the engine can use the same fold.
@@ -40,8 +40,8 @@ const ITEMIZED_ALIASES: Record<string, string[]> = {
 export type Scope = "senior" | "mezzanine" | "refinance";
 
 const SCOPE_WORDS: Record<Scope, RegExp> = {
-  mezzanine: /\b(mezzanine|mezz|second loan|second mortgage|2nd mortgage|second charge|second[- ]ranking|second[- ]position|junior|subordinate loan|deuxieme pret|pret (?:de|du) deuxieme(?: rang)?|(?:taux|amort\w*|interet) (?:de la|du) deuxieme(?=\s*(?:$|[:;,]|pret|rang|hypotheque|charge))|(?:rate|amorti[sz]ation|interest) (?:of|on) the second(?=\s*(?:$|[:;,]|loan|mortgage|charge|lien))|deuxieme rang|deuxieme hypotheque|pret de second rang|second rang|(?:mic|mortgage investment corporation) (?:second|2nd)|private second|(?<=\b(?:mortgages?|loans?|charges?|lenders?|hypotheques?|prets?)\b.{0,80})(?:the\s+)?second(?=\s*(?:is\b|:|\$))|^\s*second\s*$|(?:the\s+)?second(?=\s+(?:amort\w*|int|interest|rate|coupon|io|lender|loan)\b)|preteur prive de second rang)\b/,
-  refinance: /\b(take-?out|take out|refi|refinanc\w*|permanent loan|(?:dollars|cash|committed|amount|proceeds|montant) permanent|permanent (?=(?:dollars|cash|committed|amount|proceeds|montant)\b)|permanent financing|exit financing|long[- ]term mortgage|pret permanent|financement permanent|financement de sortie|permanent (?:mortgage|debt|facility|lender)|permanent (?=(?:io|interest|amorti[sz]\w*|repayment|rate|term)\b)|conversion (?:rate|coupon)|converts? to (?:(?:an?|the) )?(?:\$|\d|(?:[a-z-]+ ){0,2}(?:loan|mortgage|debt|financing|facility|rate))|term[- ]out|hypotheque permanente|pret a terme|reprise(?!\s+(?:des?\s+|du\s+|de la\s+)?(?:travaux|chantier|construction|possession|bail|baux|terrain))|replacement (?:loan|debt|financing|facility|mortgage|lender|interest|rate|amorti[sz]ation|amount)|(?:pret|financement) de remplacement)\b/,
+  mezzanine: /\b(mezzanine|mezz|subordinate|subordonnee?s?|(?:mic (?:second|2nd)|mic(?=.{0,80}\b(?:second|2nd|loan|principal|cash|rate|coupon|charge|interest|amort\w*|io)\b))|private lender|mortgage investment corporation(?=.{0,80}\b(?:lend\w*|advance\w*|principal|cash|rate|coupon|charge|interest|amort\w*|io)\b)|second(?=\s+(?:cash\b|principal\b|\$))|second loan|second mortgage|2nd mortgage|second charge|second[- ]ranking|second[- ]position|junior|subordinate loan|deuxieme pret|pret (?:de|du) deuxieme(?: rang)?|(?:taux|amort\w*|interet) (?:de la|du) deuxieme(?=\s*(?:$|[:;,]|pret|rang|hypotheque|charge))|(?:rate|amorti[sz]ation|interest) (?:of|on) the second(?=\s*(?:$|[:;,]|loan|mortgage|charge|lien))|deuxieme rang|deuxieme hypotheque|pret de second rang|second rang|(?:mic|mortgage investment corporation) (?:second|2nd)|private second|(?<=\b(?:mortgages?|loans?|charges?|lenders?|hypotheques?|prets?)\b.{0,80})(?:the\s+)?second(?=\s*(?:is\b|:|\$))|^\s*second\s*$|(?:the\s+)?second(?=\s+(?:amort\w*|int|interest|rate|coupon|io|lender|loan)\b)|preteur prive de second rang)\b/,
+  refinance: /\b(take-?out|take out|permanent|perm|refi|refinanc\w*|permanent loan|(?:dollars|cash|committed|amount|proceeds|montant) permanent|permanent (?=(?:dollars|cash|committed|amount|proceeds|montant)\b)|permanent financing|exit financing|long[- ]term mortgage|pret permanent|financement permanent|financement de sortie|permanent (?:mortgage|debt|facility|lender)|permanent (?=(?:io|interest|amorti[sz]\w*|repayment|rate|term)\b)|conversion (?:rate|coupon)|converts? to (?:(?:an?|the) )?(?:\$|\d|(?:[a-z-]+ ){0,2}(?:loan|mortgage|debt|financing|facility|rate))|term[- ]out|hypotheque permanente|pret a terme|reprise(?!\s+(?:des?\s+|du\s+|de la\s+)?(?:travaux|chantier|construction|possession|bail|baux|terrain))|replacement (?:loan|debt|financing|facility|mortgage|lender|interest|rate|amorti[sz]ation|amount)|(?:pret|financement) de remplacement)\b/,
   senior: new RegExp(`${SENIOR_RANK.source}|\\b(?:construction (?:loan|facility)|premier rang|pret de construction)\\b`),
 };
 const TERM_SHEET_RE = /\b(term sheet|feuille de modalites)\b/;
@@ -52,10 +52,12 @@ const SUBORDINATE_RE = /\b(subordinate[ds]?|postponed|subordonnee?s?|postposee?s
 
 /** The one scope a title, heading or label names; null when it names none, or two or more. A term sheet that names no other is senior unless `generic` is false. */
 export function scopeIn(text: string, generic = true): Scope | null {
-  let f = foldText(text);
+  let f = foldText(text).replace(/\b(?:permits?|allows?|permitted|allowed|autorise\w*|permet\w*)\b[^.;]*\b(?:subordinate|subordonn\w*)\b[^.;]*/g, " ");
+  f = f.replace(/\b(?:subordinate|subordonn\w*)\b[^.;]*\b(?:permitted|allowed|autorise\w*)\b[^.;]*/g, " ");
   const sub = SUBORDINATE_RE.exec(f);
   if (sub) f = f.slice(0, sub.index) + " mezzanine";
   const named = (Object.keys(SCOPE_WORDS) as Scope[]).filter((k) => SCOPE_WORDS[k].test(f));
+  if (named.includes("mezzanine") && named.includes("senior") && !/\b(?:and|et)\b/.test(f)) named.splice(named.indexOf("senior"), 1);
   if (generic && named.length === 0 && TERM_SHEET_RE.test(f)) named.push("senior");
   return named.length === 1 ? named[0]! : null;
 }
@@ -82,10 +84,10 @@ const REPAY_RE = /\b(repa\w+|refinanc\w*|take-?out|rembours\w+)\b/;
 export const REPLACED_LOAN = String.raw`(?:(?:the|a|an|our|its|their|existing|current|le|la|l|notre|son|sa|leur|actuel\w*)['’\s]+)*(?:construction (?:loan|facility|financing|mortgage)|interim (?:loan|financing|facility)|bridge (?:loan|financing|facility)|pret (?:de construction|interimaire|relais)|financement (?:temporaire|interimaire|de construction))\b`;
 const REPLACE_LOAN_RE = new RegExp(String.raw`\b(?:replac\w*|remplac\w*)\s+${REPLACED_LOAN}`);
 // A take-out timing label ("Take-out month", "Refinance closing month", "Mois de la reprise"); not a term, amortization, IO, lock, maturity or period.
-const TAKEOUT_TIMING_RE = /\b(?:(?:target|targeted|planned|expected)\s+)?(?:take-?out|take out|refi|refinanc\w*|permanent loan)(?:\s+(?:closing|target|targeted|expected|planned|scheduled|anticipated|estimated|funding))?\s+(?:month|mo|timing|date)$|\b(?:mois|moment|date)(?:\s+(?:prevue?|cible|visee))?\s+(?:de la |du |de |d )?(?:reprise|refinancement)(?!\s+(?:des?\s+|du\s+|de la\s+)?(?:travaux|chantier|construction|possession|bail|baux|terrain))\b/;
+const TAKEOUT_TIMING_RE = /\b(?:(?:target|targeted|planned|expected)\s+)?(?:take-?out|take out|refi|refinanc\w*|permanent loan)(?:\s+(?:closing|target|targeted|expected|planned|scheduled|anticipated|estimated|funding))?\s+(?:at\s+)?(?:month|mo|timing|date)$|\b(?:mois|moment|date)(?:\s+(?:prevue?|cible|visee))?\s+(?:de la |du |de |d )?(?:reprise|refinancement)(?!\s+(?:des?\s+|du\s+|de la\s+)?(?:travaux|chantier|construction|possession|bail|baux|terrain))\b/;
 // A month counted from a later event ("24 months after completion") is not the project month; one counted from the project's or the loan's start is.
 const LATER_EVENT_RE = /^\s*(?:after|following|from|post|since|past|beyond|once|apres|suivant|a compter de|a partir de|des)\b/;
-const PROJECT_START_RE = /\b(?:construction start|start of construction|commencement of construction|first (?:advance|draw)|loan closing|financial close|closing|debut de la construction|debut des travaux|premier deboursement|cloture du financement)\b/;
+const PROJECT_START_RE = /\b(?:construction start|start of construction|commencement of construction|first (?:advance|draw)|loan closing|financial close|closing|debut de la construction|debut des travaux|premier deboursement|premier debourse|cloture du financement)\b/;
 const LATER_EVENT_NOTE = "A month counted from a later event, not the project month; enter the project month";
 const TAKEOUT_NOT_RE = /\b(term|amorti[sz]\w*|interest[- ]only|io|lock|maturity|duree|echeance|periode)\b/;
 /** A take-out timing label, including a month noun after a colon; only this use of "target" is an input. */
@@ -167,7 +169,7 @@ const VARIABLE_RE = /\bvariables?\b/;
 const NOT_A_LOAN_RATE = /\b(vacancy|growth|discount|tax|exchange|inflation|return|occupancy) rate\b|\b(taux de (croissance|vacance|actualisation|change|rendement|capitalisation|taxation)|taux d (inflation|imposition|occupation))\b|\brate of return\b/;
 // A rate word: it may be followed by a qualifier ("taux annuel", "rate, fixed"), and an interest that is a stake or a reserve is no loan's rate.
 const RATE_ALIASES = new Set(["rate", "taux", "interest", "interet"]);
-const RATE_QUALIFIER = "annual|annuel|annuelle|per annum|par an|l an|nominal|nominale|contractual|contract|contractuel|contractuelle|fixed|stated|all-in|effectif|effective";
+const RATE_QUALIFIER = "ferme|annual|annuel|annuelle|per annum|par an|l an|nominal|nominale|contractual|contract|contractuel|contractuelle|fixed|stated|all-in|effectif|effective";
 // Interest on deposits, a partner's capital, a late or default payment, or a rate cap's strike: a rate word beside these is no loan's rate.
 const RATE_WORD_ALIASES = new Set([...RATE_ALIASES, "interest rate", "taux d interet", "au taux de", "contract interest", "interet contractuel"]);
 const NOT_A_LOAN_RATE_CONTEXT = /\b(deposits?|depots?|investors?|investisseurs?|partners?|associes?|commanditaires?|lps?|gp|late|arrears|overdue|retard|arrerages|default|defaut|penalty|penalite|cap|plafond|unreturned|capital account)\b/;
@@ -181,11 +183,11 @@ const LIMIT_RE = /\b(maximum|max|not to exceed|not exceed|not more than|at most|
 const CAPPED_RE = /\bcapped\b/;
 const CAPPED_COST_RE = /\b(hard costs?|construction costs?|building costs?|contract|fixed price|price|budget|couts? de construction|travaux|prix)\b/;
 const LOAN_WORD_RE = /\b(loan|loans|mortgage|financing|advance|pret|hypotheque|financement)\b/;
-const COVERAGE_RE = /\b(dscr|dcr|debt (?:service )?coverage|couverture|rcsd|rcd|ccd)\b/;
+const COVERAGE_RE = /\b(debt-cover|debt service|service covenant|dscr|dcr|debt (?:service )?coverage|couverture|rcsd|rcd|ccd)\b/;
 // Card 104: a coverage ratio named with a requirement ("DCR floor: 1.20x", "must maintain a DSCR of 1.25x", "Seuil du RCD : 1,20x") is the minimum covenant;
 // for it the lender's limit is the value. A result (projected, actual, stabilized, underwritten, stressed), another coverage or a test of something else never is.
-const COVENANT_RATIO_RE = /\b(dscr|dcr|debt (?:service )?coverage|coverage|couverture|rcsd|rcd|ccd)\b/;
-const COVENANT_NEED_RE = /\b(floors?|minimum|min|required|requirements?|covenants?|must maintain|maintain|at least|not less than|no less than|thresholds?|hurdles?|plancher|seuil|minimale?|exigee?|requise?|exigences?|clauses?|au moins|maintenir|(?:must|shall|may) not (?:fall|drop|go) below|not be less than|ne (?:doit |doivent )?pas (?:etre inferieure? a|descendre (?:sous|en dessous de)))\b/;
+const COVENANT_RATIO_RE = /\b(dscr|dcr|debt-cover|debt service|service|debt (?:service )?coverage|coverage|couverture|rcsd|rcd|ccd)\b/;
+const COVENANT_NEED_RE = /\b(floors?|promise|minimum|min|required|requirements?|covenants?|must maintain|maintain|at least|not less than|no less than|thresholds?|hurdles?|plancher|seuil|minimale?|exigee?|requise?|exigences?|clauses?|au moins|maintenir|(?:must|shall|may) not (?:fall|drop|go) below|not be less than|ne (?:doit |doivent )?pas (?:etre inferieure? a|descendre (?:sous|en dessous de)))\b/;
 // A bare number right after one of these is an index ("year 1", "phase 2", "l'an 2"), never a coverage ratio.
 const INDEX_BEFORE_RE = /\b(?:year|yr|month|mo|an|annee|mois|phase|tranche|period|periode)\s*$/;
 const indexFigure = (rawLabel: string, t: NumberToken) => t.unit === null && INDEX_BEFORE_RE.test(foldText(rawLabel).replace(/[^a-z0-9\s]/g, " "));
@@ -364,6 +366,8 @@ export function normalizeLabel(raw: string): { label: string; labelUnit: LabelUn
     const w = /(?:^|[\s,])(months?|mos?|mois|years?|yrs?|ans?|annees?)$/.exec(label)?.[1] ?? /^(months|mois|years)\s/.exec(label)?.[1];
     if (w) labelUnit = /^(m|mo)/.test(w) ? "months" : "years";
   }
+  if (!labelUnit && /\bamort\w*\b/.test(label) && /\byears?\b/.test(label)) labelUnit = "years";
+  if (!labelUnit && /\b(?:io|interest-only|int-only|principal-free)\b/.test(label) && /\b(?:window|period|months?)\b/.test(label)) labelUnit = "months";
   return { label, labelUnit, labelCode };
 }
 
@@ -553,7 +557,7 @@ export function scopesIn(text: string): Scope[] {
 }
 
 // Inside a sentence that names a loan: the words that put a money figure first as the loan's amount, and the filler a clause may hold around a bare term.
-const AMOUNT_WORD_RE = /\b(?:advances?|advancing|principal|will lend|lends?|lending|commits?|committing|commitment of|facility of|avance|avancera|avancent|prete|pretera|pretent|consent|consentira)\s*(?:(?:de|of|d|an?|un|une|up to|jusqu a|to)\s+)*$/;
+const AMOUNT_WORD_RE = /\b(?:in for|loan of|advances?|advancing|principal|will lend|lends?|lending|commits?|committing|commitment of|facility of|avance|avancera|avancent|prete|pretera|pretent|consent|consentira)\s*(?:(?:de|of|d|an?|un|une|up to|jusqu a|to)\s+)*$/;
 const TERM_FILLER = /\b(?:at|a|au|aux|taux|de|du|d|of|rate|interest|interet|coupon|fixed|fixe|bearing|carrying|portant|with|avec|the|le|la|an|un|une|per annum|annual|annually|stays?|remains?|is|are|will|be|while|whereas|and|but|reste|demeure|est|sera|alors que|tandis que|lenders?|preteurs?)\b/g;
 const RATE_NOT_RE = /\b(?:fees?|frais|ltv|ltc|loan to|ratio|prime|spread|premium|prix|price|of|de|du|des)\b/;
 const IO_BEFORE_RE = /(?:interest[- ]only|\bio\b|interets? seulement)\s*(?:(?:for|pour|of|de|d|during|pendant|the|first|initial|les?|premiers?|premieres?)\s+)*$/;
@@ -747,6 +751,11 @@ const WRITER_FEE_RE = /\b(?:nos|notre|mes|mon|our|my) (?:professional )?(?:honor
 export function mapToken(rawLabel: string, t: NumberToken, opts: MapOptions = {}): Mapped {
   // A sales tax line, or a rebate of one, is refused before any credit rule reads it; a cost that only states its tax basis is read.
   rawLabel = withoutTaxBasis(rawLabel).replace(/,\s*all-in\s*$/i, "");
+  if ((t.unit === "bps" || t.unit === null) && /\b(?:buy-down|buydown|reduction|spread|ecart)\b/.test(foldText(`${rawLabel} ${opts.after ?? ""}`))) return { kind: "ignored", reason: "A rate adjustment, not the loan's rate" };
+  if ((t.unit === "bps" || t.unit === null) && (t.unit === "bps" || /^\s*(?:bps?|pb)\b/i.test(opts.after ?? "")) && !/%/.test(opts.after ?? "")) {
+    const mapped = mapToken(rawLabel, { ...t, unit: "%", value: t.value === null ? null : t.value / 100 }, { ...opts, after: "" });
+    return mapped.kind === "field" && /^(?:senior|mezz|refinance)_rate_pct$/.test(mapped.fieldKey) ? { ...mapped, unitSeen: "bps (÷ 100)" } : { kind: "unmapped" };
+  }
   const folded = foldText(rawLabel);
   if (t.value !== null && (t.unit === "$" || t.currency || t.unit === null) && SALES_TAX_RE.test(folded) && !SALES_TAX_EXEMPT_RE.test(folded)) return { kind: "ignored", reason: SALES_TAX_NOTE };
   if (/\b(purchase price|prix d achat)\b/.test(normalizeLabel(rawLabel).label)) {
@@ -754,6 +763,8 @@ export function mapToken(rawLabel: string, t: NumberToken, opts: MapOptions = {}
     if (unitTypesIn(clause).length || /\b(sale|sell|sold|buyer|resale|vente|acheteur|revente)\b/.test(clause)) return { kind: "unmapped" };
   }
   const named = normalizeLabel(rawLabel).label;
+  if (t.unit === "%" && LATER_TIER_RE.test(foldText(opts.context ? opts.context.slice(0, t.start) : rawLabel)) && /\b(?:pref|preferred|hurdle|promote|promotion|carry|rendement)\b/.test(named)) return { kind: "ignored", reason: /\b(?:promote|carry|promotion)\b/.test(named) ? "A later promote tier; the field holds the first tier only" : "A later preferred-return tier; the field holds the first tier only" };
+
   const assumptionKeys = CONCEPTS.filter(c => c.assumption).map(c => c.fieldKey);
   if (/\b(?:per|par|each|chaque)[ -]+(?:stall|locker|unit|place|casier|unite)s?\b/.test(`${named} ${normalizeLabel((opts.after ?? "").split(/[,;]/)[0] ?? "").label}`) && /\b(?:parking|laundry|storage|locker|stationnement|buanderie|accessoires)\b/.test(named)) return { kind: "ignored", reason: "Other income per stall, locker or unit, not the total" };
   if ((t.unit === "$" || t.currency || t.unit === null) && /\b(?:draws?|tirages?)\b/.test(named) && (/\b(?:loans?|facilit(?:y|ies)|lenders?|prets?|preteurs?)\b/.test(named) || /\b(?:construction draws?|tirages? de construction|weekly|monthly|this month|first|next|draw number|hebdomadaire|mensuel|ce mois|premier|prochain|tirage numero)\b/.test(named))) return { kind: "ignored", reason: "A draw, not the loan amount or a budget line" };
@@ -761,18 +772,21 @@ export function mapToken(rawLabel: string, t: NumberToken, opts: MapOptions = {}
   if (/^(?:(?:its|their) (?:interest(?: rate)?|rate|amorti[sz]ation)|(?:son|leur) (?:taux|interet|amortissement)|sa duree d amortissement)$/.test(named)) return { kind: "ignored", reason: "Which loan this belongs to is not stated" };
   if (WRITER_FEE_RE.test(named)) return { kind: "ignored", reason: "The writer's own fee, not the project's soft costs" };
   if ([...named.matchAll(INCLUDED_IN_RE)].some((x) => { const rest = named.slice(x.index + x[0].length); return ALL_ALIASES.some((a) => `${rest} `.startsWith(`${a} `)); })) return { kind: "ignored", reason: INCLUDED_NOTE };
+  if (opts.budget && /\b(?:usd|us dollars|alternative|optional|supplier quote)\b/.test(named) && (t.unit === "$" || t.currency || t.unit === null)) return { kind: "ignored", reason: "An alternative or foreign-currency budget quote" };
   const budgetLabel = named.split(COVER_LIST_RE)[0] ?? named;
   const joined = budgetLabel.split(/\b(?:and|et)\b/).map((part) => budgetConcepts(part));
   const assumptionParts = normalizeLabel(rawLabel.split(/[,;]/).pop() ?? "").label.split(/\b(?:and|et)\b/);
   if (!/\b(?:interest|interets?|loan|pret)\b/.test(named) && assumptionParts.length > 1 && assumptionParts.every(part => CONCEPTS.some(c => c.assumption && (c.unit === t.unit) && c.words.some(w => w.test(part)))) && new Set(assumptionParts.flatMap(part => CONCEPTS.filter(c => c.assumption && c.unit === t.unit && c.words.some(w => w.test(part))).map(c => c.fieldKey))).size > 1) return { kind: "unmapped" };
   let m = mapSigned(rawLabel, t, opts);
+  if (m.kind === "field" && m.fieldKey === "stated_ltc_pct" && /\b(?:limits?|maximum|plafond)\b/.test(named)) return { kind: "ignored", reason: "A lender's limit, not the deal's figure" };
   if (OCCUPANCY_WORD.test(named) && SETTLED_WORD.test(named) && m.kind === "field" && m.fieldKey === "item_occupancy_pct") {
     m = { ...m, fieldKey: "stabilized_occupancy_pct", itemKey: null };
   }
   // A description naming two cost fields by concept is shown, unless its own words already name its field.
   if (m.kind === "unmapped" && !opts.quote && (opts.budget || opts.budgetConcept) && t.unit === "$" && !/%/.test(opts.gap ?? opts.ahead ?? "") && joined.length === 2 && joined.every((part) => part.length === 1) && joined[0]![0]!.fieldKey !== joined[1]![0]!.fieldKey) return { kind: "ignored", reason: "This description names more than one budget field; enter each line separately" };
-  if (m.kind === "unmapped" || (m.kind === "ignored" && m.unitMismatch) || (m.kind === "ignored" && m.reason === "A fee or premium, not an input" && /\b(?:frais courants|frais annuels|selling-cost)\b/.test(named))) m = conceptField(rawLabel, t, opts) ?? m;
-  if (m.kind === "field" && assumptionKeys.includes(m.fieldKey) && ASSUMPTION_HISTORY.test(folded)) return { kind: "ignored", reason: "History or another property's figure, not this deal's assumption" };
+  if (m.kind === "unmapped" || (m.kind === "ignored" && m.unitMismatch) || (m.kind === "ignored" && m.reason === "A fee or premium, not an input" && /\b(?:frais courants|frais annuels|selling-cost|growth|development levies|croissance)\b/.test(named))) m = conceptField(rawLabel, t, opts) ?? m;
+  if (m.kind === "field" && /^(?:senior|mezz|refinance)_rate_pct$/.test(m.fieldKey) && (NOT_A_LOAN_RATE_CONTEXT.test(named) || CONCEPTS.find(c => c.fieldKey === "senior_rate_pct")!.exclude.test(named))) return { kind: "ignored", reason: NOT_A_LOAN_RATE_NOTE };
+  if (m.kind === "field" && (assumptionKeys.includes(m.fieldKey) || /^(?:senior_|mezz_|refinance_|min_dscr)/.test(m.fieldKey)) && (ASSUMPTION_HISTORY.test(folded) || (/^(?:senior_|mezz_|refinance_|min_dscr)/.test(m.fieldKey) && /\b(?:bank of canada|prime (?:rate )?today|bond yield|inflation|deposit account|last year s|expected dcr|projected dcr)\b/.test(folded)))) return { kind: "ignored", reason: "History or another property's figure, not this deal's assumption" };
   if (m.kind === "field" && (m.fieldKey === "fixed_opex_annual" || m.fieldKey === "selling_costs_pct")) {
     // A named exclusion does not turn an operating total into the excluded item.
     const own = named.replace(/\b(?:excluding|without|hors|sans) (?:property tax(?:es)?|insurance|assurance|taxes foncieres)\b/g, " ");
@@ -781,7 +795,8 @@ export function mapToken(rawLabel: string, t: NumberToken, opts: MapOptions = {}
     if (concept.exclude.test(own)) return { kind: "ignored", reason: "A separate cost item, not this operating or selling cost assumption" };
   }
   if (m.kind === "field" && m.fieldKey === "construction_months" && /\b(?:wait|warranty|attente|garantie)\b/.test(named)) return { kind: "ignored", reason: "A wait or warranty, not the work period" };
-  if (m.kind === "field" && m.fieldKey === "lease_up_months" && /\b(?:commercial lease|bail|lease term)\b/.test(named)) return { kind: "ignored", reason: "A lease term, not the lease-up" };
+  if (m.kind === "field" && m.fieldKey === "lease_up_months" && /\b(?:commercial lease|bail|lease term|reserves?|commissions?|reserve|interets?)\b/.test(named)) return { kind: "ignored", reason: "A lease term, not the lease-up" };
+  if (m.kind === "field" && m.fieldKey === "expense_ratio_pct" && /\b(?:annual change|year-over-year change|yearly change|variation annuelle)\b/.test(named)) m = conceptField(rawLabel, t, opts) ?? { kind: "unmapped" };
   // Acquisition and risk holdings take precedence over builder words in the same label.
   if (m.kind === "field" && ["land_cost", "hard_cost", "soft_cost", "contingency", "other_cost", "stated_total_cost"].includes(m.fieldKey)) {
     const own = normalizeLabel(rawLabel).label;
@@ -795,7 +810,7 @@ export function mapToken(rawLabel: string, t: NumberToken, opts: MapOptions = {}
     const shape = budgetShapeNote(rawLabel, opts.after ?? "", m.value);
     if (shape) return { kind: "ignored", reason: shape };
     if (m.value >= 0 && (NOT_THIS_COST.test(context) || (m.fieldKey === "contingency" && !/\bcontingenc(?:e|es|y|ies)\b/.test(own) && NOT_RISK_COST.test(context)))) return { kind: "ignored", reason: "Not this deal's budget line" };
-    const meanings = budgetConcepts(own);
+    const meanings = budgetConcepts(own.split(COVER_LIST_RE)[0] ?? own);
     if (meanings.length > 1 && (opts.budgetConcept || m.concept) && !/\bland and existing building\b/.test(own)) return { kind: "ignored", reason: "This description names more than one budget field; enter each line separately" };
     if (m.fieldKey === "hard_cost" && meanings.length === 1 && meanings[0]!.fieldKey === "contingency" && !meanings[0]!.exclude.test(own) && !NOT_A_BUDGET_LINE.test(own) && !LOAN_NOUN.test(own)) m = { ...m, fieldKey: meanings[0]!.fieldKey };
     if (PROJECT_TOTAL.test(own) && !NOT_PROJECT_TOTAL.test(own)) m = { ...m, fieldKey: "stated_total_cost" };
@@ -811,7 +826,7 @@ export function mapToken(rawLabel: string, t: NumberToken, opts: MapOptions = {}
     const own = (re: RegExp) => without(label.replace(INTEREST_ONLY_RE, " "), re, def.aliases);
     if (INTEREST_FEE_FIELDS.has(def.key) && INTEREST_WORD_RE.test(own(INTEREST_WORD_RE))) return { kind: "ignored", reason: INTEREST_NOTE };
     const fee = LOAN_AMOUNTS.has(def.key) ? LOAN_FEE_WORD_RE : FEE_WORD_RE;
-    if (INTEREST_FEE_FIELDS.has(def.key) && def.key !== "soft_cost" && fee.test(own(fee))) return { kind: "ignored", reason: "A fee or premium, not an input" };
+    if (INTEREST_FEE_FIELDS.has(def.key) && def.key !== "soft_cost" && fee.test(own(fee)) && !(def.key === "development_charges" && budgetConcepts(label).some(c => c.fieldKey === def.key))) return { kind: "ignored", reason: "A fee or premium, not an input" };
     const carrying = label.replace(TRANSFER_TAX_RE, " ").replace(TAXES_BASIS_RE, " ");
     if (CARRYING_FIELDS.has(def.key) && CARRYING_RE.test(without(carrying, CARRYING_RE, def.aliases))) return { kind: "ignored", reason: CARRYING_NOTE };
   }
@@ -831,46 +846,48 @@ export function mapToken(rawLabel: string, t: NumberToken, opts: MapOptions = {}
 // Budget concepts count the meanings before exclusions, so "construction and permits" cannot silently become soft costs.
 function budgetConcepts(label: string) {
   const head = label.replace(WHERE_IT_SITS, "");
-  let meanings = CONCEPTS.filter((c) => c.budget && c.words.some((w) => w.test(head)));
+  let meanings = CONCEPTS.filter((c) => c.budget && c.words.some((w) => w.test(head)) && (c.with ?? []).every(w => w.test(head)));
   // A property purchase beats shell/building; a risk holding beats the build it protects.
   if (PROPERTY_WORD.test(head) && ACQUISITION_WORD.test(head) && !/\b(?:and|et|plus)\b/.test(head)) meanings = meanings.filter((c) => c.fieldKey !== "hard_cost");
   if (((HOLDING_WORD.test(head) && RISK_WORD.test(head)) || /\b(?:contingenc(?:e|es|y|ies)|imprevus|aleas|cushion|buffer)\b/.test(head)) && !/\b(?:and|et|plus)\b/.test(head)) meanings = meanings.filter((c) => c.fieldKey !== "hard_cost" && c.fieldKey !== "soft_cost");
   if (RESIDUAL_COST.test(head) && !HOLDING_WORD.test(head)) meanings = meanings.filter((c) => c.fieldKey !== "contingency" && c.fieldKey !== "hard_cost");
   if (/\bfees outside (?:the )?gc\b/.test(head)) meanings = meanings.filter((c) => c.fieldKey !== "hard_cost");
   if (PROJECT_TOTAL.test(head)) meanings = meanings.filter((c) => c.fieldKey !== "hard_cost");
+  if (meanings.some(c => c.fieldKey === "development_charges") && !/\b(?:and|et|plus)\b/.test(head)) meanings = meanings.filter(c => c.fieldKey !== "soft_cost");
   return meanings;
 }
 
 // One shared matcher: exactly one compatible concept, with the same scope and value conversion as aliases.
-function conceptField(rawLabel: string, t: NumberToken, opts: MapOptions): Mapped | null {
+function conceptField(rawLabel: string, t: NumberToken, opts: MapOptions, financingOnly = false): Mapped | null {
   if (t.value === null) return null;
   // Words after the figure name it only when the figure states its unit; a bare number stays shown.
   const afterLabel = opts.labelAfter === true;
+  if (afterLabel && !rawLabel.trim()) return null;
   if (afterLabel && !(t.unit === "months" || t.unit === "years" || t.unit === "%" || t.currency)) return null;
   if (!afterLabel && opts.prose && opts.context && !foldText(withoutTaxBasis(opts.context.slice(0, t.start)).replace(/,\s*all-in\s*:?\s*$/i, "")).trimEnd().endsWith(foldText(rawLabel).trim())) return null;
   const lead = afterLabel ? (opts.lead ?? "").split(/[,;]/).pop() ?? "" : "";
   const { label, labelUnit, labelCode } = normalizeLabel(opts.prose && !afterLabel ? rawLabel.split(/[,;]/).pop() ?? "" : rawLabel);
   const unit = (t.unit === "$/mo" ? "$" : t.unit) ?? labelUnit ?? (!opts.prose && Math.abs(t.value) >= 1000 ? "$" : null);
   const budget = unit === "$" && !opts.quote && (opts.budget || opts.budgetConcept) && !/%/.test(opts.gap ?? opts.ahead ?? "");
-  const meanings = budget ? budgetConcepts(label) : [];
-  if (meanings.length > 1) return { kind: "ignored", reason: "This description names more than one budget field; enter each line separately" };
-  const namedScope: Scope | null = MAIN_LENDER.test(label) ? "senior" : scopeIn(label);
-  const loan = !opts.budget && (LOAN_NOUN.test(label) || namedScope || LOAN_PERIOD.test(label) || /\bconstruction principal\b/.test(label) || (opts.loanContext ?? opts.scope !== undefined))
-    && !(opts.prose && !namedScope && !opts.loanContext && LOAN_ANAPHOR.test(label) && !scopeIn(opts.context?.slice(0, t.start) ?? "", false))
+  const meanings = budget ? budgetConcepts(label.split(COVER_LIST_RE)[0] ?? label) : [];
+  if (!financingOnly && meanings.length > 1 && !COVER_LIST_RE.test(label)) return { kind: "ignored", reason: "This description names more than one budget field; enter each line separately" };
+  const namedScope: Scope | null = scopeIn(label) ?? (MAIN_LENDER.test(label) ? "senior" : null);
+  const loan = (scopesIn(label).length <= 1 || scopeIn(label) !== null) && !opts.budget && (LOAN_NOUN.test(label) || /\b(?:intrest|fixed|ferme|amort\w*|interest-only|io)\b/.test(label) || namedScope || LOAN_PERIOD.test(label) || /\bconstruction principal\b/.test(label) || (opts.loanContext ?? opts.scope !== undefined))
     && !NOT_THE_LOAN_AFTER.test(foldText(opts.after ?? ""))
     && !(unit === "months" && MONTH_INDEX.test(label));
   // After the figure, the words before it in its clause still carry the guards.
   const folded = foldText(afterLabel ? `${lead} ${rawLabel}` : rawLabel);
-  const budgetLine = budget && !NOT_A_BUDGET_LINE.test(folded) && !LOAN_NOUN.test(folded);
+  const budgetLine = budget && (!NOT_A_BUDGET_LINE.test(folded) || /\b(?:growth|development|croissance)\b/.test(label)) && !LOAN_NOUN.test(folded);
   const assumptionLabel = label;
   const assumptionContext = normalizeLabel(afterLabel ? `${lead} ${rawLabel}` : rawLabel.split(/[,;]/).pop() ?? "").label;
   // The whole label and the words after the figure: an alternative, a loan's period or a month number is never the deal's assumption.
   const assumption = !NOT_THE_DEALS_ASSUMPTION.test(folded) && !ASSUMPTION_HISTORY.test(folded) && !LOAN_NOUN.test(folded) && !(unit === "years" && /\b(?:commercial lease|bail)\b/.test(normalizeLabel(`${opts.lead ?? ""} ${opts.context ?? rawLabel}`).label)) && !NOT_CHOSEN_AFTER.test(foldText(opts.after ?? "")) && !LEAVING_AFTER.test(foldText(opts.after ?? ""))
     && !(unit === "months" && MONTH_INDEX.test(folded));
-  const fits = CONCEPTS.filter((c) => (c.unit === unit || (c.assumption && c.unit === "months" && unit === "years")) && (c.assumption
+  const fits = CONCEPTS.filter((c) => (!financingOnly || (!c.budget && !c.assumption)) && (c.unit === unit || (c.unit === "months" && unit === "years")) && (c.assumption
     ? assumption && !opts.budget && c.words.some((w) => w.test(assumptionLabel)) && ((c.with ?? []).every((w) => w.test(assumptionLabel)) || !!c.basisAfter?.test(foldText(opts.after ?? ""))) && !c.exclude.test(assumptionContext)
     // Only an assumption or a rate in an established loan context is named after its figure: a loan noun ("$9,000,000 by the lender") or a budget word ("is the stated envelope") there does not name the figure.
-    : (!afterLabel || (c.fieldKey === "senior_rate_pct" && opts.loanContext)) && (c.budget ? budgetLine && meanings.includes(c) && (c.fieldKey !== "land_cost" || !opts.prose || ACQUISITION_WORD.test(label) || /\b(?:dirt|ground) (?:cost|deal|price|basis)\b/.test(label)) : loan && c.words.some((w) => w.test(label))) && !c.exclude.test(c.budget || afterLabel ? folded : label)));
+    : (!afterLabel || (c.fieldKey === "senior_rate_pct" && opts.loanContext)) && (c.budget ? budgetLine && meanings.includes(c) && (c.fieldKey !== "land_cost" || !opts.prose || ACQUISITION_WORD.test(label) || /\b(?:dirt|ground) (?:cost|deal|price|basis)\b/.test(label)) : (c.unscoped || loan) && !(c.fieldKey === "senior_rate_pct" && LTV_BASIS_AFTER_RE.test(foldText(opts.after ?? ""))) && c.words.some((w) => w.test(label)) && (c.with ?? []).every(w => w.test(label))) && !c.exclude.test(c.budget || afterLabel ? folded : label)));
+  if (fits.length > 1 && fits.every(c => !c.budget && !c.assumption)) return { kind: "ignored", reason: "More than one financing field fits this figure" };
   if (fits.length !== 1) return null;
   const chosen = fits[0]!;
   // "To fill" after a figure is the lease-up only for the building or its units ("6 months to fill the staff positions" is not).
@@ -918,7 +935,7 @@ function mapLabel(rawLabel: string, t: NumberToken, opts: MapOptions = {}): Mapp
   const cover = COVER_LIST_RE.exec(label);
   if (cover && cover.index > 0 && BUDGET_NAME_RE.test(label.slice(0, cover.index))) label = label.slice(0, cover.index).trim();
   const timingLabel = `${rawLabel} ${opts.gap ?? ""}`;
-  const output = OUTPUT_LIKE_PHRASES.find((p) => hasPhrase(label, p) && !(p === "valuation" && isExitCapLabel(rawLabel)) && !((p === "target" || p === "cible") && (isTakeoutTimingLabel(timingLabel) || isOperatingTarget(rawLabel))));
+  const output = OUTPUT_LIKE_PHRASES.find((p) => hasPhrase(label, p) && !(p === "valuation" && (isExitCapLabel(rawLabel) || /\bvaluation share\b/.test(label) && SCOPE_WORDS.refinance.test(label))) && !((p === "target" || p === "cible") && (isTakeoutTimingLabel(timingLabel) || isOperatingTarget(rawLabel))));
   if (output) return { kind: "ignored", reason: `"${rawLabel.trim()}" is an output figure, which is never taken as an input` };
   if (t.value === null) return { kind: "ignored", reason: t.refusal ?? "The number could not be read without guessing" };
   // Appraisal cost items are shown separately; only a stated operating-cost total is read.
@@ -965,6 +982,17 @@ function mapLabel(rawLabel: string, t: NumberToken, opts: MapOptions = {}): Mapp
     const c = compatibleValue(def, t, label, labelUnit, labelCode, prose);
     return c && { kind: "field", fieldKey: def.key, itemKey: null, value: c.value, unitSeen: c.unitSeen };
   };
+
+  if (BARE_AMOUNT_RE.test(label) && /\(\s*\d+(?:[.,]\d+)?\s*%\s+loan[- ]to[- ]cost\)/i.test((opts.context ?? "").slice(t.end) || opts.after || "")) return asField(scoped("senior_loan_amount")) ?? { kind: "unmapped" };
+  if (t.unit === "%" && /\b(?:gp|general partner|commandite)\b/.test(label) && /\b(?:above|after|apres|au-dessus)\b/.test(label) && !/\b(?:upside|carry|carried|promote|promoted|promotion|interessement)\b/.test(label)) return { kind: "unmapped" };
+  const finance = t.value < 0 ? null : conceptField(rawLabel, t, opts, true);
+  const conjuncts = normalizeLabel(rawLabel.split(/[,;/]/).pop() ?? "").label.split(/\b(?:and|et)\b/);
+  if (finance?.kind === "field" && CONCEPTS.find(c => c.fieldKey === finance.fieldKey)?.unscoped && conjuncts.length > 1) {
+    const fields = conjuncts.map(part => FIELDS.filter(d => ["senior", "refinance", "waterfall"].includes(d.group) && d.aliases.some(a => hasPhrase(part.trim(), a)) && compatibleValue(d, t, label, labelUnit, labelCode, prose)).map(d => d.key));
+    if (fields.every(keys => keys.length > 0) && new Set(fields.flat()).size > 1) return { kind: "ignored", reason: "More than one financing field fits this figure" };
+  }
+  const aliasField = FIELDS.some(d => d.extractable && !d.itemized && !["hard_cost", "soft_cost"].includes(d.key) && d.aliases.some(a => (!LOOSE_ALIASES.has(a) || a === "amort") && hasPhrase(label, a)) && compatibleValue(d, t, label, labelUnit, labelCode, prose));
+  if (finance?.kind === "ignored" || (finance?.kind === "field" && (CONCEPTS.find(c => c.fieldKey === finance.fieldKey)?.unscoped || !aliasField))) return finance;
 
   // A percentage "of the lender's valuation" is a loan-to-value, the refinance loan's when that is the loan in scope; the valuation itself is not an input.
   if (t.unit === "%" && LTV_BASIS_AFTER_RE.test(foldText(opts.after ?? ""))) {
@@ -1031,7 +1059,7 @@ function mapLabel(rawLabel: string, t: NumberToken, opts: MapOptions = {}): Mapp
   const sinceAfter = foldText((opts.after ?? "").split(/[,;.]/)[0] ?? "");
   // Only for a timing label: "refinance in month 36 once stabilized" names the project month.
   const refiMonth = (): Mapped => LATER_EVENT_RE.test(sinceAfter) && !PROJECT_START_RE.test(sinceAfter) ? { kind: "ignored", reason: LATER_EVENT_NOTE } : asField(FIELD_BY_KEY.get("refinance_month")!) ?? { kind: "unmapped" };
-  if (ordinalMonth && (REPAY_RE.test(label) || (replaces && SCOPE_WORDS.refinance.test(label.slice(0, replaces.index))))) return asField(FIELD_BY_KEY.get("refinance_month")!) ?? { kind: "unmapped" };
+  if (ordinalMonth && (REPAY_RE.test(label) || (SCOPE_WORDS.refinance.test(label) && /\b(?:conversion|passage)\b/.test(label)) || (replaces && SCOPE_WORDS.refinance.test(label.slice(0, replaces.index))))) return asField(FIELD_BY_KEY.get("refinance_month")!) ?? { kind: "unmapped" };
   if ((t.unit === "months" || (t.unit === null && labelUnit === "months")) && (TAKEOUT_TIMING_RE.test(label) || isTakeoutTimingLabel(timingLabel)) && !TAKEOUT_NOT_RE.test(label)) return refiMonth();
   // Bare amounts need a stated loan scope; the implicit senior default alone is not enough.
   if ((scope !== "senior" || opts.seniorHeading) && BARE_AMOUNT_RE.test(label)) return asField(scoped("senior_loan_amount")) ?? { kind: "unmapped" };
@@ -1139,7 +1167,7 @@ function mapLabel(rawLabel: string, t: NumberToken, opts: MapOptions = {}): Mapp
   // A covenant alias beside a result, a stress or a margin over it ("DSCR covenant headroom") is not the covenant.
   if (best?.def.key === "min_dscr_covenant" && indexFigure(rawLabel, t)) return { kind: "ignored", reason: INDEX_NOTE };
   // The bare abbreviation inside a sentence can't say whose amortization it is (card 105 audit); a label line can.
-  if (prose && best?.alias === "amort" && !scopeIn(label) && normalizeLabel(opts.context?.slice(0, t.start) ?? "").label !== label) return { kind: "ignored", reason: "An abbreviated amortization inside a sentence; enter it by hand if it is this loan's" };
+  if (prose && best?.alias === "amort" && !LOAN_NOUN.test(label) && !scopeIn(label) && normalizeLabel(opts.context?.slice(0, t.start) ?? "").label !== label) return { kind: "ignored", reason: "An abbreviated amortization inside a sentence; enter it by hand if it is this loan's" };
   if (best?.def.key === "exit_cap_rate_pct" && (PRESALE_CAP_RE.test(label) || CAP_LIMIT_AFTER_RE.test(foldText(opts.after ?? "")))) return { kind: "ignored", reason: "A presale share or a resale price limit, not the exit cap rate" };
   if (best?.def.key === "min_dscr_covenant" && COVERAGE_RESULT_RE.test(label)) return { kind: "ignored", reason: "A coverage result or a margin over the covenant, not the minimum covenant" };
   if (best) return notAssumed(best.def.key) ?? { kind: "field", fieldKey: best.def.key, itemKey: null, value: best.value, unitSeen: best.unitSeen };

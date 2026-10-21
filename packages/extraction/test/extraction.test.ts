@@ -1138,10 +1138,10 @@ describe("which loan a term belongs to, and the words small developers use", () 
       expect(pick(read("Junior loan", "Rate: 11%"))).toEqual([["mezz_rate_pct", 11]]);
       expect(pick(read("Deuxième hypothèque", "Taux : 11 %"))).toEqual([["mezz_rate_pct", 11]]);
     });
-    test("lender type never sets the loan, a senior letter that permits subordinate debt stays senior, and sections keep their own scope", () => {
+    test("private lending terms name the second loan; explicit ranks, permissions and sections retain their scope (card 118)", () => {
       expect(pick(read("Mortgage Investment Corporation - Term Sheet", "Rank: first mortgage", "Rate: 9.5%"))).toEqual([["senior_rate_pct", 9.5]]);
       expect(pick(read("Fonds hypothécaire (caisse populaire) - Feuille de modalités", "Taux : 7,5 %"))).toEqual([["senior_rate_pct", 7.5]]);
-      expect(pick(read("Private lender offer", "Rate: 9.5%"))).toEqual([["senior_rate_pct", 9.5]]);
+      expect(pick(read("Private lender offer", "Rate: 9.5%"))).toEqual([["mezz_rate_pct", 9.5]]);
       expect(pick(read("Commitment letter - construction loan", "Rate: 5.9%", "Amortization: 30 years", "Subordinate financing behind this loan is permitted with our consent."))).toEqual([["senior_rate_pct", 5.9], ["senior_amort_years", 30]]);
       expect(pick(read("Loan summary", "Construction loan", "Rate: 5.9%", "Mezzanine", "Rate: 11.5%"))).toEqual([["senior_rate_pct", 5.9], ["mezz_rate_pct", 11.5]]);
     });
@@ -1537,8 +1537,8 @@ describe("reading safety: a figure that may be the wrong one is shown, never use
       expect(pick(r)).toEqual([["senior_loan_amount", 1_500_000], ["senior_rate_pct", 6.1], ["mezz_loan_amount", 250_000], ["mezz_rate_pct", 10.5]]);
       expect(pick(read("Second: $200,000 at 11% interest only."))).toEqual([["mezz_loan_amount", 200_000]]);
       expect(pick(read("The private second will advance $180,000 at 12%."))).toEqual([["mezz_loan_amount", 180_000], ["mezz_rate_pct", 12]]);
-      // a lender's type alone never sets the loan
-      expect(pick(read("A mortgage investment corporation will lend $180,000.")).filter((p) => String(p[0]).startsWith("mezz_"))).toEqual([]);
+      // Card 118: a MIC with an actual lending term names the second loan.
+      expect(pick(read("A mortgage investment corporation will lend $180,000."))).toEqual([["mezz_loan_amount", 180_000]]);
       expect(pick(read("Prêteur privé de second rang : 150 000 $"))).toEqual([["mezz_loan_amount", 150_000]]);
       expect(pick(read("First mortgage: 6.2%"))).toEqual([["senior_rate_pct", 6.2]]);
       for (const line of ["The second floor adds 6 units.", "Second phase hard costs: $400,000", "Interest rate rose 0.5% in the second quarter."]) expect(pick(read(line)).filter((p) => String(p[0]).startsWith("mezz_")), line).toEqual([]);
@@ -3269,9 +3269,9 @@ describe("one sentence may state several terms of one loan", () => {
     expect(pick(ltv)).toEqual([["mezz_loan_amount", 240_000], ["mezz_rate_pct", 11.5]]);
     expect(ltv.other.map((o) => o.value)).toEqual([75]);
   });
-  test("negative: a sentence that names no loan's rank reads as it did; a first mortgage is ranked (card 108)", () => {
-    expect(pick(read("The lender will advance $240,000 at 11.5% fixed, amortized over 15 years."))).toEqual([]);
-    expect(pick(read("The first mortgage will advance $5,000,000 at 6.2%, amortized over 30 years."))).toEqual([["senior_loan_amount", 5_000_000], ["senior_amort_years", 30]]);
+  test("plain lender sentences and first mortgages identify their own loan (card 118)", () => {
+    expect(pick(read("The lender will advance $240,000 at 11.5% fixed, amortized over 15 years."))).toEqual([["senior_loan_amount", 240_000], ["senior_rate_pct", 11.5], ["senior_amort_years", 15]]);
+    expect(pick(read("The first mortgage will advance $5,000,000 at 6.2%, amortized over 30 years."))).toEqual([["senior_loan_amount", 5_000_000], ["senior_rate_pct", 6.2], ["senior_amort_years", 30]]);
   });
 });
 
@@ -5924,7 +5924,7 @@ describe("card 108: loan terms named by concept and unit", () => {
   });
   test.each(["Facility holdback: $50,000", "Lender balance: $900,000", "Bank deposit: $40,000", "Mortgage equity: $500,000", "Loan fee charge: 1%", "Loan insurance charge: 2%", "Bank spread charge: 1.5%", "Mortgage DCR charge: 1.2%", "Loan repayment maturity: 5 years", "Bank repayment renewal: 3 years", "Facility before repayment begins - term: 18 months", "Advance draw before repayment begins: 12 months", "Retenue bancaire : 50 000 $", "Solde du crédit : 900 000 $", "Dépôt bancaire : 40 000 $", "Capital propre du financement : 500 000 $", "Charge du prêt - frais : 1 %", "Charge du prêt - prime d'assurance : 2 %", "Charge du crédit - ratio : 70 %", "Remboursement du prêt à l'échéance : 5 ans", "Prêt sans remboursement de capital - terme : 18 mois"])("own exclusion variant: %s", (line) => expect(read("First mortgage", line).candidates.filter((c) => /^(senior|mezz|refinance)_/.test(c.fieldKey ?? ""))).toEqual([]));
   test.each(["Months before repayment begins: 18 months", "Annual charge: 6.1%", "Repaid over: 25 years", "Montant consenti : 2 000 000 $", "Charge annuelle : 6,1 %", "Remboursé sur : 25 ans"])("no loan name or scope gives no concept read: %s", (line) => expect(pick(read(line))).toEqual([]));
-  test("a generic sheet's default senior scope is not a loan heading", () => expect(pick(sheet(null, [["Charge", "6.1%"], ["Repayment period", "25 years"], ["Unallocated sum", "2000000"]]))).toEqual([]));
+  test("a repayment period supplies its own loan signal (card 118)", () => expect(pick(sheet(null, [["Charge", "6.1%"], ["Repayment period", "25 years"], ["Unallocated sum", "2000000"]]))).toEqual([["senior_amort_years", 25]]));
   test.each(["Permanent lender", "Take-out lender", "Prêt permanent", "Financement de sortie"])("a take-out heading gives refinance fields: %s", (heading) => expect(pick(read(heading, "Advance granted: $2,000,000", "Annual charge: 6.1%", "Repaid over: 25 years", "Months before repayment begins: 18 months"))).toEqual(four.map(([key, value]) => [(key === "senior_loan_amount" ? "refinance_amount" : String(key).replace("senior_", "refinance_")), value])));
   test("a concept read is counted separately and aliases keep their existing rule", () => {
     expect(read("Bank facility granted: $2,000,000").candidates[0]?.rule).toBe("concept");
@@ -6217,7 +6217,7 @@ describe("card 110 audit: an assumption concept takes only the deal's own durati
   ])("a loan's period is not the deal's assumption (the loan's own concept may still read it): %s", (line) => expect(concept(lines(line)).filter(([k]) => !String(k).startsWith("senior_"))).toEqual([]));
 
   test("a loan's repayment horizon in a sheet is not the hold", () => {
-    expect(concept(rows(["FIRST repayment horizon years", 30], ["Years of ownership", 7]))).toEqual([["hold_years", 7]]);
+    expect(concept(rows(["FIRST repayment horizon years", 30], ["Years of ownership", 7]))).toEqual([["senior_amort_years", 30], ["hold_years", 7]]);
   });
 
   test.each([
@@ -6748,7 +6748,7 @@ describe("card 115: loan ranks, plain terms and stated totals", () => {
   test.each(requested)("requested line: %s", (l, v, k, n) => expect(pick(read(`${l}: ${v}`))).toEqual([[k, n]]));
   test.each([["First amort years", 30, "senior_amort_years"], ["Bank no-principal months", 12, "senior_io_months"], ["Take-out dollars", 1_600_000, "refinance_amount"], ["Stated project subtotal", 1_330_000, "stated_total_cost"], ["Total déclaré", 2_850_000, "stated_total_cost"]] as const)("requested numeric sheet: %s", (l, n, k) => expect(pick(sheet([[l, n]]))).toEqual([[k, n]]));
   test.each([
-    "Senior debt service: $160,000", "Sponsor dollars: $800,000", "First draw: $300,000", "First phase cost: $1,300,000", "Rendement prioritaire : 8 %", "Distribution prioritaire : 8 %", "Repayment of the deposit: 12 months", "Rent-free months: 2 months", "First-year interest: $140,000", "Annual debt service: $160,000", "Senior loan balance at month 18: $2,300,000", "Senior lender fee: $25,000", "Take-out fee: $40,000",
+    "Senior debt service: $160,000", "Sponsor dollars: $800,000", "First draw: $300,000", "First phase cost: $1,300,000", "Distribution prioritaire : 8 %", "Repayment of the deposit: 12 months", "Rent-free months: 2 months", "First-year interest: $140,000", "Annual debt service: $160,000", "Senior loan balance at month 18: $2,300,000", "Senior lender fee: $25,000", "Take-out fee: $40,000",
   ])("requested shown figure: %s", (line) => {
     const r = read(line);
     expect(pick(r)).toEqual([]);
@@ -6770,6 +6770,8 @@ describe("card 115: loan ranks, plain terms and stated totals", () => {
     // 4. Refinance amount words.
     ["Takeout cash committed", "$1,700,000", "refinance_amount", 1_700_000], ["Permanent dollars", "$1,700,000", "refinance_amount", 1_700_000], ["Refinance committed funds", "$1,700,000", "refinance_amount", 1_700_000],
     ["Montant du refinancement prévu", "1 700 000 $", "refinance_amount", 1_700_000], ["Montant permanent accordé", "1 700 000 $", "refinance_amount", 1_700_000], ["Refinancement montant engagé", "1 700 000 $", "refinance_amount", 1_700_000],
+    // Card 118: these formerly refused terms now have an unambiguous financing meaning.
+    ["Take-out LTV", "75%", "refinance_ltv_pct", 75], ["Rendement prioritaire", "8%", "preferred_return_pct", 8],
     // 5. Project totals, distinct from a named cost subtotal.
     ["Project subtotal", "$1,500,000", "stated_total_cost", 1_500_000], ["All-in uses", "$1,500,000", "stated_total_cost", 1_500_000], ["Stated total", "$1,500,000", "stated_total_cost", 1_500_000],
     ["Total déclaré du projet", "1 500 000 $", "stated_total_cost", 1_500_000], ["Total des emplois", "1 500 000 $", "stated_total_cost", 1_500_000], ["Somme des emplois", "1 500 000 $", "stated_total_cost", 1_500_000],
@@ -6785,7 +6787,7 @@ describe("card 115: loan ranks, plain terms and stated totals", () => {
     ["Senior funds balance", "$2,100,000"], ["Senior cash fee", "$21,000"], ["Repayment schedule for the deposit", "12 months"],
     ["Solde de la dette prioritaire", "2 100 000 $"], ["Frais du prêt prioritaire", "21 000 $"], ["Franchise de capital du dépôt", "12 mois"],
     ["Repayment schedule maturity", "5 years"], ["No-principal draw period", "12 months"], ["Principal holiday rent-free", "2 months"],
-    ["Take-out LTV", "75%"], ["Rendement prioritaire", "8%"], ["First floor principal", "$2,100,000"],
+    ["First floor principal", "$2,100,000"],
   ];
   test.each(refusals)("own shown label: %s", (l, v) => expect(pick(read(`${l}: ${v}`))).toEqual([]));
   test.each(refusals)("own shown sheet: %s", (l, v) => expect(pick(sheet([[l!, v!]]))).toEqual([]));
@@ -7536,5 +7538,228 @@ describe("card 117: operating assumptions in plain words", () => {
   });
   test.each(["Parking cash monthly: $450", "Stationnement par mois : 450 $"])("monthly provenance: %s", input => {
     expect(read(input).candidates).toEqual([expect.objectContaining({ fieldKey: "other_income_annual", value: 5400, unitSeen: "$/mo" })]);
+  });
+});
+
+describe("card 118: financing, partners and figure-local leftovers", () => {
+  const read = (input: string, kind: "pdf" | "docx" = "pdf") => {
+    const parts = input.split(" // ");
+    return extractCandidates(input.startsWith("S:") || input.startsWith("S(")
+      ? { kind: "xlsx", lines: [], tables: [{ name: "Base", rows: parts.map((p, r) => p.replace(/^S(?:\([^)]*\))?:/, "").split("|").map((v, c) => { const text = v.trim().replace(/^"|"$/g, ""); return { text, ref: `${String.fromCharCode(65 + c)}${r + 1}`, ...(/^\d+(?:\.\d+)?$/.test(text) ? { number: Number(text) } : {}) }; })) }], pageCount: 1, needsOcr: false, fullText: "" }
+      : { kind, lines: parts.map((text, i) => ({ text, location: kind === "docx" ? `paragraph ${i + 1}` : `page 1, line ${i + 1}` })), tables: [], pageCount: 1, needsOcr: false, fullText: parts.join("\n") });
+  };
+  // The card's acceptance wordings plus independent variants and traps; no held-out documents.
+  test.each([
+    ["Bank coupon: 6.4%", "senior_rate_pct=6.4"],
+    ["Bank fixed coupon: 640 bps", "senior_rate_pct=6.4"],
+    ["First mortgage int. fixed 6.4%", "senior_rate_pct=6.4"],
+    ["Annual fixed intrest 6.40%", "senior_rate_pct=6.4"],
+    ["Credit union loan charge: 6.4% a year", "senior_rate_pct=6.4"],
+    ["Member loan rate: 6.4%", "senior_rate_pct=6.4"],
+    ["Taux annuel ferme : 6,40 %", "senior_rate_pct=6.4"],
+    ["Coupon de la banque : 6,4 %", "senior_rate_pct=6.4"],
+    ["Bank amort tail: 30 yr", "senior_amort_years=30"],
+    ["Repayment horizon: 30 years", "senior_amort_years=30"],
+    ["Amort years allowed: 30", "senior_amort_years=30"],
+    ["Member amortization horizon: 30 years", "senior_amort_years=30"],
+    ["S:FIRST repayment horizon years|30", "senior_amort_years=30"],
+    ["Durée d'amortissement de la banque : 30 ans", "senior_amort_years=30"],
+    ["Bank IO window: 18 mo.", "senior_io_months=18"],
+    ["Interest-only run: 18 months", "senior_io_months=18"],
+    ["Months free of principal: 18", "senior_io_months=18"],
+    ["Bank int-only period: a year and a half", "senior_io_months=18"],
+    ["S:FIRST IO window|18", "senior_io_months=18"],
+    ["Franchise de capital, mois : 18", "senior_io_months=18"],
+    ["Période sans capital : 18 mois", "senior_io_months=18"],
+    ["The bank will lend $2,400,000 at 6.5%, amortized over 25 years, with 12 months interest-only.", "senior_loan_amount=2400000 senior_rate_pct=6.5 senior_amort_years=25 senior_io_months=12"],
+    ["Owner says the bank is in for 850k / bank coupon 7.0%, bank amort 25 yr, bank IO 18 mo.", "senior_loan_amount=850000 senior_rate_pct=7 senior_amort_years=25 senior_io_months=18"],
+    ["La banque prêtera 2 400 000 $ à 6,5 %, amorti sur 25 ans.", "senior_loan_amount=2400000 senior_rate_pct=6.5 senior_amort_years=25"],
+    ["First-mortgage contribution toward construction: $2,700,000", "senior_loan_amount=2700000"],
+    ["Second cash from a private lender: $300,000", "mezz_loan_amount=300000"],
+    ["Second charge rate: 11%", "mezz_rate_pct=11"],
+    ["Junior amort.: 10 years", "mezz_amort_years=10"],
+    ["Junior principal-free months: 12", "mezz_io_months=12"],
+    ["Taux du prêt de second rang : 11 %", "mezz_rate_pct=11"],
+    ["Amortissement du prêt de second rang : 10 ans", "mezz_amort_years=10"],
+    ["Taux subordonné : 11 %", "mezz_rate_pct=11"],
+    ["Alongside it, a second loan of $300,000 at 11% with a 10-year amortization.", "mezz_loan_amount=300000 mezz_rate_pct=11 mezz_amort_years=10"],
+    ["Ongoing debt-cover floor: 1.25x", "min_dscr_covenant=1.25"],
+    ["Debt service floor: 1.25x", "min_dscr_covenant=1.25"],
+    ["Service covenant: 1.25x", "min_dscr_covenant=1.25"],
+    ["Annual DCR promise: 1.25x", "min_dscr_covenant=1.25"],
+    ["Minimum coverage the bank requires: 1.25x", "min_dscr_covenant=1.25"],
+    ["Couverture minimale exigée : 1,25 x", "min_dscr_covenant=1.25"],
+    ["Ratio de couverture de la dette minimal : 1,25", "min_dscr_covenant=1.25"],
+    ["Loan to cost: 70%", "stated_ltc_pct=70"],
+    ["Ratio prêt-coût : 70 %", "stated_ltc_pct=70"],
+    ["Amount: $9,500,000 (70% loan-to-cost)", "senior_loan_amount=9500000 stated_ltc_pct=70"],
+    ["Take-out leverage committed: 65%", "refinance_ltv_pct=65"],
+    ["Committed valuation share at take-out: 65%", "refinance_ltv_pct=65"],
+    ["Quotité du refinancement : 65 %", "refinance_ltv_pct=65"],
+    ["Take-out coupon: 5.1%", "refinance_rate_pct=5.1"],
+    ["Taux du prêt permanent : 5,10 %", "refinance_rate_pct=5.1"],
+    ["Take-out repayment years: 35", "refinance_amort_years=35"],
+    ["Permanent amortization: 35 years", "refinance_amort_years=35"],
+    ["Amortissement permanent : 35 ans", "refinance_amort_years=35"],
+    ["Refi at month: 24", "refinance_month=24"],
+    ["Take-out at month 24", "refinance_month=24"],
+    ["Conversion to the permanent loan occurs at project month 24.", "refinance_month=24"],
+    ["Passage au prêt permanent au mois 24.", "refinance_month=24"],
+    ["Take-out indication: $8.15M", "refinance_amount=8150000"],
+    ["Construction loan amortization: 25 years // Permanent amort.: 30 years", "senior_amort_years=25 refinance_amort_years=30"],
+    ["The bank will advance $2,400,000 for construction. // Refinance amount: $2,600,000", "senior_loan_amount=2400000 refinance_amount=2600000"],
+    ["LP funding slice: 90%", "lp_share_pct=90"],
+    ["LP proportion of subscribed equity: 90%", "lp_share_pct=90"],
+    ["Limited partners' portion of the cash: 90%", "lp_share_pct=90"],
+    ["Quote-part des commanditaires : 90 %", "lp_share_pct=90"],
+    ["Part LP de la mise de fonds : 90 %", "lp_share_pct=90"],
+    ["Pref. hurdle: 8%", "preferred_return_pct=8"],
+    ["Preferred distribution: 8% yearly", "preferred_return_pct=8"],
+    ["Rendement prioritaire LP : 8 %", "preferred_return_pct=8"],
+    ["Rendement privilégié : 8 % par an", "preferred_return_pct=8"],
+    ["GP upside after pref: 20%", "gp_promote_pct=20"],
+    ["GP carry after pref: 20%", "gp_promote_pct=20"],
+    ["Thereafter the general partner takes a promoted share of 20% of further distributions.", "gp_promote_pct=20"],
+    ["Promotion du commandité : 20 %", "gp_promote_pct=20"],
+    ["Cash terms: LP funding slice 90% / pref. hurdle 8% / GP upside after pref 20%.", "lp_share_pct=90 preferred_return_pct=8 gp_promote_pct=20"],
+    ["Owners' cash wired: $700,000", "equity_amount=700000"],
+    ["Interest holdback quoted: $360,000", "stated_interest_reserve=360000"],
+    ["Lender's maximum loan to cost: 75%", "-"],
+    ["Prime rate today: 5.2%", "-"],
+    ["Bank of Canada rate: 2.75%", "-"],
+    ["Rate on our deposit account: 3%", "-"],
+    ["Last year's mortgage rate on the old building: 4.1%", "-"],
+    ["Comparable deal's DCR: 1.4x", "-"],
+    ["Projected DCR at stabilization: 1.38x", "-"],
+    ["Partner's share of the neighbouring project: 50%", "-"],
+    ["GP's ownership of the management company: 100%", "-"],
+    ["$0 — Sales tax left after rebates", "!senior_loan_amount"],
+    ["Inflation forecast: 2.1%", "!senior_rate_pct,mezz_rate_pct"],
+    ["Refinance proceeds to equity: $400,000", "!refinance_amount"],
+    ["Lease term: 25 years", "!senior_amort_years"],
+    ["Taux du prêt subordonné : 11 %", "!senior_rate_pct"],
+    ["Amortissement subordonné : 10 ans", "!senior_amort_years"],
+    ["Second loan rate: 11%", "!senior_rate_pct"],
+    ["Permanent amort.: 30 years", "!senior_amort_years"],
+    ["Build interval: a year and a third", "construction_months=16"],
+    ["2.5% — Annual change to running costs", "expense_growth_pct=2.5"],
+    ["2.5% — Annual change to running costs", "!expense_ratio_pct"],
+    ["8 years — Years until the sale // 96% — Occupied share once let // 33% — Share of income spent running the building // 5.5% — Rate used to capitalize the sale income", "hold_years=8 stabilized_occupancy_pct=96 expense_ratio_pct=33 exit_cap_rate_pct=5.5"],
+    ["13 months — Works period // 4 months — Allow this long to let the homes // 9 years — Years until the sale", "construction_months=13 lease_up_months=4 hold_years=9"],
+    ["S(Base):Hard|Alternative imported equipment quote in USD|40000", "!hard_cost"],
+    ["S(Base):Hard|USD price for optional imported boilers|40000", "!hard_cost"],
+    ["S(Base):Hard|Hard costs ex-GST|3040000 // S:Hard|Alternative imported equipment quote in USD|40000", "hard_cost=3040000"],
+    ["City growth levies due at permit: $18,000", "!soft_cost"],
+    ["S(Base):Input|Growth levies payable on the permit|18000", "!soft_cost"],
+    ["Bank's senior share of the build: $2,700,000", "!hard_cost"],
+    ["Footnote 1: the selling-cost allowance at exit is 2.5%.", "selling_costs_pct=2.5"],
+    ["Lease-up reserve: 6 months of interest", "!lease_up_months"],
+    ["Leasing commission period: 6 months", "!lease_up_months"],
+    ["Credit union pricing: 725 bp", "senior_rate_pct=7.25"],
+    ["Banque, taux ferme : 725 pb", "senior_rate_pct=7.25"],
+    ["S:Lender repayment period years|28", "senior_amort_years=28"],
+    ["First-ranking principal holiday: two years", "senior_io_months=24"],
+    ["La banque avancera 750000 $ pour construction.", "senior_loan_amount=750000"],
+    ["Bank deposit coupon: 4%", "-"],
+    ["Lender insurance charge: 2%", "-"],
+    ["The bank will advance $720000 at 6.2%, amortized over 28 years, with 15 months interest-only.", "senior_loan_amount=720000 senior_rate_pct=6.2 senior_amort_years=28 senior_io_months=15"],
+    ["La banque prêtera 720000 $ à 6,2 %, amorti sur 28 ans.", "senior_loan_amount=720000 senior_rate_pct=6.2 senior_amort_years=28"],
+    ["Bank funding: bank in for $720000 / bank pricing 6.2% / bank amort 28 years / bank IO 15 months", "senior_loan_amount=720000 senior_rate_pct=6.2 senior_amort_years=28 senior_io_months=15"],
+    ["A comparable bank will lend $720000 at 6.2%.", "-"],
+    ["Bank deposit: $720000 at 6.2%", "-"],
+    ["Private lender coupon: 12%", "mezz_rate_pct=12"],
+    ["S:Prêt subordonné amortissement|9 ans", "mezz_amort_years=9"],
+    ["Junior bank principal holiday: 15 months", "mezz_io_months=15"],
+    ["Second floor cost: $250000", "!senior_loan_amount,mezz_loan_amount"],
+    ["Deuxième phase de construction : 9 mois", "!mezz_amort_years,mezz_io_months"],
+    ["Perm pricing: 4.8%", "refinance_rate_pct=4.8"],
+    ["S:Refinancement quotité engagée|68%", "refinance_ltv_pct=68"],
+    ["Permanent repayment period: 32 years", "refinance_amort_years=32"],
+    ["Take-out term: 5 years", "-"],
+    ["Refinance fee: $12000", "-"],
+    ["Required debt-cover: 1.3x", "min_dscr_covenant=1.3"],
+    ["S:Service de la dette plancher exigé|1.3x", "min_dscr_covenant=1.3"],
+    ["Loan principal: $720000 (68% loan-to-cost)", "senior_loan_amount=720000 stated_ltc_pct=68"],
+    ["Expected DCR floor: 1.3x", "-"],
+    ["Lender limit LTC: 80%", "-"],
+    ["Investor class funding portion: 88%", "lp_share_pct=88"],
+    ["S:Intéressement du commandité après le rendement prioritaire|22%", "gp_promote_pct=22"],
+    ["Sponsor cash contributed: $640000", "equity_amount=640000"],
+    ["GP ownership of the contractor: 22%", "-"],
+    ["LP distribution of sale proceeds: 88%", "-"],
+    ["Bank bond yield: 4.7%", "-"],
+    ["S:Historic loan amortization|22 years", "-"],
+    ["Taux hypothécaire historique : 4,7 %", "-"],
+    ["Bank contractual rate: 4.7%", "senior_rate_pct=4.7"],
+    ["S:Banque amortissement|22 ans", "senior_amort_years=22"],
+    ["Build interval: a year and two thirds", "construction_months=20"],
+    ["Mise en location : un an et un tiers", "lease_up_months=16"],
+    ["S:Bank IO|two years", "senior_io_months=24"],
+    ["Construction started a year ago", "-"],
+    ["Lease term: two years", "-"],
+    ["Operating-cost yearly change: 3%", "expense_growth_pct=3"],
+    ["S:Year-over-year change in operating expenses|3%", "expense_growth_pct=3"],
+    ["Variation annuelle des dépenses : 3 %", "expense_growth_pct=3"],
+    ["Annual change in sale price: 3%", "-"],
+    ["Historic operating expense growth: 3%", "-"],
+    ["S:Hard|US dollars equipment allowance|45000", "-"],
+    ["S:Budget|Optional shell works|45000", "-"],
+    ["S:Hard|Supplier quote for cladding|45000", "-"],
+    ["Hard construction costs: $45000", "hard_cost=45000"],
+    ["S:Hard|Cladding allowance|45000", "hard_cost=45000"],
+    ["Municipal growth fees at permit: $19000", "development_charges=19000"],
+    ["S:Budget|Redevances de croissance au permis|19000", "development_charges=19000"],
+    ["City development levies: $19000", "development_charges=19000"],
+    ["Permit and construction cost: $19000", "-"],
+    ["Growth levies included in soft costs: $19000", "-"],
+    ["Footnote 2: selling-cost allowance at exit is 3%.", "selling_costs_pct=3"],
+    ["Footnote 3: Banque coupon: 6%.", "senior_rate_pct=6"],
+    ["Note de bas de page 4 : frais de vente à la sortie : 3 %.", "selling_costs_pct=3"],
+    ["Footnote 5: old building mortgage rate is 6%.", "-"],
+    ["Footnote 6: projected DCR is 1.4x.", "-"],
+    ["Leasing reserve: two years of interest", "-"],
+    ["S:Lease-up commission period|8 months", "-"],
+    ["Réserve de mise en location : 8 mois", "-"],
+    ["Lease-up allowance: 8 months", "lease_up_months=8"],
+    ["Mise en location : 8 mois", "lease_up_months=8"],
+    ["Bank rate and LP share: 12%", "-"],
+    ["GP carry and bank coupon: 12%", "-"],
+    ["S:Rate and preferred return|12%", "-"],
+  ])("%s", (input, expected) => {
+    const got = read(input).candidates.map(c => `${c.fieldKey}=${c.value}`);
+    if (expected === "-") expect(got).toEqual([]);
+    else if (expected.startsWith("!")) expect(got.filter(g => expected.slice(1).split(",").includes(g.split("=")[0]!))).toEqual([]);
+    else expect(got.sort()).toEqual(expected.split(" ").sort());
+  });
+  test.each([
+    "Bank coupon reflects a 30 bps buy-down.", "Le taux ferme inclut une réduction de 25 pb.",
+    "GP promote (tier 2): 30%", "Tier 2 hurdle (LP IRR): 15%", "GP share above pref: 20%",
+    "Preliminary senior indication: $2400000", "Indicative senior authorization: $2400000",
+  ])("adjustments, later tiers and unstated partner terms stay shown: %s", input => expect(read(input).candidates).toEqual([]));
+  test.each([
+    ["a year and a third", 16], ["a year and two thirds", 20], ["two years", 24],
+    ["un an et un tiers", 16], ["un an et deux tiers", 20], ["deux ans", 24],
+  ] as const)("each period uses the same spelled span: %s", (span, months) => {
+    for (const [label, field] of [["Construction period", "construction_months"], ["Lease-up", "lease_up_months"], ["Bank IO", "senior_io_months"]]) {
+      expect(read(`${label}: ${span}`).candidates.map(c => [c.fieldKey, c.value])).toEqual([[field, months]]);
+      expect(read(`S:${label}|${span}`).candidates.map(c => [c.fieldKey, c.value])).toEqual([[field, months]]);
+    }
+  });
+  test.each([
+    "S:Hard|Devis alternatif en USD|45000", "S:Budget|Construction optional quote USD|45000",
+    "S:Hard|Supplier quote en dollars US|45000", "Taux de dépôt de la banque : 4 %",
+    "Taux historique du prêt : 4 %", "Part GP et taux bancaire : 20 %",
+  ])("own French exclusions keep the figure shown: %s", input => expect(read(input).candidates).toEqual([]));
+  test.each(["pdf", "docx"] as const)("figure-first runs keep each %s label local", kind => {
+    const runs = [
+      ["8 years — Years until the sale // 96% — Occupied share once let // 33% — Share of income spent running the building // $0 — Sales tax left after rebates", [["hold_years", 8], ["stabilized_occupancy_pct", 96], ["expense_ratio_pct", 33]]],
+      ["20 months — Construction period // 7 months — Lease-up period // 9 years — Hold period", [["construction_months", 20], ["lease_up_months", 7], ["hold_years", 9]]],
+      ["20 mois — Durée de construction // 7 mois — Mise en location // 9 ans — Détention", [["construction_months", 20], ["lease_up_months", 7], ["hold_years", 9]]],
+    ] as const;
+    for (const [input, expected] of runs) expect(read(input, kind).candidates.map(c => [c.fieldKey, c.value])).toEqual(expected);
+    expect(read("6% — Bank deposit rate // 22% — GP ownership of the contractor", kind).candidates).toEqual([]);
+  });
+  test("a docx paragraph never labels the next paragraph's figure", () => {
+    expect(read("Bank loan amount // $300000 // 7% — Bank coupon", "docx").candidates.map(c => [c.fieldKey, c.value])).toEqual([["senior_rate_pct", 7]]);
   });
 });

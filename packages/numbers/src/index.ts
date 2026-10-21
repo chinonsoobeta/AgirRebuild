@@ -301,9 +301,9 @@ const DIGIT_WORDS = "one|two|three|four|five|six|seven|eight|nine|un|deux|trois|
 // A number word, then (directly, or after a hyphen) a unit word. Compounds ("twenty-four") first, so they win over their first word.
 // "a" and "an" count only before a year ("a year"); "one and a half years" and "a year and a half" are 1.5 years; "five quarters" is fifteen months.
 const YEAR_NOUN = "years?|ans?|ann[ée]es?";
-const HALF = String.raw`(?:\s+(?:and\s+a\s+half|et\s+demie?)(?![\p{L}\p{N}]))?`;
+const YEAR_FRACTION = String.raw`(?:\s+(?:and\s+(?:a\s+half|a\s+third|two\s+thirds)|et\s+(?:demie?|un\s+tiers|deux\s+tiers))(?![\p{L}\p{N}]))?`;
 const WORD_RE = new RegExp(
-  String.raw`(?<![\p{L}\p{N}-])((?:${TENS})-(?:${DIGIT_WORDS})|dix-sept|dix-huit|dix-neuf|${Object.keys(WORD_VALUES).filter((w) => !w.includes("-")).join("|")}|an?)(\s+and\s+a\s+half)?(?:-|\s+)(months?|mois|${YEAR_NOUN}|(?:quarters|trimestres)${NOT_FRACTION}(?!['’])|${TYPE_BED}(?:[\s-]+(?:units?|suites?|homes?|apartments?|logements?|unités?))?|(?:units?|suites?|homes?|apartments?|logements?|unités?)|${TYPE_NAMED})(?![\p{L}\p{N}])(${HALF})`,
+  String.raw`(?<![\p{L}\p{N}-])((?:${TENS})-(?:${DIGIT_WORDS})|dix-sept|dix-huit|dix-neuf|${Object.keys(WORD_VALUES).filter((w) => !w.includes("-")).join("|")}|an?)(\s+and\s+a\s+half)?(?:-|\s+)(months?|mois|${YEAR_NOUN}|(?:quarters|trimestres)${NOT_FRACTION}(?!['’])|${TYPE_BED}(?:[\s-]+(?:units?|suites?|homes?|apartments?|logements?|unités?))?|(?:units?|suites?|homes?|apartments?|logements?|unités?)|${TYPE_NAMED})(?![\p{L}\p{N}])(${YEAR_FRACTION})`,
   "giu",
 );
 // "twelve (12) months": the digits in parentheses after their own words are the figure, and the words are not a second one.
@@ -354,14 +354,15 @@ function wordTokens(text: string): NumberToken[] {
     if (unit === "units" && /^(one|un|une|an?)$/.test(word)) continue;
     const before = text.slice(0, m.index!);
     if (PRECEDING_NUMBER_WORD.test(before)) continue;
-    const half = Boolean(m[2] || m[4]);
+    const fraction = m[2] || m[4] || "";
+    const hasFraction = Boolean(fraction);
     // "a year": a duration, not "once a year", "$96,000 a year", "a year ago" or "a unit and a half".
     if (/^an?$/.test(word) && (unit !== "years" || /(?:once|twice|times|per|each|every|[\d%$])\s*$/i.test(before) || /^(?:[-'’]|\s+(?:ago|old|earlier|later|before)\b)/i.test(text.slice(m.index! + m[0].length)))) continue;
-    if (half && unit !== "years") continue;
+    if (hasFraction && unit !== "years") continue;
     if (quarters && /^(one|un|une|an?)$/.test(word)) continue;
     const [a, b] = word.includes("-") ? word.split("-") : [word, null];
     const base = /^an?$/.test(word) ? 1 : b === null || a === "dix" ? WORD_VALUES[word]! : WORD_VALUES[a!]! + WORD_VALUES[b]!;
-    const value = quarters ? base * 3 : base + (half ? 0.5 : 0);
+    const value = quarters ? base * 3 : base + (/two\s+thirds|deux\s+tiers/i.test(fraction) ? 2 / 3 : /third|tiers/i.test(fraction) ? 1 / 3 : hasFraction ? 0.5 : 0);
     out.push({ raw: m[0], start: m.index!, end: m.index! + m[0].length, value, currency: false, currencyCode: null, unit, scaled: false, ...(quarters ? { quarters: true as const } : {}) });
   }
   return out;

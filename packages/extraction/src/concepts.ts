@@ -1,17 +1,15 @@
 // Folded words for a concept read. Aliases and their refusals always run first.
 // "Principal" is an amount word, not a loan: "Principal: $X" alone names no loan.
-export const LOAN_NOUN = /\b(?:loans?|facilit(?:y|ies)|advances?|mortgages?|lenders?|banks?|credits?|financing|borrowing|prets?|financements?|hypotheques?|preteurs?|banques?|avances?)\b/;
+export const LOAN_NOUN = /\b(?:loans?|facilit(?:y|ies)|advances?|mortgages?|lenders?|banks?|credit union|members?|credits?|financing|borrowing|prets?|financements?|hypotheques?|preteurs?|banques?|avances?)\b/;
 // The main lender is the senior loan, whatever the document's own loan is: "le prêteur principal", "our main lender".
 export const MAIN_LENDER = /\b(?:preteur principal|banque principale|premier preteur|principal lender|main lender|lead lender|first lender)\b/;
-// "The lender", "a bank", "le prêteur": a loan named before, whose rank this line does not state.
-export const LOAN_ANAPHOR = /\b(?:the|a|an|this|that|our|their|its|le|la|les|l|un|une|ce|cette|notre|leur)\s+(?:loans?|facility|lenders?|banks?|mortgages?|prets?|preteurs?|banques?|hypotheques?)\b/;
 // A figure said to be uncommitted or an alternative is not the loan: "…, never committed".
 export const NOT_THE_LOAN_AFTER = /^\W*(?:(?:which|that|but)\s+(?:was|is)\s+)?(?:never|not (?:yet )?committed|uncommitted|jamais|non engage)/;
 
 // Card 115: v5/v8/v9/v10 loan labels informed rank and plain loan vocabulary.
 // First phase/draw/year/floor and a partner's priority are not loan ranks.
-export const SENIOR_RANK = /\b(?:sr|senior|first[- ]charge|first (?=(?:money|principal|amort\w*|io|interest|rate|coupon|charge|lender|loan|mortgage)\b)|the first is|(?:dette|pret|interet|taux|amort\w*)\s+prioritaire|prioritaire\s+(?:dette|pret|interet|taux|amort\w*))\b/;
-export const LOAN_PERIOD = /\b(?:repayment (?:schedule|years)|years to repay (?:the )?principal|free-principal|no-principal|principal holiday|franchise de capital|interets? seuls|periode sans capital)\b/;
+export const SENIOR_RANK = /\b(?:sr|senior|first[- ](?:charge|ranking)|first (?=(?:money|principal|amort\w*|io|interest|rate|coupon|charge|lender|loan|mortgage)\b)|the first is|(?:dette|pret|interet|taux|amort\w*)\s+prioritaire|prioritaire\s+(?:dette|pret|interet|taux|amort\w*))\b/;
+export const LOAN_PERIOD = /\b(?:repayment (?:schedule|years|horizon|period)|years to repay (?:the )?principal|months free of principal|principal-free|int-only|free-principal|no-principal|principal holiday|franchise de capital|interets? seuls|periode sans capital)\b/;
 // v6/v8/v9/v10 totals: a named cost subtotal still belongs to that cost.
 // Card 115 audit: "stated total" and "total déclaré" alone, or of the project or its costs; "Stated total rent" is not the project's.
 export const STATED_TOTAL = /\b(?:stated project subtotal|project subtotal|(?:stated total|total declare)(?=\s*$|\s+(?:project|cost|costs|of (?:the )?(?:project|uses|costs)|budget|du projet|des couts|des emplois)\b)|total uses|all-in uses|sum of uses|total des emplois|somme des emplois)\b/;
@@ -45,13 +43,14 @@ export const MONTH_INDEX = /\b(?:month|mois)\s*:?\s*$|\b(?:at|in|by|from|until|a
 // Card 117: settled occupancy and growth words apply in either order.
 export const OCCUPANCY_WORD = /\b(?:occupancy|occupied|filled|fill|let|letting|leasing|leased|rented|occupation)\b/;
 export const SETTLED_WORD = /\b(?:stabili[sz]\w*|stab|settled|steady|mature|normal|long-run|long-term|target|planned|a maturite|de croisiere|a terme|retenue|regime(?: stable| etabli)?)\b/;
-export const GROWTH_WORD = /\b(?:growth|uplift|steps?|drift|increase|escalation|grown(?: at)?|indexation|hausse|croissance)\b/;
+export const GROWTH_WORD = /\b(?:annual change|year-over-year change|yearly change|variation annuelle|growth|uplift|steps?|drift|increase|escalation|grown(?: at)?|indexation|hausse|croissance)\b/;
 // Card 117 audit: "actual" or "réelle" beside a stabilization word is this building's stabilized state (card 105), not history.
 export const ASSUMPTION_HISTORY = /\b(?:actual(?! stabili)|historic(?:al)?|last year|prior year|seller s|previous owner|old owner|old building|comparables?|market|area|neighbou?rhood|peak|(?<!stabilisee )reel(?:le)?s?(?! stabili)|l an dernier|historique|marche)\b/;
 
 export const CONCEPTS: readonly {
   fieldKey: string;
   budget?: true;
+  unscoped?: true;
   assumption?: true;
   with?: readonly RegExp[];
   basisAfter?: RegExp;
@@ -61,13 +60,13 @@ export const CONCEPTS: readonly {
 }[] = [
   {
     fieldKey: "senior_loan_amount", unit: "$",
-    words: [LOAN_NOUN, /\b(?:amount|principal|advance|size|commitment|granted|dollars|funds|money|cash|authorization|committed|dette|montant|capital|accord\w*)\b/],
-    exclude: /\b(?:apprais\w*|evalu\w*|alternat\w*|rough|uncommitted|hypothetical|indicative|floated|(?:sub|sous-)?totals?|line of credit|credit line|marge de credit|ligne de credit|fees?|interests?|reserves?|holdbacks?|draw\w*|to date|balances?|payments?|deposits?|equity|officer|union|valuation|valued|value|frais|interets?|retenues?|soldes?|versements?|depots?|capitaux propres|capital propre|tire\w*|a ce jour|partners?|sponsors?|own|investors?|promoteurs?|associes?|commanditaires?|investisseurs?)\b/,
+    words: [LOAN_NOUN, /\b(?:lend|lends|in for|fund|contribution toward construction|pretera|avancera|amount|principal|advance|size|commitment|granted|dollars|funds|money|cash|authorization|committed|dette|montant|capital|accord\w*)\b/],
+    exclude: /\b(?:apprais\w*|evalu\w*|alternat\w*|rough|uncommitted|hypothetical|indicative|floated|(?:sub|sous-)?totals?|line of credit|credit line|marge de credit|ligne de credit|fees?|interests?|reserves?|holdbacks?|draw\w*|to date|balances?|payments?|deposits?|corporation|equity|officer|union|requirements?|valuation|valued|value|frais|interets?|retenues?|soldes?|versements?|depots?|capitaux propres|capital propre|tire\w*|a ce jour|partners?|sponsors?|own|investors?|promoteurs?|associes?|commanditaires?|investisseurs?)\b/,
   },
   {
     fieldKey: "senior_rate_pct", unit: "%",
-    words: [/\b(?:rate|interest|int|coupon|pricing|charge|cost of borrowing|taux|interet)\b/],
-    exclude: /\b(?:to[- ]value|to[- ]cost|ltv|ltc|fees?|spread|over prime|premium|insurance|dscr|dcr|holdbacks?|frais|prime d assurance|ratio|partners?|investors?|commanditaires?|associes?|investisseurs?|retard|arrerages|defaut|deposits?|depots?|ownership|carried|partnership|pret[- ](?:valeur|cout)|ecart|au dessus du taux preferentiel|resets?|renewal|renouvel\w*|revision|step[- ]?ups?)\b/,
+    words: [/\b(?:rate|interest|intrest|int|coupon|fixed|ferme|pricing|charge|cost of borrowing|taux|interet)\b/],
+    exclude: /\b(?:to[- ]value|to[- ]cost|ltv|ltc|fees?|spread|over prime|premium|insurance|dscr|dcr|holdbacks?|frais|prime d assurance|ratio|partners?|investors?|commanditaires?|associes?|investisseurs?|retard|arrerages|defaut|deposits?|depots?|ownership|carried|partnership|pret[- ](?:valeur|cout)|ecart|au dessus du taux preferentiel|resets?|renewal|renouvel\w*|revision|step[- ]?ups?|buy-down|buydown|reduction|capitalisation|capitalization)\b/,
   },
   {
     fieldKey: "senior_amort_years", unit: "years",
@@ -76,9 +75,33 @@ export const CONCEPTS: readonly {
   },
   {
     fieldKey: "senior_io_months", unit: "months",
-    words: [/\b(?:interest[- ]only|io|before repayment begins|before amortization|free-principal|no-principal|principal holiday|franchise de capital|interets? seuls|periode sans capital|interets? seulement|sans remboursement de capital)\b/],
+    words: [/\b(?:int-only|months free of principal|principal-free|interest[- ]only|io|before repayment begins|before amortization|free-principal|no-principal|principal holiday|franchise de capital|interets? seuls|periode sans capital|interets? seulement|sans remboursement de capital)\b/],
     exclude: /\b(?:terms?|maturity|draw\w*|deposits?|depots?|rent-free|echeance|termes?|tirage\w*)\b/,
   },
+  { fieldKey: "refinance_amount", unit: "$", unscoped: true,
+    words: [/\bindication\b/], with: [/\b(?:take-?out|permanent|perm|refi|refinanc\w*)\b/],
+    exclude: /\b(?:preliminary|uncommitted|alternative|fees?|equity)\b/ },
+  // Card 118: a take-out's own sizing/timing and partner terms do not require a senior-loan noun.
+  { fieldKey: "refinance_ltv_pct", unit: "%", unscoped: true,
+    words: [/\b(?:leverage|ltv|valuation share|sizing|quotite)\b/],
+    with: [/\b(?:take-?out|permanent|perm|refi|refinanc\w*)\b/], exclude: /\b(?:maximum|limit|optional|alternative)\b/ },
+  { fieldKey: "lp_share_pct", unit: "%", unscoped: true,
+    words: [/\b(?:lp|limited partners?|commanditaires?|investor class)\b/],
+    with: [/\b(?:slice|share|portion|proportion|quote-part|part)\b/], exclude: /\b(?:pref|preferred|priority|hurdle|rendement|distributions?|profits?|ownership|neighbour\w*)\b/ },
+  { fieldKey: "preferred_return_pct", unit: "%", unscoped: true,
+    words: [/\b(?:pref|preferred|priority|hurdle|rendement (?:prioritaire|privilegie))\b/],
+    exclude: /\b(?:gp|general partner|commandite|tier [2-9]|lp irr|lenders?|preteurs?|banks?|banques?|prime de performance|upside|carry|carried interest|promote|promoted|promotion|interessement|equity|ownership)\b/ },
+  { fieldKey: "gp_promote_pct", unit: "%", unscoped: true,
+    words: [/\b(?:gp|general partner|sponsor|commandite)\b/],
+    with: [/\b(?:upside|carry|carried interest|promote|promoted share|promotion|interessement)\b/], exclude: /\b(?:ownership|tier [2-9]|second tier|palier [2-9])\b/ },
+  { fieldKey: "equity_amount", unit: "$", unscoped: true,
+    words: [/\b(?:owners?|sponsors?)\b/], with: [/\bcash\b/, /\b(?:in|wired|contributed)\b/], exclude: /\b(?:returned|proceeds|remaining|refinance|take-out)\b/ },
+  { fieldKey: "stated_interest_reserve", unit: "$", unscoped: true,
+    words: [/\binterest\b/], with: [/\b(?:holdback|reserve)\b/], exclude: /\b(?:loans?|leasing|lease-up|combined|optional)\b/ },
+  { fieldKey: "stated_ltc_pct", unit: "%", unscoped: true,
+    words: [/\b(?:loan[- ]to[- ]cost|ltc|ratio pret-cout)\b/], exclude: /\b(?:maximum|limits?|lender s|plafond)\b/ },
+  { fieldKey: "development_charges", unit: "$", budget: true,
+    words: [/\b(?:growth|development|croissance)\b/], with: [/\b(?:levies|fees|redevances)\b/], exclude: /\b(?:included|inclus|deja)\b/ },
   // Card 109: v8/v9 labels informed the build/travaux, acquisition, design and contingency vocabulary.
   // Vague paraphrases in those sets are not concept words. Tax, finance and operating items remain excluded.
   {
@@ -89,7 +112,7 @@ export const CONCEPTS: readonly {
   {
     fieldKey: "hard_cost", unit: "$", budget: true,
     words: [/\b(?:interior finish package|work order|suite installation|ouvrage|transformation|marche de travaux)\b/, /^(?=.*\b(?:gc|general contractor|crew|builder|trades?|conversion|renovation|installation|fit-up)\b)(?=.*\b(?:contracts?|lump sum|payments?|bill|price|spend|envelope|sum|cost)\b)/, /\b(?:construction|build|works|trades|framing|envelope|finishes|fit-out|fitout|shell|contractor|structure|site services|servicing|sitework|travaux|charpente|enveloppe|finitions|entrepreneur|chantier)\b/, /(?<!purchase of the )(?<!purchase of )\bbuilding\b(?!\s+(?:purchase|acquisition|price|basis))/],
-    exclude: /\b(?:unallocated|loans?|rents?|monthly|loyers?|mensuel\w*|quotes?|interest|insurance|management|supervision|fees?|permits?|design|drawings|period|months?|prets?|interets?|assurance|gestion|honoraires|permis)\b/,
+    exclude: /\b(?:unallocated|loans?|banks?|lenders?|first-mortgage|advance|contribution|rents?|monthly|loyers?|mensuel\w*|quotes?|interest|insurance|management|supervision|fees?|permits?|design|drawings|period|months?|prets?|interets?|assurance|gestion|honoraires|permis)\b/,
   },
   {
     fieldKey: "soft_cost", unit: "$", budget: true,
@@ -118,7 +141,7 @@ export const CONCEPTS: readonly {
     fieldKey: "lease_up_months", unit: "months", assumption: true,
     // Card 111 (v4): "pour remplir les logements"; "locataires" is the French for tenants.
     words: [/\b(?:lease-up|leasing|letting|tenanting|let-up|fill|tenants?|tenant-finding|absorption|rent-up|mise en location|location|remplir|remplissage|to lease|to let|locataires?)\b/],
-    exclude: /\b(?:loans?|terms?|permits?|permis|lock|free rent|rent-free|notice|lease term|bail|prets?|loyer gratuit|franchise de loyer|preavis|location du terrain|free|incentives?|gratuite?s?|incitati\w*)\b/,
+    exclude: /\b(?:loans?|terms?|permits?|permis|lock|free rent|rent-free|notice|lease term|reserves?|commissions?|interest|interets?|reserve|bail|prets?|loyer gratuit|franchise de loyer|preavis|location du terrain|free|incentives?|gratuite?s?|incitati\w*)\b/,
   },
   {
     fieldKey: "stabilized_occupancy_pct", unit: "%", assumption: true,
@@ -128,7 +151,7 @@ export const CONCEPTS: readonly {
   },
   {
     fieldKey: "exit_cap_rate_pct", unit: "%", assumption: true,
-    words: [/\b(?:cap|capitali[sz](?:ation|ing))\b/],
+    words: [/\b(?:cap|capitaliz(?:e|ing|ation)|capitalis(?:e|ing|ation))\b/],
     with: [/\b(?:end|exit|sale|sell|disposal|disposition|cession|reversion|terminale?|outgoing|going-out|eventual|revente|sortie|vente|depart)\b/],
     exclude: /\b(?:going-in|entry|purchase|acquisition|in[- ]place|current|market|comparable|sold|traded|achat|entree|actuel\w*|marche)\b/,
   },
@@ -137,12 +160,12 @@ export const CONCEPTS: readonly {
     words: [/\b(?:operating|opex|running|maintenance|upkeep|frais courants|run (?:the |a |this )?building|expenses?|costs?|charges|exploitation|depenses)\b/],
     with: [/\b(?:share|fraction|ratio|percentage|proportion|take|slice|load|deduction|allowance|pourcentage|part|(?:against|of|rapportees? aux|rapportes? aux|sur (?:les )?) (?:egi|effective income|income|receipts|revenue|collections|recettes|revenus))\b/],
     basisAfter: /^\s*(?:of (?:the )?(?:egi|income|collections|revenue|receipts)|(?:des?|du|sur les) (?:recettes|revenus))\b/,
-    exclude: /\b(?:management fee|vacancy|tax|insurance|growth|increase|escalation|inflation|frais de gestion|assurance|taxes?|croissance|hausse|vacance|recurring|sell\w*|sale|exit|brokerage|commissions?|disposition|vente|courtage)\b/,
+    exclude: /\b(?:management fee|vacancy|tax|insurance|annual change|year-over-year change|yearly change|variation annuelle|growth|increase|escalation|inflation|frais de gestion|assurance|taxes?|croissance|hausse|vacance|recurring|sell\w*|sale|exit|brokerage|commissions?|disposition|vente|courtage)\b/,
   },
   {
     fieldKey: "hold_years", unit: "years", assumption: true,
     // Card 111 (v4): selling after a period, or keeping the building for it, is the hold.
-    words: [/\b(?:hold|held|holding|ownership|own|horizon|keep|detention|conserver|garder|(?:sell|sale|selling|exit|resale) after|(?:revente|vente|sortie) apres|vendre (?:apres|au bout de)|(?:garde|gardons|garderons|conserve|conservons|conserverons) (?:l|le|la) (?:immeuble|batiment|propriete|actif|projet))\b/],
+    words: [/\byears? until (?:the )?(?:sale|exit)\b/, /\b(?:hold|held|holding|ownership|own|horizon|keep|detention|conserver|garder|(?:sell|sale|selling|exit|resale) after|(?:revente|vente|sortie) apres|vendre (?:apres|au bout de)|(?:garde|gardons|garderons|conserve|conservons|conserverons) (?:l|le|la) (?:immeuble|batiment|propriete|actif|projet))\b/],
     exclude: /\b(?:loans?|terms?|amort\w*|warranty|lease|bail|prets?|garantie)\b/,
   },
   {

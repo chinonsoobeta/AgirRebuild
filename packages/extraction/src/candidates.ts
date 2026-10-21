@@ -238,7 +238,7 @@ function paragraphs(doc: NormalizedDocument, skip: Set<number>, scopes: (Scope |
       return;
     }
     const text = line.text.trim();
-    if (cur && continues(prev, text)) {
+    if (cur && (doc.kind !== "docx" || cur.segs.at(-1)!.location === line.location) && !/^\s*(?:\d|[$€£]).*\s[—–]\s/u.test(text) && continues(prev, text)) {
       cur.segs.push({ start: cur.text.length + 1, location: line.location });
       cur.text += " " + text;
     } else {
@@ -361,10 +361,9 @@ function sentenceRefusal(text: string): string | null {
   const basis = new RegExp(String.raw`(?<=\d\s?%\s+)${LTV_BASIS}(?![a-z0-9]|\s+(?:of|at|is|was|de|a)?\s*[$\d])`, "g");
   const label = normalizeLabel(fold(text).replace(basis, " ")).label;
   const capLabel = text.includes(":") && isExitCapLabel(text.slice(0, text.indexOf(":")));
-  const output = OUTPUT_LIKE_PHRASES.find((p) => hasPhrase(label, p) && !(p === "valuation" && capLabel) && !((p === "target" || p === "cible") && (isTakeoutTimingLabel(text) || isOperatingTarget(text))));
+  const output = OUTPUT_LIKE_PHRASES.find((p) => hasPhrase(label, p) && !(p === "valuation" && (capLabel || /\bvaluation share\b/.test(label) && /\b(?:take-?out|refinanc\w*|permanent)\b/.test(label))) && !((p === "target" || p === "cible") && (isTakeoutTimingLabel(text) || isOperatingTarget(text))));
   if (output) return `This sentence names an output figure ("${output}"), which is never taken as an input`;
   const f = fold(text);
-  if (/^footnote\s+\d+\s*:/.test(f)) return "A numbered footnote, not an assumption label";
   const hedge = HEDGE_RE.exec(f);
   if (hedge) return `A hedged figure ("${hedge[0]}") is not a value; enter the figure to use`;
   const other = BORROWED_RE.exec(f);
@@ -657,7 +656,7 @@ function readSentence(sentence: { text: string; start: number }, para0: Paragrap
   const dashItems = figureDashItems(text, result.format);
   if (dashItems) {
     for (const { token, label } of dashItems) {
-      const mapped = mapToken(label, token, { scope: para.scope, budgetConcept: true, context: label, quote });
+      const mapped = mapToken(label, token, { scope: para.scope, budgetConcept: true, quote });
       record(result, mapped, token, { raw: token.raw, location: locationOf(token.start), context: `${token.raw} — ${label}`, rule: "line:prose" });
     }
     return;
@@ -759,7 +758,7 @@ function readSentence(sentence: { text: string; start: number }, para0: Paragrap
     // A label that names nothing for any number ("Financing: a loan of ...") is an introduction: what follows is prose.
     const scope = para.scope;
     // A label for a unit field never names an item unless it is a unit type; the clause after the colon is then read as prose, its own unit types naming the items.
-    const opt = (t: NumberToken): MapOptions => ({ scope, seniorHeading: scope === "senior", quote, budgetConcept: true, after: text.slice(t.end, tokens[tokens.indexOf(t) + 1]?.start ?? text.length), gap: text.slice(colon + 1, t.start) });
+    const opt = (t: NumberToken): MapOptions => ({ scope, seniorHeading: scope === "senior", quote, budgetConcept: true, after: /^\s*\(\s*\d+(?:[.,]\d+)?\s*%\s+loan[- ]to[- ]cost\)/i.test(text.slice(t.end)) ? text.slice(t.end) : text.slice(t.end, tokens[tokens.indexOf(t) + 1]?.start ?? text.length), gap: text.slice(colon + 1, t.start) });
     const first = tokens.map((t) => mapToken(label, t, opt(t))).find((m) => m.kind === "field");
     const unitField = first?.kind === "field" && first.itemKey !== null && UNIT_FIELDS.has(first.fieldKey);
     const labelTypes = unitTypesIn(label);
@@ -798,7 +797,8 @@ function readSentence(sentence: { text: string; start: number }, para0: Paragrap
           continue;
         }
         // After the first figure, one whose own words just before it name a different field ("at an exit cap of 5.5%") is read by that field; one with no words of its own stays with the label.
-        const own: Mapped | null = used && i > 0 ? mapToken(text.slice(tokens[i - 1]!.end, t.start).replace(/^[\s,;]*(?:and|et|puis)?\s*/i, ""), t, { scope, quote, budgetConcept: true, after: text.slice(t.end, tokens[i + 1]?.start ?? text.length), prose: true, context: text }) : null;
+        let own: Mapped | null = used && i > 0 ? mapToken(text.slice(tokens[i - 1]!.end, t.start).replace(/^[\s,;]*(?:and|et|puis)?\s*/i, ""), t, { scope, quote, budgetConcept: true, after: text.slice(t.end, tokens[i + 1]?.start ?? text.length), prose: true, context: text }) : null;
+        if (used && i > 0 && t.unit === "%" && /^\s*\(?\s*$/.test(text.slice(tokens[i - 1]!.end, t.start)) && /^\s*loan[- ]to[- ]cost\)/i.test(text.slice(t.end))) own = mapToken("loan-to-cost", t, { after: text.slice(t.end) });
         // A part the colon's budget line includes ("Hard costs: $X, including contingency of $Y") is inside that line, not a line of its own.
         const inside: boolean = usedKey !== null && BUDGET_LINES.has(usedKey) && PART_OF_RE.test(fold(withoutTaxBasis(text.slice(colon + 1, t.start))));
         const loan = i > 0 ? amounts.get(tokens[i - 1]!) : undefined;
@@ -851,13 +851,18 @@ function readSentence(sentence: { text: string; start: number }, para0: Paragrap
   const RATE_WORD: Record<Scope, string> = { senior: "senior rate", mezzanine: "mezzanine rate", refinance: "take-out rate" };
   // A sentence that names a non-senior loan carries it: the loan a clause names holds until a clause names another.
   // A loan named only inside a condition ("if the take-out does not fund, we amortize over 25 years") is not the loan the terms belong to.
-  const loanSentence = scopesIn(unconditioned(text)).some((s) => s !== "senior");
-  let sentenceLoan: Scope | null = null;
+  const loanSentence = para.scope !== undefined || scopesIn(unconditioned(text)).length > 0 || LOAN_NOUN.test(fold(text));
+  let sentenceLoan: Scope | null = para.scope ?? null;
   let conceptLoan = false;
   tokens.forEach((t, i) => {
     const where = locationOf(t.start);
     if (ranged.has(i)) {
       other(t, "line:prose", RANGE_NOTE);
+      from = t.end;
+      return;
+    }
+    if (/^\s*(?:footnote|note de bas de page)\s*$/i.test(text.slice(0, t.start))) {
+      other(t, "line:prose", "A footnote number, not an assumption");
       from = t.end;
       return;
     }
@@ -879,12 +884,12 @@ function readSentence(sentence: { text: string; start: number }, para0: Paragrap
       return;
     }
     let opts: MapOptions = { prose: true, scope: para.scope, budgetConcept: true, loanContext: para.scope !== undefined || conceptScope !== undefined || conceptLoan, conceptScope, seniorHeading: para.scope === "senior", context: text, quote, after: isMoney(t) ? afterFigure : text.slice(t.end) };
-    let usedLabel = totalLabels.get(t) ?? label;
+    let usedLabel = totalLabels.get(t) ?? (i > 0 ? label.split(/\s+\/\s+/).pop()! : label).replace(/^\s*[,/]+\s*/, "");
     // A shared growth verb qualifies the expense clause after the rent figure.
     if (previousGrowth !== null && /^\s*(?:annually|yearly|par an)?\s*(?:and|et)\s+(?:expenses?|costs?|overhead|charges|depenses)\b/i.test(fold(label)) && GROWTH_WORD.test(fold(previousGrowth))) { usedLabel += " growth"; opts = { ...opts, context: undefined }; }
     if (loanSentence) {
       const named = scopesIn(unconditioned(label));
-      sentenceLoan = named.length === 1 ? named[0]! : named.length > 1 ? null : sentenceLoan;
+      sentenceLoan = named.length === 1 ? named[0]! : named.length > 1 ? null : LOAN_NOUN.test(fold(label)) ? (sentenceLoan ?? "senior") : sentenceLoan;
       if (sentenceLoan) opts = { ...opts, scope: sentenceLoan };
     }
     if (carry?.at === i - 1 && t.unit === "%" && !scopeIn(label, false) && !BASIS_AFTER_RE.test(fold(afterFigure))) {
@@ -892,9 +897,11 @@ function readSentence(sentence: { text: string; start: number }, para0: Paragrap
       if (normalizeLabel(label).label.replace(/\b(at|a|au|aux|avec|with|de|du|of|for|pour|bearing|carrying|portant)\b/g, "").trim() === "") usedLabel = RATE_WORD[carry.scope];
     }
     const named = !totalLabels.has(t) ? loanNameOnly(label) : null;
-    let mapped = mapToken(usedLabel, t, opts);
-    if (mapped.kind === "unmapped" && sentenceLoan && !totalLabels.has(t)) {
-      const clause = (label.split(/[,;]/).pop() ?? "");
+    const loanMoney = t.unit === null && /\b(?:bank|banque|lender|preteur)\b/i.test(usedLabel) && /\bin for\s*$/i.test(usedLabel) && /^k\b/i.test(text.slice(t.end));
+    const money = loanMoney ? { ...t, unit: "$" as const, currency: true, value: t.value === null ? null : t.value * 1000 } : t;
+    let mapped = mapToken(usedLabel, money, opts);
+    if (mapped.kind === "unmapped" && sentenceLoan && !/\b(?:alternative|optional|uncommitted|never committed)\b/i.test(text) && (i > 0 || !text.includes(":")) && !totalLabels.has(t)) {
+      const clause = (label.split(/[,;/]/).pop() ?? "");
       mapped = loanTerm(clause, text.slice(t.end).split(/[,;.]/)[0] ?? "", t, sentenceLoan) ?? mapped;
     }
     // A figure after a correction word is the earlier figure's field again (task 56).
@@ -1502,7 +1509,7 @@ function fromBudget(table: Table, headerRow: number, roles: BudgetRoles, result:
     const t = cellToken(amountCell, result.format);
     if (!t) continue;
     // A row whose own label or note says it is not part of the deal, or one under such a heading, is shown and never read, summed or totalled.
-    if (excluded || (category && (markedNotPart(category) || MEMO_SECTION_RE.test(fold(category)))) || row.some((c) => markedNotPart(c.text))) {
+    if (excluded || (!!category && /\b(?:usd|us dollars|alternative|optional|supplier quote)\b/i.test(displayLabel)) || (category && (markedNotPart(category) || MEMO_SECTION_RE.test(fold(category)))) || row.some((c) => markedNotPart(c.text))) {
       result.other.push({ fieldKey: null, itemKey: null, value: t.value, raw: t.raw, unitSeen: t.unit, location: amountCell.ref, context: `${table.name}: ${displayLabel}`, rule: "table:budget", note: NOT_PART_NOTE });
       continue;
     }
@@ -1682,7 +1689,7 @@ function categoryCells(rows: Cell[][], format: DocumentFormat): Map<Cell[], Cell
   };
   const found = rows.flatMap((r) => { const p = pair(r); return p ? [{ r, ...p }] : []; });
   const figures = rows.filter((r) => r.some((c) => cellToken(c, format))).length;
-  if (found.length < 3 || found.length < 0.6 * figures) return out;
+  if (!found.length || found.length < 0.6 * figures || (found.length < 3 && !found.every(f => costCategory(f.a.text)))) return out;
   const key = (c: Cell) => fold(c.text).replace(/\s+/g, " ").trim();
   const cats = new Map<string, number>();
   for (const f of found) cats.set(key(f.a), (cats.get(key(f.a)) ?? 0) + 1);
