@@ -1432,6 +1432,87 @@ function namedLine(text: string, location: string, result: ExtractionResult): bo
   return namedType(text.slice(0, at), text.slice(at + (text[at] === ":" ? 1 : 0)), false, location, text, "line:named-type", result);
 }
 
+
+// Labelled prose has an explicit count/rent vocabulary; a dwelling name stops before that vocabulary or a verb.
+const PROSE_COUNT_RE = /\b(?:(?:rental|finished|planned|proposed|scheduled|plan)\s+)*(?:rooms?\s+by\s+type|rental inventory|(?:homes?|units?|suites?|logements?)(?:\s+(?:to let|on offer|planned|scheduled|prevus|planifies|a louer))?|nombre de logements|[\w-]+ count)\s*:?\s*$/;
+const PROSE_RENT_RE = new RegExp(String.raw`\b(?:monthly\s+(?:lease|rental|rent)\s+(?:quote|ask|ticket)|asking\s+each month\s+per\s+${DWELLING}|per\s+${DWELLING}\s+monthly\s+(?:ticket|quote|ask)|rent\s+pcm\s+each|rent\s+per\s+${DWELLING}|renting at|rents?(?: will)?(?: at| each month)|loyer\s+(?:du type par mois|mensuel par logement)|seront loues)\s*:?\s*$`);
+const PROSE_RENT_EXCLUDED_RE = /\b(?:whole[- ]building|building[- ]wide|total monthly|monthly total|rent total|loyer total|hopes? for|around|pourrait atteindre|stress test|downside|five[- ]year rent history|rent history|historique des loyers)\b/;
+const PROSE_AREA_RE = /\b(?:(?:measured )?rentable (?:floor|floorplate)|leasable (?:floor|floorplate)|leased (?:floor|floorplate)|surface locative)\s*$/;
+const PROSE_WORD_COUNTS: Record<string, number> = { one: 1, two: 2, three: 3, four: 4, five: 5, six: 6, seven: 7, eight: 8, nine: 9, ten: 10, un: 1, une: 1, deux: 2, trois: 3, quatre: 4, cinq: 5, sept: 7, huit: 8, neuf: 9, dix: 10 };
+
+function proseItem(raw: string): string | null {
+  const name = raw.trim().replace(/^(?:the|pour)\s+/i, "").replace(/\s+(?:summary|type|plan(?: is)?)\s*$/i, "").replace(/[\s:;,]+$/, "");
+  if (!name || name.split(/\s+/).length > 4 || /\b(?:has|have|planned|proposed|scheduled|finished|prevus|planifies|a louer|rent|loyer|count|nombre|inventory|offer|let)\b/.test(fold(name)) || NON_UNIT_ROW_RE.test(fold(name))) return null;
+  return titled(name);
+}
+
+/** Read explicit prose labels, keeping the item's name across its following count and rent lines. */
+function proseRentLine(text: string, result: ExtractionResult, heading: string | null, locationOf: (pos: number) => string): { read: boolean; item: string | null } {
+  const f = fold(text);
+  const tokens = tokenize(text, result.format);
+  const word = /^(?:we plan\s+)?([\p{L}]+)\s+/iu.exec(text);
+  if (word && Object.hasOwn(PROSE_WORD_COUNTS, fold(word[1]!)) && !tokens.some((t) => t.start === 0)) {
+    tokens.unshift({ raw: word[1]!, value: PROSE_WORD_COUNTS[fold(word[1]!)]!, start: word.index + word[0].indexOf(word[1]!), end: word[0].length - 1, unit: "units", currency: false, currencyCode: null, scaled: false });
+  }
+  if (!tokens.length) return { read: false, item: heading };
+  const first = tokens[0]!;
+  const prefix = text.slice(0, first.start);
+  const countLabel = first.unit === null || first.unit === "units" ? PROSE_COUNT_RE.exec(fold(prefix)) : null;
+  const hasCount = /\bhas\s*$/i.test(prefix) && first.unit === "units";
+  const rentLabel = PROSE_RENT_RE.exec(fold(prefix));
+  const areaLabel = PROSE_AREA_RE.exec(fold(prefix));
+  if (["$/sf", "$/m2"].includes(first.unit ?? "") && !areaLabel) return { read: false, item: heading };
+  const leadCount = /^(?:we plan\s+)?$/i.test(prefix.trim()) && first.value !== null && Number.isInteger(first.value) && first.value > 0 && first.value <= 1000;
+  if (!countLabel && !rentLabel && !areaLabel && !leadCount && !hasCount) return { read: false, item: heading };
+  let item: string | null = null;
+  if (/^(?:homes?|units?|suites?|logements?)\s*:\s*$/i.test(prefix) && !heading) return { read: false, item: heading };
+  const colon = prefix.indexOf(":");
+  const verb = /\s+has\s+/i.exec(prefix);
+  if (colon >= 0 && !/^(?:nombre de logements|logements prevus|loyer mensuel par logement)$/i.test(fold(prefix.slice(0, colon)).trim())) item = proseItem(prefix.slice(0, colon));
+  else if (verb) item = proseItem(prefix.slice(0, verb.index));
+  else if (/^pour\s+/i.test(prefix)) item = proseItem(prefix.split(",")[0]!);
+  else {
+    const label = countLabel ?? rentLabel ?? areaLabel;
+    if (label) item = proseItem(prefix.slice(0, label.index));
+  }
+  // A type following the count belongs to that count, rather than the preceding generic count label.
+  const afterCount = ((first.unit === "units" ? first.raw.replace(/^(?:\d+|[\p{L}]+)(?:\s+|$)/u, "") + " " : "") + text.slice(first.end, tokens[1]?.start ?? text.length)).replace(/^[\s:]+/, "");
+  const suffix = afterCount.split(/[,;]|\b(?:will rent|seront lou|rent at|at|and|et)\b/i)[0]!.trim().replace(/[.]+$/, "");
+  if ((countLabel || leadCount) && suffix) {
+    const known = wholeUnitType(suffix) ?? (/^(?:un|une|deux|trois|quatre|cinq|six|[1-6]) pi[eè]ces$/i.test(suffix) ? titled(suffix) : null);
+    if (known) item = known;
+    else if (leadCount && /\b(?:suites?|homes?|logements?)\b/i.test(suffix)) item = proseItem(suffix);
+    else if (leadCount && /\b(?:par mois|a month|per month)\b/i.test(text)) item = proseItem(suffix);
+  }
+  if (countLabel && !leadCount && !hasCount && !/\b(?:rooms? by type|planned|proposed|scheduled|finished|inventory|offer|prevus|planifies|louer|count|nombre|let)\b/.test(fold(prefix)) && !heading) return { read: false, item: heading };
+  if (leadCount && (unitTypesIn(text).length > 0 || !tokens.some((t) => t.currency))) return { read: false, item: heading };
+  if (leadCount && (!item || /^(?:units?|homes?|suites?|logements?)$/i.test(item))) return { read: false, item: heading };
+  item ??= heading;
+  // Only a per-home label without a name may use the document-wide item.
+  if (!item && !countLabel && rentLabel) item = "All units";
+  if (!item) return { read: false, item: heading };
+  if (leadCount && !tokens.some((t) => t.unit === "$/mo") && !/\b(?:month|mois|monthly)\b/.test(f)) return { read: false, item: heading };
+  const fields = tokens.map((t, i): string | null => {
+    const before = fold(text.slice(tokens[i - 1]?.end ?? 0, t.start));
+    const after = fold(text.slice(t.end, tokens[i + 1]?.start ?? text.length));
+    if ((t.unit === "sf" || t.unit === "m2") && PROSE_AREA_RE.test(before)) return "rentable_area_sf";
+    if ((t.unit === "$/sf" || t.unit === "$/m2") && /\b(?:(?:annual|yearly) (?:area|floor) (?:tariff|rent)|at|a)\s*$/.test(before)) return "rent_psf_annual";
+    if (t.value !== null && Number.isInteger(t.value) && t.value > 0 && t.value <= 1000 && (t.unit === null || t.unit === "units") && ((i === 0 && (countLabel || leadCount || hasCount)) || PROSE_COUNT_RE.test(before))) return "unit_count";
+    if ((t.unit === "$" || t.unit === "$/mo") && (PROSE_RENT_RE.test(before) || (leadCount && (t.unit === "$/mo" || /\b(?:at|loues)\s*$/.test(before)))) && (t.unit === "$/mo" || /\b(?:month|mois|monthly|pcm)\b/.test(before + " " + after))) return "unit_rent_monthly";
+    return null;
+  });
+  if (tokens.some((t, i) => !fields[i]) && !rangeEnds(text, tokens).size && !tokens.some((t) => t.value !== null && !Number.isInteger(t.value) && t.unit === null)) return { read: false, item: heading };
+  const invalid = tokens.some((t) => (t.unit === "$/sf" || t.unit === "$/m2") && /^\s*(?:\/|per|par)\s*(?:month|mois|mo)\b/i.test(text.slice(t.end))) || rangeEnds(text, tokens).size > 0 || fields.some((field) => field === null) || PROSE_RENT_EXCLUDED_RE.test(f) || NON_UNIT_ROW_RE.test(f) || OTHER_RENT_RE.test(f.replace(MARKET_NOW_RE, " ")) || asIs(text);
+  if (!fields.some(Boolean)) return { read: false, item: heading };
+  for (const [i, t] of tokens.entries()) {
+    const fieldKey = fields[i];
+    const base = { raw: t.raw, location: locationOf(t.start), context: text.slice(0, 240), rule: "line:rent-prose" };
+    if (invalid || !fieldKey) result.other.push({ ...base, fieldKey: null, itemKey: null, value: t.value, unitSeen: t.unit, note: "Not one unambiguous rent-roll figure for this property" });
+    else result.candidates.push({ ...base, fieldKey, itemKey: item, value: fieldKey === "rentable_area_sf" && t.unit === "m2" ? t.value! * SF_PER_M2 : fieldKey === "rent_psf_annual" && t.unit === "$/m2" ? t.value! / SF_PER_M2 : t.value, unitSeen: fieldKey === "unit_count" ? "units" : t.unit });
+  }
+  return { read: true, item };
+}
+
 /** A table row of a name and two or more cells, read as a named type. */
 function namedRow(row: Cell[], table: Table, result: ExtractionResult): boolean {
   const cells = row.filter((c) => c.text);
@@ -2415,6 +2496,38 @@ export function extractCandidates(doc0: NormalizedDocument): ExtractionResult {
   const scopes = lineScopes(doc, result.format, rankIn(doc));
   const excluded = excludedLines(doc, result.format);
   const text = textTables(doc, result.format, scopes, excluded);
+  let rentHeading: string | null = null;
+  const lineIndex = new Map(doc.lines.map((l, i) => [l.location, i]));
+  for (const para of paragraphs(doc, text.used, scopes, excluded)) {
+    const headingText = para.text.trim().replace(/:$/, "").replace(/^logement de type\s+/i, "");
+    const nextLine = doc.lines[lineIndex.get(para.segs.at(-1)!.location)! + 1];
+    const nextToken = nextLine && tokenize(nextLine.text, result.format)[0];
+    const nextLabel = nextToken && fold(nextLine!.text.slice(0, nextToken.start));
+    const namedHeading = tokenize(headingText, result.format).length === 0 && nextToken && nextLabel && (PROSE_COUNT_RE.test(nextLabel) || PROSE_RENT_RE.test(nextLabel)) ? typeName(headingText, nextToken) : null;
+    const dwellingHeading = wholeUnitType(headingText) ?? namedHeading;
+    if (dwellingHeading) { rentHeading = dwellingHeading; continue; }
+    if (!tokenize(para.text, result.format).length && para.text.trim()) rentHeading = null;
+    if (para.excluded || markedNotPart(para.text)) continue;
+    // A conjunction before another count, or a semicolon before another named label, starts another item.
+    const clauses = para.text.split(new RegExp(String.raw`\s+(?:and|et)\s+(?=(?:\d+|${Object.keys(PROSE_WORD_COUNTS).join("|")})\s)|;\s*(?=(?:[^;:$]{1,60}:|${DWELLING}\s+on offer|the\s+[^;:$]+plan is))`, "i"));
+    const before = [result.candidates.length, result.other.length];
+    let item = rentHeading;
+    let offset = 0;
+    const reads = clauses.map((clause) => {
+      const start = para.text.indexOf(clause, offset);
+      offset = start + clause.length;
+      const locationOf = (pos: number) => para.segs.reduce((loc, g) => g.start <= start + pos ? g.location : loc, para.segs[0]!.location);
+      const read = proseRentLine(clause, result, item, locationOf);
+      item = read.item;
+      return read;
+    });
+    if (reads.every((r) => r.read)) {
+      para.segs.forEach((g) => text.used.add(lineIndex.get(g.location)!));
+      // A count line that names its type establishes the item for the following label lines.
+      const counts = result.candidates.slice(before[0]);
+      if (counts.length > 0 && counts.every((c) => c.fieldKey === "unit_count")) rentHeading = item;
+    } else { result.candidates.splice(before[0]!); result.other.splice(before[1]!); }
+  }
   doc.lines.forEach((l, i) => {
     if (!excluded[i] && !text.used.has(i)) {
       const row = l.text.includes("|") || text.tables.some((t) => t.table.rows.some((r) => r.some((c) => c.ref === doc.lines[i - 1]?.location))) ? null : flatRollRow(l.text, l.location);
@@ -2451,7 +2564,7 @@ export function extractCandidates(doc0: NormalizedDocument): ExtractionResult {
   // Apply ownership to every revenue path, including prose, labelled rows and tables.
   result.candidates = result.candidates.filter((c) => {
     if (!c.fieldKey || !UNIT_FIELDS.has(c.fieldKey)) return true;
-    if (!OTHER_RENT_RE.test(fold(c.context).replace(MARKET_NOW_RE, " ")) && !asIs(c.context)) return true;
+    if (!OTHER_RENT_RE.test(fold(c.context).replace(MARKET_NOW_RE, " ")) && !asIs(c.context) && !PROSE_RENT_EXCLUDED_RE.test(fold(c.context))) return true;
     result.other.push({ ...c, fieldKey: null, itemKey: null, note: OTHER_RENT_NOTE });
     return false;
   });

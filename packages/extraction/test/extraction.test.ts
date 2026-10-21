@@ -7895,3 +7895,135 @@ describe("card 119: structured rent rolls and rents belonging to this property",
   ])("rules 5 and 8: period words qualify the rent: %s", (input, expected) => roll(input, expected));
 
 });
+
+
+describe("card 120: dwelling names in prose and label lines", () => {
+  const read = (input: string, kind: "pdf" | "docx" = "pdf") => {
+    const lines = input.split(" // ").map((text, i) => ({ text, location: `paragraph ${i + 1}` }));
+    return extractCandidates({ kind, lines, tables: [], fullText: lines.map((l) => l.text).join("\n"), pageCount: 1, needsOcr: false });
+  };
+  const cases: [string, string, string, number, number][] = [
+    ["2 vocabulary", "Birch: proposed rental inventory 4; monthly rental quote $1,850 a month each.", "Birch", 4, 1850],
+    ["3 vocabulary", "Upper: homes scheduled 2; per apartment monthly ask $2,050.", "Upper", 2, 2050],
+    ["2 French vocabulary", "Clair: logements planifiés 3; loyer du type par mois 1 650 $.", "Clair", 3, 1650],
+    ["1 own wording", "Maple cottage: homes to let 3; rent each month $1,900.", "Maple Cottage", 3, 1900],
+    ["1 own wording", "Pour Clair, logements prévus 2 et loyer du type par mois 1 700 $.", "Clair", 2, 1700],
+    ["1 own wording", "Terrace home summary: homes planned 7; rent per home $2,300 a month each.", "Terrace Home", 7, 2300],
+    ["2 own wording", "Lower rooms: rental rooms by type 5; monthly lease quote $1,100 a month each.", "Lower Rooms", 5, 1100],
+    ["2 own wording", "Cour: nombre de logements 8; loyer du type par mois 1 250 $.", "Cour", 8, 1250],
+    ["2 own wording", "Attic flat: planned rental inventory 3; rent each month $1,650.", "Attic Flat", 3, 1650],
+    ["3 own wording", "West flat: homes planned 4; per suite monthly ticket $1,925.", "West Flat", 4, 1925],
+    ["3 own wording", "Pour Érable, logements à louer 2 et loyer mensuel par logement 1 950 $ par mois.", "Érable", 2, 1950],
+    ["3 own wording", "East cottage has finished homes 3 and rent per home $2,450 a month for each.", "East Cottage", 3, 2450],
+    ["5 own wording", "Units on offer 7 Three-bedroom, per suite monthly ticket $2,750.", "3BR", 7, 2750],
+    ["5 own wording", "Nombre de logements: 4 quatre pièces // Loyer mensuel par logement: 1 800 $ par mois.", "Quatre Pièces", 4, 1800],
+    ["5 own wording", "Loft count 3 Loft // Loft: rent each month $1,725", "Loft", 3, 1725],
+    ["6 named heading", "Garden flat: // Homes planned: 3 // Rent each month: $1,950", "Garden Flat", 3, 1950],
+    ["6 French named heading", "Petit // Logements prévus: 4 // Loyer mensuel par logement: 1 350 $ par mois.", "Petit", 4, 1350],
+    ["6 named Word heading", "Family suite // Homes planned: 2 // Rent each month: $2,450", "Family Suite", 2, 2450],
+    ["6 own wording", "Three-bedroom: // Homes planned: 5 // Rent each month: $2,400", "3BR", 5, 2400],
+    ["6 own wording", "Logement de type 5½ // Logements prévus: 2 // Loyer mensuel par logement: 2 100 $ par mois.", "5½", 2, 2100],
+    ["6 own wording", "Meadow: homes planned 7 // Meadow: monthly lease quote $1,800 a month each.", "Meadow", 7, 1800],
+    ["9 own wording", "Oak: homes planned 2; rent each month $1,600.", "Oak", 2, 1600],
+    ["9 own wording", "Pour Pin, nombre de logements 3 et loyer du type par mois 1 750 $.", "Pin", 3, 1750],
+    ["9 own wording", "Loft: // Homes planned: 6 // Rent each month: $1,850", "Loft", 6, 1850],
+    ["2 plan type", "We plan 4 two-bedroom homes at $2,000 per month.", "2BR", 4, 2000],
+    ["1 colon", "Chapel flat: rental rooms by type 4; monthly lease quote $1,850 a month each.", "Chapel Flat", 4, 1850],
+    ["1 verb", "Duplex home has finished homes 2 and rent per home $2,700 a month for each.", "Duplex Home", 2, 2700],
+    ["1 French", "Pour Petit, nombre de logements 4 et loyer du type par mois 1 500 $.", "Petit", 4, 1500],
+    ["1 summary", "Stacked home summary: stacked-home count 18 and rent pcm each $2,500 a month per home.", "Stacked Home", 18, 2500],
+    ["2 plan", "Cedar: homes planned 3; monthly lease quote $1,700 a month each.", "Cedar", 3, 1700],
+    ["2 French", "Jardin: logements prévus 5; loyer du type par mois 1 600 $.", "Jardin", 5, 1600],
+    ["2 inventory", "Upper flat: planned rental inventory 2; per suite monthly ticket $2,200.", "Upper Flat", 2, 2200],
+    ["3 renting", "The cottage type has 3 homes, each renting at $2,600 a month.", "Cottage", 3, 2600],
+    ["3 quote", "Coach house: homes to let 2; asking each month per home $2,000.", "Coach House", 2, 2000],
+    ["3 French", "Petit: logements à louer 4; loyer mensuel par logement 1 500 $ par mois.", "Petit", 4, 1500],
+    ["5 suffix", "Units on offer 4 One-bedroom, per suite monthly ticket $1,750.", "1BR", 4, 1750],
+    ["5 French", "Nombre de logements : 2 trois pièces // Loyer mensuel par logement : 2 100 $ par logement par mois.", "Trois Pièces", 2, 2100],
+    ["5 repeated", "Studio count 2 Studio // Studio: rent each month $1,400", "Studio", 2, 1400],
+    ["6 labels", "Two-bedroom: plan homes to let 6 // Two-bedroom asking each month per home $2,100", "2BR", 6, 2100],
+    ["6 French heading", "Logement de type 4½ // Logements prévus : 6 // Loyer mensuel par logement : 1 300 $ par logement par mois.", "4½", 6, 1300],
+    ["6 heading", "Two-bedroom: // Homes planned: 3 // Rent each month: $2,200", "2BR", 3, 2200],
+  ];
+  test.each(cases)("rule %s", (_rule, input, item, count, rent) => {
+    for (const kind of ["pdf", "docx"] as const) {
+      const r = read(input, kind);
+      expect(r.candidates.filter((c) => c.fieldKey === "unit_count").map((c) => [c.itemKey, c.value])).toEqual([[item, count]]);
+      expect(r.candidates.filter((c) => c.fieldKey === "unit_rent_monthly").map((c) => [c.itemKey, c.value])).toEqual([[item, rent]]);
+    }
+  });
+  test.each([
+    ["Five compact suites will rent at $1,500 a month and two family suites at $2,500 a month.", [5, 2], [1500, 2500]],
+    ["Trois petits logements seront loués 1 450 $ par mois et trois grands 1 650 $ par mois.", [3, 3], [1450, 1650]],
+    ["Four garden homes will rent at $1,800 a month and six upper homes at $2,300 a month.", [4, 6], [1800, 2300]],
+    ["Deux logements clairs seront loués 1 200 $ par mois et cinq sombres 1 400 $ par mois.", [2, 5], [1200, 1400]],
+    ["Eight terrace suites will rent at $1,950 a month and seven attic suites at $1,700 a month.", [8, 7], [1950, 1700]],
+    ["Seven terrace suites will rent at $1,950 a month and three attic suites at $1,700 a month.", [7, 3], [1950, 1700]],
+  ])("rule 4 pairs two types: %s", (input, counts, rents) => {
+    const r = read(input as string, "docx");
+    const n = r.candidates.filter((c) => c.fieldKey === "unit_count"), m = r.candidates.filter((c) => c.fieldKey === "unit_rent_monthly");
+    expect(n.map((c) => c.value)).toEqual(counts); expect(m.map((c) => c.value)).toEqual(rents);
+    expect(n.map((c) => c.itemKey)).toEqual(m.map((c) => c.itemKey)); expect(new Set(n.map((c) => c.itemKey)).size).toBe(2);
+    for (const c of n) expect(c.itemKey).not.toMatch(/^(?:five|two|trois|four|six|deux|cinq|seven|three)\b/i);
+  });
+  test.each([
+    ["Small suite: planned rental inventory 2; measured rentable floor 960 sf for this whole type and annual area tariff $42/sf/yr.", "Small Suite", 960, 42],
+    ["Shop: leasable floor 1,400 sf at $24/sf/yr.", "Shop", 1400, 24],
+    ["Office: leasable floor 800 sf at $32/sf/yr.", "Office", 800, 32],
+    ["Atelier: surface locative 700 sf à 28 $/sf/an.", "Atelier", 700, 28],
+    ["Rear cottage has finished homes 1, leased floorplate 550 sf and yearly floor rent $60/sf/yr; no monthly per-suite quote is made for it.", "Rear Cottage", 550, 60],
+    ["West shop: measured rentable floor 1200 sf for this whole type and annual area tariff $26/sf/yr.", "West Shop", 1200, 26],
+    ["Boutique: surface locative 900 sf à 30 $/sf/an.", "Boutique", 900, 30],
+  ])("rule 7 area: %s", (input, item, area, rent) => {
+    const r = read(input as string, "docx");
+    expect(r.candidates.filter((c) => c.fieldKey === "rentable_area_sf").map((c) => [c.itemKey, c.value])).toEqual([[item, area]]);
+    expect(r.candidates.filter((c) => c.fieldKey === "rent_psf_annual").map((c) => [c.itemKey, c.value])).toEqual([[item, rent]]);
+  });
+  const traps = [
+    "The owner hopes for rent around $2,750 a month.",
+    "Le loyer pourrait atteindre 1 950 $ par mois après travaux.",
+    "A downside stress test assumes rent of $1,425 a month.",
+    "Whole-building rent per month: $6,120.", "A stress test lowers the rent to $1,600 a month.",
+    "Parking: 6 stalls at $120 a month each.", "Storage lockers: 10 at $40 a month.",
+    "He hopes for a whole-building monthly rent around $6,120.", "Le loyer pourrait atteindre 2 400 $ par mois.",
+    "Old duplex tenants paid $1,650 a month each.", "L'ancien locataire payait 1 100 $ par mois.",
+    "Garden: homes planned 3; rent each month $1,800 to $2,100.", "Petit: logements prévus 3; loyer du type par mois entre 1 300 $ et 1 500 $.",
+    "Five-year rent history: 3 increases.", "Suite 101 Duplex home proposed 102 Duplex home proposed 201 Laneway proposed",
+    "The nearby imaginary Elm Hall asks $1,480 for a compact suite.", "Earlier phase 1 rented for $2,650.",
+    "Garden: homes planned 3.5; rent each month $1,800.", "Petit: logements prévus 2.5; loyer du type par mois 1 400 $.",
+    "Shop: floor cost $1,400; annual area tariff $24/sf/yr.", "Boutique: budget 900 $ à 30 $/sf/an.",
+  ];
+  test.each(traps)("rules 8–9 excluded or ambiguous figure: %s", (input) => {
+    const r = read(input, "docx");
+    expect(r.candidates.filter((c) => ["unit_count", "unit_rent_monthly", "rent_psf_annual"].includes(c.fieldKey!))).toEqual([]);
+    expect(r.other.length).toBeGreaterThan(0);
+  });
+  test.each([
+    [1, "Cedar home has finished homes 2 and rent per home $2,100 a month each.", "item", "Has"],
+    [1, "Pour Clair, logements prévus 3 et loyer du type par mois 1 600 $.", "item", "Pour"],
+    [2, "Cedar: homes planned 2.5; rent each month $1,800.", "field", "unit_count"],
+    [2, "Clair: logements prévus 3.5; loyer du type par mois 1 500 $.", "field", "unit_count"],
+    [3, "Whole-building monthly lease quote: $8,000.", "field", "unit_rent_monthly"],
+    [3, "Loyer total par mois: 9 000 $.", "field", "unit_rent_monthly"],
+    [4, "Six units at $2,010 per month.", "field", "unit_count"],
+    [4, "Six one- and two-bedroom suites at $1,900 a month.", "field", "unit_rent_monthly"],
+    [5, "Suite 101 Cedar proposed 102 Cedar proposed", "field", "unit_count"],
+    [5, "Logement 101 Clair proposé 102 Clair proposé", "field", "unit_count"],
+    [6, "Two-bedroom: // Budget // Rent each month: $2,200", "item", "2BR"],
+    [6, "Logement de type 4½ // Financement // Loyer mensuel par logement: 1 800 $ par mois.", "item", "4½"],
+    [7, "Office: leasable floor 800 sf at $3/sf/month.", "field", "rent_psf_annual"],
+    [7, "Atelier: surface locative 700 sf à 4 $/sf/mois.", "field", "rent_psf_annual"],
+    [8, "The neighbour's monthly lease quote is $2,100 a month each.", "field", "unit_rent_monthly"],
+    [8, "L'ancien locataire payait 1 200 $ par mois.", "field", "unit_rent_monthly"],
+    [9, "Cedar: homes planned 2; rent each month $1,800 to $2,100.", "field", "unit_rent_monthly"],
+    [9, "Clair: logements prévus 3; loyer du type par mois entre 1 400 $ et 1 600 $.", "field", "unit_rent_monthly"],
+  ])("rule %s trap: %s", (_rule, input, target, forbidden) => {
+    const r = read(String(input), "docx");
+    if (target === "field") expect(r.candidates.some((c) => c.fieldKey === forbidden)).toBe(false);
+    else expect(r.candidates.some((c) => c.itemKey?.includes(String(forbidden)))).toBe(false);
+  });
+  test("rule 6 switches the heading and joins separate named labels", () => {
+    const r = read("Compact: homes planned 4 // Compact: rent each month $2,600 // Family: homes planned 2 // Family: rent each month $2,950", "docx");
+    expect(r.candidates.map((c) => [c.fieldKey, c.itemKey, c.value])).toEqual([["unit_count", "Compact", 4], ["unit_rent_monthly", "Compact", 2600], ["unit_count", "Family", 2], ["unit_rent_monthly", "Family", 2950]]);
+  });
+});
