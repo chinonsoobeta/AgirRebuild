@@ -29,22 +29,39 @@ const GENERIC = new Set([
 ]);
 
 // Commercial labels share these word classes across lines, blocks and sheets.
-const COMMERCIAL_NAME = /(?<![\p{L}])(?:shop|caf[eé]|boutique|retail|commercial|commerce|office|bureau|storefront|[eé]picerie)(?![\p{L}])/iu;
+// Card 126 audit: a class of commercial premises, not a list of the bank's names ("local" is French for a commercial unit).
+const COMMERCIAL_NAME = /(?<![\p{L}])(?:shops?|caf[eé]s?|boutiques?|retail|commercial|commerces?|offices?|bureaux?|storefronts?|stores?|[eé]picerie|locaux|local|pharmac\p{L}*|restaurants?|cliniques?|clinics?|salons?|d[eé]panneur|garderie|daycare)(?![\p{L}])/iu;
 export function commercialItem(raw: string): string | null {
-  const m = COMMERCIAL_NAME.exec(raw);
+  // A generic premises word ("le local de l'épicerie", "the commercial unit for the café") gives way to a specific one on the same line.
+  const all = [...raw.matchAll(new RegExp(COMMERCIAL_NAME.source, "giu"))];
+  const generic = (x: RegExpMatchArray) => /^(?:local|locaux|commercial|commerces?)$/i.test(x[0]);
+  const m = all.find((x) => !generic(x)) ?? all[0] ?? null;
   if (!m || /\b(?:parking|storage|stationnement|rangement)\b/.test(foldText(raw))) return null;
-  const tail = raw.slice(m.index + m[0].length).split(/[:;,|($\d]|\b(?:floor|area|rent|loyer|tarif|surface|superficie|nombre|number|count|units|occupancy|occupation|leasable|rentable|louable|locative|par|per|au|is|has|at|leases)\b/i)[0]!.trim();
+  const tail = raw.slice(m.index + m[0].length).split(/[:;,|($\d]|\.(?!\d)|\s(?:à|a|to|for)\s|\b(?:floor|area|rent|loyer|tarif|surface|superficie|nombre|number|count|units|occupancy|occupation|leasable|rentable|louable|locative|par|per|au|is|has|at|leases|net|base|gross|brut|nette?)\b/i)[0]!.trim();
+  // With no name of its own after it, the word points to a space named elsewhere.
+  if (generic(m) && !tail && /(?:^|[\s'’])(?:ce|cet|cette|le|la|l|du|des|au|this|that|the)\s*['’]?\s*$/i.test(raw.slice(0, m.index))) return null;
   const name = m[0] + (tail && tail.split(/\s+/).length <= 3 ? ` ${tail}` : "");
-  return canonicalItem(name.replace(/\b\p{L}/gu, w => w.toUpperCase()));
+  // A letter after a space, quote or hyphen starts a word; "\b" would also split "épicerie" after its accent.
+  return canonicalItem(name.replace(/(^|[\s'’-])(\p{L})/gu, (_, a: string, w: string) => a + w.toUpperCase()));
+}
+
+/** The generic premises word of a line ("du commerce", "ce local"), for a document that names no space of its own. */
+export function genericCommercial(raw: string): string | null {
+  if (/\b(?:parking|storage|stationnement|rangement)\b/.test(foldText(raw))) return null;
+  const m = raw.match(/(?<![\p{L}])(?:local|locaux|commercial|commerces?)(?![\p{L}])/iu);
+  return m ? canonicalItem(m[0][0]!.toUpperCase() + m[0].slice(1).toLowerCase()) : null;
 }
 
 /** An area/rent label needs its own unit. The caller supplies commercial ownership. */
 export function commercialLabel(raw: string, t: NumberToken, item: string | null, after = ""): Mapped | null {
-  const f = foldText(raw).replace(/²/g, "2");
+  // The words right after the figure ("250 $ le m² annuellement", "1,500 square feet leasable") belong to its label.
+  const f = `${foldText(raw)} ${foldText(after.split(/[;,.](?!\d)|\b(?:and|et)\b/)[0] ?? "")}`.replace(/²/g, "2");
+  const perArea = t.unit === "$/sf" || t.unit === "$/m2" || /(?:\$\s*\/|\bper |\bpar |\bau |\ble )(?:sf|sq ft|square feet|square foot|pi2|p\.?c\.?|m2|metre carre)\b/.test(f);
   const area = /\b(?:area|floor area|leasable|rentable|gla|nla|surface|superficie|aire|louable|locative)\b/.test(f);
   const rent = /\b(?:rent|lease rate|loyer|tarif)\b/.test(f);
   if (!area && !rent) return null;
-  const perArea = t.unit === "$/sf" || t.unit === "$/m2" || /(?:\$\s*\/|\bper |\bpar |\bau |\ble )(?:sf|sq ft|square feet|square foot|pi2|p\.?c\.?|m2|metre carre)\b/.test(f);
+  // Card 126 audit: the words after the figure can bring in "rent" ("the tenant allowance of $65/SF as rent"); an allowance stays one.
+  if (rent && TI_RE.test(f)) return { kind: "ignored", reason: "A tenant improvement allowance, not rent" };
   const areaUnit = normalizeLabel(raw).labelUnit;
   if (!(area && (t.unit === "sf" || t.unit === "m2" || areaUnit === "sf" || areaUnit === "m2")) && !(rent && perArea)) return null;
   if (/\b(?:lot|land|site|terrain|parcel)\b/.test(f)) return { kind: "ignored", reason: "Land or site area is not rentable space" };

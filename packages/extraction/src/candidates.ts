@@ -2,7 +2,7 @@ import { GROWTH_WORD, CONCEPTS, BANK_LENDER, LOAN_NOUN, CLOSING_TOTAL, STATED_TO
 import { FIELD_BY_KEY, OUTPUT_LIKE_PHRASES } from "@agir/contracts";
 import { detectFormat, normalizeText, SF_PER_M2, tokenize, unitTypesIn, wholeUnitType, type CurrencyCode, type DocumentFormat, type NumberToken } from "@agir/numbers";
 import type { Cell, NormalizedDocument, Table } from "./document.ts";
-import { commercialItem, commercialLabel, PROPERTY_TAX_WORD, BASIS_AFTER_RE, CREDIT_NOTE, REPLACED_LOAN, DEPOSIT_NOTE, DEPOSIT_RE, LTV_BASIS, canonicalItem, costSentence, currencyOf, flagRead, flagSentence, hasPhrase, isOperatingTarget, isExitCapLabel, isTakeoutTimingLabel, isPlainRentLabel, loanNameOnly, loanTerm, mapToken, normalizeLabel, withoutTaxBasis, OLD_SHEET_RE, rankScope, SCENARIO_SHEET_NOTE, SCENARIO_SHEET_RE, SUPERSEDED_LABEL_NOTE, scopeIn, scopesIn, withCurrency, type MapOptions, type Mapped, type Scope } from "./mapping.ts";
+import { commercialItem, commercialLabel, genericCommercial, PROPERTY_TAX_WORD, BASIS_AFTER_RE, CREDIT_NOTE, REPLACED_LOAN, DEPOSIT_NOTE, DEPOSIT_RE, LTV_BASIS, canonicalItem, costSentence, currencyOf, flagRead, flagSentence, hasPhrase, isOperatingTarget, isExitCapLabel, isTakeoutTimingLabel, isPlainRentLabel, loanNameOnly, loanTerm, mapToken, normalizeLabel, withoutTaxBasis, OLD_SHEET_RE, rankScope, SCENARIO_SHEET_NOTE, SCENARIO_SHEET_RE, SUPERSEDED_LABEL_NOTE, scopeIn, scopesIn, withCurrency, type MapOptions, type Mapped, type Scope } from "./mapping.ts";
 
 /** One value found in one document, with where it came from and why it was (or was not) mapped. */
 export type Candidate = {
@@ -2764,13 +2764,15 @@ function commercialLines(doc: NormalizedDocument, result: ExtractionResult, used
     if (!named && unitTypesIn(l.text).length) continue;
     const matches = named ? [...names.values()].filter(n => n.toLowerCase().startsWith(named.toLowerCase() + " ")) : [];
     const contextual = named && heading?.toLowerCase().startsWith(named.toLowerCase() + " ") ? heading : null;
-    const inferred = contextual ?? (matches.length === 1 ? matches[0]! : named ?? heading ?? only);
+    const inferred = contextual ?? (matches.length === 1 ? matches[0]! : named ?? heading ?? only ?? (names.size === 0 ? genericCommercial(l.text) : null));
     const established = inferred ? result.candidates.find(c => c.itemKey && c.itemKey !== "All units" && commercialItem(c.itemKey) === commercialItem(inferred)) : undefined;
     const item = established?.itemKey ?? inferred;
     if (!item) continue;
     const ranges = rangeEnds(l.text, tokens);
     const mapped = tokens.map((t, n): Mapped | null => {
-      const label = l.text.slice(tokens[n - 1]?.end ?? 0, t.start);
+      // Card 126 audit: after an earlier figure, the words before a comma belong to that figure ("1,400 sf leasable, rent $32").
+      const between = l.text.slice(tokens[n - 1]?.end ?? 0, t.start);
+      const label = n > 0 ? between.split(/[;,](?!\d)/).pop()! : between;
       const after = l.text.slice(t.end, tokens[n + 1]?.start ?? l.text.length);
       const perArea = /(?:par|per|au)\s+(?:m²|m2|sf|pi²|pi2)/i.test(label);
       const m = commercialLabel(perArea && !RENT_WORD_RE.test(fold(label)) ? `Rent ${label}` : label, t, item, after);
@@ -2780,6 +2782,9 @@ function commercialLines(doc: NormalizedDocument, result: ExtractionResult, used
         const legacy = /:\s*$/.test(label) ? mapToken(label.replace(/:\s*$/, ""), t, { after }) : null;
         return !contextual && legacy?.kind === "field" && m.kind === "field" && legacy.fieldKey === m.fieldKey && legacy.itemKey !== "All units" && !/^(?:rentable|leasable|floor|net|base|surface|superficie|louable|locative)(?:\s|$)/i.test(legacy.itemKey ?? "") ? legacy : m;
       }
+      // A count of something else ("2 floors", "3 storeys") is not a count of the space.
+      const next = fold(after).match(/^\s*([a-z]+)/)?.[1];
+      if (next && !/^(?:units?|unites?|spaces?|suites?|bays?|locaux|local|commerces?|premises)$/.test(next) && !fold(item).split(/\s+/).includes(next)) return null;
       if (COUNT_WORD_RE.test(fold(label)) && homeRole(fold(label.replace(new RegExp(item, "i"), ""))) === "units" && t.value !== null && Number.isInteger(t.value) && t.value > 0 && [null, "units"].includes(t.unit)) return { kind: "field", fieldKey: "unit_count", itemKey: item, value: t.value, unitSeen: "units" };
       return null;
     });

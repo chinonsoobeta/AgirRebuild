@@ -8904,4 +8904,21 @@ describe("card 126: commercial area, building totals and shared type names", () 
     expect(fields(input, "rentable_area_sf")).toHaveLength(1);
     expect(fields(input, "rent_psf_annual")).toHaveLength(1);
   });
+  test.each([
+    ["Local du rez-de-chaussée // Surface : 120 m² // Loyer : 250 $ le m² annuellement", "rentable_area_sf", 120 * SF_PER_M2],
+    ["Local du rez-de-chaussée // Surface : 120 m² // Loyer : 250 $ le m² annuellement", "rent_psf_annual", 250 / SF_PER_M2],
+    ["Retail bay A: 1,400 square feet leasable, rent $32 per sq ft per year", "rentable_area_sf", 1400],
+    ["Retail bay A: 1,400 square feet leasable, rent $32 per sq ft per year", "rent_psf_annual", 32],
+    ["Le local de l'épicerie : surface 130 m², loyer 260 $/m²/an", "rentable_area_sf", 130 * SF_PER_M2],
+    ["Superficie louable du commerce : 100 m² // Loyer du commerce par m² et par an : 250 $", "rentable_area_sf", 100 * SF_PER_M2],
+    ["Superficie louable du commerce : 100 m² // Loyer du commerce par m² et par an : 250 $", "rent_psf_annual", 250 / SF_PER_M2],
+  ])("audit: unseen commercial wording %s reads %s", (input, field, value) => {
+    expect(fields(input, field).map(c => c.value)).toEqual([expect.closeTo(value, 6)]);
+  });
+  test("audit: an accented space name keeps its case", () => {
+    expect(fields("Le local de l'épicerie : 130 m², loyer 260 $/m²/an", "rent_psf_annual").map(c => c.itemKey)).toEqual(["Épicerie"]);
+  });
+  test.each(["We plan to lease 2 floors to a clinic.", "The café lot: 500 m²", "Comparable shop nearby: 1,200 sq ft at $30 per sq ft", "Shop: the tenant allowance of $50/SF is not rent", "Boutique : allocation pour améliorations locatives de 40 $/pi², pas un loyer"])("audit: %s is not the space's count, area or rent", (input) => {
+    expect(read(input).candidates.map(c => c.fieldKey)).toEqual([]);
+  });
 });
