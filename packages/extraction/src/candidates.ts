@@ -369,7 +369,7 @@ function sentenceRefusal(text: string): string | null {
   const output = OUTPUT_LIKE_PHRASES.find((p) => hasPhrase(label, p) && !(p === "valuation" && (capLabel || /\bvaluation share\b/.test(label) && /\b(?:take-?out|refinanc\w*|permanent)\b/.test(label))) && !((p === "target" || p === "cible") && (isTakeoutTimingLabel(text) || isOperatingTarget(text))));
   if (output) return `This sentence names an output figure ("${output}"), which is never taken as an input`;
   const f = fold(text);
-  const hedge = HEDGE_RE.exec(f);
+  const hedge = HEDGE_RE.exec(f.replace(/\broughly\s+\d[\d,.]*\s+(?:acres?|hectares?|square feet|square metres?|sf|m2)\b/g, " "));
   if (hedge) return `A hedged figure ("${hedge[0]}") is not a value; enter the figure to use`;
   const other = BORROWED_RE.exec(f);
   return other ? `This sentence speaks of another property ("${other[0]}"); its figures are not inputs` : null;
@@ -609,7 +609,7 @@ function figureDashItems(text: string, format: DocumentFormat): { token: NumberT
   return items.every((x) => x.label && !remark(x.label)) ? items as { token: NumberToken; label: string }[] : null;
 }
 
-function readSentence(sentence: { text: string; start: number }, para0: Paragraph, result: ExtractionResult, carried: string | null = null) {
+function readSentence(sentence: { text: string; start: number }, para0: Paragraph, result: ExtractionResult, carried: string | null = null, priorBudget: string | null = null) {
   const text = labelValueForm(normalizeText(sentence.text));
   const quote = quoteDocs.has(result);
   // A short label that names a loan ("Take-out: ...") scopes every number on its line, the prose after the colon too; the next line is back under the document's scope.
@@ -695,7 +695,12 @@ function readSentence(sentence: { text: string; start: number }, para0: Paragrap
   });
   // When the verb replaces a loan ("replaces the construction loan at month 28"), the figures after it are read normally.
   const loanReplaced = (t: NumberToken) => { const between = folded.slice(replacing!.index + replacing![0].length, t.start); return REPLACED_LOAN_AFTER_RE.test(between) && !FIGURE_NOUN_RE.test(between); };
-  const replaced = tokens.filter((t) => revised.includes(t) || (replacing && t.start >= replacing.index + replacing[0].length && !loanReplaced(t)) || (replacedBy && t.end <= replacedBy.index));
+  const corrected = tokens.filter((a, i) => {
+    const b = tokens[i + 1];
+    return b && isMoney(a) && isMoney(b) && /\b(?:was|etait)\s*$/i.test(text.slice(0, a.start)) && corrects(text.slice(a.end, b.start), a, b) && budgetFieldOf(text.slice(0, a.start)) !== null;
+  });
+  const correctionLabels = new Map(tokens.flatMap((t, i) => corrected.includes(t) && tokens[i + 1] ? [[tokens[i + 1]!, text.slice(0, t.start)] as const] : []));
+  const replaced = tokens.filter((t) => corrected.includes(t) || revised.includes(t) || (replacing && t.start >= replacing.index + replacing[0].length && !loanReplaced(t)) || (replacedBy && t.end <= replacedBy.index));
   for (const t of replaced) other(t, "line:prose", "A later figure in the same sentence replaces this one");
   tokens = tokens.filter((t) => !replaced.includes(t));
   // A rate that an adjustment follows ("6.65% base less a 25 bps buy-down") is the figure before it, not the loan's rate.
@@ -880,6 +885,11 @@ function readSentence(sentence: { text: string; start: number }, para0: Paragrap
     const afterShare = isMoney(t) && shares.some(([, end]) => t.start >= end);
     const label = shares.reduce((l, [a, b]) => (b > from && a < t.start ? l.slice(0, Math.max(a - from, 0)) + " ".repeat(Math.min(b, t.start) - Math.max(a, from)) + l.slice(Math.min(b, t.start) - from) : l), text.slice(from, t.start));
     const afterFigure = text.slice(t.end, tokens[i + 1]?.start ?? text.length);
+    if (i > 0 && isMoney(t) && /^\s*[,;]?\s*(?:includes?|including|comprend|incluant)\s*$/i.test(label)) {
+      other(t, "line:prose", "A part included in the preceding cost, not another budget line");
+      from = t.end;
+      return;
+    }
     // A building or schedule total is not the monthly rent of one unit.
     const rentWords = fold(label);
     const monthlyTotal = /\b(?:(?:total|gross) monthly rent|rent roll totals|loyer mensuel total|loyers mensuels totaux)\b/.test(rentWords) || (/\bproduces\b/.test(rentWords) && /^\s+of monthly rent\b/.test(fold(afterFigure)));
@@ -889,7 +899,8 @@ function readSentence(sentence: { text: string; start: number }, para0: Paragrap
       return;
     }
     let opts: MapOptions = { prose: true, scope: para.scope, budgetConcept: true, loanContext: para.scope !== undefined || conceptScope !== undefined || conceptLoan, conceptScope, seniorHeading: para.scope === "senior", context: text, quote, after: isMoney(t) ? afterFigure : text.slice(t.end) };
-    let usedLabel = totalLabels.get(t) ?? (i > 0 ? label.split(/\s+\/\s+/).pop()! : label).replace(/^\s*[,/]+\s*/, "");
+    let usedLabel = correctionLabels.get(t) ?? totalLabels.get(t) ?? (i > 0 ? label.split(/\s+\/\s+/).pop()! : label).replace(/^\s*[,/]+\s*/, "");
+    if (i > 0 && isMoney(tokens[i - 1]!) && isMoney(t) && !correctionLabels.has(t) && /[,;]/.test(usedLabel)) usedLabel = usedLabel.split(/[,;]/).pop()!.replace(/^\s*(?:and|et|puis|then)\s+/i, "");
     // A shared growth verb qualifies the expense clause after the rent figure.
     if (previousGrowth !== null && /^\s*(?:annually|yearly|par an)?\s*(?:and|et)\s+(?:expenses?|costs?|overhead|charges|depenses)\b/i.test(fold(label)) && GROWTH_WORD.test(fold(previousGrowth))) { usedLabel += " growth"; opts = { ...opts, context: undefined }; }
     if (loanSentence) {
@@ -904,7 +915,10 @@ function readSentence(sentence: { text: string; start: number }, para0: Paragrap
     const named = !totalLabels.has(t) ? loanNameOnly(label) : null;
     const loanMoney = t.unit === null && /\b(?:bank|banque|lender|preteur)\b/i.test(usedLabel) && /\bin for\s*$/i.test(usedLabel) && /^k\b/i.test(text.slice(t.end));
     const money = loanMoney ? { ...t, unit: "$" as const, currency: true, value: t.value === null ? null : t.value * 1000 } : t;
+    if (correctionLabels.has(t)) opts = { ...opts, context: undefined };
     let mapped = mapToken(usedLabel, money, opts);
+    if (mapped.kind === "unmapped" && priorBudget && /\b(?:present|current|revised|actuel\w*)\b/.test(fold(text.slice(0, t.start))) && /\b(?:replac\w*|remplac\w*)\b/.test(fold(text.slice(t.end)))) mapped = mapToken(FIELD_BY_KEY.get(priorBudget)!.aliases[0]!, money, { ...opts, context: undefined });
+    if (mapped.kind !== "field" && t.unit === null && t.value !== null && t.value >= 1000 && /^(?:base|budget|uses|inputs|emplois)$/i.test(text.slice(0, colon).trim())) mapped = mapToken(usedLabel, t, { ...opts, prose: false, budget: true });
     if (mapped.kind === "unmapped" && sentenceLoan && !/\b(?:alternative|optional|uncommitted|never committed)\b/i.test(text) && (i > 0 || !text.includes(":")) && !totalLabels.has(t)) {
       const clause = (label.split(/[,;/]/).pop() ?? "");
       mapped = loanTerm(clause, text.slice(t.end).split(/[,;.]/)[0] ?? "", t, sentenceLoan) ?? mapped;
@@ -1034,11 +1048,15 @@ function conceptLinesInBudget(doc: NormalizedDocument, result: ExtractionResult,
 }
 
 function fromLines(doc: NormalizedDocument, result: ExtractionResult, skip: Set<number>, scopes: (Scope | undefined)[], excluded: boolean[]) {
+  let priorBudget: string | null = null;
   for (const para of paragraphs(doc, skip, scopes, excluded)) {
     // A type named after a count labels the per-unit rents of the clauses after it in the same line (task 55).
     let carried: string | null = null;
     for (const s of sentences(para.text)) {
-      readSentence(s, para, result, carried);
+      readSentence(s, para, result, carried, priorBudget);
+      const old = /\b(?:original|old|previous|ancien\w*)\b/i.test(fold(s.text));
+      const probe = old ? s.text.replace(/\b(?:original|old|previous|ancien\w*|total)\b/gi, "") : "";
+      priorBudget = old ? budgetFieldOf(probe) : null;
       const text = labelValueForm(normalizeText(s.text));
       carried = countedType(text, tokenize(text, result.format)) ?? carried;
     }
@@ -1130,13 +1148,13 @@ function rentRollRoles(header: Cell[]): Roles | null {
 
 const BUDGET_LABEL_RE = /\b(line\s*items?|description|category|items?|cost\s*items?|use|poste|libelle|designation|categorie|rubrique)\b/;
 // A column named by one of these labels the row before any other label column ("Category | Line item | Amount" is labelled by its line item).
-const BUDGET_ITEM_RE = /\b(line\s*items?|items?|cost\s*items?|postes?(?: budgetaires?)?)\b/;
+const BUDGET_ITEM_RE = /\b(line\s*items?|items?|cost\s*items?|(?:input )?labels?|description|postes?(?: budgetaires?)?)\b/;
 // A label column named by one of these only when no column is named by the words above ("Division | Description | Amount" is labelled by its description).
 const BUDGET_WEAK_LABEL_RE = /\b(line|division)\b/;
 const BUDGET_AMOUNT_RE = /\b(amount|cost|budget|total|montant|couts?|\$)\b/;
 
 /** `others`: amount columns of other revisions, shown and never read; `ambiguous`: the headers do not say which revision is latest, so none is read. */
-type BudgetRoles = { label: number; amount: number; others?: number[]; ambiguous?: boolean };
+type BudgetRoles = { label: number; amount: number; category?: number; others?: number[]; ambiguous?: boolean };
 // A column headed by a revision, a version or a quote option.
 const REVISION_COL_RE = /\b(rev(?:ision)?\.?\s*[a-z0-9]|revised|revisee?|revise|original|initial|previous|precedent\w*|current|actuel\w*|courant|option|version|quote|bid|soumission|devis|alt\w*)\b/;
 /** Where a revision column stands: later is higher; null when the header does not say. */
@@ -1151,6 +1169,7 @@ function budgetRoles(header: Cell[]): BudgetRoles | null {
   let weak = -1;
   let amount = -1;
   let item = -1;
+  const category = header.findIndex(c => /^(?:category|categorie|division)$/i.test(c.text.trim()));
   const revisions: number[] = [];
   header.forEach((c, i) => {
     const h = headerOf(c);
@@ -1159,7 +1178,7 @@ function budgetRoles(header: Cell[]): BudgetRoles | null {
     else if (weak < 0 && BUDGET_WEAK_LABEL_RE.test(h)) weak = i;
     else {
       if (REVISION_COL_RE.test(h) && (BUDGET_AMOUNT_RE.test(h) || /^\s*[^a-z]*(rev|original|initial|previous|precedent|current|actuel|courant|revis)/.test(h))) revisions.push(i);
-      if (amount < 0 && BUDGET_AMOUNT_RE.test(h)) amount = i;
+      if (amount < 0 && (BUDGET_AMOUNT_RE.test(h) || (category >= 0 && /^(?:value|valeur)$/.test(h.trim())))) amount = i;
     }
   });
   if (item >= 0) label = item;
@@ -1172,7 +1191,7 @@ function budgetRoles(header: Cell[]): BudgetRoles | null {
     return { label, amount: top, others: revisions.filter((i) => i !== top), ambiguous: !clear };
   }
   const only = amount >= 0 ? amount : revisions[0] ?? -1;
-  return only >= 0 ? { label, amount: only } : null;
+  return only >= 0 ? { label, amount: only, category } : null;
 }
 
 /** A rent column's basis from a note's words ("annual rent per apartment", "net annual per square foot", "monthly"), or null. */
@@ -1644,7 +1663,7 @@ function fromBudget(table: Table, headerRow: number, roles: BudgetRoles, result:
     const row = table.rows[r]!;
     const labelCell = row[roles.label];
     const amountCell = row[roles.amount];
-    const category = categories?.get(row);
+    const category = categories?.get(row) ?? (roles.category !== undefined && roles.category >= 0 ? row[roles.category]?.text : undefined);
     if (!amountCell) continue;
     // A row with no label cell shows its amount, with the row's text cells as its context; it is never summed or totalled.
     if (!labelCell?.text) {
@@ -1652,7 +1671,8 @@ function fromBudget(table: Table, headerRow: number, roles: BudgetRoles, result:
       if (t && !isYearToken(t)) result.other.push({ fieldKey: null, itemKey: null, value: t.value, raw: t.raw, unitSeen: t.unit, location: amountCell.ref, context: `${table.name}: ${row.filter((c) => c.number === undefined && c.text.trim()).map((c) => c.text.trim()).join(" ")}`.slice(0, 240), rule: "table:budget", note: "No budget line matches this label" });
       continue;
     }
-    const displayLabel = category ? `${category}: ${labelCell.text}` : labelCell.text;
+    const basisNotes = category ? row.filter((c, i) => i !== roles.label && i !== roles.amount && i !== roles.category && c.text.trim() && !cellToken(c, result.format)).map(c => c.text.trim()) : [];
+    const displayLabel = [category ? `${category}: ${labelCell.text}` : labelCell.text, ...basisNotes].join(" ");
     // The amounts of other revisions, or of columns whose order is not told, are shown and never read.
     for (const c of [...(roles.others ?? []), ...(roles.ambiguous ? [roles.amount] : [])]) {
       const cell = row[c];
@@ -1668,6 +1688,10 @@ function fromBudget(table: Table, headerRow: number, roles: BudgetRoles, result:
     if (roles.ambiguous) continue;
     const t = cellToken(amountCell, result.format);
     if (!t) continue;
+    if (t.value === null && !result.format.mixed && result.format.decimal === null && /^\(\d{1,3}(?:,\d{3})+\)$/.test(amountCell.text.trim())) {
+      const accounting = tokenize(amountCell.text, { ...result.format, decimal: "." }, true)[0];
+      if (accounting) Object.assign(t, accounting);
+    }
     // A row whose own label or note says it is not part of the deal, or one under such a heading, is shown and never read, summed or totalled.
     if (excluded || (!!category && /\b(?:usd|us dollars|alternative|optional|supplier quote)\b/i.test(displayLabel)) || (category && (markedNotPart(category) || MEMO_SECTION_RE.test(fold(category)))) || row.some((c) => markedNotPart(c.text))) {
       result.other.push({ fieldKey: null, itemKey: null, value: t.value, raw: t.raw, unitSeen: t.unit, location: amountCell.ref, context: `${table.name}: ${displayLabel}`, rule: "table:budget", note: NOT_PART_NOTE });
@@ -1811,16 +1835,17 @@ function fromBudget(table: Table, headerRow: number, roles: BudgetRoles, result:
 }
 
 // A word that opens a section of a sheet: a first column of these (or of any few repeated words) is a category column.
-const SECTION_WORD_RE = /^(?:uses?|sources?|hard|soft|finance|financing|financement|revenues?|revenus?|income|assumptions?|operating|opex|timing|inputs?|project|projet|travaux|budget|emplois|hypotheses|land|terrain|acquisition|contingenc(?:y|ies)|imprevus|aleas|reserve|totals?|subtotal|sous-total|grand total|frais de financement|indirects|directs|construction|costs?|couts?|loan|equity|capital|exit|memos?|notes?|info|for information|pour memoire|pour information)\b/;
+const SECTION_WORD_RE = /^(?:uses?|sources?|hard|soft|build|other|autres|frais|finance|financing|financement|revenues?|revenus?|income|assumptions?|operating|opex|timing|inputs?|project|projet|travaux|budget|emplois|hypotheses|land|terrain|acquisition|contingenc(?:y|ies)|imprevus|aleas|reserve|totals?|subtotal|sous-total|grand total|frais de financement|indirects|directs|construction|costs?|couts?|loan|equity|capital|exit|memos?|notes?|info|for information|pour memoire|pour information)\b/;
 
 const filledCells = (row: Cell[]) => row.filter((c) => c.text.trim() || c.number !== undefined);
 
 // These structural budget categories name a cost line when the description itself names none.
 function budgetCategory(raw: string): string | null {
   const category = normalizeLabel(raw).label;
-  if (/^(?:hard(?: costs)?|construction|travaux|directs|couts directs)$/.test(category)) return "hard_cost";
-  if (/^(?:soft(?: costs)?|indirects|couts indirects)$/.test(category)) return "soft_cost";
+  if (/^(?:hard(?: costs)?|build|construction|travaux|directs|couts directs)$/.test(category)) return "hard_cost";
+  if (/^(?:soft(?: costs)?|frais|indirects|couts indirects)$/.test(category)) return "soft_cost";
   if (/^(?:land|terrain|acquisition)$/.test(category)) return "land_cost";
+  if (/^(?:other|autres)$/.test(category)) return "other_cost";
   // "Reserve" alone is not named: replacement, operating and interest reserves are not the contingency.
   return /^(?:contingenc(?:y|ies)|imprevus|aleas)$/.test(category) ? "contingency" : null;
 }
@@ -1838,7 +1863,7 @@ const USES_TOTAL_RE = /^(?:sum of uses|total uses|uses total|total des emplois|s
  * In a sheet with no header row, a first text column of a few short words, each repeated or opening a section, beside a column of distinct line items
  * is a category column. Returns, per row, the category cell; the row's label is then the next text cell (task 55).
  */
-function categoryCells(rows: Cell[][], format: DocumentFormat): Map<Cell[], Cell> {
+function categoryCells(rows: Cell[][], format: DocumentFormat, sheet: string): Map<Cell[], Cell> {
   const out = new Map<Cell[], Cell>();
   // A real header row (a budget or rent-roll column set) names the columns itself.
   if (rows.some((r) => !r.some((c) => c.number !== undefined) && (rentRollRoles(r) || budgetRoles(r)))) return out;
@@ -1848,6 +1873,10 @@ function categoryCells(rows: Cell[][], format: DocumentFormat): Map<Cell[], Cell
     return text(a) && text(b) && rest.some((c) => cellToken(c, format)) ? { a: a!, b: b! } : null;
   };
   const found = rows.flatMap((r) => { const p = pair(r); return p ? [{ r, ...p }] : []; });
+  // These categories are explicit even on a mixed input sheet with many unrelated row families.
+  if (/^(?:budget|base|inputs?|uses|emplois)(?:\b|$)/i.test(sheet)) {
+    for (const f of found) if (costCategory(f.a.text)) out.set(f.r, f.a);
+  }
   const figures = rows.filter((r) => r.some((c) => cellToken(c, format))).length;
   if (!found.length || found.length < 0.6 * figures || (found.length < 3 && !found.every(f => costCategory(f.a.text)))) return out;
   const key = (c: Cell) => fold(c.text).replace(/\s+/g, " ").trim();
@@ -1956,7 +1985,7 @@ function isSentenceCell(c: Cell, row: Cell[], format: DocumentFormat): boolean {
 
 function fromTable(table0: Table, result: ExtractionResult, notes: string[] = [], scope0?: Scope) {
   // A category column beside the line items is set aside; its word stays with the row (task 55).
-  const cats = categoryCells(table0.rows, result.format);
+  const cats = categoryCells(table0.rows, result.format, table0.name);
   const catOf = new Map<Cell[], string>();
   const table: Table = cats.size === 0 ? table0 : { ...table0, rows: table0.rows.map((r) => {
     const c = cats.get(r);
@@ -2025,7 +2054,9 @@ function fromTable(table0: Table, result: ExtractionResult, notes: string[] = []
     const parts: Section[] = [];
     for (const row of section.rows) {
       const cat = catOf.get(row);
-      const budget = (cat ? costCategory(cat) : section.costSection) && filledCells(row).length === 2;
+      const cells = filledCells(row);
+      const figures = cells.slice(1).filter(c => cellToken(c, result.format));
+      const budget = (cat ? costCategory(cat) : section.costSection) && (cells.length === 2 || (!!cat && figures.length === 1 && cells.indexOf(figures[0]!) > 0 && cells.slice(1).filter(c => c !== figures[0]).every(c => /^(?:note|notes)$/i.test(c.text.trim()) || /\b(?:tax|basis|package)\b/i.test(c.text))));
       const last = parts.at(-1);
       if (last && !!last.categoryBudget === !!budget) last.rows.push(row);
       else parts.push({ ...section, rows: [row], categoryBudget: !!budget });
@@ -2041,9 +2072,13 @@ function fromTable(table0: Table, result: ExtractionResult, notes: string[] = []
     }
     else if (s.budget) fromBudget(part, 0, s.budget, result, s.scope, s.excluded);
     // A detected category budget uses the same sums and total checks as a headed budget.
-    // Empty cells between the line and its amount are skipped; a note or a second figure keeps the sheet out.
+    // Empty cells and cost-basis notes may precede the amount; a second figure keeps the sheet out.
     else if (s.categoryBudget) {
-      const rows = s.rows.map(filledCells);
+      const rows = s.rows.map(row => {
+        const cells = filledCells(row);
+        const amount = cells.slice(1).find(c => cellToken(c, result.format));
+        return amount ? [cells[0]!, amount, ...cells.slice(1).filter(c => c !== amount)] : cells;
+      });
       rows.forEach((row, i) => { const cat = catOf.get(s.rows[i]!); if (cat) catOf.set(row, cat); });
       fromBudget({ ...part, rows }, -1, { label: 0, amount: 1 }, result, s.scope, s.excluded, catOf);
     }
@@ -2080,7 +2115,7 @@ function fromTable(table0: Table, result: ExtractionResult, notes: string[] = []
         if (!labelCell) return;
         const after = vf ? [vf.value] : row.slice(row.indexOf(labelCell) + 1);
         // A row that says it is not part of the deal, or one under such a heading, is shown and never read.
-        if (s.excluded || catExcluded || row.some((c) => markedNotPart(c.text))) {
+        if (s.excluded || catExcluded || row.some((c) => markedNotPart(c.text)) || (/^(?:summary|sommaire|resume)$/i.test(fold(table.name).trim()) && /\b(?:carried|linked|reporte\w*)\b/i.test(labelCell.text))) {
           for (const cell of after) {
             const t = cellToken(cell, result.format);
             if (t) result.other.push({ fieldKey: null, itemKey: null, value: t.value, raw: t.raw, unitSeen: t.unit, location: cell.ref, context: rowContext(table.name, cat, row, labelCell, cell), rule: "table:label-value", note: NOT_PART_NOTE });

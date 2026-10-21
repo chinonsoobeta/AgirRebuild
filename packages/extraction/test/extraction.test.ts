@@ -8027,3 +8027,205 @@ describe("card 120: dwelling names in prose and label lines", () => {
     expect(r.candidates.map((c) => [c.fieldKey, c.itemKey, c.value])).toEqual([["unit_count", "Compact", 4], ["unit_rent_monthly", "Compact", 2600], ["unit_count", "Family", 2], ["unit_rent_monthly", "Family", 2950]]);
   });
 });
+
+
+describe("card 121: category budget layouts, dense prose and revisions", () => {
+  const read = (input: string, kind: "pdf" | "docx" = "pdf") => {
+    const parts = input.split(" // ");
+    const sh = /^S(?:\(([^)]*)\))?:/;
+    if (sh.test(parts[0]!)) return extractCandidates({ kind: "xlsx", lines: [], tables: [{ name: parts[0]!.match(sh)![1] ?? "Base", rows: parts.map((p, r) => p.replace(sh, "").split("|").map((v, c): Cell => ({ text: v.trim(), ref: `${String.fromCharCode(65 + c)}${r + 1}`, ...(/^-?\d+$/.test(v.trim()) ? { number: Number(v) } : {}) }))) }], pageCount: 1, needsOcr: false, fullText: "" });
+    return extractCandidates({ kind, lines: parts.map((text, i) => ({ text, location: kind === "docx" ? `paragraph ${i + 1}` : `page 1, line ${i + 1}` })), tables: [], pageCount: 1, needsOcr: false, fullText: parts.join("\n") });
+  };
+  const check = (input: string, expected: string, kind: "pdf" | "docx" = "pdf") => {
+    const r = read(input, kind);
+    if (expected.startsWith("!")) expect(r.candidates.filter(c => expected.slice(1).split(",").includes(c.fieldKey!))).toEqual([]);
+    else expect(r.candidates.map(c => `${c.fieldKey}=${c.value}`).sort()).toEqual(expected === "-" ? [] : expected.split(" ").sort());
+    if (expected === "-" || expected.startsWith("!")) expect(r.other.length).toBeGreaterThan(0);
+  };
+  test.each([
+    ["S(Inputs):Hard|Hard ex-HST - Framing, roofing and trades|Hard package - tax basis stated in category|1620000", "hard_cost=1620000"],
+    ["S(Inputs):Hard|Building trades incl GST - Shell and services|Hard package - tax basis stated in category|1620000", "hard_cost=1620000"],
+    ["S(Inputs):Hard|Chantier TTC - Structure et services|Note|1620000", "hard_cost=1620000"],
+    ["S(Inputs):Soft|Soft incl-HST - Design, permits and legal|Soft package|210000", "soft_cost=210000"],
+    ["S(Inputs):Soft|Frais professionnels TTC - Architecte et permis|Note|210000", "soft_cost=210000"],
+    ["S(Inputs):Uses|Dirt cost - Purchase consideration|Uses package|640000", "land_cost=640000"],
+    ["S(Inputs):Uses|Terrain à la clôture - Prix d'achat|Note|640000", "land_cost=640000"],
+    ["S(Inputs):Uses|Risk allowance - Unallocated work allowance|Uses package|170000", "contingency=170000"],
+    ["S(Inputs):Uses|Réserve aléas - Provision non affectée|Note|170000", "contingency=170000"],
+    ["S(Inputs):Uses|uses close - Closing uses|Uses package|2640000", "stated_total_cost=2640000"],
+    ["S(Inputs):Uses|Coût global inscrit - Total des emplois|Note|2640000", "stated_total_cost=2640000"],
+    ["S(Inputs):Other|Remboursement municipal|Other package|(15,000)", "other_cost=-15000"],
+    ["S(Base):Uses|Site purchase agreed|590000", "land_cost=590000"],
+    ["S(Base):Use|Acquired site, all-in|590000", "land_cost=590000"],
+    ["S(Base):USE|LAND bought for|590000", "land_cost=590000"],
+    ["S(Base):Hard|Construction contract net GST|1480000", "hard_cost=1480000"],
+    ["S(Base):Hard|The build, ex-GST|1480000", "hard_cost=1480000"],
+    ["S(Base):Hard|Hard COST signed ex GST|1480000", "hard_cost=1480000"],
+    ["S(Base):Uses|Professional and permit allowance|96000", "soft_cost=96000"],
+    ["S(Base):Use|Development services pot|96000", "soft_cost=96000"],
+    ["S(Base):USE|Soft spend agreed|96000", "soft_cost=96000"],
+    ["S(Uses):Use|Fees and consultant spend|96000", "soft_cost=96000"],
+    ["S(Base):Uses|Uncommitted building allowance|60000", "contingency=60000"],
+    ["S(Base):Use|Unspent risk money|60000", "contingency=60000"],
+    ["S(Base):USE|RISK allowance still free|60000", "contingency=60000"],
+    ["S(Uses):Use|Remaining owner buffer|60000", "contingency=60000"],
+    ["S(Base):Uses|Closing uses|2226000", "stated_total_cost=2226000"],
+    ["S(Base):Use|Uses at close|2226000", "stated_total_cost=2226000"],
+    ["S(Base):USE|All uses closed|2226000", "stated_total_cost=2226000"],
+    ["S(Base):Use|Acquired site, all-in|590000 // S:Hard|The build, ex-GST|1480000 // S:Use|Development services pot|96000 // S:Use|Unspent risk money|60000 // S:Use|Uses at close|2226000", "land_cost=590000 hard_cost=1480000 soft_cost=96000 contingency=60000 stated_total_cost=2226000"],
+    ["prix du fonds 540 000 $ et ouvrage hors TVH 2 100 000 $, puis frais de montage 310 000 $;", "land_cost=540000 hard_cost=2100000 soft_cost=310000"],
+    ["The signed work order $2,700,000 covers the conversion, and the professional people budget $460,000 belongs to the consultants.", "hard_cost=2700000 soft_cost=460000"],
+    ["You kept held back for surprises $230,000 and remaining project charges $110,000.", "contingency=230000 other_cost=110000"],
+    ["Then outside services $330,000, unknown-work allowance $170,000 and remaining acquisition extras $65,000 are the owner's other envelopes.", "soft_cost=330000 contingency=170000 other_cost=65000"],
+    ["réserve aléas 170 000 $ et autres débours 55 000 $ sont les enveloppes du promoteur.", "contingency=170000 other_cost=55000"],
+    ["The owner will pay $1,300,000 to acquire the vacant warehouse.", "land_cost=1300000"],
+    ["I agreed the shell purchase at what we pay for the shell $950,000;", "land_cost=950000"],
+    ["The house purchase money $280,000 is the price for the corner house.", "land_cost=280000"],
+    ["The assembled parcel price is $395,000.", "land_cost=395000"],
+    ["Dirt agreed at $360,000 (yes, that is the signed total).", "land_cost=360000"],
+    ["The site, an old garage lot of roughly 0.3 acres, was bought in May 2026 for $1,150,000.", "land_cost=1150000"],
+    ["Consultants and approvals are carried at $230,000; the owner's construction cushion is $140,000.", "soft_cost=230000 contingency=140000"],
+    ["- Unallocated works provision: $70,000", "contingency=70000"],
+    ["The non-refundable utility connection assessment is $40,000.", "other_cost=40000"],
+    ["Base: honoraires du dossier 290000", "soft_cost=290000"],
+    ["Original scope price $1,540,000. // Revised signed hard-cost price $1,690,000 replaces our earlier number.", "hard_cost=1690000"],
+    ["Ancien total travaux : 1 830 000 $. // Le présent total de 1 960 000 $ remplace notre chiffre antérieur.", "hard_cost=1960000"],
+    ["The construction sum was $3,050,000 and is corrected to $3,150,000.", "hard_cost=3150000"],
+    ["This replaces the previous construction sum of $2,360,000. // Current construction sum $2,440,000 excludes GST and includes site servicing.", "hard_cost=2440000"],
+    ["Contract breakdown is $262,000 per door, not another sum.", "!hard_cost"],
+    ["The neighbouring lot sold for $700,000 last spring.", "!land_cost"],
+    ["S(Base):Memo|Window package, for reference|150000", "!hard_cost"],
+    ["S(Summary):Uses carried from Base|2226000", "!stated_total_cost"],
+    ["S(Uses):Use||2400000", "!stated_total_cost"],
+    ["The lender's contingency rule is 10% of hard costs.", "!contingency"],
+    ["Le terrain voisin a été évalué à 800 000 $.", "!land_cost"],
+    ["The consultant charged the previous owner $45,000 in 2019.", "!soft_cost"],
+    ["A competing builder quoted $1,900,000 but we did not sign it.", "!hard_cost"],
+    ["Historical adjustment, outside this project (12,500)", "!other_cost"],
+  ])("requested layout rows: %s", (input, expected) => {
+    check(input!, expected!);
+    if (!/^S(?:\([^)]*\))?:/.test(input!)) check(input!, expected!, "docx");
+  });
+  test.each([
+    ["S(Budget):Build|Trade contract signed|||910000", "hard_cost=910000"],
+    ["S(Emplois):Travaux|Permis et conception||||180000", "soft_cost=180000"],
+    ["S(Base):Frais|Professional allowance||||120000", "soft_cost=120000"],
+    ["S(Base):Uses||note|||900000", "-"],
+    ["S(Base):Hard|Loan interest||||90000", "-"],
+  ])("1 category families: %s", (input, expected) => {
+    check(input!, expected!);
+    if (!/^S(?:\([^)]*\))?:/.test(input!)) check(input!, expected!, "docx");
+  });
+  test.each([
+    ["S(Inputs):Use|HT - Considération pour achat du terrain|Basis note||650000", "land_cost=650000"],
+    ["S(Budget):Soft|incl-HST - Legal and approvals|Cost basis|||145000", "soft_cost=145000"],
+    ["S(Base):Use|TTC - Provision pour imprévus|Note||||75000", "contingency=75000"],
+    ["S(Inputs):Use|TTC - Loan fee|Note|||45000", "-"],
+    ["S(Base):Uses|ex-GST - Lot purchase and consultants|Note|||650000", "-"],
+  ])("2 label and description: %s", (input, expected) => {
+    check(input!, expected!);
+    if (!/^S(?:\([^)]*\))?:/.test(input!)) check(input!, expected!, "docx");
+  });
+  test.each([
+    ["Construction contract excludes GST: $910,000", "hard_cost=910000"],
+    ["Chantier hors TVH : 910 000 $", "hard_cost=910000"],
+    ["Site acquisition including unrecoverable HST: $650,000", "land_cost=650000"],
+    ["GST on construction: $45000", "-"],
+    ["TVH sur le terrain : 45 000 $", "-"],
+  ])("3 cost tax basis: %s", (input, expected) => {
+    check(input!, expected!);
+    if (!/^S(?:\([^)]*\))?:/.test(input!)) check(input!, expected!, "docx");
+  });
+  test.each([
+    ["The owner will close on the vacant parcel for $650,000.", "land_cost=650000"],
+    ["Les frais de montage sont de 145 000 $.", "soft_cost=145000"],
+    ["Unallocated trades provision: $75000", "contingency=75000"],
+    ["Incidental outlay: $35000", "other_cost=35000"],
+    ["Dirt agreed at $650000", "land_cost=650000"],
+    ["Consultants for the previous owner: $45000", "-"],
+    ["A competing construction contract: $910000", "-"],
+    ["Site purchase assessment: $650000", "-"],
+  ])("4 plain words: %s", (input, expected) => {
+    check(input!, expected!);
+    if (!/^S(?:\([^)]*\))?:/.test(input!)) check(input!, expected!, "docx");
+  });
+  test.each([
+    ["The work order $910,000 covers trades, then consultant services $145,000 and the risk provision $75,000.", "hard_cost=910000 soft_cost=145000 contingency=75000"],
+    ["Prix du fonds 650 000 $, puis chantier 910 000 $ et frais de montage 145 000 $.", "land_cost=650000 hard_cost=910000 soft_cost=145000"],
+    ["Outside services $145,000; unallocated work allowance $75,000; acquisition extras $35,000.", "soft_cost=145000 contingency=75000 other_cost=35000"],
+    ["The construction contract $910,000 includes $75000 contingency.", "hard_cost=910000"],
+    ["Travaux : 45 000 $ par logement, pas un autre total.", "-"],
+  ])("5 figure local words: %s", (input, expected) => {
+    check(input!, expected!);
+    if (!/^S(?:\([^)]*\))?:/.test(input!)) check(input!, expected!, "docx");
+  });
+  test.each([
+    ["The construction contract was $850,000 and is now $910,000.", "hard_cost=910000"],
+    ["Ancien total travaux : 850 000 $. // Le présent total de 910 000 $ remplace le montant précédent.", "hard_cost=910000"],
+    ["Original trades price $850000. // Revised construction price $910000 replaces the old estimate.", "hard_cost=910000"],
+    ["Original construction price: $850000", "-"],
+    ["This replaces the previous work order of $850000.", "-"],
+  ])("6 revisions: %s", (input, expected) => {
+    check(input!, expected!);
+    if (!/^S(?:\([^)]*\))?:/.test(input!)) check(input!, expected!, "docx");
+  });
+  test.each([
+    ["The parcel, roughly 0.42 acres, was purchased for $650000.", "land_cost=650000"],
+    ["Le terrain, d'environ 0,4 acre, a été acquis pour 650 000 $.", "land_cost=650000"],
+    ["The house of roughly 2200 square feet was acquired for $650000.", "land_cost=650000"],
+    ["The parcel was purchased for roughly $650000.", "-"],
+    ["Le terrain sera peut-être acquis pour 650 000 $.", "-"],
+  ])("7 hedge attachment: %s", (input, expected) => {
+    check(input!, expected!);
+    if (!/^S(?:\([^)]*\))?:/.test(input!)) check(input!, expected!, "docx");
+  });
+  test.each([
+    ["Non-refundable utility connection levy: $35000", "other_cost=35000"],
+    ["S(Inputs):Autres|Remboursement municipal|Note||-15000", "other_cost=-15000"],
+    ["S(Uses):Other|Net municipal grant||| -20000", "other_cost=-20000"],
+    ["The nearby parcel purchase was $650000.", "-"],
+    ["S(Summary):Closing uses carried from Base|1800000", "-"],
+    ["S(Base):Memo|Work order for reference||||910000", "-"],
+    ["Outside this project: acquisition extras $35000", "-"],
+  ])("8 ownership and memo: %s", (input, expected) => {
+    check(input!, expected!);
+    if (!/^S(?:\([^)]*\))?:/.test(input!)) check(input!, expected!, "docx");
+  });
+  test.each([
+    ["S(Uses):Uses|Land purchase||||650000", "land_cost=650000"],
+    ["S(Base):Hard|Consultants and permits||||145000", "soft_cost=145000"],
+    ["S(Budget):Travaux|Réserve aléas||||75000", "contingency=75000"],
+    ["S(Base):Uses|Lot purchase and professional services||||650000", "-"],
+    ["S(Base):Use|Construction and design||||910000", "-"],
+  ])("9 ambiguity: %s", (input, expected) => {
+    check(input!, expected!);
+    if (!/^S(?:\([^)]*\))?:/.test(input!)) check(input!, expected!, "docx");
+  });
+  test("a generic Item/Value table retains its ordinary review note", () => {
+    const r = read("S(Base):Item|Value // S:Marketing window, months|5");
+    expect(r.candidates).toEqual([]);
+    expect(r.other.find(c => c.value === 5)?.note).toBe("No field matches this label");
+  });
+  test("a headed category table uses the item label and the distant Value column", () => {
+    const r = read("S(Inputs):Category|Label|Basis||Value // S:Hard|Design and permits|Tax basis||145000");
+    expect(r.candidates.map(c => [c.fieldKey, c.value, c.location])).toEqual([["soft_cost", 145000, "E2"]]);
+  });
+  test("retain the category row's tax-basis note for review", () => {
+    const r = read("S(Inputs):Hard|Construction contract ex-HST - Trades|Hard package - tax basis stated in category||910000");
+    expect(r.candidates.map(c => [c.fieldKey, c.value])).toEqual([["hard_cost", 910000]]);
+    expect(r.candidates[0]!.context).toContain("Hard package - tax basis stated in category");
+  });
+  test("the original amount stays shown as superseded", () => {
+    const r = read("Original scope price $850000. // Revised construction contract $910000 replaces the earlier number.", "docx");
+    expect(r.candidates.map(c => [c.fieldKey, c.value])).toEqual([["hard_cost", 910000]]);
+    expect(r.other.find(c => c.value === 850000)?.note).toMatch(/earlier figure|replaces/i);
+  });
+  test("known budget categories survive a mixed input sheet with many other categories", () => {
+    const rows = ["S(Base):Uses|Acquired site|||650000", "S:Hard|Work order|||910000", "S:Use|Permits|||145000", ...["Rent", "Timing", "One-bedroom", "Two-bedroom", "Bank", "Partners", "Exit", "Memo", "Operations"].map(c => `S:${c}|Unnamed input|||20`)];
+    expect(read(rows.join(" // ")).candidates.filter(c => c.value! > 1000).map(c => [c.fieldKey, c.value])).toEqual([["land_cost", 650000], ["hard_cost", 910000], ["soft_cost", 145000]]);
+  });
+  test("category rows preserve the physical E and F value locations", () => {
+    const r = read("S(Base):Uses|Acquired parcel|||650000 // S:Build|Construction contract||||910000 // S:Uses|Professional and permit allowance|||145000");
+    expect(r.candidates.map(c => [c.fieldKey, c.value, c.location])).toEqual([["land_cost", 650000, "E1"], ["hard_cost", 910000, "F2"], ["soft_cost", 145000, "E3"]]);
+  });
+});

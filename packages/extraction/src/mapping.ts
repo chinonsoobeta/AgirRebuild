@@ -509,7 +509,7 @@ const FILLER = "is|are|was|were|will|be|been|should|shall|to|take|takes|taking|p
 const FILLER_RE = new RegExp(`^(\\s(${FILLER}))*$`);
 const LAST_HONORAIRES_RE = new RegExp(`(^|[^a-z0-9])honoraires(?=(\\s(${FILLER}))*\\s*$)`);
 // Fees of a financing, a broker or a guarantee are never the soft-cost line.
-const FINANCING_FEE_RE = /\b(courtage|courtiers?|preteurs?|banques?|financements?|garanties?|engagement|dossier|ouverture|hypothecaires?|prets?|lender|broker)\b/;
+const FINANCING_FEE_RE = /\b(courtage|courtiers?|preteurs?|banques?|financements?|garanties?|engagement|(?<!honoraires du )dossier|ouverture|hypothecaires?|prets?|lender|broker)\b/;
 const RATE_FILLER_RE = new RegExp(`^(\\s(${FILLER}|${RATE_QUALIFIER}))*$`);
 
 // A sequencing word after a duration noun ("of lease-up afterwards", "de location ensuite") does not stop the noun labelling the number.
@@ -630,7 +630,7 @@ export const CREDIT_NOTE = "A credit: reduces total cost";
 export const NEGATIVE_NOTE = "A negative figure that does not say it is a credit";
 
 // A label that says the figure is a credit. Folded (no accents, lower case) text.
-const CREDIT_WORD_RE = /(?:^|[^a-z])(?:credits?|credited|rebates?|refunds?|refunded|reimbursements?|reimbursed|remises?|remboursements?|rembourse(?:e|s|es)?|ristournes?|subvention deduite|subventions? (?:nette )?(?:deduite|qui reduit les couts)|aide financiere (?:deduite|qui reduit les couts)|grant applied)(?![a-z])/;
+const CREDIT_WORD_RE = /(?:^|[^a-z])(?:credits?|credited|rebates?|refunds?|refunded|reimbursements?|reimbursed|remises?|remboursements?|rembourse(?:e|s|es)?|ristournes?|subvention deduite|subventions? (?:nette )?(?:deduite|qui reduit les couts)|aide financiere (?:deduite|qui reduit les couts)|grant applied|net (?:municipal )?grant)(?![a-z])/;
 // Credit words that are not a credit against the cost: a loan line, a rating, a loss allowance, a tax credit, a restoration.
 const NOT_CREDIT_RE = /(?:line|lines|letter|letters|facility|facilities|marge|ligne|lettre|facilite|carte|card|tax|taxe|impot|impots)\s+(?:of\s+|de\s+|d\s+)?credits?(?![a-z])|credits?\s+(?:facility|facilities|union|rating|check|checks|score|loss|losses|risk|agreement|committee|card|bureau|enhancement|insurance|line|lines|support|policy|quality|worthiness|de risque|d impot)|cooperative de credit|remises?\s+(?:en etat|a neuf|en forme|des cles|de cles|des plans|de prix)/;
 // A cost waived or exempted, and the words that make a figure what is paid after it. Folded text.
@@ -647,7 +647,7 @@ const SALES_TAX_RE = new RegExp(String.raw`(?:^|[^a-z])${SALES_TAX_WORD}(?![a-z]
 // Remove only basis modifiers; a tax named as the line itself remains for SALES_TAX_NOTE.
 const TAX_NAME = String.raw`(?:GST|HST|PST|QST|TPS|TVQ|TVH|TVA|VAT|sales tax|taxes|taxe|tax|taxe de vente)`;
 const TAX_LIST = String.raw`${TAX_NAME}(?:\s*(?:[/+-]|and|et)\s*${TAX_NAME})*`;
-const TAX_BASIS = new RegExp(String.raw`\b(?:(?:ex|excl|excluding|exclusive|net of|net|before|after|hors|sans|avant|incl|including|includes|inclusive|with|without|plus|no|inclus|incluant|apres|avec|pas de)\.?[\s-]+(?:(?:the|of|de|la|des|unrecoverable|non-recoverable)\s+)*${TAX_LIST}|${TAX_LIST}\s+(?:included|extra|excluded|not applicable|n/a|nil|free|zero rated|inclus\w*|en sus|non applicable|sans objet)|taxed|tax-inclusive|tax in|TTC|HT)\b|\+\s*${TAX_LIST}\b`, "gi");
+const TAX_BASIS = new RegExp(String.raw`\b(?:(?:ex|excl|excludes|excluding|exclusive|net of|net|before|after|hors|sans|avant|incl|including|includes|inclusive|with|without|plus|no|inclus|incluant|apres|avec|pas de)\.?[\s-]+(?:(?:the|of|de|la|des|unrecoverable|non-recoverable)\s+)*${TAX_LIST}|${TAX_LIST}\s+(?:included|extra|excluded|not applicable|n/a|nil|free|zero rated|inclus\w*|en sus|non applicable|sans objet)|taxed|tax-inclusive|tax in|TTC|HT)\b|\+\s*${TAX_LIST}\b`, "gi");
 export function withoutTaxBasis(raw: string): string { return raw.replace(TAX_BASIS, " ").trimEnd(); }
 
 const INTEREST_WORD_RE = /(?:^|[^a-z])(?:interests?|interets?)(?![a-z])/;
@@ -757,6 +757,7 @@ export function mapToken(rawLabel: string, t: NumberToken, opts: MapOptions = {}
     return mapped.kind === "field" && /^(?:senior|mezz|refinance)_rate_pct$/.test(mapped.fieldKey) ? { ...mapped, unitSeen: "bps (÷ 100)" } : { kind: "unmapped" };
   }
   const folded = foldText(rawLabel);
+  if ((opts.budget || opts.budgetConcept) && /\b(?:for reference|competing|rejected|previous owner|outside this project)\b/.test(folded)) return { kind: "ignored", reason: "Not this deal's budget line" };
   if (t.value !== null && (t.unit === "$" || t.currency || t.unit === null) && SALES_TAX_RE.test(folded) && !SALES_TAX_EXEMPT_RE.test(folded)) return { kind: "ignored", reason: SALES_TAX_NOTE };
   if (/\b(purchase price|prix d achat)\b/.test(normalizeLabel(rawLabel).label)) {
     const clause = normalizeLabel(`${rawLabel.split(/[,;]/).pop() ?? ""} ${(opts.after ?? "").split(/[,;]|\b(?:and|et)\b/)[0] ?? ""}`).label;
@@ -784,7 +785,9 @@ export function mapToken(rawLabel: string, t: NumberToken, opts: MapOptions = {}
   }
   // A description naming two cost fields by concept is shown, unless its own words already name its field.
   if (m.kind === "unmapped" && !opts.quote && (opts.budget || opts.budgetConcept) && t.unit === "$" && !/%/.test(opts.gap ?? opts.ahead ?? "") && joined.length === 2 && joined.every((part) => part.length === 1) && joined[0]![0]!.fieldKey !== joined[1]![0]!.fieldKey) return { kind: "ignored", reason: "This description names more than one budget field; enter each line separately" };
-  if (m.kind === "unmapped" || (m.kind === "ignored" && m.unitMismatch) || (m.kind === "ignored" && m.reason === "A fee or premium, not an input" && /\b(?:frais courants|frais annuels|selling-cost|growth|development levies|croissance)\b/.test(named))) m = conceptField(rawLabel, t, opts) ?? m;
+  if (m.kind === "unmapped" || (m.kind === "ignored" && m.reason === "A fee or premium, not an input" && /\b(?:frais de montage|honoraires du dossier|frais courants|frais annuels|selling-cost|growth|development levies|croissance)\b/.test(named)) || (m.kind === "ignored" && m.unitMismatch)) m = conceptField(rawLabel, t, opts) ?? m;
+  // Apply revision labels to aliases and concepts alike.
+  if (m.kind === "field" && CREDITABLE.has(m.fieldKey) && OLD_LABEL_RE.test(named)) return { kind: "ignored", reason: SUPERSEDED_LABEL_NOTE };
   if (m.kind === "field" && /^(?:senior|mezz|refinance)_rate_pct$/.test(m.fieldKey) && (NOT_A_LOAN_RATE_CONTEXT.test(named) || CONCEPTS.find(c => c.fieldKey === "senior_rate_pct")!.exclude.test(named))) return { kind: "ignored", reason: NOT_A_LOAN_RATE_NOTE };
   if (m.kind === "field" && (assumptionKeys.includes(m.fieldKey) || /^(?:senior_|mezz_|refinance_|min_dscr)/.test(m.fieldKey)) && (ASSUMPTION_HISTORY.test(folded) || (/^(?:senior_|mezz_|refinance_|min_dscr)/.test(m.fieldKey) && /\b(?:bank of canada|prime (?:rate )?today|bond yield|inflation|deposit account|last year s|expected dcr|projected dcr)\b/.test(folded)))) return { kind: "ignored", reason: "History or another property's figure, not this deal's assumption" };
   if (m.kind === "field" && (m.fieldKey === "fixed_opex_annual" || m.fieldKey === "selling_costs_pct")) {
@@ -849,8 +852,8 @@ function budgetConcepts(label: string) {
   let meanings = CONCEPTS.filter((c) => c.budget && c.words.some((w) => w.test(head)) && (c.with ?? []).every(w => w.test(head)));
   // A property purchase beats shell/building; a risk holding beats the build it protects.
   if (PROPERTY_WORD.test(head) && ACQUISITION_WORD.test(head) && !/\b(?:and|et|plus)\b/.test(head)) meanings = meanings.filter((c) => c.fieldKey !== "hard_cost");
-  if (((HOLDING_WORD.test(head) && RISK_WORD.test(head)) || /\b(?:contingenc(?:e|es|y|ies)|imprevus|aleas|cushion|buffer)\b/.test(head)) && !/\b(?:and|et|plus)\b/.test(head)) meanings = meanings.filter((c) => c.fieldKey !== "hard_cost" && c.fieldKey !== "soft_cost");
-  if (RESIDUAL_COST.test(head) && !HOLDING_WORD.test(head)) meanings = meanings.filter((c) => c.fieldKey !== "contingency" && c.fieldKey !== "hard_cost");
+  if (((HOLDING_WORD.test(head) && RISK_WORD.test(head)) || /\b(?:contingenc(?:e|es|y|ies)|imprevus|aleas|cushion|buffer|unallocated (?:works?|trades?))\b/.test(head)) && !/\b(?:and|et|plus)\b/.test(head)) meanings = meanings.filter((c) => c.fieldKey !== "hard_cost" && c.fieldKey !== "soft_cost");
+  if (RESIDUAL_COST.test(head) && !HOLDING_WORD.test(head)) meanings = meanings.filter((c) => c.fieldKey !== "contingency" && c.fieldKey !== "hard_cost" && c.fieldKey !== "land_cost");
   if (/\bfees outside (?:the )?gc\b/.test(head)) meanings = meanings.filter((c) => c.fieldKey !== "hard_cost");
   if (PROJECT_TOTAL.test(head)) meanings = meanings.filter((c) => c.fieldKey !== "hard_cost");
   if (meanings.some(c => c.fieldKey === "development_charges") && !/\b(?:and|et|plus)\b/.test(head)) meanings = meanings.filter(c => c.fieldKey !== "soft_cost");
@@ -878,7 +881,7 @@ function conceptField(rawLabel: string, t: NumberToken, opts: MapOptions, financ
     && !(unit === "months" && MONTH_INDEX.test(label));
   // After the figure, the words before it in its clause still carry the guards.
   const folded = foldText(afterLabel ? `${lead} ${rawLabel}` : rawLabel);
-  const budgetLine = budget && (!NOT_A_BUDGET_LINE.test(folded) || /\b(?:growth|development|croissance)\b/.test(label)) && !LOAN_NOUN.test(folded);
+  const budgetLine = budget && (!NOT_A_BUDGET_LINE.test(folded.replace(/\b(?:signed total|total travaux)\b/g, "").replace(/\blevy\b/g, RESIDUAL_COST.test(label) ? "" : "levy")) || /\b(?:growth|development|croissance)\b/.test(label)) && !LOAN_NOUN.test(folded);
   const assumptionLabel = label;
   const assumptionContext = normalizeLabel(afterLabel ? `${lead} ${rawLabel}` : rawLabel.split(/[,;]/).pop() ?? "").label;
   // The whole label and the words after the figure: an alternative, a loan's period or a month number is never the deal's assumption.
@@ -912,8 +915,6 @@ export function outsideBounds(def: FieldDef, v: number): boolean {
 
 function mapSigned(rawLabel: string, t: NumberToken, opts: MapOptions = {}): Mapped {
   const m = mapLabel(rawLabel, t, opts);
-  // A budget line whose own label calls the figure the old, original or earlier one is shown: a later figure for the line replaces it.
-  if (m.kind === "field" && m.itemKey === null && CREDITABLE.has(m.fieldKey) && OLD_LABEL_RE.test(normalizeLabel(rawLabel).label)) return { kind: "ignored", reason: SUPERSEDED_LABEL_NOTE };
   if (t.value === null || t.value >= 0 || m.kind === "ignored") return m;
   const { label, labelUnit, labelCode } = normalizeLabel(rawLabel);
   const credit = CREDIT_WORD_RE.test(label) && !NOT_CREDIT_RE.test(label);
@@ -1254,9 +1255,18 @@ export function costSentence(sentence: string, before: string, after: string, t:
   const a = f(clause(after, false));
   const whole = f(sentence);
   if (OTHER_PROJECT_RE.test(whole) || NOT_THIS_COST.test(b) || DEPOSIT_RE.test(whole)) return null;
+  // A property and its acquisition verb may surround an acreage or date; those figures do not change the purchase amount.
+  const purchase = f(sentence.slice(0, t.start));
+  if (PROPERTY_WORD.test(purchase) && /\b(?:acquir\w*|purchas\w*|bought|closed? on|achet\w*|acquis\w*)\b/.test(purchase) && /\b(?:for|pour|at)\s*$/.test(b) && !NOT_THIS_COST.test(purchase.replace(/\bold\b/g, "")) && !DEPOSIT_RE.test(purchase)) {
+    const price = mapToken("land cost", t, { prose: true });
+    if (price.kind === "field") return price;
+  }
+  const own = withoutTaxBasis(clause(before, true)).replace(/^\s*(?:and|et|puis|then)\s+/i, "");
+  const named = mapToken(own, t, { prose: true, budgetConcept: true, after });
+  if (!/[()]/.test(before) && named.kind === "field" && LINE_FIELDS.has(named.fieldKey)) return named;
   const holds = HOLD_VERB.test(b);
   const label =
-    LAND_RE.test(`${b} # ${a}`) ? "land cost"
+    (LAND_RE.test(`${b} # ${a}`) || (/\b(?:pay|pays|paid|payer|paie\w*|close on)\b/.test(b) && /^(?:to (?:buy|acquire)|pour (?:acheter|acquerir))\b/.test(a) && /\b(?:site|lot|parcel|land|house|shell|warehouse|office|terrain|immeuble)\b/.test(a))) ? "land cost"
     : WHO_HARD.test(b) && VERB_HARD.test(b) && NOUN_HARD.test(b) && /\b(?:for|pour|at)(?: (?:a|un) (?:total|prix|montant)(?: of| de)?)?$/.test(b) ? "hard costs"
     : WHO_SOFT.test(b) && SERVICES_AFTER.test(a) ? "soft costs"
     : holds && CONTINGENCY_AFTER.test(a) ? "contingency"
