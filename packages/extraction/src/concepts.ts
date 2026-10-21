@@ -19,7 +19,7 @@ export const LOAN_PERIOD = /\b(?:repayment (?:schedule|years|horizon|after conve
 export const STATED_TOTAL = /\b(?:stated project subtotal|project subtotal|(?:stated total|total declare)(?=\s*$|\s+(?:project|cost|costs|of (?:the )?(?:project|uses|costs)|budget|du projet|des couts|des emplois)\b)|total uses|all-in uses|sum of uses|total des emplois|somme des emplois)\b/;
 // Card 116: project total words qualify the budget, never a loan, rent or equity total.
 export const PROJECT_TOTAL = /\b(?:(?:whole|entire|total|complete|all-in|global)\s+(?:(?:project|job|investment)\s+)?(?:budget|envelope|investment|project cost|job cost)|(?:project|job)\s+(?:whole|entire|total|complete|all-in|global)\s+(?:budget|envelope|cost)|uses\s+(?:at (?:close|closing)|closed|brought forward|carried forward|stated)|closing uses(?: total)?|enveloppe\s+(?:complete|globale|budgetaire)|cout global|total investissement)\b/;
-export const NOT_PROJECT_TOTAL = /\b(?:loans?|prets?|rents?|loyers?|equity|capitaux propres|fonds propres|mise de fonds|operating|exploitation)\b/;
+export const NOT_PROJECT_TOTAL = /\b(?:loans?|prets?|rents?|loyers?|equity|capitaux propres|fonds propres|mise de fonds|operating|exploitation|(?:per|par|a|an|each) (?:units?|doors?|suites?|homes?|portes?|logements?|unites?))\b/;
 export const PROPERTY_WORD = /\b(?:sites?|lots?|land|dirt|ground|parcels?|property|house|building|shell|immeuble|fonds|propriete|batisse|terrain)\b/;
 export const ACQUISITION_WORD = /\b(?:purchas\w*|acquisition|acquir\w*|buy|buying|bought|paid for|closing|consideration|allocation|cheque|price|basis|agreed|close on|closed on|under contract|achat|achet\w*|acquis\w*|prix|cloture)\b/;
 export const RISK_WORD = /\b(?:risk|surprises?|unknown\w*|unforeseen\w*|spare|just-in-case|unspent|uncommitted|extra work|imprevus|aleas)\b/;
@@ -49,7 +49,7 @@ export const OCCUPANCY_WORD = /\b(?:occupancy|occupied|filled|fill|let|letting|l
 export const SETTLED_WORD = /\b(?:stabili[sz]\w*|stab|settled|steady|mature|normal|long-run|long-term|target|planned|a maturite|de croisiere|a terme|retenue|regime(?: stable| etabli)?)\b/;
 export const GROWTH_WORD = /\b(?:annual change|year-over-year change|yearly change|variation annuelle|growth|uplift|steps?|drift|increase|escalation|grown(?: at)?|indexation|hausse|croissance)\b/;
 // Card 117 audit: "actual" or "réelle" beside a stabilization word is this building's stabilized state (card 105), not history.
-export const ASSUMPTION_HISTORY = /\b(?:actual(?! stabili)|historic(?:al)?|last year|prior year|seller s|previous owner|old owner|old building|comparables?|market|area|neighbou?rhood|peak|(?<!stabilisee )reel(?:le)?s?(?! stabili)|l an dernier|historique|marche)\b/;
+export const ASSUMPTION_HISTORY = /\b(?:actual(?! stabili)|historic(?:al)?|last year|prior year|seller s|previous owner|old owner|old building|comparables?|market|area|neighbou?r(?:hood|s|ing)?|next door|voisin\w*|peak|(?<!stabilisee )reel(?:le)?s?(?! stabili)|l an dernier|historique|marche)\b/;
 
 export const CONCEPTS: readonly {
   fieldKey: string;

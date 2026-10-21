@@ -1505,7 +1505,8 @@ function proseRentLine(text: string, result: ExtractionResult, heading: string |
     const known = wholeUnitType(suffix) ?? (/^(?:un|une|deux|trois|quatre|cinq|six|[1-6]) pi[eè]ces$/i.test(suffix) ? titled(suffix) : null);
     if (known) item = known;
     else if (leadCount && /\b(?:suites?|homes?|logements?)\b/i.test(suffix)) item = proseItem(suffix);
-    else if (leadCount && /\b(?:par mois|a month|per month)\b/i.test(text)) item = proseItem(suffix);
+    // A bare noun after a count ("trois grands") only continues a dwelling already named in this sentence.
+    else if (leadCount && heading && /\b(?:par mois|a month|per month)\b/i.test(text)) item = proseItem(suffix);
   }
   if (countLabel && !leadCount && !hasCount && !/\b(?:rooms? by type|planned|proposed|scheduled|finished|inventory|offer|prevus|planifies|louer|count|nombre|let)\b/.test(fold(prefix)) && !heading) return { read: false, item: heading };
   if (leadCount && (unitTypesIn(text).length > 0 || !tokens.some((t) => t.currency))) return { read: false, item: heading };
@@ -1587,7 +1588,8 @@ function structuredRollRow(row: Cell[], table: Table, result: ExtractionResult, 
   }
   if (!HOMES_SHEET_RE.test(fold(table.name)) || NON_ROLL_RE.test(fold(table.name)) || cells.length < 3) return false;
   const name = cells[0]!;
-  if (name.number !== undefined) return false;
+  // A suite, unit or lot number names one door or one lot, not a type with a count.
+  if (name.number !== undefined || /^(?:suite|unit|apt|apartment|door|lot|stall|#)\s*#?\s*\d/i.test(name.text.trim()) || NON_ROLL_RE.test(fold(name.text))) return false;
   const values = cells.slice(1).filter((c) => cellToken(c, result.format));
   const n = values[0] && cellToken(values[0], result.format);
   const r = values[1] && cellToken(values[1], result.format);
@@ -1598,7 +1600,7 @@ function structuredRollRow(row: Cell[], table: Table, result: ExtractionResult, 
 
 /** Two figures after a name; the rent may carry French thousands spaces. */
 function flatRollRow(text: string, ref: string): Cell[] | null {
-  const m = /^(.+?)\s+(\d{1,4})\s+(\$\s*\d[\d,]*(?:\.\d{2})?|\d{1,3}(?:[ \u00a0]\d{3})+(?:[,.]\d{2})?\s*\$|\d[\d,.]*\s*\$)(?:\s+(?:per|par|\/).*)?\s*$/i.exec(text);
+  const m = /^(.+?)\s+(\d{1,3})\s+(\$\s*\d[\d,]*(?:\.\d{2})?|\d{1,3}(?:[ \u00a0]\d{3})+(?:[,.]\d{2})?\s*\$|\d[\d,.]*\s*\$)(?:\s+(?:per|par|\/).*)?\s*$/i.exec(text);
   return m ? [m[1]!, m[2]!, m[3]!].map((text) => ({ text, ref })) : null;
 }
 

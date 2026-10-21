@@ -8341,7 +8341,7 @@ describe("card 122: assumption and loan leftovers", () => {
   });
   test.each([
     ["IO: 18 months, then 25-yr amortization", "senior_io_months=18 senior_amort_years=25"],
-    ["Repayment after conversion uses years 30;", "refinance_amort_years=30"],
+    ["Repayment after conversion uses years 30;", "senior_amort_years=30"],
     ["Conversion occurs at project month 20.", "refinance_month=20"],
     ["Dimensionnement engagé 70 %", "refinance_ltv_pct=70"],
     ["montant visé 2700000 $, soit 85 % de la valeur prêtable", "refinance_ltv_pct=85"],
@@ -8356,7 +8356,7 @@ describe("card 122: assumption and loan leftovers", () => {
     ["Ongoing annual DCR promise 1.25x and combined collateral cap 70%", "min_dscr_covenant=1.25"],
     ["25 years, Junior IO window: 18 months.", "mezz_io_months=18"],
     ["Senior IO: 12 months, then 28 years amortization.", "senior_io_months=12 senior_amort_years=28"],
-    ["Remboursement après conversion, ans : 32", "refinance_amort_years=32"],
+    ["Remboursement après conversion, ans : 32", "!refinance_amort_years"],
     ["S(Base):Dimensionnement engagé|0.73", "refinance_ltv_pct=73"],
     ["22% to the sponsor as promote.", "gp_promote_pct=22"],
     ["GP share after preferred return: 23%", "gp_promote_pct=23"],
@@ -8412,5 +8412,21 @@ describe("card 122: assumption and loan leftovers", () => {
 ])("8 exactly one field: %s", (input, expected) => {
     check(input!, expected!);
     if (!input!.startsWith("S")) check(input!, expected!, "docx");
+  });
+  // Card 122 audit: regressions found by probing the batch against each card's own base commit.
+  test.each([
+    ["S(Units):Suite 101|1|2000", "!unit_count,unit_rent_monthly"],
+    ["S(Homes):Lot 4|2|4500", "!unit_count,unit_rent_monthly"],
+    ["S(Homes):Unit 7|1|1900", "!unit_count,unit_rent_monthly"],
+    ["Studio 2026 $2,000", "!unit_count,unit_rent_monthly"],
+    ["S(Homes):Cottage flat|3|4000", "unit_count=3 unit_rent_monthly=4000"],
+    ["Closing uses per unit: $185,000", "!stated_total_cost"],
+    ["Coût global par logement : 185 000 $", "!stated_total_cost"],
+    ["S(Base):Uses|Closing uses|2226000", "stated_total_cost=2226000"],
+    ["The neighbour's expense share of EGI is 40%.", "!expense_ratio_pct"],
+    ["Next door, occupancy at maturity is 92%.", "!stabilized_occupancy_pct"],
+  ])("audit: %s", (input, expected) => check(input!, expected!));
+  test("audit: a counted non-home rent line gives no unit count", () => {
+    expect(read("Three trucks will rent at $500 a month.").candidates.map(c => c.fieldKey)).not.toContain("unit_count");
   });
 });
