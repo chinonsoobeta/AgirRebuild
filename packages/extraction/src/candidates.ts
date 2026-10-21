@@ -779,7 +779,7 @@ function readSentence(sentence: { text: string; start: number }, para0: Paragrap
       proseFrom = colon + 1;
       lead = labelTypes[0] ?? null;
       bareCount = true;
-    } else if ((first?.kind === "field" && first.concept && LOAN_NOUN.test(fold(text.slice(colon + 1, tokens[0]!.start)))) || tokens.every((t) => mapToken(label, t, opt(t)).kind === "unmapped")) proseFrom = colon + 1;
+    } else if ((first?.kind === "field" && first.concept && LOAN_NOUN.test(fold(text.slice(colon + 1, tokens[0]!.start)))) || (tokens.every((t) => mapToken(label, t, opt(t)).kind === "unmapped") || (!first && /^(?:distributions?|waterfall)$/i.test(label.trim())))) proseFrom = colon + 1;
     else {
       let used = false;
       let usedKey: string | null = null;
@@ -808,6 +808,9 @@ function readSentence(sentence: { text: string; start: number }, para0: Paragrap
         }
         // After the first figure, one whose own words just before it name a different field ("at an exit cap of 5.5%") is read by that field; one with no words of its own stays with the label.
         let own: Mapped | null = used && i > 0 ? mapToken(text.slice(tokens[i - 1]!.end, t.start).replace(/^[\s,;]*(?:and|et|puis)?\s*/i, ""), t, { scope, quote, budgetConcept: true, after: text.slice(t.end, tokens[i + 1]?.start ?? text.length), prose: true, context: text }) : null;
+        if (usedKey?.endsWith("_io_months") && i > 0 && own?.kind !== "field" && (t.unit === "months" || t.unit === "years")) {
+          own = loanTerm(text.slice(tokens[i - 1]!.end, t.start), text.slice(t.end, tokens[i + 1]?.start ?? text.length), t, scopeIn(label) ?? scope ?? "senior");
+        }
         if (used && i > 0 && t.unit === "%" && /^\s*\(?\s*$/.test(text.slice(tokens[i - 1]!.end, t.start)) && /^\s*loan[- ]to[- ]cost\)/i.test(text.slice(t.end))) own = mapToken("loan-to-cost", t, { after: text.slice(t.end) });
         // A part the colon's budget line includes ("Hard costs: $X, including contingency of $Y") is inside that line, not a line of its own.
         const inside: boolean = usedKey !== null && BUDGET_LINES.has(usedKey) && PART_OF_RE.test(fold(withoutTaxBasis(text.slice(colon + 1, t.start))));
@@ -930,7 +933,7 @@ function readSentence(sentence: { text: string; start: number }, para0: Paragrap
     }
     from = t.end;
     // "to build", "to lease (up)", "pour louer" and "de travaux" right after a duration belong to it alone (card 111: and are not the next figure's label).
-    const attached = mapped.kind === "field" && (t.unit === "months" || t.unit === "years") ? /^\s*(?:to build|to lease(?: up)?|pour louer|de (?:construction|travaux|chantier)|de (?:mise en )?location)\b/i.exec(text.slice(t.end)) : null;
+    const attached = mapped.kind === "field" && (t.unit === "months" || t.unit === "years") ? /^\s*(?:on site|from (?:the )?(?:foundations?|shovels?|excavation) to (?:the )?(?:occupancy(?: permit)?|completion|handover)|to build|to lease(?: up)?|pour louer|de (?:construction|travaux|chantier)|de (?:mise en )?location)\b/i.exec(text.slice(t.end)) : null;
     if (attached) from = t.end + attached[0].length;
     if (afterShare && mapped.kind !== "field") {
       other(t, "line:prose", SHARE_NOTE);
@@ -957,6 +960,7 @@ function readSentence(sentence: { text: string; start: number }, para0: Paragrap
       if (types.length === 1) mapped = { kind: "field", fieldKey: "unit_count", itemKey: types[0]!, value: t.value, unitSeen: "units" };
     }
     if (mapped.kind === "unmapped" || (mapped.kind === "ignored" && mapped.reason.startsWith("Looks like"))) mapped = clauseItem(text, t, lead) ?? mapped;
+    if (mapped.kind === "field" && mapped.fieldKey === "unit_count" && /\b(?:construction|building|travaux)\s+contracts?\b/.test(fold(text.slice(0, t.start)))) mapped = { kind: "ignored", reason: "A dwelling count describing a construction contract, not the rental programme" };
     mapped = withLineType(mapped, lineType, clauseOf(text, t));
     // A count whose clause names no unit type is the deal-wide count.
     if (bareCount && mapped.kind === "unmapped" && t.unit === "units" && t.value !== null) mapped = { kind: "field", fieldKey: "unit_count", itemKey: "All units", value: t.value, unitSeen: "units" };
@@ -1875,7 +1879,7 @@ function categoryCells(rows: Cell[][], format: DocumentFormat, sheet: string): M
   const found = rows.flatMap((r) => { const p = pair(r); return p ? [{ r, ...p }] : []; });
   // These categories are explicit even on a mixed input sheet with many unrelated row families.
   if (/^(?:budget|base|inputs?|uses|emplois)(?:\b|$)/i.test(sheet)) {
-    for (const f of found) if (costCategory(f.a.text)) out.set(f.r, f.a);
+    for (const f of found) if (costCategory(f.a.text) || /^(?:assumptions?|hypotheses)$/i.test(fold(f.a.text))) out.set(f.r, f.a);
   }
   const figures = rows.filter((r) => r.some((c) => cellToken(c, format))).length;
   if (!found.length || found.length < 0.6 * figures || (found.length < 3 && !found.every(f => costCategory(f.a.text)))) return out;
@@ -1895,10 +1899,10 @@ function rowContext(sheet: string, cat: string | undefined, row: Cell[], label: 
 }
 
 /** A row that is only a short text, no number: a section label ("SENIOR LOAN", "Unit mix", "Répartition des logements"). */
-function sectionLabel(row: Cell[]): string | null {
+function sectionLabel(row: Cell[], format: DocumentFormat): string | null {
   const filled = row.filter((c) => c.text || c.number !== undefined);
   const c = filled[0];
-  if (filled.length !== 1 || !c || c.number !== undefined || /\d/.test(c.text) || /[.!?]$/.test(c.text) || c.text.trim().split(/\s+/).length > 8) return null;
+  if (filled.length !== 1 || !c || c.number !== undefined || tokenize(c.text, format).length > 0 || /\d/.test(c.text) || /[.!?]$/.test(c.text) || c.text.trim().split(/\s+/).length > 8) return null;
   return c.text;
 }
 
@@ -1978,8 +1982,11 @@ type Section = { rows: Cell[][]; scope: Scope; loanScope: boolean; costSection?:
 function isSentenceCell(c: Cell, row: Cell[], format: DocumentFormat): boolean {
   if (c.number !== undefined || row.some((x) => x.number !== undefined)) return false;
   if (figureDashItems(c.text.trim(), format)) return true;
-  if (c.text.trim().split(/\s+/).length < 6) return false;
   const first = tokenize(c.text, format)[0];
+  if (c.text.trim().split(/\s+/).length < 6) {
+    if (!first || !["months", "years"].includes(first.unit ?? "") || filledCells(row).length !== 1) return false;
+    return mapToken(c.text.slice(0, first.start), first, { prose: true }).kind === "field";
+  }
   return !!first && c.text.slice(0, first.start).trim() !== "";
 }
 
@@ -2033,7 +2040,7 @@ function fromTable(table0: Table, result: ExtractionResult, notes: string[] = []
       cur = { rows: [], scope, loanScope, costSection, excluded, item };
       return;
     }
-    const label = sectionLabel(row);
+    const label = sectionLabel(row, result.format);
     if (label !== null) {
       close();
       const named = scopeIn(label);
@@ -2151,7 +2158,7 @@ function fromTable(table0: Table, result: ExtractionResult, notes: string[] = []
           const t = cellToken(cell, result.format);
           if (!t) continue;
           const base = { raw: t.raw, location: cell.ref, context: rowContext(table.name, cat, row, labelCell, cell), rule: "table:label-value" };
-          let mapped = mapToken(relative ? labelCell.text.replace(BLOCK_RELATIVE_RE, "") : labelCell.text, t, { scope, loanContext, budgetConcept: filledCells(row).length === 2 && !s.rows.some((r) => TOTAL_RE.test(labelOf(r, result.format)?.text ?? "")), ahead: cell.text.slice(0, t.start), after: cell.text.slice(t.end), quote: quoteDocs.has(result) });
+          let mapped = mapToken(relative ? labelCell.text.replace(BLOCK_RELATIVE_RE, "") : labelCell.text, t, { numberCell: cell.number !== undefined, budget: /\b(?:water and wastewater)\b/.test(fold(labelCell.text)) && /\b(?:budget|costs?|couts?|uses|emplois)\b/.test(fold(table.name)), scope, loanContext, budgetConcept: filledCells(row).length === 2 && !s.rows.some((r) => TOTAL_RE.test(labelOf(r, result.format)?.text ?? "")), ahead: cell.text.slice(0, t.start), after: cell.text.slice(t.end), quote: quoteDocs.has(result) });
           if (mapped.kind !== "field" && t.value !== null && (t.unit === "$" || t.currency) && closesUses(labelCell.text, read)) mapped = mapToken("total project cost", t, { scope: s.scope });
           if (block && mapped.kind === "field" && BLOCK_FIELDS.has(mapped.fieldKey) && !(mapped.itemKey && unitTypesIn(mapped.itemKey).length > 0)) mapped = { ...mapped, itemKey: block };
           if (relative && mapped.kind === "field" && mapped.fieldKey === "stabilized_occupancy_pct") mapped = { ...mapped, fieldKey: "item_occupancy_pct", itemKey: block! };

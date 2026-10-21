@@ -41,7 +41,7 @@ export type Scope = "senior" | "mezzanine" | "refinance";
 
 const SCOPE_WORDS: Record<Scope, RegExp> = {
   mezzanine: /\b(mezzanine|mezz|subordinate|subordonnee?s?|second(?=\s+(?:cash\b|principal\b|\$))|second loan|second mortgage|2nd mortgage|second charge|second[- ]ranking|second[- ]position|junior|subordinate loan|deuxieme pret|pret (?:de|du) deuxieme(?: rang)?|(?:taux|amort\w*|interet) (?:de la|du) deuxieme(?=\s*(?:$|[:;,]|pret|rang|hypotheque|charge))|(?:rate|amorti[sz]ation|interest) (?:of|on) the second(?=\s*(?:$|[:;,]|loan|mortgage|charge|lien))|deuxieme rang|deuxieme hypotheque|pret de second rang|second rang|(?:mic|mortgage investment corporation) (?:second|2nd)|private second|(?<=\b(?:mortgages?|loans?|charges?|lenders?|hypotheques?|prets?)\b.{0,80})(?:the\s+)?second(?=\s*(?:is\b|:|\$))|^\s*second\s*$|(?:the\s+)?second(?=\s+(?:amort\w*|int|interest|rate|coupon|io|lender|loan)\b)|preteur prive de second rang)\b/,
-  refinance: /\b(take-?out|take out|permanent|perm|refi|refinanc\w*|permanent loan|(?:dollars|cash|committed|amount|proceeds|montant) permanent|permanent (?=(?:dollars|cash|committed|amount|proceeds|montant)\b)|permanent financing|exit financing|long[- ]term mortgage|pret permanent|financement permanent|financement de sortie|permanent (?:mortgage|debt|facility|lender)|permanent (?=(?:io|interest|amorti[sz]\w*|repayment|rate|term)\b)|conversion (?:rate|coupon)|converts? to (?:(?:an?|the) )?(?:\$|\d|(?:[a-z-]+ ){0,2}(?:loan|mortgage|debt|financing|facility|rate))|term[- ]out|hypotheque permanente|pret a terme|reprise(?!\s+(?:des?\s+|du\s+|de la\s+)?(?:travaux|chantier|construction|possession|bail|baux|terrain))|replacement (?:loan|debt|financing|facility|mortgage|lender|interest|rate|amorti[sz]ation|amount)|(?:pret|financement) de remplacement)\b/,
+  refinance: /\b(take-?out|take out|permanent|perm|refi|refinanc\w*|permanent loan|(?:dollars|cash|committed|amount|proceeds|montant) permanent|permanent (?=(?:dollars|cash|committed|amount|proceeds|montant)\b)|permanent financing|exit financing|long[- ]term mortgage|pret permanent|financement permanent|financement de sortie|permanent (?:mortgage|debt|facility|lender)|permanent (?=(?:io|interest|amorti[sz]\w*|repayment|rate|term)\b)|conversion (?:rate|coupon)|repayment after conversion|remboursement apres conversion|converts? to (?:(?:an?|the) )?(?:\$|\d|(?:[a-z-]+ ){0,2}(?:loan|mortgage|debt|financing|facility|rate))|term[- ]out|hypotheque permanente|pret a terme|reprise(?!\s+(?:des?\s+|du\s+|de la\s+)?(?:travaux|chantier|construction|possession|bail|baux|terrain))|replacement (?:loan|debt|financing|facility|mortgage|lender|interest|rate|amorti[sz]ation|amount)|(?:pret|financement) de remplacement)\b/,
   senior: new RegExp(`${SENIOR_RANK.source}|\\b(?:construction (?:loan|facility)|premier rang|pret de construction)\\b`),
 };
 const TERM_SHEET_RE = /\b(term sheet|feuille de modalites)\b/;
@@ -75,7 +75,7 @@ const SCOPE_FIELD: Record<Exclude<Scope, "senior">, Record<string, string>> = {
   refinance: { min_dscr_covenant: "min_dscr_covenant", senior_loan_amount: "refinance_amount", senior_rate_pct: "refinance_rate_pct", senior_amort_years: "refinance_amort_years", senior_io_months: "refinance_io_months" },
 };
 // What a loan-to-value is taken of: "of the lender's valuation", "of appraised value", "de la valeur établie par le prêteur".
-export const LTV_BASIS = String.raw`(?:of|de|du)\s+(?:the\s+|la\s+|l['’\s]+)?(?:(?:lender|bank|preteur|banque)['’\s]+s?\s*)?(?:valuation|appraised value|appraisal|valeur\s+(?:etablie|determinee|fixee|evaluee)\s+par\s+(?:le\s+)?(?:preteur|banque)|valeur\s+d['’\s]+evaluation|valeur\s+evaluee)`;
+export const LTV_BASIS = String.raw`(?:of|de|du)\s+(?:the\s+|la\s+|l['’\s]+)?(?:(?:lender|bank|preteur|banque)['’\s]+s?\s*)?(?:valuation|appraised value|appraisal|valeur\s+(?:etablie|determinee|fixee|evaluee)\s+par\s+(?:le\s+)?(?:preteur|banque)|valeur pretable|valeur\s+d['’\s]+evaluation|valeur\s+evaluee)`;
 const LTV_BASIS_AFTER_RE = new RegExp(String.raw`^\s*${LTV_BASIS}(?![a-z0-9]|\s+(?:of|at|is|was|de|a)?\s*[$\d])`);
 const LTV_RE = /\b(loan to value|loan-to-value|ltv|ratio pret valeur|ratio pret-valeur|rpv)\b/;
 const BARE_AMOUNT_RE = /^(amount|facility amount|loan amount|principal|montant|montant du pret)$/;
@@ -84,7 +84,7 @@ const REPAY_RE = /\b(repa\w+|refinanc\w*|take-?out|rembours\w+)\b/;
 export const REPLACED_LOAN = String.raw`(?:(?:the|a|an|our|its|their|existing|current|le|la|l|notre|son|sa|leur|actuel\w*)['’\s]+)*(?:construction (?:loan|facility|financing|mortgage)|interim (?:loan|financing|facility)|bridge (?:loan|financing|facility)|pret (?:de construction|interimaire|relais)|financement (?:temporaire|interimaire|de construction))\b`;
 const REPLACE_LOAN_RE = new RegExp(String.raw`\b(?:replac\w*|remplac\w*)\s+${REPLACED_LOAN}`);
 // A take-out timing label ("Take-out month", "Refinance closing month", "Mois de la reprise"); not a term, amortization, IO, lock, maturity or period.
-const TAKEOUT_TIMING_RE = /\b(?:(?:target|targeted|planned|expected)\s+)?(?:take-?out|take out|refi|refinanc\w*|permanent loan)(?:\s+(?:closing|target|targeted|expected|planned|scheduled|anticipated|estimated|funding))?\s+(?:at\s+)?(?:month|mo|timing|date)$|\b(?:mois|moment|date)(?:\s+(?:prevue?|cible|visee))?\s+(?:de la |du |de |d )?(?:reprise|refinancement)(?!\s+(?:des?\s+|du\s+|de la\s+)?(?:travaux|chantier|construction|possession|bail|baux|terrain))\b/;
+const TAKEOUT_TIMING_RE = /\bconversion (?:occurs|happens|takes place|is scheduled) at (?:project )?month$|\b(?:(?:target|targeted|planned|expected)\s+)?(?:take-?out|take out|refi|refinanc\w*|permanent loan)(?:\s+(?:closing|target|targeted|expected|planned|scheduled|anticipated|estimated|funding))?\s+(?:at\s+)?(?:month|mo|timing|date)$|\b(?:mois|moment|date)(?:\s+(?:prevue?|cible|visee))?\s+(?:de la |du |de |d )?(?:reprise|refinancement)(?!\s+(?:des?\s+|du\s+|de la\s+)?(?:travaux|chantier|construction|possession|bail|baux|terrain))\b/;
 // A month counted from a later event ("24 months after completion") is not the project month; one counted from the project's or the loan's start is.
 const LATER_EVENT_RE = /^\s*(?:after|following|from|post|since|past|beyond|once|apres|suivant|a compter de|a partir de|des)\b/;
 const PROJECT_START_RE = /\b(?:construction start|start of construction|commencement of construction|first (?:advance|draw)|loan closing|financial close|closing|debut de la construction|debut des travaux|premier deboursement|premier debourse|cloture du financement)\b/;
@@ -135,6 +135,7 @@ const OPINION_NOTE = "An opinion of rent, not the deal's assumption";
 const AREA_WORD_RE = /\b(area|sf|sq ft|superficie|surface|gla|nrsf|rsf)\b/;
 // A lender's condition, or a figure true only today, is not the stabilized assumption.
 const LENDER_CONDITION = "A lender's condition, not the occupancy assumption";
+const withoutNegatedCondition = (text: string) => text.replace(/\b(?:not (?:a |an? )?|pas (?:une? |de )?)(?:(?:funding|lending|financing|de financement)\s+)?(?:conditions?|requirements?|exigences?)\b/g, " ");
 const CONDITION_RE = /\b(minimum|min|at least|before|prior to|until|consecutive months?|in order to|as a condition|conversion|first advance|funding|conditions?|covenants?|required|requires?|au moins|minimale?|avant|prealable\w*|deboursement|advances?|draws?|drawdowns?|disbursements?|holdbacks?|releas(?:es?|ed|ing)|funded|avances?|tirages?|debourse\w*|retenues? de garantie|versements?|libere\w*)\b/;
 // A leased or occupied share with a condition marker is the lender's condition, whatever field it names.
 const LEASED_RE = /\b(pre-?leas\w*|leased|occupied|pre-?lou\w*|loue\w*|occupe\w*|occupancy|occupation)\b/;
@@ -285,7 +286,7 @@ function lenderFigure(rawLabel: string, t: NumberToken, opts: MapOptions): strin
   if (!opts.budget && !variableEgi && !designFee && ((FEE_RE.test(without(plain, FEE_RE, t.unit === "%" ? NAMED_ALIASES : ALL_ALIASES)) && !listed) || FEE_AFTER_RE.test(tail))) return "A fee or premium, not an input";
   // A leased or occupied share (in its own label or right after it) with a condition marker in its clause is the lender's condition.
   const after = prose && at >= 0 ? (ctx.slice(at + raw.length).split(/[,;.]/)[0] ?? "") : "";
-  if (t.unit === "%" && (LEASED_RE.test(plain) || LEASED_RE.test(after.split(" ").slice(0, 6).join(" "))) && CONDITION_RE.test(`${plain} ${after}`)) return LENDER_CONDITION;
+  if (t.unit === "%" && (LEASED_RE.test(plain) || LEASED_RE.test(after.split(" ").slice(0, 6).join(" "))) && CONDITION_RE.test(withoutNegatedCondition(`${plain} ${after}`))) return LENDER_CONDITION;
   return null;
 }
 
@@ -295,7 +296,7 @@ function coverageCovenant(rawLabel: string, t: NumberToken, opts: MapOptions): M
   const words_ = (x: string) => foldText(x).replace(/[^a-z0-9\s-]/g, " ").replace(/\s+/g, " ").trim();
   // In prose the clause just before the number, in a label the label and the words between it and its figure; then the words right after the figure.
   const own = words_(`${opts.prose ? (rawLabel.split(/[,;(]|\band\b|\bet\b/).pop() ?? "") : rawLabel} ${opts.ahead ?? opts.gap ?? ""}`);
-  const next = words_((opts.after ?? "").split(/[,;.(]/)[0] ?? "").split(" ").slice(0, 4).join(" ");
+  const next = words_((opts.after ?? "").split(/[,;.(]|\b(?:and|et)\b/)[0] ?? "").split(" ").slice(0, 4).join(" ");
   if (!COVENANT_RATIO_RE.test(own) || !(COVENANT_NEED_RE.test(own) || COVENANT_AFTER_RE.test(next)) || NOT_COVENANT_RE.test(`${own} ${next}`)) return null;
   if ((scopeIn(normalizeLabel(rawLabel).label) ?? opts.scope ?? "senior") === "mezzanine") return null;
   return { kind: "field", fieldKey: "min_dscr_covenant", itemKey: null, value: t.value, unitSeen: t.unit === "x" ? "x" : "number" };
@@ -336,7 +337,7 @@ export function normalizeLabel(raw: string): { label: string; labelUnit: LabelUn
       labelCode = codeOf(inner.toUpperCase());
     } else if (/^(%|percent|pct)$/.test(inner)) labelUnit = "%";
     else if (/^(months?|mos?|mois)$/.test(inner)) labelUnit = "months";
-    else if (/^(years?|yrs?|ans?)$/.test(inner)) labelUnit = "years";
+    else if (/^(years?|yrs?|ans?|années?|annees?)$/.test(inner)) labelUnit = "years";
     else if (/^(sf|sq\.? ?ft|square feet|pi²|pi2|pi\.? ?ca\.?)$/.test(inner)) labelUnit = "sf";
     else if (/^(m²|m2|sq\.? ?m|sqm|square met(re|er)s)$/.test(inner)) labelUnit = "m2";
     else if (/^x$/.test(inner)) labelUnit = "x";
@@ -366,6 +367,9 @@ export function normalizeLabel(raw: string): { label: string; labelUnit: LabelUn
     const w = /(?:^|[\s,])(months?|mos?|mois|years?|yrs?|ans?|annees?)$/.exec(label)?.[1] ?? /^(months|mois|years)\s/.exec(label)?.[1];
     if (w) labelUnit = /^(m|mo)/.test(w) ? "months" : "years";
   }
+  // A named leasing window is a period in months, including labels without a repeated unit.
+  if (!labelUnit && /\b(?:(?:rent|lease)[- ]up (?:window|period|allowance)|delai (?:de )?(?:location|commercialisation)|time to (?:find|secure|attract) tenants|(?:time|period|window) (?:allowed|provided|budgeted) after (?:completion|handover|works)|fill(?:-up| period) after (?:keys|works|handover))\b/.test(label)) labelUnit = "months";
+  if (!labelUnit && /\bmonths?\b/.test(label) && /\b(?:lease|leasing|letting)\b/.test(label)) labelUnit = "months";
   if (!labelUnit && /\bamort\w*\b/.test(label) && /\byears?\b/.test(label)) labelUnit = "years";
   if (!labelUnit && /\b(?:io|interest-only|int-only|principal-free)\b/.test(label) && /\b(?:window|period|months?)\b/.test(label)) labelUnit = "months";
   return { label, labelUnit, labelCode };
@@ -477,6 +481,8 @@ function convert(def: FieldDef, t: NumberToken, label: string, labelUnit: LabelU
 export type MapOptions = {
   /** Prose: the alias nearest the number names it, and a bare number is never money. */
   prose?: boolean;
+  /** Numeric spreadsheet cell, whose fractional percentage is stored without a % sign. */
+  numberCell?: boolean;
   /** The loan the document or section is about; a label that names its own loan overrides it. Default senior. */
   scope?: Scope;
   /** A line has an explicit senior-loan heading, rather than a table's default senior scope. */
@@ -599,7 +605,7 @@ const LATER_TIER_RE = /\b(?:tier\s*(?:[2-9]|ii|iii|iv|two|three|four)|(?:2nd|3rd
 const VACANCY_RE = /\b(vacancy(?! rate)|(?<!taux de )vacance|inoccupation)\b/;
 // A duration labelled by the words right after it: "16 months to build", "huit mois pour louer"; not a loan's, fee's or incentive's months ("of construction interest", "de location gratuite").
 const NOT_PERIOD_AFTER = String.raw`(?!\s+(?:loans?|financing|facility|interest|insurance|warranty|commissions?|fees?|costs?|incentives?|free|reserves?|permits?|pret|financement|interets?|assurance|garantie|frais|couts?|gratuite?s?|permis))`;
-const BUILD_AFTER_RE = new RegExp(String.raw`^\s*(?:to build|of building|on site|de (?:construction|travaux|chantier))\b${NOT_PERIOD_AFTER}`);
+const BUILD_AFTER_RE = new RegExp(String.raw`^\s*(?:from (?:the )?(?:foundations?|shovels?|excavation) to (?:the )?(?:occupancy(?: permit)?|completion|handover)|to build|of building|on site|de (?:construction|travaux|chantier))\b${NOT_PERIOD_AFTER}`);
 // "to fill" only alone or before the building or its units ("7 months to fill the building"), never "to fill the staff positions".
 const LEASE_AFTER_RE = new RegExp(String.raw`^\s*(?:to (?:lease(?: up)?|let)|of (?:lease[- ]?up|leasing|letting)|pour louer|de (?:mise en )?location)\b${NOT_PERIOD_AFTER}|^\s*(?:to fill|pour remplir)(?:\s*$|\s+(?:the |les |l )?(?:units?|suites?|apartments?|building|project|logements|unites|appartements|immeuble|projet)\b)`);
 // A pace ("2 units per month", "3 ventes par mois") is never a count of units.
@@ -749,6 +755,16 @@ const INCLUDED_NOTE = "A part included in another line, not that line";
 const WRITER_FEE_RE = /\b(?:nos|notre|mes|mon|our|my) (?:professional )?(?:honoraires|fees?)\b/;
 
 export function mapToken(rawLabel: string, t: NumberToken, opts: MapOptions = {}): Mapped {
+  // A second colon supplies the figure's own label inside an introductory label/value line.
+  if (opts.gap?.includes(":") && !/\d/.test(opts.gap.slice(opts.gap.lastIndexOf(":") + 1))) {
+    const own = opts.gap.slice(0, opts.gap.lastIndexOf(":")).split(/[,;:]/).pop() ?? "";
+    const mapped = mapToken(own, t, { ...opts, gap: "", ahead: "" });
+    if (mapped.kind === "field" && mapped.itemKey === null) return mapped;
+  }
+  if (opts.numberCell && t.unit === null && t.value !== null && t.value > 0 && t.value < 1) {
+    const percent = mapToken(rawLabel, { ...t, unit: "%", value: t.value * 100 }, { ...opts, numberCell: false });
+    if (percent.kind === "field" && FIELD_BY_KEY.get(percent.fieldKey)?.unit === "%") return percent;
+  }
   // A sales tax line, or a rebate of one, is refused before any credit rule reads it; a cost that only states its tax basis is read.
   rawLabel = withoutTaxBasis(rawLabel).replace(/,\s*all-in\s*$/i, "");
   if ((t.unit === "bps" || t.unit === null) && /\b(?:buy-down|buydown|reduction|spread|ecart)\b/.test(foldText(`${rawLabel} ${opts.after ?? ""}`))) return { kind: "ignored", reason: "A rate adjustment, not the loan's rate" };
@@ -764,6 +780,9 @@ export function mapToken(rawLabel: string, t: NumberToken, opts: MapOptions = {}
     if (unitTypesIn(clause).length || /\b(sale|sell|sold|buyer|resale|vente|acheteur|revente)\b/.test(clause)) return { kind: "unmapped" };
   }
   const named = normalizeLabel(rawLabel).label;
+  if (t.unit === null && /^(?:\d{4}-\d{2}-\d{2}\b|\d{1,2}:\d{2}\b)/.test(t.raw + (opts.after ?? "")) || /\b(?:approval file|file (?:number|no))\b/.test(named)) return { kind: "ignored", reason: "A date, time or file reference, not an assumption" };
+  if (t.unit === "%" && /\b(?:lp|limited partners?|commanditaires?)\b/.test(named) && /\b(?:profits?|distributions?|hurdle)\b/.test(named)) return { kind: "ignored", reason: "A profit distribution split, not the LP equity share" };
+  if (t.unit === "%" && /\b(?:variable|management|gestion)\b/.test(named) && /^\s*(?:of|on|du|de) (?:equity|capital)\b/.test(foldText(opts.after ?? ""))) return { kind: "ignored", reason: "A share of equity, not an operating expense share" };
   if (t.unit === "%" && LATER_TIER_RE.test(foldText(opts.context ? opts.context.slice(0, t.start) : rawLabel)) && /\b(?:pref|preferred|hurdle|promote|promotion|carry|rendement)\b/.test(named)) return { kind: "ignored", reason: /\b(?:promote|carry|promotion)\b/.test(named) ? "A later promote tier; the field holds the first tier only" : "A later preferred-return tier; the field holds the first tier only" };
 
   const assumptionKeys = CONCEPTS.filter(c => c.assumption).map(c => c.fieldKey);
@@ -778,6 +797,16 @@ export function mapToken(rawLabel: string, t: NumberToken, opts: MapOptions = {}
   const joined = budgetLabel.split(/\b(?:and|et)\b/).map((part) => budgetConcepts(part));
   const assumptionParts = normalizeLabel(rawLabel.split(/[,;]/).pop() ?? "").label.split(/\b(?:and|et)\b/);
   if (!/\b(?:interest|interets?|loan|pret)\b/.test(named) && assumptionParts.length > 1 && assumptionParts.every(part => CONCEPTS.some(c => c.assumption && (c.unit === t.unit) && c.words.some(w => w.test(part)))) && new Set(assumptionParts.flatMap(part => CONCEPTS.filter(c => c.assumption && c.unit === t.unit && c.words.some(w => w.test(part))).map(c => c.fieldKey))).size > 1) return { kind: "unmapped" };
+  const localLabel = normalizeLabel(rawLabel.split(/[,;:]/).pop() ?? "").label;
+  const duration = t.unit ?? normalizeLabel(rawLabel).labelUnit;
+  if (!LOAN_PERIOD.test(localLabel) && !/\b(?:io|interest[- ]only|interest only|interets? seulement)\b/.test(localLabel) && (duration === "months" || duration === "years") && /\b(?:and|et)\b/.test(localLabel) && localLabel.split(/\b(?:and|et)\b/).every(part => part.trim())) {
+    const periodFields = CONCEPTS.filter(c => ["months", "years"].includes(c.unit) && c.words.some(w => w.test(localLabel)) && (c.with ?? []).every(w => w.test(localLabel)));
+    if (new Set(periodFields.map(c => c.fieldKey)).size > 1) return { kind: "ignored", reason: "More than one period field fits this figure" };
+  }
+  if (t.unit === "%" && /\b(?:and|et)\b/.test(localLabel)) {
+    const parts = localLabel.split(/\b(?:and|et)\b/).map(part => FIELDS.filter(d => d.extractable && !d.itemized && d.unit === "%" && d.aliases.some(a => hasPhrase(part, a))).map(d => d.key));
+    if (parts.every(keys => keys.length) && new Set(parts.flat()).size > 1) return { kind: "ignored", reason: "More than one percentage field fits this figure" };
+  }
   let m = mapSigned(rawLabel, t, opts);
   if (m.kind === "field" && m.fieldKey === "stated_ltc_pct" && /\b(?:limits?|maximum|plafond)\b/.test(named)) return { kind: "ignored", reason: "A lender's limit, not the deal's figure" };
   if (OCCUPANCY_WORD.test(named) && SETTLED_WORD.test(named) && m.kind === "field" && m.fieldKey === "item_occupancy_pct") {
@@ -869,7 +898,8 @@ function conceptField(rawLabel: string, t: NumberToken, opts: MapOptions, financ
   if (afterLabel && !(t.unit === "months" || t.unit === "years" || t.unit === "%" || t.currency)) return null;
   if (!afterLabel && opts.prose && opts.context && !foldText(withoutTaxBasis(opts.context.slice(0, t.start)).replace(/,\s*all-in\s*:?\s*$/i, "")).trimEnd().endsWith(foldText(rawLabel).trim())) return null;
   const lead = afterLabel ? (opts.lead ?? "").split(/[,;]/).pop() ?? "" : "";
-  const { label, labelUnit, labelCode } = normalizeLabel(opts.prose && !afterLabel ? rawLabel.split(/[,;]/).pop() ?? "" : rawLabel);
+  const periodLabel = /,\s*(?:months?|mois|years?|ans?|années?)\s*$/i.test(rawLabel);
+  const { label, labelUnit, labelCode } = normalizeLabel(opts.prose && !afterLabel && !periodLabel ? rawLabel.split(/[,;]/).pop() ?? "" : rawLabel);
   const unit = (t.unit === "$/mo" ? "$" : t.unit) ?? labelUnit ?? (!opts.prose && Math.abs(t.value) >= 1000 ? "$" : null);
   const budget = unit === "$" && !opts.quote && (opts.budget || opts.budgetConcept) && !/%/.test(opts.gap ?? opts.ahead ?? "");
   const meanings = budget ? budgetConcepts(label.split(COVER_LIST_RE)[0] ?? label) : [];
@@ -881,16 +911,16 @@ function conceptField(rawLabel: string, t: NumberToken, opts: MapOptions, financ
     && !(unit === "months" && MONTH_INDEX.test(label));
   // After the figure, the words before it in its clause still carry the guards.
   const folded = foldText(afterLabel ? `${lead} ${rawLabel}` : rawLabel);
-  const budgetLine = budget && (!NOT_A_BUDGET_LINE.test(folded.replace(/\b(?:signed total|total travaux)\b/g, "").replace(/\blevy\b/g, RESIDUAL_COST.test(label) ? "" : "levy")) || /\b(?:growth|development|croissance)\b/.test(label)) && !LOAN_NOUN.test(folded);
+  const budgetLine = budget && (!NOT_A_BUDGET_LINE.test(folded.replace(/\b(?:signed total|total travaux)\b/g, "").replace(/\blevy\b/g, RESIDUAL_COST.test(label) ? "" : "levy")) || /\b(?:growth|development|croissance|redevances (?:municipales )?d amenagement)\b/.test(label)) && !LOAN_NOUN.test(folded);
   const assumptionLabel = label;
-  const assumptionContext = normalizeLabel(afterLabel ? `${lead} ${rawLabel}` : rawLabel.split(/[,;]/).pop() ?? "").label;
+  const assumptionContext = withoutNegatedCondition(normalizeLabel(afterLabel ? `${lead} ${rawLabel}` : periodLabel ? rawLabel : rawLabel.split(/[,;]/).pop() ?? "").label);
   // The whole label and the words after the figure: an alternative, a loan's period or a month number is never the deal's assumption.
   const assumption = !NOT_THE_DEALS_ASSUMPTION.test(folded) && !ASSUMPTION_HISTORY.test(folded) && !LOAN_NOUN.test(folded) && !(unit === "years" && /\b(?:commercial lease|bail)\b/.test(normalizeLabel(`${opts.lead ?? ""} ${opts.context ?? rawLabel}`).label)) && !NOT_CHOSEN_AFTER.test(foldText(opts.after ?? "")) && !LEAVING_AFTER.test(foldText(opts.after ?? ""))
-    && !(unit === "months" && MONTH_INDEX.test(folded));
+    && !(unit === "months" && MONTH_INDEX.test(folded) && !periodLabel);
   const fits = CONCEPTS.filter((c) => (!financingOnly || (!c.budget && !c.assumption)) && (c.unit === unit || (c.unit === "months" && unit === "years")) && (c.assumption
     ? assumption && !opts.budget && c.words.some((w) => w.test(assumptionLabel)) && ((c.with ?? []).every((w) => w.test(assumptionLabel)) || !!c.basisAfter?.test(foldText(opts.after ?? ""))) && !c.exclude.test(assumptionContext)
     // Only an assumption or a rate in an established loan context is named after its figure: a loan noun ("$9,000,000 by the lender") or a budget word ("is the stated envelope") there does not name the figure.
-    : (!afterLabel || (c.fieldKey === "senior_rate_pct" && opts.loanContext)) && (c.budget ? budgetLine && meanings.includes(c) && (c.fieldKey !== "land_cost" || !opts.prose || ACQUISITION_WORD.test(label) || /\b(?:dirt|ground) (?:cost|deal|price|basis)\b/.test(label)) : (c.unscoped || loan) && !(c.fieldKey === "senior_rate_pct" && LTV_BASIS_AFTER_RE.test(foldText(opts.after ?? ""))) && c.words.some((w) => w.test(label)) && (c.with ?? []).every(w => w.test(label))) && !c.exclude.test(c.budget || afterLabel ? folded : label)));
+    : (!afterLabel || (c.fieldKey === "senior_rate_pct" && opts.loanContext)) && (c.budget ? budgetLine && (c.fieldKey !== "development_charges" || opts.budget || !/\bwater and wastewater\b/.test(label)) && meanings.includes(c) && (c.fieldKey !== "land_cost" || !opts.prose || ACQUISITION_WORD.test(label) || /\b(?:dirt|ground) (?:cost|deal|price|basis)\b/.test(label)) : (c.unscoped || loan) && !(c.fieldKey === "senior_rate_pct" && LTV_BASIS_AFTER_RE.test(foldText(opts.after ?? ""))) && c.words.some((w) => w.test(label)) && (c.with ?? []).every(w => w.test(label))) && !c.exclude.test(c.budget || afterLabel ? folded : label)));
   if (fits.length > 1 && fits.every(c => !c.budget && !c.assumption)) return { kind: "ignored", reason: "More than one financing field fits this figure" };
   if (fits.length !== 1) return null;
   const chosen = fits[0]!;
@@ -986,7 +1016,8 @@ function mapLabel(rawLabel: string, t: NumberToken, opts: MapOptions = {}): Mapp
   };
 
   if (BARE_AMOUNT_RE.test(label) && /\(\s*\d+(?:[.,]\d+)?\s*%\s+loan[- ]to[- ]cost\)/i.test((opts.context ?? "").slice(t.end) || opts.after || "")) return asField(scoped("senior_loan_amount")) ?? { kind: "unmapped" };
-  if (t.unit === "%" && /\b(?:gp|general partner|commandite)\b/.test(label) && /\b(?:above|after|apres|au-dessus)\b/.test(label) && !/\b(?:upside|carry|carried|promote|promoted|promotion|interessement)\b/.test(label)) return { kind: "unmapped" };
+  if (t.unit === "%" && /\bpromoted interest\b/.test(label) && /^\s*of (?:all |the )?(?:further |remaining )?distributions\b/.test(foldText(opts.after ?? ""))) return asField(FIELD_BY_KEY.get("gp_promote_pct")!) ?? { kind: "unmapped" };
+  if (t.unit === "%" && /\b(?:you re|we re|we are|actual|adopted|retained)\b/.test(label) && /\b(?:max(?:imum)? loan[- ]to[- ]cost|ltc limit)\b/.test(foldText(opts.context ?? ""))) return asField(FIELD_BY_KEY.get("stated_ltc_pct")!) ?? { kind: "unmapped" };
   const finance = t.value < 0 ? null : conceptField(rawLabel, t, opts, true);
   const conjuncts = normalizeLabel(rawLabel.split(/[,;/]/).pop() ?? "").label.split(/\b(?:and|et)\b/);
   if (finance?.kind === "field" && CONCEPTS.find(c => c.fieldKey === finance.fieldKey)?.unscoped && conjuncts.length > 1) {
@@ -998,7 +1029,7 @@ function mapLabel(rawLabel: string, t: NumberToken, opts: MapOptions = {}): Mapp
 
   // A percentage "of the lender's valuation" is a loan-to-value, the refinance loan's when that is the loan in scope; the valuation itself is not an input.
   if (t.unit === "%" && LTV_BASIS_AFTER_RE.test(foldText(opts.after ?? ""))) {
-    if (scope === "refinance") return asField(FIELD_BY_KEY.get("refinance_ltv_pct")!) ?? { kind: "unmapped" };
+    if (scope === "refinance" || /\bvaleur pretable\b/.test(foldText(opts.after ?? ""))) return asField(FIELD_BY_KEY.get("refinance_ltv_pct")!) ?? { kind: "unmapped" };
     return { kind: "ignored", reason: `A loan-to-value on the lender's valuation, but the ${scope === "mezzanine" ? "mezzanine" : "senior"} loan has no loan-to-value field; the figure is not an input` };
   }
   // "Interest" is the rate only as the whole label of a label/value line: "promoted interest of 20%" is not.
@@ -1160,7 +1191,7 @@ function mapLabel(rawLabel: string, t: NumberToken, opts: MapOptions = {}): Mapp
     const lead = foldText(rawLabel.split(/[,;]/).pop() ?? "").trim();
     const clauseText = prose && opts.context && lead ? (foldText(opts.context).split(/[,;]/).find((c) => c.includes(lead)) ?? where) : where;
     if (MARKET_RE.test(`${where} ${normalizeLabel((opts.after ?? "").split(/[,;.]/)[0] ?? "").label}`)) return { kind: "ignored", reason: MARKET_NOTE };
-    if (CONDITION_RE.test(normalizeLabel(clauseText).label)) return { kind: "ignored", reason: LENDER_CONDITION };
+    if (CONDITION_RE.test(withoutNegatedCondition(normalizeLabel(clauseText).label))) return { kind: "ignored", reason: LENDER_CONDITION };
     return CURRENT_RE.test(where) && !STABILIZED_RE.test(label) ? { kind: "ignored", reason: EARLY_OCCUPANCY_NOTE } : null;
   };
   // A unit type in parentheses ("End units (3 bed)") names the item.

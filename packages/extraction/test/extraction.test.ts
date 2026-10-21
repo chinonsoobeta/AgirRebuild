@@ -2133,7 +2133,8 @@ describe("a lender's limits, terms, fees and conditions are not inputs", () => {
     test("a condition marker elsewhere in the sentence does not set aside a figure that is not about occupancy", () => {
       const r = read("Conditions: 50% of the retail pre-leased before first advance; min DSCR 1.25x at conversion; max loan-to-cost 65% - you're at 65.0% so no room");
       expect(noteOf(r, 50)).toBe(CONDITION);
-      expect(r.other.filter((o) => o.value === 65).map((o) => o.note)).toEqual([LIMIT, "No field matches this label"]);
+      expect(r.other.filter((o) => o.value === 65).map((o) => o.note)).toEqual([LIMIT]);
+      expect(pick(r).filter(([k]) => k === "stated_ltc_pct")).toEqual([["stated_ltc_pct", 65]]);
       // negative: a deal's own loan-to-cost beside a condition is still read
       expect(pick(read("Stated LTC 65%; 50% of the retail pre-leased before first advance."))).toEqual([["stated_ltc_pct", 65]]);
       expect(pick(read("Stabilized occupancy is 96%, and funding requires 90% occupancy."))).toEqual([["stabilized_occupancy_pct", 96]]);
@@ -7737,7 +7738,11 @@ describe("card 118: financing, partners and figure-local leftovers", () => {
     "Bank coupon reflects a 30 bps buy-down.", "Le taux ferme inclut une réduction de 25 pb.",
     "GP promote (tier 2): 30%", "Tier 2 hurdle (LP IRR): 15%", "GP share above pref: 20%",
     "Preliminary senior indication: $2400000", "Indicative senior authorization: $2400000",
-  ])("adjustments, later tiers and unstated partner terms stay shown: %s", input => expect(read(input).candidates).toEqual([]));
+  ])("adjustments, later tiers and stated partner terms: %s", input => {
+    const r = read(input);
+    if (input === "GP share above pref: 20%") expect(r.candidates.map(c => [c.fieldKey, c.value])).toEqual([["gp_promote_pct", 20]]);
+    else expect(r.candidates).toEqual([]);
+  });
   test.each([
     ["a year and a third", 16], ["a year and two thirds", 20], ["two years", 24],
     ["un an et un tiers", 16], ["un an et deux tiers", 20], ["deux ans", 24],
@@ -8227,5 +8232,185 @@ describe("card 121: category budget layouts, dense prose and revisions", () => {
   test("category rows preserve the physical E and F value locations", () => {
     const r = read("S(Base):Uses|Acquired parcel|||650000 // S:Build|Construction contract||||910000 // S:Uses|Professional and permit allowance|||145000");
     expect(r.candidates.map(c => [c.fieldKey, c.value, c.location])).toEqual([["land_cost", 650000, "E1"], ["hard_cost", 910000, "F2"], ["soft_cost", 145000, "E3"]]);
+  });
+});
+
+
+describe("card 122: assumption and loan leftovers", () => {
+  const read = (input: string, kind: "pdf" | "docx" = "pdf") => {
+    const parts = input.split(" // ");
+    const sh = /^S(?:\(([^)]*)\))?:/;
+    if (sh.test(parts[0]!)) return extractCandidates({ kind: "xlsx", lines: [], tables: [{ name: parts[0]!.match(sh)![1] ?? "Base", rows: parts.map((p, r) => p.replace(sh, "").split("|").map((v, c): Cell => ({ text: v.trim(), ref: `${String.fromCharCode(65 + c)}${r + 1}`, ...(/^-?\d+(?:\.\d+)?$/.test(v.trim()) ? { number: Number(v) } : {}) }))) }], pageCount: 1, needsOcr: false, fullText: "" });
+    return extractCandidates({ kind, lines: parts.map((text, i) => ({ text, location: kind === "docx" ? `paragraph ${i + 1}` : `page 1, line ${i + 1}` })), tables: [], pageCount: 1, needsOcr: false, fullText: parts.join("\n") });
+  };
+  const check = (input: string, expected: string, kind: "pdf" | "docx" = "pdf") => {
+    const r = read(input, kind);
+    if (expected.startsWith("!")) expect(r.candidates.filter(c => expected.slice(1).split(",").includes(c.fieldKey!))).toEqual([]);
+    else expect(r.candidates.map(c => `${c.fieldKey}=${c.value}`).sort()).toEqual(expected === "-" ? [] : expected.split(" ").sort());
+    if (expected === "-" || expected.startsWith("!")) expect(r.other.length).toBeGreaterThan(0);
+  };
+  test.each([
+    ["Location initiale, mois 6", "lease_up_months=6"],
+    ["délai de location 6", "lease_up_months=6"],
+    ["rent-up window 9", "lease_up_months=9"],
+    ["S(Base):Rent-up allowance|8", "lease_up_months=8"],
+    ["S(Base):Time to secure tenants|5", "lease_up_months=5"],
+    ["Délai commercialisation (mois) : 7", "lease_up_months=7"],
+    ["LEASE window months 5", "lease_up_months=5"],
+    ["Horizon de détention (années) 5", "hold_years=5"],
+    ["franchise de capital, mois 18.", "senior_io_months=18"],
+    ["S(Base):Leasing period (months)|8", "lease_up_months=8"],
+    ["Horizon prévu (années) : 7", "hold_years=7"],
+    ["Senior amortization years: 24", "senior_amort_years=24"],
+    ["Take-out month: 28", "refinance_month=28"],
+    ["S(Inputs):Assumptions|Mois de travaux|15 months", "construction_months=15"],
+    ["Construction (mois) : 19", "construction_months=19"],
+    ["Junior IO months: 11", "mezz_io_months=11"],
+    ["Lease-up approval file 2026-08-27", "-"],
+    ["Hold file number: 45", "-"]
+])("1 label period units: %s", (input, expected) => {
+    check(input!, expected!);
+    if (!input!.startsWith("S")) check(input!, expected!, "docx");
+  });
+  test.each([
+    ["fill-up after keys: 6 months", "lease_up_months=6"],
+    ["time to find tenants: 7 months", "lease_up_months=7"],
+    ["Time allowed after completion: 8 months", "lease_up_months=8"],
+    ["allow months to reach the letting target 5.", "lease_up_months=5"],
+    ["Délai commercialisation: 6 mois.", "lease_up_months=6"],
+    ["Absorption locative 6 months", "lease_up_months=6"],
+    ["fill period after works: 5 months", "lease_up_months=5"],
+    ["budget four months to lease up", "lease_up_months=4"],
+    ["afterworks leasing allowance six months", "lease_up_months=6"],
+    ["Letting runway: 6 months", "lease_up_months=6"],
+    ["Mois de travaux 18 months", "construction_months=18"],
+    ["crew occupation months 21 months on site", "construction_months=21"],
+    ["fourteen months from shovels to occupancy permit", "construction_months=14"],
+    ["building stretch two quarters", "construction_months=6"],
+    ["Time provided after handover: 8 months", "lease_up_months=8"],
+    ["We budget time to complete: 17 months", "construction_months=17"],
+    ["Time to finish: 18 months", "construction_months=18"],
+    ["We allow five months to find tenants after handover.", "lease_up_months=5"],
+    ["Commercialisation initiale : huit mois.", "lease_up_months=8"],
+    ["S(Jotter):building stretch two quarters", "construction_months=6"],
+    ["S(Base):building duration three quarters", "construction_months=9"],
+    ["S(Base):Durée travaux six mois", "construction_months=6"],
+    ["S(Inputs):Assumptions|Absorption locative|4 months", "lease_up_months=4"],
+    ["I noted crew occupation months 20 months on site and fill period after works 5 months after works;", "construction_months=20 lease_up_months=5"],
+    ["Let us call it time the crew needs a year and a half to finish the works, then afterworks leasing allowance six months after the works.", "construction_months=18 lease_up_months=6"],
+    ["S(Base):Building duration|two quarters", "construction_months=6"],
+    ["The crew needs a year and a half to finish the works, then leasing allowance six months.", "construction_months=18 lease_up_months=6"],
+    ["Timing: sixteen months from shovels to occupancy permit, then budget five months to lease up.", "construction_months=16 lease_up_months=5"],
+    ["Construction warranty: 18 months", "-"],
+    ["Délai avant les travaux : six mois", "-"]
+])("2 period word classes: %s", (input, expected) => {
+    check(input!, expected!);
+    if (!input!.startsWith("S")) check(input!, expected!, "docx");
+  });
+  test.each([
+    ["taux stabilisé retenu 96%", "stabilized_occupancy_pct=96"],
+    ["Occupation à maturité 94%", "stabilized_occupancy_pct=94"],
+    ["settled occupancy of 95% (not a funding condition)", "stabilized_occupancy_pct=95"],
+    ["running costs against effective income of 32%", "expense_ratio_pct=32"],
+    ["Charge exploitation relative 35%", "expense_ratio_pct=35"],
+    ["Expnese share of EGI 34%", "expense_ratio_pct=34"],
+    ["Cap à la revente 5.25%", "exit_cap_rate_pct=5.25"],
+    ["S(Base):Occupation à maturité|0.95", "stabilized_occupancy_pct=95"],
+    ["S(Inputs):Assumptions|Occupation à maturité|0.95", "stabilized_occupancy_pct=95"],
+    ["S(Inputs):Assumptions|Charge exploitation relative|0.34", "expense_ratio_pct=34"],
+    ["S(Inputs):Assumptions|Cap à la revente|0.055", "exit_cap_rate_pct=5.5"],
+    ["95% settled occupancy is assumed.", "stabilized_occupancy_pct=95"],
+    ["S(Base):Expense share of EGI|0.31", "expense_ratio_pct=31"],
+    ["Cap de revente retenu : 5,4 %", "exit_cap_rate_pct=5.4"],
+    ["Settled occupancy minimum required for funding: 95%", "-"],
+    ["Occupation minimale avant le déboursé : 92 %", "-"]
+])("3 occupancy expense and exit: %s", (input, expected) => {
+    check(input!, expected!);
+    if (!input!.startsWith("S")) check(input!, expected!, "docx");
+  });
+  test.each([
+    ["annual management spend $96,000 in a settled year plus extra variable bite 3% of EGI", "fixed_opex_annual=96000 variable_expense_pct=3"],
+    ["Yearly management budget $87000 plus variable costs 4% of EGI.", "fixed_opex_annual=87000 variable_expense_pct=4"],
+    ["Gestion annuelle fixe : 82000 $, puis frais variables 2% du revenu brut effectif.", "fixed_opex_annual=82000 variable_expense_pct=2"],
+    ["S(Base):Annual management spend|91000 // S:Variable expense share of EGI|0.025", "fixed_opex_annual=91000 variable_expense_pct=2.5"],
+    ["Management fee: 3% of equity", "-"],
+    ["Gestion : 4% du capital", "-"]
+])("4 fixed and variable operating costs: %s", (input, expected) => {
+    check(input!, expected!);
+    if (!input!.startsWith("S")) check(input!, expected!, "docx");
+  });
+  test.each([
+    ["IO: 18 months, then 25-yr amortization", "senior_io_months=18 senior_amort_years=25"],
+    ["Repayment after conversion uses years 30;", "refinance_amort_years=30"],
+    ["Conversion occurs at project month 20.", "refinance_month=20"],
+    ["Dimensionnement engagé 70 %", "refinance_ltv_pct=70"],
+    ["montant visé 2700000 $, soit 85 % de la valeur prêtable", "refinance_ltv_pct=85"],
+    ["RATIO PRÊT/COÛT : 59,9 %", "stated_ltc_pct=59.9"],
+    ["max loan-to-cost 65% - you're at 65.0%", "stated_ltc_pct=65"],
+    ["GP share above pref 20%.", "gp_promote_pct=20"],
+    ["The General Partner is entitled to a promoted interest of 20% of all further distributions.", "gp_promote_pct=20"],
+    ["then 75% to partners pro rata and 25% to the GP as promote", "gp_promote_pct=25"],
+    ["Equity terms: LP equity portion: 90%, Preferred distribution: 8% yearly;", "lp_share_pct=90 preferred_return_pct=8"],
+    ["Distributions: first to return capital pro rata, then the preferred return, then 75% to partners pro rata and 25% to the GP as promote.", "gp_promote_pct=25"],
+    ["LP equity portion: 90%, Preferred distribution: 8% yearly", "lp_share_pct=90 preferred_return_pct=8"],
+    ["Ongoing annual DCR promise 1.25x and combined collateral cap 70%", "min_dscr_covenant=1.25"],
+    ["25 years, Junior IO window: 18 months.", "mezz_io_months=18"],
+    ["Senior IO: 12 months, then 28 years amortization.", "senior_io_months=12 senior_amort_years=28"],
+    ["Remboursement après conversion, ans : 32", "refinance_amort_years=32"],
+    ["S(Base):Dimensionnement engagé|0.73", "refinance_ltv_pct=73"],
+    ["22% to the sponsor as promote.", "gp_promote_pct=22"],
+    ["GP share after preferred return: 23%", "gp_promote_pct=23"],
+    ["LP share of profits after the hurdle: 70%", "-"],
+    ["max loan-to-cost 65%", "-"],
+    ["Interest on deposit: 4%", "-"]
+])("5 loans and partners: %s", (input, expected) => {
+    check(input!, expected!);
+    if (!input!.startsWith("S")) check(input!, expected!, "docx");
+  });
+  test.each([
+    ["S(Budget):Municipal capital cost, water and wastewater charges|128500", "development_charges=128500"],
+    ["S(Budget):Municipal capital cost charges|120000", "development_charges=120000"],
+    ["S(Budget):DCCs|110000", "development_charges=110000"],
+    ["S(Budget):Development cost charges|100000", "development_charges=100000"],
+    ["S(Budget):Redevances d’aménagement|90000", "development_charges=90000"],
+    ["S(Budget):Water and wastewater charges|98000", "development_charges=98000"],
+    ["S(Budget):Redevances municipales d’aménagement|99000", "development_charges=99000"],
+    ["S(Budget):DCCs already included in construction|98000", "-"],
+    ["S(Budget):Development cost charges waived|98000", "-"]
+])("6 development budget charges: %s", (input, expected) => {
+    check(input!, expected!);
+    if (!input!.startsWith("S")) check(input!, expected!, "docx");
+  });
+  test.each([
+    ["Loan amount: $ 1 2 0 , 0 0 0 LTC: 6 5 %", "!stated_ltc_pct"],
+    ["Objet : TR : Aboiteaux - mixte 12 logements + 2 locaux - demande de prêt permanent", "unit_count=2"],
+    ["Date: Tue, 14 Jul 2026 21:47", "-"],
+    ["Sent: Monday, July 13, 2026 4:12 PM", "-"],
+    ["Éloïse <eloise@example.test> le 2026-08-27", "-"],
+    ["Approval file ML-79031, committee 2026-09-03.", "-"],
+    ["Construction contract, 6 row homes", "-"],
+    ["Purpose: construction and term financing of 10 rental townhouses", "-"],
+    ["S(Table 1):Logements créés par format|6", "-"],
+    ["S(Base):Lease-up months|2026-08-27", "-"],
+    ["S(Base):Settled occupancy|14:05", "-"],
+    ["Doors total: 12", "-"],
+    ["Construction: 8 x 3-bed", "-"],
+    ["Sent: Thursday, 22 October 2026 09:35", "-"],
+    ["Le 2026-09-28, dossier 7291", "-"],
+    ["S(Base):Amortization years|2026-10-22", "-"]
+])("7 dates identifiers and counts: %s", (input, expected) => {
+    check(input!, expected!);
+    if (!input!.startsWith("S")) check(input!, expected!, "docx");
+  });
+  test.each([
+    ["Construction and lease-up: 18 months", "-"],
+    ["S(Base):Build and leasing months|16", "-"],
+    ["S(Base):Construction et location (mois)|14", "-"],
+    ["Construction: 17 months; lease-up: 4 months", "construction_months=17 lease_up_months=4"],
+    ["S(Base):Hold and amortization years|20", "-"],
+    ["S(Base):LP share and preferred return|0.08", "-"]
+])("8 exactly one field: %s", (input, expected) => {
+    check(input!, expected!);
+    if (!input!.startsWith("S")) check(input!, expected!, "docx");
   });
 });

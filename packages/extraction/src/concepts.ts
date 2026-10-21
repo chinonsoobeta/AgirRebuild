@@ -13,7 +13,7 @@ export const NOT_THE_LOAN_AFTER = /^\W*(?:(?:which|that|but)\s+(?:was|is)\s+)?(?
 // Card 115: v5/v8/v9/v10 loan labels informed rank and plain loan vocabulary.
 // First phase/draw/year/floor and a partner's priority are not loan ranks.
 export const SENIOR_RANK = /\b(?:sr|senior|first[- ](?:charge|ranking)|first (?=(?:money|principal|amort\w*|io|interest|rate|coupon|charge|lender|loan|mortgage)\b)|the first is|(?:dette|pret|interet|taux|amort\w*)\s+prioritaire|prioritaire\s+(?:dette|pret|interet|taux|amort\w*))\b/;
-export const LOAN_PERIOD = /\b(?:repayment (?:schedule|years|horizon)|years to repay (?:the )?principal|months free of principal|principal-free|int-only|free-principal|no-principal|principal holiday|franchise de capital|interets? seuls|periode sans capital)\b/;
+export const LOAN_PERIOD = /\b(?:repayment (?:schedule|years|horizon|after conversion)|years to repay (?:the )?principal|months free of principal|principal-free|int-only|free-principal|no-principal|principal holiday|franchise de capital|interets? seuls|periode sans capital)\b/;
 // v6/v8/v9/v10 totals: a named cost subtotal still belongs to that cost.
 // Card 115 audit: "stated total" and "total déclaré" alone, or of the project or its costs; "Stated total rent" is not the project's.
 export const STATED_TOTAL = /\b(?:stated project subtotal|project subtotal|(?:stated total|total declare)(?=\s*$|\s+(?:project|cost|costs|of (?:the )?(?:project|uses|costs)|budget|du projet|des couts|des emplois)\b)|total uses|all-in uses|sum of uses|total des emplois|somme des emplois)\b/;
@@ -87,8 +87,8 @@ export const CONCEPTS: readonly {
     exclude: /\b(?:preliminary|uncommitted|alternative|fees?|equity)\b/ },
   // Card 118: a take-out's own sizing/timing and partner terms do not require a senior-loan noun.
   { fieldKey: "refinance_ltv_pct", unit: "%", unscoped: true,
-    words: [/\b(?:leverage|ltv|valuation share|sizing|quotite)\b/],
-    with: [/\b(?:take-?out|permanent|perm|refi|refinanc\w*)\b/], exclude: /\b(?:maximum|limit|optional|alternative)\b/ },
+    words: [/\b(?:leverage|ltv|valuation share|sizing|quotite|dimensionnement)\b/],
+    with: [/\b(?:take-?out|permanent|perm|refi|refinanc\w*|engage)\b/], exclude: /\b(?:maximum|limit|optional|alternative)\b/ },
   { fieldKey: "lp_share_pct", unit: "%", unscoped: true,
     words: [/\b(?:lp|limited partners?|commanditaires?|investor class)\b/],
     with: [/\b(?:slice|share|portion|proportion|quote-part|part)\b/], exclude: /\b(?:pref|preferred|priority|hurdle|rendement|distributions?|profits?|ownership|neighbour\w*)\b/ },
@@ -97,15 +97,15 @@ export const CONCEPTS: readonly {
     exclude: /\b(?:shares?|dividends?|stock|actions privilegiees|gp|general partner|commandite|tier [2-9]|lp irr|lenders?|preteurs?|banks?|banques?|prime de performance|upside|carry|carried interest|promote|promoted|promotion|interessement|equity|ownership)\b/ },
   { fieldKey: "gp_promote_pct", unit: "%", unscoped: true,
     words: [/\b(?:gp|general partner|sponsor|commandite)\b/],
-    with: [/\b(?:upside|carry|carried interest|promote|promoted share|promotion|interessement)\b/], exclude: /\b(?:ownership|tier [2-9]|second tier|palier [2-9])\b/ },
+    with: [/\b(?:upside|carry|carried interest|promote|promoted (?:share|interest)|promotion|interessement|share (?:above|after) (?:pref|preferred return))\b/], exclude: /\b(?:ownership|tier [2-9]|second tier|palier [2-9])\b/ },
   { fieldKey: "equity_amount", unit: "$", unscoped: true,
     words: [/\b(?:owners?|sponsors?)\b/], with: [/\bcash\b/, /\b(?:in|wired|contributed)\b/], exclude: /\b(?:returned|proceeds|remaining|refinance|take-out)\b/ },
   { fieldKey: "stated_interest_reserve", unit: "$", unscoped: true,
     words: [/\binterest\b/], with: [/\b(?:holdback|reserve)\b/], exclude: /\b(?:earned|earnings?|income|loans?|leasing|lease-up|combined|optional)\b/ },
   { fieldKey: "stated_ltc_pct", unit: "%", unscoped: true,
-    words: [/\b(?:loan[- ]to[- ]cost|ltc|ratio pret-cout)\b/], exclude: /\b(?:maximum|limits?|lender s|plafond)\b/ },
+    words: [/\b(?:loan[- ]to[- ]cost|ltc|ratio pret[- /]cout)\b/], exclude: /\b(?:maximum|limits?|lender s|plafond)\b/ },
   { fieldKey: "development_charges", unit: "$", budget: true,
-    words: [/\b(?:growth|development|croissance)\b/], with: [/\b(?:levies|fees|redevances)\b/], exclude: /\b(?:included|inclus|deja)\b/ },
+    words: [/\b(?:growth|development|croissance|municipal capital cost|water and wastewater|dccs?|redevances (?:municipales )?d amenagement)\b/], with: [/\b(?:levies|fees|redevances|charges|dccs?)\b/], exclude: /\b(?:included|inclus|deja)\b/ },
   // Card 109: v8/v9 labels informed the build/travaux, acquisition, design and contingency vocabulary.
   // Vague paraphrases in those sets are not concept words. Tax, finance and operating items remain excluded.
   {
@@ -138,18 +138,18 @@ export const CONCEPTS: readonly {
   {
     fieldKey: "construction_months", unit: "months", assumption: true,
     // Card 111 (v4, v5): a span from the foundations to occupancy is the build.
-    words: [/\b(?:build|construction|works|work period|trades|installation|fit-up|site|crew|delivery|program(?:me)?|conversion|renovation|fit-out|chantier|travaux|transformation)\b/, /\bfrom (?:the )?(?:foundations?|shovels?(?: in the ground)?|ground-?breaking|excavation|mobili[sz]ation) to (?:the )?(?:occupancy|completion|handover|delivery|substantial completion)\b|\b(?:de|des|du) (?:la |les )?(?:fondations?|excavation|mobilisation|debut des travaux) (?:a|au|jusqu a) (?:la |l )?(?:occupation|livraison|fin des travaux)\b/],
-    exclude: /\b(?:loans?|interest|reserves?|terms?|lock|permits?|approval|wait|holdbacks?|warranty|lease|let|tenants?|prets?|interets?|permis|attente|garantie|retenue|insurance|assurance|starts?|debut|avant|commencement|fixed through|post-completion|construction month|fill|tenanting|remplissage|reviews?|examen|revue|(?:re-?)?zoning|zonage|draws?|tirages?|take-?out|relais|deadline|echeance)\b/,
+    words: [/\b(?:build|building (?:stretch|duration)|(?:time|period|duration) to (?:finish|complete)|construction|works|work period|trades|installation|fit-up|site|crew|delivery|program(?:me)?|conversion|renovation|fit-out|chantier|travaux|transformation)\b/, /\bfrom (?:the )?(?:foundations?|shovels?(?: in the ground)?|ground-?breaking|excavation|mobili[sz]ation) to (?:the )?(?:occupancy|completion|handover|delivery|substantial completion)\b|\b(?:de|des|du) (?:la |les )?(?:fondations?|excavation|mobilisation|debut des travaux) (?:a|au|jusqu a) (?:la |l )?(?:occupation|livraison|fin des travaux)\b/],
+    exclude: /\b(?:loans?|interest|reserves?|terms?|lock|(?<!occupancy )permits?|approval|wait|holdbacks?|warranty|lease|let(?! us\b)|tenants?|prets?|interets?|permis|attente|garantie|retenue|insurance|assurance|starts?|debut|avant|commencement|fixed through|post-completion|construction month|fill|tenanting|remplissage|reviews?|examen|revue|(?:re-?)?zoning|zonage|draws?|tirages?|take-?out|relais|deadline|echeance)\b/,
   },
   {
     fieldKey: "lease_up_months", unit: "months", assumption: true,
     // Card 111 (v4): "pour remplir les logements"; "locataires" is the French for tenants.
-    words: [/\b(?:lease-up|leasing|letting|tenanting|let-up|fill|tenants?|tenant-finding|absorption|rent-up|mise en location|location|remplir|remplissage|to lease|to let|locataires?)\b/],
+    words: [/\b(?:lease[- ]up|lease window|leasing|letting|tenanting|let-up|fill(?:-up)?|(?:time|period|window) (?:allowed|provided|budgeted) after (?:completion|handover|works)|commercialisation|tenants?|tenant-finding|absorption|rent-up|mise en location|location|remplir|remplissage|to lease|to let|locataires?)\b/],
     exclude: /\b(?:loans?|terms?|permits?|permis|lock|free rent|rent-free|notice|lease term|reserves?|commissions?|interest|interets?|reserve|bail|prets?|loyer gratuit|franchise de loyer|preavis|location du terrain|free|incentives?|gratuite?s?|incitati\w*)\b/,
   },
   {
     fieldKey: "stabilized_occupancy_pct", unit: "%", assumption: true,
-    words: [OCCUPANCY_WORD],
+    words: [OCCUPANCY_WORD, /\btaux stabilise\b/],
     with: [SETTLED_WORD],
     exclude: /\b(?:covenant|lender|condition|market|area|comparable|current|today|existing|in[- ]place|breakeven|vacancy|actuel\w*|marche|preteur|clause|seuil de rentabilite)\b/,
   },
@@ -161,10 +161,10 @@ export const CONCEPTS: readonly {
   },
   {
     fieldKey: "expense_ratio_pct", unit: "%", assumption: true,
-    words: [/\b(?:operating|opex|running|maintenance|upkeep|frais courants|run (?:the |a |this )?building|expenses?|costs?|charges|exploitation|depenses)\b/],
-    with: [/\b(?:share|fraction|ratio|percentage|proportion|take|slice|load|deduction|allowance|pourcentage|part|(?:against|of|rapportees? aux|rapportes? aux|sur (?:les )?) (?:egi|effective income|income|receipts|revenue|collections|recettes|revenus))\b/],
+    words: [/\b(?:operating|opex|running|maintenance|upkeep|expnese|frais courants|run (?:the |a |this )?building|expenses?|costs?|charges|exploitation|depenses)\b/],
+    with: [/\b(?:share|fraction|ratio|relative|percentage|proportion|take|slice|load|deduction|allowance|pourcentage|part|(?:against|of|rapportees? aux|rapportes? aux|sur (?:les )?) (?:egi|effective income|income|receipts|revenue|collections|recettes|revenus))\b/],
     basisAfter: /^\s*(?:of (?:the )?(?:egi|income|collections|revenue|receipts)|(?:des?|du|sur les) (?:recettes|revenus))\b/,
-    exclude: /\b(?:management fee|vacancy|tax|insurance|annual change|year-over-year change|yearly change|variation annuelle|growth|increase|escalation|inflation|frais de gestion|assurance|taxes?|croissance|hausse|vacance|recurring|sell\w*|sale|exit|brokerage|commissions?|disposition|vente|courtage)\b/,
+    exclude: /\b(?:variables?|management fee|vacancy|tax|insurance|annual change|year-over-year change|yearly change|variation annuelle|growth|increase|escalation|inflation|frais de gestion|assurance|taxes?|croissance|hausse|vacance|recurring|sell\w*|sale|exit|brokerage|commissions?|disposition|vente|courtage)\b/,
   },
   {
     fieldKey: "hold_years", unit: "years", assumption: true,
@@ -185,8 +185,15 @@ export const CONCEPTS: readonly {
     exclude: /\b(?:rents?|loyers?|market|comparable|construction|hard|build|marche)\b/,
   },
   {
+    fieldKey: "variable_expense_pct", unit: "%", assumption: true,
+    words: [/\b(?:variables?|frais variables)\b/],
+    with: [/\b(?:egi|effective (?:gross )?income|revenu brut effectif)\b/],
+    basisAfter: /^\s*(?:of (?:the )?(?:egi|effective (?:gross )?income)|du revenu brut effectif)\b/,
+    exclude: /\b(?:equity|capital|loan|pret)\b/,
+  },
+  {
     fieldKey: "fixed_opex_annual", unit: "$", assumption: true,
-    words: [/\b(?:overhead|operating|opex|running bill|operating pot|charges|exploitation|frais d exploitation)\b/],
+    words: [/\b(?:overhead|operating|opex|(?:management|gestion) (?:spend|budget|annuelle fixe)|running bill|operating pot|charges|exploitation|frais d exploitation)\b/],
     with: [/\b(?:fixed|annual|yearly|per year|fixes?|annuels?|annuelles?|par an)\b/],
     exclude: /\b(?:tax(?:es)?|insurance|management fee|fees?|reserve|debt|impot|assurance|frais de gestion|dette)\b/,
   },
