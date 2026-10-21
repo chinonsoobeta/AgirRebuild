@@ -221,9 +221,15 @@ under "Not found in the documents", not "Choices only you make". A deal read bef
 `development_charges` and no `other_cost` at its next reconcile, so the "source removed" rule applies to the old
 other-cost row and the new value waits for review.
 
-The other three stay unread (`extractable: false`) and appear under "Choices only you make". Property tax beside an
-operating-expense total would be counted twice the other way; a GST/HST figure "net of rebates" is not a line
-documents state reliably; and the premium is a lender's term chosen with the refinance, not a budget line.
+**Reading and verification (card 125).** GST/HST net and yearly property tax are also read from documents
+(`extractable: true`) and appear under "Not found in the documents" when absent. Every document-sourced value
+carries a verification note and requires individual review, outside "Approve all". GST/HST is read only as a tax
+balance net of rebates; the person must check the rebates this project qualifies for. Property tax is added to fixed
+operating costs or the expense ratio, so the person must check it is not already included there. Explicitly included
+amounts and property-tax parts of a stated operating-cost table total stay shown. A monthly property-tax amount
+is multiplied by twelve. A value typed by the person carries no verification note. The refinance premium stays
+unread (`extractable: false`) under "Choices only you make": it is a lender's term chosen with the refinance,
+not a budget line.
 
 **The fields.** All are optional, 0 or more, and in dollars unless stated. Each is set on the engine input only
 when it has a value; an absent field is omitted, never `0` and never `undefined`, so a deal that states none of

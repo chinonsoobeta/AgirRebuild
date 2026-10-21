@@ -342,3 +342,9 @@ export const FR_ABSENT: Record<string, string> = {
   stated_ltc_pct: "rien à vérifier",
   stated_interest_reserve: "rien à vérifier",
 };
+
+/** Checks beside document-sourced field values in review (card 125). */
+export const FR_VERIFY: Record<string, string> = {
+  gst_hst_net: "À vérifier : la TPS/TVH nette dépend des remboursements auxquels ce projet a droit.",
+  property_tax_annual: "Vérifiez qu'elle n'est pas déjà comprise dans vos charges d'exploitation ou votre ratio des charges.",
+};

@@ -2,7 +2,7 @@ import { GROWTH_WORD, CONCEPTS, BANK_LENDER, LOAN_NOUN, CLOSING_TOTAL, STATED_TO
 import { FIELD_BY_KEY, OUTPUT_LIKE_PHRASES } from "@agir/contracts";
 import { detectFormat, normalizeText, SF_PER_M2, tokenize, unitTypesIn, wholeUnitType, type CurrencyCode, type DocumentFormat, type NumberToken } from "@agir/numbers";
 import type { Cell, NormalizedDocument, Table } from "./document.ts";
-import { BASIS_AFTER_RE, CREDIT_NOTE, REPLACED_LOAN, DEPOSIT_NOTE, DEPOSIT_RE, LTV_BASIS, canonicalItem, costSentence, currencyOf, flagRead, flagSentence, hasPhrase, isOperatingTarget, isExitCapLabel, isTakeoutTimingLabel, isPlainRentLabel, loanNameOnly, loanTerm, mapToken, normalizeLabel, withoutTaxBasis, OLD_SHEET_RE, rankScope, SCENARIO_SHEET_NOTE, SCENARIO_SHEET_RE, SUPERSEDED_LABEL_NOTE, scopeIn, scopesIn, withCurrency, type MapOptions, type Mapped, type Scope } from "./mapping.ts";
+import { PROPERTY_TAX_WORD, BASIS_AFTER_RE, CREDIT_NOTE, REPLACED_LOAN, DEPOSIT_NOTE, DEPOSIT_RE, LTV_BASIS, canonicalItem, costSentence, currencyOf, flagRead, flagSentence, hasPhrase, isOperatingTarget, isExitCapLabel, isTakeoutTimingLabel, isPlainRentLabel, loanNameOnly, loanTerm, mapToken, normalizeLabel, withoutTaxBasis, OLD_SHEET_RE, rankScope, SCENARIO_SHEET_NOTE, SCENARIO_SHEET_RE, SUPERSEDED_LABEL_NOTE, scopeIn, scopesIn, withCurrency, type MapOptions, type Mapped, type Scope } from "./mapping.ts";
 
 /** One value found in one document, with where it came from and why it was (or was not) mapped. */
 export type Candidate = {
@@ -2108,7 +2108,44 @@ function isSentenceCell(c: Cell, row: Cell[], format: DocumentFormat): boolean {
   return !!first && c.text.slice(0, first.start).trim() !== "";
 }
 
-function fromTable(table0: Table, result: ExtractionResult, notes: string[] = [], scope0?: Scope) {
+/** A period header applies to the property-tax amount column; a later operating total owns its parts. */
+function fromTable(table: Table, result: ExtractionResult, notes: string[] = [], scope?: Scope) {
+  const periods = new Map<number, string>();
+  const rows = table.rows.map(row => {
+    if (row.every(c => !cellToken(c, result.format))) {
+      row.forEach((c, col) => {
+        const words = fold(c.text);
+        if (/\b(?:annual(?:ly)?|yearly|annuel(?:le)?s?|monthly|mensuel(?:le)?s?)\b/.test(words)) periods.set(col, c.text);
+        else periods.delete(col);
+      });
+      return row;
+    }
+    const label = row.find(c => PROPERTY_TAX_WORD.test(fold(c.text)));
+    const amount = row.findIndex(c => !!cellToken(c, result.format));
+    const period = periods.get(amount);
+    return label && period ? row.map(c => c === label ? { ...c, text: `${c.text} (${period})` } : c) : row;
+  });
+  const start = result.candidates.length;
+  readTable({ ...table, rows }, result, notes, scope);
+  const owned = new Set<string>();
+  let parts: string[] = [];
+  for (const row of table.rows) {
+    const words = normalizeLabel(row.map(c => c.text).join(" ")).label;
+    if (!words.trim()) { parts = []; continue; }
+    if (/\btotal\b/.test(words) && /\b(?:operating (?:costs?|expenses?)|opex|charges d exploitation|depenses d exploitation|frais d exploitation)\b/.test(words)) {
+      parts.forEach(ref => owned.add(ref));
+      parts = [];
+    } else if (/\btotal\b/.test(words)) parts = [];
+    else if (PROPERTY_TAX_WORD.test(words)) parts.push(...row.map(c => c.ref));
+  }
+  const added = result.candidates.splice(start);
+  for (const c of added) {
+    if (c.fieldKey === "property_tax_annual" && owned.has(c.location)) result.other.push({ ...c, fieldKey: null, itemKey: null, note: "A part of the stated operating-cost total" });
+    else result.candidates.push(c);
+  }
+}
+
+function readTable(table0: Table, result: ExtractionResult, notes: string[] = [], scope0?: Scope) {
   // A category column beside the line items is set aside; its word stays with the row (task 55).
   const cats = categoryCells(table0.rows, result.format, table0.name);
   const catOf = new Map<Cell[], string>();

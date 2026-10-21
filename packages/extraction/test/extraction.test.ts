@@ -4470,9 +4470,9 @@ describe("card 61b: development charges and land transfer tax are read into thei
     const proposals = consolidate(r.candidates.map((c) => ({ ...c, documentId: "d", documentName: "d" })));
     expect(proposals.map((p) => [p.fieldKey, p.status]).sort()).toEqual([["development_charges", "needs_review"], ["other_cost", "needs_review"]]);
   });
-  test("property tax and GST/HST net of rebates are still not read as any field", () => {
+  test("property tax needs a period and GST/HST explicitly net of rebates is read (card 125)", () => {
     expect(pick(read("Property tax: $12,000"))).toEqual([]);
-    expect(pick(read("GST/HST net of rebates: $40,000"))).toEqual([]);
+    expect(pick(read("GST/HST net of rebates: $40,000"))).toEqual([["gst_hst_net", 40_000]]);
   });
   test("permit levies are still other costs", () => {
     expect(pick(read("Permit levies: $5,000"))).toEqual([["other_cost", 5_000]]);
@@ -7759,7 +7759,7 @@ describe("card 118: financing, partners and figure-local leftovers", () => {
   ])("own French exclusions keep the figure shown: %s", input => expect(read(input).candidates).toEqual([]));
   test.each(["pdf", "docx"] as const)("figure-first runs keep each %s label local", kind => {
     const runs = [
-      ["8 years — Years until the sale // 96% — Occupied share once let // 33% — Share of income spent running the building // $0 — Sales tax left after rebates", [["hold_years", 8], ["stabilized_occupancy_pct", 96], ["expense_ratio_pct", 33]]],
+      ["8 years — Years until the sale // 96% — Occupied share once let // 33% — Share of income spent running the building // $0 — Sales tax left after rebates", [["hold_years", 8], ["stabilized_occupancy_pct", 96], ["expense_ratio_pct", 33], ["gst_hst_net", 0]]],
       ["20 months — Construction period // 7 months — Lease-up period // 9 years — Hold period", [["construction_months", 20], ["lease_up_months", 7], ["hold_years", 9]]],
       ["20 mois — Durée de construction // 7 mois — Mise en location // 9 ans — Détention", [["construction_months", 20], ["lease_up_months", 7], ["hold_years", 9]]],
     ] as const;
@@ -8684,4 +8684,85 @@ describe("card 124: labels by meaning and figure type", () => {
   test("audit: a holding period with no unit is not read as years", () => {
     expect(read("Holding period 60").candidates.filter(c => c.fieldKey === "hold_years")).toEqual([]);
   });
+});
+
+
+describe("card 125: net sales tax and yearly property tax need a person's check", () => {
+  const read = (...lines: string[]) => extractCandidates({ kind: "pdf", lines: lines.map((text, i) => ({ text, location: `page 1, line ${i + 1}` })), tables: [], pageCount: 1, needsOcr: false, fullText: lines.join("\n") });
+  const sheet = (rows: string[][]) => extractCandidates({ kind: "xlsx", pageCount: null, lines: [], tables: [{ name: "Inputs", rows: rows.map((r, i) => r.map((text, j) => ({ text, ref: `Inputs!${String.fromCharCode(65 + j)}${i + 1}` }))) }], needsOcr: false, fullText: rows.flat().join(" ") });
+  const pick = (r: ReturnType<typeof read>) => r.candidates.map(c => [c.fieldKey, c.value]);
+  const net = [
+    "Net HST: $24,600", "GST after rebates: $24,600", "Sales tax less rebates: $24,600",
+    "The GST we bear after rebates is $24,600.", "We budget net sales tax cost of $24,600.", "After rebates, HST will cost $24,600.",
+    "TVH nette : 24 600 $", "TPS moins remboursements : 24 600 $", "La taxe de vente après remboursements est de 24 600 $.",
+    "GST/HST net of rebates: $24,600", "HST minus rebates: $24,600", "HST we bear, net of rebates: $24,600",
+  ];
+  test.each(net)("reads the tax balance: %s", line => expect(pick(read(line))).toEqual([["gst_hst_net", 24600]]));
+  test.each(["Net HST", "Sales tax after rebates", "TPS/TVH nette des remboursements"])("reads sheets with and without a category: %s", label => {
+    for (const category of [[], ["Uses"], ["Emplois"]]) expect(pick(sheet([[...category, label, "$24,600"]]))).toEqual([["gst_hst_net", 24600]]);
+  });
+  const taxTraps = [
+    "HST on hard costs: $24,600", "GST on land: $24,600",
+    "Net HST rebate: $24,600", "GST rebate expected: $24,600", "Remboursement net de TVH : 24 600 $", "HST rebate: $24,600",
+    "HST before rebates: $24,600", "Gross GST: $24,600", "HST self-supply: $24,600", "TPS avant remboursements : 24 600 $",
+    "Hard costs including HST: $24,600", "Soft costs plus GST: $24,600",
+    "Net HST rate: 13%", "TPS nette : 5 %", "PST net of rebates: $24,600", "GST rebate net of fees: $24,600",
+  ];
+  test.each(taxTraps)("never treats the gross tax, rebate, basis or rate as net tax: %s", line => {
+    const r = read(line);
+    expect(r.candidates.filter(c => c.fieldKey === "gst_hst_net")).toEqual([]);
+    expect([...r.candidates, ...r.other].length).toBeGreaterThan(0);
+  });
+  const property = [
+    "Annual property taxes: $24,600", "Municipal tax per year: $24,600", "Realty taxes: $24,600/yr",
+    "We allow $24,600 a year for property taxes.", "Municipal taxes are budgeted at $24,600 per year.", "Each year realty tax will be $24,600.",
+    "Taxes foncières annuelles : 24 600 $", "Impôt foncier par an : 24 600 $", "Les taxes municipales sont prévues à 24 600 $ par année.",
+  ];
+  test.each(property)("reads a yearly amount: %s", line => expect(pick(read(line))).toEqual([["property_tax_annual", 24600]]));
+  test.each(["Property taxes per month: $2,050", "Taxes municipales mensuelles : 2 050 $", "Realty tax: $2,050/mo"])("annualizes a monthly amount: %s", line => expect(pick(read(line))).toEqual([["property_tax_annual", 24600]]));
+  test.each(["Property taxes", "Realty tax", "Taxes municipales"])("uses the yearly column header: %s", label => {
+    expect(pick(sheet([["Item", "Annual amount"], [label, "$24,600"]]))).toEqual([["property_tax_annual", 24600]]);
+    expect(pick(sheet([["Category", "Description", "Montant annuel"], ["Emplois", label, "$24,600"]]))).toEqual([["property_tax_annual", 24600]]);
+  });
+  const propertyTraps = [
+    "Annual property taxes included in operating costs: $24,600", "Municipal taxes per year, part of the expense ratio: $24,600", "Taxes foncières annuelles comprises dans les charges d'exploitation : 24 600 $",
+    "Seller's annual property taxes: $24,600", "Previous owner's municipal taxes per year: $24,600", "Last year's annual realty tax: $24,600", "Assessed annual property tax: $24,600", "Comparable building's municipal tax per year: $24,600", "Taxe foncière annuelle du vendeur : 24 600 $", "Ancien propriétaire, impôt foncier par an : 24 600 $", "Taxes municipales annuelles de l'année dernière : 24 600 $", "Taxes foncières annuelles d'un immeuble comparable : 24 600 $",
+    "Property tax rate: 2%", "Municipal mill rate: 24.6", "Annual realty tax mill rate: $24,600", "Taux annuel des taxes foncières : 2 %",
+    "Land transfer tax: $24,600", "Welcome tax: $24,600", "Droits de mutation : 24 600 $", "Property transfer tax per year: $24,600",
+    "Property taxes during construction per year: $24,600", "Annual municipal taxes on the land while building: $24,600", "Taxes foncières annuelles pendant les travaux : 24 600 $",
+    "Property taxes: $24,600", "Taxe foncière : 24 600 $",
+  ];
+  test.each(propertyTraps)("keeps a non-project, rate, transfer or carrying figure out: %s", line => {
+    const r = read(line);
+    expect(r.candidates.filter(c => c.fieldKey === "property_tax_annual")).toEqual([]);
+    expect([...r.candidates, ...r.other].length).toBeGreaterThan(0);
+  });
+  test.each(["Total operating costs", "Total charges d'exploitation"])("shows property-tax parts of an operating table ending in %s", total => {
+    const r = sheet([["Item", "Annual amount"], ["Property taxes", "$24,600"], ["Insurance", "$5,400"], [total, "$30,000"]]);
+    expect(r.candidates.filter(c => c.fieldKey === "property_tax_annual")).toEqual([]);
+    expect(r.other.some(c => c.value === 24600)).toBe(true);
+    expect(pick(r)).toContainEqual(["fixed_opex_annual", 30000]);
+  });
+  test.each(["Net HST and hard costs: $24,600", "Annual property taxes and net GST: $24,600", "Taxes foncières annuelles et TPS nette : 24 600 $"])("shows a combined figure: %s", line => {
+    const r = read(line);
+    expect(r.candidates).toEqual([]);
+    expect(r.other.some(c => c.value === 24600)).toBe(true);
+  });
+  test("reuses the existing for-sale rejection for a rental-only property tax", () => {
+    const r = read("Annual property tax: $24,600");
+    const a = assemble([{ fieldKey: "sell_units", itemKey: null, status: "approved", valueNumeric: 1 }, ...r.candidates.map(c => ({ fieldKey: c.fieldKey!, itemKey: c.itemKey, status: "approved" as const, valueNumeric: c.value }))]);
+    expect(a.input).toBeNull();
+    expect(a.readiness.impossible).toContainEqual(expect.objectContaining({ fieldKey: "property_tax_annual", label: "Property tax (per year) does not apply when the units are sold" }));
+  });
+  // Audit: tax while the build runs is a carrying cost; tax on "the building" is the finished asset's yearly tax.
+  test.each([
+    "Property tax on the land while we build: $4,000 per year",
+    "Property taxes until the building is complete: $4,000 per year",
+    "Taxes foncières pendant les travaux : 4 000 $ par an",
+  ])("audit: a carrying-period property tax is not read: %s", line => expect(read(line).candidates.filter(c => c.fieldKey === "property_tax_annual")).toEqual([]));
+  test.each([
+    ["Property tax on the building, annual: $12,600", 12600],
+    ["Realty taxes, yearly: $12,600", 12600],
+    ["Property tax: $1,050 per month", 12600],
+  ] as const)("audit: a finished building's yearly property tax is read: %s", (line, value) => expect(pick(read(line))).toEqual([["property_tax_annual", value]]));
 });

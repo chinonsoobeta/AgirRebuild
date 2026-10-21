@@ -4,7 +4,7 @@
 // 51,962,556 and 6.45% in English, 51 962 556 $ and 6,45 % in French.
 
 import { createContext, useContext, useMemo, useState, type ReactNode } from "react";
-import { FR_ABSENT, FR_FIELDS, FR_METRICS, STRESS, GATES, plainTerm, numberFormat, verdictText as sharedVerdictText, checkText as sharedCheckText, type VerdictLike, type CheckLike, CURRENCY_NAMES, FIELDS, FIELD_BY_KEY, METRIC_BY_KEY, placeLabel, type Currency, type ReadinessItem } from "@agir/contracts";
+import { FR_VERIFY, FR_ABSENT, FR_FIELDS, FR_METRICS, STRESS, GATES, plainTerm, numberFormat, verdictText as sharedVerdictText, checkText as sharedCheckText, type VerdictLike, type CheckLike, CURRENCY_NAMES, FIELDS, FIELD_BY_KEY, METRIC_BY_KEY, placeLabel, type Currency, type ReadinessItem } from "@agir/contracts";
 
 export type Lang = "en" | "fr";
 
@@ -1564,6 +1564,7 @@ export function build(lang: Lang, setLang: (l: Lang) => void) {
     },
     ask: (key: string) => (ASK[key]?.[idx] ?? [FIELD_BY_KEY.get(key)?.label ?? key]).map((x) => plainTerm(lang, x ?? "")),
     help: (key: string, en: string | null) => { const h = lang === "fr" ? FR_HELP[key] ?? en : en; return h && plainTerm(lang, h); },
+    verify: (key: string) => lang === "fr" ? FR_VERIFY[key] : FIELD_BY_KEY.get(key)?.verify,
     absent: (key: string) => { const en = FIELD_BY_KEY.get(key)?.absentMeans ?? ""; return plainTerm(lang, lang === "fr" ? FR_ABSENT[key] ?? en : en); },
     /** One readiness item as a line of the review card: the field's name (with the item), then the reason when there is one; the engine's own sentence when it is about no single field. */
     item: (i: ReadinessItem) => {

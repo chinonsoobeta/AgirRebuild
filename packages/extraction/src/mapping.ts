@@ -434,7 +434,7 @@ function convert(def: FieldDef, t: NumberToken, label: string, labelUnit: LabelU
   switch (def.unit) {
     case "$":
       // A monthly total of other income is twelve months of it. Per-item figures are refused before mapping.
-      if (def.key === "other_income_annual" && (u === "$/mo" || MONTHLY_RE.test(label)) && (t.currency || u === "$" || u === "$/mo" || (!prose && u === null))) return { value: v * 12, unitSeen: "$/mo" };
+      if ((def.key === "other_income_annual" || def.key === "property_tax_annual") && (u === "$/mo" || MONTHLY_RE.test(label)) && (t.currency || u === "$" || u === "$/mo" || (!prose && u === null))) return { value: v * 12, unitSeen: "$/mo" };
       if (u === "$" || labelUnit === "$") return { value: v, unitSeen: "$" };
       // In prose a bare number is never money (a year, a count): tables and label/value lines keep the rule.
       if (u === null && !prose && Math.abs(v) >= 1000) return { value: v, unitSeen: "number" };
@@ -656,12 +656,20 @@ export const SALES_TAX_NOTE = "A sales tax line; enter GST/HST net of rebates, o
 export const INTEREST_NOTE = "Interest on this item, not the item; label it if it belongs to a cost line";
 export const CARRYING_NOTE = "A carrying cost; label it under the cost line it belongs to";
 const SALES_TAX_WORD = String.raw`(?:hst|gst|pst|qst|tps|tvq|tvh|tva|vat|sales tax|taxe de vente)`;
+const NET_TAX_WORD = /\b(?:gst|hst|tps|tvh|sales tax|taxe de vente)\b/;
+const REBATE_WORD = /\b(?:rebates?|remboursements?)\b/;
+const NET_WORD = /\b(?:net|nette|after|less|minus|we bear|apres|moins)\b/;
+const PLAIN_NET_TAX = /\bnet\s+(?:gst(?:\s*\/\s*hst)?|hst|tps(?:\s*\/\s*tvh)?|tvh|sales tax|taxe de vente)\b|\b(?:gst|hst|tps|tvh|sales tax|taxe de vente)\s+(?:net|nette)\b/;
+export const PROPERTY_TAX_WORD = /\b(?:property tax(?:es)?|municipal tax(?:es)?|realty tax(?:es)?|taxes? foncieres?|impot foncier|taxes municipales)\b/;
+const PROPERTY_TAX_EXCLUDE = /\b(?:included in|part of|compris\w* dans|inclus\w* dans|seller|vendeur|previous owner|ancien proprietaire|last year|annee derniere|assessed|assessment|comparable|rates?|taux|mills?|millage|during construction|while building|pendant (?:les travaux|la construction)|construction|chantier)\b/;
 const SALES_TAX_RE = new RegExp(String.raw`(?:^|[^a-z])${SALES_TAX_WORD}(?![a-z])`);
 // Remove only basis modifiers; a tax named as the line itself remains for SALES_TAX_NOTE.
 const TAX_NAME = String.raw`(?:GST|HST|PST|QST|TPS|TVQ|TVH|TVA|VAT|sales tax|taxes|taxe|tax|taxe de vente)`;
 const TAX_LIST = String.raw`${TAX_NAME}(?:\s*(?:[/+-]|and|et)\s*${TAX_NAME})*`;
 const TAX_BASIS = new RegExp(String.raw`\b(?:(?:ex|excl|excludes|excluding|exclusive|net of|net|before|after|hors|sans|avant|incl|including|includes|inclusive|with|without|plus|no|inclus|incluant|apres|avec|pas de)\.?[\s-]+(?:(?:the|of|de|la|des|unrecoverable|non-recoverable)\s+)*${TAX_LIST}|${TAX_LIST}\s+(?:included|extra|excluded|not applicable|n/a|nil|free|zero rated|inclus\w*|en sus|non applicable|sans objet)|taxed|tax-inclusive|tax in|TTC|HT)\b|\+\s*${TAX_LIST}\b`, "gi");
-export function withoutTaxBasis(raw: string): string { return raw.replace(TAX_BASIS, " ").trimEnd(); }
+export function withoutTaxBasis(raw: string): string {
+  return raw.replace(TAX_BASIS, (match, at: number) => /^net\s+(?:gst|hst|tps|tvh|sales tax)\b/i.test(match) && !/\b(?:costs?|couts?|price|prix|land|terrain|fees?|honoraires|construction|contract|contrat|works|travaux)\b/i.test(raw.slice(0, at)) ? match : " ").trimEnd();
+}
 
 const INTEREST_WORD_RE = /(?:^|[^a-z])(?:interests?|interets?)(?![a-z])/;
 // Fees are soft costs, so a soft-cost line about fees is that line. In French "frais" is mostly a cost ("frais de construction"),
@@ -702,7 +710,7 @@ const SHARED_NOUN_RE = /^(?:costs?|couts?|frais|expenses?|depenses|charges?)$/;
 // The price of the land is a land line, though no alias says so alone.
 const PURCHASE_PRICE_RE = /^(?:the\s+)?(?:land\s+)?(?:purchase|acquisition)\s+price$|^prix\s+d\s+(?:achat|acquisition)(?:\s+du\s+terrain)?$/;
 const LINE_PROBE: NumberToken = { raw: "1000000", start: 0, end: 7, value: 1_000_000, currency: true, currencyCode: null, unit: "$", scaled: false };
-const LINE_FIELDS = new Set(FIELDS.filter((f) => f.group === "budget" && f.key !== "gst_hst_net").map((f) => f.key));
+const LINE_FIELDS = new Set(FIELDS.filter((f) => f.group === "budget").map((f) => f.key));
 
 /** The budget field a phrase names alone; null when it names none. */
 function lineOf(phrase: string): string | null {
@@ -785,7 +793,28 @@ export function mapToken(rawLabel: string, t: NumberToken, opts: MapOptions = {}
   }
   const folded = foldText(rawLabel);
   if ((opts.budget || opts.budgetConcept) && /\b(?:for reference|competing|rejected|previous owner|outside this project)\b/.test(folded)) return { kind: "ignored", reason: "Not this deal's budget line" };
-  if (t.value !== null && (t.unit === "$" || t.currency || t.unit === null) && SALES_TAX_RE.test(folded) && !SALES_TAX_EXEMPT_RE.test(folded)) return { kind: "ignored", reason: SALES_TAX_NOTE };
+  const taxWords = foldText(`${rawLabel} ${t.raw} ${opts.gap ?? ""} ${(opts.after ?? "").split(/[;,.](?!\d)/)[0] ?? ""}`);
+  if ((NET_TAX_WORD.test(folded) || PROPERTY_TAX_WORD.test(taxWords)) && /\b(?:and|et|plus)\b|[+&]/.test(taxWords)) {
+    const other = mapLabel(rawLabel, t, opts);
+    if (NET_TAX_WORD.test(taxWords) && PROPERTY_TAX_WORD.test(taxWords) || other.kind === "field" && !["gst_hst_net", "property_tax_annual"].includes(other.fieldKey)) return { kind: "ignored", reason: "More than one cost field fits this figure" };
+  }
+  if (SALES_TAX_RE.test(folded) && !SALES_TAX_EXEMPT_RE.test(folded)) {
+    // Tax + a net balance, never a rebate as the head noun or a gross/rate figure.
+    const rebateHead = /\b(?:net(?:te)? )?(?:rebates?|remboursements?)\s+(?:(?:of|de|du|des|la)\s+)*(?:gst|hst|tps|tvh|sales tax|taxe de vente)\b|\b(?:gst|hst|tps|tvh|sales tax|taxe de vente)\s+(?:net(?:te)? )?(?:rebates?|remboursements?)\b/.test(taxWords);
+    const net = NET_TAX_WORD.test(folded) && !/\b(?:pst|qst|tvq|gross|brut|before|avant|rates?|taux)\b/.test(taxWords) && !rebateHead && (PLAIN_NET_TAX.test(taxWords) || NET_WORD.test(taxWords) && REBATE_WORD.test(taxWords));
+    const def = FIELD_BY_KEY.get("gst_hst_net")!;
+    const value = net ? compatibleValue(def, t, taxWords, normalizeLabel(rawLabel).labelUnit, normalizeLabel(rawLabel).labelCode, opts.prose) : null;
+    return value && !outsideBounds(def, value.value) ? { kind: "field", fieldKey: def.key, itemKey: null, ...value } : { kind: "ignored", reason: SALES_TAX_NOTE };
+  }
+  if (PROPERTY_TAX_WORD.test(taxWords) && !/\b(?:operating|opex|charges d exploitation|depenses d exploitation|fixed costs)\b/.test(folded.replace(PROPERTY_TAX_WORD, ""))) {
+    // Card 125 audit: tax while building, or on the land before completion, is a carrying cost; "the building" alone is the finished asset.
+    if (/\b(?:construction|travaux|chantier)\b|\b(?:during|while|until|pendant|durant)\b(?: \w+){0,3} (?:build\w*|works?|construction)\b|\bon the (?:land|lot|site)\b/.test(taxWords)) return { kind: "ignored", reason: CARRYING_NOTE };
+    const def = FIELD_BY_KEY.get("property_tax_annual")!;
+    const monthly = MONTHLY_RE.test(taxWords) || t.unit === "$/mo";
+    const yearly = /\b(?:annual(?:ly)?|yearly|per year|a year|each year|annuel(?:le)?s?|par an|par annee)\b|\/\s*(?:yr|year|an|annee)\b/.test(taxWords);
+    const value = !PROPERTY_TAX_EXCLUDE.test(taxWords) && (monthly || yearly) ? compatibleValue(def, t, taxWords, normalizeLabel(rawLabel).labelUnit, normalizeLabel(rawLabel).labelCode, opts.prose) : null;
+    return value && !outsideBounds(def, value.value) ? { kind: "field", fieldKey: def.key, itemKey: null, ...value } : { kind: "ignored", reason: !monthly && !yearly && /^(?:property tax(?:es)?)$/.test(normalizeLabel(rawLabel).label) ? "An itemized operating cost: enter the total as fixed operating costs on Review." : "Not a separate yearly property tax for this project" };
+  }
   if (/\b(purchase price|prix d achat)\b/.test(normalizeLabel(rawLabel).label)) {
     const clause = normalizeLabel(`${rawLabel.split(/[,;]/).pop() ?? ""} ${(opts.after ?? "").split(/[,;]|\b(?:and|et)\b/)[0] ?? ""}`).label;
     if (unitTypesIn(clause).length || /\b(sale|sell|sold|buyer|resale|vente|acheteur|revente)\b/.test(clause)) return { kind: "unmapped" };

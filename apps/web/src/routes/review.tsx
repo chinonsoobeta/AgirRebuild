@@ -1,6 +1,6 @@
 import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
 import { useEffect, useRef, useState, type FormEvent, type ReactNode } from "react";
-import { FIELDS, tableSourceLabel } from "@agir/contracts";
+import { FIELD_BY_KEY, FIELDS, tableSourceLabel } from "@agir/contracts";
 import { SF_PER_M2 } from "@agir/numbers";
 import { api, type Assumption, type Review as ReviewData, type Source } from "../api";
 import { Banner, canEdit, DealHeader, ErrorText, Glossary, StatusTag, useDeal, useSession } from "../components/ui";
@@ -37,13 +37,14 @@ export const foreignIn = (s: Source, dealCurrency: string | null | undefined) =>
   return code && code !== dealCurrency ? code : undefined;
 };
 
-function Quote({ s, currency }: { s: Source; currency: string | null | undefined }) {
-  const { t, msg } = useI18n();
+export function Quote({ s, currency, fieldKey }: { s: Source; currency: string | null | undefined; fieldKey?: string }) {
+  const { t, msg, L } = useI18n();
   const i = s.context.indexOf(s.raw);
   return (
     <div className="stack" style={{ gap: 6 }}>
       <span className="row small" style={{ gap: 8, fontWeight: 600 }}><I.Doc />{s.document_name}</span>
       <div className="source-quote">{i >= 0 ? (<>{s.context.slice(0, i)}<mark>{s.raw}</mark>{s.context.slice(i + s.raw.length)}</>) : s.context}</div>
+      {fieldKey && L.verify(fieldKey) && <span className="small" style={{ fontWeight: 600 }}>{L.verify(fieldKey)}</span>}
       {s.ocr && <span className="small" style={{ fontWeight: 600 }}>{t("review.ocr")}</span>}
       {s.rule === "suggested" && <span className="small" style={{ fontWeight: 600 }}>{t("review.suggested")}</span>}
       {s.rule === "remembered" && s.note && <span className="small" style={{ fontWeight: 600 }}>{msg(s.note)}</span>}
@@ -59,7 +60,7 @@ const metricUnit = (unit: string) => unit === "sf" || unit === "$/sf/yr";
 /** A value typed in square metres becomes square feet (rent per m² becomes rent per sf) before it is posted, and the reason records what was typed. */
 /** A document value no document states any more (card 63): kept only as the person's own value, with a reason, and never by Approve all. */
 export const keepsWithReason = (a: Pick<Assumption, "sourceKind" | "sources">) => a.sourceKind === "document" && a.sources.length === 0;
-export const approvable = <A extends Pick<Assumption, "sourceKind" | "sources">>(rows: A[]) => rows.filter((a) => !keepsWithReason(a) && !a.sources.some((s) => s.ocr));
+export const approvable = <A extends Pick<Assumption, "fieldKey" | "sourceKind" | "sources">>(rows: A[]) => rows.filter((a) => !keepsWithReason(a) && !a.sources.some((s) => s.ocr) && !(a.sourceKind === "document" && FIELD_BY_KEY.get(a.fieldKey)?.verify));
 
 export function enteredInUnit(unit: string, metric: boolean, value: number, reason: string, lang: Lang): { value: number; reason: string } {
   if (!metric || !metricUnit(unit)) return { value, reason };
@@ -425,7 +426,7 @@ export function Review({ dealId }: { dealId: string }) {
                   // A figure in another currency is never a choice: say why, show it, and leave the amount to be entered.
                   <div className="stack" style={{ gap: 8 }}>
                     <p>{msg(a.reason)}</p>
-                    {a.sources.filter((s) => foreignIn(s, dealCurrency)).map((s, i) => <Quote key={i} s={s} currency={dealCurrency} />)}
+                    {a.sources.filter((s) => foreignIn(s, dealCurrency)).map((s, i) => <Quote key={i} s={s} currency={dealCurrency} fieldKey={a.sourceKind === "document" ? a.fieldKey : undefined} />)}
                   </div>
                 )}
                 <div style={{ display: "grid", gridTemplateColumns: "repeat(auto-fit, minmax(220px, 1fr))", gap: 12 }}>
@@ -698,7 +699,7 @@ export function Review({ dealId }: { dealId: string }) {
           {focused ? (
             <>
               <strong>{name(focused)}</strong>
-              {focused.sources.length ? focused.sources.slice(0, 4).map((src, n) => <Quote key={n} s={src} currency={dealCurrency} />) : <p className="small muted">{focused.tableSource ? tableSourceLabel(focused.tableSource,lang) : focused.sourceKind === "default" ? t("review.namedDefault") : t("review.enteredByShort", { who: focused.decidedBy ?? "—" })}</p>}
+              {focused.sources.length ? focused.sources.slice(0, 4).map((src, n) => <Quote key={n} s={src} currency={dealCurrency} fieldKey={focused.sourceKind === "document" ? focused.fieldKey : undefined} />) : <p className="small muted">{focused.tableSource ? tableSourceLabel(focused.tableSource,lang) : focused.sourceKind === "default" ? t("review.namedDefault") : t("review.enteredByShort", { who: focused.decidedBy ?? "—" })}</p>}
             </>
           ) : (
             <p className="small muted">{t("review.selectValue")}</p>

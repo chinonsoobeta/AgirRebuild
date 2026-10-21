@@ -78,3 +78,14 @@ describe("card 94a cited tables", () => {
     }
   });
 });
+
+
+describe("card 125: document taxes require verification", () => {
+  it("flags only the two taxes, in English and French", async () => {
+    const { FIELDS, FR_VERIFY } = await import("../src/index.ts");
+    expect(FIELDS.filter(f => f.verify).map(f => f.key).sort()).toEqual(["gst_hst_net", "property_tax_annual"]);
+    expect(FIELDS.find(f => f.key === "gst_hst_net")).toMatchObject({ extractable: true, verify: "Check this: GST/HST net depends on the rebates this project qualifies for." });
+    expect(FIELDS.find(f => f.key === "property_tax_annual")).toMatchObject({ extractable: true, verify: "Check this is not already inside your operating costs or expense ratio." });
+    expect(FR_VERIFY).toEqual({ gst_hst_net: "À vérifier : la TPS/TVH nette dépend des remboursements auxquels ce projet a droit.", property_tax_annual: "Vérifiez qu'elle n'est pas déjà comprise dans vos charges d'exploitation ou votre ratio des charges." });
+  });
+});

@@ -1,4 +1,4 @@
-import { describe, expect, it } from "vitest";
+import { describe, expect, it, vi } from "vitest";
 import type { EngineInput, ReadinessItem } from "@agir/contracts";
 import { assemble, validateInput, EngineInputError } from "../../../packages/engine/src/index.ts";
 import validateSource from "../../../packages/engine/src/validate.ts?raw";
@@ -6,9 +6,9 @@ import { allEquityDeal } from "../../../packages/engine/test/fixtures.ts";
 import { FIELDS, METRICS, POLICIES, tableSourceLabel, landTransferTaxOptions, gstHstNetOptions } from "@agir/contracts";
 import { SF_PER_M2 } from "@agir/numbers";
 import { reviewWaiting } from "../src/components/ui.tsx";
-import { approvable, enteredInUnit, foreignIn, keepsWithReason } from "../src/routes/review.tsx";
+import { Quote, approvable, enteredInUnit, foreignIn, keepsWithReason } from "../src/routes/review.tsx";
 import { describeEvent } from "../src/routes/audit.tsx";
-import { build, checkText, dealStatus, translateMessage, verdictText, type Key } from "../src/i18n.tsx";
+import { I18nProvider, build, checkText, dealStatus, translateMessage, verdictText, type Key } from "../src/i18n.tsx";
 
 describe("a run's source labels in French", () => {
   it("uses the owner's short bilingual published-table labels", () => {
@@ -917,5 +917,36 @@ describe("card 112: suggested fields and likely figures on review", () => {
     expect(fr.t("review.likely")).toBe("Peut-être dans vos documents :");
     expect(en.t("review.useFigure")).toBe("Use this figure");
     expect(fr.t("review.useFigure")).toBe("Utiliser ce chiffre");
+  });
+});
+
+
+describe("card 125: review asks a person to verify document taxes", () => {
+  it("excludes verified document fields from Approve all and keeps typed values and existing text/OCR results", () => {
+    const rows = [
+      { fieldKey: "gst_hst_net", sourceKind: "document", sources: [{ document_name: "a.txt" }] },
+      { fieldKey: "property_tax_annual", sourceKind: "document", sources: [{ document_name: "a.txt" }] },
+      { fieldKey: "gst_hst_net", sourceKind: "manual", sources: [] },
+      { fieldKey: "land_cost", sourceKind: "document", sources: [{ document_name: "a.txt" }] },
+      { fieldKey: "land_cost", sourceKind: "document", sources: [{ ocr: true }] },
+    ] as any;
+    expect(approvable(rows)).toEqual([rows[2], rows[3]]);
+  });
+  it.each(["en", "fr"] as const)("renders each verification note beside the source quote in %s", async lang => {
+    const { createElement: h } = await import("react");
+    const { renderToStaticMarkup } = await import("react-dom/server");
+    vi.stubGlobal("localStorage", { getItem: () => lang });
+    try {
+      for (const fieldKey of ["gst_hst_net", "property_tax_annual"]) {
+        const note = build(lang, () => {}).L.verify(fieldKey);
+        expect(note).toBeTruthy();
+        const s = { context: "Net HST: $24,600", raw: "$24,600", document_name: "inputs.txt", location: "line 1" } as any;
+        const html = renderToStaticMarkup(h(I18nProvider, { children: h(Quote, { s, currency: "CAD", fieldKey }) }));
+        expect(html).toContain("<mark>$24,600</mark>");
+        expect(html).toContain(note!.replaceAll("'", "&#x27;"));
+        const typed = renderToStaticMarkup(h(I18nProvider, { children: h(Quote, { s, currency: "CAD" }) }));
+        expect(typed).not.toContain(note!.replaceAll("'", "&#x27;"));
+      }
+    } finally { vi.unstubAllGlobals(); }
   });
 });

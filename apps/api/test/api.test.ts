@@ -1373,23 +1373,20 @@ describe("card 61: Canadian cost lines and a mortgage insurance premium are ente
   const metrics = async (runId: string) => (await call(nina, "GET", `/api/runs/${runId}`)).json.result.scenarios[0].metrics as { key: string; value: number | null; status: string }[];
   const snapshot = async (runId: string) => ((await db.query<any>(`select input_snapshot as snap from runs where id = $1`, [runId])) as [{ snap: any }])[0].snap;
 
-  test("review offers GST/HST net and property tax as choices and the other two lines as not found, and the premium only once a refinance month is stated", async () => {
+  test("review lists all four cost and tax lines as not found (card 125: GST/HST net and property tax are read), and offers the premium only once a refinance month is stated", async () => {
     nina = await signup("nina@example.com", "Nina Builder", "solo");
     nw = (await call(nina, "GET", "/api/me")).json.workspaces[0].id;
     const d = await make("Halifax Fourplex");
     const before = await choices(d);
     const by = new Map(before.map((c) => [c.fieldKey, c]));
-    expect(by.get("gst_hst_net")).toMatchObject({ unit: "$", help: "If your soft or other costs already include it, leave this out.", detail: "none stated" });
-    expect(by.has("development_charges")).toBe(false);
-    expect(by.has("land_transfer_tax")).toBe(false);
-    expect(by.get("property_tax_annual")).toMatchObject({ unit: "$", help: "Leave this out if your expense ratio or fixed operating costs already include it." });
+    for (const k of ["development_charges", "land_transfer_tax", "gst_hst_net", "property_tax_annual"]) expect(by.has(k), k).toBe(false);
     expect(by.has("refinance_insurance_premium_pct")).toBe(false);
     await put(d, "refinance_month", 24);
     const after = await choices(d);
     expect(after.find((c) => c.fieldKey === "refinance_insurance_premium_pct")).toMatchObject({ unit: "%", detail: "no mortgage insurance" });
     const nf = (await call(nina, "GET", `/api/deals/${d}/review`)).json.notFound.map((n: any) => n.fieldKey);
-    for (const k of ["development_charges", "land_transfer_tax"]) expect(nf, k).toContain(k);
-    for (const k of ["gst_hst_net", "property_tax_annual", "refinance_insurance_premium_pct"]) expect(nf, k).not.toContain(k);
+    for (const k of ["development_charges", "land_transfer_tax", "gst_hst_net", "property_tax_annual"]) expect(nf, k).toContain(k);
+    expect(nf).not.toContain("refinance_insurance_premium_pct");
   });
 
   test("a run with the lines records them, shows the metric, and builds its lender package", async () => {
