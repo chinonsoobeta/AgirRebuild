@@ -1,4 +1,4 @@
-import { GROWTH_WORD, CONCEPTS, LOAN_NOUN, STATED_TOTAL } from "./concepts.ts";
+import { GROWTH_WORD, CONCEPTS, BANK_LENDER, LOAN_NOUN, STATED_TOTAL } from "./concepts.ts";
 import { FIELD_BY_KEY, OUTPUT_LIKE_PHRASES } from "@agir/contracts";
 import { detectFormat, normalizeText, SF_PER_M2, tokenize, unitTypesIn, wholeUnitType, type CurrencyCode, type DocumentFormat, type NumberToken } from "@agir/numbers";
 import type { Cell, NormalizedDocument, Table } from "./document.ts";
@@ -227,6 +227,8 @@ function continues(prev: string, next: string): boolean {
   return !(/[\d%](?:\s*(?:\$?\/(?:mo|month|yr|year|sf|mois)|per (?:month|year)|sf|units|suites|doors|par (?:mois|an)|logements|pi²|m²))?\s*$/.test(fold(prev)) && /^[\d$€£]/.test(next));
 }
 
+const FIGURE_FIRST_RE = /^\s*(?:\d|[$€£]).*\s[—–]\s/u;
+
 /** The lines the table reader did not consume, with a sentence wrapped across lines made one paragraph. */
 function paragraphs(doc: NormalizedDocument, skip: Set<number>, scopes: (Scope | undefined)[], excluded: boolean[]): Paragraph[] {
   const out: Paragraph[] = [];
@@ -238,7 +240,10 @@ function paragraphs(doc: NormalizedDocument, skip: Set<number>, scopes: (Scope |
       return;
     }
     const text = line.text.trim();
-    if (cur && (doc.kind !== "docx" || cur.segs.at(-1)!.location === line.location) && !/^\s*(?:\d|[$€£]).*\s[—–]\s/u.test(text) && continues(prev, text)) {
+    // Card 118: a figure-first "figure — label" line starts its own paragraph, and in a Word file laid out that way no paragraph joins the one before it.
+    // Card 118 audit: elsewhere a sentence wrapped across Word paragraphs still joins ("The committed principal is" / "$2,850,000 …").
+    const figureFirst = doc.kind === "docx" && cur?.segs.at(-1)!.location !== line.location && [prev, doc.lines[li + 1]?.text ?? ""].some((l) => FIGURE_FIRST_RE.test(l));
+    if (cur && !FIGURE_FIRST_RE.test(text) && !figureFirst && continues(prev, text)) {
       cur.segs.push({ start: cur.text.length + 1, location: line.location });
       cur.text += " " + text;
     } else {
@@ -889,7 +894,7 @@ function readSentence(sentence: { text: string; start: number }, para0: Paragrap
     if (previousGrowth !== null && /^\s*(?:annually|yearly|par an)?\s*(?:and|et)\s+(?:expenses?|costs?|overhead|charges|depenses)\b/i.test(fold(label)) && GROWTH_WORD.test(fold(previousGrowth))) { usedLabel += " growth"; opts = { ...opts, context: undefined }; }
     if (loanSentence) {
       const named = scopesIn(unconditioned(label));
-      sentenceLoan = named.length === 1 ? named[0]! : named.length > 1 ? null : LOAN_NOUN.test(fold(label)) ? (sentenceLoan ?? "senior") : sentenceLoan;
+      sentenceLoan = named.length === 1 ? named[0]! : named.length > 1 ? null : BANK_LENDER.test(fold(label)) ? (sentenceLoan ?? "senior") : sentenceLoan;
       if (sentenceLoan) opts = { ...opts, scope: sentenceLoan };
     }
     if (carry?.at === i - 1 && t.unit === "%" && !scopeIn(label, false) && !BASIS_AFTER_RE.test(fold(afterFigure))) {

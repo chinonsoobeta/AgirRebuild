@@ -1138,10 +1138,10 @@ describe("which loan a term belongs to, and the words small developers use", () 
       expect(pick(read("Junior loan", "Rate: 11%"))).toEqual([["mezz_rate_pct", 11]]);
       expect(pick(read("Deuxième hypothèque", "Taux : 11 %"))).toEqual([["mezz_rate_pct", 11]]);
     });
-    test("private lending terms name the second loan; explicit ranks, permissions and sections retain their scope (card 118)", () => {
+    test("lender type never sets the loan, a senior letter that permits subordinate debt stays senior, and sections keep their own scope", () => {
       expect(pick(read("Mortgage Investment Corporation - Term Sheet", "Rank: first mortgage", "Rate: 9.5%"))).toEqual([["senior_rate_pct", 9.5]]);
       expect(pick(read("Fonds hypothécaire (caisse populaire) - Feuille de modalités", "Taux : 7,5 %"))).toEqual([["senior_rate_pct", 7.5]]);
-      expect(pick(read("Private lender offer", "Rate: 9.5%"))).toEqual([["mezz_rate_pct", 9.5]]);
+      expect(pick(read("Private lender offer", "Rate: 9.5%"))).toEqual([["senior_rate_pct", 9.5]]);
       expect(pick(read("Commitment letter - construction loan", "Rate: 5.9%", "Amortization: 30 years", "Subordinate financing behind this loan is permitted with our consent."))).toEqual([["senior_rate_pct", 5.9], ["senior_amort_years", 30]]);
       expect(pick(read("Loan summary", "Construction loan", "Rate: 5.9%", "Mezzanine", "Rate: 11.5%"))).toEqual([["senior_rate_pct", 5.9], ["mezz_rate_pct", 11.5]]);
     });
@@ -1537,8 +1537,8 @@ describe("reading safety: a figure that may be the wrong one is shown, never use
       expect(pick(r)).toEqual([["senior_loan_amount", 1_500_000], ["senior_rate_pct", 6.1], ["mezz_loan_amount", 250_000], ["mezz_rate_pct", 10.5]]);
       expect(pick(read("Second: $200,000 at 11% interest only."))).toEqual([["mezz_loan_amount", 200_000]]);
       expect(pick(read("The private second will advance $180,000 at 12%."))).toEqual([["mezz_loan_amount", 180_000], ["mezz_rate_pct", 12]]);
-      // Card 118: a MIC with an actual lending term names the second loan.
-      expect(pick(read("A mortgage investment corporation will lend $180,000."))).toEqual([["mezz_loan_amount", 180_000]]);
+      // a lender's type alone never sets the loan (card 118 audit: kept)
+      expect(pick(read("A mortgage investment corporation will lend $180,000.")).filter((p) => String(p[0]).startsWith("mezz_"))).toEqual([]);
       expect(pick(read("Prêteur privé de second rang : 150 000 $"))).toEqual([["mezz_loan_amount", 150_000]]);
       expect(pick(read("First mortgage: 6.2%"))).toEqual([["senior_rate_pct", 6.2]]);
       for (const line of ["The second floor adds 6 units.", "Second phase hard costs: $400,000", "Interest rate rose 0.5% in the second quarter."]) expect(pick(read(line)).filter((p) => String(p[0]).startsWith("mezz_")), line).toEqual([]);
@@ -3269,8 +3269,10 @@ describe("one sentence may state several terms of one loan", () => {
     expect(pick(ltv)).toEqual([["mezz_loan_amount", 240_000], ["mezz_rate_pct", 11.5]]);
     expect(ltv.other.map((o) => o.value)).toEqual([75]);
   });
-  test("plain lender sentences and first mortgages identify their own loan (card 118)", () => {
-    expect(pick(read("The lender will advance $240,000 at 11.5% fixed, amortized over 15 years."))).toEqual([["senior_loan_amount", 240_000], ["senior_rate_pct", 11.5], ["senior_amort_years", 15]]);
+  test("negative: a sentence that names no loan's rank reads as it did; a first mortgage or a bank is ranked (cards 108, 118)", () => {
+    // Card 118 audit: "the lender" states no rank; a bank or credit union is the senior lender.
+    expect(pick(read("The lender will advance $240,000 at 11.5% fixed, amortized over 15 years."))).toEqual([]);
+    expect(pick(read("A private lender will advance $240,000 at 11.5%."))).toEqual([]);
     expect(pick(read("The first mortgage will advance $5,000,000 at 6.2%, amortized over 30 years."))).toEqual([["senior_loan_amount", 5_000_000], ["senior_rate_pct", 6.2], ["senior_amort_years", 30]]);
   });
 });
@@ -5924,7 +5926,7 @@ describe("card 108: loan terms named by concept and unit", () => {
   });
   test.each(["Facility holdback: $50,000", "Lender balance: $900,000", "Bank deposit: $40,000", "Mortgage equity: $500,000", "Loan fee charge: 1%", "Loan insurance charge: 2%", "Bank spread charge: 1.5%", "Mortgage DCR charge: 1.2%", "Loan repayment maturity: 5 years", "Bank repayment renewal: 3 years", "Facility before repayment begins - term: 18 months", "Advance draw before repayment begins: 12 months", "Retenue bancaire : 50 000 $", "Solde du crédit : 900 000 $", "Dépôt bancaire : 40 000 $", "Capital propre du financement : 500 000 $", "Charge du prêt - frais : 1 %", "Charge du prêt - prime d'assurance : 2 %", "Charge du crédit - ratio : 70 %", "Remboursement du prêt à l'échéance : 5 ans", "Prêt sans remboursement de capital - terme : 18 mois"])("own exclusion variant: %s", (line) => expect(read("First mortgage", line).candidates.filter((c) => /^(senior|mezz|refinance)_/.test(c.fieldKey ?? ""))).toEqual([]));
   test.each(["Months before repayment begins: 18 months", "Annual charge: 6.1%", "Repaid over: 25 years", "Montant consenti : 2 000 000 $", "Charge annuelle : 6,1 %", "Remboursé sur : 25 ans"])("no loan name or scope gives no concept read: %s", (line) => expect(pick(read(line))).toEqual([]));
-  test("a repayment period supplies its own loan signal (card 118)", () => expect(pick(sheet(null, [["Charge", "6.1%"], ["Repayment period", "25 years"], ["Unallocated sum", "2000000"]]))).toEqual([["senior_amort_years", 25]]));
+  test("a generic sheet's default senior scope is not a loan heading", () => expect(pick(sheet(null, [["Charge", "6.1%"], ["Repayment period", "25 years"], ["Unallocated sum", "2000000"]]))).toEqual([]));
   test.each(["Permanent lender", "Take-out lender", "Prêt permanent", "Financement de sortie"])("a take-out heading gives refinance fields: %s", (heading) => expect(pick(read(heading, "Advance granted: $2,000,000", "Annual charge: 6.1%", "Repaid over: 25 years", "Months before repayment begins: 18 months"))).toEqual(four.map(([key, value]) => [(key === "senior_loan_amount" ? "refinance_amount" : String(key).replace("senior_", "refinance_")), value])));
   test("a concept read is counted separately and aliases keep their existing rule", () => {
     expect(read("Bank facility granted: $2,000,000").candidates[0]?.rule).toBe("concept");
@@ -7667,7 +7669,7 @@ describe("card 118: financing, partners and figure-local leftovers", () => {
     ["Bank funding: bank in for $720000 / bank pricing 6.2% / bank amort 28 years / bank IO 15 months", "senior_loan_amount=720000 senior_rate_pct=6.2 senior_amort_years=28 senior_io_months=15"],
     ["A comparable bank will lend $720000 at 6.2%.", "-"],
     ["Bank deposit: $720000 at 6.2%", "-"],
-    ["Private lender coupon: 12%", "mezz_rate_pct=12"],
+    ["Private lender coupon: 12%", "senior_rate_pct=12"], // audit: a lender's type never sets the rank
     ["S:Prêt subordonné amortissement|9 ans", "mezz_amort_years=9"],
     ["Junior bank principal holiday: 15 months", "mezz_io_months=15"],
     ["Second floor cost: $250000", "!senior_loan_amount,mezz_loan_amount"],
@@ -7761,5 +7763,12 @@ describe("card 118: financing, partners and figure-local leftovers", () => {
   });
   test("a docx paragraph never labels the next paragraph's figure", () => {
     expect(read("Bank loan amount // $300000 // 7% — Bank coupon", "docx").candidates.map(c => [c.fieldKey, c.value])).toEqual([["senior_rate_pct", 7]]);
+  });
+  test.each([
+    ["Member dues: $1,200", "senior_loan_amount"], ["Fixed price contract margin: 8%", "senior_rate_pct"], ["Fixed expenses share: 30%", "senior_rate_pct"],
+    ["Interest earned on the reserve: $5,000", "stated_interest_reserve"], ["Preferred shares dividend: 5%", "preferred_return_pct"], ["The bank's prime rate is 4.95%.", "senior_rate_pct"],
+  ])("card 118 audit: %s is not %s", (line, key) => expect(read(line).candidates.filter((c) => c.fieldKey === key)).toEqual([]));
+  test("card 118 audit: outside a figure-first layout, a sentence wrapped across Word paragraphs is one sentence", () => {
+    expect(read("Update: the committed senior principal is // $1,900,000 // for the whole scope.", "docx").candidates.map(c => [c.fieldKey, c.value])).toEqual([["senior_loan_amount", 1_900_000]]);
   });
 });

@@ -1,6 +1,10 @@
 // Folded words for a concept read. Aliases and their refusals always run first.
 // "Principal" is an amount word, not a loan: "Principal: $X" alone names no loan.
-export const LOAN_NOUN = /\b(?:loans?|facilit(?:y|ies)|advances?|mortgages?|lenders?|banks?|credit union|members?|credits?|financing|borrowing|prets?|financements?|hypotheques?|preteurs?|banques?|avances?)\b/;
+export const LOAN_NOUN = /\b(?:loans?|facilit(?:y|ies)|advances?|mortgages?|lenders?|banks?|credit union|member(?= (?:loans?|mortgages?|amort\w*|rates?|interest|io)\b)|credits?|financing|borrowing|prets?|financements?|hypotheques?|preteurs?|banques?|avances?)\b/;
+// "The lender", "le prêteur": a loan named before, whose rank this line does not state.
+// Card 118 audit: a bank or credit union is the senior lender, so "the bank" is not an anaphor.
+export const LOAN_ANAPHOR = /\b(?:the|a|an|this|that|our|their|its|le|la|les|l|un|une|ce|cette|notre|leur)\s+(?:loans?|facility|(?:private )?lenders?|mortgages?|prets?|preteurs?|hypotheques?)\b/;
+export const BANK_LENDER = /\b(?:banks?|banques?|credit union|caisse)\b/;
 // The main lender is the senior loan, whatever the document's own loan is: "le prêteur principal", "our main lender".
 export const MAIN_LENDER = /\b(?:preteur principal|banque principale|premier preteur|principal lender|main lender|lead lender|first lender)\b/;
 // A figure said to be uncommitted or an alternative is not the loan: "…, never committed".
@@ -9,7 +13,7 @@ export const NOT_THE_LOAN_AFTER = /^\W*(?:(?:which|that|but)\s+(?:was|is)\s+)?(?
 // Card 115: v5/v8/v9/v10 loan labels informed rank and plain loan vocabulary.
 // First phase/draw/year/floor and a partner's priority are not loan ranks.
 export const SENIOR_RANK = /\b(?:sr|senior|first[- ](?:charge|ranking)|first (?=(?:money|principal|amort\w*|io|interest|rate|coupon|charge|lender|loan|mortgage)\b)|the first is|(?:dette|pret|interet|taux|amort\w*)\s+prioritaire|prioritaire\s+(?:dette|pret|interet|taux|amort\w*))\b/;
-export const LOAN_PERIOD = /\b(?:repayment (?:schedule|years|horizon|period)|years to repay (?:the )?principal|months free of principal|principal-free|int-only|free-principal|no-principal|principal holiday|franchise de capital|interets? seuls|periode sans capital)\b/;
+export const LOAN_PERIOD = /\b(?:repayment (?:schedule|years|horizon)|years to repay (?:the )?principal|months free of principal|principal-free|int-only|free-principal|no-principal|principal holiday|franchise de capital|interets? seuls|periode sans capital)\b/;
 // v6/v8/v9/v10 totals: a named cost subtotal still belongs to that cost.
 // Card 115 audit: "stated total" and "total déclaré" alone, or of the project or its costs; "Stated total rent" is not the project's.
 export const STATED_TOTAL = /\b(?:stated project subtotal|project subtotal|(?:stated total|total declare)(?=\s*$|\s+(?:project|cost|costs|of (?:the )?(?:project|uses|costs)|budget|du projet|des couts|des emplois)\b)|total uses|all-in uses|sum of uses|total des emplois|somme des emplois)\b/;
@@ -65,8 +69,8 @@ export const CONCEPTS: readonly {
   },
   {
     fieldKey: "senior_rate_pct", unit: "%",
-    words: [/\b(?:rate|interest|intrest|int|coupon|fixed|ferme|pricing|charge|cost of borrowing|taux|interet)\b/],
-    exclude: /\b(?:to[- ]value|to[- ]cost|ltv|ltc|fees?|spread|over prime|premium|insurance|dscr|dcr|holdbacks?|frais|prime d assurance|ratio|partners?|investors?|commanditaires?|associes?|investisseurs?|retard|arrerages|defaut|deposits?|depots?|ownership|carried|partnership|pret[- ](?:valeur|cout)|ecart|au dessus du taux preferentiel|resets?|renewal|renouvel\w*|revision|step[- ]?ups?|buy-down|buydown|reduction|capitalisation|capitalization)\b/,
+    words: [/\b(?:rate|interest|intrest|int|coupon|fixed(?=\s*$| (?:rate|coupon|interest|intrest|pricing)\b)|ferme|pricing|charge|cost of borrowing|taux|interet)\b/],
+    exclude: /\b(?:to[- ]value|to[- ]cost|ltv|ltc|fees?|spread|over prime|premium|insurance|dscr|dcr|holdbacks?|frais|prime d assurance|ratio|partners?|investors?|commanditaires?|associes?|investisseurs?|retard|arrerages|defaut|deposits?|depots?|ownership|carried|partnership|pret[- ](?:valeur|cout)|ecart|au dessus du taux preferentiel|resets?|renewal|renouvel\w*|revision|step[- ]?ups?|buy-down|buydown|reduction|capitalisation|capitalization|prime(?! d assurance))\b/,
   },
   {
     fieldKey: "senior_amort_years", unit: "years",
@@ -90,14 +94,14 @@ export const CONCEPTS: readonly {
     with: [/\b(?:slice|share|portion|proportion|quote-part|part)\b/], exclude: /\b(?:pref|preferred|priority|hurdle|rendement|distributions?|profits?|ownership|neighbour\w*)\b/ },
   { fieldKey: "preferred_return_pct", unit: "%", unscoped: true,
     words: [/\b(?:pref|preferred|priority|hurdle|rendement (?:prioritaire|privilegie))\b/],
-    exclude: /\b(?:gp|general partner|commandite|tier [2-9]|lp irr|lenders?|preteurs?|banks?|banques?|prime de performance|upside|carry|carried interest|promote|promoted|promotion|interessement|equity|ownership)\b/ },
+    exclude: /\b(?:shares?|dividends?|stock|actions privilegiees|gp|general partner|commandite|tier [2-9]|lp irr|lenders?|preteurs?|banks?|banques?|prime de performance|upside|carry|carried interest|promote|promoted|promotion|interessement|equity|ownership)\b/ },
   { fieldKey: "gp_promote_pct", unit: "%", unscoped: true,
     words: [/\b(?:gp|general partner|sponsor|commandite)\b/],
     with: [/\b(?:upside|carry|carried interest|promote|promoted share|promotion|interessement)\b/], exclude: /\b(?:ownership|tier [2-9]|second tier|palier [2-9])\b/ },
   { fieldKey: "equity_amount", unit: "$", unscoped: true,
     words: [/\b(?:owners?|sponsors?)\b/], with: [/\bcash\b/, /\b(?:in|wired|contributed)\b/], exclude: /\b(?:returned|proceeds|remaining|refinance|take-out)\b/ },
   { fieldKey: "stated_interest_reserve", unit: "$", unscoped: true,
-    words: [/\binterest\b/], with: [/\b(?:holdback|reserve)\b/], exclude: /\b(?:loans?|leasing|lease-up|combined|optional)\b/ },
+    words: [/\binterest\b/], with: [/\b(?:holdback|reserve)\b/], exclude: /\b(?:earned|earnings?|income|loans?|leasing|lease-up|combined|optional)\b/ },
   { fieldKey: "stated_ltc_pct", unit: "%", unscoped: true,
     words: [/\b(?:loan[- ]to[- ]cost|ltc|ratio pret-cout)\b/], exclude: /\b(?:maximum|limits?|lender s|plafond)\b/ },
   { fieldKey: "development_charges", unit: "$", budget: true,
