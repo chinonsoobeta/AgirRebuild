@@ -1057,6 +1057,7 @@ type Roles = {
   psfHeader: boolean;
   /** What the rent column's header says the rent is per; null when it only says "Rent". */
   rentBasis: RentBasis | null;
+  ambiguousRent?: boolean;
   /** The column headers say the area, or the rent, is per square metre. */
   areaM2: boolean;
   rentPerM2: boolean;
@@ -1068,20 +1069,23 @@ type Roles = {
 const headerOf = (c: Cell) => c.text.toLowerCase().replace(/²/g, "2").normalize("NFD").replace(/[̀-ͯ]/g, "");
 const M2_RE = /\b(m2|sq\.? ?m|sqm|square met(re|er)s?)\b/;
 const PER_M2_RE = /(psm|\/\s?(m2|sq\.? ?m|sqm)\b|(per|au|par) (m2|sq\.? ?m|sqm|square met(re|er))\b)/;
-const MONTHLY_RE = /\b(monthly|per month|per mo|a month|mensuel(le)?|par mois|mois)\b|\/\s?(mo|mth|month)\b/;
-const ANNUAL_RE = /\b(annual|yearly|annuel(le)?|per year|per annum|par annee|par an)\b|\/\s?yr\b/;
+const MONTHLY_RE = /\b(monthly|per month|each month|per mo|a month|mensuel(le)?|par mois|mois)\b|\bmo\.(?=\s|$)|\/\s?(mo|mth|month)\b/;
+const ANNUAL_RE = /\b(annual|yearly|year|annuel(le)?|per year|per annum|par annee|par an)\b|\/\s?(yr|year|an)\b/;
 
 type RentRole = "units" | "item" | "rent" | "basis" | "area" | "occupancy";
 
-const COUNT_HEADER_RE = /\b(inventory|count|units|homes|doors|suites|totals|number|quantity|qty|nombre|logements)\b/;
+const COUNT_HEADER_RE = /\b(inventory|count|units|homes|doors|suites|totals|number|how many|quantity|qty|nombre|logements)\b/;
 
 function rentRole(h: string): RentRole | null {
+  // A per-home rent labels money, even when it also contains a count noun.
+  if (/\b(rent|loyer|ask|asking)\b/.test(h) && !/basis/.test(h)) return "rent";
+  if (MONTHLY_RE.test(h) && /\b(home|unit|suite|door|dwelling|logement|unite)\b/.test(h)) return "rent";
   // French: "Nombre de logements" counts units; "Type de logement" and "Unité" name them; "Loyer par logement" is a rent.
   if (/\b(nombre|nbre|nb|quantite)\b/.test(h)) return "units";
   // A count word with no type word ("Inventory by plan", "Homes by plan") is the count, not the plan (task 55).
-  if (COUNT_HEADER_RE.test(h) && !/\b(types?|rent|loyer)\b/.test(h) && !isPlainRentLabel(h)) return "units";
+  if (COUNT_HEADER_RE.test(h) && (!/\btypes?\b/.test(h) || /^(?:count|homes|doors|units|nombre|logements)\b/.test(h.trim())) && !/\b(rent|loyer)\b/.test(h) && !isPlainRentLabel(h)) return "units";
   // "Rent per suite" is a rent, not an item; a lone "Unit" names the row.
-  if (!/\b(rent|loyer)\b/.test(h) && !isPlainRentLabel(h) && (h.trim() === "unit" || /\b(unit\s*type|type|component|space|tenant|suite|plan|floor\s*plan|use)\b/.test(h) || /\b(logement|unite|appartement|locataire|espace|local)\b/.test(h))) return "item";
+  if (!/\b(rent|loyer)\b/.test(h) && !isPlainRentLabel(h) && (h.trim() === "unit" || /\b(unit\s*type|type|layout|component|space|tenant|suite|plan|floor\s*plan|use)\b/.test(h) || /\b(logement|unite|appartement|locataire|espace|local)\b/.test(h))) return "item";
   if (/\b(units|unit count|count|#|doors|suites|homes|logements|unites|appartements)\b/.test(h)) return "units";
   if ((/\b(rent|loyer)\b/.test(h) || isPlainRentLabel(h)) && !/basis/.test(h)) return "rent";
   if (/basis/.test(h)) return "basis";
@@ -1108,6 +1112,7 @@ function rentRollRoles(header: Cell[]): Roles | null {
     if (role === "units") roles.units = i;
     else if (role === "item") roles.item.push(i);
     else if (role === "rent") {
+      if (roles.rent !== undefined) roles.ambiguousRent = true;
       roles.rent = i;
       roles.rentPerM2 = PER_M2_RE.test(h);
       roles.psfHeader = /(psf|\/\s?sf|per sf|(au|par) (pi2|pi\.? ?ca))/.test(h) || roles.rentPerM2;
@@ -1119,6 +1124,7 @@ function rentRollRoles(header: Cell[]): Roles | null {
       roles.areaTotal = /\b(total|totale|gla)\b/.test(h);
     } else if (role === "occupancy") roles.occupancy = i;
   });
+  roles.ambiguousRent &&= roles.item.length === 1 && roles.area === undefined && roles.basis === undefined;
   return roles.item.length > 0 && roles.rent !== undefined && (roles.units !== undefined || roles.area !== undefined || bySuite) ? roles : null;
 }
 
@@ -1211,6 +1217,13 @@ function fromRentRoll(table: Table, headerRow: number, roles: Roles, result: Ext
   const wordsOf = (row: Cell[]) =>
     new Set(row.filter((c) => c.number === undefined && c.text && !RENTS_ARE_RE.test(c.text)).flatMap((c) => c.text.toLowerCase().split(/[^\p{L}0-9]+/u).filter(Boolean)));
   const body = table.rows.slice(headerRow + 1);
+  if (NON_ROLL_RE.test(fold(table.name))) {
+    for (const row of body) for (const [i, cell] of row.entries()) {
+      const t = !roles.item.includes(i) && cellToken(cell, result.format);
+      if (t) result.other.push({ fieldKey: null, itemKey: null, value: t.value, raw: t.raw, unitSeen: t.unit, location: cell.ref, context: `${table.name}: ${row.map((c) => c.text).join(" | ")}`, rule: "table:rent-roll", note: "This sheet is not a dwelling rent roll" });
+    }
+    return;
+  }
   const notes = [...body.flatMap((row) => row.map((c) => c.text)), ...extraNotes]
     .map((t) => RENTS_ARE_RE.exec(t))
     .filter((m): m is RegExpExecArray => m !== null)
@@ -1236,11 +1249,13 @@ function fromRentRoll(table: Table, headerRow: number, roles: Roles, result: Ext
     const itemParts = roles.item.map((i) => row[i]?.text ?? "").filter(Boolean);
     const itemText = itemParts.join(" ").trim();
     if (!itemText) continue;
-    // The roll's total row: its figures are shown, never read.
-    if (itemParts.some((p) => TOTAL_RE.test(p))) {
+    const rowContext = `${table.name}: ${row.map((c) => c.text).join(" | ")}`;
+    const otherProperty = OTHER_RENT_RE.test(fold(rowContext).replace(MARKET_NOW_RE, " "));
+    // The roll's total row, an unrelated property or an ambiguous rent is shown.
+    if (itemParts.some((p) => ROLL_TOTAL_RE.test(fold(p))) || roles.ambiguousRent || otherProperty) {
       for (const [i, cell] of row.entries()) {
         const t = roles.item.includes(i) ? null : cellToken(cell, result.format);
-        if (t) result.other.push({ fieldKey: null, itemKey: null, value: t.value, raw: t.raw, unitSeen: t.unit, location: cell.ref, context: `${table.name}: ${itemText}`, rule: "table:rent-roll", note: ROLL_SUMMARY_NOTE });
+        if (t) result.other.push({ fieldKey: null, itemKey: null, value: t.value, raw: t.raw, unitSeen: t.unit, location: cell.ref, context: `${table.name}: ${itemText}`, rule: "table:rent-roll", note: otherProperty ? OTHER_RENT_NOTE : roles.ambiguousRent ? "More than one rent column fits; enter the rent to use" : ROLL_SUMMARY_NOTE });
       }
       continue;
     }
@@ -1281,9 +1296,10 @@ function fromRentRoll(table: Table, headerRow: number, roles: Roles, result: Ext
       if (idx === undefined) return;
       const cell = row[idx];
       if (!cell || (!cell.text && cell.number === undefined)) return;
-      const t = cellToken(cell, result.format);
-      if (!t || t.value === null) {
-        if (t) result.other.push({ fieldKey: null, itemKey: null, value: null, raw: t.raw, unitSeen: t.unit, location: cell.ref, context: itemText, rule: "table:rent-roll", note: t.refusal ?? "Unreadable" });
+      const t = rollToken(cell, result.format);
+      const invalidCount = fieldKey === "unit_count" && t && (t.value === null || !Number.isInteger(t.value) || t.value < 0 || ![null, "units"].includes(t.unit));
+      if (!t || t.value === null || invalidCount) {
+        if (t) result.other.push({ fieldKey: null, itemKey: null, value: t.value, raw: t.raw, unitSeen: t.unit, location: cell.ref, context: itemText, rule: "table:rent-roll", note: invalidCount ? "Not a unit count" : t.refusal ?? "Unreadable" });
         return;
       }
       const def = FIELD_BY_KEY.get(fieldKey)!;
@@ -1424,6 +1440,64 @@ function namedRow(row: Cell[], table: Table, result: ExtractionResult): boolean 
   return namedType(head.text, cells.slice(1).map((c) => c.text).join(" | "), true, head.ref, `${table.name}: ${cells.map((c) => c.text).join(" | ")}`, "table:named-type", result);
 }
 
+// Names and fields establish a roll; numbers alone never do outside a homes sheet.
+const HOMES_SHEET_RE = /\b(homes?|units?|suites?|unit mix|rent roll|logements?|mix|typologie)\b/;
+const NON_ROLL_RE = /\b(parking|storage|equipment|budget|phases?|invoices?|lots?|stationnement|rangement|equipement|factures?|parcelles?)\b/;
+const ROLL_TOTAL_RE = /^(?:(?:grand|sub|sous)[- ]*)?(?:total|sum|all|ensemble)\b/;
+const OTHER_RENT_RE = /\b(comparisons?|comparables?|comps?|market|marche|unrelated|separate|neighbou?rs?|next door|autre immeuble|immeuble voisin|voisin|old tenants?|former tenants?|previous tenants?|past tenants?|anciens? locataires?|phase \d+.*rented|might reach|could reach)\b/;
+const OTHER_RENT_NOTE = "A comparison, past rent or possible rent, not this property's rent";
+
+function rollToken(cell: Cell, format: DocumentFormat): NumberToken | null {
+  const t = cellToken(cell, format);
+  return t && cell.number === undefined && rangeEnds(cell.text, tokenize(cell.text, format)).size > 0 ? { ...t, raw: cell.text, value: null, refusal: RANGE_NOTE } : t;
+}
+
+/** A row with two labelled values, a field/name suffix, or a headerless homes-sheet row. */
+function structuredRollRow(row: Cell[], table: Table, result: ExtractionResult, category?: string): boolean {
+  const cells = row.filter((c) => c.text.trim() || c.number !== undefined);
+  const context = `${table.name}: ${category ?? ""} ${cells.map((c) => c.text).join(" | ")}`;
+  const add = (name: string, label: string, cell: Cell) => {
+    const t = rollToken(cell, result.format);
+    const role = rentRole(fold(label));
+    if (!t || (role !== "units" && role !== "rent")) return false;
+    const count = role === "units";
+    if (t.refusal === RANGE_NOTE) {
+      result.other.push({ fieldKey: null, itemKey: null, value: null, raw: cell.text, unitSeen: t.unit, location: cell.ref, context, rule: "table:labelled-roll", note: RANGE_NOTE });
+      return true;
+    }
+    if (t.value === null || (count ? !Number.isInteger(t.value) || t.value <= 0 || (t.unit !== null && t.unit !== "units") : !MONTHLY_RE.test(fold(label)) || ![null, "$", "$/mo"].includes(t.unit))) return false;
+    result.candidates.push({ fieldKey: count ? "unit_count" : "unit_rent_monthly", itemKey: canonicalItem(name.trim()), value: t.value, raw: t.raw, unitSeen: count ? "units" : withCurrency("$/mo", t.currencyCode), location: cell.ref, context, rule: "table:labelled-roll" });
+    return true;
+  };
+  if (cells.length === 5 && rentRole(headerOf(cells[1]!)) === "units" && rentRole(headerOf(cells[3]!)) === "rent") {
+    const before = result.candidates.length;
+    if (add(cells[0]!.text, cells[1]!.text, cells[2]!) && add(cells[0]!.text, cells[3]!.text, cells[4]!)) return true;
+    result.candidates.splice(before);
+  }
+  // The last separated suffix is the item, so hyphens inside bedroom names stay intact.
+  for (const [i, c] of cells.entries()) {
+    const match = /^(.*)(?: - | \/ )(.*)$/.exec(c.text);
+    if (!match) continue;
+    const values = cells.slice(i + 1).filter((v) => cellToken(v, result.format));
+    if (values.length === 1 && add(match[2]!, match[1]!, values[0]!)) return true;
+  }
+  if (!HOMES_SHEET_RE.test(fold(table.name)) || NON_ROLL_RE.test(fold(table.name)) || cells.length < 3) return false;
+  const name = cells[0]!;
+  if (name.number !== undefined) return false;
+  const values = cells.slice(1).filter((c) => cellToken(c, result.format));
+  const n = values[0] && cellToken(values[0], result.format);
+  const r = values[1] && cellToken(values[1], result.format);
+  if (values.length !== 2 || !n || !r || n.unit !== null || !Number.isInteger(n.value) || n.value! <= 0 || n.value! > 1000 || r.value! < 100 || ![null, "$", "$/mo"].includes(r.unit)) return false;
+  fromRentRoll({ ...table, rows: [[name, ...values]] }, -1, { item: [0], units: 1, rent: 2, rentBasis: "monthly", psfHeader: false, areaM2: false, rentPerM2: false, areaTotal: false }, result);
+  return true;
+}
+
+/** Two figures after a name; the rent may carry French thousands spaces. */
+function flatRollRow(text: string, ref: string): Cell[] | null {
+  const m = /^(.+?)\s+(\d{1,4})\s+(\$\s*\d[\d,]*(?:\.\d{2})?|\d{1,3}(?:[ \u00a0]\d{3})+(?:[,.]\d{2})?\s*\$|\d[\d,.]*\s*\$)(?:\s+(?:per|par|\/).*)?\s*$/i.exec(text);
+  return m ? [m[1]!, m[2]!, m[3]!].map((text) => ({ text, ref })) : null;
+}
+
 const COUNT_ROW_RE = /^(?:(?:number|nombre|nb|no\.?)\s+(?:of|de|d')\s*)?(?:homes?|units?|suites?|doors?|apartments?|logements?|unites?|appartements?|count)$/;
 const PER_UNIT_LABEL_RE = /\b(per|par)\s+(home|unit|suite|door|apartment|logement|unite|appartement)\b/;
 
@@ -1438,12 +1512,12 @@ function fromTypeColumns(table: Table, result: ExtractionResult): boolean {
     const types = table.rows[h]!.map((c, i) => (i > 0 ? wholeUnitType(c.text) : null));
     if (new Set(types.filter(Boolean)).size < 2) continue;
     const body = table.rows.slice(h + 1).map((row) => ({ row, label: headerOf(row[0] ?? { text: "", ref: "" }).trim() }));
-    const isRent = (l: string) => /\b(rent|loyer)\b/.test(l) && !/\b(psf|sf|pi2|m2)\b/.test(l);
+    const isRent = (l: string) => rentRole(l) === "rent" && !/\b(psf|sf|pi2|m2)\b/.test(l);
     if (!body.some((b) => COUNT_ROW_RE.test(b.label)) || !body.some((b) => isRent(b.label))) continue;
     for (const { row, label } of body) {
       types.forEach((type, i) => {
         const cell = row[i];
-        const t = type && cell?.text ? cellToken(cell, result.format) : null;
+        const t = type && cell?.text ? rollToken(cell, result.format) : null;
         if (!type || !cell || !t) return;
         const base = { raw: t.raw, location: cell.ref, context: `${table.name}: ${row[0]!.text} ${cell.text}`.slice(0, 240), rule: "table:type-columns" };
         const aside = (note: string) => result.other.push({ ...base, fieldKey: null, itemKey: null, value: t.value, unitSeen: t.unit, note });
@@ -1907,6 +1981,7 @@ function fromTable(table0: Table, result: ExtractionResult, notes: string[] = []
         const catExcluded = !!cat && (markedNotPart(cat) || (MEMO_SECTION_RE.test(fold(cat)) && (!WEAK_MEMO_SECTION_RE.test(fold(cat)) || otherCategory(cat))));
         const scope = (cat && scopeIn(cat)) || s.scope;
         const loanContext = s.loanScope || !!(cat && scopeIn(cat));
+        if (!s.excluded && !catExcluded && structuredRollRow(row0, table, result, cat)) return;
         if (!s.excluded && !catExcluded && namedRow(row0, table, result)) return;
         // A sentence cell is read as a sentence under the scope and exclusion in force for its row; the other cells of the row read as usual.
         const row = row0.filter((c) => !isSentenceCell(c, row0, result.format));
@@ -2027,6 +2102,7 @@ const SENTENCE_WORDS = /^(the|is|are|was|were|be|will|and|or|for|to|with|that|th
 
 /** Split a header line into columns: each ends at a role word and takes the words before it, plus a unit or "per ..." qualifier after it. */
 function headerColumns(text: string, roleOf: (h: string) => string | null, ref: string): Cell[] {
+  if (text.includes("|")) return text.split("|").map((text) => ({ text: text.trim(), ref }));
   const tokens = text.match(/\([^)]*\)|\S+/g) ?? [];
   const cols: Cell[] = [];
   let pending: string[] = [];
@@ -2066,8 +2142,32 @@ function textTables(doc: NormalizedDocument, format: DocumentFormat, scopes: (Sc
   const lines = doc.lines;
   for (let i = 0; i < lines.length - 1; i++) {
     const head = lines[i]!;
+    if (used.has(i)) continue;
+    // In a transposed text roll, the types form the columns and the next lines name the fields.
+    const typeWords = head.text.includes("|") ? head.text.split("|").map((x) => x.trim()) : head.text.match(/(?:one|two|three|un|une|deux|trois)[- ](?:bedrooms?|beds?|chambres?)|[1-6]\s*½|\S+/gi) ?? [];
+    const names = typeWords.filter((w) => wholeUnitType(w));
+    if (!excluded[i] && names.length >= 2 && typeWords.every((w, k) => wholeUnitType(w) || (k === 0 && /^(item|poste|type)$/i.test(w)))) {
+      const rows: Cell[][] = [[{ text: "Item", ref: head.location }, ...names.map((text) => ({ text, ref: head.location }))]];
+      let j = i + 1;
+      for (; j < lines.length && !excluded[j]; j++) {
+        const l = lines[j]!;
+        const first = tokenize(l.text, format)[0];
+        if (!first) break;
+        const label = l.text.slice(0, first.start).replace(/\s*\|\s*$/, "").trim();
+        if (!COUNT_ROW_RE.test(fold(label)) && rentRole(fold(label)) !== "rent") break;
+        const amounts = l.text.includes("|") ? l.text.split("|").slice(1).map((s) => s.trim()) : l.text.slice(first.start).match(/\$\s*\d[\d,.]*|\d{1,3}(?:[ \u00a0]\d{3})+\s*\$|\d[\d,.]*\s*\$|\d+/g) ?? [];
+        if (amounts.length !== names.length) break;
+        rows.push([{ text: label, ref: l.location }, ...amounts.map((text) => ({ text, ref: l.location }))]);
+      }
+      const table = { name: `Table at ${head.location}`, rows };
+      const probe: ExtractionResult = { format, candidates: [], other: [], notes: [] };
+      if (fromTypeColumns(table, probe)) {
+        for (let k = i; k < j; k++) used.add(k);
+        out.push({ table, notes: [], scope: scopes[i] }); i = j - 1; continue;
+      }
+    }
     const words = head.text.match(/\S+/g) ?? [];
-    if (excluded[i] || words.length < 2 || words.length > 10 || /[.:;]$/.test(head.text) || words.some((w) => SENTENCE_WORDS.test(w)) || tokenize(head.text, format).length > 0) continue;
+    if (excluded[i] || words.length < 2 || words.length > (head.text.includes("|") ? 24 : 10) || /[:;]$/.test(head.text) || (/\.$/.test(head.text) && !/\bmo\.$/i.test(head.text)) || (!head.text.includes("|") && words.some((w) => SENTENCE_WORDS.test(w))) || tokenize(head.text, format).length > 0) continue;
     // A rent roll's columns, else a budget's.
     let cols = headerColumns(head.text, (h) => rentRole(h), head.location);
     let kind: "rent" | "budget" = "rent";
@@ -2093,6 +2193,10 @@ function textTables(doc: NormalizedDocument, format: DocumentFormat, scopes: (Sc
       const line = lines[j]!;
       // A line under a heading that marks its section as not part of the deal is left to the prose reader, which shows it.
       if (excluded[j]) break;
+      const direct = line.text.includes("|") ? line.text.split("|").map((text) => ({ text: text.trim(), ref: line.location })) : kind === "rent" && numeric.length === 2 && rr?.units === 1 && rr.rent === 2 ? flatRollRow(line.text, line.location) : null;
+      if (direct && direct.length === cols.length) {
+        rows.push(direct); used.add(j); continue;
+      }
       // "3 480" in an English document is two numbers, not one with a space group: split what the tokenizer refused.
       const tokens = tokenize(line.text, format).flatMap((t) =>
         t.value === null && /\s/.test(t.raw)
@@ -2110,7 +2214,7 @@ function textTables(doc: NormalizedDocument, format: DocumentFormat, scopes: (Sc
       if (!run) break;
       const itemText = line.text.slice(0, run[0]!.start).trim();
       // A budget amount is money, so a page number or a count in a footer is not a line.
-      if (!/\p{L}/u.test(itemText) || (kind === "budget" && !(run[0]!.currency || (run[0]!.unit === null && Math.abs(run[0]!.value ?? 0) >= 1000)))) break;
+      if ((!/\p{L}/u.test(itemText) && !wholeUnitType(itemText)) || (kind === "budget" && !(run[0]!.currency || (run[0]!.unit === null && Math.abs(run[0]!.value ?? 0) >= 1000)))) break;
       const trailing = line.text.slice(run[run.length - 1]!.end).trim();
       const cells = cols.map((c, ci): Cell => {
         const n = numeric.indexOf(ci);
@@ -2312,6 +2416,13 @@ export function extractCandidates(doc0: NormalizedDocument): ExtractionResult {
   const excluded = excludedLines(doc, result.format);
   const text = textTables(doc, result.format, scopes, excluded);
   doc.lines.forEach((l, i) => {
+    if (!excluded[i] && !text.used.has(i)) {
+      const row = l.text.includes("|") || text.tables.some((t) => t.table.rows.some((r) => r.some((c) => c.ref === doc.lines[i - 1]?.location))) ? null : flatRollRow(l.text, l.location);
+      if (row && (wholeUnitType(row[0]!.text) || /^(row homes?|townhouses?|duplex)$/i.test(row[0]!.text)) && !NON_ROLL_RE.test(fold(row[0]!.text))) {
+        fromRentRoll({ name: `Table at ${l.location}`, rows: [row] }, -1, { item: [0], units: 1, rent: 2, rentBasis: "monthly", psfHeader: false, areaM2: false, rentPerM2: false, areaTotal: false }, result);
+        text.used.add(i);
+      }
+    }
     if (!excluded[i] && !text.used.has(i) && namedLine(l.text, l.location, result)) text.used.add(i);
   });
   const [linesFrom, linesOtherFrom] = [result.candidates.length, result.other.length];
@@ -2337,6 +2448,13 @@ export function extractCandidates(doc0: NormalizedDocument): ExtractionResult {
     if (!markedNotPart(fold(t.name).replace(new RegExp(named, "g"), " "))) for (const o of result.other.slice(beforeOther)) if (o.note === NOT_PART_NOTE) o.note = note;
     result.candidates.splice(before).forEach((c) => result.other.push({ ...c, fieldKey: null, itemKey: null, note }));
   }
+  // Apply ownership to every revenue path, including prose, labelled rows and tables.
+  result.candidates = result.candidates.filter((c) => {
+    if (!c.fieldKey || !UNIT_FIELDS.has(c.fieldKey)) return true;
+    if (!OTHER_RENT_RE.test(fold(c.context).replace(MARKET_NOW_RE, " ")) && !asIs(c.context)) return true;
+    result.other.push({ ...c, fieldKey: null, itemKey: null, note: OTHER_RENT_NOTE });
+    return false;
+  });
   applyScales(doc, result);
   applyStatedCurrency(doc, result);
   const aside = (c: Candidate, note: string) => result.other.push({ ...c, fieldKey: null, itemKey: null, note });

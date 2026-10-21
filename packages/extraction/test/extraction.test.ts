@@ -1753,7 +1753,7 @@ describe("reading safety: a figure that may be the wrong one is shown, never use
     });
     test("a type is one item whichever way it is written, in a sheet or in prose", () => {
       const table = sheets(grid("Types", ["Type", "Units", "Rent per month"], ["One-bed", 2, 1_700], ["1 chambre", 3, 1_650], ["Bachelor", 1, 1_200], ["End units (3 bed)", 2, 2_400], ["three-bedroom", 1, 2_300], ["Studio", 1, 1_300]));
-      expect(table.candidates.filter((c) => c.fieldKey === "unit_count").map((c) => [c.itemKey, c.value])).toEqual([["1BR", 2], ["1BR", 3], ["Bachelor", 1], ["3BR", 2], ["3BR", 1], ["Studio", 1]]);
+      expect(table.candidates.filter((c) => c.fieldKey === "unit_count").map((c) => [c.itemKey, c.value])).toEqual([["1BR", 2], ["1BR", 3], ["Bachelor", 1], ["End units", 2], ["3BR", 1], ["Studio", 1]]);
       expect(items(read("The one-bedroom suites rent for $1,800 a month."))).toEqual([["unit_rent_monthly", "1BR", 1_800]]);
       expect(items(sheets(grid("Types", ["Type", "Units", "Rent per month"], ["One-bed", 2, 1_700])))[0]).toEqual(["unit_count", "1BR", 2]);
     });
@@ -7771,4 +7771,127 @@ describe("card 118: financing, partners and figure-local leftovers", () => {
   test("card 118 audit: outside a figure-first layout, a sentence wrapped across Word paragraphs is one sentence", () => {
     expect(read("Update: the committed senior principal is // $1,900,000 // for the whole scope.", "docx").candidates.map(c => [c.fieldKey, c.value])).toEqual([["senior_loan_amount", 1_900_000]]);
   });
+});
+
+describe("card 119: structured rent rolls and rents belonging to this property", () => {
+  const read = (input: string) => {
+    const parts = input.split(" // ");
+    const sheet = /^S(?:\(([^)]*)\))?:/;
+    const tables = parts.every((p) => sheet.test(p)) ? [{ name: parts[0]!.match(sheet)![1] ?? "Base", rows: parts.map((p, r) => p.replace(sheet, "").split("|").map((text, c) => ({ text: text.trim(), ref: `${String.fromCharCode(65 + c)}${r + 1}`, ...(/^\d+$/.test(text.trim()) ? { number: Number(text) } : {}) }))) }] : [];
+    return extractCandidates({ kind: tables.length ? "xlsx" : "pdf", tables, lines: tables.length ? [] : parts.map((text, i) => ({ text, location: `page 1, line ${i + 1}` })), fullText: tables.length ? "" : parts.join("\n"), pageCount: 1, needsOcr: false });
+  };
+  const roll = (input: string, expected: number) => {
+    const r = read(input);
+    const items = new Map<string, Map<string, Set<number | null>>>();
+    for (const c of r.candidates.filter((c) => c.fieldKey === "unit_count" || c.fieldKey === "unit_rent_monthly")) {
+      expect(c.itemKey).toBeTruthy();
+      const item = items.get(c.itemKey!) ?? new Map();
+      const values = item.get(c.fieldKey!) ?? new Set();
+      values.add(c.value); item.set(c.fieldKey!, values); items.set(c.itemKey!, item);
+    }
+    expect(items.size).toBeGreaterThan(0);
+    let gpr = 0;
+    for (const fields of items.values()) {
+      expect(fields.get("unit_count")?.size).toBe(1);
+      expect(fields.get("unit_rent_monthly")?.size).toBe(1);
+      gpr += [...fields.get("unit_count")!][0]! * [...fields.get("unit_rent_monthly")!][0]! * 12;
+    }
+    expect(gpr).toBe(expected);
+  };
+  const cases: [string, string, number][] = [
+    ["1 no header", "S(Suites):Courtyard|3|1800 // S:Upper flat|2|2200", 117600],
+    ["1 odd header and status", "S(Homes):Layout|How many|Status|Ask each month // S:Courtyard|3|ready|1800", 64800],
+    ["1 French no header", "S(Typologie):Petit appartement|4|1350", 64800],
+    ["1 header outside homes sheet", "S(Base):Layout|Doors|Monthly ask // S:Garden|3|1900", 68400],
+    ["1 year header", "S(Homes):Type|Number|Rent / year // S:Garden|3|24000", 72000],
+    ["1 French annual header", "S(Logements):Type|Nombre|Loyer / an // S:4½|3|24000", 72000],
+    ["1 annual", "S(Units):Type|Number|Rent per year // S:Garden|3|24000", 72000],
+    ["2 sum", "S(Homes):Type|Count|Monthly rent // S:Garden|3|1900 // S:Sum|3|5700", 68400],
+    ["2 all", "S(Homes):Type|Count|Monthly rent // S:Garden|3|1900 // S:All|3|5700", 68400],
+    ["2 ensemble sous-total", "S(Logements):Type|Nombre|Loyer mensuel // S:3½|3|1400 // S:Ensemble|3|4200 // S:Sous-total|3|4200", 50400],
+    ["3 distinct names", "S(Homes):Type|Count|Monthly rent // S:Corner (2 bed)|2|2100 // S:Middle (2 bed)|3|2200", 129600],
+    ["3 name with brackets", "S(Homes):Type|Count|Monthly rent // S:Garden|2|2100 // S:Garden (2 bed)|2|2100", 50400],
+    ["3 French names", "S(Logements):Type|Nombre|Loyer mensuel // S:Aile est (3 chambres)|2|2100 // S:Aile ouest (3 chambres)|3|2200", 129600],
+    ["4 category suffix", "S(Inputs):Revenue|Count of homes - garden|Working note|3 // S:Revenue|Rent per home per month - garden|Working note|$1,900", 68400],
+    ["4 layout suffix", "S(Inputs):Revenue|Doors by layout - upper|Note|4 // S:Revenue|Base rent each month - upper|Note|$2,200", 105600],
+    ["4 French suffix", "S(Inputs):Revenus|Nombre par type - deux chambres|Note|3 // S:Revenus|Loyer par logement par mois - deux chambres|Note|1 900 $", 68400],
+    ["4 jotter slash", "S(Jotter):new backyard homes / Garden room|3 // S:monthly ask per home / Garden room|1900", 68400],
+    ["5 paired figures", "S(Base):Two-bedroom|Door count|3|Monthly rent per door|$1,900", 68400],
+    ["5 planned homes", "S(Base):Studio|Homes planned|4|Monthly per suite|$1,400", 67200],
+    ["5 French pairs", "S(Base):4½|Logements prévus|3|Loyer mensuel retenu|1 900 $", 68400],
+    ["6 transposed", "S(Mix):Item|Studio|Two-bedroom // S:Suites|3|2 // S:Asking per suite per mo.|$1,400|$2,200", 103200],
+    ["6 French transposed", "S(Mix):Poste|3½|4½ // S:Logements|3|2 // S:Loyer par logement par mois|1 400 $|2 200 $", 103200],
+    ["6 text transposed", "Studio Two-bedroom // Homes 3 2 // Monthly per home $1,400 $2,200", 103200],
+    ["7 flat text", "Type Count Monthly rent // Garden flat 3 $1,900", 68400],
+    ["7 pipe text", "Layout | Doors | Monthly ask // Garden flat | 3 | $1,900", 68400],
+    ["7 French spaces", "Type Nombre Loyer mensuel // 4½ 3 1 900 $", 68400],
+    ["7 single dwelling", "Row home 3 $1,900", 68400],
+    ["7 single type", "two-bedroom 3 $1,900 per unit/mo.", 68400],
+    ["7 French dwelling", "deux chambres 3 1 900 $ par logement par mois", 68400],
+    ["8 base sheet", "S(Base):Type|Homes|Monthly rent // S:Studio|3|1400", 50400],
+    ["8 base scenario", "S(Base scenario):Type|Homes|Monthly rent // S:Studio|3|1400", 50400],
+    ["8 French base", "S(Scénario retenu):Type|Nombre|Loyer mensuel // S:3½|3|1400", 50400],
+  ];
+  test.each(cases)("rule %s", (_rule, input, expected) => roll(input, expected));
+  test.each([
+    ["1", "S(Equipment):Garden|3|1900"], ["1", "S(Base):Layout|How many|Price // S:Garden|3|1900"],
+    ["2", "S(Homes):Total|3|1900"], ["2", "S(Logements):Ensemble|3|1900"],
+    ["3", "S(Homes):Type|Count|Monthly rent // S:Corner (2 bed)|2|2100 // S:Middle (2 bed)|3|2200"],
+    ["3", "S(Logements):Type|Nombre|Loyer mensuel // S:Est (2 chambres)|2|2100 // S:Ouest (2 chambres)|3|2200"],
+    ["4", "S(Inputs):Comparables|Rent per home per month - studio|Note|$1,900"],
+    ["4", "S(Inputs):Marché|Loyer par logement par mois - 3½|Note|1 900 $"],
+    ["5", "S(Base):Studio|Parking stalls|3|Equipment price|1900"], ["5", "S(Base):3½|Lots prévus|3|Prix du lot|1900"],
+    ["6", "S(Phases):Item|Phase 3|Phase 4 // S:Homes|3|2 // S:Cost|1900000|2200000"],
+    ["6", "S(Mix):Poste|3½|4½ // S:Stationnement|3|2 // S:Coût|1900|2200"],
+    ["7", "Invoice 3 $1,900"], ["7", "Stationnement 3 1 900 $"],
+    ["8", "S(Stress):Type|Homes|Monthly rent // S:Studio|3|1400"],
+    ["8", "S(Storage):Type|Count|Monthly rent // S:Locker|3|1400"],
+    ["9", "The neighbour's bachelor rents for $1,850 / mo."], ["9", "Le voisin loue son 3½ 1 350 $ par mois."],
+    ["9", "An unrelated building gets $1,850 a month for a studio."], ["9", "Previous tenants paid $1,850 monthly."],
+    ["9", "Phase 1 rented for $1,850."], ["9", "These homes might reach $1,850 to $2,100 a month with upgrades."],
+    ["9", "S(Homes):Type|Count|Monthly rent // S:Neighbour studio|3|1850"],
+    ["9", "S(Inputs):Ancien loyer par logement par mois - 3½|1350"],
+    ["10", "S(Homes):Garden|3|1900|2100"], ["10", "S(Homes):Garden|3.5|1900"],
+    ["10", "S(Base):Type|Count|Monthly rent|Annual rent // S:Garden|3|1900|24000"],
+  ])("rule %s trap: %s", (rule, input) => {
+    const r = read(input);
+    if (rule === "3") {
+      const counts = r.candidates.filter((c) => c.fieldKey === "unit_count");
+      expect(new Set(counts.map((c) => c.itemKey)).size).toBe(2);
+    } else expect(r.candidates.filter((c) => c.fieldKey === "unit_rent_monthly")).toEqual([]);
+    if (rule === "9" || rule === "10") expect(r.other.length).toBeGreaterThan(0);
+  });
+  test.each([
+    ["Our bachelor rent: $1,850 / mo.", 1850], ["Loyer mensuel de notre studio : 1 350 $", 1350],
+    ["Our one-bedroom suites rent for $2,100 a month.", 2100],
+  ])("rule 9: our rent stays readable: %s", (line, value) => expect(read(line).candidates.some((c) => c.fieldKey === "unit_rent_monthly" && c.value === value)).toBe(true));
+  test.each([
+    ["S(Homes):Garden|3|1900", 68400], ["S(Logements):4½|3|1900", 68400],
+    ["Type | Homes | Monthly rent // Garden | 3 | $1,900", 68400],
+  ])("rule 10: one unambiguous field per figure: %s", (line, value) => roll(line, value));
+  test.each([
+    "S(Homes):Type|Count|Monthly rent|Note // S:Studio|3|1850|Unrelated building",
+    "S(Logements):Type|Nombre|Loyer mensuel|Note // S:3½|3|1350|Immeuble voisin",
+    "S(Homes):Type|Count|Monthly rent // S:Studio|3|$1,850 to $2,100",
+    "S(Logements):Type|Nombre|Loyer mensuel // S:3½|3|entre 1 350 $ et 1 500 $",
+    "S(Inputs):Revenue|Monthly rent - studio|Note|$1,850 to $2,100",
+  ])("rule 9: other-property notes and ranges in cells stay shown: %s", (input) => {
+    const r = read(input);
+    expect(r.candidates.filter((c) => c.fieldKey === "unit_rent_monthly")).toEqual([]);
+    expect(r.other.length).toBeGreaterThan(0);
+  });
+  test.each([
+    "S(Homes):Type|Count|Monthly rent // S:Studio|3.5|1850",
+    "S(Logements):Type|Nombre|Loyer mensuel // S:3½|3.5|1350",
+  ])("rule 10: a fractional figure cannot be a unit count: %s", (input) => {
+    const r = read(input);
+    expect(r.candidates.some((c) => c.fieldKey === "unit_count")).toBe(false);
+    expect(r.other.some((c) => c.value === 3.5)).toBe(true);
+  });
+  test.each([
+    ["S(Base):Studio|Base door count|3|Base mo. rent per door|1850", 66600],
+    ["S(Base):Studio|Homes scheduled|3|Each month per suite|1850", 66600],
+    ["S(Logements):Type|Nombre|Loyer mensuel // S:3½|3|1350", 48600],
+  ])("rules 5 and 8: period words qualify the rent: %s", (input, expected) => roll(input, expected));
+
 });

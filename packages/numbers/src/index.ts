@@ -247,7 +247,10 @@ export function parenType(raw: string): string | null {
 
 /** A unit type written in any of its ways is one name ("One-bed", "1BR", "1 chambre" are "1BR"); a name with more to it ("2-bed + den") is kept as written. */
 export function canonicalItem(name: string): string {
-  return wholeUnitType(name) ?? parenType(name) ?? name;
+  const whole = wholeUnitType(name);
+  if (whole) return whole;
+  // A bracketed bedroom count describes a named layout; it does not replace its name.
+  return name.replace(/\s*[([]([^()[\]]*)[)\]]\s*$/u, (all, inside: string) => wholeUnitType(inside) ? "" : all).trim();
 }
 
 /** Two item names are the same item when their folds are equal: canonical, single spaces, lower case. */

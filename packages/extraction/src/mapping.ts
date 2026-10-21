@@ -1133,8 +1133,10 @@ function mapLabel(rawLabel: string, t: NumberToken, opts: MapOptions = {}): Mapp
     if (!def.itemized) continue;
     for (const alias of ITEMIZED_ALIASES[def.key] ?? []) {
       const prefix = endsWithPhrase(label, alias);
-      if (prefix === null) continue;
-      const name = itemName(prefix);
+      // A monthly rent may lead its type name too: "loyer mensuel de notre studio".
+      const suffixType = def.key === "unit_rent_monthly" && MONTHLY_RE.test(alias) && label.startsWith(alias + " ") ? wholeUnitType(label.slice(alias.length).trim().replace(/^(?:de notre|de nos|notre|our)\s+/, "")) : null;
+      if (prefix === null && !suffixType) continue;
+      const name = prefix === null ? suffixType! : itemName(prefix);
       const c = compatibleValue(def, t, label, labelUnit, labelCode, prose);
       if (!c) continue;
       if (!item || alias.length > item.alias.length || (name && !item.itemKey)) {
