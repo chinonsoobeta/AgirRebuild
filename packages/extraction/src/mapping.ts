@@ -824,6 +824,8 @@ export function mapToken(rawLabel: string, t: NumberToken, opts: MapOptions = {}
     m = { ...m, fieldKey: "stabilized_occupancy_pct", itemKey: null };
   }
   if (m.kind === "field" && m.fieldKey === "construction_months" && duration === "years" && KEEP_WORD.test(named)) m = { kind: "unmapped" };
+  // Card 124 audit: letting that starts after the works names the works only as its starting point.
+  if (m.kind === "field" && m.fieldKey === "construction_months" && LETTING_WORD.test(named) && /\b(?:after|apres|following|once|suivant|des la fin)\b(?: \w+){0,3} (?:works?|travaux|construction|completion|build\w*|chantier|livraison)\b/.test(named)) m = { ...m, fieldKey: "lease_up_months" };
   // A description naming two cost fields by concept is shown, unless its own words already name its field.
   if (m.kind === "unmapped" && !opts.quote && (opts.budget || opts.budgetConcept) && t.unit === "$" && !/%/.test(opts.gap ?? opts.ahead ?? "") && joined.length === 2 && joined.every((part) => part.length === 1) && joined[0]![0]!.fieldKey !== joined[1]![0]!.fieldKey) return { kind: "ignored", reason: "This description names more than one budget field; enter each line separately" };
   if (m.kind === "unmapped" || (m.kind === "ignored" && m.reason === "A fee or premium, not an input" && ((SALE_WORD.test(named) && SALE_COST_WORD.test(named)) || /\b(?:frais de montage|honoraires du dossier|frais courants|frais annuels|selling-cost|growth|development levies|croissance)\b/.test(named))) || (m.kind === "ignored" && m.unitMismatch)) m = conceptField(rawLabel, t, opts) ?? m;

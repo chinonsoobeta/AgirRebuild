@@ -8665,4 +8665,23 @@ describe("card 124: labels by meaning and figure type", () => {
   test.each(traps)("rule %s trap: %s", (_rule, input, forbidden) => {
     expect(read(input).candidates.filter(c => c.fieldKey === forbidden)).toEqual([]);
   });
+  // Audit: letting that starts after the works is the lease-up, not the build the works name.
+  test.each([
+    ["Délai pour trouver des locataires après les travaux : 4 mois", 4],
+    ["Mois pour louer après la livraison : 4", 4],
+    ["Months to rent out the homes after the works: 4", 4],
+    ["Time to find tenants once construction is done: 4 months", 4],
+  ] as const)("audit: lease-up after the works: %s", (input, value) => {
+    expect(read(input).candidates.map(c => [c.fieldKey, c.value])).toEqual([["lease_up_months", value]]);
+  });
+  test.each([
+    "Durée des travaux : 18 mois",
+    "Months of site work before we can rent: 18",
+    "Build time: 18 months",
+  ])("audit: a build period stays the build: %s", (input) => {
+    expect(read(input).candidates.map(c => [c.fieldKey, c.value])).toEqual([["construction_months", 18]]);
+  });
+  test("audit: a holding period with no unit is not read as years", () => {
+    expect(read("Holding period 60").candidates.filter(c => c.fieldKey === "hold_years")).toEqual([]);
+  });
 });

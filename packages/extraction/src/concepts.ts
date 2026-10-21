@@ -153,7 +153,7 @@ export const CONCEPTS: readonly {
     fieldKey: "construction_months", unit: "months", assumption: true,
     // Card 111 (v4, v5): a span from the foundations to occupancy is the build.
     words: [BUILD_DURATION, /\b(?:build|building (?:stretch|duration)|(?:time|period|duration) to (?:finish|complete)|construction|works|work period|trades|installation|fit-up|site|crew|delivery|program(?:me)?|conversion|renovation|fit-out|chantier|travaux|transformation)\b/, /\bfrom (?:the )?(?:foundations?|shovels?(?: in the ground)?|ground-?breaking|excavation|mobili[sz]ation) to (?:the )?(?:occupancy|completion|handover|delivery|substantial completion)\b|\b(?:de|des|du) (?:la |les )?(?:fondations?|excavation|mobilisation|debut des travaux) (?:a|au|jusqu a) (?:la |l )?(?:occupation|livraison|fin des travaux)\b/],
-    exclude: /\b(?:loans?|interest|reserves?|terms?|lock|(?<!occupancy )permits?|approval|wait|holdbacks?|warranty|lease|let(?! us\b)|tenants?|prets?|interets?|permis|attente|garantie|retenue|insurance|assurance|starts?|debut|avant|commencement|fixed through|post-completion|construction month|fill|tenanting|remplissage|reviews?|examen|revue|(?:re-?)?zoning|zonage|draws?|tirages?|take-?out|relais|deadline|echeance)\b/,
+    exclude: /\b(?:loans?|interest|reserves?|terms?|lock|(?<!occupancy )permits?|approval|wait|holdbacks?|warranty|lease|let(?! us\b)|tenants?|locataires?|louer|rent out|prets?|interets?|permis|attente|garantie|retenue|insurance|assurance|starts?|debut|avant|commencement|fixed through|post-completion|construction month|fill|tenanting|remplissage|reviews?|examen|revue|(?:re-?)?zoning|zonage|draws?|tirages?|take-?out|relais|deadline|echeance)\b/,
   },
   {
     fieldKey: "lease_up_months", unit: "months", assumption: true,
