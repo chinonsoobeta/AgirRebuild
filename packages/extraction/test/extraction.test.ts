@@ -8766,3 +8766,142 @@ describe("card 125: net sales tax and yearly property tax need a person's check"
     ["Property tax: $1,050 per month", 12600],
   ] as const)("audit: a finished building's yearly property tax is read: %s", (line, value) => expect(pick(read(line))).toEqual([["property_tax_annual", value]]));
 });
+
+
+describe("card 126: commercial area, building totals and shared type names", () => {
+  const read = (input: string) => {
+    const parts = input.split(" // ");
+    const sh = /^S(?:\(([^)]*)\))?:/;
+    const tables = parts.every(p => sh.test(p)) ? [{ name: parts[0]!.match(sh)![1] ?? "Base", rows: parts.map((p, r) => p.replace(sh, "").split("|").map((text, c) => ({ text: text.trim(), ref: `${String.fromCharCode(65 + c)}${r + 1}`, ...(/^\d+$/.test(text.trim()) ? { number: Number(text) } : {}) }))) }] : [];
+    return extractCandidates({ kind: tables.length ? "xlsx" : "pdf", tables, lines: tables.length ? [] : parts.map((text, i) => ({ text, location: `page 1, line ${i + 1}` })), fullText: parts.join("\n"), pageCount: 1, needsOcr: false });
+  };
+  const fields = (input: string, field: string) => read(input).candidates.filter(c => c.fieldKey === field);
+  test.each([
+    ["Floor area for the shop: 840 square feet", 840],
+    ["Pour Boutique, superficie locative : 130 m²;", 130 * SF_PER_M2],
+    ["S:Leasable café area (m²)|95", 95 * SF_PER_M2],
+    ["Surface du Commerce Est : 110 m².", 110 * SF_PER_M2],
+  ])("rule 1 area: %s", (input, value) => expect(fields(input, "rentable_area_sf")[0]?.value).toBeCloseTo(value, 6));
+  test.each([
+    ["Lease rate for the shop: $31 per sq ft yearly", 31],
+    ["Pour Boutique, tarif surfacique annuel : 265 $/m²/an;", 265 / SF_PER_M2],
+    ["S:Net rent café ($/sf)|3 per month", 36],
+    ["Loyer du Commerce Est : 225 $/m²/an.", 225 / SF_PER_M2],
+  ])("rule 2 rent: %s", (input, value) => expect(fields(input, "rent_psf_annual")[0]?.value).toBeCloseTo(value, 6));
+  test.each([
+    ["Shop Elm // Rentable floor area: 800 sf // Net rent: $29/sf/year", "Shop Elm"],
+    ["S:Commerce Ouest // S:Superficie totale louable de ce type (m²)|125 // S:Loyer de base ($/m²/an)|250", "Commerce Ouest"],
+    ["Pour Boutique, surface locative 135 m²; // Tarif de ce local : 245 $/m²/an.", "Boutique"],
+  ])("rule 3 ownership: %s", (input, item) => {
+    const r = read(input).candidates.filter(c => ["rentable_area_sf", "rent_psf_annual"].includes(c.fieldKey!));
+    expect(r.map(c => c.fieldKey).sort()).toEqual(["rent_psf_annual", "rentable_area_sf"]);
+    expect(r.every(c => itemFold(c.itemKey!) === itemFold(item))).toBe(true);
+  });
+  test.each([
+    ["Space Area (sf) Rent ($/sf/year) // Shop 850 32", 850 * 32],
+    ["Local Superficie (m²) Loyer ($/m²/an) // Boutique 130 260", 130 * 260],
+    ["S(Loyers):Local|Surface (m²)|Loyer ($/m²/an) // S:Commerce Sud|140|255 // S:Superficie locative (m²)|140 // S:Loyer de base net ($/m²/an)|255", 140 * 255],
+    ["Type Logements Superficie (pi²) Loyer // 3 1/2 2 580 1 450 $ par mois", 2 * 1450 * 12],
+  ])("rule 4 tables: %s", (input, value) => {
+    const by = new Map<string, Record<string, number>>();
+    for (const c of read(input).candidates) if (c.fieldKey && c.value !== null) by.set(c.itemKey!, { ...by.get(c.itemKey!), [c.fieldKey]: c.value });
+    expect([...by.values()].reduce((n, it) => n + (it.rent_psf_annual !== undefined ? it.rentable_area_sf! * it.rent_psf_annual : it.unit_count! * it.unit_rent_monthly! * 12), 0)).toBeCloseTo(value, 5);
+  });
+  test.each([
+    ["Pour Boutique, surface locative 135 m²; tarif surfacique annuel 245 $/m²/an; occupation 90 %.", 135 * 245],
+    ["Shop area: 950 sf; net rent: $30/sf/year; occupancy 92%.", 950 * 30],
+    ["Surface louable commerce 100 m²; soit environ 1076 pi².", 100 * SF_PER_M2],
+  ])("rules 1–3 mixed clauses: %s", (input, value) => {
+    const r = read(input).candidates;
+    const area = r.find(c => c.fieldKey === "rentable_area_sf")!;
+    const rent = r.find(c => c.fieldKey === "rent_psf_annual");
+    expect(area).toBeDefined();
+    if (rent) { expect(rent.itemKey).toBe(area.itemKey); expect(area.value! * rent.value!).toBeCloseTo(value, 4); }
+    else expect(area.value).toBeCloseTo(value, 4);
+  });
+  test.each([
+    ["Shop east // Shop west count: 1; Shop west rent: $28/sf/year // Shop area: 900 sf", "Shop West"],
+    ["Commerce Est // Commerce rue Nombre à louer 1 Par m² et par an 240 $ // Surface louable commerce 100 m²; soit environ 1076 pi².", "Commerce Rue"],
+    ["Office East // Office west count: 1; Office west rent: $28/sf/year // Office area: 900 sf", "Office West"],
+  ])("rule 3 a following area stays with the named space: %s", (input, item) => {
+    expect(fields(input, "rentable_area_sf")[0]?.itemKey).toBe(item);
+  });
+  test("rule 3 a street number never becomes a commercial count", () => {
+    expect(fields("Commercial shop // Re: Cedar Apartments, 2418 Cedar Road", "unit_count")).toEqual([]);
+  });
+  const sourced = (input: string, id: string) => read(input).candidates.map(c => ({ ...c, documentId: id, documentName: id }));
+  test.each(["Residential", "Logements", "Cedar Quay"])("rule 5 cross-document total: %s", name => {
+    const total = sourced(`${name} units: 7`, "summary");
+    const types = sourced("Type Units Monthly rent // Studio 3 $1400 // Loft 4 $1800", "roll");
+    const p = consolidate([...total, ...types]);
+    expect(p.filter(c => c.fieldKey === "unit_count").map(c => c.itemKey).sort()).toEqual(["Loft", "Studio"]);
+    expect(total[0]?.note ?? read(`${name} units: 7`).other[0]?.note).toMatch(/building.*total/i);
+  });
+  test.each(["Residential", "Residential units", "Logements"])("rule 5 sole item stays: %s", name => {
+    const cs = sourced(`S:Type|Units|Monthly rent // S:${name}|7|`, "summary");
+    expect(consolidate(cs).filter(p => p.fieldKey === "unit_count").map(p => p.itemKey)).toEqual([name]);
+  });
+  test.each(["Cedar Quay project", "Rue des Saules", "Oak Street"])("rule 5 project or street total need not equal the mix: %s", name => {
+    const cs = [...sourced(`S:Type|Units|Monthly rent // S:${name}|9|`, "summary"), ...sourced("Type Units Monthly rent // Studio 3 $1400 // Loft 4 $1800", "roll")];
+    expect(consolidate(cs).some(p => p.itemKey === name && p.fieldKey === "unit_count")).toBe(false);
+  });
+  test("rule 5 a place's programme count beside two fractional layouts is a total", () => {
+    const cs = [...sourced("Québec : huit logements, structure de bois.", "summary"), ...sourced("Type Logements Superficie (pi²) Loyer // 3 1/2 2 580 1 450 $ par mois // 4 1/2 4 720 1 850 $ par mois", "roll")];
+    expect(consolidate(cs).filter(p => p.fieldKey === "unit_count").map(p => p.itemKey)).toEqual(["3 1/2", "4 1/2"]);
+  });
+  test.each(["unit_rent_monthly", "rent_psf_annual", "rentable_area_sf"])("rule 5 another document supplies %s", fieldKey => {
+    const cs = [...sourced("Residential units: 7", "summary"), ...sourced("Type Units Monthly rent // Studio 3 $1400 // Loft 4 $1800", "roll")];
+    cs.push({ ...cs[0]!, fieldKey, value: 1500, documentId: "details", documentName: "details" });
+    expect(consolidate(cs).some(p => p.fieldKey === "unit_count" && p.itemKey === "Residential")).toBe(true);
+  });
+  test.each(["Shop", "Commerce", "Boutique"])("rule 5 commercial count stays: %s", name => {
+    const cs = [...sourced(`S:Type|Units|Monthly rent // S:${name}|7|`, "summary"), ...sourced("Type Units Monthly rent // Studio 3 $1400 // Loft 4 $1800", "roll")];
+    expect(consolidate(cs).some(p => p.itemKey === name && p.fieldKey === "unit_count")).toBe(true);
+  });
+  test.each(["three-bed sides", "Two-bed terraces", "Residential units"])("rule 6 preserves candidate spelling: %s", name => {
+    expect(fields(`S:Type|Units|Monthly rent // S:${name}|7|1500`, "unit_count")[0]?.itemKey).toBe(name);
+  });
+  test.each([
+    ["three-bed sides", "3-bed side"], ["Two-bed terraces", "2-bed terrace"], ["trois chambres latérales", "3 chambres latérale"], ["basement suites", "basement suite"],
+  ])("rule 6 canonical fold: %s", (a, b) => expect(itemFold(a)).toBe(itemFold(b)));
+  test.each([
+    "S(Revenue):Revenue|Plan quantities - two-bed stacked|Revenue package - tax basis stated in category|8 // S:Revenue|Per-door monthly lease - two-bed stacked|Revenue package - tax basis stated in category|$2150",
+    "S(Revenus):Revenus|Portes prévues - Jardin|Base fiscale|4 // S:Revenus|Tarif mensuel - Jardin|Base fiscale|1 650 $",
+    "S(Lease):Revenue|Homes available - Terrace|Tax basis note|3 // S:Revenue|Monthly rent - Terrace|Tax basis note|$1900",
+  ])("rule 7 category revenue: %s", input => {
+    expect(fields(input, "unit_count")).toHaveLength(1);
+    expect(fields(input, "unit_rent_monthly")).toHaveLength(1);
+  });
+  test.each([
+    ["Revenue", "Plan quantities - two-bed stacked", "Per-door monthly lease - two-bed stacked"],
+    ["Revenus", "Portes prévues - Jardin", "Tarif mensuel - Jardin"],
+    ["Revenue", "Homes available - Terrace", "Monthly rent - Terrace"],
+  ])("rule 7 headed budget uses each revenue row's value: %s", (category, count, rent) => {
+    const input = `S(Inputs):Category|Description|Amount|Tax basis|Value // S:Hard|Hard costs|900000|| // S:${category}|${count}||${category} package - tax basis stated in category|8 // S:${category}|${rent}||${category} package - tax basis stated in category|$2150`;
+    expect(fields(input, "unit_count")).toHaveLength(1);
+    expect(fields(input, "unit_rent_monthly")).toHaveLength(1);
+  });
+  const traps: [string, string, string][] = [
+    ["1", "Land area: 9000 sf", "rentable_area_sf"], ["1", "Superficie du terrain : 800 m²", "rentable_area_sf"],
+    ["2", "Shop comparable rent: $26/sf/year", "rent_psf_annual"], ["2", "Loyer de l'ancien local : 220 $/m²/an", "rent_psf_annual"],
+    ["3", "Studio // Surface locative : 80 m²", "rentable_area_sf"], ["3", "All units // Rent per sf: $28/sf", "rent_psf_annual"],
+    ["4", "Comparable // Local Surface (m²) Loyer ($/m²/an) // Boutique 100 240", "rent_psf_annual"], ["4", "S:Type|Logements|Superficie (pi²)|Loyer mensuel // S:Total|2|580|1450", "unit_rent_monthly"],
+    ["5", "Phase two may add 5 townhomes.", "unit_count"], ["5", "Plus tard, on pourrait ajouter 3 logements.", "unit_count"],
+    ["7", "S(Revenue):Revenue|Monthly parking lease - Shop|Tax basis|$190", "unit_rent_monthly"], ["7", "S(Revenus):Revenus|Tarif mensuel voisin - Jardin|Base fiscale|1650 $", "unit_rent_monthly"],
+    ["8", "Shop rent: $20 to $26 per sf yearly", "rent_psf_annual"], ["8", "Tarif Boutique : entre 210 $ et 260 $ par m² par an", "rent_psf_annual"],
+    ["8", "Nearby café rent: $28/sf/year", "rent_psf_annual"], ["8", "Site area for the shop: 7000 sf", "rentable_area_sf"],
+    ["9", "Shop area and rent: 140 m²", "rentable_area_sf"], ["9", "Boutique superficie et loyer : 250 $/m²/an", "rentable_area_sf"],
+  ];
+  test.each(traps)("rule %s trap: %s", (_rule, input, field) => expect(fields(input, field)).toEqual([]));
+  test.each([["3-bed side", "3-bed rear"], ["Studio", "Studios B"], ["Residential units", "Residential unit"]])("rule 6 distinct names: %s / %s", (a, b) => expect(itemFold(a)).not.toBe(itemFold(b)));
+  test.each(["Studio", "Lower 2-bed", "Attic", "Garden suite", "End units"])("rule 5 typed count never removed: %s", name => {
+    const cs = [...sourced(`S:Type|Units|Monthly rent // S:${name}|7|`, "a"), ...sourced("Type Units Monthly rent // Loft 3 $1400 // Attic 4 $1800", "b")];
+    expect(consolidate(cs).some(p => p.itemKey === name && p.fieldKey === "unit_count")).toBe(true);
+  });
+  test.each([
+    "Shop rental area: 950 sf // Shop rent: $30/sf/year", "Pour Café, superficie louable : 90 m² // Loyer Café : 240 $/m²/an", "S:Local|Area (sf)|Rent ($/sf) // S:Retail|1100|28",
+  ])("rules 8 and 9 one unambiguous value: %s", input => {
+    expect(fields(input, "rentable_area_sf")).toHaveLength(1);
+    expect(fields(input, "rent_psf_annual")).toHaveLength(1);
+  });
+});

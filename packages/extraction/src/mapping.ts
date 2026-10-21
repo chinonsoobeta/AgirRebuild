@@ -28,6 +28,36 @@ const GENERIC = new Set([
   "borrower", "emprunteur", "yearly", "annuel", "annuelle", "annually", "broker", "agent", "appraiser", "courtier", "evaluateur", "projet", "sponsor", "promoteur", "address", "adresse", "lender", "preteur", "property", "propriete",
 ]);
 
+// Commercial labels share these word classes across lines, blocks and sheets.
+const COMMERCIAL_NAME = /(?<![\p{L}])(?:shop|caf[eé]|boutique|retail|commercial|commerce|office|bureau|storefront|[eé]picerie)(?![\p{L}])/iu;
+export function commercialItem(raw: string): string | null {
+  const m = COMMERCIAL_NAME.exec(raw);
+  if (!m || /\b(?:parking|storage|stationnement|rangement)\b/.test(foldText(raw))) return null;
+  const tail = raw.slice(m.index + m[0].length).split(/[:;,|($\d]|\b(?:floor|area|rent|loyer|tarif|surface|superficie|nombre|number|count|units|occupancy|occupation|leasable|rentable|louable|locative|par|per|au|is|has|at|leases)\b/i)[0]!.trim();
+  const name = m[0] + (tail && tail.split(/\s+/).length <= 3 ? ` ${tail}` : "");
+  return canonicalItem(name.replace(/\b\p{L}/gu, w => w.toUpperCase()));
+}
+
+/** An area/rent label needs its own unit. The caller supplies commercial ownership. */
+export function commercialLabel(raw: string, t: NumberToken, item: string | null, after = ""): Mapped | null {
+  const f = foldText(raw).replace(/²/g, "2");
+  const area = /\b(?:area|floor area|leasable|rentable|gla|nla|surface|superficie|aire|louable|locative)\b/.test(f);
+  const rent = /\b(?:rent|lease rate|loyer|tarif)\b/.test(f);
+  if (!area && !rent) return null;
+  const perArea = t.unit === "$/sf" || t.unit === "$/m2" || /(?:\$\s*\/|\bper |\bpar |\bau |\ble )(?:sf|sq ft|square feet|square foot|pi2|p\.?c\.?|m2|metre carre)\b/.test(f);
+  const areaUnit = normalizeLabel(raw).labelUnit;
+  if (!(area && (t.unit === "sf" || t.unit === "m2" || areaUnit === "sf" || areaUnit === "m2")) && !(rent && perArea)) return null;
+  if (/\b(?:lot|land|site|terrain|parcel)\b/.test(f)) return { kind: "ignored", reason: "Land or site area is not rentable space" };
+  if (area && rent) return { kind: "ignored", reason: "More than one field fits this commercial label" };
+  if (!item || item === "All units" || unitTypesIn(item).length) return null;
+  if (t.value === null) return { kind: "ignored", reason: t.refusal ?? "Unreadable" };
+  if (rent && ![null, "$", "$/mo", "$/sf", "$/m2"].includes(t.unit)) return null;
+  const metric = t.unit === "m2" || t.unit === "$/m2" || areaUnit === "m2" || /\b(?:m2|metre carre)\b/.test(f);
+  const monthly = t.unit === "$/mo" || MONTHLY_RE.test(`${f} ${after}`);
+  const value = area ? t.value * (metric ? SF_PER_M2 : 1) : t.value * (monthly ? 12 : 1) / (metric ? SF_PER_M2 : 1);
+  return { kind: "field", fieldKey: area ? "rentable_area_sf" : "rent_psf_annual", itemKey: item, value, unitSeen: withCurrency(area ? metric ? "m2" : "sf" : metric ? "$/m2" : "$/sf", t.currencyCode), ...(monthly ? { note: "Monthly rent per area × 12" } : {}) };
+}
+
 const ITEMIZED_ALIASES: Record<string, string[]> = {
   unit_count: ["rental units", "units", "unit count", "homes", "suites", "apartments", "doors", "logements", "unites", "appartements", "nombre de logements", "nombre d unites", "nombre de locaux", "locaux"],
   unit_rent_monthly: ["rent", "monthly rent", "rent per month", "rent monthly", "rent per unit", "rent per suite", "rent per door", "rent per home", "loyer par unite", "loyer par local", "loyer annuel par logement", "loyer annuel par unite", "loyer annuel par local", "loyer mensuel par logement", "loyer mensuel par unite", "loyer mensuel par local", "market rent", "loyer", "loyer mensuel", "loyer par mois", "loyer par logement", "loyer du marche"],
@@ -1203,6 +1233,14 @@ function mapLabel(rawLabel: string, t: NumberToken, opts: MapOptions = {}): Mapp
     const def = FIELD_BY_KEY.get(own)!;
     best = { ...best, def };
   }
+  if ((t.unit === "sf" || t.unit === "m2" || labelUnit === "sf" || labelUnit === "m2") && /\b(?:lot|land|site|terrain|parcel)\b/.test(label)) return { kind: "ignored", reason: "Land or site area is not rentable space" };
+  const namedType = unitTypesIn(rawLabel);
+  const typeLabel = rawLabel.replace(/\d\s*½/g, " ").trim();
+  if (namedType.length === 1 && /½/.test(namedType[0]!)) {
+    const key = /\b(?:logements?|unites?|nombre)\b/i.test(typeLabel) && !/loyer/i.test(typeLabel) ? "unit_count" : /loyer.*(?:mensuel|mois)/i.test(typeLabel) ? "unit_rent_monthly" : null;
+    const c = key ? compatibleValue(FIELD_BY_KEY.get(key)!, t, normalizeLabel(typeLabel).label, labelUnit, labelCode, prose) : null;
+    if (key && c) return { kind: "field", fieldKey: key, itemKey: namedType[0]!, ...c };
+  }
   // Itemized: an alias at the end of the label, with a component name before it.
   let item: { def: FieldDef; alias: string; itemKey: string; value: number; unitSeen: string } | null = null;
   for (const def of FIELDS) {
@@ -1295,7 +1333,6 @@ function mapLabel(rawLabel: string, t: NumberToken, opts: MapOptions = {}): Mapp
   }
   return { kind: "unmapped" };
 }
-
 
 // ---- Budget lines written as sentences with verbs ---------------------------------------------------
 // A verb gives a field only together with its object noun: "pay ... to buy the lot", "the contractor will do the work for", "set aside ... for other costs".

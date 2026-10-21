@@ -1,8 +1,8 @@
 import { FIELD_BY_KEY, FIELDS } from "@agir/contracts";
-import { detectFormat, tokenize } from "@agir/numbers";
+import { detectFormat, tokenize, unitTypesIn } from "@agir/numbers";
 import type { Candidate } from "./candidates.ts";
 import { CONCEPTS } from "./concepts.ts";
-import { canonicalItem, currencyOf, foldText, itemFold, outsideBounds } from "./mapping.ts";
+import { commercialItem, canonicalItem, currencyOf, foldText, itemFold, outsideBounds } from "./mapping.ts";
 
 /** `labelledBy` is the person whose label put a figure here (task 58), so review can ask someone else to confirm it. */
 export type SourcedCandidate = Candidate & { documentId: string; documentName: string; ocr?: boolean; labelledBy?: string };
@@ -31,6 +31,28 @@ function groupForm(list: readonly SourcedCandidate[]): string {
   return [...count].sort(([a, n], [b, m]) => m - n || (a < b ? -1 : a > b ? 1 : 0))[0]![0];
 }
 
+const BUILDING_TOTAL_NOTE = "A whole-building count total, not a residential type";
+/** Compare count-only names with the complete residential mix across the supplied documents. */
+function buildingTotals(cs: readonly SourcedCandidate[]): Set<SourcedCandidate> {
+  const by = new Map<string, SourcedCandidate[]>();
+  for (const c of cs) if (c.itemKey) { const k = itemFold(c.itemKey); by.set(k, [...(by.get(k) ?? []), c]); }
+  const typed = (name: string) => /\b(?:studios?|bachelors?|lofts?|attic|basement|garden|end|interior|stacked|terraces?|sides?)\b|\d\s+1\/2\b/i.test(name) || unitTypesIn(name).some(t => /BR|½/.test(t));
+  const counts = [...by].filter(([name]) => typed(name) && !commercialItem(name)).map(([, values]) => [...new Set(values.filter(c => c.fieldKey === "unit_count" && c.value !== null).map(c => c.value!))]).filter(v => v.length > 0);
+  const sum = counts.length >= 2 && counts.every(v => v.length === 1) ? counts.reduce((n, v) => n + v[0]!, 0) : null;
+  const out = new Set<SourcedCandidate>();
+  if (counts.length < 2) return out;
+  for (const [name, values] of by) {
+    if (typed(name) || commercialItem(name) || values.some(c => ["unit_rent_monthly", "rent_psf_annual", "rentable_area_sf", "area_per_unit"].includes(c.fieldKey ?? ""))) continue;
+    const count = values.filter(c => c.fieldKey === "unit_count" && c.value !== null);
+    const generic = /^(?:all units|residential(?: units)?|apartments?|town-?homes?|homes?|units?|building|logements?|residentiel)$/i.test(foldText(name));
+    const project = /\b(?:project|projet|building|immeuble|street|road|avenue|lane|rue|chemin|residences)\b/.test(foldText(name));
+    // A place heading followed by the programme's dwellings describes the building, rather than a layout row.
+    const place = values.some(c => c.context && /^[^:]+:\s*(?:\d+|[\p{L}-]+)\s+(?:apartments?|logements?|homes?|units?)\b/iu.test(c.context));
+    if (generic || project || place || (sum !== null && count.every(c => c.value === sum))) count.forEach(c => out.add(c));
+  }
+  return out;
+}
+
 /**
  * Gather candidates from every live document into one proposal per field.
  * Agreement yields one value for review. Disagreement yields a conflict that
@@ -44,8 +66,10 @@ export function consolidate(candidates: readonly SourcedCandidate[], dealCurrenc
     const code = currencyOf(c.unitSeen);
     return code !== null && code !== dealCurrency; // a deal with no currency compares none
   };
+  const totals = buildingTotals(candidates);
   const groups = new Map<string, SourcedCandidate[]>();
   for (const c of candidates) {
+    if (totals.has(c)) { c.note = BUILDING_TOTAL_NOTE; continue; }
     if (!c.fieldKey || c.value === null) continue;
     const k = `${c.fieldKey}|${itemFold(c.itemKey ?? "")}`;
     const list = groups.get(k) ?? [];

@@ -255,7 +255,10 @@ export function canonicalItem(name: string): string {
 
 /** Two item names are the same item when their folds are equal: canonical, single spaces, lower case. */
 export function itemFold(name: string): string {
-  return canonicalItem(name).replace(/\s+/g, " ").trim().toLowerCase();
+  const words: Record<string, string> = { one: "1", two: "2", three: "3", four: "4", five: "5", six: "6", un: "1", une: "1", deux: "2", trois: "3", quatre: "4", cinq: "5" };
+  return canonicalItem(name).replace(/\s+/g, " ").trim().toLowerCase()
+    .replace(/\b(one|two|three|four|five|six|un|une|deux|trois|quatre|cinq)(?=[- ](?:bed|chambre))/g, w => words[w]!)
+    .replace(/(\b(?:\d+[- ](?:beds?|bedrooms?|chambres?)|basement|garden|end|interior|lower|upper|front|rear|stacked)\s+)(sides|terraces|suites|homes|units|latérales|laterales)\b/g, (_, prefix: string, noun: string) => prefix + noun.slice(0, -1));
 }
 
 // "m" is million only when it is not the m of m²: "$450 m²" is not $450,000,000.
