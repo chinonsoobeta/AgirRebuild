@@ -1097,7 +1097,7 @@ const ANNUAL_RE = /\b(annual|yearly|year|annuel(le)?|per year|per annum|par anne
 type RentRole = "units" | "item" | "rent" | "basis" | "area" | "occupancy";
 
 const HOME_WORD_RE = /\b(homes?|units?|suites?|doors?|dwellings?|apartments?|flats?|logements?|unites?|portes?|appartements?)\b/;
-const COUNT_WORD_RE = /\b(inventory|count|totals|number|how many|quantity|qty|lettable|available|scheduled|planned|a louer|nombre|nbre|nb|quantite|prevus?|prevues?|disponibles?)\b/;
+const COUNT_WORD_RE = /\b(inventory|count|totals|number|how many|quantity|qty|lettable|available|scheduled|planned|to (?:lease|let|rent)|a louer|nombre|nbre|nb|quantite|prevus?|prevues?|disponibles?)\b/;
 const RENT_WORD_RE = /\b(rents?|ask|asking|lease|tarif|loyers?)\b/;
 const NON_HOME_RENT_RE = /\b(parking|storage|lockers?|casiers?|bikes?|laundry|commercial|retail|stationnement|rangement|buanderie|velos?|psf|sf|sqft|square foot|square feet|pi2|m2)\b/;
 const PER_UNIT_LABEL_RE = /\b(per|par)\s+(home|unit|suite|door|dwelling|apartment|flat|logement|unite|appartement)\b/;
@@ -1105,7 +1105,8 @@ const PER_UNIT_LABEL_RE = /\b(per|par)\s+(home|unit|suite|door|dwelling|apartmen
 /** The same role vocabulary applies to headers, labelled values and transposed rows. */
 function homeRole(h: string): "units" | "rent" | null {
   if (NON_HOME_RENT_RE.test(h)) return null;
-  const rent = RENT_WORD_RE.test(h), perHome = PER_UNIT_LABEL_RE.test(h);
+  // "Doors to lease" counts homes, as "à louer" does; the lease word there is not a rent.
+  const rent = RENT_WORD_RE.test(h.replace(/\bto (?:lease|let|rent)\b/g, " ")), perHome = PER_UNIT_LABEL_RE.test(h);
   if ((MONTHLY_RE.test(h) && (rent || perHome)) || (ANNUAL_RE.test(h) && perHome)) return "rent";
   if ((HOME_WORD_RE.test(h) || COUNT_WORD_RE.test(h)) && !rent && !/\$|\b(price|cost|cout|prix|money|dollars?)\b/.test(h) && !MONTHLY_RE.test(h) && !ANNUAL_RE.test(h)) return "units";
   return null;
@@ -1561,7 +1562,7 @@ function namedRow(row: Cell[], table: Table, result: ExtractionResult): boolean 
 function pairedProseRents(doc: NormalizedDocument, result: ExtractionResult, excluded: boolean[]) {
   const rentLines = doc.lines.filter((l,i) => !excluded[i] && RENT_WORD_RE.test(fold(l.text)) && /\$/.test(l.text) && /\([^)]*\)|\b(for|pour|at|a)\b/.test(fold(l.text)));
   if (!rentLines.length) return;
-  const clean = (s: string) => s.trim().replace(/^(?:the|les?|la|pour|and|et)\s+/i, "").replace(/\s+(?:units?|homes?|suites?|apartments?|logements?)\b/gi, "").replace(/[.;:]+$/, "").trim();
+  const clean = (s: string) => s.trim().replace(/^(?:the|les?|la|pour|and|et)\s+/i, "").replace(/\s+(?:units?|homes?|suites?|apartments?|flats?|dwellings?|doors?|logements?|appartements?|unit[eé]s?)\b/gi, "").replace(/[.;:]+$/, "").trim();
   const nameKey = (s: string) => fold(canonicalItem(clean(s))).replace(/\b([\p{L}-]+)s\b/gu,"$1").replace(/\s+/g," ");
   const mix = new Map<string,string>();
   const remember = (name: string) => { if (!mix.has(nameKey(name))) mix.set(nameKey(name), canonicalItem(clean(name))); };
@@ -1577,7 +1578,7 @@ function pairedProseRents(doc: NormalizedDocument, result: ExtractionResult, exc
       const rawName = m[3]!.trim();
       if (!n || n > 1000 || (!m[2] && !HOME_WORD_RE.test(fold(rawName))) || /\$|\b(total|at|rent|loyer|available|scheduled|planned)\b/.test(fold(rawName))) continue;
       // A following clause is not part of the dwelling name. A noun on its own is no type.
-      const dwelling = /\b(?:units?|homes?|suites?|apartments?|logements?)\b/i.exec(rawName);
+      const dwelling = /\b(?:units?|homes?|suites?|apartments?|flats?|dwellings?|doors?|logements?|appartements?|unit[eé]s?)\b/i.exec(rawName);
       const name = canonicalItem(clean(dwelling ? rawName.slice(0,dwelling.index) : rawName));
       if (!name || name.split(/\s+/).some(w => NAME_STOP_RE.test(w)) || name.split(/\s+/).length > 4 || /[/+$]|\b(months?|mois|years?|ans?|per|par|a month|rent|lease|louer|storeys?|buildings?)\b/.test(fold(name)) || NON_HOME_RENT_RE.test(fold(name)) || /\d+(?![- ]?(?:bed|br|chambre))[a-z]?\b/i.test(name.replace(/\b[1-6][- ]?(?:bed(?:room)?s?|br|chambres?)\b/gi, "").replace(/\d\s*½/g, ""))) continue;
       remember(name);
@@ -2134,7 +2135,8 @@ function fromTable(table0: Table, result: ExtractionResult, notes: string[] = []
     if (cur.rows.length > 0) sections.push(cur);
   };
   table.rows.forEach((row, at) => {
-    const numeric = row.some((c) => c.number !== undefined);
+    // A cell holding a home label with its figure ("Suites planned 3") makes the row a data row, not a header.
+    const numeric = row.some((c) => c.number !== undefined || (tokenize(c.text, result.format).length > 0 && homeRole(fold(c.text.replace(/\$?\s*\d[\d ,.\u00a0]*(?:\s*\$)?/g, " "))) !== null));
     if (cur.rent && (!filledCells(row).length || ROLL_TOTAL_RE.test(fold(row.find(c => c.text.trim())?.text ?? "")))) {
       if (filledCells(row).length) cur.rows.push(row);
       close();

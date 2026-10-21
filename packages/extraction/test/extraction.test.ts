@@ -8556,4 +8556,21 @@ describe("card 123: rent by type across labelled cells, columns and prose", () =
     const r = read(input);
     expect(r.candidates.filter(c => c.fieldKey === forbidden || c.itemKey?.toLowerCase() === forbidden.toLowerCase())).toEqual([]);
   });
+  // Card 123 audit: a type named with a home word, "to lease/let" counts, and flats in a prose mix.
+  const gpr = (input: string) => {
+    const by = new Map<string, Record<string, number>>();
+    for (const c of read(input).candidates) if (c.fieldKey === "unit_count" || c.fieldKey === "unit_rent_monthly") by.set(c.itemKey ?? "", { ...by.get(c.itemKey ?? ""), [c.fieldKey]: c.value as number });
+    return [...by.values()].reduce((a, it) => a + (it.unit_count ?? NaN) * (it.unit_rent_monthly ?? NaN) * 12, 0);
+  };
+  test.each([
+    ["S(Base):Garden suite||Suites intended 2||Rent each month per suite $2,000", 48000],
+    ["S(Base):Notes // S:Corner flat||Flats wanted 2||Rent each month per flat $2,000 // S:Garden suite||Suites intended 2||Rent each month per suite $2,000", 96000],
+    ["S(Mix):Plan|Studio|Loft // S:Doors to lease|1|1 // S:Monthly per home|$2,000|$2,000", 48000],
+    ["S(Base):Studio||Homes to let 2||Monthly rent per home $2,000", 48000],
+    ["The block is 2 flats (1 x studio, 1 x loft). // Rents are $2,000 (studio) and $2,000 (loft).", 48000],
+    ["Two dwellings (1 x studio, 1 x loft). // Rents are $2,000 (studio) and $2,000 (loft).", 48000],
+  ])("audit: %s", (input, want) => expect(gpr(input)).toBe(want));
+  test("audit: a plan to lease floors is no unit count", () => {
+    expect(read("We plan to lease 2 floors to a clinic.").candidates.map(c => c.fieldKey)).not.toContain("unit_count");
+  });
 });
