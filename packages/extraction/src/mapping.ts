@@ -4,7 +4,7 @@
 // but it never becomes an input.
 
 import { FIELD_BY_KEY, FIELDS, OUTPUT_LIKE_PHRASES, type FieldDef } from "@agir/contracts";
-import { LENDING_WORD, PRICE_WORD, REPAYMENT_WORD, IO_WORD, OWNER_WORD, CASH_IN_WORD, NOT_SENIOR_LENDER, OTHER_LENDER, LENDER_TEST, OTHER_RATE, SALE_WORD, SALE_COST_WORD, BUILD_DURATION, LETTING_WORD, TIME_WORD, KEEP_WORD, CLOSING_TOTAL, ASSUMPTION_HISTORY, OCCUPANCY_WORD, SETTLED_WORD, ACQUISITION_WORD, PROPERTY_WORD, RISK_WORD, HOLDING_WORD, RESIDUAL_COST, NOT_THIS_COST, NOT_RISK_COST, NOT_PROJECT_TOTAL, PROJECT_TOTAL, CONCEPTS, SENIOR_RANK, LOAN_PERIOD, STATED_TOTAL, DEBT_SERVICE, LOAN_ANAPHOR, LOAN_NOUN, MAIN_LENDER, MONTH_INDEX, NOT_A_BUDGET_LINE, NOT_CHOSEN_AFTER, LEAVING_AFTER, NOT_THE_DEALS_ASSUMPTION, NOT_THE_LOAN_AFTER, WHERE_IT_SITS } from "./concepts.ts";
+import { DECLINED_AFTER, LENDING_WORD, PRICE_WORD, REPAYMENT_WORD, IO_WORD, OWNER_WORD, CASH_IN_WORD, NOT_SENIOR_LENDER, OTHER_LENDER, LENDER_TEST, OTHER_RATE, SALE_WORD, SALE_COST_WORD, BUILD_DURATION, LETTING_WORD, TIME_WORD, KEEP_WORD, CLOSING_TOTAL, ASSUMPTION_HISTORY, OCCUPANCY_WORD, SETTLED_WORD, ACQUISITION_WORD, PROPERTY_WORD, RISK_WORD, HOLDING_WORD, RESIDUAL_COST, NOT_THIS_COST, NOT_RISK_COST, NOT_PROJECT_TOTAL, PROJECT_TOTAL, CONCEPTS, SENIOR_RANK, LOAN_PERIOD, STATED_TOTAL, DEBT_SERVICE, LOAN_ANAPHOR, LOAN_NOUN, MAIN_LENDER, MONTH_INDEX, NOT_A_BUDGET_LINE, NOT_CHOSEN_AFTER, LEAVING_AFTER, NOT_THE_DEALS_ASSUMPTION, NOT_THE_LOAN_AFTER, WHERE_IT_SITS } from "./concepts.ts";
 import { canonicalItem, codeOf, parenType, SF_PER_M2, unitTypesIn, wholeUnitType, type CurrencyCode, type NumberToken } from "@agir/numbers";
 
 // canonicalItem and itemFold live in @agir/numbers so the engine can use the same fold.
@@ -919,7 +919,8 @@ export function mapToken(rawLabel: string, t: NumberToken, opts: MapOptions = {}
     if (parts.every(keys => keys.length) && new Set(parts.flat()).size > 1) return { kind: "ignored", reason: "More than one percentage field fits this figure" };
   }
   let m = mapSigned(rawLabel, t, opts);
-  if (m.kind === "field" && m.fieldKey === "stated_ltc_pct" && /\b(?:limits?|maximum|plafond)\b/.test(named)) return { kind: "ignored", reason: "A lender's limit, not the deal's figure" };
+  // Card 127 audit: a lender capping or limiting the ratio, by any verb, states its limit.
+  if (m.kind === "field" && ["stated_ltc_pct", "refinance_ltv_pct"].includes(m.fieldKey) && /\b(?:limits?|maximum|plafond\w*|plafonn\w*|caps?|capped|capping|no more than|will not exceed|up to|at most|au plus)\b/.test(named)) return { kind: "ignored", reason: "A lender's limit, not the deal's figure" };
   if (OCCUPANCY_WORD.test(named) && SETTLED_WORD.test(named) && m.kind === "field" && m.fieldKey === "item_occupancy_pct") {
     m = { ...m, fieldKey: "stabilized_occupancy_pct", itemKey: null };
   }
@@ -932,7 +933,8 @@ export function mapToken(rawLabel: string, t: NumberToken, opts: MapOptions = {}
   // Card 127: another lender, a test, or a different kind of rate outranks every loan/equity reading.
   if (m.kind === "field" && (/^(?:senior_|mezz_|refinance_)/.test(m.fieldKey) || m.fieldKey === "equity_amount")) {
     const own = foldText(`${rawLabel} ${(opts.after ?? "").split(/[,;.]|\b(?:and|et)\b/)[0] ?? ""}`);
-    if (reference?.refused || OTHER_LENDER.test(own)) return { kind: "ignored", reason: "Another lender's, declined or historical figure, not this deal's funding" };
+    // Card 127 audit: a refusal later in the sentence ("…; we said no") also makes the offer another lender's.
+    if (reference?.refused || OTHER_LENDER.test(own) || DECLINED_AFTER.test(foldText(opts.after ?? ""))) return { kind: "ignored", reason: "Another lender's, declined or historical figure, not this deal's funding" };
     if (m.fieldKey.startsWith("senior_") && (reference?.notSenior || NOT_SENIOR_LENDER.test(folded))) return { kind: "ignored", reason: "An equity or vendor lender, not the senior loan" };
     if (LENDER_TEST.test(folded)) return { kind: "ignored", reason: "A lender's limit, not the deal's figure" };
     if (/_rate_pct$/.test(m.fieldKey) && OTHER_RATE.test(own)) return { kind: "ignored", reason: "Another kind of rate, not the loan's price" };

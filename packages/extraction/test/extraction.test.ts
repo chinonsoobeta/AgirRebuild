@@ -3271,9 +3271,10 @@ describe("one sentence may state several terms of one loan", () => {
     expect(ltv.other.map((o) => o.value)).toEqual([75]);
   });
   test("negative: a sentence that names no loan's rank reads as it did; a first mortgage or a bank is ranked (cards 108, 118)", () => {
-    // Card 127: an unranked lender with lending attributes now names the senior loan.
+    // Card 127: an unranked lender with lending attributes now names the senior loan; a lender's type never sets the rank (card 118).
     expect(pick(read("The lender will advance $240,000 at 11.5% fixed, amortized over 15 years."))).toEqual([["senior_loan_amount", 240_000], ["senior_rate_pct", 11.5], ["senior_amort_years", 15]]);
     expect(pick(read("A private lender will advance $240,000 at 11.5%."))).toEqual([["senior_loan_amount", 240_000]]);
+    expect(pick(read("A private first mortgage will advance $240,000 at 9.5%."))).toEqual([["senior_loan_amount", 240_000], ["senior_rate_pct", 9.5]]);
     expect(pick(read("The first mortgage will advance $5,000,000 at 6.2%, amortized over 30 years."))).toEqual([["senior_loan_amount", 5_000_000], ["senior_rate_pct", 6.2], ["senior_amort_years", 30]]);
   });
 });
@@ -9042,5 +9043,28 @@ describe("card 127: the deal's lender and equity by meaning", () => {
     expect(read("The bank advances $1,700,000; the second lender provides $430,000; its coupon is 11%.").candidates.map(c => [c.fieldKey, c.value])).toEqual([["senior_loan_amount", 1700000], ["mezz_loan_amount", 430000], ["mezz_rate_pct", 11]]);
     expect(read("La banque accorde 1 700 000 $; le prêt de deuxième rang est de 430 000 $; son taux est de 11 %.").candidates.map(c => [c.fieldKey, c.value])).toEqual([["senior_loan_amount", 1700000], ["mezz_loan_amount", 430000], ["mezz_rate_pct", 11]]);
     expect(read("The bank commits $1,700,000; the rival lender offers $430,000; its coupon is 11%.").candidates.map(c => [c.fieldKey, c.value])).toEqual([["senior_loan_amount", 1700000]]);
+  });
+  const fieldsOf = (input: string) => read(input).candidates.map(c => [c.fieldKey, c.value]);
+  test.each([
+    ["The building lender limits loan-to-cost to 72%.", "stated_ltc_pct"],
+    ["Le prêteur plafonne le ratio prêt-coût à 72 %.", "stated_ltc_pct"],
+    ["A competitor bank quoted $2,500,000; we passed on it.", "senior_loan_amount"],
+    ["Une caisse concurrente offrait 2 500 000 $, offre rejetée.", "senior_loan_amount"],
+  ])("audit: %s is not the deal's %s", (input, field) => {
+    expect(fieldsOf(input).map(([f]) => f)).not.toContain(field);
+  });
+  test.each([
+    ["Our credit union will finance $2,100,000 of the build.", "senior_loan_amount", 2_100_000],
+    ["The first mortgage is priced at 6.1% and is paid off over 25 years.", "senior_rate_pct", 6.1],
+    ["The first mortgage is priced at 6.1% and is paid off over 25 years.", "senior_amort_years", 25],
+    ["Owners are bringing $640,000 in cash.", "equity_amount", 640_000],
+  ])("audit: %s reads %s", (input, field, value) => {
+    expect(fieldsOf(input)).toContainEqual([field, value]);
+  });
+  test("audit: carrying a share of a cost beside a financing word is no loan rate", () => {
+    expect(fieldsOf("Soft costs include legal and financing, and we carry a 4% contingency on hard costs.").map(([f]) => f)).not.toContain("senior_rate_pct");
+  });
+  test("audit: a lender financing the construction is not a construction cost", () => {
+    expect(fieldsOf("Our credit union will finance $2,100,000 of the construction.").map(([f]) => f)).not.toContain("hard_cost");
   });
 });

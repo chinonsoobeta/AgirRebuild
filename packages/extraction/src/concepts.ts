@@ -11,14 +11,16 @@ export const MAIN_LENDER = /\b(?:preteur principal|banque principale|premier pre
 export const NOT_THE_LOAN_AFTER = /^\W*(?:(?:which|that|but)\s+(?:was|is)\s+)?(?:never|not (?:yet )?committed|uncommitted|jamais|non engage)/;
 
 // Card 127: lender identity and the figure's attribute are separate word classes.
-export const LENDING_WORD = /\b(?:lends?|advances?|commits?|provides?|puts? up|signs? for|funds?|funding|approves?|approved|sanctions?|sanctioned|amount|sum|prete\w*|accord\w*|consent\w*|montant)\b/;
-export const PRICE_WORD = /\b(?:rates?|interest|coupon|charges?|bills?|priced|fixed|annual|yearly|taux|interets?)\b/;
-export const REPAYMENT_WORD = /\b(?:amort\w*|payback|pays? down|repaid|repayment|rembours\w*)\b/;
-export const IO_WORD = /\b(?:interest[- ]only|io|no[- ]principal|without principal|interets? seulement|sans remboursement de capital|franchise)\b/;
+export const LENDING_WORD = /\b(?:lends?|will finance|to finance|finances|financed|financera|financer|advances?|commits?|provides?|puts? up|signs? for|funds?|funding|approves?|approved|sanctions?|sanctioned|amount|sum|prete\w*|accord\w*|consent\w*|montant)\b/;
+export const PRICE_WORD = /\b(?:a year|per annum|par an|rates?|interest|coupon|charges?|bills?|priced|fixed|annual|yearly|taux|interets?)\b/;
+export const REPAYMENT_WORD = /\b(?:amort\w*|paid off|pays? off|payback|pays? down|repaid|repayment|rembours\w*)\b/;
+export const IO_WORD = /\b(?:interest[- ]only|only interest|seul\w* (?:les )?interets?|io|no[- ]principal|without principal|interets? seulement|sans remboursement de capital|franchise)\b/;
 export const OWNER_WORD = /\b(?:partners?|owners?|sponsors?|we|our|associes?|promoteurs?)\b/;
-export const CASH_IN_WORD = /\b(?:put in|puts in|cash (?:in|wired)|contribut\w*|invest\w*|own cash|equity|mise de fonds|apport|fonds propres)\b/;
+export const CASH_IN_WORD = /\b(?:bring\w*|in cash|put in|puts in|cash (?:in|wired)|contribut\w*|invest\w*|own cash|equity|mise de fonds|apport|fonds propres)\b/;
 export const NOT_SENIOR_LENDER = /\b(?:vendor take[- ]back|vtb|equity|fonds propres|capitaux propres)\b/;
-export const OTHER_LENDER = /\b(?:rival|other|another|competing|alternative|autre banque|declined|refused|rejected|turned (?:it )?down|offre refusee|not taken|last year|seller s|previous owner|existing loan being repaid|ancien proprietaire|annee derniere)\b/;
+export const OTHER_LENDER = /\b(?:rival|other|another|competing|competitor|concurrent\w*|alternative|autre banque|declined|refused|rejected|turned (?:it )?down|offre refusee|not taken|last year|seller s|previous owner|existing loan being repaid|ancien proprietaire|annee derniere)\b/;
+// Card 127 audit: a decline anywhere after the figure in its sentence.
+export const DECLINED_AFTER = /\b(?:declined|refused|rejected|turned (?:it |them )?down|passed on it|said no|walked away|dit non|refus\w*|decline\w*|rejet\w*|pas retenu\w*)\b/;
 export const LENDER_TEST = /\b(?:caps?|limits?|no more than|will not exceed|up to|at most|stress[- ]test|qualifying|debt yield|dscr|coverage|plafonne\w*|au plus|taux de qualification)\b/;
 export const OTHER_RATE = /\b(?:vacancy|occupancy|inoccupation|occupation|cap rate|growth|inflation|debt yield)\b/;
 
