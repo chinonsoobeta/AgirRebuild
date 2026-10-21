@@ -8430,3 +8430,130 @@ describe("card 122: assumption and loan leftovers", () => {
     expect(read("Three trucks will rent at $500 a month.").candidates.map(c => c.fieldKey)).not.toContain("unit_count");
   });
 });
+
+
+describe("card 123: rent by type across labelled cells, columns and prose", () => {
+  const read = (input: string, kind: "pdf" | "docx" = "pdf") => {
+    const parts = input.split(" // ");
+    const sh = /^S(?:\(([^)]*)\))?:/;
+    const tables = parts.every(p => sh.test(p)) ? [{ name: parts[0]!.match(sh)![1] ?? "Base", rows: parts.map((p, r) => p.replace(sh, "").split("|").map((text, c) => ({ text: text.trim(), ref: `${String.fromCharCode(65 + c)}${r + 1}`, ...(/^\d+$/.test(text.trim()) ? { number: Number(text) } : {}) }))) }] : [];
+    return extractCandidates({ kind: tables.length && kind !== "docx" ? "xlsx" : kind, tables, lines: tables.length ? [] : parts.map((text, i) => ({ text, location: `page ${i < 3 ? 1 : 2}, line ${i + 1}` })), fullText: parts.join("\n"), pageCount: 2, needsOcr: false });
+  };
+  const cases: [string, string, [string, number, number][]][] = [
+    ["1 count and period vocabulary", "S:Type|Flats available|Lease pcm // S:Studio|3|1700", [["Studio",3,1700]]],
+    ["1 French nouns", "S:Type|Portes disponibles|Tarif mensuel // S:3½|4|1450", [["3½",4,1450]]],
+    ["1 yearly per dwelling", "S:Plan|Dwellings scheduled|Lease per dwelling yearly // S:Studio|2|20400", [["Studio",2,1700]]],
+    ["2 A inline labels", "S:One-bedroom||Apartments available 3||Per dwelling each month $1,750", [["1BR",3,1750]]],
+    ["2 A reordered figures", "S:Two-bedroom|4 flats planned||$2,100 rent pcm", [["2BR",4,2100]]],
+    ["2 A French spaces", "S:3½||Nombre à louer 6|Par logement et par mois 1 450 $", [["3½",6,1450]]],
+    ["2 A2 header context", "Plan Number available Monthly per home // Garden two-bed Base homes 3 Recommended asking $2,150", [["Garden two-bed",3,2150]]],
+    ["2 A2 French repeated header", "Type Quantité Tarif de base // 3½ Nombre à louer 4 Par logement et par mois 1 450 $ //  // Type Quantité Tarif de base — suite // 4½ Portes prévues 2 Tarif retenu 1 850 $", [["3½",4,1450],["4½",2,1850]]],
+    ["2 A2 reordered", "Layout Flats Monthly lease // Courtyard 3 dwellings available $1,650 asking", [["Courtyard",3,1650]]],
+    ["3 B arbitrary leading header", "S:Proposed dwellings|Studio|Two-bedroom // S:Lettable quantity|3|2 // S:Lease pcm|$1,500|$2,100", [["Studio",3,1500],["2BR",2,2100]]],
+    ["3 B French empty lead", "S:|3½|4½ // S:Portes disponibles|3|2 // S:Tarif mensuel|1 500 $|2 100 $", [["3½",3,1500],["4½",2,2100]]],
+    ["3 B fixed width", "Typologie  Studio  Two-bedroom // Apartments planned  3  2 // Per dwelling monthly  $1,500  $2,100", [["Studio",3,1500],["2BR",2,2100]]],
+    ["4 C summary header", "Summary: flats to let / lease pcm // Compact 3 $1,600 // Family 2 $2,300", [["Compact",3,1600],["Family",2,2300]]],
+    ["4 C mid sheet", "S:Rental programme // S:For review // S:UNIT MIX|Units|Rent per month // S:1-bed|3|1600", [["1BR",3,1600]]],
+    ["4 C French title", "Programme locatif // Typologie Quantité Tarif mensuel // Clair 3 1 450 $", [["Clair",3,1450]]],
+    ["5 D value before label", "S:3|new terrace dwellings / Terrace // S:1950|monthly lease per dwelling / Terrace", [["Terrace",3,1950]]],
+    ["5 D empty cell", "S:2||flats available / Attic // S:$1,700||per flat monthly / Attic", [["Attic",2,1700]]],
+    ["5 D type with a home noun", "S:2|Homes available / Garden suite // S:$1,700|Lease monthly / Garden suite", [["Garden suite",2,1700]]],
+    ["5 D French", "S:4|Portes prévues / Clair // S:1 450 $|Tarif mensuel / Clair", [["Clair",4,1450]]],
+    ["6 E parentheses", "Program: 6 apartments (3 x 1-bed, 3 x 2-bed). // Residential rents $1,950 (1-bed) and $2,550 (2-bed).", [["1BR",3,1950],["2BR",3,2550]]],
+    ["6 E for and short form", "Twelve lower 2-bed units and twelve upper 3-bed units. // Rents in the model are $2,350 for the lower 2-beds and $2,850 for the uppers.", [["Lower 2-bed",12,2350],["Upper 3-bed",12,2850]]],
+    ["6 E French types before money", "Programme: 3 x 3½, 2 x 4½. // Loyers mensuels: 3½ à 1 450 $ et 4½ à 1 850 $.", [["3½",3,1450],["4½",2,1850]]],
+    ["6 E names before rents", "Program: 2 x Loft, 5 x Studio. // Rents: Lofts at $1,800 and Studios at $1,450.", [["Loft",2,1800],["Studio",5,1450]]],
+    ["6 E home synonyms", "Six courtyard homes and four terrace suites. // Monthly rent quotes: $1,900 for courtyard homes and $2,450 for terrace suites.", [["courtyard",6,1900],["terrace",4,2450]]],
+    ["6 E French spelled mix", "Programme: deux petits logements et trois grands logements. // Loyers mensuels: 1 250 $ pour les petits logements et 1 700 $ pour les grands logements.", [["petits",2,1250],["grands",3,1700]]],
+    ["7 F tax note", "S:Revenue|Dwellings scheduled - Garden|Revenue package - tax basis stated in category|3 // S:Revenue|Lease pcm - Garden|Revenue package - tax basis stated in category|$1,950", [["Garden",3,1950]]],
+    ["7 F rent before count", "S:Revenue|Each month per door - Attic|Tax basis|$1,700 // S:Revenue|Flats available - Attic|Tax basis|2", [["Attic",2,1700]]],
+    ["7 F French", "S:Revenus|Portes prévues - Clair|Base de taxe|4 // S:Revenus|Tarif mensuel - Clair|Base de taxe|1 450 $", [["Clair",4,1450]]],
+    ["8 type in row", "S:Lower 2-bed|Doors scheduled 3|Monthly lease $1,950", [["Lower 2-bed",3,1950]]],
+    ["8 type in column", "S:Plan|Studio|Loft // S:Available|3|2 // S:Asking per month|$1,500|$2,100", [["Studio",3,1500],["Loft",2,2100]]],
+    ["8 type in prose", "Programme: 4 x 3½. // Loyer: 1 450 $ (3½).", [["3½",4,1450]]],
+    ["9 current own rent", "S:Studio|Available apartments 3|Lease each month $1,700", [["Studio",3,1700]]],
+    ["9 French current", "S:3½|Portes prévues 3|Tarif mensuel 1 450 $", [["3½",3,1450]]],
+    ["9 table current", "S:Type|Available|Lease pcm // S:Studio|3|1700", [["Studio",3,1700]]],
+    ["10 one French figure", "Type Quantité Tarif mensuel // 3½ Logements prévus 6 Par logement par mois 1 300 $", [["3½",6,1300]]],
+    ["10 single role", "S:Studio|Available 2|Asking monthly $1,700", [["Studio",2,1700]]],
+    ["10 single figure first", "S:2|Available flats / Loft // S:1700|Monthly lease / Loft", [["Loft",2,1700]]],
+  ];
+  test.each(cases)("rule %s", (_rule, input, expected) => {
+    for (const kind of ["pdf", "docx"] as const) {
+      const r = read(input, kind);
+      const got = r.candidates.filter(c => c.fieldKey === "unit_count" || c.fieldKey === "unit_rent_monthly").map(c => [c.fieldKey, c.itemKey?.toLowerCase(), c.value]);
+      const want = expected.flatMap(([item,n,rent]) => [["unit_count",item.toLowerCase(),n],["unit_rent_monthly",item.toLowerCase(),rent]]);
+      expect(got.sort(), JSON.stringify(r)).toEqual(want.sort());
+    }
+  });
+  test.each([
+    ["S:Type|Count|Monthly lease // S:Studio|3|1700 // S: // S:Family|2|2300", "Family"],
+    ["S:Type|Count|Monthly lease // S:Studio|3|1700 // S:Total|3|5100 // S:Family|2|2300", "Family"],
+    ["Type Count Monthly lease // Studio 3 $1,700 // Total 3 $5,100 // Family 2 $2,300", "Family"],
+    ["S:Type|Count|Parking rent monthly // S:Studio|3|170", "Studio"],
+    ["S:Type|Nombre|Loyer mensuel des casiers // S:3½|3|145", "3½"],
+  ])("a roll stops or excludes a non-home header: %s", (input, item) => {
+    expect(read(input).candidates.filter(c => c.fieldKey === "unit_rent_monthly" && c.itemKey === item)).toEqual([]);
+  });
+  test.each([
+    "Program: 3 x Studio. // Suite 102 is the barrier-free suite. // Rents $1,700 (Studio).",
+    "Program: 3 x Studio. // 101 / Duplex home / proposed // Rents $1,700 (Studio).",
+    "Program: 3 x Studio. // We lease three suites a month. // Rents $1,700 (Studio).",
+    "Programme: 3 x 3½. // Il faut 8 mois pour louer les 12 logements. // Loyer 1 450 $ (3½).",
+  ])("prose counts exclude suite identifiers and timing: %s", input => {
+    const counts = read(input).candidates.filter(c => c.rule === "line:mix-count");
+    expect(counts.map(c => c.value)).toEqual([3]);
+  });
+  test("a name before a slash is not a count label merely because it includes suite", () => {
+    const r = read("S:3|Garden suite / count // S:2500|Garden suite / monthly rent");
+    expect(r.candidates.filter(c => c.fieldKey === "unit_count").map(c => [c.itemKey,c.value])).toEqual([["Garden Suite",3]]);
+  });
+  test("a letter heading does not make its own base rent table a comparison", () => {
+    const r = read("Market letter to the sponsor // Unit type Count Base monthly rent // Row home 3 $2,600");
+    expect(r.candidates.filter(c => c.fieldKey === "unit_rent_monthly").map(c => c.value)).toEqual([2600]);
+  });
+  test("pipe-separated labelled rows keep their original type", () => {
+    const r = read("Type | Count | Monthly rent // 3½ | Portes prévues 3 | Loyer mensuel 1 450 $");
+    expect(r.candidates.filter(c => c.fieldKey === "unit_rent_monthly").map(c => c.itemKey)).toEqual(["3½"]);
+  });
+  test.each([
+    "Three lower 2-bed units and two upper 3-bed units. // Rents $1,700 for the lower 2-beds and $2,300 for the uppers; the lowers could reach $1,600 to $1,800.",
+    "Programme: 3 x 3½, 2 x 4½. // Loyers 1 450 $ (3½) et 1 850 $ (4½); comparaison 1 300 $ à 1 500 $.",
+  ])("a later comparison clause does not replace stated rents: %s", input => {
+    const r = read(input);
+    expect(r.candidates.filter(c => c.fieldKey === "unit_rent_monthly")).toHaveLength(2);
+  });
+  test("a comparison heading belongs to the following worksheet table", () => {
+    expect(read("S:Comparison // S:Type|Count|Monthly rent // S:Studio|3|1700").candidates.filter(c => c.fieldKey === "unit_rent_monthly")).toEqual([]);
+  });
+  test("a comparison paragraph belongs to a located Word table", () => {
+    const r = extractCandidates({ kind: "docx", lines: [{text:"Comparison",location:"paragraph 1"}], tables: [{name:"Table 1",at:1,rows:[["Type","Count","Monthly rent"],["Studio","3","1700"]].map((row,r) => row.map((text,c) => ({text,ref:`R${r}C${c}`})))}],fullText:"Comparison",pageCount:null,needsOcr:false });
+    expect(r.candidates.filter(c => c.fieldKey === "unit_rent_monthly")).toEqual([]);
+  });
+  const traps: [string, string, string][] = [
+    ["1", "S:Studio|Doors monthly 3|Parking lease monthly $170", "unit_count"],
+    ["1", "S:3½|Coût 3|Tarif mensuel stationnement 145 $", "unit_rent_monthly"],
+    ["2", "S:Studio|Homes 10 to 12|Monthly lease $1,700", "unit_count"],
+    ["2", "S:3½|Portes prévues 3|Tarif mensuel 1 400 $ à 1 600 $", "unit_rent_monthly"],
+    ["3", "S:Comparison|Studio|Loft // S:Available|3|2 // S:Lease pcm|1700|1900", "unit_rent_monthly"],
+    ["3", "S:Plan|Studio|Loft // S:Available|3|2 // S:Parking rent monthly|170|190", "unit_rent_monthly"],
+    ["4", "Flats / rent pcm // Compact 3 $1,700 //  // Family 2 $2,300", "Family"],
+    ["4", "Type Quantité Tarif mensuel // Clair 3 1 450 $ // Total 3 4 350 $", "Total"],
+    ["5", "S:$1,700 to $1,900|Monthly lease / Loft", "unit_rent_monthly"],
+    ["5", "S:145|Loyer mensuel stationnement / Clair", "unit_rent_monthly"],
+    ["6", "Rents: $1,700 (Studio) and $2,300 (Loft).", "unit_rent_monthly"],
+    ["6", "Programme: 3 x 3½. // Loyer: 1 450 $ (4½).", "unit_rent_monthly"],
+    ["7", "S:Revenue|Parking lease monthly - Garden|Tax basis|$170", "unit_rent_monthly"],
+    ["7", "S:Revenus|Tarif mensuel voisin - Clair|Base de taxe|1 450 $", "unit_rent_monthly"],
+    ["8", "Program: 3 x lower 2-bed, 2 x upper 2-bed, 2 x upper 3-bed. // Rents $2,000 for the uppers.", "unit_rent_monthly"],
+    ["8", "S:Studio|Monthly rent $1,700 to $1,900", "unit_rent_monthly"],
+    ["9", "Comparison // Type Count Monthly rent // Studio 3 $1,700", "unit_rent_monthly"],
+    ["9", "Programme: 3 x 3½. // Les anciens locataires payaient un loyer de 1 450 $ (3½).", "unit_rent_monthly"],
+    ["10", "S:Studio|Count 3 and 4|Monthly lease $1,700", "unit_count"],
+    ["10", "S:3½|Quantité 2 à 4|Tarif mensuel 1 450 $", "unit_count"],
+  ];
+  test.each(traps)("rule %s trap: %s", (_rule, input, forbidden) => {
+    const r = read(input);
+    expect(r.candidates.filter(c => c.fieldKey === forbidden || c.itemKey?.toLowerCase() === forbidden.toLowerCase())).toEqual([]);
+  });
+});
