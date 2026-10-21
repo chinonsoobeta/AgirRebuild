@@ -2,7 +2,7 @@ import { GROWTH_WORD, CONCEPTS, BANK_LENDER, LOAN_NOUN, CLOSING_TOTAL, STATED_TO
 import { FIELD_BY_KEY, OUTPUT_LIKE_PHRASES } from "@agir/contracts";
 import { detectFormat, normalizeText, SF_PER_M2, tokenize, unitTypesIn, wholeUnitType, type CurrencyCode, type DocumentFormat, type NumberToken } from "@agir/numbers";
 import type { Cell, NormalizedDocument, Table } from "./document.ts";
-import { commercialItem, commercialLabel, genericCommercial, PROPERTY_TAX_WORD, BASIS_AFTER_RE, CREDIT_NOTE, REPLACED_LOAN, DEPOSIT_NOTE, DEPOSIT_RE, LTV_BASIS, canonicalItem, costSentence, currencyOf, flagRead, flagSentence, hasPhrase, isOperatingTarget, isExitCapLabel, isTakeoutTimingLabel, isPlainRentLabel, loanNameOnly, loanTerm, mapToken, normalizeLabel, withoutTaxBasis, OLD_SHEET_RE, rankScope, SCENARIO_SHEET_NOTE, SCENARIO_SHEET_RE, SUPERSEDED_LABEL_NOTE, scopeIn, scopesIn, withCurrency, type MapOptions, type Mapped, type Scope } from "./mapping.ts";
+import { unconditioned, commercialItem, commercialLabel, genericCommercial, PROPERTY_TAX_WORD, BASIS_AFTER_RE, CREDIT_NOTE, REPLACED_LOAN, DEPOSIT_NOTE, DEPOSIT_RE, LTV_BASIS, canonicalItem, costSentence, currencyOf, flagRead, flagSentence, hasPhrase, isOperatingTarget, isExitCapLabel, isTakeoutTimingLabel, isPlainRentLabel, loanNameOnly, loanTerm, mapToken, normalizeLabel, withoutTaxBasis, OLD_SHEET_RE, rankScope, SCENARIO_SHEET_NOTE, SCENARIO_SHEET_RE, SUPERSEDED_LABEL_NOTE, scopeIn, scopesIn, withCurrency, type MapOptions, type Mapped, type Scope } from "./mapping.ts";
 
 /** One value found in one document, with where it came from and why it was (or was not) mapped. */
 export type Candidate = {
@@ -174,7 +174,6 @@ const tableRank = (t: Table): Scope | null => {
 };
 
 // A loan named only inside a condition does not establish a sentence or document scope.
-const unconditioned = (x: string) => x.replace(/(?:^|[\s,;(])(?:if|unless|should|until|in case|si|sauf si|à moins qu\S*|a moins qu\S*)\s[^,;]*/giu, " ");
 
 /**
  * The loan each line is about, set by a title or heading: one of the first three lines or a "Subject:" / "Re:" / "Objet :" line
@@ -612,6 +611,8 @@ function figureDashItems(text: string, format: DocumentFormat): { token: NumberT
 function readSentence(sentence: { text: string; start: number }, para0: Paragraph, result: ExtractionResult, carried: string | null = null, priorBudget: string | null = null) {
   const text = labelValueForm(normalizeText(sentence.text));
   const quote = quoteDocs.has(result);
+  const lineStart = para0.segs.filter(g => g.start <= sentence.start).at(-1)?.start ?? 0;
+  const loanLead = para0.text.slice(lineStart, sentence.start).split(/[.!?]\s+/).pop() ?? "";
   // A short label that names a loan ("Take-out: ...") scopes every number on its line, the prose after the colon too; the next line is back under the document's scope.
   const label = text.slice(0, Math.max(text.indexOf(":"), 0));
   const inline = label.split(/\s+/).length <= 8 ? scopeIn(label, false) : null;
@@ -768,7 +769,7 @@ function readSentence(sentence: { text: string; start: number }, para0: Paragrap
     // A label that names nothing for any number ("Financing: a loan of ...") is an introduction: what follows is prose.
     const scope = para.scope;
     // A label for a unit field never names an item unless it is a unit type; the clause after the colon is then read as prose, its own unit types naming the items.
-    const opt = (t: NumberToken): MapOptions => ({ scope, seniorHeading: scope === "senior", quote, budgetConcept: true, after: /^\s*\(\s*\d+(?:[.,]\d+)?\s*%\s+loan[- ]to[- ]cost\)/i.test(text.slice(t.end)) ? text.slice(t.end) : text.slice(t.end, tokens[tokens.indexOf(t) + 1]?.start ?? text.length), gap: text.slice(colon + 1, t.start) });
+    const opt = (t: NumberToken): MapOptions => ({ scope, loanLead, seniorHeading: scope === "senior", quote, budgetConcept: true, after: /^\s*\(\s*\d+(?:[.,]\d+)?\s*%\s+loan[- ]to[- ]cost\)/i.test(text.slice(t.end)) ? text.slice(t.end) : text.slice(t.end, tokens[tokens.indexOf(t) + 1]?.start ?? text.length), gap: text.slice(colon + 1, t.start) });
     const first = tokens.map((t) => mapToken(label, t, opt(t))).find((m) => m.kind === "field");
     const unitField = first?.kind === "field" && first.itemKey !== null && UNIT_FIELDS.has(first.fieldKey);
     const labelTypes = unitTypesIn(label);
@@ -901,7 +902,7 @@ function readSentence(sentence: { text: string; start: number }, para0: Paragrap
       from = t.end;
       return;
     }
-    let opts: MapOptions = { prose: true, scope: para.scope, budgetConcept: true, loanContext: para.scope !== undefined || conceptScope !== undefined || conceptLoan, conceptScope, seniorHeading: para.scope === "senior", context: text, quote, after: isMoney(t) ? afterFigure : text.slice(t.end) };
+    let opts: MapOptions = { prose: true, scope: para.scope, loanLead, budgetConcept: true, loanContext: para.scope !== undefined || conceptScope !== undefined || conceptLoan, conceptScope, seniorHeading: para.scope === "senior", context: text, quote, after: isMoney(t) ? afterFigure : text.slice(t.end) };
     let usedLabel = correctionLabels.get(t) ?? totalLabels.get(t) ?? (i > 0 ? label.split(/\s+\/\s+/).pop()! : label).replace(/^\s*[,/]+\s*/, "");
     if (i > 0 && isMoney(tokens[i - 1]!) && isMoney(t) && !correctionLabels.has(t) && /[,;]/.test(usedLabel)) usedLabel = usedLabel.split(/[,;]/).pop()!.replace(/^\s*(?:and|et|puis|then)\s+/i, "");
     // A shared growth verb qualifies the expense clause after the rent figure.

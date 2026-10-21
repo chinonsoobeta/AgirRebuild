@@ -3271,9 +3271,9 @@ describe("one sentence may state several terms of one loan", () => {
     expect(ltv.other.map((o) => o.value)).toEqual([75]);
   });
   test("negative: a sentence that names no loan's rank reads as it did; a first mortgage or a bank is ranked (cards 108, 118)", () => {
-    // Card 118 audit: "the lender" states no rank; a bank or credit union is the senior lender.
-    expect(pick(read("The lender will advance $240,000 at 11.5% fixed, amortized over 15 years."))).toEqual([]);
-    expect(pick(read("A private lender will advance $240,000 at 11.5%."))).toEqual([]);
+    // Card 127: an unranked lender with lending attributes now names the senior loan.
+    expect(pick(read("The lender will advance $240,000 at 11.5% fixed, amortized over 15 years."))).toEqual([["senior_loan_amount", 240_000], ["senior_rate_pct", 11.5], ["senior_amort_years", 15]]);
+    expect(pick(read("A private lender will advance $240,000 at 11.5%."))).toEqual([["senior_loan_amount", 240_000]]);
     expect(pick(read("The first mortgage will advance $5,000,000 at 6.2%, amortized over 30 years."))).toEqual([["senior_loan_amount", 5_000_000], ["senior_rate_pct", 6.2], ["senior_amort_years", 30]]);
   });
 });
@@ -8920,5 +8920,127 @@ describe("card 126: commercial area, building totals and shared type names", () 
   });
   test.each(["We plan to lease 2 floors to a clinic.", "The café lot: 500 m²", "Comparable shop nearby: 1,200 sq ft at $30 per sq ft", "Shop: the tenant allowance of $50/SF is not rent", "Boutique : allocation pour améliorations locatives de 40 $/pi², pas un loyer"])("audit: %s is not the space's count, area or rent", (input) => {
     expect(read(input).candidates.map(c => c.fieldKey)).toEqual([]);
+  });
+});
+
+
+describe("card 127: the deal's lender and equity by meaning", () => {
+  const read = (input: string) => {
+    const parts = input.split(" // ");
+    const tables = parts.every(p => p.startsWith("S:")) ? [{ name: "Book", rows: parts.map((p, r) => p.slice(2).split("|").map((v, c) => ({ text: v.trim(), ref: `${String.fromCharCode(65 + c)}${r + 1}`, ...(/^\d+(?:\.\d+)?$/.test(v.trim()) ? { number: Number(v) } : {}) }))) }] : [];
+    return extractCandidates({ kind: tables.length ? "xlsx" : "pdf", tables, lines: tables.length ? [] : parts.map((text, i) => ({ text, location: `page 1, line ${i + 1}` })), fullText: parts.join("\n"), pageCount: 1, needsOcr: false });
+  };
+  const cases: [string, string, string, number][] = [
+    // 1: lender nouns, attributes and same-line references, in both orders.
+    ["1", "The credit union sanctions $1,700,000 for this project.", "senior_loan_amount", 1700000],
+    ["1", "Montant consenti par la caisse : 1 700 000 $", "senior_loan_amount", 1700000],
+    ["1", "Our building loan provides $1,700,000.", "senior_loan_amount", 1700000],
+    ["1 reference", "The bank advances $1,700,000; its coupon is 6.7%.", "senior_rate_pct", 6.7],
+    ["1 reference", "La caisse accorde 1 700 000 $; son taux annuel est de 6,7 %.", "senior_rate_pct", 6.7],
+    ["1 reference", "The main lender commits $1,700,000; it bills 6.7% annually.", "senior_rate_pct", 6.7],
+    // 2: each attribute needs the matching figure type.
+    ["2 amount", "The bank signs for $1,700,000.", "senior_loan_amount", 1700000],
+    ["2 amount", "Sum approved by the first mortgage lender: $1,700,000", "senior_loan_amount", 1700000],
+    ["2 amount", "La banque consent 1 700 000 $ au projet.", "senior_loan_amount", 1700000],
+    ["2 price", "The lender bills an annual 6.7%.", "senior_rate_pct", 6.7],
+    ["2 price", "Coupon fixed by the mortgage: 6.7%", "senior_rate_pct", 6.7],
+    ["2 price", "La caisse applique un taux de 6,7 %.", "senior_rate_pct", 6.7],
+    ["2 repayment", "The bank payback runs 27 years.", "senior_amort_years", 27],
+    ["2 repayment", "Repayment of the facility takes 27 years.", "senior_amort_years", 27],
+    ["2 repayment", "Remboursement du prêt principal : 27 ans", "senior_amort_years", 27],
+    ["2 IO", "The bank allows no principal for 15 months.", "senior_io_months", 15],
+    ["2 IO", "Without principal on the mortgage: 15 months", "senior_io_months", 15],
+    ["2 IO", "La caisse prévoit une franchise de 15 mois.", "senior_io_months", 15],
+    ["2 sheet", "S:Input|Mortgage payback years|27", "senior_amort_years", 27],
+    ["2 sheet", "S:Hypothèses|Caisse franchise mois|15", "senior_io_months", 15],
+    ["2 sheet", "S:Input|Bank coupon %|6.7", "senior_rate_pct", 6.7],
+    ["2 sheet", "S:Mortgage payback, years|27", "senior_amort_years", 27],
+    ["2 sheet", "S:Caisse intérêts seulement, mois|15", "senior_io_months", 15],
+    ["2 sheet", "S:Input|Sum sanctioned by the bank|1700000", "senior_loan_amount", 1700000],
+    // 3: owner + cash-in, never a cost percentage.
+    ["3", "The partners invest $430,000.", "equity_amount", 430000],
+    ["3", "Apport des promoteurs : 430 000 $", "equity_amount", 430000],
+    ["3", "Our own cash contributed: $430,000", "equity_amount", 430000],
+    ["3", "S:Hypothèses|Mise de fonds des associés|430000", "equity_amount", 430000],
+    ["3", "We put in $430,000.", "equity_amount", 430000],
+    // 5: existing correct labels and explicit secondary ranks retain their fields.
+    ["5", "Senior amount: $1,700,000", "senior_loan_amount", 1700000],
+    ["5", "Taux du deuxième prêt : 11 %", "mezz_rate_pct", 11],
+    ["5", "S:Bank amortization (years)|27", "senior_amort_years", 27],
+  ];
+  test.each(cases)("rule %s: %s", (_rule, input, key, value) => {
+    const r = read(input);
+    const own = r.candidates.filter(c => c.value === value).map(c => [c.fieldKey, c.value]);
+    expect(own).toEqual([[key, value]]);
+  });
+  const traps = [
+    // 4a: another lender or an offer not taken.
+    "A competing credit union advances $1,700,000.",
+    "Offre refusée de la banque : 1 700 000 $",
+    "The mortgage offered $1,700,000 but we turned it down.",
+    "Another bank coupon: 6.7%", "Autre banque, taux : 6,7 %",
+    // 4b: history or somebody else's loan.
+    "Last year the bank advanced $1,700,000.",
+    "Prêt de l'ancien propriétaire : 1 700 000 $",
+    "The seller's mortgage coupon is 6.7%.",
+    "Existing loan being repaid: $1,700,000",
+    // 4c: limits and underwriting tests, regardless of verb.
+    "The bank caps the amount it provides at $1,700,000.",
+    "La caisse plafonne le montant consenti à 1 700 000 $.",
+    "The mortgage will not exceed $1,700,000.",
+    "The bank stress-test rate is 6.7%.",
+    "Taux de qualification de la caisse : 6,7 %",
+    "Bank debt yield: 6.7%", "Bank coverage test rate: 6.7%",
+    // 4d: another rate stated by a lender.
+    "Vacancy rate forecast by the bank: 6.7%",
+    "Taux d'inoccupation de la caisse : 6,7 %",
+    "Bank growth rate: 6.7%",
+    // 4e: term is not amortization.
+    "Mortgage repayment term: 5 years",
+    "Terme de remboursement du prêt : 5 ans",
+    "Loan renewal after 5 years",
+    // 3 and 5: unit mismatch and ambiguous meanings stay shown.
+    "The partners contribute 25% of cost.",
+    "Mise de fonds des associés : 25 % du coût",
+    "Bank amount: 27 years", "Bank payback: 6.7%",
+    "S:Input|Bank payback|27", "S:Hypothèses|Caisse franchise|15",
+    "Bank amount and partners equity: $430,000",
+    "Principal: $1,700,000",
+  ];
+  test.each(traps)("rule 4/5 shown: %s", input => {
+    const r = read(input);
+    expect(r.candidates).toEqual([]);
+    expect(r.other.length).toBeGreaterThan(0);
+  });
+  test.each(["Bank occupancy rate: 96%", "Bank coupon and vacancy: 6.7%"])("another rate is never the loan price: %s", input => {
+    expect(read(input).candidates.filter(c => c.fieldKey === "senior_rate_pct")).toEqual([]);
+  });
+  test.each([
+    "The vendor take-back lender provides $430,000.",
+    "Equity lender coupon: 11%",
+    "Le prêteur en fonds propres applique un taux de 11 %.",
+    "The second lender charges a fixed 11%.",
+    "Le prêteur subordonné consent 430 000 $.",
+    "Private second mortgage amount: $430,000",
+  ])("rule 1: a secondary or equity lender is never senior: %s", input => {
+    expect(read(input).candidates.filter(c => c.fieldKey?.startsWith("senior_"))).toEqual([]);
+  });
+  test("a later lender replaces the earlier lender even when its figure was refused", () => {
+    expect(read("A rival bank offered $430,000; the main lender commits $1,700,000; its coupon is 6.7%.").candidates.map(c => [c.fieldKey, c.value])).toEqual([["senior_loan_amount", 1700000], ["senior_rate_pct", 6.7]]);
+  });
+  test("a colon in a later clause keeps the same lender reference", () => {
+    expect(read("La caisse accorde 1 700 000 $; son taux : 6,7 %.").candidates.map(c => [c.fieldKey, c.value])).toEqual([["senior_loan_amount", 1700000], ["senior_rate_pct", 6.7]]);
+  });
+  test.each([
+    "S:Loan-to-cost after 6% interest|65",
+    "S:Bank payback after 6% coupon|27",
+    "S:Caisse remboursement après 5% intérêt|28",
+  ])("rule 5: an earlier figure supplies no label unit: %s", input => {
+    expect(read(input).candidates).toEqual([]);
+  });
+  test("references follow the last lender on this line", () => {
+    expect(read("The bank advances $1,700,000; the second lender provides $430,000; its coupon is 11%.").candidates.map(c => [c.fieldKey, c.value])).toEqual([["senior_loan_amount", 1700000], ["mezz_loan_amount", 430000], ["mezz_rate_pct", 11]]);
+    expect(read("La banque accorde 1 700 000 $; le prêt de deuxième rang est de 430 000 $; son taux est de 11 %.").candidates.map(c => [c.fieldKey, c.value])).toEqual([["senior_loan_amount", 1700000], ["mezz_loan_amount", 430000], ["mezz_rate_pct", 11]]);
+    expect(read("The bank commits $1,700,000; the rival lender offers $430,000; its coupon is 11%.").candidates.map(c => [c.fieldKey, c.value])).toEqual([["senior_loan_amount", 1700000]]);
   });
 });

@@ -1,6 +1,6 @@
 // Folded words for a concept read. Aliases and their refusals always run first.
 // "Principal" is an amount word, not a loan: "Principal: $X" alone names no loan.
-export const LOAN_NOUN = /\b(?:loans?|facilit(?:y|ies)|advances?|mortgages?|lenders?|banks?|credit union|member(?= (?:loans?|mortgages?|amort\w*|rates?|interest|io)\b)|credits?|financing|borrowing|prets?|financements?|hypotheques?|preteurs?|banques?|avances?)\b/;
+export const LOAN_NOUN = /\b(?:loans?|facilit(?:y|ies)|advances?|mortgages?|lenders?|banks?|credit union|member(?= (?:loans?|mortgages?|amort\w*|rates?|interest|io)\b)|credits?|financing|borrowing|prets?|financements?|hypotheques?|preteurs?|banques?|caisses?|avances?)\b/;
 // "The lender", "le prêteur": a loan named before, whose rank this line does not state.
 // Card 118 audit: a bank or credit union is the senior lender, so "the bank" is not an anaphor.
 export const LOAN_ANAPHOR = /\b(?:the|a|an|this|that|our|their|its|le|la|les|l|un|une|ce|cette|notre|leur)\s+(?:loans?|facility|(?:private )?lenders?|mortgages?|prets?|preteurs?|hypotheques?)\b/;
@@ -9,6 +9,18 @@ export const BANK_LENDER = /\b(?:banks?|banques?|credit union|caisse)\b/;
 export const MAIN_LENDER = /\b(?:preteur principal|banque principale|premier preteur|principal lender|main lender|lead lender|first lender)\b/;
 // A figure said to be uncommitted or an alternative is not the loan: "…, never committed".
 export const NOT_THE_LOAN_AFTER = /^\W*(?:(?:which|that|but)\s+(?:was|is)\s+)?(?:never|not (?:yet )?committed|uncommitted|jamais|non engage)/;
+
+// Card 127: lender identity and the figure's attribute are separate word classes.
+export const LENDING_WORD = /\b(?:lends?|advances?|commits?|provides?|puts? up|signs? for|funds?|funding|approves?|approved|sanctions?|sanctioned|amount|sum|prete\w*|accord\w*|consent\w*|montant)\b/;
+export const PRICE_WORD = /\b(?:rates?|interest|coupon|charges?|bills?|priced|fixed|annual|yearly|taux|interets?)\b/;
+export const REPAYMENT_WORD = /\b(?:amort\w*|payback|pays? down|repaid|repayment|rembours\w*)\b/;
+export const IO_WORD = /\b(?:interest[- ]only|io|no[- ]principal|without principal|interets? seulement|sans remboursement de capital|franchise)\b/;
+export const OWNER_WORD = /\b(?:partners?|owners?|sponsors?|we|our|associes?|promoteurs?)\b/;
+export const CASH_IN_WORD = /\b(?:put in|puts in|cash (?:in|wired)|contribut\w*|invest\w*|own cash|equity|mise de fonds|apport|fonds propres)\b/;
+export const NOT_SENIOR_LENDER = /\b(?:vendor take[- ]back|vtb|equity|fonds propres|capitaux propres)\b/;
+export const OTHER_LENDER = /\b(?:rival|other|another|competing|alternative|autre banque|declined|refused|rejected|turned (?:it )?down|offre refusee|not taken|last year|seller s|previous owner|existing loan being repaid|ancien proprietaire|annee derniere)\b/;
+export const LENDER_TEST = /\b(?:caps?|limits?|no more than|will not exceed|up to|at most|stress[- ]test|qualifying|debt yield|dscr|coverage|plafonne\w*|au plus|taux de qualification)\b/;
+export const OTHER_RATE = /\b(?:vacancy|occupancy|inoccupation|occupation|cap rate|growth|inflation|debt yield)\b/;
 
 // Card 115: v5/v8/v9/v10 loan labels informed rank and plain loan vocabulary.
 // First phase/draw/year/floor and a partner's priority are not loan ranks.
@@ -78,22 +90,22 @@ export const CONCEPTS: readonly {
 }[] = [
   {
     fieldKey: "senior_loan_amount", unit: "$",
-    words: [LOAN_NOUN, /\b(?:lend|lends|in for|fund|contribution toward construction|pretera|avancera|amount|principal|advance|size|commitment|granted|dollars|funds|money|cash|authorization|committed|dette|montant|capital|accord\w*)\b/],
-    exclude: /\b(?:apprais\w*|evalu\w*|alternat\w*|rough|uncommitted|hypothetical|indicative|floated|(?:sub|sous-)?totals?|line of credit|credit line|marge de credit|ligne de credit|fees?|interests?|reserves?|holdbacks?|draw\w*|to date|balances?|payments?|deposits?|corporation|equity|officer|union|requirements?|valuation|valued|value|frais|interets?|retenues?|soldes?|versements?|depots?|capitaux propres|capital propre|tire\w*|a ce jour|partners?|sponsors?|own|investors?|promoteurs?|associes?|commanditaires?|investisseurs?)\b/,
+    words: [LENDING_WORD, LOAN_NOUN, /\b(?:lend|lends|in for|fund|contribution toward construction|pretera|avancera|amount|principal|advance|size|commitment|granted|dollars|funds|money|cash|authorization|committed|dette|montant|capital|accord\w*)\b/],
+    exclude: /\b(?:apprais\w*|evalu\w*|alternat\w*|rough|uncommitted|hypothetical|indicative|floated|(?:sub|sous-)?totals?|line of credit|credit line|marge de credit|ligne de credit|fees?|interests?|reserves?|holdbacks?|draw\w*|to date|balances?|payments?|deposits?|corporation|equity|officer|(?<!credit )union|requirements?|valuation|valued|value|frais|interets?|retenues?|soldes?|versements?|depots?|capitaux propres|capital propre|tire\w*|a ce jour|partners?|sponsors?|own|investors?|promoteurs?|associes?|commanditaires?|investisseurs?)\b/,
   },
   {
     fieldKey: "senior_rate_pct", unit: "%",
-    words: [/\b(?:rate|interest|intrest|int|coupon|fixed(?=\s*$| (?:rate|coupon|interest|intrest|pricing)\b)|ferme|pricing|charge|cost of borrowing|taux|interet)\b/],
+    words: [PRICE_WORD, /\b(?:rate|interest|intrest|int|coupon|fixed(?=\s*$| (?:rate|coupon|interest|intrest|pricing)\b)|ferme|pricing|charge|cost of borrowing|taux|interet)\b/],
     exclude: /\b(?:to[- ]value|to[- ]cost|ltv|ltc|fees?|spread|over prime|premium|insurance|dscr|dcr|holdbacks?|frais|prime d assurance|ratio|partners?|investors?|commanditaires?|associes?|investisseurs?|retard|arrerages|defaut|deposits?|depots?|ownership|carried|partnership|pret[- ](?:valeur|cout)|ecart|au dessus du taux preferentiel|resets?|renewal|renouvel\w*|revision|step[- ]?ups?|buy-down|buydown|reduction|capitalisation|capitalization|prime(?! d assurance))\b/,
   },
   {
     fieldKey: "senior_amort_years", unit: "years",
-    words: [/\b(?:amort\w*|repay\w*|repaid|paid down|rembours\w*)\b/],
+    words: [REPAYMENT_WORD, /\b(?:amort\w*|repay\w*|repaid|paid down|rembours\w*)\b/],
     exclude: /\b(?:terms?|maturity|renewal|draw\w*|deposits?|depots?|rent-free|echeance|termes?|duree du pret|renouvellement)\b/,
   },
   {
     fieldKey: "senior_io_months", unit: "months",
-    words: [/\b(?:int-only|months free of principal|principal-free|interest[- ]only|io|before repayment begins|before amortization|free-principal|no-principal|principal holiday|franchise de capital|interets? seuls|periode sans capital|interets? seulement|sans remboursement de capital)\b/],
+    words: [IO_WORD, /\b(?:int-only|months free of principal|principal-free|interest[- ]only|io|before repayment begins|before amortization|free-principal|no-principal|principal holiday|franchise de capital|interets? seuls|periode sans capital|interets? seulement|sans remboursement de capital)\b/],
     exclude: /\b(?:terms?|maturity|draw\w*|deposits?|depots?|rent-free|echeance|termes?|tirage\w*)\b/,
   },
   { fieldKey: "refinance_amount", unit: "$", unscoped: true,
@@ -113,7 +125,7 @@ export const CONCEPTS: readonly {
     words: [/\b(?:gp|general partner|sponsor|commandite)\b/],
     with: [/\b(?:upside|carry|carried interest|promote|promoted (?:share|interest)|promotion|interessement|share (?:above|after) (?:pref|preferred return))\b/], exclude: /\b(?:ownership|tier [2-9]|second tier|palier [2-9])\b/ },
   { fieldKey: "equity_amount", unit: "$", unscoped: true,
-    words: [/\b(?:owners?|sponsors?)\b/], with: [/\bcash\b/, /\b(?:in|wired|contributed)\b/], exclude: /\b(?:returned|proceeds|remaining|refinance|take-out)\b/ },
+    words: [CASH_IN_WORD], with: [OWNER_WORD], exclude: /\b(?:returned|proceeds|remaining|refinance|take-out)\b/ },
   { fieldKey: "stated_interest_reserve", unit: "$", unscoped: true,
     words: [/\binterest\b/], with: [/\b(?:holdback|reserve)\b/], exclude: /\b(?:earned|earnings?|income|loans?|leasing|lease-up|combined|optional)\b/ },
   { fieldKey: "stated_ltc_pct", unit: "%", unscoped: true,

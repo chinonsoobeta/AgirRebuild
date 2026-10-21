@@ -4,7 +4,7 @@
 // but it never becomes an input.
 
 import { FIELD_BY_KEY, FIELDS, OUTPUT_LIKE_PHRASES, type FieldDef } from "@agir/contracts";
-import { SALE_WORD, SALE_COST_WORD, BUILD_DURATION, LETTING_WORD, TIME_WORD, KEEP_WORD, CLOSING_TOTAL, ASSUMPTION_HISTORY, OCCUPANCY_WORD, SETTLED_WORD, ACQUISITION_WORD, PROPERTY_WORD, RISK_WORD, HOLDING_WORD, RESIDUAL_COST, NOT_THIS_COST, NOT_RISK_COST, NOT_PROJECT_TOTAL, PROJECT_TOTAL, CONCEPTS, SENIOR_RANK, LOAN_PERIOD, STATED_TOTAL, DEBT_SERVICE, LOAN_ANAPHOR, LOAN_NOUN, MAIN_LENDER, MONTH_INDEX, NOT_A_BUDGET_LINE, NOT_CHOSEN_AFTER, LEAVING_AFTER, NOT_THE_DEALS_ASSUMPTION, NOT_THE_LOAN_AFTER, WHERE_IT_SITS } from "./concepts.ts";
+import { LENDING_WORD, PRICE_WORD, REPAYMENT_WORD, IO_WORD, OWNER_WORD, CASH_IN_WORD, NOT_SENIOR_LENDER, OTHER_LENDER, LENDER_TEST, OTHER_RATE, SALE_WORD, SALE_COST_WORD, BUILD_DURATION, LETTING_WORD, TIME_WORD, KEEP_WORD, CLOSING_TOTAL, ASSUMPTION_HISTORY, OCCUPANCY_WORD, SETTLED_WORD, ACQUISITION_WORD, PROPERTY_WORD, RISK_WORD, HOLDING_WORD, RESIDUAL_COST, NOT_THIS_COST, NOT_RISK_COST, NOT_PROJECT_TOTAL, PROJECT_TOTAL, CONCEPTS, SENIOR_RANK, LOAN_PERIOD, STATED_TOTAL, DEBT_SERVICE, LOAN_ANAPHOR, LOAN_NOUN, MAIN_LENDER, MONTH_INDEX, NOT_A_BUDGET_LINE, NOT_CHOSEN_AFTER, LEAVING_AFTER, NOT_THE_DEALS_ASSUMPTION, NOT_THE_LOAN_AFTER, WHERE_IT_SITS } from "./concepts.ts";
 import { canonicalItem, codeOf, parenType, SF_PER_M2, unitTypesIn, wholeUnitType, type CurrencyCode, type NumberToken } from "@agir/numbers";
 
 // canonicalItem and itemFold live in @agir/numbers so the engine can use the same fold.
@@ -85,6 +85,9 @@ const ITEMIZED_ALIASES: Record<string, string[]> = {
 
 /** Which loan a document, a section or a label is about. A generic label ("Rate", "Loan amount") means the loan in scope. */
 export type Scope = "senior" | "mezzanine" | "refinance";
+
+// A lender named only in a condition does not govern the sentence's terms.
+export const unconditioned = (x: string) => x.replace(/(?:^|[\s,;(])(?:if|unless|should|until|in case|si|sauf si|à moins qu\S*|a moins qu\S*)\s[^,;]*/giu, " ");
 
 const SCOPE_WORDS: Record<Scope, RegExp> = {
   mezzanine: /\b(mezzanine|mezz|subordinate|subordonnee?s?|second(?=\s+(?:cash\b|principal\b|\$))|second loan|second mortgage|2nd mortgage|second charge|second[- ]ranking|second[- ]position|junior|subordinate loan|deuxieme pret|pret (?:de|du) deuxieme(?: rang)?|(?:taux|amort\w*|interet) (?:de la|du) deuxieme(?=\s*(?:$|[:;,]|pret|rang|hypotheque|charge))|(?:rate|amorti[sz]ation|interest) (?:of|on) the second(?=\s*(?:$|[:;,]|loan|mortgage|charge|lien))|deuxieme rang|deuxieme hypotheque|pret de second rang|second rang|(?:mic|mortgage investment corporation) (?:second|2nd)|private second|(?<=\b(?:mortgages?|loans?|charges?|lenders?|hypotheques?|prets?)\b.{0,80})(?:the\s+)?second(?=\s*(?:is\b|:|\$))|^\s*second\s*$|(?:the\s+)?second(?=\s+(?:amort\w*|int|interest|rate|coupon|io|lender|loan)\b)|preteur prive de second rang)\b/,
@@ -549,6 +552,8 @@ export type MapOptions = {
   usesCategory?: boolean;
   /** A money label in text may use the budget concepts; arbitrary plain-sheet labels may not. */
   budgetConcept?: boolean;
+  /** Earlier clauses on the same physical line, for lender references only. */
+  loanLead?: string;
   /** The sentence the label came from, for words about a sale that sit outside the label. */
   context?: string;
   /** The words just after the number in its line, for what the figure is a share of ("4% of EGI") or what it measures ("24 months IO"). */
@@ -816,6 +821,20 @@ const INCLUDED_NOTE = "A part included in another line, not that line";
 // The writer's own fee ("Nos honoraires", "Our professional fees") is a quote for a mandate, not the project's soft costs.
 const WRITER_FEE_RE = /\b(?:nos|notre|mes|mon|our|my) (?:professional )?(?:honoraires|fees?)\b/;
 
+/** The last lender named in this sentence; pronouns never carry between lines. */
+function lenderReference(before: string, fallback: Scope): { scope: Scope; refused: boolean; notSenior: boolean } | null {
+  let last: { scope: Scope; refused: boolean; notSenior: boolean } | null = null;
+  let currentScope = fallback;
+  for (const clause of foldText(unconditioned(before)).split(/[,;]|\b(?:and|et)\b/)) {
+    const scope = scopeIn(clause, false);
+    if (!scope && !LOAN_NOUN.test(clause)) continue;
+    if (scopesIn(clause).length > 1 && !scope) return null;
+    currentScope = scope ?? currentScope;
+    last = { scope: currentScope, refused: OTHER_LENDER.test(clause), notSenior: NOT_SENIOR_LENDER.test(clause) };
+  }
+  return last;
+}
+
 export function mapToken(rawLabel: string, t: NumberToken, opts: MapOptions = {}): Mapped {
   // A second colon supplies the figure's own label inside an introductory label/value line.
   if (opts.gap?.includes(":") && !/\d/.test(opts.gap.slice(opts.gap.lastIndexOf(":") + 1))) {
@@ -838,6 +857,11 @@ export function mapToken(rawLabel: string, t: NumberToken, opts: MapOptions = {}
     const mapped = mapToken(rawLabel, { ...t, unit: "%", value: t.value === null ? null : t.value / 100 }, { ...opts, after: "" });
     return mapped.kind === "field" && /^(?:senior|mezz|refinance)_rate_pct$/.test(mapped.fieldKey) ? { ...mapped, unitSeen: "bps (÷ 100)" } : { kind: "unmapped" };
   }
+  const before = opts.prose && opts.context ? opts.context.slice(0, t.start) : rawLabel;
+  const earlier = opts.prose && opts.context ? opts.context.slice(0, Math.max(0, t.start - rawLabel.length)) : "";
+  const reference = lenderReference(`${opts.loanLead ?? ""} ${before}`, opts.scope ?? "senior");
+  const priorLender = lenderReference(`${opts.loanLead ?? ""} ${earlier}`, opts.scope ?? "senior");
+  if (reference && priorLender) opts = { ...opts, scope: reference.scope, loanContext: true };
   const folded = foldText(rawLabel);
   if ((opts.budget || opts.budgetConcept) && /\b(?:for reference|competing|rejected|previous owner|outside this project)\b/.test(folded)) return { kind: "ignored", reason: "Not this deal's budget line" };
   const taxWords = foldText(`${rawLabel} ${t.raw} ${opts.gap ?? ""} ${(opts.after ?? "").split(/[;,.](?!\d)/)[0] ?? ""}`);
@@ -876,7 +900,7 @@ export function mapToken(rawLabel: string, t: NumberToken, opts: MapOptions = {}
   if (/\b(?:per|par|each|chaque)[ -]+(?:stall|locker|unit|place|casier|unite)s?\b/.test(`${named} ${normalizeLabel((opts.after ?? "").split(/[,;]/)[0] ?? "").label}`) && /\b(?:parking|laundry|storage|locker|stationnement|buanderie|accessoires)\b/.test(named)) return { kind: "ignored", reason: "Other income per stall, locker or unit, not the total" };
   if ((t.unit === "$" || t.currency || t.unit === null) && /\b(?:draws?|tirages?)\b/.test(named) && (/\b(?:loans?|facilit(?:y|ies)|lenders?|prets?|preteurs?)\b/.test(named) || /\b(?:construction draws?|tirages? de construction|weekly|monthly|this month|first|next|draw number|hebdomadaire|mensuel|ce mois|premier|prochain|tirage numero)\b/.test(named))) return { kind: "ignored", reason: "A draw, not the loan amount or a budget line" };
   if ((t.unit === "$" || t.currency || (t.unit === null && t.value !== null && Math.abs(t.value) >= 1000)) && DEBT_SERVICE.test(named)) return { kind: "ignored", reason: "Debt service or a payment, not a loan amount" };
-  if (/^(?:(?:its|their) (?:interest(?: rate)?|rate|amorti[sz]ation)|(?:son|leur) (?:taux|interet|amortissement)|sa duree d amortissement)$/.test(named)) return { kind: "ignored", reason: "Which loan this belongs to is not stated" };
+  if (!priorLender && /^(?:(?:its|their) (?:interest(?: rate)?|rate|amorti[sz]ation)|(?:son|leur) (?:taux|interet|amortissement)|sa duree d amortissement)$/.test(named)) return { kind: "ignored", reason: "Which loan this belongs to is not stated" };
   if (WRITER_FEE_RE.test(named)) return { kind: "ignored", reason: "The writer's own fee, not the project's soft costs" };
   if ([...named.matchAll(INCLUDED_IN_RE)].some((x) => { const rest = named.slice(x.index + x[0].length); return ALL_ALIASES.some((a) => `${rest} `.startsWith(`${a} `)); })) return { kind: "ignored", reason: INCLUDED_NOTE };
   if (opts.budget && /\b(?:usd|us dollars|alternative|optional|supplier quote)\b/.test(named) && (t.unit === "$" || t.currency || t.unit === null)) return { kind: "ignored", reason: "An alternative or foreign-currency budget quote" };
@@ -905,6 +929,16 @@ export function mapToken(rawLabel: string, t: NumberToken, opts: MapOptions = {}
   // A description naming two cost fields by concept is shown, unless its own words already name its field.
   if (m.kind === "unmapped" && !opts.quote && (opts.budget || opts.budgetConcept) && t.unit === "$" && !/%/.test(opts.gap ?? opts.ahead ?? "") && joined.length === 2 && joined.every((part) => part.length === 1) && joined[0]![0]!.fieldKey !== joined[1]![0]!.fieldKey) return { kind: "ignored", reason: "This description names more than one budget field; enter each line separately" };
   if (m.kind === "unmapped" || (m.kind === "ignored" && m.reason === "A fee or premium, not an input" && ((SALE_WORD.test(named) && SALE_COST_WORD.test(named)) || /\b(?:frais de montage|honoraires du dossier|frais courants|frais annuels|selling-cost|growth|development levies|croissance)\b/.test(named))) || (m.kind === "ignored" && m.unitMismatch)) m = conceptField(rawLabel, t, opts) ?? m;
+  // Card 127: another lender, a test, or a different kind of rate outranks every loan/equity reading.
+  if (m.kind === "field" && (/^(?:senior_|mezz_|refinance_)/.test(m.fieldKey) || m.fieldKey === "equity_amount")) {
+    const own = foldText(`${rawLabel} ${(opts.after ?? "").split(/[,;.]|\b(?:and|et)\b/)[0] ?? ""}`);
+    if (reference?.refused || OTHER_LENDER.test(own)) return { kind: "ignored", reason: "Another lender's, declined or historical figure, not this deal's funding" };
+    if (m.fieldKey.startsWith("senior_") && (reference?.notSenior || NOT_SENIOR_LENDER.test(folded))) return { kind: "ignored", reason: "An equity or vendor lender, not the senior loan" };
+    if (LENDER_TEST.test(folded)) return { kind: "ignored", reason: "A lender's limit, not the deal's figure" };
+    if (/_rate_pct$/.test(m.fieldKey) && OTHER_RATE.test(own)) return { kind: "ignored", reason: "Another kind of rate, not the loan's price" };
+    if (/_amort_years$/.test(m.fieldKey) && /\b(?:terms?|termes?|renewal|renouvellement)\b/.test(folded)) return { kind: "ignored", reason: "A loan's term, not its amortization" };
+    if (m.fieldKey === "equity_amount" && LOAN_NOUN.test(named) && LENDING_WORD.test(named) && OWNER_WORD.test(named) && CASH_IN_WORD.test(named)) return { kind: "ignored", reason: "More than one financing field fits this figure" };
+  }
   // Apply revision labels to aliases and concepts alike.
   if (m.kind === "field" && CREDITABLE.has(m.fieldKey) && OLD_LABEL_RE.test(named)) return { kind: "ignored", reason: SUPERSEDED_LABEL_NOTE };
   if (m.kind === "field" && /^(?:senior|mezz|refinance)_rate_pct$/.test(m.fieldKey) && (NOT_A_LOAN_RATE_CONTEXT.test(named) || CONCEPTS.find(c => c.fieldKey === "senior_rate_pct")!.exclude.test(named))) return { kind: "ignored", reason: NOT_A_LOAN_RATE_NOTE };
@@ -989,16 +1023,19 @@ function conceptField(rawLabel: string, t: NumberToken, opts: MapOptions, financ
   if (!afterLabel && opts.prose && opts.context && !foldText(withoutTaxBasis(opts.context.slice(0, t.start)).replace(/,\s*all-in\s*:?\s*$/i, "")).trimEnd().endsWith(foldText(rawLabel).trim())) return null;
   const lead = afterLabel ? (opts.lead ?? "").split(/[,;]/).pop() ?? "" : "";
   const periodLabel = /,\s*(?:months?|mois|years?|ans?|années?)\s*$/i.test(rawLabel);
-  const { label, labelUnit, labelCode } = normalizeLabel(opts.prose && !afterLabel && !periodLabel ? rawLabel.split(/[,;]/).pop() ?? "" : rawLabel);
+  const normalized = normalizeLabel(opts.prose && !afterLabel && !periodLabel ? rawLabel.split(/[,;]/).pop() ?? "" : rawLabel);
+  const { label, labelCode } = normalized;
+  const statedUnit = !opts.prose && LOAN_NOUN.test(label) && !/\d/.test(label) ? /\b(?:years?|ans?|annees?)\b/.test(label) ? "years" : /\b(?:months?|mois)\b/.test(label) ? "months" : /%/.test(label) ? "%" : null : null;
+  const labelUnit = normalized.labelUnit ?? statedUnit;
   const unit = (t.unit === "$/mo" ? "$" : t.unit) ?? labelUnit ?? (!opts.prose && Math.abs(t.value) >= 1000 ? "$" : null);
   const budget = unit === "$" && !opts.quote && (opts.budget || opts.budgetConcept) && !/%/.test(opts.gap ?? opts.ahead ?? "");
   const meanings = budget ? budgetConcepts(label.split(COVER_LIST_RE)[0] ?? label) : [];
   if (!financingOnly && meanings.length > 1 && !COVER_LIST_RE.test(label)) return { kind: "ignored", reason: "This description names more than one budget field; enter each line separately" };
   const namedScope: Scope | null = scopeIn(label) ?? (MAIN_LENDER.test(label) ? "senior" : null);
   const loan = (scopesIn(label).length <= 1 || scopeIn(label) !== null) && !opts.budget && (LOAN_NOUN.test(label) || /\b(?:intrest|fixed(?=\s*$| (?:rate|coupon|interest|intrest|pricing)\b)|ferme|amort\w*|interest-only|io)\b/.test(label) || namedScope || LOAN_PERIOD.test(label) || /\bconstruction principal\b/.test(label) || (opts.loanContext ?? opts.scope !== undefined))
-    && !(opts.prose && !namedScope && !opts.loanContext && LOAN_ANAPHOR.test(opts.context ? foldText(opts.context.slice(0, t.start)) : label) && !scopeIn(opts.context?.slice(0, t.start) ?? "", false))
+    && !(opts.prose && !namedScope && !opts.loanContext && LOAN_ANAPHOR.test(opts.context ? foldText(opts.context.slice(0, t.start)) : label) && !scopeIn(opts.context?.slice(0, t.start) ?? "", false) && !LENDING_WORD.test(label) && !PRICE_WORD.test(label) && !REPAYMENT_WORD.test(label) && !IO_WORD.test(label))
     && !NOT_THE_LOAN_AFTER.test(foldText(opts.after ?? ""))
-    && !(unit === "months" && MONTH_INDEX.test(label));
+    && !(unit === "months" && MONTH_INDEX.test(label) && !IO_WORD.test(label));
   // After the figure, the words before it in its clause still carry the guards.
   const folded = foldText(afterLabel ? `${lead} ${rawLabel}` : rawLabel);
   const budgetLine = budget && (!NOT_A_BUDGET_LINE.test(folded.replace(/\b(?:signed total|total travaux)\b/g, "").replace(/\blevy\b/g, RESIDUAL_COST.test(label) ? "" : "levy")) || /\b(?:growth|development|croissance|redevances (?:municipales )?d amenagement)\b/.test(label)) && !LOAN_NOUN.test(folded);
@@ -1023,6 +1060,7 @@ function conceptField(rawLabel: string, t: NumberToken, opts: MapOptions, financ
   if (chosen.budget && (t.currencyCode ?? labelCode) && (t.currencyCode ?? labelCode) !== "CAD") return { kind: "ignored", reason: "An amount in another currency" };
   const scope = namedScope ?? opts.conceptScope ?? opts.scope ?? "senior";
   const key = chosen.fieldKey;
+  if (key === "senior_loan_amount" && /\bcredit union\b/.test(label) && !LENDING_WORD.test(label)) return null;
   if (key === "contingency" && !t.currency && t.unit === null && !opts.budget && !opts.numberCell) return null;
   const def = FIELD_BY_KEY.get(chosen.budget || chosen.assumption || scope === "senior" ? key : SCOPE_FIELD[scope][key] ?? key)!;
   const c = compatibleValue(def, t, label, labelUnit, labelCode, opts.prose);
