@@ -1,4 +1,4 @@
-import { GROWTH_WORD, CONCEPTS, BANK_LENDER, LOAN_NOUN, STATED_TOTAL } from "./concepts.ts";
+import { GROWTH_WORD, CONCEPTS, BANK_LENDER, LOAN_NOUN, CLOSING_TOTAL, STATED_TOTAL } from "./concepts.ts";
 import { FIELD_BY_KEY, OUTPUT_LIKE_PHRASES } from "@agir/contracts";
 import { detectFormat, normalizeText, SF_PER_M2, tokenize, unitTypesIn, wholeUnitType, type CurrencyCode, type DocumentFormat, type NumberToken } from "@agir/numbers";
 import type { Cell, NormalizedDocument, Table } from "./document.ts";
@@ -1837,7 +1837,7 @@ function fromBudget(table: Table, headerRow: number, roles: BudgetRoles, result:
     }
     const categoryTotal = category && TOTAL_RE.test(category);
     const trailingTotal = category ? /\b(?:sub-?total|sous-?total|total)\s*$/i : null;
-    const statedTotal = STATED_TOTAL.test(normalizeLabel(labelCell.text).label);
+    const statedTotal = STATED_TOTAL.test(normalizeLabel(labelCell.text).label) || (CLOSING_TOTAL.test(normalizeLabel(labelCell.text).label) && (!!category || /\b(?:close|closing|cloture)\b/.test(fold(labelCell.text))));
     const usesTotal = USES_TOTAL_RE.test(labelCell.text.trim());
     const isTotal = statedTotal || usesTotal || TOTAL_RE.test(labelCell.text) || !!categoryTotal || !!trailingTotal?.test(labelCell.text);
     // Unread rows with nothing read or totalled above them are the whole table's breakdown of its first total.
@@ -1849,7 +1849,7 @@ function fromBudget(table: Table, headerRow: number, roles: BudgetRoles, result:
     const moneyToken: NumberToken = { ...t, currency: true, unit: t.unit ?? "$" };
     const quoted = quoteDocs.has(result) ? mapToken(labelCell.text, moneyToken, { scope, budget: true, quote: true }) : null;
     const closing = isTotal && closesUses(labelCell.text, [...components.values()].map((c) => c.fieldKey)) && table.rows.slice(r + 1).every((x) => !x[roles.amount] || !cellToken(x[roles.amount]!, result.format));
-    let mapped = quoted?.kind === "field" && quoted.quote ? quoted : mapToken(closing || usesTotal ? "total project cost" : isTotal && (/development|project/i.test(labelCell.text) || statedTotal) ? labelCell.text : labelText, moneyToken, { scope, budget: true, quote: quoteDocs.has(result) });
+    let mapped = quoted?.kind === "field" && quoted.quote ? quoted : mapToken(closing || usesTotal ? "total project cost" : isTotal && (/development|project/i.test(labelCell.text) || statedTotal) ? labelCell.text : labelText, moneyToken, { scope, budget: true, usesCategory: !!category && /^(?:uses?|emplois|costs?|couts|budget)$/.test(fold(category)), quote: quoteDocs.has(result) });
     // Only an unnamed line inherits its category. A named field or an explicit refusal keeps its own meaning.
     const categoryKey = category && budgetCategory(category);
     // The line's own words still apply their guards (a fee, interest, an amount to date): the category is read with them.
@@ -1997,10 +1997,10 @@ function categoryCells(rows: Cell[][], format: DocumentFormat, sheet: string): M
   const found = rows.flatMap((r) => { const p = pair(r); return p ? [{ r, ...p }] : []; });
   // These categories are explicit even on a mixed input sheet with many unrelated row families.
   if (/^(?:budget|base|inputs?|uses|emplois)(?:\b|$)/i.test(sheet)) {
-    for (const f of found) if (costCategory(f.a.text) || /^(?:assumptions?|hypotheses)$/i.test(fold(f.a.text))) out.set(f.r, f.a);
+    for (const f of found) if (costCategory(f.a.text) || /^(?:inputs?|assumptions?|hypotheses)$/i.test(fold(f.a.text))) out.set(f.r, f.a);
   }
   const figures = rows.filter((r) => r.some((c) => cellToken(c, format))).length;
-  if (!found.length || found.length < 0.6 * figures || (found.length < 3 && !found.every(f => costCategory(f.a.text)))) return out;
+  if (!found.length || found.length < 0.6 * figures || (found.length < 3 && !found.every(f => costCategory(f.a.text) || /^(?:inputs?|assumptions?|hypotheses)$/.test(fold(f.a.text))))) return out;
   const key = (c: Cell) => fold(c.text).replace(/\s+/g, " ").trim();
   const cats = new Map<string, number>();
   for (const f of found) cats.set(key(f.a), (cats.get(key(f.a)) ?? 0) + 1);

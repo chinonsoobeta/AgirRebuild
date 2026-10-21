@@ -22,11 +22,11 @@ export const PROJECT_TOTAL = /\b(?:(?:whole|entire|total|complete|all-in|global)
 export const NOT_PROJECT_TOTAL = /\b(?:loans?|prets?|rents?|loyers?|equity|capitaux propres|fonds propres|mise de fonds|operating|exploitation|(?:per|par|a|an|each) (?:units?|doors?|suites?|homes?|portes?|logements?|unites?))\b/;
 export const PROPERTY_WORD = /\b(?:sites?|lots?|land|dirt|ground|parcels?|property|house|building|shell|immeuble|fonds|propriete|batisse|terrain)\b/;
 export const ACQUISITION_WORD = /\b(?:purchas\w*|acquisition|acquir\w*|buy|buying|bought|paid for|closing|consideration|allocation|cheque|price|basis|agreed|close on|closed on|under contract|achat|achet\w*|acquis\w*|prix|cloture)\b/;
-export const RISK_WORD = /\b(?:risk|surprises?|unknown\w*|unforeseen\w*|spare|just-in-case|unspent|uncommitted|extra work|imprevus|aleas)\b/;
-export const HOLDING_WORD = /\b(?:allowance|money|pot|provision|sleeve|cushion|buffer|held back|fund|sum|somme|reserve|coussin)\b/;
+export const RISK_WORD = /\b(?:risk|surprises?|unknown\w*|unplanned|unexpected|unassigned|unallocated|unearmarked|uncontracted|overruns?|unforeseen\w*|spare|just-in-case|unspent|uncommitted|extra work|imprevus|aleas)\b/;
+export const HOLDING_WORD = /\b(?:allowance|money|pot|provision|sleeve|cushion|buffer|held back|fund|sum|somme|reserve|coussin|margin|marge)\b/;
 export const RESIDUAL_COST = /\b(?:everything else|miscellaneous|misc|sundry|odd costs?|non-GC|non-?trade|(?:other|remaining) project (?:charges|bills|cash|spend|costs)|unallocated(?: project)? (?:charges|bills|costs)|acquisition extras|incidental outlay|non-refundable utility connection|autres debours|frais divers)\b/i;
 export const NOT_THIS_COST = /\b(?:values?(?![- ]engineered)|apprais\w*|(?<!utility connection )assess\w*|valuation|valeur|land lease|ground rent|bail foncier|loyer du terrain|another (?:project|job)|other (?:project|job)(?! (?:charges|bills|cash|spend|costs))|autre projet|last year|prior year|previous year|an dernier|annee (?:derniere|precedente)|neighbou?r\w*|nearby|competing|rejected|for reference|voisin\w*|previous owner|ancien proprietaire|paid to date|payes? a ce jour|payee?s? a ce jour|to complete|a terminer|deposits?|depots?)\b/;
-export const NOT_RISK_COST = /\b(?:du marche|(?:cushion|buffer|coussin) (?:on|sur) (?:the |le |les )?(?:prices?|prix)|rent|loyers?|ratios?|rates?|taux|dscr|dcr|months?|years?|mois|ans?|(?:per|par) (?:units?|suites?|lots?|doors?|unites?|logements?|months?|years?|mois|ans?)|insurance|assurance|claim|operating|replacement|interest|lease-up|deficit|exploitation|remplacement|interets?|mise en location)\b/;
+export const NOT_RISK_COST = /\b(?:du marche|(?:cushion|buffer|coussin) (?:on|sur) (?:the |le |les )?(?:prices?|prix)|rents?|loyers?|ratios?|rates?|taux|dscr|dcr|months?|years?|mois|ans|annees?|(?:per|par) (?:units?|suites?|lots?|doors?|unites?|logements?|months?|years?|mois|ans?)|insurance|assurance|claim|operating|replacement|interest|lease-up|deficit|exploitation|remplacement|interets?|mise en location)\b/;
 
 export const DEBT_SERVICE = /\b(?:debt service|service de la dette|annual payment|mortgage payment)\b/;
 
@@ -45,11 +45,25 @@ export const LEAVING_AFTER = /^\W*(?:[a-z]+\s+){0,2}(?:vacate|move out|leave|qui
 export const MONTH_INDEX = /\b(?:month|mois)\s*:?\s*$|\b(?:at|in|by|from|until|au|en|du|des le)\s+(?:(?:the|project|le)\s+)?(?:month|mois)\b/;
 
 // Card 117: settled occupancy and growth words apply in either order.
-export const OCCUPANCY_WORD = /\b(?:occupancy|occupied|filled|fill|let|letting|leasing|leased|rented|occupation)\b/;
-export const SETTLED_WORD = /\b(?:stabili[sz]\w*|stab|settled|steady|mature|normal|long-run|long-term|target|planned|a maturite|de croisiere|a terme|retenue|regime(?: stable| etabli)?)\b/;
+export const OCCUPANCY_WORD = /\b(?:occupancy|occupied|filled|fill|let|letting|leasing|leased|rented|tenanted|tenancy|occupes?|occupee?s?|loues?|occupation)\b/;
+export const SETTLED_WORD = /\b(?:stabili[sz]\w*|stab|settled|steady|mature|normal|long[- ]run|long-term|once established|target|planned|a maturite|de croisiere|a terme|retenue|regime(?: stable| etabli)?)\b/;
 export const GROWTH_WORD = /\b(?:annual change|year-over-year change|yearly change|variation annuelle|growth|uplift|steps?|drift|increase|escalation|grown(?: at)?|indexation|hausse|croissance)\b/;
 // Card 117 audit: "actual" or "réelle" beside a stabilization word is this building's stabilized state (card 105), not history.
 export const ASSUMPTION_HISTORY = /\b(?:actual(?! stabili)|historic(?:al)?|last year|prior year|seller s|previous owner|old owner|old building|comparables?|market|area|neighbou?r(?:hood|s|ing)?|next door|voisin\w*|peak|(?<!stabilisee )reel(?:le)?s?(?! stabili)|l an dernier|historique|marche)\b/;
+
+// Card 124: the subject and the kind of duration are independent word classes.
+export const BUILD_WORD = /\b(?:build|building|construction|works?|trades?|crews?|site|program(?:me)?|chantier|travaux)\b/;
+export const DURATION_WORD = /\b(?:duration|length|period|months?|time|program(?:me)?|duree|periode|mois)\b/;
+// Two distinct words are required: "programme" alone cannot supply both classes.
+export const BUILD_DURATION = new RegExp(`(?:${BUILD_WORD.source}.*${DURATION_WORD.source}|${DURATION_WORD.source}.*${BUILD_WORD.source})`);
+export const LETTING_WORD = /\b(?:let|letting|lease|leasing|rent out|fill|tenants?|tenanted|occupied|occupy|louer|location|locataires?)\b/;
+export const TIME_WORD = /\b(?:window|months?|time|allowance|delai|mois)\b/;
+export const KEEP_WORD = /\b(?:hold|held|holding|keep|retain|retained|own|ownership|before we sell|conservation|detention|conserv\w*|gard\w*)\b/;
+export const SALE_WORD = /\b(?:sale|sell|selling|disposal|exit|cession|vente)\b/;
+export const SALE_COST_WORD = /\b(?:friction|transaction|costs?|charges|fees|allowance|couts?|frais)\b/;
+export const SHARE_WORD = /\b(?:share|proportion|fraction|part)\b/;
+// A total may stand alone or specify the closing/uses, but never a named component.
+export const CLOSING_TOTAL = /^(?:(?:the|le|la) )?(?:grand total|total|sum|somme|all uses|overall)(?: (?:of|the|all|uses|at|close|closing|a|la|cloture|des|emplois))*$/;
 
 export const CONCEPTS: readonly {
   fieldKey: string;
@@ -138,19 +152,19 @@ export const CONCEPTS: readonly {
   {
     fieldKey: "construction_months", unit: "months", assumption: true,
     // Card 111 (v4, v5): a span from the foundations to occupancy is the build.
-    words: [/\b(?:build|building (?:stretch|duration)|(?:time|period|duration) to (?:finish|complete)|construction|works|work period|trades|installation|fit-up|site|crew|delivery|program(?:me)?|conversion|renovation|fit-out|chantier|travaux|transformation)\b/, /\bfrom (?:the )?(?:foundations?|shovels?(?: in the ground)?|ground-?breaking|excavation|mobili[sz]ation) to (?:the )?(?:occupancy|completion|handover|delivery|substantial completion)\b|\b(?:de|des|du) (?:la |les )?(?:fondations?|excavation|mobilisation|debut des travaux) (?:a|au|jusqu a) (?:la |l )?(?:occupation|livraison|fin des travaux)\b/],
+    words: [BUILD_DURATION, /\b(?:build|building (?:stretch|duration)|(?:time|period|duration) to (?:finish|complete)|construction|works|work period|trades|installation|fit-up|site|crew|delivery|program(?:me)?|conversion|renovation|fit-out|chantier|travaux|transformation)\b/, /\bfrom (?:the )?(?:foundations?|shovels?(?: in the ground)?|ground-?breaking|excavation|mobili[sz]ation) to (?:the )?(?:occupancy|completion|handover|delivery|substantial completion)\b|\b(?:de|des|du) (?:la |les )?(?:fondations?|excavation|mobilisation|debut des travaux) (?:a|au|jusqu a) (?:la |l )?(?:occupation|livraison|fin des travaux)\b/],
     exclude: /\b(?:loans?|interest|reserves?|terms?|lock|(?<!occupancy )permits?|approval|wait|holdbacks?|warranty|lease|let(?! us\b)|tenants?|prets?|interets?|permis|attente|garantie|retenue|insurance|assurance|starts?|debut|avant|commencement|fixed through|post-completion|construction month|fill|tenanting|remplissage|reviews?|examen|revue|(?:re-?)?zoning|zonage|draws?|tirages?|take-?out|relais|deadline|echeance)\b/,
   },
   {
     fieldKey: "lease_up_months", unit: "months", assumption: true,
     // Card 111 (v4): "pour remplir les logements"; "locataires" is the French for tenants.
-    words: [/\b(?:lease[- ]up|lease window|leasing|letting|tenanting|let-up|fill(?:-up)?|(?:time|period|window) (?:allowed|provided|budgeted) after (?:completion|handover|works)|commercialisation|tenants?|tenant-finding|absorption|rent-up|mise en location|location|remplir|remplissage|to lease|to let|locataires?)\b/],
+    words: [new RegExp(`^(?=.*${LETTING_WORD.source})(?=.*${TIME_WORD.source})`), /\b(?:lease[- ]up|lease window|leasing|letting|tenanting|let-up|fill(?:-up)?|(?:time|period|window) (?:allowed|provided|budgeted) after (?:completion|handover|works)|commercialisation|tenants?|tenant-finding|absorption|rent-up|mise en location|location|remplir|remplissage|to lease|to let|rent out|occupy|tenanted|locataires?)\b/],
     exclude: /\b(?:loans?|terms?|permits?|permis|lock|free rent|rent-free|notice|lease term|reserves?|commissions?|interest|interets?|reserve|bail|prets?|loyer gratuit|franchise de loyer|preavis|location du terrain|free|incentives?|gratuite?s?|incitati\w*)\b/,
   },
   {
     fieldKey: "stabilized_occupancy_pct", unit: "%", assumption: true,
     words: [OCCUPANCY_WORD, /\btaux stabilise\b/],
-    with: [SETTLED_WORD],
+    with: [new RegExp(`${SETTLED_WORD.source}|${SHARE_WORD.source}`)],
     exclude: /\b(?:covenant|lender|condition|market|area|comparable|current|today|existing|in[- ]place|breakeven|vacancy|actuel\w*|marche|preteur|clause|seuil de rentabilite)\b/,
   },
   {
@@ -169,8 +183,8 @@ export const CONCEPTS: readonly {
   {
     fieldKey: "hold_years", unit: "years", assumption: true,
     // Card 111 (v4): selling after a period, or keeping the building for it, is the hold.
-    words: [/\byears? until (?:the )?(?:sale|exit)\b/, /\b(?:hold|held|holding|ownership|own|horizon|keep|detention|conserver|garder|(?:sell|sale|selling|exit|resale) after|(?:revente|vente|sortie) apres|vendre (?:apres|au bout de)|(?:garde|gardons|garderons|conserve|conservons|conserverons) (?:l|le|la) (?:immeuble|batiment|propriete|actif|projet))\b/],
-    exclude: /\b(?:loans?|terms?|amort\w*|warranty|lease|bail|prets?|garantie)\b/,
+    words: [KEEP_WORD, /\byears? until (?:the )?(?:sale|exit)\b/, /\b(?:hold|held|holding|ownership|own|horizon|keep|detention|conserver|garder|(?:sell|sale|selling|exit|resale) after|(?:revente|vente|sortie) apres|vendre (?:apres|au bout de)|(?:garde|gardons|garderons|conserve|conservons|conserverons) (?:l|le|la) (?:immeuble|batiment|propriete|actif|projet))\b/],
+    exclude: /\b(?:loans?|terms?|amort\w*|warranty|lease|bail|prets?|garantie|seller|vendeur|tenants?|locataires?)\b/,
   },
   {
     fieldKey: "rent_growth_pct", unit: "%", assumption: true,
@@ -205,8 +219,8 @@ export const CONCEPTS: readonly {
   },
   {
     fieldKey: "selling_costs_pct", unit: "%", assumption: true,
-    words: [/\b(?:sale|sell|selling|disposal|exit|cession|vente)\b/],
-    with: [/\b(?:friction|transaction|costs?|allowance|couts?|frais)\b/],
-    exclude: /\b(?:purchase|lease|leasing|brokerage|commission|achat|location)\b/,
+    words: [SALE_WORD],
+    with: [SALE_COST_WORD],
+    exclude: /\b(?:purchase|lease|leasing|brokerage|commission|achat|location|growth|croissance|cap|capitalization)\b/,
   },
 ];

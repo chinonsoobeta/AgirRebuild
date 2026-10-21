@@ -4,7 +4,7 @@
 // but it never becomes an input.
 
 import { FIELD_BY_KEY, FIELDS, OUTPUT_LIKE_PHRASES, type FieldDef } from "@agir/contracts";
-import { ASSUMPTION_HISTORY, OCCUPANCY_WORD, SETTLED_WORD, ACQUISITION_WORD, PROPERTY_WORD, RISK_WORD, HOLDING_WORD, RESIDUAL_COST, NOT_THIS_COST, NOT_RISK_COST, NOT_PROJECT_TOTAL, PROJECT_TOTAL, CONCEPTS, SENIOR_RANK, LOAN_PERIOD, STATED_TOTAL, DEBT_SERVICE, LOAN_ANAPHOR, LOAN_NOUN, MAIN_LENDER, MONTH_INDEX, NOT_A_BUDGET_LINE, NOT_CHOSEN_AFTER, LEAVING_AFTER, NOT_THE_DEALS_ASSUMPTION, NOT_THE_LOAN_AFTER, WHERE_IT_SITS } from "./concepts.ts";
+import { SALE_WORD, SALE_COST_WORD, BUILD_DURATION, LETTING_WORD, TIME_WORD, KEEP_WORD, CLOSING_TOTAL, ASSUMPTION_HISTORY, OCCUPANCY_WORD, SETTLED_WORD, ACQUISITION_WORD, PROPERTY_WORD, RISK_WORD, HOLDING_WORD, RESIDUAL_COST, NOT_THIS_COST, NOT_RISK_COST, NOT_PROJECT_TOTAL, PROJECT_TOTAL, CONCEPTS, SENIOR_RANK, LOAN_PERIOD, STATED_TOTAL, DEBT_SERVICE, LOAN_ANAPHOR, LOAN_NOUN, MAIN_LENDER, MONTH_INDEX, NOT_A_BUDGET_LINE, NOT_CHOSEN_AFTER, LEAVING_AFTER, NOT_THE_DEALS_ASSUMPTION, NOT_THE_LOAN_AFTER, WHERE_IT_SITS } from "./concepts.ts";
 import { canonicalItem, codeOf, parenType, SF_PER_M2, unitTypesIn, wholeUnitType, type CurrencyCode, type NumberToken } from "@agir/numbers";
 
 // canonicalItem and itemFold live in @agir/numbers so the engine can use the same fold.
@@ -372,6 +372,11 @@ export function normalizeLabel(raw: string): { label: string; labelUnit: LabelUn
   if (!labelUnit && /\bmonths?\b/.test(label) && /\b(?:lease|leasing|letting)\b/.test(label)) labelUnit = "months";
   if (!labelUnit && /\bamort\w*\b/.test(label) && /\byears?\b/.test(label)) labelUnit = "years";
   if (!labelUnit && /\b(?:io|interest-only|int-only|principal-free)\b/.test(label) && /\b(?:window|period|months?)\b/.test(label)) labelUnit = "months";
+  // A duration class supplies a bare label-line or sheet value's unit. Explicit units win.
+  if (!labelUnit && !LOAN_NOUN.test(label) && !LOAN_PERIOD.test(label)) {
+    if (KEEP_WORD.test(label) && /\b(?:years?|ans?|annees?|duration|period|duree|periode)\b/.test(label)) labelUnit = "years";
+    else if (BUILD_DURATION.test(label) || (LETTING_WORD.test(label) && TIME_WORD.test(label))) labelUnit = "months";
+  }
   return { label, labelUnit, labelCode };
 }
 
@@ -493,6 +498,8 @@ export type MapOptions = {
   conceptScope?: Scope;
   /** A budget table's row: "Other" names a cost here. */
   budget?: boolean;
+  /** A Uses/Emplois category supplies the meaning of a bare total. */
+  usesCategory?: boolean;
   /** A money label in text may use the budget concepts; arbitrary plain-sheet labels may not. */
   budgetConcept?: boolean;
   /** The sentence the label came from, for words about a sale that sit outside the label. */
@@ -761,9 +768,13 @@ export function mapToken(rawLabel: string, t: NumberToken, opts: MapOptions = {}
     const mapped = mapToken(own, t, { ...opts, gap: "", ahead: "" });
     if (mapped.kind === "field" && mapped.itemKey === null) return mapped;
   }
-  if (opts.numberCell && t.unit === null && t.value !== null && t.value > 0 && t.value < 1) {
+  if (opts.numberCell && t.unit === null && t.value !== null && t.value > 0 && t.value <= 1) {
     const percent = mapToken(rawLabel, { ...t, unit: "%", value: t.value * 100 }, { ...opts, numberCell: false });
-    if (percent.kind === "field" && FIELD_BY_KEY.get(percent.fieldKey)?.unit === "%") return percent;
+    if (percent.kind === "field" && FIELD_BY_KEY.get(percent.fieldKey)?.unit === "%" && (t.value < 1 || percent.fieldKey === "stabilized_occupancy_pct")) {
+      // New share readings from numeric cells need the range that identifies their type.
+      if (percent.concept && ((percent.fieldKey === "stabilized_occupancy_pct" && t.value < 0.80) || (percent.fieldKey === "selling_costs_pct" && (t.value < 0.005 || t.value > 0.10)))) return { kind: "unmapped" };
+      return percent;
+    }
   }
   // A sales tax line, or a rebate of one, is refused before any credit rule reads it; a cost that only states its tax basis is read.
   rawLabel = withoutTaxBasis(rawLabel).replace(/,\s*all-in\s*$/i, "");
@@ -812,16 +823,17 @@ export function mapToken(rawLabel: string, t: NumberToken, opts: MapOptions = {}
   if (OCCUPANCY_WORD.test(named) && SETTLED_WORD.test(named) && m.kind === "field" && m.fieldKey === "item_occupancy_pct") {
     m = { ...m, fieldKey: "stabilized_occupancy_pct", itemKey: null };
   }
+  if (m.kind === "field" && m.fieldKey === "construction_months" && duration === "years" && KEEP_WORD.test(named)) m = { kind: "unmapped" };
   // A description naming two cost fields by concept is shown, unless its own words already name its field.
   if (m.kind === "unmapped" && !opts.quote && (opts.budget || opts.budgetConcept) && t.unit === "$" && !/%/.test(opts.gap ?? opts.ahead ?? "") && joined.length === 2 && joined.every((part) => part.length === 1) && joined[0]![0]!.fieldKey !== joined[1]![0]!.fieldKey) return { kind: "ignored", reason: "This description names more than one budget field; enter each line separately" };
-  if (m.kind === "unmapped" || (m.kind === "ignored" && m.reason === "A fee or premium, not an input" && /\b(?:frais de montage|honoraires du dossier|frais courants|frais annuels|selling-cost|growth|development levies|croissance)\b/.test(named)) || (m.kind === "ignored" && m.unitMismatch)) m = conceptField(rawLabel, t, opts) ?? m;
+  if (m.kind === "unmapped" || (m.kind === "ignored" && m.reason === "A fee or premium, not an input" && ((SALE_WORD.test(named) && SALE_COST_WORD.test(named)) || /\b(?:frais de montage|honoraires du dossier|frais courants|frais annuels|selling-cost|growth|development levies|croissance)\b/.test(named))) || (m.kind === "ignored" && m.unitMismatch)) m = conceptField(rawLabel, t, opts) ?? m;
   // Apply revision labels to aliases and concepts alike.
   if (m.kind === "field" && CREDITABLE.has(m.fieldKey) && OLD_LABEL_RE.test(named)) return { kind: "ignored", reason: SUPERSEDED_LABEL_NOTE };
   if (m.kind === "field" && /^(?:senior|mezz|refinance)_rate_pct$/.test(m.fieldKey) && (NOT_A_LOAN_RATE_CONTEXT.test(named) || CONCEPTS.find(c => c.fieldKey === "senior_rate_pct")!.exclude.test(named))) return { kind: "ignored", reason: NOT_A_LOAN_RATE_NOTE };
   if (m.kind === "field" && (assumptionKeys.includes(m.fieldKey) || /^(?:senior_|mezz_|refinance_|min_dscr)/.test(m.fieldKey)) && (ASSUMPTION_HISTORY.test(folded) || (/^(?:senior_|mezz_|refinance_|min_dscr)/.test(m.fieldKey) && /\b(?:bank of canada|prime (?:rate )?today|bond yield|inflation|deposit account|last year s|expected dcr|projected dcr)\b/.test(folded)))) return { kind: "ignored", reason: "History or another property's figure, not this deal's assumption" };
   if (m.kind === "field" && (m.fieldKey === "fixed_opex_annual" || m.fieldKey === "selling_costs_pct")) {
     // A named exclusion does not turn an operating total into the excluded item.
-    const own = named.replace(/\b(?:excluding|without|hors|sans) (?:property tax(?:es)?|insurance|assurance|taxes foncieres)\b/g, " ");
+    const own = (m.fieldKey === "selling_costs_pct" ? localLabel : named).replace(/\b(?:excluding|without|hors|sans) (?:property tax(?:es)?|insurance|assurance|taxes foncieres)\b/g, " ");
     const fieldKey = m.fieldKey;
     const concept = CONCEPTS.find(c => c.fieldKey === fieldKey)!;
     if (concept.exclude.test(own)) return { kind: "ignored", reason: "A separate cost item, not this operating or selling cost assumption" };
@@ -917,10 +929,10 @@ function conceptField(rawLabel: string, t: NumberToken, opts: MapOptions, financ
   // The whole label and the words after the figure: an alternative, a loan's period or a month number is never the deal's assumption.
   const assumption = !NOT_THE_DEALS_ASSUMPTION.test(folded) && !ASSUMPTION_HISTORY.test(folded) && !LOAN_NOUN.test(folded) && !(unit === "years" && /\b(?:commercial lease|bail)\b/.test(normalizeLabel(`${opts.lead ?? ""} ${opts.context ?? rawLabel}`).label)) && !NOT_CHOSEN_AFTER.test(foldText(opts.after ?? "")) && !LEAVING_AFTER.test(foldText(opts.after ?? ""))
     && !(unit === "months" && MONTH_INDEX.test(folded) && !periodLabel);
-  const fits = CONCEPTS.filter((c) => (!financingOnly || (!c.budget && !c.assumption)) && (c.unit === unit || (c.unit === "months" && unit === "years")) && (c.assumption
+  const fits = CONCEPTS.filter((c) => (!financingOnly || (!c.budget && !c.assumption)) && (c.unit === unit || (c.unit === "months" && unit === "years" && !KEEP_WORD.test(label))) && (c.assumption
     ? assumption && !opts.budget && c.words.some((w) => w.test(assumptionLabel)) && ((c.with ?? []).every((w) => w.test(assumptionLabel)) || !!c.basisAfter?.test(foldText(opts.after ?? ""))) && !c.exclude.test(assumptionContext)
-    // Only an assumption or a rate in an established loan context is named after its figure: a loan noun ("$9,000,000 by the lender") or a budget word ("is the stated envelope") there does not name the figure.
-    : (!afterLabel || (c.fieldKey === "senior_rate_pct" && opts.loanContext)) && (c.budget ? budgetLine && (c.fieldKey !== "development_charges" || opts.budget || !/\bwater and wastewater\b/.test(label)) && meanings.includes(c) && (c.fieldKey !== "land_cost" || !opts.prose || ACQUISITION_WORD.test(label) || /\b(?:dirt|ground) (?:cost|deal|price|basis)\b/.test(label)) : (c.unscoped || loan) && !(c.fieldKey === "senior_rate_pct" && LTV_BASIS_AFTER_RE.test(foldText(opts.after ?? ""))) && c.words.some((w) => w.test(label)) && (c.with ?? []).every(w => w.test(label))) && !c.exclude.test(c.budget || afterLabel ? folded : label)));
+    // After a typed figure, read assumptions, a risk allowance, or a rate in an established loan context; a loan noun or a vague budget word there names nothing.
+    : (!afterLabel || (c.fieldKey === "contingency" && HOLDING_WORD.test(label) && RISK_WORD.test(label)) || (c.fieldKey === "senior_rate_pct" && opts.loanContext)) && (c.budget ? budgetLine && (c.fieldKey !== "development_charges" || opts.budget || !/\bwater and wastewater\b/.test(label)) && meanings.includes(c) && (c.fieldKey !== "land_cost" || !opts.prose || ACQUISITION_WORD.test(label) || /\b(?:dirt|ground) (?:cost|deal|price|basis)\b/.test(label)) : (c.unscoped || loan) && !(c.fieldKey === "senior_rate_pct" && LTV_BASIS_AFTER_RE.test(foldText(opts.after ?? ""))) && c.words.some((w) => w.test(label)) && (c.with ?? []).every(w => w.test(label))) && !c.exclude.test(c.budget || afterLabel ? folded : label)));
   if (fits.length > 1 && fits.every(c => !c.budget && !c.assumption)) return { kind: "ignored", reason: "More than one financing field fits this figure" };
   if (fits.length !== 1) return null;
   const chosen = fits[0]!;
@@ -933,6 +945,7 @@ function conceptField(rawLabel: string, t: NumberToken, opts: MapOptions, financ
   if (chosen.budget && (t.currencyCode ?? labelCode) && (t.currencyCode ?? labelCode) !== "CAD") return { kind: "ignored", reason: "An amount in another currency" };
   const scope = namedScope ?? opts.conceptScope ?? opts.scope ?? "senior";
   const key = chosen.fieldKey;
+  if (key === "contingency" && !t.currency && t.unit === null && !opts.budget && !opts.numberCell) return null;
   const def = FIELD_BY_KEY.get(chosen.budget || chosen.assumption || scope === "senior" ? key : SCOPE_FIELD[scope][key] ?? key)!;
   const c = compatibleValue(def, t, label, labelUnit, labelCode, opts.prose);
   return c ? { kind: "field", fieldKey: def.key, itemKey: null, ...c, concept: true } : null;
@@ -1105,7 +1118,7 @@ function mapLabel(rawLabel: string, t: NumberToken, opts: MapOptions = {}): Mapp
     if (scope === "refinance" && ordinalMonth && FUNDING_RE.test(label)) return asField(FIELD_BY_KEY.get("refinance_month")!) ?? { kind: "unmapped" };
   }
 
-  if ((STATED_TOTAL.test(label) || PROJECT_TOTAL.test(label)) && !NOT_PROJECT_TOTAL.test(label) && budgetConcepts(label).length === 0) return asField(FIELD_BY_KEY.get("stated_total_cost")!) ?? { kind: "unmapped" };
+  if ((STATED_TOTAL.test(label) || PROJECT_TOTAL.test(label) || (CLOSING_TOTAL.test(label) && (opts.usesCategory || /\b(?:close|closing|cloture)\b/.test(label)))) && !NOT_PROJECT_TOTAL.test(label) && budgetConcepts(label).length === 0) return asField(FIELD_BY_KEY.get("stated_total_cost")!) ?? { kind: "unmapped" };
 
   // Scalars: longest alias found anywhere in the label, among compatible fields (in prose: the alias ending nearest the number).
   type Hit = { def: FieldDef; alias: string; at: [number, number]; c: { value: number; unitSeen: string } | null };

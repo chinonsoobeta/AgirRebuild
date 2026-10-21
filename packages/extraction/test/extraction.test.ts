@@ -8574,3 +8574,95 @@ describe("card 123: rent by type across labelled cells, columns and prose", () =
     expect(read("We plan to lease 2 floors to a clinic.").candidates.map(c => c.fieldKey)).not.toContain("unit_count");
   });
 });
+
+
+describe("card 124: labels by meaning and figure type", () => {
+  const read = (input: string, kind: "pdf" | "docx" = "pdf") => {
+    const parts = input.split(" // ");
+    const sh = /^S(?:\(([^)]*)\))?:/;
+    const tables = parts.every(p => sh.test(p)) ? [{ name: parts[0]!.match(sh)![1] ?? "Base", rows: parts.map((p, r) => p.replace(sh, "").split("|").map((text, c) => ({ text: text.trim(), ref: `${String.fromCharCode(65 + c)}${r + 1}`, ...(/^\d+(?:\.\d+)?$/.test(text.trim()) ? { number: Number(text) } : {}) }))) }] : [];
+    return extractCandidates({ kind: tables.length && kind !== "docx" ? "xlsx" : kind, tables, lines: tables.length ? [] : parts.map((text, i) => ({ text, location: `page ${i < 3 ? 1 : 2}, line ${i + 1}` })), fullText: parts.join("\n"), pageCount: 2, needsOcr: false });
+  };
+  const cases: [string, string, string, number][] = [
+    ["1", "S:Uses|Reserve against unexpected bills|65000", "contingency", 65000],
+    ["1", "We set aside an unearmarked pot of $65,000.", "contingency", 65000],
+    ["1", "Marge distincte pour aléas : 65 000 $", "contingency", 65000],
+    ["2", "S:Uses|Overall at closing|2600000", "stated_total_cost", 2600000],
+    ["2", "Grand total at close: $2,600,000", "stated_total_cost", 2600000],
+    ["2", "S:Emplois|Somme à la clôture|2600000", "stated_total_cost", 2600000],
+    ["3", "S:Inputs|Length of the crews programme|17", "construction_months", 17],
+    ["3", "17 months is the duration of the works.", "construction_months", 17],
+    ["3", "Durée prévue des travaux : 17", "construction_months", 17],
+    ["4", "S:Hypothèses|Délai pour louer après livraison|5", "lease_up_months", 5],
+    ["4", "5 months to rent out the homes after handover.", "lease_up_months", 5],
+    ["4", "Time allowance for getting homes occupied: 5", "lease_up_months", 5],
+    ["5", "S:Inputs|Proportion of tenanted homes once established|0.95", "stabilized_occupancy_pct", 95],
+    ["5", "95% of homes are let in a normal year.", "stabilized_occupancy_pct", 95],
+    ["5", "Part occupée en régime établi : 95 %", "stabilized_occupancy_pct", 95],
+    ["6", "S:Input|Retained period after handover|9", "hold_years", 9],
+    ["6", "9 years we keep the building after completion.", "hold_years", 9],
+    ["6", "Durée de conservation après travaux : 9", "hold_years", 9],
+    ["7", "S:Inputs|Fees for disposal|0.03", "selling_costs_pct", 3],
+    ["7", "3% allowance for selling the property.", "selling_costs_pct", 3],
+    ["7", "Charges de cession : 3 %", "selling_costs_pct", 3],
+    ["8", "Years retained after the works: 7", "hold_years", 7],
+    ["8", "S:Years of ownership after delivery|7", "hold_years", 7],
+    ["8", "Nous conservons le bâtiment pendant 7 ans.", "hold_years", 7],
+    ["9", "S:Uncontracted work reserve|65000", "contingency", 65000],
+    ["9", "Money for unforeseen bills: $65,000", "contingency", 65000],
+    ["9", "Le budget prévoit une provision pour imprévus de 65 000 $.", "contingency", 65000],
+    ["10", "S:Letting time in months|5", "lease_up_months", 5],
+    ["10", "Window for finding tenants: 5 months", "lease_up_months", 5],
+    ["10", "Délai de location retenu : 5 mois", "lease_up_months", 5],
+    ["8 existing conversion", "Length of construction: 2 years", "construction_months", 24],
+    ["1 figure first", "$65,000 is the money reserved for unforeseen bills.", "contingency", 65000],
+    ["2 figure first", "$2,600,000 — total at closing", "stated_total_cost", 2600000],
+  ];
+  test.each(cases)("rule %s: %s", (_rule, input, fieldKey, value) => {
+    expect(read(input).candidates.map(c => [c.fieldKey, c.value])).toEqual([[fieldKey, value]]);
+  });
+  test.each([
+    ["S:Input|Tenanted fraction once settled|0.80", "stabilized_occupancy_pct", 80],
+    ["S:Input|Tenanted fraction once settled|1.00", "stabilized_occupancy_pct", 100],
+    ["S:Input|Fees for disposal|0.005", "selling_costs_pct", 0.5],
+    ["S:Input|Fees for disposal|0.10", "selling_costs_pct", 10],
+  ] as const)("numeric share boundary: %s", (input, fieldKey, value) => {
+    expect(read(input).candidates.map(c => [c.fieldKey, c.value])).toEqual([[fieldKey, value]]);
+  });
+  test("selling costs keep their own clause beside a cap and hold", () => {
+    expect(read("Exit: 6% cap, selling costs 2% on sale, nine-year hold.").candidates.map(c => [c.fieldKey, c.value])).toContainEqual(["selling_costs_pct", 2]);
+  });
+  test("one programme word supplies no build duration", () => {
+    const r = read("Program: 2 shops + 6 apartments (3 x 1-bed, 3 x 2-bed) over 4 storeys.");
+    expect(r.candidates.filter(c => c.fieldKey === "construction_months")).toEqual([]);
+    expect(r.other.find(c => c.raw === "3 x")?.note).toBe("No field matches this label");
+  });
+  const traps: [string, string, string][] = [
+    ["1", "S:Uses|Cushion on rents|65000", "contingency"],
+    ["1", "Unknown work reserve: 5 months", "contingency"],
+    ["2", "S:Uses|Total hard costs|2600000", "stated_total_cost"],
+    ["2", "Sum of loan amounts: $2,600,000", "stated_total_cost"],
+    ["3", "S:Input|Works loan IO months|17", "construction_months"],
+    ["3", "Years retained after the build: 9", "construction_months"],
+    ["4", "S:Input|Homes to let|5", "lease_up_months"],
+    ["4", "Tenant notice to vacate: 5 months", "lease_up_months"],
+    ["5", "Comparable tenanted proportion: 95%", "stabilized_occupancy_pct"],
+    ["5", "Last year occupied share: 95%", "stabilized_occupancy_pct"],
+    ["6", "The seller retained the building for 9 years.", "hold_years"],
+    ["6", "S:Input|Tenants holding years|9", "hold_years"],
+    ["7", "Sale price growth: 3%", "selling_costs_pct"],
+    ["7", "Disposal cap rate: 3%", "selling_costs_pct"],
+    ["8", "S:Input|Crews duration|0.95", "construction_months"],
+    ["9", "S:Uses|Fees of disposal|65000", "selling_costs_pct"],
+    ["9", "Selling allowance: 5 months", "selling_costs_pct"],
+    ["10", "Build and letting period: 5 months", "construction_months"],
+    ["10", "Construction and holding duration: 7 years", "construction_months"],
+    ["8", "9 years retained after construction", "construction_months"],
+    ["5 numeric range", "S:Inputs|Tenanted fraction once settled|0.7", "stabilized_occupancy_pct"],
+    ["7 numeric range", "S:Inputs|Fees for disposal|0.2", "selling_costs_pct"],
+    ["7 numeric range", "S:Fees for disposal|0.001", "selling_costs_pct"],
+  ];
+  test.each(traps)("rule %s trap: %s", (_rule, input, forbidden) => {
+    expect(read(input).candidates.filter(c => c.fieldKey === forbidden)).toEqual([]);
+  });
+});
