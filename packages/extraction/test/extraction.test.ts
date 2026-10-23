@@ -3708,6 +3708,43 @@ describe("struck figures in a PDF, per-door shares of a cost, and deposits (task
     out += `xref\n0 ${objs.length + 1}\n0000000000 65535 f \n${at.map((o) => `${String(o).padStart(10, "0")} 00000 n \n`).join("")}trailer\n<< /Size ${objs.length + 1} /Root 1 0 R >>\nstartxref\n${xref}\n%%EOF`;
     return new TextEncoder().encode(out);
   }
+  test("PDF pieces with no visible gap form words without swallowing real spaces (Card 128a)", async () => {
+    const bytes = pdf(`BT /F1 12 Tf 72 700 Td (Gro) Tj ET
+BT /F1 9 Tf 91.4 700 Td (ss) Tj ET
+BT /F1 12 Tf 104.5 700 Td (F) Tj ET
+BT /F1 9 Tf 111.9 700 Td (loor) Tj ET
+BT /F1 12 Tf 150 700 Td (area) Tj ET`);
+    const d = await parseDocument(bytes, "type.pdf");
+    expect(d.lines.map(l => l.text)).toEqual(["Gross Floor area"]);
+    expect(d.lines[0]!.location).toBe("page 1, line 1");
+  });
+
+  const positioned = (text: string, x: number, y: number) => `BT /F1 10 Tf ${x} ${y} Td (${text}) Tj ET`;
+  const columnText = (side: string) => Array.from({ length: 6 }, (_, i) => `${side} paragraph has several words here ${String.fromCharCode(65 + i)}`);
+  test("PDF prose columns read top to bottom, left column first (Card 128a)", async () => {
+    const left = columnText("Left"), right = columnText("Right");
+    const bytes = pdf(left.flatMap((s, i) => [positioned(s, 40, 720 - 16 * i), positioned(right[i]!, 330, 720 - 16 * i)]).join("\n"));
+    const d = await parseDocument(bytes, "columns.pdf");
+    expect(d.lines.map(l => l.text)).toEqual([...left, ...right]);
+    expect(d.lines.map(l => l.location)).toEqual(left.concat(right).map((_, i) => `page 1, line ${i + 1}`));
+  });
+
+  const wideTable = (top: number) => [
+    positioned("Type", 40, top), positioned("Units", 250, top), positioned("Monthly rent", 400, top),
+    positioned("Studio", 40, top - 18), positioned("7", 250, top - 18), positioned("$1,620", 400, top - 18),
+    positioned("Loft", 40, top - 36), positioned("9", 250, top - 36), positioned("$2,180", 400, top - 36),
+  ];
+  test("PDF table rows stay records despite wide empty bands (Card 128a)", async () => {
+    const d = await parseDocument(pdf(wideTable(700).join("\n")), "table.pdf");
+    expect(d.lines.map(l => l.text)).toEqual(["Type Units Monthly rent", "Studio 7 $1,620", "Loft 9 $2,180"]);
+  });
+  test("PDF columns stop before a full-width table on the same page (Card 128a)", async () => {
+    const left = columnText("Left"), right = columnText("Right");
+    const top = left.flatMap((s, i) => [positioned(s, 40, 720 - 16 * i), positioned(right[i]!, 330, 720 - 16 * i)]);
+    const d = await parseDocument(pdf([...top, ...wideTable(580)].join("\n")), "mixed.pdf");
+    expect(d.lines.map(l => l.text)).toEqual([...left, ...right, "Type Units Monthly rent", "Studio 7 $1,620", "Loft 9 $2,180"]);
+  });
+
   // "Land cost" at x 72, the struck figure at x 200 and the second figure at x 300, one text item each; a line is drawn at height `y`.
   const struckPdf = (y: number) => pdf(`BT /F1 12 Tf 72 700 Td (Land cost) Tj ET\nBT /F1 12 Tf 200 700 Td ($900,000) Tj ET\nBT /F1 12 Tf 300 700 Td ($950,000) Tj ET\n0.6 w 196 ${y} m 252 ${y} l S`);
 

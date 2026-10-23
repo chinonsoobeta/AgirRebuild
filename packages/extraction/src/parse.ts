@@ -88,6 +88,72 @@ async function horizontalRules(pdfjs: typeof import("pdfjs-dist/legacy/build/pdf
 const STRIKE_ON = "\ue000";
 const STRIKE_OFF = "\ue001";
 
+type PdfPiece = { x: number; end: number; size: number; s: string };
+
+/** PDF font changes can split a word into items. An explicit space still wins. */
+function pdfWords(parts: PdfPiece[]): string {
+  return parts.map((part, i) => {
+    const prev = parts[i - 1];
+    const adjacent = prev && part.x - prev.end <= 0.12 * Math.min(prev.size, part.size);
+    const space = prev && !adjacent && !/\s(?:\ue001)?$/.test(prev.s) && !/^(?:\ue000)?\s/.test(part.s) ? " " : "";
+    return space + part.s;
+  }).join("").replace(/\s+/g, " ");
+}
+
+/** Only persistent gutters with prose on both sides justify changing row order. */
+function pdfReadingOrder(rows: PdfPiece[][]): PdfPiece[][] {
+  const wide = (a: PdfPiece, b: PdfPiece) => b.x - a.end >= Math.max(18, 2 * Math.min(a.size, b.size));
+  const cells = (row: PdfPiece[]) => {
+    const out: PdfPiece[][] = [];
+    row.forEach((p, i) => {
+      if (i === 0 || wide(row[i - 1]!, p)) out.push([]);
+      out.at(-1)!.push(p);
+    });
+    return out;
+  };
+  const prose = (row: PdfPiece[]) => {
+    const text = pdfWords(row).replace(/[\ue000\ue001]/g, "");
+    return (text.match(/\p{L}+/gu)?.length ?? 0) >= 5 && (text.match(/\d+/g)?.length ?? 0) <= 1;
+  };
+  const rowCells = rows.map(cells);
+  const short = (cs: PdfPiece[][]) => cs.length >= 3 && cs.every(c => pdfWords(c).trim().split(/\s+/).length <= 4);
+  // Three short-cell rows, with numbers in the body, are records, including their header.
+  const table = new Set<number>();
+  rows.forEach((_, i) => {
+    if (rowCells.slice(i, i + 3).length === 3 && rowCells.slice(i, i + 3).every(short) && rowCells.slice(i + 1, i + 3).every(cs => cs.filter(c => /\d/.test(pdfWords(c))).length >= 2)) {
+      [i, i + 1, i + 2].forEach(n => table.add(n));
+    }
+  });
+  const positions = new Set<number>();
+  for (const row of rows) row.forEach((p, i) => { if (i && wide(row[i - 1]!, p)) positions.add((row[i - 1]!.end + p.x) / 2); });
+  let best: { x: number; from: number; to: number; support: number } | null = null;
+  for (const x of positions) {
+    let from = 0, support = 0, leftProse = 0, rightProse = 0;
+    const finish = (to: number) => {
+      if (support >= 5 && leftProse >= 3 && rightProse >= 3 && (!best || support > best.support)) best = { x, from, to, support };
+      from = to + 1; support = 0; leftProse = 0; rightProse = 0;
+    };
+    rows.forEach((row, i) => {
+      const left = row.filter(p => p.end <= x), right = row.filter(p => p.x >= x);
+      if (left.length + right.length !== row.length || table.has(i) && left.length > 0 && right.length > 0) { finish(i); return; }
+      if (left.length && right.length) {
+        if (!wide(left.at(-1)!, right[0]!)) { finish(i); return; }
+        support++;
+      }
+      if (prose(left)) leftProse++;
+      if (prose(right)) rightProse++;
+    });
+    finish(rows.length);
+  }
+  if (!best) return rows;
+  // The search above assigns best inside a callback.
+  const cut = best as { x: number; from: number; to: number; support: number };
+  const run = rows.slice(cut.from, cut.to);
+  const left = run.map(row => row.filter(p => p.end <= cut.x)).filter(row => row.length);
+  const right = run.map(row => row.filter(p => p.x >= cut.x)).filter(row => row.length);
+  return [...rows.slice(0, cut.from), ...pdfReadingOrder(left), ...pdfReadingOrder(right), ...pdfReadingOrder(rows.slice(cut.to))];
+}
+
 async function parsePdf(bytes: Uint8Array): Promise<NormalizedDocument> {
   const pdfjs = await import("pdfjs-dist/legacy/build/pdf.mjs");
   const task = pdfjs.getDocument({ data: new Uint8Array(bytes), useSystemFonts: true });
@@ -105,9 +171,9 @@ async function parsePdf(bytes: Uint8Array): Promise<NormalizedDocument> {
     // A page drawn rotated is not checked for strike-through lines.
     const rules = page.rotate === 0 ? await horizontalRules(pdfjs, page) : [];
     // Group text items into lines by their baseline.
-    const rows = new Map<number, { x: number; s: string }[]>();
+    const rows = new Map<number, PdfPiece[]>();
     for (const item of content.items as { str?: string; transform?: number[]; width?: number; height?: number }[]) {
-      if (!item.str || !item.transform) continue;
+      if (!item.str?.trim() || !item.transform) continue;
       const [a, b, , d, x, base] = item.transform as [number, number, number, number, number, number];
       const size = Math.abs(item.height || d);
       const width = item.width ?? 0;
@@ -117,18 +183,12 @@ async function parsePdf(bytes: Uint8Array): Promise<NormalizedDocument> {
       const y = Math.round(base);
       const key = [...rows.keys()].find((k) => Math.abs(k - y) <= 2) ?? y;
       const list = rows.get(key) ?? [];
-      list.push({ x, s: struck ? STRIKE_ON + item.str + STRIKE_OFF : item.str });
+      list.push({ x, end: x + width, size, s: struck ? STRIKE_ON + item.str + STRIKE_OFF : item.str });
       rows.set(key, list);
     }
-    const ordered = [...rows.entries()].sort((a, b) => b[0] - a[0]);
-    ordered.forEach(([, parts], i) => {
-      const { text, struck } = unmark(
-        parts
-          .sort((a, b) => a.x - b.x)
-          .map((x) => x.s)
-          .join(" ")
-          .replace(/\s+/g, " "),
-      );
+    const ordered = pdfReadingOrder([...rows.entries()].sort((a, b) => b[0] - a[0]).map(([, parts]) => parts.sort((a, b) => a.x - b.x)));
+    ordered.forEach((parts, i) => {
+      const { text, struck } = unmark(pdfWords(parts));
       if (text) {
         chars += text.replace(/\s/g, "").length;
         lines.push({ text, location: `page ${p}, line ${i + 1}`, ...(struck.length > 0 ? { struck } : {}) });
