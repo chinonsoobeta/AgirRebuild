@@ -9105,3 +9105,51 @@ describe("card 127: the deal's lender and equity by meaning", () => {
     expect(fieldsOf("Our credit union will finance $2,100,000 of the construction.").map(([f]) => f)).not.toContain("hard_cost");
   });
 });
+
+describe("figures must belong to this deal (Card 128b)", () => {
+  const read = (...lines: string[]) => extractCandidates({ kind: "pdf", lines: lines.map((text, i) => ({ text, location: `page 1, line ${i + 1}` })), tables: [], pageCount: 1, needsOcr: false, fullText: lines.join("\n") });
+  const cases: { rule: string; shown: string[][]; traps: { lines: string[]; field: string; value: number }[] }[] = [
+    { rule: "securities", shown: [
+      ["Partnership units: 175"], ["The trust issued 340 initial investor units."], ["Class B units: 85; subscription price: $760."],
+      ["Parts du fonds : 260"], ["La société en commandite émet 375 unités de placement."], ["Chaque part coûte 850 $ à la souscription."],
+    ], traps: [{ lines: ["48 residential strata units"], field: "unit_count", value: 48 }, { lines: ["12 one-bedroom units"], field: "unit_count", value: 12 }] },
+    { rule: "another project", shown: [
+      ["The nearby tower will contain 18 one-bedroom units."], ["Dorian Homes' Cedar Court provides 36 two-bedroom apartments."], ["Recently completed buildings include 22 studio units."],
+      ["Le projet voisin comprend 28 studios."], ["Dans un autre immeuble, on trouve 16 logements de deux chambres."], ["Les immeubles comparables offrent 19 appartements de trois chambres."],
+    ], traps: [{ lines: ["Willow Court", "Willow Court project summary", "Willow Court's residential mix includes 14 one-bedroom units."], field: "unit_count", value: 14 }, { lines: ["Projet du Ruisseau", "Programme du Projet du Ruisseau", "Notre projet comprend 9 studios."], field: "unit_count", value: 9 }] },
+    { rule: "market statistics", shown: [
+      ["Two-bedroom apartments averaged $2,430 per month across the district."], ["Median rent for studios reached $1,780 monthly."], ["The city levies development charges of $36,500 for every new apartment."],
+      ["Dans la région, les studios se louent en moyenne à 1 680 $ par mois."], ["Le loyer médian du marché des deux chambres est de 2 240 $ par mois."], ["La ville impose des redevances de développement de 32 500 $ par nouveau logement."],
+    ], traps: [{ lines: ["Average rent for our 2-bedroom units: $2,060"], field: "unit_rent_monthly", value: 2060 }, { lines: ["Le loyer mensuel de notre studio est de 1 540 $."], field: "unit_rent_monthly", value: 1540 }, { lines: ["The property has 9 two-bedroom apartments averaging 860 SF."], field: "unit_count", value: 9 }] },
+    { rule: "issuer statements", shown: [
+      ["Total liabilities and shareholders' equity $610,500"], ["Statement of financial position", "Partners' equity $4,800,000"], ["Company balance sheet", "Retained earnings and equity: $950,000"],
+      ["Bilan de la société", "Capitaux propres : 5 600 000 $"], ["État de la situation financière", "Fonds propres : 860 000 $"], ["Bénéfices non répartis et capitaux propres : 730 000 $"],
+    ], traps: [{ lines: ["Project sources of funds", "Equity contributed by the partners: $2,700,000"], field: "equity_amount", value: 2700000 }, { lines: ["Sources de financement du projet", "Apport en fonds propres : 1 950 000 $"], field: "equity_amount", value: 1950000 }, { lines: ["Financial statements may be found in the appendix.", "Project equity contribution: $2,150,000"], field: "equity_amount", value: 2150000 }] },
+    { rule: "legal boilerplate", shown: [
+      ["A cease trade order in effect for a period of more than 40 consecutive days disqualifies the issuer."], ["An issuer that held securities during the past 9 years must disclose convictions."], ["The regulatory notice requires construction disclosure within 3 business days."],
+      ["Une ordonnance d'interdiction peut rester en vigueur pendant une période de 45 jours."], ["Toute personne ayant détenu des titres au cours des 8 dernières années doit déclarer ses condamnations."], ["Un avis réglementaire exige les documents de construction dans les 4 jours ouvrables."],
+    ], traps: [{ lines: ["Construction will take 30 months."], field: "construction_months", value: 30 }, { lines: ["La durée des travaux est de 20 mois."], field: "construction_months", value: 20 }] },
+    { rule: "identifiers", shown: [
+      ["Rate 2027"], ["2026 Property Taxes"], ["Construction period .................. 27"],
+      ["Taux 2028"], ["Section 16. Durée de construction"], ["Dossier de cour : CV-26-00734582-00CL"],
+      ["Page 18 of 40"], ["Property tax contact: 604-555-0183"], ["Construction date: 2026-04-17"], ["Construction office: V6C 2P4"],
+    ], traps: [{ lines: ["Annual property tax: $18,400"], field: "property_tax_annual", value: 18400 }, { lines: ["Construction period: 27 months"], field: "construction_months", value: 27 }, { lines: ["Section 3: Land cost $760,000"], field: "land_cost", value: 760000 }, { lines: ["Construction begins 2026-04-17; construction period: 18 months"], field: "construction_months", value: 18 }] },
+    { rule: "item names", shown: [
+      ["New units: 380"], ["Aging units: 65"], ["Rate units: 215"],
+      ["Existing units: 125"], ["Partner units: 140"], ["111 Birch Road - Unit 2"],
+      ["# unités : 24"], ["2029 unités : 42"], ["142 rue des Pins, unité 3"],
+    ], traps: [{ lines: ["Plan Aspen: 15 units"], field: "unit_count", value: 15 }, { lines: ["Retail units: 4"], field: "unit_count", value: 4 }, { lines: ["Caretaker Suite: 2 units"], field: "unit_count", value: 2 }, { lines: ["Lower Flat: 3 units"], field: "unit_count", value: 3 }, { lines: ["Plan B: 7 units"], field: "unit_count", value: 7 }] },
+    { rule: "one field", shown: [
+      ["Land and construction costs: $4,700,000"], ["Soft costs and contingency: $680,000"], ["The land plus hard costs total $5,900,000."],
+      ["Terrain et coûts de construction : 4 600 000 $"], ["Coûts indirects et contingence : 720 000 $"], ["Les coûts du terrain et les travaux représentent 3 900 000 $."],
+    ], traps: [{ lines: ["Hard costs: $6,200,000"], field: "hard_cost", value: 6200000 }, { lines: ["Coût total du projet : 9 400 000 $"], field: "stated_total_cost", value: 9400000 }] },
+  ];
+  for (const c of cases) {
+    test.each(c.shown.map((lines, i) => ({ lines, i })))(`${c.rule}: shown variant $i`, ({ lines }) => {
+      expect(read(...lines).candidates, lines.join(" / ")).toEqual([]);
+    });
+    test.each(c.traps.map((trap, i) => ({ ...trap, i })))(`${c.rule}: still read trap $i`, ({ lines, field, value }) => {
+      expect(read(...lines).candidates, lines.join(" / ")).toEqual(expect.arrayContaining([expect.objectContaining({ fieldKey: field, value })]));
+    });
+  }
+});

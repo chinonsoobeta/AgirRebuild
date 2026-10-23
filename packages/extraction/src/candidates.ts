@@ -455,8 +455,9 @@ function clauseOf(text: string, t: NumberToken): string {
 /** A count or a monthly rent in prose, named by the one unit type its clause names ("two-bedroom", "studio", "4½"); none or several name nothing. */
 function clauseItem(text: string, t: NumberToken, lead: string | null = null): Mapped | null {
   const count = t.unit === "units";
-  if (t.value === null || (!count && t.unit !== "$/mo")) return null;
-  const types = unitTypesIn(clauseOf(text, t));
+  const ownRent = t.unit === "$" && /\b(?:our|notre|nos)\b/.test(fold(text)) && /\b(?:average rent|monthly rent|loyer mensuel|loyer moyen)\b/.test(fold(text));
+  if (t.value === null || (!count && t.unit !== "$/mo" && !ownRent)) return null;
+  const types = unitTypesIn(ownRent ? text : clauseOf(text, t));
   if (types.length === 0 && lead) types.push(lead);
   if (types.length !== 1) return null;
   return count
@@ -2800,6 +2801,58 @@ function commercialLines(doc: NormalizedDocument, result: ExtractionResult, used
   }
 }
 
+/** Refuse only positive evidence of a non-deal figure, across all reading paths. */
+function dealFigures(doc: NormalizedDocument, result: ExtractionResult) {
+  const statements = new Map<string, boolean>();
+  let statement = false;
+  for (const line of doc.lines) {
+    const f = fold(line.text);
+    if (/^(?:(?:company|fund|issuer) )?(?:balance sheet|statement of financial position|financial statements|bilan|etat de la situation financiere|etats financiers)(?: (?:de la|of the) (?:societe|company|fund|issuer))?\s*[:.]?$/.test(f.trim())) statement = true;
+    if (/\b(?:project sources|sources of funds|project budget|sources de financement du projet|budget du projet)\b/.test(f)) statement = false;
+    statements.set(line.location, statement);
+  }
+  const headings = doc.lines.slice(0, 8).filter(l => !/[.!?]$/.test(l.text) && l.text.split(/\s+/).length <= 10).map(l => fold(l.text));
+  const securities = /\b(?:(?:limited partners?|limited partnership|partnership|trust|fund|subscription|investor|class [a-z])(?:[ '’-]+[a-z]+){0,2}[ '’-]+units?|units? (?:of|in) (?:the )?(?:partnership|trust|fund|company)|subscription (?:amount|price)|price per security|investor count|parts? (?:sociales|du fonds|de la fiducie|de la societe)|unites? de la societe en commandite|prix de souscription)\b/;
+  const outside = /\b(?:(?:neighbou?ring|nearby|another|comparable|recently completed|adjacent) (?:[a-z-]+ )?(?:projects?|developers?|buildings?|towers?|apartments?)|(?:projets?|immeubles?|batiments?) voisins?|autres? (?:immeubles?|projets?)|immeubles? comparables?)\b/;
+  const statistic = /\b(?:averaged|average rent|median|typical|moyenn[a-z]*|mediane?|citywide|across (?:the )?(?:city|region|district)|in the region|metro vancouver|cmhc survey|dans la region|a l echelle (?:de la ville|regionale))\b/;
+  const reason = (c: Candidate): string | null => {
+    // Sentence boundaries and semicolons separate ownership; decimal points do not.
+    const clause = c.context.split(/(?<=[.!?])\s+|;\s*/).find(t => t.includes(c.raw)) ?? c.context;
+    const f = fold(clause), own = /\b(?:our|notre|nos|this (?:project|building)|ce (?:projet|batiment)|cet immeuble)\b/.test(f);
+    if (securities.test(f)) return "A security or subscription, not a dwelling or a project input";
+    if (outside.test(f)) return "A figure about another project, not this deal";
+    const possessive = [...clause.matchAll(/((?:[\p{Lu}][\p{L}-]*[ \t]+){0,3}[\p{Lu}][\p{L}-]*)['’]s?\s/gu)];
+    if (!own && /\b(?:homes?|apartments?|development|tower|units?|projet|immeuble|logements?)\b/.test(f) && possessive.some(m => {
+      const name = fold(m[1]!).replace(/^(?:the|le|la) /, "");
+      return !/^(?:bank|borrower|lender|general partner|limited partner|gp|lp|project|company|corporation)$/.test(name) && !headings.some(h => h.includes(name));
+    })) return "A figure attributed to another named owner or project";
+    if (!own && statistic.test(f.replace(MARKET_NOW_RE, " "))) return "A market or regional statistic, not this deal's figure";
+    if (/\b(?:city|municipal|ville|municipalite)\b/.test(f) && /\b(?:every|each|per|par|chaque|tout)\b/.test(f) && /\b(?:apartment|dwelling|unit|logement|habitation)\b/.test(f)) return "A municipal rate per dwelling, not the project's total";
+    if (statements.get(c.location) || /\b(?:retained earnings|benefices non repartis|total liabilities.*equity|total (?:du )?passif.*capitaux propres)\b/.test(f)
+      || /\b(?:balance sheet|bilan)\b/.test(f) && /\b(?:equity|assets|liabilities|capitaux propres|actif|passif)\b/.test(f)) return "An issuer financial statement, not the project's sources or costs";
+    if (/\b(?:cease[- ]trade|court order|penalt(?:y|ies)|convictions?|eligibility|regulatory notice|ordonnances?|condamnations?|admissibilite|avis reglementaire|interdiction)\b/.test(f)
+      || /^(?:months|years)$/.test(c.unitSeen ?? "") && /\b(?:(?:during|over|in) the (?:past|last|previous)|au cours des|dernieres? annees)\b/.test(f)) return "Legal or historical disclosure, not a project term";
+    const raw = c.raw.trim(), at = c.context.indexOf(c.raw);
+    if (/^(?:19|20)\d{2}$/.test(raw) && (/^\s*(?:19|20)\d{2}\s+\p{L}/u.test(clause) || /\b(?:rate|taux|year|annee)\s+(?:19|20)\d{2}\b/.test(f))) return "A year label, not an input";
+    const identifier = /^\s*(?:page|section|clause|schedule|annexe|article|court file|dossier de cour)\b[^:]*?(?:\d[\w.-]*|:)/i.exec(c.context);
+    const codes = [...c.context.matchAll(/\b\d{4}[-/]\d{1,2}[-/]\d{1,2}\b|\b[A-Z]\d[A-Z] ?\d[A-Z]\d\b|\b\d{3}[- .]\d{3}[- .]\d{4}\b/g)];
+    const contents = /\.\s*\.\s*\./.test(c.context) && /^\d{1,3}$/.test(raw);
+    if (contents || identifier && at >= 0 && at < identifier[0].length || codes.some(m => at >= m.index! && at < m.index! + m[0].length)) return "An identifier, date or contents entry, not an input";
+    if (["unit_count", "unit_rent_monthly"].includes(c.fieldKey ?? "")) {
+      const name = fold(c.itemKey ?? "").trim();
+      if (/^(?:new|aging|existing|rental|rate|partner|#|million|(?:19|20)\d{2})$/.test(name)) return "The item is a non-dwelling word or year";
+      if (new RegExp(`^\\s*${c.value}\\s+.+\\b(?:${STREETS.join("|")})\\b.*\\b(?:unit|suite)\\b`, "i").test(clause)) return "The item is a street address fragment";
+    }
+    return null;
+  };
+  result.candidates = result.candidates.filter(c => {
+    const note = reason(c);
+    if (!note) return true;
+    result.other.push({ ...c, fieldKey: null, itemKey: null, note });
+    return false;
+  });
+}
+
 /** Every candidate value in one document. Deterministic: no model is consulted. */
 export function extractCandidates(doc0: NormalizedDocument): ExtractionResult {
   const result: ExtractionResult = { format: detectFormat(doc0.fullText), candidates: [], other: [], notes: [...(doc0.notes ?? [])] };
@@ -2931,6 +2984,7 @@ export function extractCandidates(doc0: NormalizedDocument): ExtractionResult {
     aside(c, "Another line already gives this figure");
     return false;
   });
+  dealFigures(doc, result);
   // Within one document, the same field and value found twice is one candidate.
   const seen = new Set<string>();
   result.candidates = result.candidates.filter((c) => {
