@@ -19,7 +19,8 @@ import {
 } from "@agir/contracts";
 import { assemble, canonicalJson, ENGINE_VERSION, heldPartnerReturns, replay } from "@agir/engine";
 import type { Db } from "@agir/db";
-import { applyLabels, figureOrder, labelPhrase, labelUnit, offeredIds, suggestFields, type SourcedCandidate } from "@agir/extraction";
+import { currentDocuments, documentsHash } from "../../worker/src/reader.ts";
+import { applyLabels, figureOrder, labelPhrase, labelUnit, offeredIds, suggestFields, type ReaderResponse, type ReadingVerification, READER_PROMPT_VERSION, type SourcedCandidate } from "@agir/extraction";
 
 export const sha256 = (s: string) => createHash("sha256").update(s).digest("hex");
 /** The hash of each registered policy, by version. A run is fresh against the hash of the policy it was made under. */
@@ -414,6 +415,26 @@ export async function reviewView(tx: Db, dealId: string, asOf: string) {
       suggestions: l || !figureId || r.value === null ? [] : suggestFields({ raw: r.raw, context: r.context, note: r.note, unitSeen: r.unit_seen, value: r.value }),
     };
   });
+  const docs = await currentDocuments(tx, dealId);
+  // RLS on ai_readings limits this snapshot to staff, including when a client can read the deal.
+  const [stored] = await tx.query<{ outcome: "ok" | "failed"; model: string; prompt_version: string; created_at: string | Date; response: ReaderResponse | null; verification: { readings: ReadingVerification[]; conflicts: ReadingVerification[][] } | null }>(
+    `select outcome, model, prompt_version, created_at, response, verification from ai_readings where deal_id=$1 and documents_hash=$2 and prompt_version=$3 order by created_at desc, id desc limit 1`,
+    [dealId, documentsHash(docs), READER_PROMPT_VERSION],
+  );
+  const rejectedReading = (r: ReaderResponse["readings"][number], verification: ReadingVerification | undefined) => verification && verification.outcome !== "verified"
+    ? [{ field: r.field, item: r.item, value: r.value, file: r.file, location: r.location, quote: r.quote, reason: verification.outcome }] : [];
+  const aiReading = stored ? {
+    outcome: stored.outcome, model: stored.model, promptVersion: stored.prompt_version, createdAt: stored.created_at,
+    notUsed: (stored.response?.not_used ?? []).map(r => {
+      const matches = docs.filter(d => d.name === r.file);
+      const document = matches.length === 1 ? matches[0] : undefined;
+      return { ...r, figureId: other.find(o => !o.label && o.documentId === document?.id && o.location === r.location && o.value === r.value)?.figureId ?? null };
+    }),
+    pleaseCheck: [
+      ...(stored.response?.readings ?? []).flatMap((r, i) => rejectedReading(r, stored.verification?.readings[i])),
+      ...(stored.response?.conflicts ?? []).flatMap((c, i) => c.values.flatMap((v, j) => rejectedReading({ ...v, field: c.field, item: c.item, note: c.why, confidence: "high" }, stored.verification?.conflicts[i]?.[j]))),
+    ],
+  } : null;
   // Up to three unlabelled figures that may hold a missing input: those it ranks first, then the others, each in the table's order.
   const likely = (fieldKey: string) =>
     other.filter((o) => o.suggestions.includes(fieldKey))
@@ -421,6 +442,7 @@ export async function reviewView(tx: Db, dealId: string, asOf: string) {
       .slice(0, 3)
       .map((o) => ({ documentId: o.documentId, figureId: o.figureId!, document_name: o.document_name, location: o.location, raw: o.raw, context: o.context }));
   return {
+    aiReading,
     readiness,
     regions: await regionGroups(tx, dealId),
     proposals,

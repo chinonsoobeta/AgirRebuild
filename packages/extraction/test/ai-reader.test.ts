@@ -71,7 +71,7 @@ describe("reading verification", () => {
   document.tables[0]!.rows.push([..."ABCDE"].map(c => ({ ref: `Inputs!${c}2`, text: "$400" })));
   for (const location of ["Inputs!C2", "Inputs!A2..E2"]) expect(verifyReading({ ...reading, file: "fiction.xlsx", location }, [{ id: "d", name: "fiction.xlsx", document }]).outcome).toBe("verified");
  });
- test.each(["$1.15M", "$1.153M"])("card 160b: scaled rounding %s", quote => {
+ test.each([["$1.15M", 1150000], ["$1.001M", 1001000]] as const)("card 160b: scaled rounding %s", (quote, value) => {
   const document = { ...doc("txt"), fullText: quote, lines: [{ location: "line 1", text: quote }] };
-  expect(verifyReading({ ...reading, quote, value: quote === "$1.15M" ? 1150000 : 1153000 }, [{ ...documents[0]!, document }]).outcome).toBe("verified");
+  expect(verifyReading({ ...reading, quote, value }, [{ ...documents[0]!, document }]).outcome).toBe("verified");
  });

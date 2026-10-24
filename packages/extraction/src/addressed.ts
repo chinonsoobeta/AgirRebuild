@@ -1,6 +1,6 @@
 import type { NormalizedDocument } from "./document.ts";
 
-/** The same addressed text is used for the request and for quote verification. */
+/** Keep every covered address available for quote verification. */
 export function addressedEntries(doc: NormalizedDocument): { location: string; text: string }[] {
   const mark = (text: string, struck: [number, number][] = []) => {
     const ranges = [...struck].sort((a, b) => a[0] - b[0]);
@@ -18,5 +18,16 @@ export function addressedEntries(doc: NormalizedDocument): { location: string; t
 }
 
 export function addressedText(doc: NormalizedDocument, fileName: string): string {
-  return [`=== FILE ${fileName} ===`, ...addressedEntries(doc).map(e => `[${e.location}] ${e.text}`)].join("\n");
+  const entries = addressedEntries(doc);
+  const runs: typeof entries = [];
+  for (const entry of entries) {
+    const previous = runs.at(-1);
+    const cell = /^(.*!)([A-Z]+)(\d+)$/.exec(entry.location);
+    const last = previous && /^(.*!)([A-Z]+)(\d+)(?:\.\.([A-Z]+)\d+)?$/.exec(previous.location);
+    const column = (letters: string) => [...letters].reduce((n, c) => n * 26 + c.charCodeAt(0) - 64, 0);
+    if (previous && cell && last && previous.text === entry.text && cell[1] === last[1] && cell[3] === last[3] && column(cell[2]!) === column(last[4] ?? last[2]!) + 1) {
+      previous.location = `${last[1]}${last[2]}${last[3]}..${cell[2]}${cell[3]}`;
+    } else runs.push({ ...entry });
+  }
+  return [`=== FILE ${fileName} ===`, ...runs.map(e => `[${e.location}] ${e.text}`)].join("\n");
 }

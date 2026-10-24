@@ -32,7 +32,7 @@ export function verifyReading(reading: Reading, documents: readonly ReadingDocum
   if (field.itemized ? !reading.item?.trim() : reading.item !== null) return { outcome: READING_FAILURE.item };
   const matches = documents.filter(d => d.name === reading.file);
   const doc = matches.length === 1 ? matches[0] : undefined;
-  const entries = doc ? addressedEntries(doc.document).filter(e => e.location === reading.location) : [];
+  const entries = doc ? addressedEntries(doc.document).filter(e => e.location === reading.location.replace(/^(.*![A-Z]+\d+)\.\.[A-Z]+\d+$/, "$1")) : [];
   if (!doc || entries.length !== 1) return { outcome: READING_FAILURE.address };
   if (!entries[0]!.text.includes(reading.quote)) return { outcome: READING_FAILURE.quote };
   const format = detectFormat(doc.document.fullText);
@@ -51,7 +51,7 @@ export function verifyReading(reading: Reading, documents: readonly ReadingDocum
     const decimal = Number(digits[1]!.replace(",", "."));
     const grouped = Number(digits[1]!.replace(/[.,]/, ""));
     const values = format.decimal ? [format.decimal === digits[2] ? decimal : grouped] : [decimal, grouped];
-    const matches = values.some(v => sign * v * scaleOf(scale[1]!) === reading.value);
+    const matches = values.some(v => Math.abs(sign * v * scaleOf(scale[1]!) - reading.value) < 0.005);
     if (matches) ambiguous = format.decimal === null;
     return matches;
   });

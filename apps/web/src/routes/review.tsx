@@ -171,6 +171,7 @@ export function Review({ dealId }: { dealId: string }) {
   const [focus, setFocus] = useState<string | null>(null);
   const [editing, setEditing] = useState<string | null>(null);
   const [keeping, setKeeping] = useState<string | null>(null);
+  const [aiEntry, setAiEntry] = useState<{ id: string; value: number; field: string; item: string } | null>(null);
   const [entering, setEntering] = useState<string | null>(null);
   const [picked, setPicked] = useState<Record<string, number>>({});
   const [formError, setFormError] = useState<unknown>(null);
@@ -198,6 +199,7 @@ export function Review({ dealId }: { dealId: string }) {
     mutationFn: (b: { fieldKey: string; itemKey?: string | null; value: number; reason: string; confirmOutsideWindow?: boolean }) => api.post(`/deals/${dealId}/values`, b),
     onSuccess: () => {
       setEntering(null);
+      setAiEntry(null);
       return refresh();
     },
   });
@@ -290,7 +292,7 @@ export function Review({ dealId }: { dealId: string }) {
   );
 
   // The form that enters a value for a field no document gave: a missing input, or a line that was not found.
-  const entryForm = (m: ReviewData["missing"][number], id: string, head: ReactNode) => (
+  const entryForm = (m: { fieldKey: string; itemKey?: string | null; unit: string; label: string }, id: string, head: ReactNode, defaultValue?: number) => (
     <form
       key={id}
       className="stack"
@@ -312,7 +314,7 @@ export function Review({ dealId }: { dealId: string }) {
       <WindowConfirmation error={enter.variables?.fieldKey === m.fieldKey && enter.variables?.itemKey === (m.itemKey ?? null) ? enter.error : null} busy={enter.isPending} onConfirm={() => enter.variables && enter.mutate({...enter.variables, confirmOutsideWindow: true})} />
       {editable && (
         <div className="row" style={{ alignItems: "flex-start" }}>
-          <ValueInput unit={m.unit} id={id} label={name(m)} />
+          <ValueInput unit={m.unit} id={id} label={name(m)} defaultValue={defaultValue} />
           <input className="input grow" name="reason" aria-label={t("review.sourceFor", { label: name(m) })} placeholder={t("review.sourceHint")} minLength={10} required style={{ minWidth: 220, flexBasis: 240 }} />
           <button className="btn small" type="submit" style={{ height: 44 }}>{t("common.save")}</button>
         </div>
@@ -320,6 +322,25 @@ export function Review({ dealId }: { dealId: string }) {
     </form>
   );
 
+  const aiEntryControl = (id: string, value: number) => editable && <>
+    <button className="btn quiet small" type="button" onClick={() => { setAiEntry({ id, value, field: "", item: "" }); enter.reset(); setFormError(null); }}>{t("review.aiEnter")}</button>
+    {aiEntry?.id === id && <div className="stack">
+      <select aria-label={t("review.col.input")} value={aiEntry.field} onChange={e => setAiEntry({ ...aiEntry, field: e.target.value, item: "" })}>
+        <option value="">{t("review.useAs")}</option>
+        {LABELLABLE.map(field => <option key={field.key} value={field.key}>{L.field(field.key)}</option>)}
+      </select>
+      {(() => {
+        const field = FIELD_BY_KEY.get(aiEntry.field);
+        if (!field) return null;
+        const item = aiEntry.item;
+        return <>
+          {field.itemized && <input className="input" aria-label={t("review.col.input")} value={item} onChange={e => setAiEntry({ ...aiEntry, item: e.target.value })} list="ai-entry-items" />}
+          <datalist id="ai-entry-items">{itemNames.map(item => <option key={item} value={item} />)}</datalist>
+          {(!field.itemized || item.trim()) && entryForm({ fieldKey: field.key, itemKey: field.itemized ? item.trim() : null, unit: field.unit, label: field.label }, `ai-${aiEntry.id}-${field.key}-${item}`, <span>{L.field(field.key, item || null)}</span>, aiEntry.value)}
+        </>;
+      })()}
+    </div>}
+  </>;
   // A unit type or space no document states: one request enters every value, so it is added whole or not at all.
   const addItemForm = () => (
     <form
@@ -687,9 +708,29 @@ export function Review({ dealId }: { dealId: string }) {
               </ul>
             </details>
           )}
+            {r.aiReading?.outcome === "failed" && <p className="small muted">{t("review.aiUnavailable")}</p>}
           <details id="unused-figures" style={{ borderTop: "1px solid var(--rule)", paddingTop: 16 }} open={otherOpen} onToggle={(e) => setOtherOpen(e.currentTarget.open)}>
             <summary>{t("review.other")} <span className="num faint" style={{ fontWeight: 400 }}>{r.other.length}</span></summary>
             <p className="small muted" style={{ marginTop: 8 }}>{t("review.otherBody")}</p>
+            {!!r.aiReading?.notUsed.length && <section className="stack">
+              <h3>{t("review.aiUnused")}</h3>
+              {r.aiReading.notUsed.map((item, i) => {
+                const figure = item.figureId ? r.other.find(o => o.figureId === item.figureId && o.document_name === item.file && o.location === item.location) : undefined;
+                return <div key={i} className="stack small">
+                  <strong className="num">{f.value(item.value, "")}</strong>
+                  <span>{item.quote}</span><span>{item.file} · {msg(item.location)}</span><span>{msg(item.why)}</span>
+                  {editable && figure ? <UseAs o={figure} items={itemNames} busy={label.isPending} onSave={b => label.mutate(b)} /> : aiEntryControl(`unused-${i}`, item.value)}
+                </div>;
+              })}
+            </section>}
+            {!!r.aiReading?.pleaseCheck.length && <section className="stack">
+              <h3>{t("review.aiCheck")}</h3>
+              {r.aiReading.pleaseCheck.map((item, i) => <div key={i} className="stack small">
+                <strong>{L.field(item.field, item.item)} · {f.value(item.value, "")}</strong>
+                <span>{item.quote}</span><span>{item.file} · {msg(item.location)}</span><span>{msg(item.reason)}</span>
+                {aiEntryControl(`check-${i}`, item.value)}
+              </div>)}
+            </section>}
             <ErrorText error={label.error ?? unlabel.error} />
             <table className="tbl" style={{ marginTop: 12 }}>
               <thead><tr><th>{t("review.col.doc")}</th><th>{t("review.col.text")}</th><th>{t("review.col.whyNot")}</th></tr></thead>

@@ -68,6 +68,10 @@ export type Assumption = {
 };
 export type ReadinessItem = { fieldKey: string; itemKey?: string; label: string; detail?: string };
 export type Review = {
+  aiReading: null | { outcome: "ok" | "failed"; model: string; promptVersion: string; createdAt: string;
+    notUsed: { value: number; file: string; location: string; quote: string; why: string; figureId: string | null }[];
+    pleaseCheck: { field: string; item: string | null; value: number; file: string; location: string; quote: string; reason: string }[];
+  };
   regions: { documentId: string; documentName: string; source: string; table: string; fields: string[]; ids: string[]; leftOut: { id: string; reason: string }[] }[];
   proposals: import("@agir/contracts").Proposal[];
   tableNotices: import("@agir/contracts").Proposal[];
