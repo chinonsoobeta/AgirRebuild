@@ -510,7 +510,7 @@ export function Review({ dealId }: { dealId: string }) {
   };
   const pendingItem = (a: Assumption) => (
     <div className="card" key={a.id} onClick={() => setFocus(a.id)} style={{ background: focused?.id === a.id ? "var(--sunken)" : undefined, cursor: "pointer" }}>
-      <div>{name(a)}{a.sources.filter((s, i, all) => s.check_note && all.findIndex(x => x.check_note === s.check_note) === i).map((s, i) => <div key={i} className="small muted" style={s.check_outcome === "questions" ? { color: "var(--review-text)", fontWeight: 600 } : undefined}>{msg(s.check_note)}</div>)}{a.material && <span className="faint small">{t("review.materialTag")}</span>}</div>
+      <div>{name(a)}{a.sources.filter((s, i, all) => s.check_note && all.findIndex(x => x.check_note === s.check_note) === i).map((s, i) => <div key={i} className="small muted" style={s.check_outcome === "questions" ? { color: "var(--review-text)", fontWeight: 600 } : undefined}>{msg(s.check_note)}</div>)}{a.reason && <div className="small muted">{msg(a.reason)}</div>}{a.material && <span className="faint small">{t("review.materialTag")}</span>}</div>
       <div className="r num">{f.value(a.value, a.unit)}</div>
       <div className="small muted">{(() => { const docs = new Set(a.sources.filter((s) => a.value !== null && Math.abs(s.value - a.value) < 0.5).map((s) => s.document_id)); return docs.size > 1 ? t("review.agree", { n: docs.size }) : a.sources[0]?.document_name; })()}</div>
       <div className="r" style={{ whiteSpace: "nowrap" }}>

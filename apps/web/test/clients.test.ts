@@ -395,7 +395,7 @@ describe("card 96c thresholds", () => {
 describe("card 150 one review list", () => {
   it("shows the blocking count, leaves defaults unticked and excludes please-check from Approve all", async () => {
     state.role = "owner";
-    const a = { ...stated(), fieldKey: "land_cost", itemKey: null, status: "needs_review", value: 800000, sources: [{ document_id: "d1", document_name: "invented.txt", value: 800000, context: "Land cost: $800,000", raw: "$800,000", location: "line 1", check_outcome: "questions", check_note: "Check this value" }, { document_id: "d1", document_name: "invented.txt", value: 800000, context: "Land cost: $800,000", raw: "$800,000", location: "line 1" }] };
+    const a = { ...stated(), fieldKey: "land_cost", itemKey: null, status: "needs_review", value: 800000, reason: "The documents give this as parts that add up to it: $500,000 + $300,000", sources: [{ document_id: "d1", document_name: "invented.txt", value: 800000, context: "Land cost: $800,000", raw: "$800,000", location: "line 1", check_outcome: "questions", check_note: "Check this value" }, { document_id: "d1", document_name: "invented.txt", value: 800000, context: "Land cost: $800,000", raw: "$800,000", location: "line 1" }] };
     state.review = { assumptions: [a], missing: [{ fieldKey: "vacancy_pct", label: "Vacancy", unit: "%", default: 3, material: false, help: null, likely: [] }],
       readiness: { status: "blocked", impossible: [] }, notFound: [], choices: [], other: [], regions: [],
       todo: { blocking: 2, items: [{ kind: "missing", fieldKey: "vacancy_pct", itemKey: null, assumptionId: null, blocking: true }, { kind: "please_check", fieldKey: a.fieldKey, itemKey: a.itemKey, assumptionId: a.id, blocking: true }] } };
@@ -403,6 +403,7 @@ describe("card 150 one review list", () => {
     const html = text(render(element));
     expect(html).toContain("2 actions before this deal can run");
     expect(html).toContain("Check this value");
+    expect(html).toContain("parts that add up to it");
     expect(html).not.toContain("Approve all");
     // Two readings of one file are not two documents agreeing.
     expect(html).not.toContain("documents agree");
