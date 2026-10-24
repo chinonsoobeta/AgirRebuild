@@ -968,3 +968,20 @@ describe("a document's role: audit of Card 132", () => {
     }
   });
 });
+
+
+it("card 133 leaves questioned rows out of Approve all", () => {
+  const rows = ["questions", "confirms"].map(check_outcome => ({fieldKey: "hard_cost", sourceKind: "document" as const, sources: [{check_outcome}] as any}));
+  expect(approvable(rows)).toEqual([rows[1]]);
+});
+it.each([
+  "Checked: the costs read add up to the stated total cost of $6,000,000",
+  "Please check: this is more than the stated total cost of $6,000,000",
+  "Checked: the loan and total cost agree with the stated loan-to-cost of 75%",
+  "Checked: the unit types read add up to the stated total of 20",
+  "Please check: the unit types read add up to 20, the documents state 21",
+  "Please check: this looks about 1,000 times off $6,250,000",
+])("card 133 translates %s", note => {
+  expect(build("en", () => {}).msg(note)).toBe(note);
+  expect(build("fr", () => {}).msg(note)).not.toBe(note);
+});

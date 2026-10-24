@@ -1,7 +1,7 @@
 import { describe, expect, test, vi } from "vitest";
 import { SF_PER_M2 } from "@agir/numbers";
 import { assemble, type AssumptionRow } from "@agir/engine";
-import { WAIVED_NOTE, REMEMBERED_NOTE, applyLabels, itemFold, applySuggestions, labelPhrase, labelUnit, consolidate, extractCandidates, offerable, offeredIds, figureOrder, withoutLabelled, normalizeLabel, parseDocument, scoreExtraction, suggestFields, type Cell, type NormalizedDocument, type SourcedCandidate, type Table } from "../src/index.ts";
+import { checkArithmetic, WAIVED_NOTE, REMEMBERED_NOTE, applyLabels, itemFold, applySuggestions, labelPhrase, labelUnit, consolidate, extractCandidates, offerable, offeredIds, figureOrder, withoutLabelled, normalizeLabel, parseDocument, scoreExtraction, suggestFields, type Cell, type NormalizedDocument, type SourcedCandidate, type Table } from "../src/index.ts";
 import { MAX_PDF_PAGES, pdfPageError, relativeLinks } from "../src/parse.ts";
 import { loadOracles, toNormalized } from "./oracle.ts";
 
@@ -9394,5 +9394,42 @@ describe("Card 132: the person's document role", () => {
     const d = toNormalized({name: "sample.txt", kind: "txt", lines});
     expect(JSON.stringify(extractCandidates(d, {}))).toBe(JSON.stringify(extractCandidates(d)));
     expect(JSON.stringify(extractCandidates(d, {role: undefined}))).toBe(JSON.stringify(extractCandidates(d)));
+  });
+});
+
+
+describe("card 133 arithmetic", () => {
+  const read = (...entries: [string, number, string?][]) => consolidate(entries.map(([fieldKey, value, itemKey]) => ({ fieldKey, value, itemKey: itemKey ?? null, raw: String(value), unitSeen: null, location: "line 1", context: "Invented Cedar budget", rule: "test", documentId: "cedar", documentName: "cedar.txt" })));
+  test("confirms three costs and total without changing proposals", () => {
+    const ps = read(["land_cost", 1000000], ["hard_cost", 4000000], ["soft_cost", 1000000], ["stated_total_cost", 6000000]);
+    const before = structuredClone(ps);
+    const got = checkArithmetic(ps);
+    expect(got.every(p => p.check?.outcome === "confirms")).toBe(true);
+    expect(got[0]!.check?.note).toBe("Checked: the costs read add up to the stated total cost of $6,000,000");
+    expect(got.map(({check, ...p}) => p)).toEqual(before);
+    expect(ps).toEqual(before);
+  });
+  test("questions a loan read as hard cost", () => {
+    expect(checkArithmetic(read(["hard_cost", 9000000], ["stated_total_cost", 6000000])).find(p => p.fieldKey === "hard_cost")?.check).toEqual({outcome: "questions", note: "Please check: this is more than the stated total cost of $6,000,000"});
+  });
+  test("does not question an incomplete budget with unread financing", () => {
+    expect(checkArithmetic(read(["land_cost", 1000000], ["hard_cost", 3000000], ["soft_cost", 1000000], ["stated_total_cost", 6000000])).every(p => !p.check)).toBe(true);
+  });
+  test("confirms stated loan to cost", () => {
+    expect(checkArithmetic(read(["senior_loan_amount", 4500000], ["stated_total_cost", 6000000], ["stated_ltc_pct", 75])).find(p => p.fieldKey === "senior_loan_amount")?.check?.outcome).toBe("confirms");
+  });
+  test("questions a loan above total", () => {
+    expect(checkArithmetic(read(["senior_loan_amount", 7000000], ["stated_total_cost", 6000000], ["stated_ltc_pct", 75])).find(p => p.fieldKey === "senior_loan_amount")?.check?.outcome).toBe("questions");
+  });
+  test.each([20, 21])("compares unit counts with total %s", total => {
+    expect(checkArithmetic(read(["unit_count", 8, "1BR"], ["unit_count", 12, "2BR"], ["unit_count", total])).find(p => !p.itemKey)?.check).toEqual(total === 20 ? {outcome: "confirms", note: "Checked: the unit types read add up to the stated total of 20"} : {outcome: "questions", note: "Please check: the unit types read add up to 20, the documents state 21"});
+  });
+  test("questions a total in thousands against dollar parts", () => {
+    const got = checkArithmetic(read(["land_cost", 1000000], ["hard_cost", 4250000], ["soft_cost", 1000000], ["stated_total_cost", 6250]));
+    expect(got.find(p => p.fieldKey === "stated_total_cost")?.check).toEqual({outcome: "questions", note: "Please check: this looks about 1,000 times off $6,250,000"});
+  });
+  test("does not use a conflicting cost", () => {
+    const got = checkArithmetic(read(["land_cost", 1000000], ["land_cost", 2000000], ["hard_cost", 4000000], ["soft_cost", 1000000], ["stated_total_cost", 6000000]));
+    expect(got.every(p => !p.check)).toBe(true);
   });
 });

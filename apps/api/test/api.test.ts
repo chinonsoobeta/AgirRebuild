@@ -3390,3 +3390,17 @@ describe("Card 132: document roles", () => {
   });
 
 });
+
+
+test("card 133 reconciles arithmetic notes into review sources", async () => {
+  const d = (await call(alice, "POST", `/api/workspaces/${ws}/deals`, {name: "Invented arithmetic budget", assetType: "Multifamily"})).json.id;
+  await call(alice, "PUT", `/api/deals/${d}/documents?name=budget.txt`, undefined, Buffer.from("Hard cost: $9,000,000\nTotal development cost: $6,000,000"));
+  await work();
+  const review = (await call(alice, "GET", `/api/deals/${d}/review`)).json;
+  const a = review.assumptions.find((a: any) => a.fieldKey === "hard_cost");
+  expect(a.value).toBe(9000000);
+  expect(a.status).toBe("needs_review");
+  expect(a.sources[0]).toMatchObject({check_outcome: "questions", check_note: "Please check: this is more than the stated total cost of $6,000,000"});
+  const [stored] = await db.query(`select sources from assumptions where deal_id = $1 and field_key = 'hard_cost'`, [d]);
+  expect(stored.sources).toEqual(a.sources);
+});
