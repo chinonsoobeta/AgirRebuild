@@ -73,7 +73,12 @@ end $$;
 create or replace function agir_deal_metrics_on_audit() returns trigger
 language plpgsql security definer set search_path = public as $$
 begin
-  if new.deal_id is not null then perform agir_refresh_deal_metrics(new.deal_id); end if;
+  -- Counts are for learning only: a failure to count never blocks the action being audited.
+  if new.deal_id is not null then
+    begin perform agir_refresh_deal_metrics(new.deal_id);
+    exception when others then raise warning 'deal_metrics not updated for %: %', new.deal_id, sqlerrm;
+    end;
+  end if;
   return null;
 end $$;
 create trigger audit_events_deal_metrics after insert on audit_events
