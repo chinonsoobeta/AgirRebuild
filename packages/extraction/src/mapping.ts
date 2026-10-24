@@ -3,6 +3,8 @@
 // sits next to an output figure, is kept as unmapped so the analyst can see it,
 // but it never becomes an input.
 
+import { frameFigure, nameFigure } from "./frame.ts";
+import type { Region } from "./candidates.ts";
 import { FIELD_BY_KEY, FIELDS, OUTPUT_LIKE_PHRASES, type FieldDef } from "@agir/contracts";
 import { PERMIT_ITEM_NOTE, PERMIT_WORD, DECLINED_AFTER, LENDING_WORD, PRICE_WORD, REPAYMENT_WORD, IO_WORD, OWNER_WORD, CASH_IN_WORD, NOT_SENIOR_LENDER, OTHER_LENDER, LENDER_TEST, OTHER_RATE, SALE_WORD, SALE_COST_WORD, BUILD_DURATION, LETTING_WORD, TIME_WORD, KEEP_WORD, CLOSING_TOTAL, ASSUMPTION_HISTORY, OCCUPANCY_WORD, SETTLED_WORD, ACQUISITION_WORD, PROPERTY_WORD, RISK_WORD, HOLDING_WORD, RESIDUAL_COST, NOT_THIS_COST, NOT_RISK_COST, NOT_PROJECT_TOTAL, PROJECT_TOTAL, CONCEPTS, SENIOR_RANK, LOAN_PERIOD, STATED_TOTAL, DEBT_SERVICE, LOAN_ANAPHOR, LOAN_NOUN, MAIN_LENDER, MONTH_INDEX, NOT_A_BUDGET_LINE, NOT_CHOSEN_AFTER, LEAVING_AFTER, NOT_THE_DEALS_ASSUMPTION, NOT_THE_LOAN_AFTER, WHERE_IT_SITS } from "./concepts.ts";
 import { canonicalItem, codeOf, parenType, SF_PER_M2, unitTypesIn, wholeUnitType, type CurrencyCode, type NumberToken } from "@agir/numbers";
@@ -547,6 +549,7 @@ function convert(def: FieldDef, t: NumberToken, label: string, labelUnit: LabelU
 }
 
 export type MapOptions = {
+  region?: Region;
   /** Prose: the alias nearest the number names it, and a bare number is never money. */
   prose?: boolean;
   /** Numeric spreadsheet cell, whose fractional percentage is stored without a % sign. */
@@ -935,7 +938,19 @@ export function mapToken(rawLabel: string, t: NumberToken, opts: MapOptions = {}
     const parts = localLabel.split(/\b(?:and|et)\b/).map(part => FIELDS.filter(d => d.extractable && !d.itemized && d.unit === "%" && d.aliases.some(a => hasPhrase(part, a))).map(d => d.key));
     if (parts.every(keys => keys.length) && new Set(parts.flat()).size > 1) return ambiguous(parts.flat(), "More than one percentage field fits this figure");
   }
-  let m = mapSigned(rawLabel, t, opts);
+  const frame = frameFigure(rawLabel, t, opts);
+  const namedFigure = frame.attribute ? nameFigure(frame) : null;
+  const signed = mapSigned(rawLabel, t, opts);
+  let framed: Mapped | null = null;
+  if (namedFigure && "refused" in namedFigure) framed = { kind: "ignored", reason: namedFigure.refused };
+  else if (namedFigure && "fieldKey" in namedFigure) {
+    const normalized = normalizeLabel(rawLabel);
+    const value = compatibleValue(FIELD_BY_KEY.get(namedFigure.fieldKey)!, t, normalized.label, normalized.labelUnit, normalized.labelCode, opts.prose);
+    // Keep the existing alias metadata; a new word-based name follows the concept path.
+    if (signed.kind === "field" && signed.fieldKey === namedFigure.fieldKey) framed = signed;
+    else if (signed.kind === "unmapped" && value) framed = { kind: "field", fieldKey: namedFigure.fieldKey, itemKey: null, ...value, concept: true };
+  }
+  let m = framed ?? signed;
   // Card 127 audit: a lender capping or limiting the ratio, by any verb, states its limit.
   if (m.kind === "field" && ["stated_ltc_pct", "refinance_ltv_pct"].includes(m.fieldKey) && /\b(?:limits?|maximum|plafond\w*|plafonn\w*|caps?|capped|capping|no more than|will not exceed|up to|at most|au plus)\b/.test(named)) return { kind: "ignored", reason: "A lender's limit, not the deal's figure" };
   if (OCCUPANCY_WORD.test(named) && SETTLED_WORD.test(named) && m.kind === "field" && m.fieldKey === "item_occupancy_pct") {

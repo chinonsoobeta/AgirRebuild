@@ -6,3 +6,4 @@ export * from "./results.ts";
 export * from "./place.ts";
 export * from "./fr.ts";
 export * from "./tables.ts";
+export * from "./field-table.ts";

@@ -2,6 +2,7 @@ import { describe, expect, it } from "vitest";
 import { existsSync, readdirSync, readFileSync } from "node:fs";
 import { detectFormat, tokenize } from "@agir/numbers";
 import { FIELD_BY_KEY, FIELD_TABLE } from "@agir/contracts";
+import { mapToken } from "../src/mapping.ts";
 import { frameFigure, nameFigure } from "../src/frame.ts";
 
 const cases = [
@@ -61,6 +62,31 @@ it("leaves a capped loan-to-cost figure to the old rules", () => {
   expect(nameFigure(figure("The lender capped the loan-to-cost", "68%"))).not.toEqual({ fieldKey: "stated_ltc_pct" });
 });
 
+// Invented values exercise each provenance difference found by the full measurement.
+it.each([
+  ["Loan-to-cost", "71%", "stated_ltc_pct"],
+  ["Loan-to-cost", "69.5%", "stated_ltc_pct"],
+  ["Loan to cost", "73%", "stated_ltc_pct"],
+  ["loan-to-cost", "66%", "stated_ltc_pct"],
+  ["Loan to cost", "63.8%", "stated_ltc_pct"],
+  ["Taux second rang", "13%", "mezz_rate_pct"],
+  ["Loan-to-cost", "72%", "stated_ltc_pct"],
+  ["Loan to cost", "62.9%", "stated_ltc_pct"],
+  ["loan-to-cost", "71.5%", "stated_ltc_pct"],
+  ["Senior fixed rate", "7.3%", "senior_rate_pct"],
+  ["LTC", "74%", "stated_ltc_pct"],
+  ["The second interest", "10.4%", "mezz_rate_pct"],
+  ["Intérêt prioritaire", "6.45%", "senior_rate_pct"],
+  ["Senior repayment years", "31 years", "senior_amort_years"],
+  ["Junior rate", "11.4%", "mezz_rate_pct"],
+  ["Junior advance", "$340000", "mezz_loan_amount"],
+  ["Senior repayment horizon", "32 years", "senior_amort_years"],
+  ["Senior principal holiday", "17 months", "senior_io_months"],
+])("preserves concept provenance for %s (%s)", (label, value, fieldKey) => {
+  const token = tokenize(value!, detectFormat(value!))[0]!;
+  expect(mapToken(label!, token, { prose: true })).toMatchObject({ kind: "field", fieldKey, concept: true });
+});
+
 // Bank wording stays outside the repository; only aggregate counts are printed.
 const bank = "/Users/chinonsoobeta/Documents/Codex/2026-10-04/agir-reading-work/harness/bank";
 it("audits every loan wording-bank case through the frame alone", (context) => {
@@ -86,7 +112,7 @@ it("audits every loan wording-bank case through the frame alone", (context) => {
           const frame = frameFigure(label, token, { prose: !sheet, numberCell: sheet, context: text, after: text.slice(token.end) });
           const named = nameFigure(frame);
           if (named && "fieldKey" in named) fields.add(named.fieldKey);
-          else reasons.add(!frame.subject ? "Subject not established" : !frame.attribute ? "Attribute not established" : !FIELD_TABLE.some(row => row.subject === frame.subject && row.attribute === frame.attribute && row.type === frame.type) ? "No matching table row or unit" : "Legacy agreement not established");
+          else reasons.add(!frame.subject ? "Subject not established" : !frame.attribute ? "Attribute not established" : !FIELD_TABLE.some(row => row.subject === frame.subject && row.attribute === frame.attribute && row.type === frame.type) ? "No matching table row or unit" : "Non-extractable table field");
         }
       }
       const wanted = want.filter(key => scope.has(key));

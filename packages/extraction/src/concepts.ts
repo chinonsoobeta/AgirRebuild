@@ -1,6 +1,7 @@
+import { LOAN_NOUN, SENIOR_RANK, LENDING_WORD, PRICE_WORD, REPAYMENT_WORD, IO_WORD, OTHER_LENDER, DECLINED_AFTER, LENDER_TEST, OTHER_RATE, LOAN_PERIOD, NOT_SENIOR_LENDER } from "./slot-words.ts";
+export { LOAN_NOUN, SENIOR_RANK, LENDING_WORD, PRICE_WORD, REPAYMENT_WORD, IO_WORD, OTHER_LENDER, DECLINED_AFTER, LENDER_TEST, OTHER_RATE, LOAN_PERIOD, NOT_SENIOR_LENDER } from "./slot-words.ts";
 // Folded words for a concept read. Aliases and their refusals always run first.
 // "Principal" is an amount word, not a loan: "Principal: $X" alone names no loan.
-export const LOAN_NOUN = /\b(?:loans?|facilit(?:y|ies)|advances?|mortgages?|lenders?|banks?|credit union|member(?= (?:loans?|mortgages?|amort\w*|rates?|interest|io)\b)|credits?|financing|borrowing|prets?|financements?|hypotheques?|preteurs?|banques?|caisses?|avances?)\b/;
 // "The lender", "le prêteur": a loan named before, whose rank this line does not state.
 // Card 118 audit: a bank or credit union is the senior lender, so "the bank" is not an anaphor.
 export const LOAN_ANAPHOR = /\b(?:the|a|an|this|that|our|their|its|le|la|les|l|un|une|ce|cette|notre|leur)\s+(?:loans?|facility|(?:private )?lenders?|mortgages?|prets?|preteurs?|hypotheques?)\b/;
@@ -11,23 +12,12 @@ export const MAIN_LENDER = /\b(?:preteur principal|banque principale|premier pre
 export const NOT_THE_LOAN_AFTER = /^\W*(?:(?:which|that|but)\s+(?:was|is)\s+)?(?:never|not (?:yet )?committed|uncommitted|jamais|non engage)/;
 
 // Card 127: lender identity and the figure's attribute are separate word classes.
-export const LENDING_WORD = /\b(?:lends?|will finance|to finance|finances|financed|financera|financer|advances?|commits?|provides?|puts? up|signs? for|funds?|funding|approves?|approved|sanctions?|sanctioned|amount|sum|prete\w*|accord\w*|consent\w*|montant)\b/;
-export const PRICE_WORD = /\b(?:a year|per annum|par an|rates?|interest|coupon|charges?|bills?|priced|fixed|annual|yearly|taux|interets?)\b/;
-export const REPAYMENT_WORD = /\b(?:amort\w*|paid off|pays? off|payback|pays? down|repaid|repayment|rembours\w*)\b/;
-export const IO_WORD = /\b(?:interest[- ]only|only interest|seul\w* (?:les )?interets?|io|no[- ]principal|without principal|interets? seulement|sans remboursement de capital|franchise)\b/;
 export const OWNER_WORD = /\b(?:partners?|owners?|sponsors?|we|our|associes?|promoteurs?)\b/;
 export const CASH_IN_WORD = /\b(?:bring\w*|in cash|put in|puts in|cash (?:in|wired)|contribut\w*|invest\w*|own cash|equity|mise de fonds|apport|fonds propres)\b/;
-export const NOT_SENIOR_LENDER = /\b(?:vendor take[- ]back|vtb|equity|fonds propres|capitaux propres)\b/;
-export const OTHER_LENDER = /\b(?:rival|other|another|competing|competitor|concurrent\w*|alternative|autre banque|declined|refused|rejected|turned (?:it )?down|offre refusee|not taken|last year|seller s|previous owner|existing loan being repaid|ancien proprietaire|annee derniere)\b/;
 // Card 127 audit: a decline anywhere after the figure in its sentence.
-export const DECLINED_AFTER = /\b(?:declined|refused|rejected|turned (?:it |them )?down|passed on it|said no|walked away|dit non|refus\w*|decline\w*|rejet\w*|pas retenu\w*)\b/;
-export const LENDER_TEST = /\b(?:caps?|limits?|no more than|will not exceed|up to|at most|stress[- ]test|qualifying|debt yield|dscr|coverage|plafonne\w*|au plus|taux de qualification)\b/;
-export const OTHER_RATE = /\b(?:vacancy|occupancy|inoccupation|occupation|cap rate|growth|inflation|debt yield)\b/;
 
 // Card 115: v5/v8/v9/v10 loan labels informed rank and plain loan vocabulary.
 // First phase/draw/year/floor and a partner's priority are not loan ranks.
-export const SENIOR_RANK = /\b(?:sr|senior|first[- ](?:charge|ranking)|first (?=(?:money|principal|amort\w*|io|interest|rate|coupon|charge|lender|loan|mortgage)\b)|the first is|(?:dette|pret|interet|taux|amort\w*)\s+prioritaire|prioritaire\s+(?:dette|pret|interet|taux|amort\w*))\b/;
-export const LOAN_PERIOD = /\b(?:repayment (?:schedule|years|horizon|after conversion)|years to repay (?:the )?principal|months free of principal|principal-free|int-only|free-principal|no-principal|principal holiday|franchise de capital|interets? seuls|periode sans capital)\b/;
 // v6/v8/v9/v10 totals: a named cost subtotal still belongs to that cost.
 // Card 115 audit: "stated total" and "total déclaré" alone, or of the project or its costs; "Stated total rent" is not the project's.
 export const STATED_TOTAL = /\b(?:stated project subtotal|project subtotal|(?:stated total|total declare)(?=\s*$|\s+(?:project|cost|costs|of (?:the )?(?:project|uses|costs)|budget|du projet|des couts|des emplois)\b)|total uses|all-in uses|sum of uses|total des emplois|somme des emplois)\b/;
