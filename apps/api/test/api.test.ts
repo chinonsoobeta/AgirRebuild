@@ -3411,3 +3411,22 @@ test("card 133 reconciles arithmetic notes into review sources", async () => {
   expect(next.status).toBe("needs_review");
   expect(next.sources[0].check_outcome).toBeUndefined();
 });
+
+test("card 134 persists alternatives and chooses for review until a person labels the figure", async () => {
+  const d = (await call(alice, "POST", `/api/workspaces/${ws}/deals`, { name: "Invented Arithmetic Court", assetType: "Multifamily", location: "Burnaby", province: "BC", currency: "CAD" })).json.id;
+  const text = "Senior loan amount: $4,500,000\nTotal project cost: $6,000,000\nLoan-to-cost and refinance LTV: 75%\n";
+  expect((await call(alice, "PUT", `/api/deals/${d}/documents?name=invented.txt`, undefined, new TextEncoder().encode(text))).status).toBe(200);
+  await work();
+  const [c] = await db.query<any>(`select alternatives from candidates where deal_id = $1 and value = 75`, [d]);
+  expect(c.alternatives).toEqual(["stated_ltc_pct", "refinance_ltv_pct"]);
+  const [a] = await db.query<any>(`select status, value, sources from assumptions where deal_id = $1 and field_key = 'stated_ltc_pct'`, [d]);
+  expect(a).toMatchObject({ status: "needs_review", value: 75 });
+  expect(a.sources[0].rule).toBe("arithmetic-choice");
+  const review = (await call(alice, "GET", `/api/deals/${d}/review`)).json;
+  const fig = review.other.find((o: any) => o.value === 75);
+  expect((await call(alice, "POST", `/api/deals/${d}/figure-labels`, { documentId: fig.documentId, figureId: fig.figureId, fieldKey: "refinance_ltv_pct" })).status).toBe(200);
+  await work();
+  const [labelled] = await db.query<any>(`select status, value, sources from assumptions where deal_id = $1 and field_key = 'refinance_ltv_pct'`, [d]);
+  expect(labelled).toMatchObject({ status: "needs_review", value: 75 });
+  expect(labelled.sources[0].rule).toBe("labelled");
+});

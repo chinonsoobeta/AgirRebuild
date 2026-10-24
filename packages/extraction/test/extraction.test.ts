@@ -1,7 +1,7 @@
 import { describe, expect, test, vi } from "vitest";
 import { SF_PER_M2 } from "@agir/numbers";
 import { assemble, type AssumptionRow } from "@agir/engine";
-import { checkArithmetic, WAIVED_NOTE, REMEMBERED_NOTE, applyLabels, itemFold, applySuggestions, labelPhrase, labelUnit, consolidate, extractCandidates, offerable, offeredIds, figureOrder, withoutLabelled, normalizeLabel, parseDocument, scoreExtraction, suggestFields, type Cell, type NormalizedDocument, type SourcedCandidate, type Table } from "../src/index.ts";
+import { chooseByArithmetic, checkArithmetic, WAIVED_NOTE, REMEMBERED_NOTE, applyLabels, itemFold, applySuggestions, labelPhrase, labelUnit, consolidate, extractCandidates, offerable, offeredIds, figureOrder, withoutLabelled, normalizeLabel, parseDocument, scoreExtraction, suggestFields, type Cell, type NormalizedDocument, type SourcedCandidate, type Table } from "../src/index.ts";
 import { MAX_PDF_PAGES, pdfPageError, relativeLinks } from "../src/parse.ts";
 import { loadOracles, toNormalized } from "./oracle.ts";
 
@@ -9458,4 +9458,33 @@ describe("card 133 arithmetic", () => {
     expect(got.filter(p => p.check?.outcome === "confirms")).toHaveLength(4);
   });
 
+});
+
+describe("card 134 arithmetic choice", () => {
+  const figure = (fieldKey: string | null, value: number, alternatives?: string[]): SourcedCandidate => ({ fieldKey, value, alternatives, itemKey: null, raw: String(value), unitSeen: null, location: "line 1", context: "Invented funding", rule: "test", documentId: "invented", documentName: "Invented" });
+  const read = (...pairs: [string, number][]) => consolidate(pairs.map(([k, v]) => figure(k, v)));
+  test("chooses the percentage that closes the existing loan identity", () => {
+    const f = figure(null, 75, ["stated_ltc_pct", "refinance_ltv_pct"]);
+    expect(chooseByArithmetic(read(["senior_loan_amount", 4500000], ["stated_total_cost", 6000000]), [f])).toEqual([{ ...f, fieldKey: "stated_ltc_pct", rule: "arithmetic-choice", note: "Chosen because it closes: the loan and total cost agree with the stated loan-to-cost of 75%" }]);
+    expect(chooseByArithmetic(read(["stated_total_cost", 6000000]), [f])).toEqual([]);
+    expect(chooseByArithmetic(read(["senior_loan_amount", 4500000], ["stated_total_cost", 6000000], ["stated_ltc_pct", 75]), [f])).toEqual([]);
+  });
+  test("leaves both closing choices and three fields unchosen", () => {
+    const ps = read(["land_cost", 1000000], ["hard_cost", 3000000], ["soft_cost", 1000000], ["stated_total_cost", 6000000]);
+    expect(chooseByArithmetic(ps, [figure(null, 1000000, ["contingency", "other_cost"])])).toEqual([]);
+    expect(chooseByArithmetic(ps, [figure(null, 1000000, ["contingency", "other_cost", "development_charges"])])).toEqual([]);
+  });
+  test("rejects a closing choice that adds a question elsewhere", () => {
+    const ps = read(["land_cost", 1000000], ["hard_cost", 3000000], ["soft_cost", 2000000], ["senior_loan_amount", 4500000000], ["stated_ltc_pct", 75]);
+    expect(chooseByArithmetic(ps, [figure(null, 6000000, ["stated_total_cost", "refinance_month"])])).toEqual([]);
+  });
+  test("records two named alternatives but preserves the three-field refusal", () => {
+    const doc = (text: string): NormalizedDocument => ({ kind: "pdf", fullText: text, lines: [{text, location: "page 1, line 1"}], tables: [], notes: [] });
+    const two = extractCandidates(doc("Loan-to-cost and refinance LTV: 75%.")).other.find(c => c.value === 75);
+    expect(two?.alternatives).toEqual(["stated_ltc_pct", "refinance_ltv_pct"]);
+    expect(two?.note).toMatch(/^Could be the .+ or the .+; enter the one to use$/);
+    const three = extractCandidates(doc("Loan-to-cost and refinance LTV and vacancy: 75%.")).other.find(c => c.value === 75);
+    expect(three?.alternatives).toBeUndefined();
+    expect(three?.note).toBe("More than one percentage field fits this figure");
+  });
 });

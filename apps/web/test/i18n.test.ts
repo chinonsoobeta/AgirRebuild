@@ -1000,3 +1000,8 @@ it.each(["en", "fr"] as const)("card 133 renders arithmetic source notes in %s",
     }
   } finally { vi.unstubAllGlobals(); }
 });
+
+it("translates card 134 arithmetic choice and alternative notes", () => {
+  expect(translateMessage("Chosen because it closes: the loan and total cost agree with the stated loan-to-cost of 75%")).toBe("Choisi car il confirme : le prêt et le coût total correspondent au ratio prêt-coût déclaré de 75 %");
+  expect(translateMessage("Could be the stated loan-to-cost or the refinance loan-to-value; enter the one to use")).toBe("Il pourrait s’agir de Ratio prêt-coût déclaré ou de Ratio prêt-valeur du refinancement; saisissez le champ à utiliser");
+});
