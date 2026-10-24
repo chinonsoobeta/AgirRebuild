@@ -3775,3 +3775,42 @@ describe("card 150 todoList", () => {
     expect(todoList(ready(), [], ai)).toMatchObject({ blocking: 0, items: [{ kind: "ai_check", blocking: false }] });
   });
 });
+
+describe("fallback: no model", () => {
+  test("with no key and no provider, an upload reaches a run with no call and no AI reading", async () => {
+    const key = process.env.ANTHROPIC_API_KEY;
+    delete process.env.ANTHROPIC_API_KEY;
+    const fetchSpy = vi.spyOn(globalThis, "fetch");
+    const parseSpy = vi.spyOn(Anthropic.Messages.prototype, "parse");
+    const createSpy = vi.spyOn(Anthropic.Messages.prototype, "create");
+    await db.query(`update workspaces set label_suggestions = true where id = $1`, [ws]);
+    try {
+      const id = (await call(alice, "POST", `/api/workspaces/${ws}/deals`, { name: "Fallback Heights", assetType: "Multifamily", location: "Burnaby", province: "BC" })).json.id;
+      for (const doc of loadOracle("maple-heights").documents) {
+        expect((await call(alice, "PUT", `/api/deals/${id}/documents?name=${encodeURIComponent(doc.name)}`, undefined, await documentBytes(doc))).status).toBe(200);
+      }
+      await drain({ db, store });
+      const docs = (await call(alice, "GET", `/api/deals/${id}/documents`)).json;
+      expect(docs.map((d: any) => d.stage)).toEqual(docs.map(() => "extracted"));
+      const review = (await call(alice, "GET", `/api/deals/${id}/review`)).json;
+      expect(review.readiness.missing).toEqual([]);
+      expect(review.assumptions.length).toBeGreaterThan(10);
+      expect(review.assumptions.every((a: any) => (a.sources ?? []).every((s: any) => s.rule !== "ai"))).toBe(true);
+      for (const a of review.assumptions.filter((x: any) => x.status === "needs_review")) {
+        expect((await call(alice, "POST", `/api/assumptions/${a.id}/review`, { action: "approve", version: a.version })).status).toBe(200);
+      }
+      const r = await call(alice, "POST", `/api/deals/${id}/runs`);
+      expect(r.status).toBe(200);
+      expect((await call(alice, "GET", `/api/runs/${r.json.id}`)).json.result.verdict.code).toBe("REJECT");
+      expect(await db.query(`select id from ai_readings where deal_id=$1`, [id])).toEqual([]);
+      expect(await db.query(`select id from label_suggestions where deal_id=$1`, [id])).toEqual([]);
+      expect(fetchSpy).not.toHaveBeenCalled();
+      expect(parseSpy).not.toHaveBeenCalled();
+      expect(createSpy).not.toHaveBeenCalled();
+    } finally {
+      await db.query(`update workspaces set label_suggestions = false where id = $1`, [ws]);
+      fetchSpy.mockRestore(); parseSpy.mockRestore(); createSpy.mockRestore();
+      if (key !== undefined) process.env.ANTHROPIC_API_KEY = key;
+    }
+  });
+});
