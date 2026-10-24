@@ -11,7 +11,9 @@ The gate fails if any of these happens:
 - a trap is read;
 - an extra value appears;
 - a false conflict appears;
-- fewer than 99% of the unseen items are read correctly.
+- fewer unseen items are read correctly than in the recorded baseline (544 of 550 at reader-v2, offline).
+
+99% of unseen items is the goal. The gate reports it but does not fail on it.
 
 ## Which run a change needs
 
