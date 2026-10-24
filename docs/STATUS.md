@@ -325,3 +325,9 @@ Where the code showed a better route than [the plan](plan-small-developers.md), 
 ## Card 94b — cited insured product floors (2026-10-19)
 
 Local draft for human review: Select points and Standard term choose the cited 1.10x / 1.20x / 1.30x floors. Stored-policy limits check minimum units, refinance LTV before premium, and amortization. Readiness requires the Standard term for 7+ units. Owner review is required for the existing-property LTV choice; no credit sign-off is implied.
+
+## Fallback gate and held-out measurement (card 154)
+
+- Command: `npm run gate -- --tier=fallback`. It runs only the `fallback: no model` tests (`apps/api/test/api.test.ts`) with `ANTHROPIC_API_KEY` removed from the child environment; the `release` tier runs the same step. The test uploads an invented document set with no key and no injected provider, checks that no request reaches `fetch` or the Anthropic SDK, that the documents are extracted and reconciled, that a run is produced as before card 160a, and that no `ai_readings` (or `label_suggestions`) row is written.
+- The rule reader is the fallback for the AI reader (card 160a) and must keep working with no key.
+- At each phase end Claude runs the held-out measurement outside the repository: `measure-part.sh <part> <previous>` (in `agir-reading-work/harness/realdocs/`), run from the repository root with only `SETS=v2,v3,v4,v4c,v5,v6,v7,v8,v9,v10,ref`. It scores the bank, the real documents, the readings and the actions and writes byte comparisons against the previous part (`*-diff-part-<part>.txt`) in the harness's own folder. Blind and real documents, the harness and its outputs are never stored in the repository.
