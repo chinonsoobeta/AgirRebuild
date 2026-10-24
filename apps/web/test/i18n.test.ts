@@ -1047,3 +1047,13 @@ it.each(["en", "fr"] as const)("card 135 offers confirmation only for an outside
     expect(translateMessage(en + " The documents state 15 units in all; the types read so far have 12.")).toBe(fr + " Les documents indiquent 15 logements au total ; les types lus jusqu’ici en comptent 12.");
   }
 });
+
+describe("Card 137 region text", () => {
+  it("names the table and exclusions in French", () => {
+    const fr = build("fr", () => {});
+    expect(fr.t("review.regionIntro", { kind: fr.t("review.regionRent"), fields: "type, nombre, loyer mensuel" })).toBe("Ce tableau ressemble à votre état locatif : type, nombre, loyer mensuel.");
+    expect(fr.t("review.regionConfirm", { n: 12 })).toBe("Confirmer les 12 valeurs");
+    expect(fr.msg("read by OCR")).toBe("lu par ROC");
+    expect(fr.msg("please check")).toBe("à vérifier");
+  });
+});

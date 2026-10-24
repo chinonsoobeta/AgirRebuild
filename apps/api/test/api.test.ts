@@ -3504,3 +3504,49 @@ describe("card 135 typed plausibility windows", () => {
   await put("unit_rent_monthly", 1850, "2-bed");
   expect((await call(owner, "GET", `/api/deals/${d}/review`)).json.readiness.status).toBe("ready");
 });
+
+describe("Card 137: confirming a region", () => {
+  async function setup() {
+    const d = (await call(alice, "POST", `/api/workspaces/${ws}/deals`, { name: "Invented region", assetType: "Multifamily", province: "BC" })).json.id;
+    await call(alice, "PUT", `/api/deals/${d}/documents?name=invented.csv`, undefined, new TextEncoder().encode("Type,Units,Monthly rent,Area sf\nStudio,8,1800,500\n"));
+    await work();
+    const read = async () => (await call(alice, "GET", `/api/deals/${d}/review`)).json;
+    return { d, read };
+  }
+  test("stores regions, preserves versions on reconcile, and confirms two while leaving a questioned third", async () => {
+    const { d, read } = await setup();
+    const before = await read();
+    expect(before.assumptions).toHaveLength(3);
+    expect(before.assumptions.every((a: any) => a.sources[0].region?.source === "sheet")).toBe(true);
+    await reconcileDeal(db, d);
+    expect((await read()).assumptions.map((a: any) => [a.id, a.version])).toEqual(before.assumptions.map((a: any) => [a.id, a.version]));
+    const questioned = before.assumptions[0];
+    await db.query(`update assumptions set sources = $2 where id = $1`, [questioned.id, JSON.stringify(questioned.sources.map((s: any) => ({ ...s, check_outcome: "questions" })))]);
+    const view = await read();
+    expect(view.regions).toHaveLength(1);
+    const g = view.regions[0];
+    expect(g.ids).toHaveLength(2);
+    expect(g.leftOut).toContainEqual({ id: questioned.id, reason: "please check" });
+    const result = await call(alice, "POST", `/api/deals/${d}/regions/confirm`, g);
+    expect(result.status).toBe(200);
+    expect(result.json).toMatchObject({ approved: 2, awaitingSecond: 0, leftOut: g.leftOut });
+    const after = await read();
+    expect(after.regions).toEqual([]);
+    expect(after.assumptions.find((a: any) => a.id === questioned.id).status).toBe("needs_review");
+    for (const a of after.assumptions.filter((a: any) => a.id !== questioned.id)) expect(a.reason).toBe(`Confirmed with the table ${g.table} in invented.csv`);
+  });
+  test("leaves OCR and the caller's labels out and never offers one eligible value", async () => {
+    const { d, read } = await setup();
+    const before = await read();
+    const [uid] = await db.query<{ id: string }>(`select id from users where email = 'alice@example.com'`);
+    for (const [i, a] of before.assumptions.entries()) {
+      if (i > 1) continue;
+      await db.query(`update assumptions set sources = $2 where id = $1`, [a.id, JSON.stringify(a.sources.map((s: any) => i === 0 ? { ...s, ocr: true } : { ...s, rule: "labelled", labelled_by: uid!.id }))]);
+    }
+    expect((await read()).regions).toEqual([]);
+    const s = before.assumptions[2].sources[0];
+    const res = await call(alice, "POST", `/api/deals/${d}/regions/confirm`, { documentId: s.document_id, source: "sheet", table: s.region.table });
+    expect(res.status).toBe(409);
+    expect((await read()).assumptions.every((a: any) => a.status === "needs_review")).toBe(true);
+  });
+});
