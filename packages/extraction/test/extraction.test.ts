@@ -9153,3 +9153,24 @@ describe("figures must belong to this deal (Card 128b)", () => {
     });
   }
 });
+
+describe("figures must belong to this deal: audit of Card 128b", () => {
+  const read = (...lines: string[]) => extractCandidates({ kind: "pdf", lines: lines.map((text, i) => ({ text, location: `page 1, line ${i + 1}` })), tables: [], pageCount: 1, needsOcr: false, fullText: lines.join("\n") });
+  const values = (lines: string[], field: string) => read(...lines).candidates.filter(c => c.fieldKey === field).map(c => c.value);
+  test("a contrast ends our ownership: the city's average rent is not ours", () => {
+    expect(values(["Our average rent for the two-bedroom units is $1,950 per month, while the city average rent is $1,700."], "unit_rent_monthly")).toEqual([1950]);
+    expect(values(["Notre loyer moyen pour les deux chambres est de 1 850 $, alors que le loyer moyen de la ville est de 1 600 $."], "unit_rent_monthly")).toEqual([1850]);
+    expect(values(["Our average rent for studios is $1,400, compared with $1,250 across the region."], "unit_rent_monthly")).toEqual([1400]);
+  });
+  test("a label-value list with dot leaders is not a table of contents", () => {
+    expect(values(["Number of units .......... 48", "Loan amount ........ $6,200,000", "Interest rate ........ 5.25%"], "unit_count")).toEqual([48]);
+    expect(values(["Number of units .......... 36", "Storeys .......... 4", "Parking stalls .......... 30"], "unit_count")).toEqual([36]);
+  });
+  test("a table of contents is still refused", () => {
+    expect(read("Executive summary .......... 3", "Unit mix .......... 7", "Number of units .......... 12", "Financing .......... 18").candidates).toEqual([]);
+  });
+  test("'typical' alone does not make a rent a market statistic", () => {
+    expect(values(["Typical unit size 750 sf", "Typical two-bedroom rent $2,100 per month"], "unit_rent_monthly")).toEqual([2100]);
+    expect(read("Typical market rent for two-bedroom units in the area is $1,900 per month.").candidates).toEqual([]);
+  });
+});

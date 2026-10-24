@@ -452,12 +452,24 @@ function clauseOf(text: string, t: NumberToken): string {
   return text.slice(from);
 }
 
+/** "Our rent is $1,950, while the city's is $1,700": a contrast starts another owner's figure, so ownership stops at it. */
+const CONTRAST_RE = /\b(?:while|whereas|compared (?:to|with)|versus|vs\.?|alors que|tandis que|par rapport (?:a|à|au|aux))(?=\s|$)/giu;
+function contrastPart(text: string, at: number): string {
+  let from = 0;
+  for (const m of text.matchAll(CONTRAST_RE)) {
+    if (m.index! + m[0].length <= at) from = m.index! + m[0].length;
+    else if (m.index! >= at) return text.slice(from, m.index!);
+  }
+  return text.slice(from);
+}
+
 /** A count or a monthly rent in prose, named by the one unit type its clause names ("two-bedroom", "studio", "4½"); none or several name nothing. */
 function clauseItem(text: string, t: NumberToken, lead: string | null = null): Mapped | null {
   const count = t.unit === "units";
-  const ownRent = t.unit === "$" && /\b(?:our|notre|nos)\b/.test(fold(text)) && /\b(?:average rent|monthly rent|loyer mensuel|loyer moyen)\b/.test(fold(text));
+  const own = contrastPart(text, t.start);
+  const ownRent = t.unit === "$" && /\b(?:our|notre|nos)\b/.test(fold(own)) && /\b(?:average rent|monthly rent|loyer mensuel|loyer moyen)\b/.test(fold(own));
   if (t.value === null || (!count && t.unit !== "$/mo" && !ownRent)) return null;
-  const types = unitTypesIn(ownRent ? text : clauseOf(text, t));
+  const types = unitTypesIn(ownRent ? own : clauseOf(text, t));
   if (types.length === 0 && lead) types.push(lead);
   if (types.length !== 1) return null;
   return count
@@ -2811,13 +2823,27 @@ function dealFigures(doc: NormalizedDocument, result: ExtractionResult) {
     if (/\b(?:project sources|sources of funds|project budget|sources de financement du projet|budget du projet)\b/.test(f)) statement = false;
     statements.set(line.location, statement);
   }
+  // A contents entry is a dot-leader line ending in a page number, in a run of such lines whose numbers never go down.
+  // "Number of units ..... 48" beside "Loan amount ..... $6,200,000" is a label-value list, not contents.
+  const lineAt = new Map(doc.lines.map((l, i) => [l.location, i]));
+  const leader = (i: number) => i >= 0 && i < doc.lines.length && /\.\s*\.\s*\.\s*\S+\s*$/.test(doc.lines[i]!.text);
+  const page = (i: number) => /\.\s*\.\s*\.\s*(\d{1,3})\s*$/.exec(doc.lines[i]!.text)?.[1];
+  const tocEntry = (i: number) => {
+    if (!page(i)) return false;
+    let a = i, b = i;
+    while (leader(a - 1)) a--;
+    while (leader(b + 1)) b++;
+    const pages = doc.lines.slice(a, b + 1).map((_, k) => page(a + k));
+    return pages.every((p, k) => p !== undefined && (k === 0 || Number(p) >= Number(pages[k - 1])));
+  };
   const headings = doc.lines.slice(0, 8).filter(l => !/[.!?]$/.test(l.text) && l.text.split(/\s+/).length <= 10).map(l => fold(l.text));
   const securities = /\b(?:(?:limited partners?|limited partnership|partnership|trust|fund|subscription|investor|class [a-z])(?:[ '’-]+[a-z]+){0,2}[ '’-]+units?|units? (?:of|in) (?:the )?(?:partnership|trust|fund|company)|subscription (?:amount|price)|price per security|investor count|parts? (?:sociales|du fonds|de la fiducie|de la societe)|unites? de la societe en commandite|prix de souscription)\b/;
   const outside = /\b(?:(?:neighbou?ring|nearby|another|comparable|recently completed|adjacent) (?:[a-z-]+ )?(?:projects?|developers?|buildings?|towers?|apartments?)|(?:projets?|immeubles?|batiments?) voisins?|autres? (?:immeubles?|projets?)|immeubles? comparables?)\b/;
-  const statistic = /\b(?:averaged|average rent|median|typical|moyenn[a-z]*|mediane?|citywide|across (?:the )?(?:city|region|district)|in the region|metro vancouver|cmhc survey|dans la region|a l echelle (?:de la ville|regionale))\b/;
+  const statistic = /\b(?:averaged|average rent|median|typical (?:market|area|local|neighbou?rhood)|moyenn[a-z]*|mediane?|citywide|across (?:the )?(?:city|region|district)|in the region|metro vancouver|cmhc survey|dans la region|a l echelle (?:de la ville|regionale))\b/;
   const reason = (c: Candidate): string | null => {
     // Sentence boundaries and semicolons separate ownership; decimal points do not.
-    const clause = c.context.split(/(?<=[.!?])\s+|;\s*/).find(t => t.includes(c.raw)) ?? c.context;
+    const sentence = c.context.split(/(?<=[.!?])\s+|;\s*/).find(t => t.includes(c.raw)) ?? c.context;
+    const clause = sentence.includes(c.raw) ? contrastPart(sentence, sentence.indexOf(c.raw)) : sentence;
     const f = fold(clause), own = /\b(?:our|notre|nos|this (?:project|building)|ce (?:projet|batiment)|cet immeuble)\b/.test(f);
     if (securities.test(f)) return "A security or subscription, not a dwelling or a project input";
     if (outside.test(f)) return "A figure about another project, not this deal";
@@ -2836,7 +2862,7 @@ function dealFigures(doc: NormalizedDocument, result: ExtractionResult) {
     if (/^(?:19|20)\d{2}$/.test(raw) && (/^\s*(?:19|20)\d{2}\s+\p{L}/u.test(clause) || /\b(?:rate|taux|year|annee)\s+(?:19|20)\d{2}\b/.test(f))) return "A year label, not an input";
     const identifier = /^\s*(?:page|section|clause|schedule|annexe|article|court file|dossier de cour)\b[^:]*?(?:\d[\w.-]*|:)/i.exec(c.context);
     const codes = [...c.context.matchAll(/\b\d{4}[-/]\d{1,2}[-/]\d{1,2}\b|\b[A-Z]\d[A-Z] ?\d[A-Z]\d\b|\b\d{3}[- .]\d{3}[- .]\d{4}\b/g)];
-    const contents = /\.\s*\.\s*\./.test(c.context) && /^\d{1,3}$/.test(raw);
+    const contents = /^\d{1,3}$/.test(raw) && (lineAt.has(c.location) ? tocEntry(lineAt.get(c.location)!) : /\.\s*\.\s*\./.test(c.context));
     if (contents || identifier && at >= 0 && at < identifier[0].length || codes.some(m => at >= m.index! && at < m.index! + m[0].length)) return "An identifier, date or contents entry, not an input";
     if (["unit_count", "unit_rent_monthly"].includes(c.fieldKey ?? "")) {
       const name = fold(c.itemKey ?? "").trim();
