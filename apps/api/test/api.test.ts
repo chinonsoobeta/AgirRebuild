@@ -3590,3 +3590,50 @@ describe("Card 137: confirming a region", () => {
   });
 
 });
+
+
+describe("card 160a: the deal AI reader", () => {
+  const text = "Land cost: $400,000\nConstruction period: 18 months\nUnlabelled reserve 7000\nAnother amount 500000\nHidden number 123";
+  const setup = async () => {
+    const id = (await call(alice, "POST", `/api/workspaces/${ws}/deals`, { name: "Invented AI deal" })).json.id;
+    await call(alice, "PUT", `/api/deals/${id}/documents?name=fiction.txt`, undefined, new TextEncoder().encode(text));
+    return id;
+  };
+  const r = (field: string, value: number, location: string, quote: string, confidence = "high") => ({ field, value, location, quote, confidence, item: null, unit_seen: "$", file: "fiction.txt", note: null });
+  test("checks sources, agreement, conflicts, low confidence and reuse", async () => {
+    const id = await setup();
+    const read = vi.fn(async () => ({ readings: [r("land_cost", 400000, "line 1", "$400,000"), r("soft_cost", 123, "line 1", "123"), r("other_cost", 7000, "line 3", "7000", "low")], conflicts: [{ field: "hard_cost", item: null, why: "Two stated amounts", values: [r("hard_cost", 400000, "line 1", "$400,000"), r("hard_cost", 500000, "line 4", "500000")] }], not_used: [] }));
+    await drain({ db, store, read });
+    expect(read).toHaveBeenCalledTimes(1);
+    expect(read.mock.calls[0]![0].messages[0].content).toContain("[line 1] Land cost: $400,000");
+    const rows = await db.query<any>(`select * from assumptions where deal_id=$1`, [id]);
+    const land = rows.filter(a => a.field_key === "land_cost");
+    expect(land).toHaveLength(1);
+    expect(land[0].sources.map((s: any) => s.rule)).toContain("ai");
+    expect(land[0].sources.some((s: any) => s.rule !== "ai")).toBe(true);
+    expect(rows.some(a => a.field_key === "soft_cost")).toBe(false);
+    expect(rows.find(a => a.field_key === "other_cost").sources[0]).toMatchObject({ check_outcome: "questions" });
+    expect(rows.find(a => a.field_key === "hard_cost")).toMatchObject({ status: "conflicting", conflict_values: [{ value: 400000, documents: ["fiction.txt"] }, { value: 500000, documents: ["fiction.txt"] }] });
+    const [stored] = await db.query<any>(`select * from ai_readings where deal_id=$1`, [id]);
+    expect(stored.verification.readings[1].outcome).toBe("The AI quote is not at this address");
+    const [document] = await db.query<any>(`select id from documents where deal_id=$1`, [id]);
+    await db.query(`insert into jobs (kind,payload) values ('extract_document',$1)`, [JSON.stringify({ document_id: document.id })]);
+    await drain({ db, store, read });
+    expect(read).toHaveBeenCalledTimes(1);
+  });
+  test("retries once, stores a safe failure and keeps the rule reader", async () => {
+    const id = await setup();
+    const read = vi.fn(async () => { throw new Error("private error detail"); });
+    await drain({ db, store, read });
+    expect(read).toHaveBeenCalledTimes(2);
+    const [row] = await db.query<any>(`select * from ai_readings where deal_id=$1`, [id]);
+    expect(row).toMatchObject({ outcome: "failed", error: { class: "Error", status: null } });
+    expect(JSON.stringify(row)).not.toContain("private error detail");
+    expect((await db.query<any>(`select value from assumptions where deal_id=$1 and field_key='land_cost'`, [id]))[0].value).toBe(400000);
+  });
+  test("without an environment key or provider it uses only rules", async () => {
+    const id = await setup();
+    await drain({ db, store });
+    expect(await db.query(`select id from ai_readings where deal_id=$1`, [id])).toEqual([]);
+  });
+});
