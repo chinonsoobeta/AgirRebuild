@@ -18,8 +18,7 @@ import {
   type RunResult,
 } from "@agir/contracts";
 import { assemble, canonicalJson, ENGINE_VERSION, heldPartnerReturns, replay } from "@agir/engine";
-import type { Db } from "@agir/db";
-import { currentDocuments, documentsHash } from "../../worker/src/reader.ts";
+import { currentDocuments, documentsHash, type Db } from "@agir/db";
 import { applyLabels, figureOrder, labelPhrase, labelUnit, offeredIds, suggestFields, type ReaderResponse, type ReadingVerification, READER_PROMPT_VERSION, type SourcedCandidate } from "@agir/extraction";
 
 export const sha256 = (s: string) => createHash("sha256").update(s).digest("hex");

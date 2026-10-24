@@ -1,7 +1,7 @@
 import Anthropic from "@anthropic-ai/sdk";
 import { zodOutputFormat } from "@anthropic-ai/sdk/helpers/zod";
 import * as z from "zod/v4";
-import { sha256Hex, type Db, type BlobStore } from "@agir/db";
+import { currentDocuments, documentsHash, type Db, type BlobStore } from "@agir/db";
 import { addressedText, parseDocument, verifyReadings, READER_PROMPT, READER_PROMPT_VERSION, type ReaderResponse, type ReadingDocument } from "@agir/extraction";
 
 const unit = z.enum(["$", "%", "sf", "m2", "$/sf", "$/m2", "months", "years", "units", "x", "vacancy_%"]);
@@ -18,9 +18,7 @@ const provider: ReaderProvider = async request => {
   if (!reply.parsed_output || reply.stop_reason === "max_tokens" || reply.stop_reason === "refusal") throw new Error("ReaderResponseError");
   return reply.parsed_output;
 };
-type DocumentRow = { id: string; name: string; sha256: string; storage_key: string; stage: string };
-export const documentsHash = (docs: readonly { id: string; sha256: string }[]) => sha256Hex(new TextEncoder().encode(JSON.stringify(docs.map(d => [d.id, d.sha256]).sort((a, b) => a[0]! < b[0]! ? -1 : a[0]! > b[0]! ? 1 : 0))));
-export const currentDocuments = (db: Db, dealId: string) => db.query<DocumentRow>(`select id, name, sha256, storage_key, stage from documents where deal_id=$1 and retired_at is null order by id`, [dealId]);
+export { currentDocuments, documentsHash };
 
 /** Called after extraction commits, outside any transaction, before reconciliation. */
 export async function readDeal(db: Db, store: BlobStore, dealId: string, workspaceId: string, injected?: ReaderProvider) {
