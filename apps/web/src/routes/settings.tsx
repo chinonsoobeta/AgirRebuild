@@ -110,6 +110,40 @@ export function LogoPanel({ workspaceId, hasLogo }: { workspaceId: string; hasLo
   );
 }
 
+/** Production counts per deal (card 155): counts and durations only, for the owner. */
+type DealCounts = { deal_id?: string; name?: string; docs_pdf: number; docs_xlsx: number; docs_csv: number; docs_docx: number; docs_txt: number; docs_no_candidates: number;
+  figures_read: number; figures_confirmed_from_suggestion: number; figures_typed: number; actions_until_runnable: number; minutes_upload_to_run?: number | null };
+export function CountsPanel({ workspaceId }: { workspaceId: string }) {
+  const { t } = useI18n();
+  const q = useQuery({ queryKey: ["deal-metrics", workspaceId], queryFn: () => api.get<{ deals: DealCounts[]; totals: DealCounts & { deals: number } }>(`/workspaces/${workspaceId}/deal-metrics`) });
+  const cells = (r: DealCounts) => [
+    [r.docs_pdf, r.docs_xlsx, r.docs_csv, r.docs_docx, r.docs_txt].join(" / "), r.docs_no_candidates, r.figures_read,
+    r.figures_confirmed_from_suggestion, r.figures_typed, r.actions_until_runnable,
+  ];
+  const deals = q.data?.deals ?? [];
+  return (
+    <section className="panel stack">
+      <h2 className="h-section">{t("counts.title")}</h2>
+      <p className="small muted">{t("counts.body")}</p>
+      {q.data && deals.length === 0 ? <p className="small muted">{t("counts.none")}</p> : deals.length > 0 && (
+        <div style={{ overflowX: "auto" }}>
+          <table className="tbl small">
+            <thead><tr><th>{t("counts.deal")}</th><th>{t("counts.docs")}</th><th className="r">{t("counts.noCandidates")}</th><th className="r">{t("counts.read")}</th>
+              <th className="r">{t("counts.suggested")}</th><th className="r">{t("counts.typed")}</th><th className="r">{t("counts.actions")}</th><th className="r">{t("counts.minutes")}</th></tr></thead>
+            <tbody>
+              {deals.map((d) => (
+                <tr key={d.deal_id}><td>{d.name}</td>{cells(d).map((v, i) => <td key={i} className={i ? "r" : undefined}>{v}</td>)}<td className="r">{d.minutes_upload_to_run ?? "—"}</td></tr>
+              ))}
+            </tbody>
+            {q.data && <tfoot><tr><th scope="row">{t("counts.total")}</th>{cells(q.data.totals).map((v, i) => <td key={i} className={i ? "r" : undefined}>{v}</td>)}<td /></tr></tfoot>}
+          </table>
+        </div>
+      )}
+      <ErrorText error={q.error} />
+    </section>
+  );
+}
+
 /** Choose a deal, then manage its clients. */
 function Clients() {
   const { t } = useI18n();
@@ -181,6 +215,7 @@ export function Settings() {
           )}
           {(role === "owner" || role === "admin") && <Clients />}
           {role === "owner" && <LogoPanel workspaceId={workspaceId} hasLogo={ws?.has_logo ?? false} />}
+          {role === "owner" && <CountsPanel workspaceId={workspaceId} />}
         </div>
         <div className="stack" style={{ gap: 16 }}>
           <fieldset className="panel stack" style={{ margin: 0 }} disabled={role !== "owner"}>

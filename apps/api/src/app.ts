@@ -308,6 +308,20 @@ export function createApp({ db, store, secureCookies, demoSignIn = false, trustP
     return c.json(r);
   });
 
+  // ---- Production counts (card 155): counts and durations per deal, never content; the owner only. ----------
+  app.get("/api/workspaces/:ws/deal-metrics", async (c) => {
+    const ws = z.string().uuid().parse(c.req.param("ws"));
+    const deals = await as(c, async (tx) => {
+      const [m] = await tx.query<{ role: string }>(`select role from workspace_members where workspace_id = $1 and user_id = agir_uid()`, [ws]);
+      if (m?.role !== "owner") throw new HttpError(403, "Only the workspace owner can see production counts.");
+      return tx.query<Record<string, unknown>>(`select m.*, d.name from deal_metrics m join deals d on d.id = m.deal_id where m.workspace_id = $1 order by d.created_at`, [ws]);
+    });
+    const summed = ["docs_pdf", "docs_xlsx", "docs_csv", "docs_docx", "docs_txt", "docs_deal_source", "docs_evidence", "docs_context", "docs_no_candidates", "figures_read", "figures_confirmed_from_suggestion", "figures_typed", "actions_until_runnable"];
+    const totals: Record<string, number> = { deals: deals.length };
+    for (const k of summed) totals[k] = deals.reduce((n, d) => n + Number(d[k] ?? 0), 0);
+    return c.json({ deals, totals });
+  });
+
   // ---- Deals ----------------------------------------------------------------------
   app.get("/api/workspaces/:ws/deals", async (c) => {
     const out = await as(c, async (tx) => {
