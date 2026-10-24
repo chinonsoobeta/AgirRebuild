@@ -9314,3 +9314,53 @@ describe("document kind: audit of Card 128c", () => {
     expect(read("Narrative appraisal", "18 Linden Lane", ...filler, "Land cost: $830,000").notes).toContain("Document kind: appraisal (evidence)");
   });
 });
+
+
+describe("candidate regions (Card 130)", () => {
+  const read = (lines: string[], tables: Table[] = [], kind: NormalizedDocument["kind"] = "pdf") => extractCandidates({
+    kind, lines: lines.map((text, i) => ({ text, location: `page 1, line ${i + 1}` })),
+    tables, fullText: [...lines, ...tables.flatMap(t => t.rows.map(r => r.map(c => c.text).join(" | ")))].join("\n"), pageCount: 1, needsOcr: false,
+  });
+  const table = (name: string, rows: string[][]): Table => ({ name, rows: rows.map((r, i) => r.map((text, j) => ({ text, ref: `${name}!${String.fromCharCode(65 + j)}${i + 1}` }))) });
+  test("every figure in the reference inputs has a source, including shown figures", () => {
+    let figures = 0;
+    for (const deal of loadOracles()) for (const doc of deal.documents) {
+      const r = extractCandidates(toNormalized(doc));
+      for (const c of [...r.candidates, ...r.other]) {
+        expect(c.region?.source, `${doc.name}@${c.location}`).toBeTruthy();
+        figures++;
+      }
+    }
+    expect(figures).toBeGreaterThan(100);
+  });
+  test("rent-roll figures retain the table, row index and computed column role", () => {
+    const r = read([], [table("Willow roll", [["Unit type", "Units", "Monthly rent"], ["1BR", "12", "$1,750"]])]);
+    for (const [fieldKey, columnRole] of [["unit_count", "units"], ["unit_rent_monthly", "rent"]]) {
+      expect(r.candidates.find(c => c.fieldKey === fieldKey)?.region).toMatchObject({ source: "table", table: "Willow roll", row: 1, columnRole });
+    }
+  });
+  test("the printed budget total retains its total role beside a subtotal", () => {
+    const r = read([], [table("Willow budget", [["Description", "Amount"], ["Land cost", "$800,000"], ["Subtotal hard costs", "$2,400,000"], ["Total project cost", "$3,200,000"]])]);
+    expect(r.candidates.find(c => c.fieldKey === "stated_total_cost")?.region).toMatchObject({ source: "table", table: "Willow budget", row: 3, rowRole: "total", columnRole: "amount" });
+  });
+  test("a label-value line retains the heading as written", () => {
+    const r = read(["Construction financing", "Interest rate: 6.25%"]);
+    expect(r.candidates.find(c => c.fieldKey === "senior_rate_pct")?.region).toMatchObject({ source: "label-value line", heading: "Construction financing" });
+  });
+  test("a prose figure identifies prose", () => {
+    const r = read(["The land cost is $800,000."]);
+    expect(r.candidates.find(c => c.fieldKey === "land_cost")?.region?.source).toBe("prose");
+  });
+  test("evidence figures retain the existing document-kind verdict", () => {
+    const r = read(["Appraisal report", ...Array(12).fill("The narrative describes the background and purpose of our housing development."), "Project budget", "Land cost: $800,000"]);
+    expect(r.candidates.find(c => c.fieldKey === "land_cost")?.region?.kind).toBe("appraisal (evidence)");
+  });
+  test("text tables and sheets keep their distinct sources, including shown totals", () => {
+    const text = read(["Type | Units | Monthly rent", "1BR | 12 | $1,750", "Total | 12 | $21,000"]);
+    expect(text.candidates.length).toBeGreaterThan(0);
+    for (const c of [...text.candidates, ...text.other]) expect(c.region?.source).toBe("text table");
+    const sheet = read([], [table("Willow sheet", [["Land cost", "$800,000"], ["Unassigned", "123"]])], "xlsx");
+    expect(sheet.other.length).toBeGreaterThan(0);
+    for (const c of [...sheet.candidates, ...sheet.other]) expect(c.region).toMatchObject({ source: "sheet", table: "Willow sheet" });
+  });
+});
