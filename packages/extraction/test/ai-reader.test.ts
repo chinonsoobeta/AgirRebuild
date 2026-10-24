@@ -63,3 +63,15 @@ describe("reading verification", () => {
     expect(verifyReading({ ...reading, ...change }, documents)).toMatchObject({ outcome: "verified", candidate: { value, rule: "ai", documentId: "d", context: change.quote } });
   });
 });
+
+ test("card 160b: merged model text keeps every verification address", () => {
+  const document = doc("xlsx");
+  document.tables = [{ name: "Inputs", rows: [[..."ABCDE"].map(c => ({ ref: `Inputs!${c}1`, text: "Fictional test deal" }))] }];
+  expect(addressedText(document, "fiction.xlsx")).toBe("=== FILE fiction.xlsx ===\n[Inputs!A1..E1] Fictional test deal");
+  document.tables[0]!.rows.push([..."ABCDE"].map(c => ({ ref: `Inputs!${c}2`, text: "$400" })));
+  for (const location of ["Inputs!C2", "Inputs!A2..E2"]) expect(verifyReading({ ...reading, file: "fiction.xlsx", location }, [{ id: "d", name: "fiction.xlsx", document }]).outcome).toBe("verified");
+ });
+ test.each(["$1.15M", "$1.153M"])("card 160b: scaled rounding %s", quote => {
+  const document = { ...doc("txt"), fullText: quote, lines: [{ location: "line 1", text: quote }] };
+  expect(verifyReading({ ...reading, quote, value: quote === "$1.15M" ? 1150000 : 1153000 }, [{ ...documents[0]!, document }]).outcome).toBe("verified");
+ });

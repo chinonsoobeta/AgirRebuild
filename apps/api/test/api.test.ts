@@ -3705,3 +3705,28 @@ describe("card 160a: the deal AI reader", () => {
     expect(await db.query(`select id from ai_readings where deal_id=$1`, [id])).toEqual([]);
   });
 });
+
+ test("card 160b: AI omissions and failed verification use governed labels", async () => {
+  const id = (await call(alice, "POST", `/api/workspaces/${ws}/deals`, { name: "Invented Review", assetType: "Multifamily", location: "Vancouver" })).json.id;
+  await call(alice, "PUT", `/api/deals/${id}/documents?name=fiction.txt`, undefined, new TextEncoder().encode("Unlabelled reserve 7000\nOther amount 8000"));
+  const omitted = { value: 7000, file: "fiction.txt", location: "line 1", quote: "7000", why: "No stated purpose" };
+  const bad = { field: "land_cost", item: null, value: 8000, unit_seen: "$" as const, file: "fiction.txt", location: "line 1", quote: "8000", note: null, confidence: "high" as const };
+  await drain({ db, store, read: async () => ({ readings: [bad], conflicts: [{ field: "other_cost", item: null, values: [bad], why: "Disagreement" }], not_used: [omitted, { ...omitted, value: 9000 }] }) });
+  const review = () => call(alice, "GET", `/api/deals/${id}/review`);
+  const before = (await review()).json;
+  expect(before.assumptions.some((a: any) => a.value === 7000)).toBe(false);
+  const figure = before.other.find((o: any) => o.value === 7000);
+  expect(before.aiReading.notUsed).toEqual([{ ...omitted, figureId: figure.figureId }, { ...omitted, value: 9000, figureId: null }]);
+  expect(before.aiReading.pleaseCheck).toHaveLength(2);
+  expect(before.aiReading.pleaseCheck[0]).toEqual({ field: bad.field, item: null, value: 8000, file: bad.file, location: bad.location, quote: bad.quote, reason: extraction.READING_FAILURE.quote });
+  const client = await signup("review160b@example.com", "Invented Client");
+  await call(alice, "POST", `/api/deals/${id}/clients`, { email: "review160b@example.com" });
+  expect((await call(client, "GET", `/api/deals/${id}/review`)).json.aiReading).toBeNull();
+  expect((await call(alice, "POST", `/api/deals/${id}/figure-labels`, { documentId: figure.documentId, figureId: before.aiReading.notUsed[0].figureId, fieldKey: "land_cost" })).status).toBe(200);
+  await work();
+  expect((await review()).json.assumptions.find((a: any) => a.fieldKey === "land_cost")).toMatchObject({ value: 7000, status: "pending" });
+  await db.query(`update ai_readings set outcome='failed', response=null, verification=null where deal_id=$1`, [id]);
+  expect((await review()).json.aiReading).toMatchObject({ outcome: "failed", notUsed: [], pleaseCheck: [] });
+  await call(alice, "PUT", `/api/deals/${id}/documents?name=new.txt`, undefined, new TextEncoder().encode("Invented new document"));
+  expect((await review()).json.aiReading).toBeNull();
+ });

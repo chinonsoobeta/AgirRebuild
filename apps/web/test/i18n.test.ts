@@ -1057,3 +1057,11 @@ describe("Card 137 region text", () => {
     expect(fr.msg("please check")).toBe("à vérifier");
   });
 });
+
+ it("card 160b: Review AI strings have French", () => {
+  const en = build("en", () => {}), fr = build("fr", () => {});
+  for (const key of ["review.aiUnused", "review.aiCheck", "review.aiEnter", "review.aiUnavailable"] as Key[]) {
+    expect(fr.t(key)).not.toBe(en.t(key));
+    expect(fr.t(key)).not.toBe(key);
+  }
+ });
