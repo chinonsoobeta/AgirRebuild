@@ -148,10 +148,12 @@ export function detectFormat(text: string): DocumentFormat {
 export function parseCore(
   core: string,
   format: DocumentFormat,
-  /** The token is money, a count or an area: never written to three decimal places. */
+  /** The token is money, a count or an area: normally grouped at three digits. */
   grouping = false,
   /** A trailing "$" follows: fr-CA format on its own, so one space group is a thousands group. */
   trailingDollar = false,
+  /** A money scale word follows, so three decimal places are possible. */
+  moneyScale = false,
 ): { value: number | null; refusal?: string } {
   const spaced = new RegExp(`[${SPACE_CLASS}]`).test(core);
   const plainSpaceGroups = (core.match(/ \d{3}/g) ?? []).length;
@@ -174,11 +176,11 @@ export function parseCore(
       // Repeated separator: it groups thousands, so the decimal is the other one.
       decimal = sep === "." ? "," : ".";
       if (format.decimal && format.decimal === sep) return contradicts();
-    } else if (parts[1]!.length !== 3 || spaced) {
-      // Not three digits after it (or spaces already group the thousands): a decimal.
+    } else if (parts[1]!.length !== 3 || spaced || parts[0] === "0") {
+      // A zero whole part cannot start a thousands group; spaces also establish grouping.
       decimal = sep;
       if (format.decimal && format.decimal !== sep) return contradicts();
-    } else if (grouping) {
+    } else if (grouping && !moneyScale) {
       // Money, counts and areas are never written with three decimals, so three
       // digits after a lone separator group thousands. If the document says that
       // separator is its decimal mark, the reading is implausible: refuse it.
@@ -427,7 +429,7 @@ export function tokenize(line: string, format: DocumentFormat, cell = false): Nu
     let unit: TokenUnit = currency ? "$" : null;
     const upcoming = UNIT_RULES.find((r) => r.re.test(scale && currency ? rest.slice(scale[0].length) : rest))?.unit ?? null;
     const grouping = currency || upcoming === "units" || upcoming === "sf" || upcoming === "m2";
-    const parsed = parseCore(core!, format, grouping, Boolean(suffix?.[1]?.startsWith("$")));
+    const parsed = parseCore(core!, format, grouping, Boolean(suffix?.[1]?.startsWith("$")), Boolean(scale && currency));
     let value = parsed.value;
     let refusal = parsed.refusal;
     // A scale word counts only in a money context: "18 M" alone is not $18,000,000.
