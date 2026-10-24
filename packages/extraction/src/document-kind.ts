@@ -6,7 +6,7 @@ type Fingerprint = { kind: string; role: "deal source" | "evidence" | "context";
 /** Title words and a separate content/structure signal are required for every context kind. */
 export const FINGERPRINTS: Fingerprint[] = [
   { kind: "term sheet", role: "deal source", title: /\b(?:term sheet|fiche de modalites)\b/ },
-  { kind: "commitment letter", role: "deal source", title: /\b(?:commitment letter|lettre d.engagement)\b/ },
+  { kind: "commitment letter", role: "deal source", title: /\b(?:commitment letter|letter of commitment|(?:takeout|financing|mortgage|loan|construction) commitment|lettre d.engagement|engagement de (?:financement|pret))\b/ },
   { kind: "credit letter", role: "deal source", title: /\b(?:credit (?:letter|agreement)|convention de credit|lettre de credit)\b/ },
   { kind: "cost budget", role: "deal source", title: /\b(?:project cost budget|construction budget|cost budget|budget des couts|budget de construction)\b/ },
   { kind: "rent roll", role: "deal source", title: /\b(?:rent roll|etat des loyers|market rent survey for \d+)\b/ },
@@ -26,7 +26,8 @@ export const FINGERPRINTS: Fingerprint[] = [
   { kind: "prototype feasibility study", role: "context", title: /\b(?:feasibility study|regulatory changes|zoning rules|etude de faisabilite|changements reglementaires)\b/, support: /\b(?:prototypes?|whitecard|pro forma scenarios|batiments types)\b/ },
   { kind: "multi-property court record", role: "context", title: /\b(?:court file|superior court|dossier de cour|cour superieure)\b/, structure: "addresses" },
   { kind: "blank template", role: "context", title: /\b(?:application form|submission request form|formulaire de demande)\b/, structure: "blank" },
-  { kind: "appraisal", role: "evidence", title: /\b(?:appraisal|rapport d.evaluation)\b/ },
+  // "Subject to a satisfactory appraisal" is a condition, not a title: an appraisal names itself in a heading.
+  { kind: "appraisal", role: "evidence", heading: true, title: /^(?:(?:narrative |summary )?appraisal(?: report)?(?: of\b)?|rapport d.evaluation|evaluation (?:de la propriete|immobiliere))\b/ },
   { kind: "offering memorandum for one project", role: "evidence", title: /\b(?:offering memorandum|offering statement|notice d.offre|45-106|subscription|units of the partnership|the issuer|risk factors|souscription)\b/ },
   { kind: "broker brochure", role: "evidence", heading: true, title: /^(?:for sale|forward sale|offering|a vendre|investment opportunity|broker brochure|brochure immobiliere)\b/, support: /\b(?:exclusive listing|listed by|advisors|asking price|pricing guidance|offers will be|prix demande|inscription exclusive)\b|(?=[\s\S]*\b(?:real estate corporation|brokerage|courtier immobilier|agence immobiliere)\b)(?=[\s\S]*(?:@|\d{3}[- .]\d{3}[- .]\d{4}))/ },
   { kind: "single-project court record", role: "evidence", title: /\b(?:court file|superior court|receiver.s report|dossier de cour|cour superieure|rapport du sequestre)\b/ },

@@ -9296,3 +9296,21 @@ describe("document kind and subject sections (Card 128c)", () => {
   });
 
 });
+
+describe("document kind: audit of Card 128c", () => {
+  const filler = Array.from({ length: 20 }, () => "The narrative explains the purpose and background of this document.");
+  const read = (...lines: string[]) => extractCandidates(toNormalized({ name: "invented.pdf", kind: "pdf", lines }));
+  test.each([
+    [["Takeout commitment", "Lender: Brightwater Credit Union"], "commitment letter (deal source)"],
+    [["Engagement de financement", "Prêteur : Caisse des Ormes"], "commitment letter (deal source)"],
+    [["Financing summary for 18 Linden Lane"], "unrecognized document (deal source)"],
+  ])("a mention of an appraisal does not make %j an appraisal", (head, kind) => {
+    const r = read(...head, ...filler, "This financing is subject to a satisfactory appraisal of the property. / Sous réserve d'un rapport d'évaluation satisfaisant.", "Loan amount: $3,400,000");
+    expect(r.notes).toContain(`Document kind: ${kind}`);
+    // A takeout loan reads as the refinance amount; any loan reading of the figure is kept.
+    expect(r.candidates.some(c => /_(?:loan_)?amount$/.test(c.fieldKey ?? "") && c.value === 3400000)).toBe(true);
+  });
+  test("an appraisal titled as one is still an appraisal", () => {
+    expect(read("Narrative appraisal", "18 Linden Lane", ...filler, "Land cost: $830,000").notes).toContain("Document kind: appraisal (evidence)");
+  });
+});
