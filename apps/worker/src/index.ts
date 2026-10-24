@@ -148,11 +148,11 @@ async function verifyDocument(deps: WorkerDeps, documentId: string) {
 
 async function extractDocument(deps: WorkerDeps, documentId: string) {
   const { db, store } = deps;
-  const [d] = await db.query<{ id: string; deal_id: string; workspace_id: string; name: string; storage_key: string; retired_at: string | null }>(
-    `select id, deal_id, workspace_id, name, storage_key, retired_at from documents where id = $1`,
+  const [d] = await db.query<{ id: string; deal_id: string; workspace_id: string; name: string; storage_key: string; role_set: "deal_source" | "evidence" | "context" | null; stage: string; retired_at: string | null }>(
+    `select id, deal_id, workspace_id, name, storage_key, role_set, stage, retired_at from documents where id = $1`,
     [documentId],
   );
-  if (!d || d.retired_at) return;
+  if (!d || d.retired_at || d.stage === "rejected") return;
   await setStage(db, d.id, "reading", null);
   const bytes = await store.get(d.storage_key);
   let parsed;
@@ -179,7 +179,7 @@ async function extractDocument(deps: WorkerDeps, documentId: string) {
     }
   }
   await setStage(db, d.id, "extracting", null, { page_count: parsed.pageCount, ...(parsed.needsOcr ? { needs_ocr: true } : {}) });
-  const result = extractCandidates(parsed);
+  const result = extractCandidates(parsed, { role: d.role_set === "deal_source" ? "deal source" : d.role_set ?? undefined });
   const format = result.format.mixed ? "mixed" : result.format.decimal === "." ? "1,234.56" : result.format.decimal === "," ? "1.234,56" : "not detected";
   const asSourced = (c: (typeof result.candidates)[number]): SourcedCandidate => ({ ...c, documentId: d.id, documentName: d.name });
   const suggestions = await suggestLabels(deps, d.workspace_id, offeredOf([...result.candidates, ...result.other].map(asSourced)));
@@ -200,8 +200,8 @@ async function extractDocument(deps: WorkerDeps, documentId: string) {
       );
     }
     await tx.query(
-      `update documents set stage = 'extracted', stage_detail = $4, candidate_count = $2, number_format = $3, updated_at = now() where id = $1`,
-      [d.id, result.candidates.length, format, parsed.needsOcr ? `Read by OCR from ${parsed.pageCount} scanned ${parsed.pageCount === 1 ? "page" : "pages"}. Check every value against the page before approving it.` : null],
+      `update documents set stage = 'extracted', stage_detail = $4, read_role = $5, candidate_count = $2, number_format = $3, updated_at = now() where id = $1`,
+      [d.id, result.candidates.length, format, parsed.needsOcr ? `Read by OCR from ${parsed.pageCount} scanned ${parsed.pageCount === 1 ? "page" : "pages"}. Check every value against the page before approving it.` : null, result.notes.find(n => n.startsWith("Document kind: "))?.slice("Document kind: ".length) ?? null],
     );
     await tx.query(`insert into jobs (kind, payload) values ('reconcile_deal', $1)`, [JSON.stringify({ deal_id: d.deal_id })]);
   });

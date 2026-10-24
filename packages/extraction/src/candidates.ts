@@ -2945,7 +2945,7 @@ function dealFigures(doc: NormalizedDocument, result: ExtractionResult) {
 }
 
 /** Every candidate value in one document. Deterministic: no model is consulted. */
-export function extractCandidates(doc0: NormalizedDocument): ExtractionResult {
+export function extractCandidates(doc0: NormalizedDocument, options?: { role?: "deal source" | "evidence" | "context" }): ExtractionResult {
   const result: ExtractionResult = { format: detectFormat(doc0.fullText), candidates: [], other: [], notes: [...(doc0.notes ?? [])] };
   const regions = new Map<string, Partial<Region>>();
   documentRegions.set(result, { regions, tableSource: doc0.kind === "xlsx" || doc0.kind === "csv" ? "sheet" : "table" });
@@ -3085,7 +3085,7 @@ export function extractCandidates(doc0: NormalizedDocument): ExtractionResult {
     return false;
   });
   dealFigures(doc, result);
-  applyDocumentKind(doc, result);
+  applyDocumentKind(doc, result, options);
   // Within one document, the same field and value found twice is one candidate.
   const seen = new Set<string>();
   result.candidates = result.candidates.filter((c) => {

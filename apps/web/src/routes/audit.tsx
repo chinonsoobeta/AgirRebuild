@@ -22,6 +22,10 @@ export function describeEvent(i: I18n, e: AuditEvent): string {
     case "document.verified": return fr ? "A vérifié un document : type, taille et empreinte" : "Checked a document: type, size and fingerprint";
     case "document.rejected": return fr ? `A refusé un document : ${i.msg(p.reason)}` : `Rejected a document: ${p.reason}`;
     case "document.extracted": return fr ? `A lu un document : ${p.candidates} valeurs trouvées` : `Read a document: ${p.candidates} values found`;
+    case "document.role_set": {
+      const role = (value: unknown) => i.t(value === "deal_source" ? "docs.role.deal_source" : value === "evidence" ? "docs.role.evidence" : value === "context" ? "docs.role.context" : "docs.role.auto");
+      return i.t("docs.role.changed", { old: role(p.old), new: role(p.new) });
+    }
     case "document.retired": return fr ? `A retiré ${p.name}` : `Removed ${p.name}`;
     case "document.retried": return fr ? "A relancé la lecture d'un document" : "Retried reading a document";
     case "assumptions.reconciled": {

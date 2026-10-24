@@ -6,6 +6,9 @@ import * as I from "../components/icons";
 import { QuickStart } from "../components/QuickStart";
 import { useI18n, type I18n } from "../i18n";
 
+const ROLE_CHOICES = ["", "deal_source", "evidence", "context"] as const;
+const ROLE_KEYS = { "": "docs.role.auto", deal_source: "docs.role.deal_source", evidence: "docs.role.evidence", context: "docs.role.context" } as const;
+
 const SEGMENTS: Record<string, [string, string, string]> = {
   uploaded: ["#9c978a", "#ddd8cc", "#ddd8cc"],
   checking: ["#9c978a", "#ddd8cc", "#ddd8cc"],
@@ -49,6 +52,7 @@ export function Documents({ dealId }: { dealId: string }) {
     refetchInterval: (q) => (q.state.data?.some((d) => !["extracted", "rejected", "read_failed"].includes(d.stage)) ? 1200 : false),
   });
   const input = useRef<HTMLInputElement>(null);
+  const [uploadRole, setUploadRole] = useState("");
   const [dragging, setDragging] = useState(false);
   const [notes, setNotes] = useState<string[]>([]);
   const refresh = () => Promise.all([qc.invalidateQueries({ queryKey: ["documents", dealId] }), qc.invalidateQueries({ queryKey: ["deal", dealId] })]);
@@ -56,7 +60,7 @@ export function Documents({ dealId }: { dealId: string }) {
     mutationFn: async (files: File[]) => {
       const out: string[] = [];
       for (const f of files) {
-        const r = await api.upload<{ id: string; duplicate: boolean }>(`/deals/${dealId}/documents?name=${encodeURIComponent(f.name)}`, f);
+        const r = await api.upload<{ id: string; duplicate: boolean }>(`/deals/${dealId}/documents?name=${encodeURIComponent(f.name)}${uploadRole ? `&role=${uploadRole}` : ""}`, f);
         if (r.duplicate) out.push(t("docs.duplicate", { name: f.name }));
       }
       return out;
@@ -70,6 +74,11 @@ export function Documents({ dealId }: { dealId: string }) {
     mutationFn: ({ id, action }: { id: string; action: "retry" | "retire" }) => api.post(`/documents/${id}/${action}`),
     onSuccess: () => refresh(),
   });
+  const setRole = useMutation({
+    mutationFn: ({ id, value }: { id: string; value: string }) => api.post(`/documents/${id}/role`, { role: value || null }),
+    onSuccess: () => refresh(),
+  });
+  const roleOptions = ROLE_CHOICES.map(value => <option key={value} value={value}>{t(ROLE_KEYS[value])}</option>);
   const pick = (list: FileList | null) => list && list.length && upload.mutate([...list]);
   if (!deal.data) return <p className="muted">{t("common.loading")}</p>;
   const editable = canEdit(role);
@@ -100,23 +109,32 @@ export function Documents({ dealId }: { dealId: string }) {
                   <span className="small faint">{t("docs.types")}</span>
                 </div>
               </div>
+              <label className="stack small" style={{ gap: 4 }}>
+                {t("docs.role.question")}
+                <select value={uploadRole} onChange={e => setUploadRole(e.target.value)}>{roleOptions}</select>
+              </label>
               <label className="btn" htmlFor="doc-upload">{upload.isPending ? t("docs.uploading") : t("docs.choose")}</label>
               <input ref={input} id="doc-upload" type="file" multiple accept=".pdf,.xlsx,.csv,.docx,.txt" className="sr-only" onChange={(e) => pick(e.target.files)} />
             </div>
           )}
           {editable && docs.data?.length === 0 && <QuickStart dealId={dealId} />}
-          <ErrorText error={upload.error ?? act.error} />
+          <ErrorText error={upload.error ?? act.error ?? setRole.error} />
           {notes.map((n) => <p key={n} className="small muted">{n}</p>)}
           <table className="tbl">
             <thead><tr><th>{t("docs.col.doc")}</th><th style={{ width: 150 }}>{t("docs.col.stages")}</th><th>{t("docs.col.result")}</th><th className="r"><span className="sr-only">{t("docs.actions")}</span></th></tr></thead>
             <tbody>
               {(docs.data ?? []).map((d) => {
                 const seg = SEGMENTS[d.stage] ?? SEGMENTS.uploaded!;
+                const readRole = /\((deal source|evidence|context)(?:, set by a person)?\)$/.exec(d.read_role ?? "")?.[1];
+                const usedRole = readRole === "deal source" ? "deal_source" : readRole === "evidence" || readRole === "context" ? readRole : null;
+                const byPerson = d.read_role?.includes(", set by a person)");
                 return (
                   <tr key={d.id}>
                     <td>
                       <div className="stack" style={{ gap: 2 }}>
                         <a href={`/api/documents/${d.id}/file`} className="row" style={{ gap: 8, textDecoration: "none" }}><I.Doc />{d.name}</a>
+                        {usedRole && <span className="small muted">{t(byPerson ? "docs.role.you" : "docs.role.agir", { role: t(ROLE_KEYS[usedRole]) })}</span>}
+                        {editable && <select aria-label={t("docs.role.change", { name: d.name })} value={d.role_set ?? ""} disabled={setRole.isPending} onChange={e => setRole.mutate({ id: d.id, value: e.target.value })}>{roleOptions}</select>}
                         <span className="small faint">{f.bytes(d.size_bytes)}{d.page_count ? ` · ${t("docs.pages", { n: d.page_count })}` : ""}{d.uploaded_by ? ` · ${d.uploaded_by}` : ""}</span>
                       </div>
                     </td>

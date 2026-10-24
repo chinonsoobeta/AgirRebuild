@@ -3358,6 +3358,15 @@ describe("Card 132: document roles", () => {
     await work();
     const docs = (await call(alice, "GET", `/api/deals/${d}/documents`)).json;
     expect(docs[0]).toMatchObject({role_set: "context", candidate_count: 0});
+    // Audit of Card 132: a role given at upload never starts a read before the file check; the check's own extraction is the only one.
+    expect(await db.query(`select id from jobs where kind='extract_document' and payload->>'document_id'=$1`, [r.json.id])).toHaveLength(1);
+    expect(await db.query(`select action from audit_events where action='document.verified' and entity_id=$1`, [r.json.id])).toHaveLength(1);
+    const invalid = await call(alice, "PUT", `/api/deals/${d}/documents?name=invalid.pdf&role=context`, undefined, new TextEncoder().encode("Not a PDF\nLand cost: $990,000\n"));
+    expect(invalid.status).toBe(200);
+    await work();
+    const rejected = (await call(alice, "GET", `/api/deals/${d}/documents`)).json.find((doc: any) => doc.id === invalid.json.id);
+    expect(rejected).toMatchObject({stage: "rejected", candidate_count: 0, read_role: null});
+    expect((await call(alice, "POST", `/api/documents/${invalid.json.id}/role`, {role: "deal_source"})).status).toBe(422);
   });
 
 });

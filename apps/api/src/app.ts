@@ -376,7 +376,7 @@ export function createApp({ db, store, secureCookies, demoSignIn = false, trustP
   app.get("/api/deals/:id/documents", async (c) => {
     const rows = await as(c, (tx) =>
       tx.query(
-        `select d.id, d.name, d.kind, d.size_bytes, d.stage, d.stage_detail, d.page_count, d.number_format, d.needs_ocr, d.candidate_count,
+        `select d.id, d.name, d.kind, d.role_set, d.read_role, d.size_bytes, d.stage, d.stage_detail, d.page_count, d.number_format, d.needs_ocr, d.candidate_count,
                 d.created_at, d.updated_at, u.name as uploaded_by,
                 (select count(*)::int from candidates c where c.document_id = d.id and c.field_key is null) as other_count
          from documents d left join users u on u.id = d.uploaded_by
@@ -388,6 +388,7 @@ export function createApp({ db, store, secureCookies, demoSignIn = false, trustP
   });
 
   app.put("/api/deals/:id/documents", async (c) => {
+    const role = z.enum(["deal_source", "evidence", "context"]).nullable().parse(c.req.query("role") ?? null);
     const name = (c.req.query("name") ?? "").trim();
     const kind = kindOf(name);
     if (!name || !kind) return c.json({ error: "Upload a PDF, Excel (.xlsx), CSV, Word (.docx) or text file." }, 415);
@@ -397,17 +398,25 @@ export function createApp({ db, store, secureCookies, demoSignIn = false, trustP
     if (bytes.byteLength === 0) return c.json({ error: "The file is empty." }, 422);
     if (bytes.byteLength > MAX_UPLOAD_BYTES) return c.json({ error: "The file is larger than 75 MB." }, 413);
     const put = await store.put(bytes);
-    const [r] = await as(c, (tx) =>
-      tx.query<{ document_id: string; duplicate: boolean }>(`select * from fn_register_document($1, $2, $3, $4, $5, $6)`, [
+    const r = await as(c, async (tx) => {
+      const [registered] = await tx.query<{ document_id: string; duplicate: boolean }>(`select * from fn_register_document($1, $2, $3, $4, $5, $6)`, [
         c.req.param("id"),
         name.slice(0, 200),
         kind,
         bytes.byteLength,
         put.sha256,
         put.key,
-      ]),
-    );
-    return c.json({ id: r!.document_id, duplicate: r!.duplicate });
+      ]);
+      if (!registered!.duplicate && role !== null) await tx.query(`select fn_set_document_role($1, $2)`, [registered!.document_id, role]);
+      return registered!;
+    });
+    return c.json({ id: r.document_id, duplicate: r.duplicate });
+  });
+
+  app.post("/api/documents/:id/role", async (c) => {
+    const { role } = z.object({ role: z.enum(["deal_source", "evidence", "context"]).nullable() }).parse(await c.req.json());
+    await as(c, (tx) => tx.query(`select fn_set_document_role($1, $2)`, [c.req.param("id"), role]));
+    return c.json({ ok: true });
   });
 
   app.post("/api/documents/:id/retire", async (c) => {

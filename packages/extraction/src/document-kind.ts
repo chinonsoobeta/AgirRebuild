@@ -81,9 +81,10 @@ export function documentKind(doc: NormalizedDocument): Pick<Fingerprint, "kind" 
 const EXCLUDED_SECTION = /^(?:comparable (?:sales|rents)|market (?:overview|analysis)|demographics|about (?:the )?(?:broker|sponsor)|development team|track record|definitions|risk factors|(?:issuer.s? )?financial statements|balance sheet|table of contents|contents|ventes comparables|loyers comparables|apercu du marche|analyse du marche|demographie|a propos du (?:courtier|promoteur)|equipe de developpement|realisations|definitions|facteurs de risque|etats financiers|bilan|table des matieres)\b/;
 const SUBJECT_SECTION = /^(?:project (?:budget|summary|description|financing)|property (?:summary|description)|development budget|construction costs|sources (?:and uses|of funds)|rent roll|suite mix|pro\s*forma|financial plan|executive summary|budget du projet|description du projet|sources de financement|etat des loyers|sommaire executif)\b/;
 
-export function applyDocumentKind(doc: NormalizedDocument, result: ExtractionResult): void {
-  const {kind, role} = documentKind(doc);
-  result.notes.push(`Document kind: ${kind} (${role})`);
+export function applyDocumentKind(doc: NormalizedDocument, result: ExtractionResult, options?: { role?: "deal source" | "evidence" | "context" }): void {
+  const fingerprint = documentKind(doc);
+  const kind = fingerprint.kind, role = options?.role ?? fingerprint.role;
+  result.notes.push(`Document kind: ${kind} (${role}${options?.role ? ", set by a person" : ""})`);
   for (const c of [...result.candidates, ...result.other]) if (c.region) c.region.kind = `${kind} (${role})`;
   if (role === "deal source") return;
   if (role === "context") {
