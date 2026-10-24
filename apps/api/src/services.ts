@@ -62,7 +62,7 @@ type AssumptionDb = {
   source_kind: "document" | "analyst" | "default" | "table";
   source_table: string | null;
   /** unit_seen is the unit the document wrote; sources recorded before it was kept have none. */
-  sources: { document_id: string; document_name: string; value: number; location: string; raw: string; unit_seen?: string | null; context: string; rule?: string; ocr?: boolean; labelled_by?: string }[];
+  sources: { document_id: string; document_name: string; value: number; location: string; raw: string; unit_seen?: string | null; context: string; rule?: string; ocr?: boolean; labelled_by?: string; region?: SourcedCandidate["region"]; check_outcome?: "confirms" | "questions" }[];
   conflict_values: { value: number; documents: string[] }[] | null;
   reason: string | null;
   decided_by: string | null;
@@ -310,6 +310,39 @@ export function hideClientEvents<E extends { entity_id: string | null; payload: 
   });
 }
 
+/** The view and confirmation use the same eligibility rules; a source must belong wholly to one region. */
+export async function regionGroups(tx: Db, dealId: string) {
+  const [actor] = await tx.query<{ id: string }>(`select agir_uid() as id`);
+  const rows = await loadAssumptions(tx, dealId);
+  const groups = new Map<string, { documentId: string; documentName: string; source: string; table: string; fields: string[]; fieldLabels: string[]; ids: string[]; leftOut: { id: string; reason: string }[] }>();
+  for (const a of rows) {
+    const first = a.sources[0];
+    const region = first?.region;
+    if (!first || !region?.table || !["table", "sheet", "text table"].includes(region.source)) continue;
+    if (!a.sources.every(s => s.document_id === first.document_id && s.region?.source === region.source && s.region?.table === region.table)) continue;
+    if (a.status !== "needs_review" || a.value === null || (a.conflict_values?.length ?? 0) > 1) continue;
+    const key = JSON.stringify([first.document_id, region.source, region.table]);
+    let g = groups.get(key);
+    if (!g) {
+      g = { documentId: first.document_id, documentName: first.document_name, source: region.source, table: region.table, fields: [], fieldLabels: [], ids: [], leftOut: [] };
+      groups.set(key, g);
+    }
+    const reason = a.sources.some(s => s.ocr) ? "read by OCR"
+      : a.sources.some(s => s.check_outcome === "questions") ? "please check"
+      : a.sources.some(s => s.rule === "labelled" && s.labelled_by === actor?.id) ? "your own label"
+      : FIELD_BY_KEY.get(a.field_key)?.verify ? "please check" : null;
+    if (reason) g.leftOut.push({ id: a.id, reason });
+    else {
+      g.ids.push(a.id);
+      if (!g.fields.includes(a.field_key)) {
+        g.fields.push(a.field_key);
+        g.fieldLabels.push(FIELD_BY_KEY.get(a.field_key)!.label);
+      }
+    }
+  }
+  return [...groups.values()].filter(g => g.ids.length >= 2);
+}
+
 export async function reviewView(tx: Db, dealId: string, asOf: string) {
   const assumptions = await loadAssumptions(tx, dealId);
   const { readiness, gaps } = readinessFor(assumptions);
@@ -388,6 +421,7 @@ export async function reviewView(tx: Db, dealId: string, asOf: string) {
       .map((o) => ({ documentId: o.documentId, figureId: o.figureId!, document_name: o.document_name, location: o.location, raw: o.raw, context: o.context }));
   return {
     readiness,
+    regions: await regionGroups(tx, dealId),
     proposals,
     tableNotices,
     assumptions: assumptions.map((a) => {

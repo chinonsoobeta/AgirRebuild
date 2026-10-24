@@ -186,6 +186,10 @@ export function Review({ dealId }: { dealId: string }) {
       return refresh();
     },
   });
+  const confirmRegion = useMutation({
+    mutationFn: (group: ReviewData["regions"][number]) => api.post(`/deals/${dealId}/regions/confirm`, { documentId: group.documentId, source: group.source, table: group.table }),
+    onSuccess: () => refresh(),
+  });
   const acceptTable = useMutation({
     mutationFn: (b: {fieldKey:string;tableId:string;optionKey:string}) => api.post(`/deals/${dealId}/proposals/accept`,b),
     onSuccess: () => refresh(),
@@ -593,6 +597,19 @@ export function Review({ dealId }: { dealId: string }) {
             );
           })}
 
+          {(r.regions ?? []).map((g) => {
+            const rent = g.fields.every(k => ["unit_count", "unit_rent_monthly", "rentable_area_sf", "rent_psf_annual"].includes(k));
+            const cost = g.fields.every(k => FIELD_BY_KEY.get(k)?.group === "budget");
+            const loan = g.fields.every(k => ["senior", "mezzanine", "refinance"].includes(FIELD_BY_KEY.get(k)?.group ?? ""));
+            const fields = [...(rent ? [t("review.regionType")] : []), ...g.fields.map(k => L.field(k))].join(", ");
+            return <div className="card stack" key={`${g.documentId}:${g.source}:${g.table}`} style={{ gap: 8 }}>
+              <strong>{g.documentName} · {g.table}</strong>
+              <p>{rent || cost || loan ? t("review.regionIntro", { kind: t(rent ? "review.regionRent" : cost ? "review.regionBudget" : "review.regionLoan"), fields }) : t("review.regionOther", { fields })}</p>
+              {editable && <button className="btn primary" type="button" disabled={confirmRegion.isPending} onClick={() => confirmRegion.mutate(g)}>{t("review.regionConfirm", { n: g.ids.length })}</button>}
+              {g.leftOut.map(x => <div className="small muted" key={x.id}>{name(r.assumptions.find(a => a.id === x.id)!)}: {msg(x.reason)}</div>)}
+              <ErrorText error={confirmRegion.variables?.documentId === g.documentId && confirmRegion.variables?.table === g.table ? confirmRegion.error : null} />
+            </div>;
+          })}
           {pending.length > 0 && (
             <div className="stack" style={{ gap: 12 }}>
               <div className="spread">

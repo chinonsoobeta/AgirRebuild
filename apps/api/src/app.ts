@@ -9,7 +9,7 @@ import { breakeven, DRIVERS, driversFor, SALE_DRIVERS, EngineInputError, explore
 import { canonicalItem, itemFold, kindOf } from "@agir/extraction";
 import { MAX_UPLOAD_BYTES } from "@agir/worker";
 import { checkPassword, createSession, endSession, hashPassword, rateLimiter, SESSION_DAYS, userForSession } from "./auth.ts";
-import { thresholdsView, auditPackage, clientViewer, createRun, dealOverview, hideClientEvents, HttpError, labelRefusal, reviewView, runView, sha256 } from "./services.ts";
+import { thresholdsView, auditPackage, clientViewer, createRun, dealOverview, hideClientEvents, HttpError, labelRefusal, regionGroups, reviewView, runView, sha256 } from "./services.ts";
 
 export type AppDeps = { db: Db; store: BlobStore; secureCookies: boolean; demoSignIn?: boolean; trustProxy?: boolean; now?: () => Date };
 type Env = { Variables: { user: { id: string; email: string; name: string } } };
@@ -485,6 +485,24 @@ export function createApp({ db, store, secureCookies, demoSignIn = false, trustP
   });
 
   app.get("/api/deals/:id/review", async (c) => c.json(await as(c, (tx) => reviewView(tx, c.req.param("id"), now().toISOString().slice(0, 10)))));
+
+  app.post("/api/deals/:id/regions/confirm", async (c) => {
+    const body = z.object({ documentId: z.string().uuid(), source: z.enum(["table", "sheet", "text table"]), table: z.string().min(1).max(1000) }).parse(await c.req.json());
+    return c.json(await as(c, async (tx) => {
+      // Serialize region confirmations for this deal; fn_review locks each row and checks its version.
+      await tx.query(`select pg_advisory_xact_lock(hashtext($1))`, [c.req.param("id")]);
+      const rows = await tx.query<{ id: string; version: number }>(`select id, version from assumptions where deal_id = $1 order by id`, [c.req.param("id")]);
+      const group = (await regionGroups(tx, c.req.param("id"))).find(g => g.documentId === body.documentId && g.source === body.source && g.table === body.table);
+      if (!group) throw new HttpError(409, "This table no longer has two values to confirm. Reload and try again.");
+      let approved = 0, awaitingSecond = 0;
+      for (const id of group.ids) {
+        const [result] = await tx.query<{ status: string }>(`select (a).status from (select fn_review($1, 'approve', null, $2, $3) a) x`, [id, `Confirmed with the table ${group.table} in ${group.documentName}`, rows.find(a => a.id === id)!.version]);
+        if (result!.status === "approved") approved++;
+        else if (result!.status === "awaiting_second_approval") awaitingSecond++;
+      }
+      return { approved, awaitingSecond, leftOut: group.leftOut };
+    }));
+  });
 
   app.post("/api/assumptions/:id/review", async (c) => {
     const body = z

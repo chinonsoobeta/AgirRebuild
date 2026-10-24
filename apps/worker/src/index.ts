@@ -194,9 +194,9 @@ async function extractDocument(deps: WorkerDeps, documentId: string) {
     }
     for (const c of [...result.candidates, ...result.other]) {
       await tx.query(
-        `insert into candidates (document_id, deal_id, workspace_id, field_key, item_key, value, raw, unit_seen, location, context, rule, note, alternatives)
-         values ($1,$2,$3,$4,$5,$6,$7,$8,$9,$10,$11,$12,$13)`,
-        [d.id, d.deal_id, d.workspace_id, c.fieldKey, c.itemKey, c.value, c.raw, c.unitSeen, c.location, c.context, c.rule, c.note ?? null, c.alternatives ?? null],
+        `insert into candidates (document_id, deal_id, workspace_id, field_key, item_key, value, raw, unit_seen, location, context, rule, note, alternatives, region)
+         values ($1,$2,$3,$4,$5,$6,$7,$8,$9,$10,$11,$12,$13,$14)`,
+        [d.id, d.deal_id, d.workspace_id, c.fieldKey, c.itemKey, c.value, c.raw, c.unitSeen, c.location, c.context, c.rule, c.note ?? null, c.alternatives ?? null, c.region ? JSON.stringify(c.region) : null],
       );
     }
     await tx.query(
@@ -220,7 +220,7 @@ type AssumptionRowDb = {
   status: string;
   value: number | null;
   source_kind: string;
-  sources: { value: number; unit_seen?: string | null; document_id?: string; location?: string; labelled_by?: string; check_outcome?: "confirms" | "questions"; check_note?: string }[];
+  sources: { region?: SourcedCandidate["region"]; value: number; unit_seen?: string | null; document_id?: string; location?: string; labelled_by?: string; check_outcome?: "confirms" | "questions"; check_note?: string }[];
   conflict_values: { value: number }[] | null;
   reason: string | null;
   version: number;
@@ -252,16 +252,16 @@ export async function reconcileDeal(db: Db, dealId: string) {
     if (!deal) return;
     const rows = await tx.query<{
       id: string; document_id: string; document_name: string; field_key: string; item_key: string | null; value: number;
-      raw: string; unit_seen: string | null; location: string; context: string; rule: string; note: string | null; alternatives: string[] | null; needs_ocr: boolean;
+      raw: string; unit_seen: string | null; location: string; context: string; rule: string; note: string | null; alternatives: string[] | null; needs_ocr: boolean; region: SourcedCandidate["region"];
     }>(
-      `select c.id, c.document_id, d.name as document_name, c.field_key, c.item_key, c.value, c.raw, c.unit_seen, c.location, c.context, c.rule, c.note, c.alternatives, d.needs_ocr
+      `select c.id, c.document_id, d.name as document_name, c.field_key, c.item_key, c.value, c.raw, c.unit_seen, c.location, c.context, c.rule, c.note, c.alternatives, c.region, d.needs_ocr
        from candidates c join documents d on d.id = c.document_id
        where c.deal_id = $1 and c.field_key is not null and c.value is not null and d.retired_at is null and d.stage = 'extracted'`,
       [dealId],
     );
     const toSourced = (r: (typeof rows)[number]): SourcedCandidate => ({
       fieldKey: r.field_key, itemKey: r.item_key, value: r.value, raw: r.raw, unitSeen: r.unit_seen, location: r.location,
-      context: r.context, rule: r.rule, ...(r.alternatives ? { alternatives: r.alternatives } : {}), ...(r.note ? { note: r.note } : {}), documentId: r.document_id, documentName: r.document_name, ...(r.needs_ocr ? { ocr: true } : {}),
+      context: r.context, rule: r.rule, ...(r.region ? { region: r.region } : {}), ...(r.alternatives ? { alternatives: r.alternatives } : {}), ...(r.note ? { note: r.note } : {}), documentId: r.document_id, documentName: r.document_name, ...(r.needs_ocr ? { ocr: true } : {}),
     });
     const sourced = rows.map(toSourced);
     // A stored suggestion counts only while the workspace switch is on, and only after the boundary has checked it. The model is never called here.
@@ -272,7 +272,7 @@ export async function reconcileDeal(db: Db, dealId: string) {
     const unlabelled = figureOrder(
       (
         await tx.query<(typeof rows)[number]>(
-          `select c.id, c.document_id, d.name as document_name, c.field_key, c.item_key, c.value, c.raw, c.unit_seen, c.location, c.context, c.rule, c.note, c.alternatives, d.needs_ocr
+          `select c.id, c.document_id, d.name as document_name, c.field_key, c.item_key, c.value, c.raw, c.unit_seen, c.location, c.context, c.rule, c.note, c.alternatives, c.region, d.needs_ocr
            from candidates c join documents d on d.id = c.document_id
            where c.deal_id = $1 and c.field_key is null and c.value is not null and d.retired_at is null and d.stage = 'extracted'`,
           [dealId],
@@ -371,6 +371,7 @@ export async function reconcileDeal(db: Db, dealId: string) {
       const sources = p.sources.map((s) => ({
         document_id: s.documentId,
         document_name: s.documentName,
+        ...(s.region ? { region: s.region } : {}),
         value: s.value,
         location: s.location,
         raw: s.raw,
@@ -394,6 +395,15 @@ export async function reconcileDeal(db: Db, dealId: string) {
         await log(ins!.id, "extracted", null, p.status, null, p.value, reason ?? (p.status === "conflicting" ? "Documents disagree" : "Found in documents"));
         changed++;
         continue;
+      }
+      // Region metadata alone never reopens a decision or increments its version, including waiting and conflicting rows.
+      const withRegions = e.sources.map(old => {
+        const current = sources.find(s => s.document_id === old.document_id && s.location === old.location && same(s.value, old.value));
+        return current?.region ? { ...old, region: current.region } : old;
+      });
+      if (JSON.stringify(withRegions) !== JSON.stringify(e.sources)) {
+        await tx.query(`update assumptions set sources = $2 where id = $1`, [e.id, JSON.stringify(withRegions)]);
+        e.sources = withRegions;
       }
       // A foreign figure the row's sources already hold was seen when the value was settled.
       const foreignKnown = p.foreign.every((f) => (e.sources ?? []).some((x) => x.unit_seen === f.unitSeen && same(x.value, f.value)));

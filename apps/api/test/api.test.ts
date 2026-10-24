@@ -3518,8 +3518,11 @@ describe("Card 137: confirming a region", () => {
     const before = await read();
     expect(before.assumptions).toHaveLength(3);
     expect(before.assumptions.every((a: any) => a.sources[0].region?.source === "sheet")).toBe(true);
+    // Existing assumptions gain provenance without a new review version.
+    for (const a of before.assumptions) await db.query(`update assumptions set sources = $2 where id = $1`, [a.id, JSON.stringify(a.sources.map(({ region, ...s }: any) => s))]);
     await reconcileDeal(db, d);
     expect((await read()).assumptions.map((a: any) => [a.id, a.version])).toEqual(before.assumptions.map((a: any) => [a.id, a.version]));
+    expect((await read()).assumptions.every((a: any) => a.sources[0].region?.source === "sheet")).toBe(true);
     const questioned = before.assumptions[0];
     await db.query(`update assumptions set sources = $2 where id = $1`, [questioned.id, JSON.stringify(questioned.sources.map((s: any) => ({ ...s, check_outcome: "questions" })))]);
     const view = await read();
@@ -3542,6 +3545,7 @@ describe("Card 137: confirming a region", () => {
     for (const [i, a] of before.assumptions.entries()) {
       if (i > 1) continue;
       await db.query(`update assumptions set sources = $2 where id = $1`, [a.id, JSON.stringify(a.sources.map((s: any) => i === 0 ? { ...s, ocr: true } : { ...s, rule: "labelled", labelled_by: uid!.id }))]);
+      if (i === 0) expect((await read()).regions[0].leftOut).toContainEqual({ id: a.id, reason: "read by OCR" });
     }
     expect((await read()).regions).toEqual([]);
     const s = before.assumptions[2].sources[0];
@@ -3549,4 +3553,40 @@ describe("Card 137: confirming a region", () => {
     expect(res.status).toBe(409);
     expect((await read()).assumptions.every((a: any) => a.status === "needs_review")).toBe(true);
   });
+  test("fn_review keeps a material own label waiting for a second person; the region leaves it out", async () => {
+    const { d, read } = await setup();
+    const before = await read();
+    const a = before.assumptions[0];
+    const [uid] = await db.query<{ id: string }>(`select id from users where email = 'alice@example.com'`);
+    await db.query(`update assumptions set field_key = 'exit_cap_rate_pct', item_key = '', value = 5, sources = $2 where id = $1`, [a.id, JSON.stringify(a.sources.map((s: any) => ({ ...s, value: 5, rule: "labelled", labelled_by: uid!.id })))]);
+    const view = await read();
+    expect(view.regions[0].leftOut).toContainEqual({ id: a.id, reason: "your own label" });
+    expect((await call(alice, "POST", `/api/deals/${d}/regions/confirm`, view.regions[0])).json.approved).toBe(2);
+    expect((await read()).assumptions.find((x: any) => x.id === a.id).status).toBe("needs_review");
+    expect((await call(alice, "POST", `/api/assumptions/${a.id}/review`, { action: "approve", version: a.version })).json.status).toBe("awaiting_second_approval");
+    expect((await call(alice, "POST", `/api/assumptions/${a.id}/review`, { action: "second_approve" })).status).toBe(403);
+    expect((await call(bob, "POST", `/api/assumptions/${a.id}/review`, { action: "second_approve" })).json.status).toBe("approved");
+  });
+  test("an error from fn_review rolls back earlier approvals and their audit events", async () => {
+    const { d, read } = await setup();
+    const before = await read();
+    // Last in field order: approve valid earlier rows before the database rejects this rent.
+    const a = before.assumptions.find((x: any) => x.fieldKey === "unit_rent_monthly");
+    await db.query(`update assumptions set value = -1 where id = $1`, [a.id]);
+    const g = (await read()).regions[0];
+    expect((await call(alice, "POST", `/api/deals/${d}/regions/confirm`, g)).status).toBe(422);
+    expect((await read()).assumptions.map((x: any) => [x.id, x.status, x.version])).toEqual(before.assumptions.map((x: any) => [x.id, x.status, x.version]));
+    expect(await db.query(`select id from assumption_events where deal_id = $1 and action = 'approve'`, [d])).toEqual([]);
+  });
+
+  test("requires all sources in the same named region and never offers a singleton", async () => {
+    const { read } = await setup();
+    const before = await read();
+    for (const [i, a] of before.assumptions.entries()) {
+      const source = a.sources[0];
+      await db.query(`update assumptions set sources = $2 where id = $1`, [a.id, JSON.stringify(i === 0 ? [source, { ...source, region: { ...source.region, table: "Elsewhere" } }] : [{ ...source, region: { ...source.region, table: `Separate ${i}` } }])]);
+    }
+    expect((await read()).regions).toEqual([]);
+  });
+
 });

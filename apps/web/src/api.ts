@@ -68,6 +68,7 @@ export type Assumption = {
 };
 export type ReadinessItem = { fieldKey: string; itemKey?: string; label: string; detail?: string };
 export type Review = {
+  regions: { documentId: string; documentName: string; source: string; table: string; fields: string[]; ids: string[]; leftOut: { id: string; reason: string }[] }[];
   proposals: import("@agir/contracts").Proposal[];
   tableNotices: import("@agir/contracts").Proposal[];
   readiness: { status: "ready" | "blocked"; missing: ReadinessItem[]; conflicting: ReadinessItem[]; pending: ReadinessItem[]; impossible: ReadinessItem[]; notFound: ReadinessItem[]; choices: ReadinessItem[]; defaultable: string[] };
