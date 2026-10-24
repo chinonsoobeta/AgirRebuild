@@ -1335,6 +1335,13 @@ const SALE_SHARES: Record<string, string> = {
 };
 
 const FR_REASONS: [RegExp, string | ((m: RegExpMatchArray) => string)][] = [
+  [/^(.+\.) The documents state (.+) units in all; the types read so far have (.+)\.$/, m => `${translateMessage(m[1])} Les documents indiquent ${m[2]} logements au total ; les types lus jusqu’ici en comptent ${m[3]}.`],
+  [/^The 1 unit of type (.+) has no rent in the documents\.$/, m => `Les documents ne donnent aucun loyer pour le logement de type ${m[1]}.`],
+  [/^The (.+) units of type (.+) have no rent in the documents\.$/, m => `Les documents ne donnent aucun loyer pour les ${m[1]} logements de type ${m[2]}.`],
+  [/^Type (.+) has a rent of (.+) a month but no unit count in the documents\.$/, m => `Les documents donnent un loyer de ${m[2]} par mois pour le type ${m[1]}, mais aucun nombre de logements.`],
+  [/^The (.+) SF of space (.+) have no rent per SF in the documents\.$/, m => `Les documents ne donnent aucun loyer par pi² pour les ${m[1]} pi² de l’espace ${m[2]}.`],
+  [/^Space (.+) has a rent of (.+) per SF a year but no rentable area in the documents\.$/, m => `Les documents donnent un loyer de ${m[2]} par pi² par an pour l’espace ${m[1]}, mais aucune superficie locative.`],
+  [/^Type (.+) has no rent in the documents\.$/, m => `Les documents ne donnent aucun loyer pour le type ${m[1]}.`],
   [/^Give a reason for the threshold change$/, "Indiquez le motif de la modification du seuil"],
   [/^Published table$/, "Tableau publié"],
   [/^This table option is not available\. Review the current proposals\.$/, "Cette option du tableau n’est pas disponible. Consultez les propositions actuelles."],
@@ -1607,7 +1614,7 @@ export function build(lang: Lang, setLang: (l: Lang) => void) {
     item: (i: ReadinessItem) => {
       const sentence = (x: string) => { const o = msg(x); return o.charAt(0).toUpperCase() + o.slice(1); };
       // In French the field's name stands for the label, unless the label is a sentence of its own (two names for one item).
-      if (i.detail) return lang === "fr" ? `${translateMessage(i.label) !== i.label ? sentence(i.label) : L.field(i.fieldKey, i.itemKey)}\u00a0: ${msg(i.detail)}` : `${i.label}: ${i.detail}`;
+      if (i.detail && !(i.itemKey && /^(?:Rent|Units|Rentable area|Rent per SF) \(/.test(i.label))) return lang === "fr" ? `${translateMessage(i.label) !== i.label ? sentence(i.label) : L.field(i.fieldKey, i.itemKey)}\u00a0: ${msg(i.detail)}` : `${i.label}: ${i.detail}`;
       if (lang === "en") return i.label.charAt(0).toUpperCase() + i.label.slice(1);
       if (i.fieldKey === "unit_count" && !i.itemKey) return t("review.revenueProgram");
       return translateMessage(i.label) !== i.label || i.fieldKey === "input" ? sentence(i.label) : L.field(i.fieldKey, i.itemKey);

@@ -3486,3 +3486,21 @@ describe("card 135 typed plausibility windows", () => {
     expect((await db.query<any>(`select reason from assumptions where deal_id=$1 and field_key='expense_ratio_pct'`, [d]))[0].reason).toBe(reason);
   });
 });
+
+ test("card 136 entering the named rent makes the invented roll ready", async () => {
+  const owner = await signup("roll136@example.com", "Roll Owner", "solo");
+  const w = (await call(owner, "GET", "/api/me")).json.workspaces[0].id;
+  const d = (await call(owner, "POST", `/api/workspaces/${w}/deals`, {name: "Invented Birch Roll", assetType: "Multifamily"})).json.id;
+  const put = async (fieldKey: string, value: number, itemKey?: string) => expect((await call(owner, "POST", `/api/deals/${d}/values`, {fieldKey, value, itemKey, reason: "Invented rent roll setup"})).status).toBe(200);
+  for (const [key, value] of Object.entries({land_cost:600000, hard_cost:1400000, soft_cost:150000, contingency:70000, construction_months:12, lease_up_months:3, hold_years:5, stabilized_occupancy_pct:95, expense_ratio_pct:30, exit_cap_rate_pct:5, selling_costs_pct:0, senior_loan_amount:0, refinance_rate_pct:4})) await put(key, value);
+  for (const [item, count, rent] of [["studio",3,1350],["1-bed",5,1650],["2-bed",4,null]] as const) {
+    await put("unit_count", count, item);
+    if (rent !== null) await put("unit_rent_monthly", rent, item);
+  }
+  const before = (await call(owner, "GET", `/api/deals/${d}/review`)).json;
+  expect(before.readiness.status).toBe("blocked");
+  expect(before.missing).toHaveLength(1);
+  expect(before.missing[0]).toMatchObject({fieldKey:"unit_rent_monthly", itemKey:"2-bed", detail:"The 4 units of type 2-bed have no rent in the documents."});
+  await put("unit_rent_monthly", 1850, "2-bed");
+  expect((await call(owner, "GET", `/api/deals/${d}/review`)).json.readiness.status).toBe("ready");
+});

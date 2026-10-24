@@ -320,6 +320,30 @@ describe("quick-start templates", () => {
     return rows;
   };
 
+  test("card 136 names the missing rent without filling it", () => {
+    const base = rowsFor("apartment", 0).filter(r => !r.itemKey);
+    const row = (fieldKey: string, valueNumeric: number, itemKey: string | null = null) => ({fieldKey, valueNumeric, itemKey, status: "approved" as const});
+    const roll = [row("unit_count", 3, "studio"), row("unit_rent_monthly", 1350, "studio"), row("unit_count", 5, "1-bed"), row("unit_rent_monthly", 1650, "1-bed"), row("unit_count", 4, "2-bed")];
+    const partial = assemble([...base, ...roll]);
+    expect(partial.readiness.status).toBe("blocked");
+    expect(partial.input).toBeNull();
+    expect(partial.readiness.missing).toEqual([{fieldKey: "unit_rent_monthly", itemKey: "2-bed", label: "Rent (2-bed)"}]);
+    // Card 136 audit: the sentence sits beside readiness, so readiness and its hashes are unchanged.
+    expect(partial.gaps).toEqual({"unit_rent_monthly|2-bed": "The 4 units of type 2-bed have no rent in the documents."});
+    expect(assemble([...base, row("unit_count", 1, "2-bed")]).gaps["unit_rent_monthly|2-bed"]).toBe("The 1 unit of type 2-bed has no rent in the documents.");
+    const complete = assemble([...base, ...roll, row("unit_rent_monthly", 1850, "2-bed")]);
+    expect(complete.readiness.status).toBe("ready");
+    expect(complete.input!.revenue).toEqual([
+      {key: "1-bed", label: "1-bed", basis: "per_unit", units: 5, rentMonthly: 1650},
+      {key: "2-bed", label: "2-bed", basis: "per_unit", units: 4, rentMonthly: 1850},
+      {key: "studio", label: "studio", basis: "per_unit", units: 3, rentMonthly: 1350},
+    ]);
+    expect(assemble([...base, ...roll, row("unit_count", 15)]).gaps["unit_rent_monthly|2-bed"]).toBe("The 4 units of type 2-bed have no rent in the documents. The documents state 15 units in all; the types read so far have 12.");
+    expect(assemble([...base, row("unit_rent_monthly", 1850, "2-bed")]).gaps["unit_count|2-bed"]).toBe("Type 2-bed has a rent of $1,850 a month but no unit count in the documents.");
+    expect(assemble([...base, row("rentable_area_sf", 2400, "Retail")]).gaps["rent_psf_annual|Retail"]).toBe("The 2,400 SF of space Retail have no rent per SF in the documents.");
+    expect(assemble([...base, row("rent_psf_annual", 24, "Retail")]).gaps["rentable_area_sf|Retail"]).toBe("Space Retail has a rent of $24 per SF a year but no rentable area in the documents.");
+  });
+
   test.each(RENTAL_TEMPLATES.map((t) => [t.key] as const))("%s asks only real fields and defaults exactly the fields that carry one", (key) => {
     const t = TEMPLATES.find((x) => x.key === key)!;
     for (const q of t.questions) {

@@ -61,8 +61,10 @@ const PROBLEM_FIELD: [RegExp, string][] = [
   [/^A deal that is kept and refinanced /, "refinance_month"],
 ];
 
-export function assemble(rows: readonly AssumptionRow[]): { readiness: Readiness; input: EngineInput | null } {
+export function assemble(rows: readonly AssumptionRow[]): { readiness: Readiness; input: EngineInput | null; gaps: Record<string, string> } {
   const missing: ReadinessItem[] = [];
+  // Card 136: plain sentences for a roll kept in part. Kept beside readiness, never in it, so readiness and its hashes are unchanged.
+  const gaps: Record<string, string> = {};
   const conflicting: ReadinessItem[] = [];
   const pending: ReadinessItem[] = [];
   const impossible: ReadinessItem[] = [];
@@ -182,6 +184,11 @@ export function assemble(rows: readonly AssumptionRow[]): { readiness: Readiness
     if (itemKeys.size === 0) {
       missing.push({ fieldKey: "unit_count", label: "Revenue program (at least one unit type or space)" });
     }
+    const number = (value: number) => value.toLocaleString("en-US", { maximumFractionDigits: 20 });
+    const total = values.get("unit_count");
+    const counted = [...itemKeys].reduce((sum, item) => sum + (values.get(`unit_count|${item}`) ?? 0), 0);
+    const gap = (fieldKey: string, item: string, text: string) => { gaps[`${fieldKey}|${item}`] = text; };
+    const context = total === undefined ? "" : ` The documents state ${number(total)} units in all; the types read so far have ${number(counted)}.`;
     for (const item of [...itemKeys].sort()) {
       const get = (f: string) => values.get(`${f}|${item}`);
       const blocked = (f: string) =>
@@ -194,14 +201,15 @@ export function assemble(rows: readonly AssumptionRow[]): { readiness: Readiness
       const anyBlocked = ["unit_count", "unit_rent_monthly", "rent_psf_annual", "rentable_area_sf", "item_occupancy_pct"].some(blocked);
       if (anyBlocked) continue;
       if (rentMonthly !== undefined) {
-        if (units === undefined) missing.push({ fieldKey: "unit_count", itemKey: item, label: `Units (${item})` });
+        if (units === undefined) { missing.push({ fieldKey: "unit_count", itemKey: item, label: `Units (${item})` }); gap("unit_count", item, `Type ${item} has a rent of $${number(rentMonthly)} a month but no unit count in the documents.${context}`); }
         else revenue.push({ key: item, label: item, basis: "per_unit", units, rentMonthly, ...(occ !== undefined ? { occupancyPct: occ } : {}) });
       } else if (psf !== undefined || area !== undefined) {
-        if (area === undefined) missing.push({ fieldKey: "rentable_area_sf", itemKey: item, label: `Rentable area (${item})` });
-        else if (psf === undefined) missing.push({ fieldKey: "rent_psf_annual", itemKey: item, label: `Rent per SF (${item})` });
+        if (area === undefined) { missing.push({ fieldKey: "rentable_area_sf", itemKey: item, label: `Rentable area (${item})` }); gap("rentable_area_sf", item, `Space ${item} has a rent of $${number(psf!)} per SF a year but no rentable area in the documents.${context}`); }
+        else if (psf === undefined) { missing.push({ fieldKey: "rent_psf_annual", itemKey: item, label: `Rent per SF (${item})` }); gap("rent_psf_annual", item, `The ${number(area)} SF of space ${item} have no rent per SF in the documents.${context}`); }
         else revenue.push({ key: item, label: item, basis: "per_sf", units: units ?? 0, areaSf: area, rentPsfAnnual: psf, ...(occ !== undefined ? { occupancyPct: occ } : {}) });
       } else {
         missing.push({ fieldKey: "unit_rent_monthly", itemKey: item, label: `Rent (${item})` });
+        gap("unit_rent_monthly", item, (units === undefined ? `Type ${item} has no rent in the documents.` : (units === 1 ? `The 1 unit of type ${item} has no rent in the documents.` : `The ${number(units)} units of type ${item} have no rent in the documents.`)) + context);
       }
     }
   }
@@ -240,7 +248,7 @@ export function assemble(rows: readonly AssumptionRow[]): { readiness: Readiness
   const defaultable = missing.map((m) => m.fieldKey).filter((k) => FIELD_BY_KEY.get(k)?.default !== undefined);
   const blocked = missing.length + conflicting.length + pending.length + impossible.length > 0;
   const readiness: Readiness = { status: blocked ? "blocked" : "ready", missing, conflicting, pending, impossible, notFound, choices, defaultable };
-  if (blocked) return { readiness, input: null };
+  if (blocked) return { readiness, input: null, gaps };
 
   const v = (k: string) => values.get(k);
   const n = (k: string, fallback = 0) => values.get(k) ?? fallback;
@@ -348,7 +356,7 @@ export function assemble(rows: readonly AssumptionRow[]): { readiness: Readiness
   } catch (e) {
     if (!(e instanceof EngineInputError)) throw e;
     const problems = e.problems.map((label): ReadinessItem => ({ fieldKey: PROBLEM_FIELD.find(([re]) => re.test(label))?.[1] ?? "input", label }));
-    return { readiness: { ...readiness, status: "blocked", impossible: problems }, input: null };
+    return { readiness: { ...readiness, status: "blocked", impossible: problems }, input: null, gaps };
   }
-  return { readiness, input };
+  return { readiness, input, gaps };
 }

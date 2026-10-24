@@ -94,7 +94,7 @@ async function loadAssumptions(tx: Db, dealId: string): Promise<AssumptionDb[]> 
   );
 }
 
-function readinessFor(rows: AssumptionDb[]): { readiness: Readiness; input: EngineInput | null } {
+function readinessFor(rows: AssumptionDb[]): { readiness: Readiness; input: EngineInput | null; gaps: Record<string, string> } {
   return assemble(
     rows.map((r) => ({ fieldKey: r.field_key, itemKey: r.item_key || null, status: r.status, valueNumeric: r.value })),
   );
@@ -312,7 +312,7 @@ export function hideClientEvents<E extends { entity_id: string | null; payload: 
 
 export async function reviewView(tx: Db, dealId: string, asOf: string) {
   const assumptions = await loadAssumptions(tx, dealId);
-  const { readiness } = readinessFor(assumptions);
+  const { readiness, gaps } = readinessFor(assumptions);
   const [deal] = await tx.query<{province: string | null}>(`select province from deals where id = $1`, [dealId]);
   const province = deal?.province;
   const approved = assumptions.filter(a => ENGINE_READABLE_STATUSES.includes(a.status) && a.value !== null);
@@ -426,7 +426,8 @@ export async function reviewView(tx: Db, dealId: string, asOf: string) {
     }),
     missing: readiness.missing.map((m) => {
       const def = FIELD_BY_KEY.get(m.fieldKey)!;
-      return { ...m, unit: def.unit, material: def.material, default: def.default ?? null, help: def.help ?? null, groupLabel: FIELD_GROUP_LABELS[def.group], likely: likely(m.fieldKey) };
+      const gap = gaps[`${m.fieldKey}|${m.itemKey ?? ""}`];
+      return { ...m, ...(gap ? { detail: gap } : {}), unit: def.unit, material: def.material, default: def.default ?? null, help: def.help ?? null, groupLabel: FIELD_GROUP_LABELS[def.group], likely: likely(m.fieldKey) };
     }),
     notFound: readiness.notFound.map((m) => {
       const def = FIELD_BY_KEY.get(m.fieldKey)!;

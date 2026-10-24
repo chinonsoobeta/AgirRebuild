@@ -504,6 +504,7 @@ export function Review({ dealId }: { dealId: string }) {
                       <label htmlFor={id} style={{ fontWeight: 600 }}>{name(m)}</label>
                       <span className="small faint">{L.group(m.groupLabel ? groupKey(m.groupLabel) : "")}{m.default !== null ? t("review.default", { v: f.value(m.default, m.unit) }) : ""}{m.material ? t("review.materialTag") : ""}</span>
                     </div>
+                    {m.detail && <p className="small muted">{msg(m.detail)}</p>}
                     {L.help(m.fieldKey, m.help) && <span className="help">{L.help(m.fieldKey, m.help)}</span>}
                     {m.likely.length > 0 && (
                       <div className="stack small" style={{ gap: 6 }}>

@@ -1033,3 +1033,17 @@ it.each(["en", "fr"] as const)("card 135 offers confirmation only for an outside
     expect(render(null)).toBe("");
   } finally { vi.unstubAllGlobals(); }
 });
+
+ it("card 136 translates rent-roll gaps and the stated total", () => {
+  const pairs = [
+    ["The 4 units of type 2-bed have no rent in the documents.", "Les documents ne donnent aucun loyer pour les 4 logements de type 2-bed."],
+    ["Type 2-bed has a rent of $1,850 a month but no unit count in the documents.", "Les documents donnent un loyer de $1,850 par mois pour le type 2-bed, mais aucun nombre de logements."],
+    ["The 2,400 SF of space Retail have no rent per SF in the documents.", "Les documents ne donnent aucun loyer par pi² pour les 2,400 pi² de l’espace Retail."],
+    ["Space Retail has a rent of $24 per SF a year but no rentable area in the documents.", "Les documents donnent un loyer de $24 par pi² par an pour l’espace Retail, mais aucune superficie locative."],
+  ];
+  for (const [en, fr] of pairs) {
+    expect(build("en", () => {}).msg(en)).toBe(en);
+    expect(translateMessage(en)).toBe(fr);
+    expect(translateMessage(en + " The documents state 15 units in all; the types read so far have 12.")).toBe(fr + " Les documents indiquent 15 logements au total ; les types lus jusqu’ici en comptent 12.");
+  }
+});
