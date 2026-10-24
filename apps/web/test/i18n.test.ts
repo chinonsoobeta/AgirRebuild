@@ -1065,3 +1065,17 @@ describe("Card 137 region text", () => {
     expect(fr.t(key)).not.toBe(key);
   }
  });
+
+
+describe("card 150 French action sentences", () => {
+  it("translates every new list and banner string", () => {
+    const fr = build("fr", () => {});
+    const en = build("en", () => {});
+    for (const key of ["review.todoCount", "review.todoReady", "review.useDefault", "review.acceptTickedDefaults", "review.b.conflicts", "review.b.missing", "review.b.pending", "review.b.awaiting", "review.b.impossible", "review.b.tail"] as Key[]) {
+      const params = { n: 2, v: "3%" };
+      expect(fr.t(key, params)).not.toBe(en.t(key, params));
+      expect(fr.t(key, params)).not.toBe(key);
+    }
+    expect(fr.t("review.todoCount", { n: 2 })).toBe("2 actions avant de pouvoir lancer ce projet");
+  });
+});

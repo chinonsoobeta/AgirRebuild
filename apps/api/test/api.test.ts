@@ -13,7 +13,7 @@ import { createApp } from "../src/app.ts";
 import { rateLimiter } from "../src/auth.ts";
 import { POLICIES, POLICY_V1, RENTAL_HOLD_DRAFT, type Policy } from "@agir/contracts";
 import { DRIVERS, SALE_DRIVERS, canonicalJson, heldPartnerReturns } from "@agir/engine";
-import { POLICY_HASHES, sha256, sourceLabel } from "../src/services.ts";
+import { POLICY_HASHES, sha256, sourceLabel, todoList } from "../src/services.ts";
 
 let db: Db;
 let app: ReturnType<typeof createApp>;
@@ -93,10 +93,15 @@ describe("the whole workflow, from documents to an audit package", () => {
   test("approve every extracted value, then run", async () => {
     const review = (await call(alice, "GET", `/api/deals/${deal}/review`)).json;
     expect(review.readiness.missing).toEqual([]);
+    const blocking = (r: any) => r.readiness.missing.length + r.readiness.conflicting.length + r.readiness.pending.length + r.readiness.impossible.length;
+    expect(review.todo.blocking).toBe(blocking(review));
     expect(review.other.some((o: any) => /output figure/.test(o.note ?? ""))).toBe(true);
     for (const a of review.assumptions.filter((x: any) => x.status === "needs_review")) {
       expect((await call(alice, "POST", `/api/assumptions/${a.id}/review`, { action: "approve", version: a.version })).status).toBe(200);
     }
+    const after = (await call(alice, "GET", `/api/deals/${deal}/review`)).json;
+    expect(after.todo.blocking).toBe(blocking(after));
+    expect(after.todo.blocking).toBe(0);
     const r = await call(alice, "POST", `/api/deals/${deal}/runs`);
     expect(r.status).toBe(200);
     run = r.json.id;
@@ -3743,3 +3748,30 @@ describe("card 160a: the deal AI reader", () => {
   await call(alice, "PUT", `/api/deals/${id}/documents?name=new.txt`, undefined, new TextEncoder().encode("Invented new document"));
   expect((await review()).json.aiReading).toBeNull();
  });
+
+
+describe("card 150 todoList", () => {
+  const item = (fieldKey: string) => ({ fieldKey, label: fieldKey });
+  const ready = () => ({ status: "ready" as const, missing: [], conflicting: [], pending: [], impossible: [], notFound: [], choices: [], defaultable: [] });
+  const row = (id: string, status: string, questions = false) => ({ id, field_key: id, item_key: "", status, sources: questions ? [{ check_outcome: "questions" }] : [] });
+  test("counts exactly the blocking readiness items, including each kind", () => {
+    for (const key of [null, "missing", "conflicting", "pending", "impossible"] as const) {
+      const r = { ...ready(), ...(key ? { status: "blocked" as const, [key]: [item("land_cost")] } : {}) };
+      const todo = todoList(r, [], null);
+      expect(todo.blocking).toBe(r.missing.length + r.conflicting.length + r.pending.length + r.impossible.length);
+      expect(todo.blocking === 0).toBe(r.status === "ready");
+    }
+  });
+  test("orders actions and distinguishes questioning sources from ordinary review; AI checks never block", () => {
+    const r = { ...ready(), status: "blocked" as const, conflicting: [item("c")], impossible: [item("i")], missing: [item("m")], pending: [item("n"), item("p"), item("a")] };
+    const rows = [row("a", "awaiting_second_approval"), row("n", "needs_review"), row("p", "needs_review", true), row("c", "conflicting"), row("i", "approved")];
+    const ai = { pleaseCheck: [{ field: "land_cost", item: null }] };
+    const result = todoList(r, rows as Parameters<typeof todoList>[1], ai);
+    expect(result.blocking).toBe(6);
+    expect(result.items.map(x => x.kind)).toEqual(["conflict", "impossible", "missing", "please_check", "needs_review", "awaiting", "ai_check"]);
+    expect(result.items.map(x => x.assumptionId)).toEqual(["c", "i", null, "p", "n", "a", null]);
+    expect(result.items.every(x => x.itemKey === null)).toBe(true);
+    expect(result.items.at(-1)).toMatchObject({ fieldKey: "land_cost", blocking: false });
+    expect(todoList(ready(), [], ai)).toMatchObject({ blocking: 0, items: [{ kind: "ai_check", blocking: false }] });
+  });
+});

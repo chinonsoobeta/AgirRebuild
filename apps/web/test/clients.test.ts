@@ -7,7 +7,7 @@ import { randomBytes } from "node:crypto";
 import { renderToStaticMarkup } from "react-dom/server";
 import { api, ApiError, type Assumption } from "../src/api";
 import { canDecide, canEdit } from "../src/components/ui";
-import { ClientConfirmation, TableProposal } from "../src/routes/review.tsx";
+import { ClientConfirmation, TableProposal, Review } from "../src/routes/review.tsx";
 import { ClientsPanel, LogoPanel } from "../src/routes/settings.tsx";
 import { Invite } from "../src/routes/invite.tsx";
 import { Reports } from "../src/routes/reports.tsx";
@@ -18,14 +18,14 @@ import { build, type Lang } from "../src/i18n.tsx";
 // Card 89c: the screens of a broker's client. Mocks follow apps/web/test/run.test.ts.
 const state = vi.hoisted(() => ({ lang: "en" as Lang, role: "client", me: undefined as unknown, meError: null as unknown, invite: undefined as unknown, inviteError: null as unknown,
   session: null as null | {workspaceId:string;setWorkspace:ReturnType<typeof vi.fn>}, dealSnapshot: undefined as unknown, effects: [] as (()=>void)[],
-  thresholds: undefined as any,
+  thresholds: undefined as any, review: undefined as any,
   clients: [] as unknown[], invites: [] as unknown[], artifacts: [] as unknown[], secret: "", options: [] as { queryKey: unknown[] }[],
   hooks: [] as unknown[], index: 0, nodes: [] as { tag: string; props: Record<string, any> }[], invalidate: vi.fn(async () => {}), navigate: vi.fn() }));
 vi.mock("@tanstack/react-query", () => ({
   useQuery: (options: { queryKey: unknown[] }) => {
     state.options.push(options);
     const key = options.queryKey[0];
-    return key === "thresholds" ? { data: state.thresholds } : key === "me" ? { data: state.me, error: state.meError, isLoading: false } : key === "invite" ? { data: state.invite, error: state.inviteError }
+    return key === "review" ? { data: state.review } : key === "thresholds" ? { data: state.thresholds } : key === "me" ? { data: state.me, error: state.meError, isLoading: false } : key === "invite" ? { data: state.invite, error: state.inviteError }
       : key === "deal-clients" ? { data: state.clients } : key === "invites" ? { data: state.invites } : key === "artifacts" ? { data: state.artifacts }
       : key === "deal" ? {data:state.dealSnapshot} : key === "share-links" ? { data: [] } : {};
   },
@@ -41,7 +41,7 @@ vi.mock("../src/components/ui", async (original) => {
   return {
     ...ui,
     DealHeader: () => createElement("header", null, "Deal header"),
-    useDeal: () => ({ data: { run: { id: "run-1", number: 1, fresh: true }, documents: { total: 0, processing: 0, failed: 0 } } }),
+    useDeal: () => ({ data: { deal: { currency: "CAD" }, run: { id: "run-1", number: 1, fresh: true }, documents: { total: 0, processing: 0, failed: 0 } } }),
     useSession: () => ({ solo: false, role: state.role, workspaceId: "ws", me: { user: { id: "me-id", name: "Me" }, workspaces: [] } }),
   };
 });
@@ -388,5 +388,31 @@ describe("card 96c thresholds", () => {
     const fr = text(render(createElement(StandardVerdict, { custom: true, standard })));
     expect(fr).toContain("Selon les seuils standard d'Agir");
     expect(fr).not.toContain("Under Agir");
+  });
+});
+
+
+describe("card 150 one review list", () => {
+  it("shows the blocking count, leaves defaults unticked and excludes please-check from Approve all", async () => {
+    state.role = "owner";
+    const a = { ...stated(), status: "needs_review", sources: [{ document_name: "invented.txt", check_outcome: "questions", check_note: "Check this value" }] };
+    state.review = { assumptions: [a], missing: [{ fieldKey: "vacancy_pct", label: "Vacancy", unit: "%", default: 3, material: false, help: null, likely: [] }],
+      readiness: { status: "blocked", impossible: [] }, notFound: [], choices: [], other: [], regions: [],
+      todo: { blocking: 2, items: [{ kind: "missing", fieldKey: "vacancy_pct", itemKey: null, assumptionId: null, blocking: true }, { kind: "please_check", fieldKey: a.fieldKey, itemKey: a.itemKey, assumptionId: a.id, blocking: true }] } };
+    const element = createElement(Review, { dealId: "deal-1" });
+    const html = text(render(element));
+    expect(html).toContain("2 actions before this deal can run");
+    expect(html).toContain("Check this value");
+    expect(html).not.toContain("Approve all");
+    const checks = state.nodes.filter(n => n.tag === "input" && n.props.type === "checkbox");
+    expect(checks).toHaveLength(1);
+    expect(checks.every(n => !n.props.checked && !n.props.defaultChecked)).toBe(true);
+    expect(buttons("Accept the 0 ticked defaults")[0]?.props.disabled).toBe(true);
+    checks[0]!.props.onChange({ target: { checked: true } });
+    render(element);
+    await buttons("Accept the 1 ticked defaults")[0]!.props.onClick();
+    expect(vi.mocked(api.post).mock.calls).toContainEqual(["/deals/deal-1/defaults", { fields: ["vacancy_pct"] }]);
+    state.review.todo = { blocking: 0, items: [] };
+    expect(text(render(element))).toContain("Nothing is left; this deal can run");
   });
 });
