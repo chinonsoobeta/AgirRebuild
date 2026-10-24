@@ -6,7 +6,19 @@ import { applyDocumentKind } from "./document-kind.ts";
 import { unconditioned, commercialItem, commercialLabel, genericCommercial, PROPERTY_TAX_WORD, BASIS_AFTER_RE, CREDIT_NOTE, REPLACED_LOAN, DEPOSIT_NOTE, DEPOSIT_RE, LTV_BASIS, canonicalItem, costSentence, currencyOf, flagRead, flagSentence, hasPhrase, isOperatingTarget, isExitCapLabel, isTakeoutTimingLabel, isPlainRentLabel, loanNameOnly, loanTerm, mapToken, normalizeLabel, withoutTaxBasis, OLD_SHEET_RE, rankScope, SCENARIO_SHEET_NOTE, SCENARIO_SHEET_RE, SUPERSEDED_LABEL_NOTE, scopeIn, scopesIn, withCurrency, type MapOptions, type Mapped, type Scope } from "./mapping.ts";
 
 /** One value found in one document, with where it came from and why it was (or was not) mapped. */
+export type Region = {
+  source: "table" | "sheet" | "text table" | "label-value line" | "prose";
+  table?: string;
+  row?: number;
+  rowRole?: string;
+  columnRole?: string;
+  heading?: string;
+  kind?: string;
+  scope?: "this deal" | "scenario" | "prior year" | "other project";
+};
+
 export type Candidate = {
+  region?: Region;
   fieldKey: string | null;
   itemKey: string | null;
   value: number | null;
@@ -26,6 +38,28 @@ export type ExtractionResult = {
   /** What the parser could not read from the document as a whole. */
   notes: string[];
 };
+
+/** Reader metadata keyed by the same locations the readers already retain. */
+const documentRegions = new WeakMap<ExtractionResult, { regions: Map<string, Partial<Region>>; tableSource: "sheet" | "table" }>();
+
+function regionAt(result: ExtractionResult, location: string | string[], rule: string): Region {
+  const known = documentRegions.get(result)?.regions.get(typeof location === "string" ? location : location[0] ?? "");
+  const source = rule === "line:label-value" || rule === "line:named-type" || rule === "line:commercial-label" ? "label-value line" : "prose";
+  const region: Region = { source, ...known };
+  if (Array.isArray(location) && location.length > 1) delete region.row;
+  return region;
+}
+
+/** Register table identity and original row indexes before section readers slice the rows. */
+function tableRegions(table: Table, result: ExtractionResult, source?: Region["source"]) {
+  const state = documentRegions.get(result);
+  if (!state) return; // A text-table recognition probe does not produce document figures.
+  table.rows.forEach((row, i) => row.forEach(cell => {
+    const known = state.regions.get(cell.ref);
+    if (known?.table !== undefined) return;
+    state.regions.set(cell.ref, { ...known, source: source ?? state.tableSource, table: table.name, row: i });
+  }));
+}
 
 const TOTAL_RE = /^\s*(grand\s+)?(sub-?\s*|sous-?\s*)?total\b/i;
 // A row labelled only "Total": it closes a uses table when budget lines above it name at least two budget fields and none is the stated total yet.
@@ -89,7 +123,7 @@ function floating(text: string, tokens: NumberToken[]): { spreads: NumberToken[]
   return first && { spreads, ...first };
 }
 
-type Base = { raw: string; location: string; context: string; rule: string };
+type Base = { region: Region; raw: string; location: string; context: string; rule: string };
 
 /** The documents that are a builder's quote: there, a Total is the hard cost. */
 const quoteDocs = new WeakSet<ExtractionResult>();
@@ -128,7 +162,7 @@ function record(result: ExtractionResult, mapped: Mapped, token: NumberToken, ba
 }
 
 function push(result: ExtractionResult, label: string, token: NumberToken, location: string, context: string, rule: string, opts: MapOptions = {}) {
-  record(result, mapToken(label, token, quoteDocs.has(result) ? { quote: true, ...opts } : opts), token, { raw: token.raw, location, context: context.slice(0, 240), rule });
+  record(result, mapToken(label, token, quoteDocs.has(result) ? { quote: true, ...opts } : opts), token, { region: regionAt(result, location, rule), raw: token.raw, location, context: context.slice(0, 240), rule });
 }
 
 /** The [start, end) of every balanced "( ... )" in a line. */
@@ -184,7 +218,7 @@ const tableRank = (t: Table): Scope | null => {
  * a senior/mezzanine loan or a use of construction other than a date/milestone. Otherwise scope stays unstated (generic terms default to senior).
  * Inline labels and per-sentence loan names still take precedence over this document fallback.
  */
-function lineScopes(doc: NormalizedDocument, format: DocumentFormat, rank: Scope | null): (Scope | undefined)[] {
+function lineScopes(doc: NormalizedDocument, format: DocumentFormat, rank: Scope | null, regions: Map<string, Partial<Region>>): (Scope | undefined)[] {
   let first = 0;
   const headings = doc.lines.map((line) => {
     const text = line.text.trim();
@@ -214,7 +248,10 @@ function lineScopes(doc: NormalizedDocument, format: DocumentFormat, rank: Scope
         /\b(?:construction\s+(?:start(?:s|ed)?|begins|completion|completes|completed|commencement|end)|(?:debut|fin|achevement)\s+de la construction)\b/g, " ")));
     if (refinanceLines >= 2 && !blocked) scope = "refinance";
   }
-  return headings.map((h) => {
+  let heading: string | undefined;
+  return headings.map((h, i) => {
+    if (h !== null) heading = doc.lines[i]!.text;
+    if (heading !== undefined) regions.set(doc.lines[i]!.location, { heading });
     if (h !== null) scope = scopeIn(h, !rank || named) ?? scope;
     return scope;
   });
@@ -637,18 +674,18 @@ function readSentence(sentence: { text: string; start: number }, para0: Paragrap
   const colonAt = text.indexOf(":");
   const flag = colonAt > 0 ? flagRead(text.slice(0, colonAt), text.slice(colonAt + 1)) : null;
   if (flag) {
-    result.candidates.push({ fieldKey: flag.fieldKey, itemKey: null, value: flag.value, raw: text.slice(colonAt + 1).trim(), unitSeen: "flag", location: locationOf(colonAt), context: sentence.text.slice(0, 240), rule: "line:flag" });
+    result.candidates.push({ region: regionAt(result, locationOf(colonAt), "line:label-value"), fieldKey: flag.fieldKey, itemKey: null, value: flag.value, raw: text.slice(colonAt + 1).trim(), unitSeen: "flag", location: locationOf(colonAt), context: sentence.text.slice(0, 240), rule: "line:flag" });
     return;
   }
   // A whole sentence that states a flag outright ("Draws follow an S-curve") is the flag; numbers in it are read as usual.
   const stated = para0.excluded || markedNotPart(text) ? null : flagSentence(text);
-  if (stated) result.candidates.push({ fieldKey: stated.fieldKey, itemKey: null, value: stated.value, raw: stated.raw, unitSeen: "flag", location: locationOf(0), context: sentence.text.slice(0, 240), rule: "line:flag" });
+  if (stated) result.candidates.push({ region: regionAt(result, locationOf(0), "line:flag"), fieldKey: stated.fieldKey, itemKey: null, value: stated.value, raw: stated.raw, unitSeen: "flag", location: locationOf(0), context: sentence.text.slice(0, 240), rule: "line:flag" });
   // An explicit absence of an interest-only period is zero months, in the loan's own scope.
   if (colonAt > 0 && /^\s*none[.!]?\s*$/i.test(text.slice(colonAt + 1)) && !para.excluded && !markedNotPart(text)) {
     const zero: NumberToken = { raw: text.slice(colonAt + 1).trim(), start: colonAt + 1, end: text.length, value: 0, unit: "months", currency: false, currencyCode: null, scaled: false };
     const mapped = mapToken(label, zero, { scope: para.scope });
     if (mapped.kind === "field" && /^(senior|mezz|refinance)_io_months$/.test(mapped.fieldKey)) {
-      record(result, mapped, zero, { raw: zero.raw, location: locationOf(colonAt), context: sentence.text.slice(0, 240), rule: "line:label-value" });
+      record(result, mapped, zero, { region: regionAt(result, locationOf(colonAt), "line:label-value"), raw: zero.raw, location: locationOf(colonAt), context: sentence.text.slice(0, 240), rule: "line:label-value" });
       return;
     }
   }
@@ -666,7 +703,7 @@ function readSentence(sentence: { text: string; start: number }, para0: Paragrap
   // A range's "5 - 7" is read with the dash as the second number's sign: shown as written, positive.
   const shown = (t: NumberToken, note: string) => (t.value !== null && t.value < 0 && note === RANGE_NOTE && /^[-−]\s*[$\d]/.test(t.raw) ? -t.value : t.value);
   const other = (t: NumberToken, rule: string, note: string) =>
-    result.other.push({ fieldKey: null, itemKey: null, value: shown(t, note), raw: t.raw, unitSeen: t.unit, location: locationOf(t.start), context, rule, note });
+    result.other.push({ region: regionAt(result, locationOf(t.start), rule), fieldKey: null, itemKey: null, value: shown(t, note), raw: t.raw, unitSeen: t.unit, location: locationOf(t.start), context, rule, note });
   for (const t of addresses) other(t, "line:prose", ADDRESS_NOTE);
   const refusal = para0.excluded || markedNotPart(text) ? NOT_PART_NOTE : sentenceRefusal(text);
   if (refusal) {
@@ -677,7 +714,7 @@ function readSentence(sentence: { text: string; start: number }, para0: Paragrap
   if (dashItems) {
     for (const { token, label } of dashItems) {
       const mapped = mapToken(label, token, { scope: para.scope, budgetConcept: true, quote });
-      record(result, mapped, token, { raw: token.raw, location: locationOf(token.start), context: `${token.raw} — ${label}`, rule: "line:prose" });
+      record(result, mapped, token, { region: regionAt(result, locationOf(token.start), "line:prose"), raw: token.raw, location: locationOf(token.start), context: `${token.raw} — ${label}`, rule: "line:prose" });
     }
     return;
   }
@@ -745,7 +782,7 @@ function readSentence(sentence: { text: string; start: number }, para0: Paragrap
       const stated = m.kind === "field" ? m.fieldKey === "stated_total_cost" : m.kind === "unmapped" && /\b(budget|total|cost|costs|cout|couts)\b/.test(fold(lab));
       if (m.kind === "field" ? stated || BUDGET_FIELDS.has(m.fieldKey) : m.kind === "unmapped") {
         const total = stated ? mapToken("total cost", t, { prose: true }) : null;
-        if (total?.kind === "field") record(result, total, t, { raw: t.raw, location: locationOf(t.start), context: context.slice(0, 240), rule: "line:total-of-costs" });
+        if (total?.kind === "field") record(result, total, t, { region: regionAt(result, locationOf(t.start), "line:total-of-costs"), raw: t.raw, location: locationOf(t.start), context: context.slice(0, 240), rule: "line:total-of-costs" });
         else other(t, "line:prose", total?.kind === "ignored" ? total.reason : SEVERAL_NOTE);
         parts.add(t);
       }
@@ -812,7 +849,7 @@ function readSentence(sentence: { text: string; start: number }, para0: Paragrap
         if (isMoney(t) && shares.some(([, end]) => t.start >= end)) {
           const own = used ? null : mapToken(label, t, opt(t));
           if (own?.kind === "field" && FIELD_BY_KEY.get(own.fieldKey)?.unit === "$") {
-            record(result, own, t, { raw: t.raw, location: locationOf(t.start), context: context.slice(0, 240), rule: "line:label-value" });
+            record(result, own, t, { region: regionAt(result, locationOf(t.start), "line:label-value"), raw: t.raw, location: locationOf(t.start), context: context.slice(0, 240), rule: "line:label-value" });
             used = true;
           } else other(t, "line:label-value", SHARE_NOTE);
           continue;
@@ -856,7 +893,7 @@ function readSentence(sentence: { text: string; start: number }, para0: Paragrap
         }
         if (mapped.kind === "field") {
           mapped = withLineType(mapped, lineType, text);
-          record(result, mapped, t, { raw: t.raw, location: locationOf(t.start), context: context.slice(0, 240), rule: "line:label-value" });
+          record(result, mapped, t, { region: regionAt(result, locationOf(t.start), "line:label-value"), raw: t.raw, location: locationOf(t.start), context: context.slice(0, 240), rule: "line:label-value" });
           used = true;
           usedKey ??= mapped.fieldKey;
           if (AMOUNT_SCOPE[mapped.fieldKey]) amounts.set(t, AMOUNT_SCOPE[mapped.fieldKey]!);
@@ -1006,7 +1043,7 @@ function readSentence(sentence: { text: string; start: number }, para0: Paragrap
     previousGrowth = mapped.kind === "field" && mapped.fieldKey === "rent_growth_pct" ? usedLabel : null;
     lastRead = mapped.kind === "field" && isMoney(t) ? { label: usedLabel, key: mapped.fieldKey, t } : null;
     if (mapped.kind === "field" && AMOUNT_SCOPE[mapped.fieldKey]) conceptLoan = true;
-    record(result, mapped, t, { raw: t.raw, location: where, context, rule: "line:prose" });
+    record(result, mapped, t, { region: regionAt(result, where, "line:prose"), raw: t.raw, location: where, context, rule: "line:prose" });
   });
 }
 
@@ -1261,13 +1298,19 @@ function suiteItem(parts: string[], hasUnitCount: boolean): { type: string; suit
 }
 
 function fromRentRoll(table: Table, headerRow: number, roles: Roles, result: ExtractionResult, extraNotes: string[] = []) {
+  tableRegions(table, result, "text table");
+  const rentRegion = (cell: Cell, row: Cell[]): Region => {
+    const i = row.indexOf(cell);
+    const columnRole = roles.item.includes(i) ? "item" : (["units", "rent", "basis", "area", "occupancy"] as const).find(role => roles[role] === i);
+    return { ...regionAt(result, cell.ref, "table:rent-roll"), ...(columnRole ? { columnRole } : {}) };
+  };
   const wordsOf = (row: Cell[]) =>
     new Set(row.filter((c) => c.number === undefined && c.text && !RENTS_ARE_RE.test(c.text)).flatMap((c) => c.text.toLowerCase().split(/[^\p{L}0-9]+/u).filter(Boolean)));
   const body = table.rows.slice(headerRow + 1);
   if (NON_ROLL_RE.test(fold(table.name))) {
     for (const row of body) for (const [i, cell] of row.entries()) {
       const t = !roles.item.includes(i) && cellToken(cell, result.format);
-      if (t) result.other.push({ fieldKey: null, itemKey: null, value: t.value, raw: t.raw, unitSeen: t.unit, location: cell.ref, context: `${table.name}: ${row.map((c) => c.text).join(" | ")}`, rule: "table:rent-roll", note: "This sheet is not a dwelling rent roll" });
+      if (t) result.other.push({ region: rentRegion(cell, row), fieldKey: null, itemKey: null, value: t.value, raw: t.raw, unitSeen: t.unit, location: cell.ref, context: `${table.name}: ${row.map((c) => c.text).join(" | ")}`, rule: "table:rent-roll", note: "This sheet is not a dwelling rent roll" });
     }
     return;
   }
@@ -1302,15 +1345,17 @@ function fromRentRoll(table: Table, headerRow: number, roles: Roles, result: Ext
     if (commercialNames.length === 1 && summaryCells.length === 2) {
       const t = rollToken(summaryCells[1]!, result.format);
       const mapped = t && commercialLabel(itemText, t, canonicalItem(commercialNames[0]!), summaryCells[1]!.text.slice(t.end));
-      if (t && mapped) { record(result, mapped, t, { raw: t.raw, location: summaryCells[1]!.ref, context: rowContext, rule: "table:label-value" }); continue; }
+      if (t && mapped) { record(result, mapped, t, { region: rentRegion(summaryCells[1]!, row), raw: t.raw, location: summaryCells[1]!.ref, context: rowContext, rule: "table:label-value" }); continue; }
     }
 
     const otherProperty = OTHER_RENT_RE.test(fold(rowContext).replace(MARKET_NOW_RE, " "));
     // The roll's total row, an unrelated property or an ambiguous rent is shown.
-    if (itemParts.some((p) => ROLL_TOTAL_RE.test(fold(p))) || roles.ambiguousRent || otherProperty) {
+    const totalRow = itemParts.some((p) => ROLL_TOTAL_RE.test(fold(p)));
+    if (totalRow) for (const cell of row) Object.assign(documentRegions.get(result)!.regions.get(cell.ref)!, { rowRole: "total" });
+    if (totalRow || roles.ambiguousRent || otherProperty) {
       for (const [i, cell] of row.entries()) {
         const t = roles.item.includes(i) ? null : cellToken(cell, result.format);
-        if (t) result.other.push({ fieldKey: null, itemKey: null, value: t.value, raw: t.raw, unitSeen: t.unit, location: cell.ref, context: `${table.name}: ${itemText}`, rule: "table:rent-roll", note: otherProperty ? OTHER_RENT_NOTE : roles.ambiguousRent ? "More than one rent column fits; enter the rent to use" : ROLL_SUMMARY_NOTE });
+        if (t) result.other.push({ region: rentRegion(cell, row), fieldKey: null, itemKey: null, value: t.value, raw: t.raw, unitSeen: t.unit, location: cell.ref, context: `${table.name}: ${itemText}`, rule: "table:rent-roll", note: otherProperty ? OTHER_RENT_NOTE : roles.ambiguousRent ? "More than one rent column fits; enter the rent to use" : ROLL_SUMMARY_NOTE });
       }
       continue;
     }
@@ -1318,21 +1363,21 @@ function fromRentRoll(table: Table, headerRow: number, roles: Roles, result: Ext
     if (SUMMARY_LABEL_RE.test(fold(itemText)) && !STABILIZED_LABEL_RE.test(fold(itemText))) {
       const cell = row.find((c, i) => !roles.item.includes(i) && (c.number !== undefined || /\d/.test(c.text)));
       const t = cell && cellToken(cell, result.format);
-      if (cell && t) result.other.push({ fieldKey: null, itemKey: null, value: t.value, raw: t.raw, unitSeen: t.unit, location: cell.ref, context: `${table.name}: ${itemText}`, rule: "table:rent-roll", note: ROLL_SUMMARY_NOTE });
+      if (cell && t) result.other.push({ region: rentRegion(cell, row), fieldKey: null, itemKey: null, value: t.value, raw: t.raw, unitSeen: t.unit, location: cell.ref, context: `${table.name}: ${itemText}`, rule: "table:rent-roll", note: ROLL_SUMMARY_NOTE });
       continue;
     }
     // A row of the unit table that names an income line is read by its own label, never as a unit type.
     const firstCell = row.find((c, i) => !roles.item.includes(i) && cellToken(c, result.format));
     const firstTok = firstCell && cellToken(firstCell, result.format);
     if (firstCell && firstTok && unitTypesIn(itemText).length === 0 && NON_UNIT_ROW_RE.test(fold(itemText))) {
-      record(result, mapToken(itemText, firstTok, {}), firstTok, { raw: firstTok.raw, location: firstCell.ref, context: `${table.name}: ${itemText}`, rule: "table:label-value" });
+      record(result, mapToken(itemText, firstTok, {}), firstTok, { region: rentRegion(firstCell, row), raw: firstTok.raw, location: firstCell.ref, context: `${table.name}: ${itemText}`, rule: "table:label-value" });
       continue;
     }
     // A row for the building as it stands today is not the new rental programme.
     if (asIs(itemText)) {
       for (const [i, cell] of row.entries()) {
         const t = roles.item.includes(i) ? null : cellToken(cell, result.format);
-        if (t) result.other.push({ fieldKey: null, itemKey: null, value: t.value, raw: t.raw, unitSeen: t.unit, location: cell.ref, context: `${table.name}: ${itemText}`, rule: "table:rent-roll", note: AS_IS_NOTE });
+        if (t) result.other.push({ region: rentRegion(cell, row), fieldKey: null, itemKey: null, value: t.value, raw: t.raw, unitSeen: t.unit, location: cell.ref, context: `${table.name}: ${itemText}`, rule: "table:rent-roll", note: AS_IS_NOTE });
       }
       continue;
     }
@@ -1353,12 +1398,12 @@ function fromRentRoll(table: Table, headerRow: number, roles: Roles, result: Ext
       if (!cell || (!cell.text && cell.number === undefined)) return;
       const t = rollToken(cell, result.format);
       if (fieldKey === "unit_rent_monthly" && roles.rent !== undefined && NON_HOME_RENT_RE.test(headerOf(table.rows[headerRow]?.[roles.rent] ?? { text: "", ref: "" }))) {
-        if (t) result.other.push({ fieldKey: null, itemKey: null, value: t.value, raw: t.raw, unitSeen: t.unit, location: cell.ref, context: rowContext, rule: "table:rent-roll", note: "Not a home rent" });
+        if (t) result.other.push({ region: rentRegion(cell, row), fieldKey: null, itemKey: null, value: t.value, raw: t.raw, unitSeen: t.unit, location: cell.ref, context: rowContext, rule: "table:rent-roll", note: "Not a home rent" });
         return;
       }
       const invalidCount = fieldKey === "unit_count" && t && (t.value === null || !Number.isInteger(t.value) || t.value < 0 || ![null, "units"].includes(t.unit));
       if (!t || t.value === null || invalidCount) {
-        if (t) result.other.push({ fieldKey: null, itemKey: null, value: t.value, raw: t.raw, unitSeen: t.unit, location: cell.ref, context: itemText, rule: "table:rent-roll", note: invalidCount ? "Not a unit count" : t.refusal ?? "Unreadable" });
+        if (t) result.other.push({ region: rentRegion(cell, row), fieldKey: null, itemKey: null, value: t.value, raw: t.raw, unitSeen: t.unit, location: cell.ref, context: itemText, rule: "table:rent-roll", note: invalidCount ? "Not a unit count" : t.refusal ?? "Unreadable" });
         return;
       }
       const def = FIELD_BY_KEY.get(fieldKey)!;
@@ -1389,13 +1434,13 @@ function fromRentRoll(table: Table, headerRow: number, roles: Roles, result: Ext
         unitSeen = withCurrency("$/yr", t.currencyCode);
         note = "The table gives a yearly rent per unit; shown as a monthly rent (÷ 12)";
       }
-      sink.push({ fieldKey, itemKey, value, raw: t.raw, unitSeen, location: cell.ref, context: `${table.name}: ${itemText}`, rule: suite ? SUITE_RULE : "table:rent-roll", ...(note ? { note } : {}) });
+      sink.push({ region: rentRegion(cell, row), fieldKey, itemKey, value, raw: t.raw, unitSeen, location: cell.ref, context: `${table.name}: ${itemText}`, rule: suite ? SUITE_RULE : "table:rent-roll", ...(note ? { note } : {}) });
     };
     add("unit_count", roles.units);
     if (basis === null) {
       const cell = roles.rent !== undefined ? row[roles.rent] : undefined;
       const t = cell && (cell.text || cell.number !== undefined) ? cellToken(cell, result.format) : null;
-      if (cell && t) result.other.push({ fieldKey: null, itemKey: null, value: t.value, raw: t.raw, unitSeen: t.unit, location: cell.ref, context: `${table.name}: ${itemText}`, rule: "table:rent-roll", note: BASIS_UNSTATED });
+      if (cell && t) result.other.push({ region: rentRegion(cell, row), fieldKey: null, itemKey: null, value: t.value, raw: t.raw, unitSeen: t.unit, location: cell.ref, context: `${table.name}: ${itemText}`, rule: "table:rent-roll", note: BASIS_UNSTATED });
     } else add(basis === "psf" ? "rent_psf_annual" : "unit_rent_monthly", roles.rent, basis);
     if (basis === "psf" || (basis !== null && (roles.units !== undefined || suite))) add("rentable_area_sf", roles.area);
     add("item_occupancy_pct", roles.occupancy);
@@ -1408,13 +1453,13 @@ function fromRentRoll(table: Table, headerRow: number, roles: Roles, result: Ext
     // The count is the rows, or the sum of the count column when the roll has one.
     const counts = all.filter((c) => c.fieldKey === "unit_count");
     const n = roles.units !== undefined ? counts.reduce((sum, c) => sum + c.value!, 0) : rows.length;
-    result.candidates.push({ ...base, fieldKey: "unit_count", value: n, raw: `${rows.length} suites`, location: rows.map((x) => x.ref).join(", "), note: `${rows.length} suites of this type are listed` });
+    result.candidates.push({ region: regionAt(result, rows.map((x) => x.ref), base.rule), ...base, fieldKey: "unit_count", value: n, raw: `${rows.length} suites`, location: rows.map((x) => x.ref).join(", "), note: `${rows.length} suites of this type are listed` });
     const areas = all.filter((c) => c.fieldKey === "rentable_area_sf");
-    if (areas.length > 0) result.candidates.push({ ...areas[0]!, value: areas.reduce((sum, c) => sum + c.value!, 0), raw: areas.map((c) => c.raw).join(" + "), location: areas.map((c) => c.location).join(", "), note: `Sum of ${areas.length} suites` });
+    if (areas.length > 0) result.candidates.push({ ...areas[0]!, region: { ...regionAt(result, areas.map(c => c.location), SUITE_RULE), columnRole: areas[0]!.region?.columnRole }, value: areas.reduce((sum, c) => sum + c.value!, 0), raw: areas.map((c) => c.raw).join(" + "), location: areas.map((c) => c.location).join(", "), note: `Sum of ${areas.length} suites` });
     for (const fieldKey of ["unit_rent_monthly", "rent_psf_annual", "item_occupancy_pct"]) {
       const list = all.filter((c) => c.fieldKey === fieldKey);
       if (list.length === 0) continue;
-      if (list.every((c) => c.value === list[0]!.value)) result.candidates.push({ ...list[0]!, location: list.map((c) => c.location).join(", ") });
+      if (list.every((c) => c.value === list[0]!.value)) result.candidates.push({ ...list[0]!, region: { ...regionAt(result, list.map(c => c.location), SUITE_RULE), columnRole: list[0]!.region?.columnRole }, location: list.map((c) => c.location).join(", ") });
       else for (const c of list) result.other.push({ ...c, fieldKey: null, itemKey: null, note: DIFFERENT_RENTS_NOTE });
     }
   }
@@ -1469,7 +1514,7 @@ function namedType(nameText: string, rest: string, bare: boolean, location: stri
   if (!by || !name) return false;
   const asis = asIs(`${nameText} ${rest}`);
   for (const [t, fieldKey, unitSeen] of by) {
-    const base = { raw: t.raw, location, context: context.slice(0, 240), rule };
+    const base = { region: regionAt(result, location, rule), raw: t.raw, location, context: context.slice(0, 240), rule };
     // Square metres are square feet, and a rent per m², a rent per sf, by the same conversions as everywhere.
     const value = fieldKey === "rentable_area_sf" && t.unit === "m2" ? t.value! * SF_PER_M2 : fieldKey === "rent_psf_annual" && t.unit === "$/m2" ? t.value! / SF_PER_M2 : t.value!;
     if (asis) result.other.push({ ...base, fieldKey: null, itemKey: null, value: t.value, unitSeen: t.unit, note: AS_IS_NOTE });
@@ -1566,7 +1611,7 @@ function proseRentLine(text: string, result: ExtractionResult, heading: string |
   if (!fields.some(Boolean)) return { read: false, item: heading };
   for (const [i, t] of tokens.entries()) {
     const fieldKey = fields[i];
-    const base = { raw: t.raw, location: locationOf(t.start), context: text.slice(0, 240), rule: "line:rent-prose" };
+    const base = { region: regionAt(result, locationOf(t.start), "line:rent-prose"), raw: t.raw, location: locationOf(t.start), context: text.slice(0, 240), rule: "line:rent-prose" };
     if (invalid || !fieldKey) result.other.push({ ...base, fieldKey: null, itemKey: null, value: t.value, unitSeen: t.unit, note: "Not one unambiguous rent-roll figure for this property" });
     else result.candidates.push({ ...base, fieldKey, itemKey: item, value: fieldKey === "rentable_area_sf" && t.unit === "m2" ? t.value! * SF_PER_M2 : fieldKey === "rent_psf_annual" && t.unit === "$/m2" ? t.value! / SF_PER_M2 : t.value, unitSeen: fieldKey === "unit_count" ? "units" : t.unit });
   }
@@ -1605,7 +1650,7 @@ function pairedProseRents(doc: NormalizedDocument, result: ExtractionResult, exc
       const name = canonicalItem(clean(dwelling ? rawName.slice(0,dwelling.index) : rawName));
       if (!name || name.split(/\s+/).some(w => NAME_STOP_RE.test(w)) || name.split(/\s+/).length > 4 || /[/+$]|\b(months?|mois|years?|ans?|per|par|a month|rent|lease|louer|storeys?|buildings?)\b/.test(fold(name)) || NON_HOME_RENT_RE.test(fold(name)) || /\d+(?![- ]?(?:bed|br|chambre))[a-z]?\b/i.test(name.replace(/\b[1-6][- ]?(?:bed(?:room)?s?|br|chambres?)\b/gi, "").replace(/\d\s*½/g, ""))) continue;
       remember(name);
-      counts.push({fieldKey:"unit_count",itemKey:mix.get(nameKey(name))!,value:n,raw:m[1]!,unitSeen:"units",location:l.location,context:l.text,rule:"line:mix-count"});
+      counts.push({ region: regionAt(result, l.location, "line:mix-count"),fieldKey:"unit_count",itemKey:mix.get(nameKey(name))!,value:n,raw:m[1]!,unitSeen:"units",location:l.location,context:l.text,rule:"line:mix-count"});
     }
     // A type list replaces a preceding programme total, rather than assigning that total to its first type.
     if (counts.length) {
@@ -1644,7 +1689,7 @@ function pairedProseRents(doc: NormalizedDocument, result: ExtractionResult, exc
       const context = l.text.slice(l.text.lastIndexOf(";",t.start) + 1,end < 0 ? l.text.length : end).trim();
       const ranged = ranges.has(tokens.indexOf(t));
       const invalid = ranged || OTHER_RENT_RE.test(fold(context)) || NON_HOME_RENT_RE.test(fold(context)) || PROSE_RENT_EXCLUDED_RE.test(fold(context));
-      const base = {raw:t.raw,value:t.value,unitSeen:withCurrency("$/mo",t.currencyCode),location:l.location,context,rule:"line:paired-rent"};
+      const base = { region: regionAt(result, l.location, "line:paired-rent"),raw:t.raw,value:t.value,unitSeen:withCurrency("$/mo",t.currencyCode),location:l.location,context,rule:"line:paired-rent"};
       if (!invalid && item && t.value !== null) result.candidates.push({...base,fieldKey:"unit_rent_monthly",itemKey:item});
       else result.other.push({...base,fieldKey:null,itemKey:null,note:ranged ? RANGE_NOTE : invalid ? "Not one current home rent" : "The rent's type does not uniquely match the stated mix"});
     }
@@ -1673,12 +1718,12 @@ function structuredRollRow(row: Cell[], table: Table, result: ExtractionResult, 
     if (!t || (role !== "units" && role !== "rent")) return false;
     const count = role === "units";
     if (t.refusal === RANGE_NOTE) {
-      result.other.push({ fieldKey: null, itemKey: null, value: null, raw: cell.text, unitSeen: t.unit, location: cell.ref, context, rule: "table:labelled-roll", note: RANGE_NOTE });
+      result.other.push({ region: regionAt(result, cell.ref, "table:labelled-roll"), fieldKey: null, itemKey: null, value: null, raw: cell.text, unitSeen: t.unit, location: cell.ref, context, rule: "table:labelled-roll", note: RANGE_NOTE });
       return true;
     }
     if (cell.number === undefined && tokenize(cell.text, result.format).length !== 1) return false;
     if (t.value === null || (count ? !Number.isInteger(t.value) || t.value <= 0 || (t.unit !== null && t.unit !== "units") : ![null, "$", "$/mo"].includes(t.unit))) return false;
-    result.candidates.push({ fieldKey: count ? "unit_count" : "unit_rent_monthly", itemKey: canonicalItem(name.trim()), value: !count && ANNUAL_RE.test(fold(label)) ? t.value / 12 : t.value, raw: t.raw, unitSeen: count ? "units" : withCurrency(ANNUAL_RE.test(fold(label)) ? "$/yr" : "$/mo", t.currencyCode), location: cell.ref, context, rule: "table:labelled-roll", ...(!count && ANNUAL_RE.test(fold(label)) ? { note: "The row gives a yearly rent per unit; shown as a monthly rent (÷ 12)" } : {}) });
+    result.candidates.push({ region: regionAt(result, cell.ref, "table:labelled-roll"), fieldKey: count ? "unit_count" : "unit_rent_monthly", itemKey: canonicalItem(name.trim()), value: !count && ANNUAL_RE.test(fold(label)) ? t.value / 12 : t.value, raw: t.raw, unitSeen: count ? "units" : withCurrency(ANNUAL_RE.test(fold(label)) ? "$/yr" : "$/mo", t.currencyCode), location: cell.ref, context, rule: "table:labelled-roll", ...(!count && ANNUAL_RE.test(fold(label)) ? { note: "The row gives a yearly rent per unit; shown as a monthly rent (÷ 12)" } : {}) });
     return true;
   };
   const name = cells[0];
@@ -1690,7 +1735,7 @@ function structuredRollRow(row: Cell[], table: Table, result: ExtractionResult, 
     });
     if (labelled.some(c => c.role === "units") && labelled.some(c => c.role === "rent")) {
       for (const c of labelled) if (c.role) {
-        if (!add(name.text, c.label, c.cell)) for (const t of c.tokens) result.other.push({ fieldKey: null, itemKey: null, value: t.value, raw: t.raw, unitSeen: t.unit, location: c.cell.ref, context, rule: "table:labelled-roll", note: "Not one unambiguous rent-roll figure" });
+        if (!add(name.text, c.label, c.cell)) for (const t of c.tokens) result.other.push({ region: regionAt(result, c.cell.ref, "table:labelled-roll"), fieldKey: null, itemKey: null, value: t.value, raw: t.raw, unitSeen: t.unit, location: c.cell.ref, context, rule: "table:labelled-roll", note: "Not one unambiguous rent-roll figure" });
       }
       return true;
     }
@@ -1764,7 +1809,7 @@ function fromTypeColumns(table: Table, result: ExtractionResult): boolean {
         const cell = row[i];
         const t = type && cell?.text ? rollToken(cell, result.format) : null;
         if (!type || !cell || !t) return;
-        const base = { raw: t.raw, location: cell.ref, context: `${table.name}: ${table.rows.slice(0, h + 1).flat().map(c => c.text).join(" ")} ${row[0]!.text} ${cell.text}`.slice(0, 240), rule: "table:type-columns" };
+        const base = { region: regionAt(result, cell.ref, "table:type-columns"), raw: t.raw, location: cell.ref, context: `${table.name}: ${table.rows.slice(0, h + 1).flat().map(c => c.text).join(" ")} ${row[0]!.text} ${cell.text}`.slice(0, 240), rule: "table:type-columns" };
         const aside = (note: string) => result.other.push({ ...base, fieldKey: null, itemKey: null, value: t.value, unitSeen: t.unit, note });
         if (homeRole(label) === "units") {
           if (t.value !== null && Number.isInteger(t.value) && t.value > 0 && (t.unit === null || t.unit === "units")) result.candidates.push({ ...base, fieldKey: "unit_count", itemKey: type, value: t.value, unitSeen: "units" });
@@ -1792,6 +1837,11 @@ function suiteHeader(row: Cell[]): boolean {
 }
 
 function fromBudget(table: Table, headerRow: number, roles: BudgetRoles, result: ExtractionResult, scope: Scope, excluded = false, categories?: Map<Cell[], string>) {
+  const budgetRegion = (cell: Cell, row: Cell[]): Region => {
+    const i = row.indexOf(cell);
+    const columnRole = i === roles.label ? "label" : i === roles.amount ? "amount" : i === roles.category ? "category" : undefined;
+    return { ...regionAt(result, cell.ref, "table:budget"), ...(columnRole ? { columnRole } : {}) };
+  };
   // Sum component lines per field; use a "Total X" row only when no component
   // line mapped to X, and raise both when they disagree. A line that maps to no
   // field, between the header (or the previous total) and a total row for X, is a component of X.
@@ -1818,7 +1868,7 @@ function fromBudget(table: Table, headerRow: number, roles: BudgetRoles, result:
     // A row with no label cell shows its amount, with the row's text cells as its context; it is never summed or totalled.
     if (!labelCell?.text) {
       const t = cellToken(amountCell, result.format);
-      if (t && !isYearToken(t)) result.other.push({ fieldKey: null, itemKey: null, value: t.value, raw: t.raw, unitSeen: t.unit, location: amountCell.ref, context: `${table.name}: ${row.filter((c) => c.number === undefined && c.text.trim()).map((c) => c.text.trim()).join(" ")}`.slice(0, 240), rule: "table:budget", note: "No budget line matches this label" });
+      if (t && !isYearToken(t)) result.other.push({ region: budgetRegion(amountCell, row), fieldKey: null, itemKey: null, value: t.value, raw: t.raw, unitSeen: t.unit, location: amountCell.ref, context: `${table.name}: ${row.filter((c) => c.number === undefined && c.text.trim()).map((c) => c.text.trim()).join(" ")}`.slice(0, 240), rule: "table:budget", note: "No budget line matches this label" });
       continue;
     }
     const basisNotes = category ? row.filter((c, i) => i !== roles.label && i !== roles.amount && i !== roles.category && c.text.trim() && !cellToken(c, result.format)).map(c => c.text.trim()) : [];
@@ -1827,13 +1877,13 @@ function fromBudget(table: Table, headerRow: number, roles: BudgetRoles, result:
     for (const c of [...(roles.others ?? []), ...(roles.ambiguous ? [roles.amount] : [])]) {
       const cell = row[c];
       const o = cell && cellToken(cell, result.format);
-      if (cell && o) result.other.push({ fieldKey: null, itemKey: null, value: o.value, raw: o.raw, unitSeen: o.unit, location: cell.ref, context: `${table.name}: ${displayLabel}`, rule: "table:budget", note: roles.ambiguous ? "Several amount columns; choose one" : SUPERSEDED_NOTE });
+      if (cell && o) result.other.push({ region: budgetRegion(cell, row), fieldKey: null, itemKey: null, value: o.value, raw: o.raw, unitSeen: o.unit, location: cell.ref, context: `${table.name}: ${displayLabel}`, rule: "table:budget", note: roles.ambiguous ? "Several amount columns; choose one" : SUPERSEDED_NOTE });
     }
     // The figures of the row's other columns (a "$ per unit" or "% of total" column) are shown, never read.
     for (const [c, cell] of row.entries()) {
       if (c === roles.label || c === roles.amount || (roles.others ?? []).includes(c)) continue;
       const o = cellToken(cell, result.format);
-      if (o && !isYearToken(o)) result.other.push({ fieldKey: null, itemKey: null, value: o.value, raw: o.raw, unitSeen: o.unit, location: cell.ref, context: `${table.name}: ${displayLabel}`, rule: "table:budget", note: "Another column of this budget row; not read" });
+      if (o && !isYearToken(o)) result.other.push({ region: budgetRegion(cell, row), fieldKey: null, itemKey: null, value: o.value, raw: o.raw, unitSeen: o.unit, location: cell.ref, context: `${table.name}: ${displayLabel}`, rule: "table:budget", note: "Another column of this budget row; not read" });
     }
     if (roles.ambiguous) continue;
     const t = cellToken(amountCell, result.format);
@@ -1844,12 +1894,12 @@ function fromBudget(table: Table, headerRow: number, roles: BudgetRoles, result:
     }
     // A row whose own label or note says it is not part of the deal, or one under such a heading, is shown and never read, summed or totalled.
     if (excluded || (!!category && /\b(?:usd|us dollars|alternative|optional|supplier quote)\b/i.test(displayLabel)) || (category && (markedNotPart(category) || MEMO_SECTION_RE.test(fold(category)))) || row.some((c) => markedNotPart(c.text))) {
-      result.other.push({ fieldKey: null, itemKey: null, value: t.value, raw: t.raw, unitSeen: t.unit, location: amountCell.ref, context: `${table.name}: ${displayLabel}`, rule: "table:budget", note: NOT_PART_NOTE });
+      result.other.push({ region: budgetRegion(amountCell, row), fieldKey: null, itemKey: null, value: t.value, raw: t.raw, unitSeen: t.unit, location: amountCell.ref, context: `${table.name}: ${displayLabel}`, rule: "table:budget", note: NOT_PART_NOTE });
       continue;
     }
     // An amount whose own cell says it is per door is a share, not the line: it is shown and never read, summed or totalled.
     if (perUnit(amountCell.text, t, displayLabel)) {
-      result.other.push({ fieldKey: null, itemKey: null, value: t.value, raw: t.raw, unitSeen: t.unit, location: amountCell.ref, context: `${table.name}: ${displayLabel}`, rule: "table:budget", note: PER_UNIT_NOTE });
+      result.other.push({ region: budgetRegion(amountCell, row), fieldKey: null, itemKey: null, value: t.value, raw: t.raw, unitSeen: t.unit, location: amountCell.ref, context: `${table.name}: ${displayLabel}`, rule: "table:budget", note: PER_UNIT_NOTE });
       continue;
     }
     // A row in a budget sheet that is not money ("Loan-to-cost | 70%") is a label and value.
@@ -1860,7 +1910,7 @@ function fromBudget(table: Table, headerRow: number, roles: BudgetRoles, result:
     // A figure the label says is part of another budget field adds nothing of its own.
     const counted = partOfNote(labelCell.text, false);
     if (counted) {
-      result.other.push({ fieldKey: null, itemKey: null, value: t.value, raw: t.raw, unitSeen: "$", location: amountCell.ref, context: `${table.name}: ${displayLabel}`, rule: "table:budget", note: counted });
+      result.other.push({ region: budgetRegion(amountCell, row), fieldKey: null, itemKey: null, value: t.value, raw: t.raw, unitSeen: "$", location: amountCell.ref, context: `${table.name}: ${displayLabel}`, rule: "table:budget", note: counted });
       continue;
     }
     const categoryTotal = category && TOTAL_RE.test(category);
@@ -1869,6 +1919,7 @@ function fromBudget(table: Table, headerRow: number, roles: BudgetRoles, result:
     const usesTotal = USES_TOTAL_RE.test(labelCell.text.trim());
     const isTotal = statedTotal || usesTotal || TOTAL_RE.test(labelCell.text) || !!categoryTotal || !!trailingTotal?.test(labelCell.text);
     // Unread rows with nothing read or totalled above them are the whole table's breakdown of its first total.
+    for (const cell of row) Object.assign(documentRegions.get(result)!.regions.get(cell.ref)!, { rowRole: isTotal ? "total" : "line" });
     const bare = !started;
     if (isTotal) started = true;
     const lines = segment;
@@ -1887,6 +1938,7 @@ function fromBudget(table: Table, headerRow: number, roles: BudgetRoles, result:
     }
     if (mapped.kind !== "field" || FIELD_BY_KEY.get(mapped.fieldKey)?.unit !== "$") {
       const shown: Candidate = {
+        region: budgetRegion(amountCell, row),
         fieldKey: null,
         itemKey: null,
         value: t.value,
@@ -1905,6 +1957,7 @@ function fromBudget(table: Table, headerRow: number, roles: BudgetRoles, result:
       continue;
     }
     const cand: Candidate = {
+      region: budgetRegion(amountCell, row),
       fieldKey: mapped.fieldKey,
       itemKey: null,
       value: mapped.value,
@@ -1942,7 +1995,7 @@ function fromBudget(table: Table, headerRow: number, roles: BudgetRoles, result:
         for (const l of lines) l.shown.note = NOT_SHOWN_NOTE;
         if (read) {
           components.delete(key);
-          for (const r of read.rows) result.other.push({ fieldKey: null, itemKey: null, value: r.value, raw: String(r.value), unitSeen: "$", location: r.ref, context: `${table.name}: ${r.label}`, rule: "table:budget", note: NOT_SHOWN_NOTE });
+          for (const r of read.rows) result.other.push({ region: regionAt(result, r.ref, "table:budget"), fieldKey: null, itemKey: null, value: r.value, raw: String(r.value), unitSeen: "$", location: r.ref, context: `${table.name}: ${r.label}`, rule: "table:budget", note: NOT_SHOWN_NOTE });
         }
       }
       continue;
@@ -1959,10 +2012,11 @@ function fromBudget(table: Table, headerRow: number, roles: BudgetRoles, result:
     const acc = components.get(key);
     if (!acc || acc.alias) continue;
     components.delete(key);
-    for (const r of acc.rows) result.other.push({ fieldKey: null, itemKey: null, value: r.value, raw: String(r.value), unitSeen: "$", location: r.ref, context: `${table.name}: ${r.label}`, rule: "table:budget", note: CONCEPT_BESIDE_UNREAD_NOTE });
+    for (const r of acc.rows) result.other.push({ region: regionAt(result, r.ref, "table:budget"), fieldKey: null, itemKey: null, value: r.value, raw: String(r.value), unitSeen: "$", location: r.ref, context: `${table.name}: ${r.label}`, rule: "table:budget", note: CONCEPT_BESIDE_UNREAD_NOTE });
   }
   for (const acc of components.values()) {
     result.candidates.push({
+      region: { ...regionAt(result, acc.refs, "table:budget"), columnRole: "amount" },
       fieldKey: acc.fieldKey,
       itemKey: null,
       value: acc.sum,
@@ -2196,6 +2250,7 @@ function readTable(table0: Table, result: ExtractionResult, notes: string[] = []
   let loanScope = tableRank(table) !== null || scope0 !== undefined;
   let costSection = false;
   let labelled = false;
+  let regionHeading: string | undefined;
   // A sheet name or a section label that marks what follows as not part of the deal.
   // A sheet named as not part of the deal stays so throughout; a section label inside it cannot undo it.
   const sheetExcluded = markedNotPart(table.name);
@@ -2207,6 +2262,7 @@ function readTable(table0: Table, result: ExtractionResult, notes: string[] = []
     if (cur.rows.length > 0) sections.push(cur);
   };
   table.rows.forEach((row, at) => {
+    if (regionHeading !== undefined) for (const cell of row) Object.assign(documentRegions.get(result)!.regions.get(cell.ref)!, { heading: regionHeading });
     // A cell holding a home label with its figure ("Suites planned 3") makes the row a data row, not a header.
     const numeric = catOf.has(row) || row.some((c) => c.number !== undefined || (tokenize(c.text, result.format).length > 0 && homeRole(fold(c.text.replace(/\$?\s*\d[\d ,.\u00a0]*(?:\s*\$)?/g, " "))) !== null));
     if (cur.rent && (!filledCells(row).length || ROLL_TOTAL_RE.test(fold(row.find(c => c.text.trim())?.text ?? "")))) {
@@ -2231,6 +2287,7 @@ function readTable(table0: Table, result: ExtractionResult, notes: string[] = []
     }
     const item = numeric ? null : blockHeading(row, table.rows[at + 1], scope, result.format);
     if (item !== null) {
+      regionHeading = row.map(c => c.text).filter(Boolean).join(" ");
       close();
       labelled = true;
       excluded = sheetExcluded || markedNotPart(item);
@@ -2239,6 +2296,7 @@ function readTable(table0: Table, result: ExtractionResult, notes: string[] = []
     }
     const label = sectionLabel(row, result.format);
     if (label !== null) {
+      regionHeading = row.map(c => c.text).filter(Boolean).join(" ");
       close();
       const named = scopeIn(label);
       scope = named ?? scope;
@@ -2329,14 +2387,14 @@ function readTable(table0: Table, result: ExtractionResult, notes: string[] = []
         if (s.excluded || catExcluded || row.some((c) => markedNotPart(c.text)) || (/^(?:summary|sommaire|resume)$/i.test(fold(table.name).trim()) && /\b(?:carried|linked|reporte\w*)\b/i.test(labelCell.text))) {
           for (const cell of after) {
             const t = cellToken(cell, result.format);
-            if (t) result.other.push({ fieldKey: null, itemKey: null, value: t.value, raw: t.raw, unitSeen: t.unit, location: cell.ref, context: rowContext(table.name, cat, row, labelCell, cell), rule: "table:label-value", note: NOT_PART_NOTE });
+            if (t) result.other.push({ region: regionAt(result, cell.ref, "table:label-value"), fieldKey: null, itemKey: null, value: t.value, raw: t.raw, unitSeen: t.unit, location: cell.ref, context: rowContext(table.name, cat, row, labelCell, cell), rule: "table:label-value", note: NOT_PART_NOTE });
           }
           return;
         }
         const answer = after.find((c) => c.text);
         const flag = answer ? flagRead(labelCell.text, answer.text) : null;
         if (answer && flag) {
-          result.candidates.push({ fieldKey: flag.fieldKey, itemKey: null, value: flag.value, raw: answer.text, unitSeen: "flag", location: answer.ref, context: `${table.name}: ${labelCell.text} ${answer.text}`.slice(0, 240), rule: "table:label-value" });
+          result.candidates.push({ region: regionAt(result, answer.ref, "table:label-value"), fieldKey: flag.fieldKey, itemKey: null, value: flag.value, raw: answer.text, unitSeen: "flag", location: answer.ref, context: `${table.name}: ${labelCell.text} ${answer.text}`.slice(0, 240), rule: "table:label-value" });
           return;
         }
         // The note for a figure the row's label does not read: why the label does not fit it.
@@ -2351,7 +2409,7 @@ function readTable(table0: Table, result: ExtractionResult, notes: string[] = []
           if (later.length === 0 || after.every((c) => { const x = cellToken(c, result.format); return !x || isYearToken(x); })) return;
           for (const { c, x } of later) {
             const own = note ?? laterNote(c, x);
-            result.other.push({ fieldKey: null, itemKey: null, value: x.value, raw: x.raw, unitSeen: x.unit, location: c.ref, context: rowContext(table.name, cat, row, labelCell, c), rule: "table:label-value", note: own });
+            result.other.push({ region: regionAt(result, c.ref, "table:label-value"), fieldKey: null, itemKey: null, value: x.value, raw: x.raw, unitSeen: x.unit, location: c.ref, context: rowContext(table.name, cat, row, labelCell, c), rule: "table:label-value", note: own });
           }
         };
         // The cell a per-unit budget figure hands the line to (task 68): skipped to, once the cells before it are shown.
@@ -2361,7 +2419,7 @@ function readTable(table0: Table, result: ExtractionResult, notes: string[] = []
           skipTo = null;
           const t = cellToken(cell, result.format);
           if (!t) continue;
-          const base = { raw: t.raw, location: cell.ref, context: rowContext(table.name, cat, row, labelCell, cell), rule: "table:label-value" };
+          const base = { region: regionAt(result, cell.ref, "table:label-value"), raw: t.raw, location: cell.ref, context: rowContext(table.name, cat, row, labelCell, cell), rule: "table:label-value" };
           const commercialMapped = commercialLabel(labelCell.text, t, commercialItem(labelCell.text) ?? (block && commercialItem(block) ? block : commercial), cell.text.slice(t.end));
           const legacyMapped = mapToken(relative ? labelCell.text.replace(BLOCK_RELATIVE_RE, "") : labelCell.text, t, { numberCell: cell.number !== undefined, budget: /\b(?:water and wastewater)\b/.test(fold(labelCell.text)) && /\b(?:budget|costs?|couts?|uses|emplois)\b/.test(fold(table.name)), scope, loanContext, budgetConcept: filledCells(row).length === 2 && !s.rows.some((r) => TOTAL_RE.test(labelOf(r, result.format)?.text ?? "")), ahead: cell.text.slice(0, t.start), after: cell.text.slice(t.end), quote: quoteDocs.has(result) });
           let mapped = commercialMapped && !(legacyMapped.kind === "field" && commercialMapped.kind === "field" && legacyMapped.fieldKey === commercialMapped.fieldKey) ? commercialMapped : legacyMapped;
@@ -2399,7 +2457,7 @@ function readTable(table0: Table, result: ExtractionResult, notes: string[] = []
             }
             for (const c of after.slice(after.indexOf(cell) + 1, after.indexOf(lineCell))) {
               const x = wholeUnitType(c.text) ? null : cellToken(c, result.format);
-              if (x) result.other.push({ fieldKey: null, itemKey: null, value: x.value, raw: x.raw, unitSeen: x.unit, location: c.ref, context: rowContext(table.name, cat, row, labelCell, c), rule: "table:label-value", note: laterNote(c, x) });
+              if (x) result.other.push({ region: regionAt(result, c.ref, "table:label-value"), fieldKey: null, itemKey: null, value: x.value, raw: x.raw, unitSeen: x.unit, location: c.ref, context: rowContext(table.name, cat, row, labelCell, c), rule: "table:label-value", note: laterNote(c, x) });
             }
             skipTo = lineCell;
             continue;
@@ -2412,7 +2470,7 @@ function readTable(table0: Table, result: ExtractionResult, notes: string[] = []
             if (mapped.kind === "field" && def?.unit === "$" && mapped.fieldKey !== "stated_total_cost" && mapped.fieldKey !== "fixed_opex_annual" && lines.length > 0) {
               const sum = lines.reduce((n, l) => n + l.value, 0);
               if (Math.abs(sum - mapped.value) > 1) {
-                result.candidates.push({ ...base, fieldKey: mapped.fieldKey, itemKey: null, value: sum, raw: sum.toString(), unitSeen: withCurrency("$", t.currencyCode), location: lines.map((l) => l.ref).join(", "), context: `${table.name}: ${lines.map((l) => l.label).join(" + ")}`.slice(0, 240), rule: "table:budget-sum" });
+                result.candidates.push({ ...base, region: regionAt(result, lines.map((l) => l.ref), "table:budget-sum"), fieldKey: mapped.fieldKey, itemKey: null, value: sum, raw: sum.toString(), unitSeen: withCurrency("$", t.currencyCode), location: lines.map((l) => l.ref).join(", "), context: `${table.name}: ${lines.map((l) => l.label).join(" + ")}`.slice(0, 240), rule: "table:budget-sum" });
               }
             }
             lines = [];
@@ -2585,7 +2643,7 @@ function withoutStruck(text: string, struck: [number, number][] | undefined, loc
     const from = t.start + digits[0]!.index!;
     const to = t.start + digits.at(-1)!.index! + 1;
     if (!struck.some(([a, b]) => a <= from && to <= b)) continue;
-    result.other.push({ fieldKey: null, itemKey: null, value: t.value, raw: t.raw.trim(), unitSeen: t.unit, location, context: text.slice(0, 240), rule: "line:struck", note: STRUCK_NOTE });
+    result.other.push({ region: regionAt(result, location, "line:struck"), fieldKey: null, itemKey: null, value: t.value, raw: t.raw.trim(), unitSeen: t.unit, location, context: text.slice(0, 240), rule: "line:struck", note: STRUCK_NOTE });
     out += text.slice(at, t.start);
     at = t.end;
   }
@@ -2749,7 +2807,7 @@ function commercialLines(doc: NormalizedDocument, result: ExtractionResult, used
     const same = (c: Candidate) => c.location === line.location && c.raw === t.raw;
     result.candidates = result.candidates.filter(c => !same(c));
     result.other = result.other.filter(c => !same(c));
-    record(result, m, t, { raw: t.raw, location: line.location, context: line.text, rule: "line:commercial-label" });
+    record(result, m, t, { region: regionAt(result, line.location, "line:commercial-label"), raw: t.raw, location: line.location, context: line.text, rule: "line:commercial-label" });
   };
   const names = new Map<string, string>();
   for (const [i, l] of doc.lines.entries()) {
@@ -2883,6 +2941,9 @@ function dealFigures(doc: NormalizedDocument, result: ExtractionResult) {
 /** Every candidate value in one document. Deterministic: no model is consulted. */
 export function extractCandidates(doc0: NormalizedDocument): ExtractionResult {
   const result: ExtractionResult = { format: detectFormat(doc0.fullText), candidates: [], other: [], notes: [...(doc0.notes ?? [])] };
+  const regions = new Map<string, Partial<Region>>();
+  documentRegions.set(result, { regions, tableSource: doc0.kind === "xlsx" || doc0.kind === "csv" ? "sheet" : "table" });
+  for (const table of doc0.tables) tableRegions(table, result);
   // The document's own text is untouched; the copy read from has its struck figures taken out.
   const doc: NormalizedDocument = {
     ...doc0,
@@ -2890,7 +2951,7 @@ export function extractCandidates(doc0: NormalizedDocument): ExtractionResult {
     tables: doc0.tables.map((t) => ({ ...t, rows: t.rows.map((r) => r.map((c) => (c.struck ? { ...c, text: withoutStruck(c.text, c.struck, c.ref, result), struck: undefined } : c))) })),
   };
   if (isBuilderQuote(doc)) quoteDocs.add(result);
-  const scopes = lineScopes(doc, result.format, rankIn(doc));
+  const scopes = lineScopes(doc, result.format, rankIn(doc), regions);
   const excluded = excludedLines(doc, result.format);
   const text = textTables(doc, result.format, scopes, excluded);
   let rentHeading: string | null = null;
@@ -2938,7 +2999,10 @@ export function extractCandidates(doc0: NormalizedDocument): ExtractionResult {
   const [linesFrom, linesOtherFrom] = [result.candidates.length, result.other.length];
   fromLines(doc, result, text.used, scopes, excluded);
   conceptLinesInBudget(doc, result, linesFrom, linesOtherFrom);
-  for (const t of text.tables) fromTable(t.table, result, t.notes, t.scope);
+  for (const t of text.tables) {
+    tableRegions(t.table, result, "text table");
+    fromTable(t.table, result, t.notes, t.scope);
+  }
   // A Word file's paragraphs may carry the note about a rent column ("Retail rents are ..."); there is no order between them and its tables.
   const notes = doc.kind === "docx" ? doc.lines.map((l) => l.text) : [];
   // A Word table is under the heading above it: the scope in force after the lines that come before it.
@@ -2946,6 +3010,8 @@ export function extractCandidates(doc0: NormalizedDocument): ExtractionResult {
   const documentScopes = [...new Set(scopes.filter((scope) => scope !== undefined))];
   const documentScope = documentScopes.length === 1 ? documentScopes[0] : undefined;
   for (const t of doc.tables) {
+    const heading = t.at ? regions.get(doc.lines[t.at - 1]?.location ?? "")?.heading : undefined;
+    if (heading !== undefined) for (const row of t.rows) for (const cell of row) Object.assign(regions.get(cell.ref)!, { heading });
     const [before, beforeOther] = [result.candidates.length, result.other.length];
     const owner = t.at ? comparisonHeading(doc.lines.slice(0,t.at).map(l => l.text), result.format) : "";
     fromTable(owner ? { ...t, name: `${t.name}: ${owner}` } : t, result, notes, t.at ? scopes[t.at - 1] : documentScope);
@@ -2954,6 +3020,7 @@ export function extractCandidates(doc0: NormalizedDocument): ExtractionResult {
     const old = OLD_SHEET_RE.test(fold(t.name));
     // "Base scenario" or "Scénario retenu" is the base case; "Base vs downside" still names a scenario.
     if (!old && !SCENARIO_SHEET_RE.test(fold(t.name).replace(BASE_SCENARIO_RE, " "))) continue;
+    if (!old) for (const c of [...result.candidates.slice(before), ...result.other.slice(beforeOther)]) if (c.region) c.region.scope = "scenario";
     const [named, note] = old ? [OLD_SHEET_RE, SUPERSEDED_LABEL_NOTE] : [SCENARIO_SHEET_RE, SCENARIO_SHEET_NOTE];
     // (a name that also says "not part of the deal" in other words keeps that note)
     if (!markedNotPart(fold(t.name).replace(new RegExp(named, "g"), " "))) for (const o of result.other.slice(beforeOther)) if (o.note === NOT_PART_NOTE) o.note = note;

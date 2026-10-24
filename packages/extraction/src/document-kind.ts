@@ -84,6 +84,7 @@ const SUBJECT_SECTION = /^(?:project (?:budget|summary|description|financing)|pr
 export function applyDocumentKind(doc: NormalizedDocument, result: ExtractionResult): void {
   const {kind, role} = documentKind(doc);
   result.notes.push(`Document kind: ${kind} (${role})`);
+  for (const c of [...result.candidates, ...result.other]) if (c.region) c.region.kind = `${kind} (${role})`;
   if (role === "deal source") return;
   if (role === "context") {
     result.other = [...result.other.map(c => ({...c, note: contextNote(kind, c.note)})), ...result.candidates.map(c => ({...c, fieldKey: null, itemKey: null, note: contextNote(kind)}))];

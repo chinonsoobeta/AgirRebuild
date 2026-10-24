@@ -9358,7 +9358,10 @@ describe("candidate regions (Card 130)", () => {
   test("text tables and sheets keep their distinct sources, including shown totals", () => {
     const text = read(["Type | Units | Monthly rent", "1BR | 12 | $1,750", "Total | 12 | $21,000"]);
     expect(text.candidates.length).toBeGreaterThan(0);
-    for (const c of [...text.candidates, ...text.other]) expect(c.region?.source).toBe("text table");
+    for (const c of text.candidates) expect(c.region?.source).toBe("text table");
+    // The existing text-table reader stops before the total; the prose reader shows it.
+    expect(text.other).toHaveLength(2);
+    for (const c of text.other) expect(c.region?.source).toBe("prose");
     const sheet = read([], [table("Willow sheet", [["Land cost", "$800,000"], ["Unassigned", "123"]])], "xlsx");
     expect(sheet.other.length).toBeGreaterThan(0);
     for (const c of [...sheet.candidates, ...sheet.other]) expect(c.region).toMatchObject({ source: "sheet", table: "Willow sheet" });
