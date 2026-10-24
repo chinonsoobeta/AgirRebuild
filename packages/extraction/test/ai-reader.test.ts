@@ -23,6 +23,31 @@ describe("reading verification", () => {
     const document = { ...doc("txt"), fullText, lines: [{ location: "line 1", text: fullText.split("\n")[0]! }] };
     expect(verifyReading({ ...reading, quote, value, field, unit_seen }, [{ id: "d", name: reading.file, document }])).toMatchObject({ outcome: "verified", candidate: { value } });
   });
+  test.each(["senior_rate_pct", "mezz_rate_pct", "refinance_rate_pct"])("verifies basis points for %s", field => {
+    const quote = "Senior interest rate: 621 bps";
+    const document = { ...doc("txt"), fullText: quote, lines: [{ location: "line 1", text: quote }] };
+    expect(verifyReading({ ...reading, field, value: 6.21, unit_seen: "%", quote }, [{ ...documents[0]!, document }])).toMatchObject({ outcome: "verified", candidate: { value: 6.21, unitSeen: "bps (÷ 100)" } });
+    for (const value of [6.21, 621]) expect(verifyReading({ ...reading, field: "exit_cap_rate_pct", value, unit_seen: "%", quote }, [{ ...documents[0]!, document }])).toEqual({ outcome: READING_FAILURE.value });
+  });
+  test.each([
+    ["Loan: $1.216M", 1216000], ["Prêt : 0,614 M$", 614000],
+  ])("verifies the alternate scaled reading with review: %s", (quote, value) => {
+    const document = { ...doc("txt"), fullText: quote, lines: [{ location: "line 1", text: quote }] };
+    expect(verifyReading({ ...reading, quote, value }, [{ ...documents[0]!, document }])).toMatchObject({ outcome: "verified", candidate: { value, ambiguous: true } });
+  });
+  test("requires the scale and respects settled document formatting", () => {
+    const quote = "Loan: $1.216M";
+    const document = { ...doc("txt"), fullText: quote, lines: [{ location: "line 1", text: quote }] };
+    for (const value of [1216, 1.216]) expect(verifyReading({ ...reading, quote, value }, [{ ...documents[0]!, document }])).toEqual({ outcome: READING_FAILURE.value });
+    const own = verifyReading({ ...reading, quote, value: 1216000000 }, [{ ...documents[0]!, document }]);
+    expect(own.outcome).toBe("verified");
+    expect(own.candidate).not.toHaveProperty("ambiguous");
+    document.fullText += "\nCost: $2,500,000.50";
+    const settled = verifyReading({ ...reading, quote, value: 1216000 }, [{ ...documents[0]!, document }]);
+    expect(settled.outcome).toBe("verified");
+    expect(settled.candidate).not.toHaveProperty("ambiguous");
+    expect(verifyReading({ ...reading, quote, value: 1216000000 }, [{ ...documents[0]!, document }]).outcome).toBe(READING_FAILURE.value);
+  });
   test.each([
     [{ field: "unknown" }, "field"], [{ field: "sell_units" }, "field"], [{ item: "studio" }, "item"],
     [{ file: "absent" }, "address"], [{ location: "line 9" }, "address"],
