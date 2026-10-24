@@ -3606,7 +3606,7 @@ describe("card 160a: the deal AI reader", () => {
     return id;
   };
   const r = (field: string, value: number, location: string, quote: string, confidence: "high" | "medium" | "low" = "high") => ({ field, value, location, quote, confidence, item: null, unit_seen: "$" as const, file: "fiction.txt", note: null });
-  test.each([[false, "Loan: $1.216M", "$1.216M", 1216000], [true, "Loan: $1.216M", "$1.216M", 1216000], [false, "Prêt : 0,614 M$", "0,614 M$", 614000]] as const)("reviews an ambiguous AI scale unless rules agree: %s / %s", async (agrees, text, quote, value) => {
+  test.each([[false, "Loan: $1.216M", "$1.216M", 1216000], [true, "Loan: $1.216M", "$1.216M", 1216000]] as const)("reviews an ambiguous AI scale unless rules agree: %s / %s", async (agrees, text, quote, value) => {
     const id = (await call(alice, "POST", `/api/workspaces/${ws}/deals`, { name: "Invented scaled loan", assetType: "Multifamily", location: "Vancouver" })).json.id;
     await call(alice, "PUT", `/api/deals/${id}/documents?name=fiction.txt`, undefined, new TextEncoder().encode(text));
     if (agrees) await call(alice, "PUT", `/api/deals/${id}/documents?name=rules.txt`, undefined, new TextEncoder().encode("Land cost: $1,216,000"));
@@ -3618,6 +3618,14 @@ describe("card 160a: the deal AI reader", () => {
     expect(ai).toBeDefined();
     if (agrees) expect(loan.sources.every((s: any) => !s.check_outcome)).toBe(true);
     else expect(ai).toMatchObject({ check_outcome: "questions", check_note: "Please check: the separator in this figure could be a decimal point or a thousands group; the AI read it as shown" });
+  });
+  test("a leading zero is a decimal, so the AI reading of 0,614 M$ needs no separator check", async () => {
+    const id = (await call(alice, "POST", `/api/workspaces/${ws}/deals`, { name: "Invented scaled loan", assetType: "Multifamily", location: "Vancouver" })).json.id;
+    await call(alice, "PUT", `/api/deals/${id}/documents?name=fiction.txt`, undefined, new TextEncoder().encode("Prêt : 0,614 M$"));
+    await drain({ db, store, read: async () => ({ readings: [r("land_cost", 614000, "line 1", "0,614 M$")], conflicts: [], not_used: [] }) });
+    const [loan] = await db.query<any>(`select * from assumptions where deal_id=$1 and field_key='land_cost'`, [id]);
+    expect(loan?.value).toBe(614000);
+    expect(loan.sources.every((s: any) => !s.check_outcome)).toBe(true);
   });
   test("calls the provider after committing extraction and queues reconciliation afterward", async () => {
     const id = await setup();
