@@ -9432,4 +9432,30 @@ describe("card 133 arithmetic", () => {
     const got = checkArithmetic(read(["land_cost", 1000000], ["land_cost", 2000000], ["hard_cost", 4000000], ["soft_cost", 1000000], ["stated_total_cost", 6000000]));
     expect(got.every(p => !p.check)).toBe(true);
   });
+  test("questions one cost at a thousandfold scale using the other costs", () => {
+    const got = checkArithmetic(read(["land_cost", 1000000], ["hard_cost", 4000000000], ["soft_cost", 1000000], ["stated_total_cost", 6000000]));
+    expect(got.find(p => p.fieldKey === "hard_cost")?.check).toEqual({outcome: "questions", note: "Please check: this looks about 1,000 times off $4,000,000"});
+    expect(got.find(p => p.fieldKey === "stated_total_cost")?.check).toBeUndefined();
+  });
+  test("questions loan scale without changing the loan", () => {
+    const got = checkArithmetic(read(["senior_loan_amount", 4500], ["stated_total_cost", 6000000], ["stated_ltc_pct", 75]));
+    expect(got.find(p => p.fieldKey === "senior_loan_amount")?.check).toEqual({outcome: "questions", note: "Please check: this looks about 1,000 times off $4,500,000"});
+    expect(got.find(p => p.fieldKey === "senior_loan_amount")?.value).toBe(4500);
+  });
+  test("uses the money tolerance and the percentage-point tolerance", () => {
+    const got = checkArithmetic(read(["land_cost", 1000000], ["hard_cost", 4000000], ["soft_cost", 990000], ["stated_total_cost", 6000000], ["senior_loan_amount", 4560000], ["stated_ltc_pct", 75]));
+    expect(got.filter(p => p.check?.outcome === "confirms")).toHaveLength(5);
+    expect(checkArithmetic(read(["senior_loan_amount", 4570000], ["stated_total_cost", 6000000], ["stated_ltc_pct", 75])).every(p => !p.check)).toBe(true);
+  });
+
+  test.each([
+    ["Land cost: $1,000,000", "Hard cost: $4,000,000", "Soft cost: $1,000,000", "Total development cost: $6,000,000"],
+    ["Coût du terrain : 1 000 000 $", "Coûts de construction : 4 000 000 $", "Honoraires professionnels : 1 000 000 $", "Coût total du projet : 6 000 000 $"],
+  ])("checks an invented budget document: %s", (...lines) => {
+    const doc = toNormalized({name: "Invented Cedar budget", kind: "txt", lines});
+    const candidates = extractCandidates(doc).candidates.map(c => ({...c, documentId: "cedar", documentName: "cedar.txt"}));
+    const got = checkArithmetic(consolidate(candidates));
+    expect(got.filter(p => p.check?.outcome === "confirms")).toHaveLength(4);
+  });
+
 });

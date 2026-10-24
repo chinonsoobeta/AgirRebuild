@@ -1404,6 +1404,12 @@ const FR_REASONS: [RegExp, string | ((m: RegExpMatchArray) => string)][] = [
   [/^The LP cash flows have no single IRR\.$/, "Les flux des commanditaires n'ont pas de TRI unique."],
   [/^The GP cash flows have no single IRR\.$/, "Les flux du commandité n'ont pas de TRI unique."],
   // Extraction notes and document states.
+  [/^Checked: the costs read add up to the stated total cost of (.+)$/, (m) => `Vérifié : les coûts lus correspondent au coût total déclaré de ${m[1]}`],
+  [/^Please check: this is more than the stated total cost of (.+)$/, (m) => `À vérifier : ce montant dépasse le coût total déclaré de ${m[1]}`],
+  [/^Checked: the loan and total cost agree with the stated loan-to-cost of (.+)%$/, (m) => `Vérifié : le prêt et le coût total correspondent au ratio prêt-coût déclaré de ${m[1]} %`],
+  [/^Checked: the unit types read add up to the stated total of (.+)$/, (m) => `Vérifié : les types de logements lus correspondent au total déclaré de ${m[1]}`],
+  [/^Please check: the unit types read add up to (.+), the documents state (.+)$/, (m) => `À vérifier : les types de logements lus totalisent ${m[1]}, les documents indiquent ${m[2]}`],
+  [/^Please check: this looks about 1,000 times off (.+)$/, (m) => `À vérifier : ce montant semble différer d’un facteur d’environ 1 000 de ${m[1]}`],
   [/^"(.+)" is an output figure, which is never taken as an input$/, (m) => `« ${m[1]} » est un résultat ; il n'est jamais retenu comme donnée`],
   [/^"(.+)" could be (.+) or (.+); the document does not group thousands with spaces elsewhere$/, (m) => `« ${m[1]} » peut se lire ${m[2]} ou ${m[3]} ; le document ne groupe pas les milliers par des espaces ailleurs`],
   [/^"(.+)" could be (.+) or (.+); the document does not say which$/, (m) => `« ${m[1]} » peut se lire ${m[2]} ou ${m[3]} ; le document ne précise pas lequel`],

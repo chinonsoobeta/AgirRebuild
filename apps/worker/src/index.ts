@@ -8,7 +8,7 @@ import { FIELDS, FIELD_BY_KEY, runPolicy, type Currency, type Policy, type Engin
 import { itemFold } from "@agir/numbers";
 import { renderArtifact, RendererUnavailableError, type ArtifactInput } from "@agir/artifacts";
 import { sha256Hex, type BlobStore, type Db } from "@agir/db";
-import { applyLabels, applySuggestions, consolidate, extractCandidates, figureOrder, kindOf, labelPhrase, labelUnit, offerable, offeredIds, parseDocument, ocrPdf, REMEMBERED_NOTE, withoutLabelled, type SourcedCandidate } from "@agir/extraction";
+import { applyLabels, applySuggestions, checkArithmetic, consolidate, extractCandidates, figureOrder, kindOf, labelPhrase, labelUnit, offerable, offeredIds, parseDocument, ocrPdf, REMEMBERED_NOTE, withoutLabelled, type SourcedCandidate } from "@agir/extraction";
 
 export const MAX_UPLOAD_BYTES = 75 * 1024 * 1024;
 
@@ -220,7 +220,7 @@ type AssumptionRowDb = {
   status: string;
   value: number | null;
   source_kind: string;
-  sources: { value: number; unit_seen?: string | null; document_id?: string; location?: string; labelled_by?: string }[];
+  sources: { value: number; unit_seen?: string | null; document_id?: string; location?: string; labelled_by?: string; check_outcome?: "confirms" | "questions"; check_note?: string }[];
   conflict_values: { value: number }[] | null;
   reason: string | null;
   version: number;
@@ -232,8 +232,8 @@ type RestoreTo = { status: "approved" | "default_accepted"; value: number; reaso
 const same = (a: number | null, b: number | null) => a !== null && b !== null && Math.abs(a - b) <= 1e-9 * Math.max(1, Math.abs(a), Math.abs(b));
 
 /** What a reviewer sees of a row's sources, in an order that does not matter. */
-const sourceForm = (s: { value: number | null; unit_seen?: string | null; document_id?: string; location?: string; labelled_by?: string }[]) =>
-  (s ?? []).map((x) => JSON.stringify([x.document_id ?? null, x.location ?? null, x.value, x.unit_seen ?? null, x.labelled_by ?? null])).sort();
+const sourceForm = (s: { value: number | null; unit_seen?: string | null; document_id?: string; location?: string; labelled_by?: string; check_outcome?: "confirms" | "questions"; check_note?: string }[]) =>
+  (s ?? []).map((x) => JSON.stringify([x.document_id ?? null, x.location ?? null, x.value, x.unit_seen ?? null, x.labelled_by ?? null, x.check_outcome ?? null, x.check_note ?? null])).sort();
 const sameList = (a: unknown[], b: unknown[]) => a.length === b.length && a.every((x, i) => x === b[i]);
 const sameValues = (a: { value: number }[] | null, b: { value: number }[] | null) => {
   if (!a || !b) return a === b;
@@ -321,7 +321,7 @@ export async function reconcileDeal(db: Db, dealId: string) {
         .filter((x) => !rememberedIds.includes(String(x.id)));
       ({ kept, dropped } = applySuggestions(sourced, offered, suggestions));
     }
-    const proposals = consolidate([...sourced, ...kept, ...remembered, ...labelled], deal.currency);
+    const proposals = checkArithmetic(consolidate([...sourced, ...kept, ...remembered, ...labelled], deal.currency));
     const existing = await tx.query<AssumptionRowDb>(
       `select id, field_key, item_key, status, value, source_kind, sources, conflict_values, reason, version from assumptions where deal_id = $1 for update`,
       [dealId],
@@ -375,6 +375,7 @@ export async function reconcileDeal(db: Db, dealId: string) {
         context: s.context,
         rule: s.rule,
         ...(s.ocr ? { ocr: true } : {}),
+        ...(p.check ? { check_outcome: p.check.outcome, check_note: p.check.note } : {}),
         ...(s.note ? { note: s.note } : {}),
         ...(s.labelledBy ? { labelled_by: s.labelledBy } : {}),
       }));

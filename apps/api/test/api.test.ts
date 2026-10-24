@@ -3402,5 +3402,12 @@ test("card 133 reconciles arithmetic notes into review sources", async () => {
   expect(a.status).toBe("needs_review");
   expect(a.sources[0]).toMatchObject({check_outcome: "questions", check_note: "Please check: this is more than the stated total cost of $6,000,000"});
   const [stored] = await db.query(`select sources from assumptions where deal_id = $1 and field_key = 'hard_cost'`, [d]);
-  expect(stored.sources).toEqual(a.sources);
+  expect(stored!.sources).toEqual(a.sources);
+  // An unchanged hard-cost source must get a fresh check when another document changes the total.
+  await call(alice, "PUT", `/api/deals/${d}/documents?name=additional-total.txt`, undefined, Buffer.from("Total development cost: $12,000,000"));
+  await work();
+  const next = (await call(alice, "GET", `/api/deals/${d}/review`)).json.assumptions.find((x: any) => x.fieldKey === "hard_cost");
+  expect(next.value).toBe(9000000);
+  expect(next.status).toBe("needs_review");
+  expect(next.sources[0].check_outcome).toBeUndefined();
 });

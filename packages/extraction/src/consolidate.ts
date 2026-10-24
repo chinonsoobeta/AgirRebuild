@@ -9,6 +9,7 @@ import { commercialItem, canonicalItem, currencyOf, foldText, itemFold, outsideB
 export type SourcedCandidate = Candidate & { documentId: string; documentName: string; ocr?: boolean; labelledBy?: string };
 
 export type Proposal = {
+  check?: { outcome: "confirms" | "questions"; note: string };
   fieldKey: string;
   itemKey: string | null;
   /** needs_review when every source agrees; conflicting when they do not. */

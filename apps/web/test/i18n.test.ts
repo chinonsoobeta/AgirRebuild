@@ -985,3 +985,18 @@ it.each([
   expect(build("en", () => {}).msg(note)).toBe(note);
   expect(build("fr", () => {}).msg(note)).not.toBe(note);
 });
+
+it.each(["en", "fr"] as const)("card 133 renders arithmetic source notes in %s", async lang => {
+  const { createElement: h } = await import("react");
+  const { renderToStaticMarkup } = await import("react-dom/server");
+  vi.stubGlobal("localStorage", { getItem: () => lang });
+  try {
+    for (const check_outcome of ["questions", "confirms"] as const) {
+      const check_note = check_outcome === "questions" ? "Please check: this is more than the stated total cost of $6,000,000" : "Checked: the costs read add up to the stated total cost of $6,000,000";
+      const s = { context: "Hard cost: $9,000,000", raw: "$9,000,000", document_name: "cedar.txt", location: "line 1", check_outcome, check_note } as any;
+      const html = renderToStaticMarkup(h(I18nProvider, { children: h(Quote, {s, currency: "CAD"}) }));
+      expect(html).toContain(build(lang, () => {}).msg(check_note));
+      expect(html.includes("var(--review-text)")).toBe(check_outcome === "questions");
+    }
+  } finally { vi.unstubAllGlobals(); }
+});

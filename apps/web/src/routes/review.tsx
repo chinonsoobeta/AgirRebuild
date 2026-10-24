@@ -48,6 +48,7 @@ export function Quote({ s, currency, fieldKey }: { s: Source; currency: string |
       {s.ocr && <span className="small" style={{ fontWeight: 600 }}>{t("review.ocr")}</span>}
       {s.rule === "suggested" && <span className="small" style={{ fontWeight: 600 }}>{t("review.suggested")}</span>}
       {s.rule === "remembered" && s.note && <span className="small" style={{ fontWeight: 600 }}>{msg(s.note)}</span>}
+      {s.check_note && <span className="small muted" style={s.check_outcome === "questions" ? { color: "var(--review-text)", fontWeight: 600 } : undefined}>{msg(s.check_note)}</span>}
       <span className="small faint">{msg(s.location)}</span>
       {(s.unit_seen?.startsWith("m2") || s.unit_seen?.startsWith("$/m2")) && <span className="small faint">{t("review.fromM2")}</span>}
       {foreignIn(s, currency) && <span className="small faint">{t("review.statedIn", { code: foreignIn(s, currency) })}</span>}
@@ -60,7 +61,7 @@ const metricUnit = (unit: string) => unit === "sf" || unit === "$/sf/yr";
 /** A value typed in square metres becomes square feet (rent per m² becomes rent per sf) before it is posted, and the reason records what was typed. */
 /** A document value no document states any more (card 63): kept only as the person's own value, with a reason, and never by Approve all. */
 export const keepsWithReason = (a: Pick<Assumption, "sourceKind" | "sources">) => a.sourceKind === "document" && a.sources.length === 0;
-export const approvable = <A extends Pick<Assumption, "fieldKey" | "sourceKind" | "sources">>(rows: A[]) => rows.filter((a) => !keepsWithReason(a) && !a.sources.some((s) => s.ocr) && !(a.sourceKind === "document" && FIELD_BY_KEY.get(a.fieldKey)?.verify));
+export const approvable = <A extends Pick<Assumption, "fieldKey" | "sourceKind" | "sources">>(rows: A[]) => rows.filter((a) => !keepsWithReason(a) && !a.sources.some((s) => s.ocr || s.check_outcome === "questions") && !(a.sourceKind === "document" && FIELD_BY_KEY.get(a.fieldKey)?.verify));
 
 export function enteredInUnit(unit: string, metric: boolean, value: number, reason: string, lang: Lang): { value: number; reason: string } {
   if (!metric || !metricUnit(unit)) return { value, reason };
@@ -599,7 +600,7 @@ export function Review({ dealId }: { dealId: string }) {
                 <tbody>
                   {pending.map((a) => (
                     <tr key={a.id} onClick={() => setFocus(a.id)} style={{ background: focused?.id === a.id ? "var(--sunken)" : undefined, cursor: "pointer" }}>
-                      <td>{name(a)}{a.material && <span className="faint small">{t("review.materialTag")}</span>}</td>
+                      <td>{name(a)}{a.sources.filter((s, i, all) => s.check_note && all.findIndex(x => x.check_note === s.check_note) === i).map((s, i) => <div key={i} className="small muted" style={s.check_outcome === "questions" ? { color: "var(--review-text)", fontWeight: 600 } : undefined}>{msg(s.check_note)}</div>)}{a.material && <span className="faint small">{t("review.materialTag")}</span>}</td>
                       <td className="r num">{f.value(a.value, a.unit)}</td>
                       <td className="small muted">{a.sources.length > 1 ? t("review.agree", { n: a.sources.length }) : a.sources[0]?.document_name}</td>
                       <td className="r" style={{ whiteSpace: "nowrap" }}>
