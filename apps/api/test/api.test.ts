@@ -6,7 +6,7 @@ import { randomUUID } from "node:crypto";
 import * as zlib from "node:zlib";
 import { asUser, fileStore, migrate, openPglite, type Db } from "@agir/db";
 import Anthropic from "@anthropic-ai/sdk";
-import { drain, reconcileDeal, type SuggestRequest, type SuggestReply } from "@agir/worker";
+import { drain, reconcileDeal, type ReaderRequest, type SuggestRequest, type SuggestReply } from "@agir/worker";
 import { documentBytes, loadOracle } from "@agir/testkit";
 import { createApp } from "../src/app.ts";
 import { rateLimiter } from "../src/auth.ts";
@@ -3595,17 +3595,17 @@ describe("Card 137: confirming a region", () => {
 describe("card 160a: the deal AI reader", () => {
   const text = "Land cost: $400,000\nConstruction period: 18 months\nUnlabelled reserve 7000\nAnother amount 500000\nHidden number 123";
   const setup = async () => {
-    const id = (await call(alice, "POST", `/api/workspaces/${ws}/deals`, { name: "Invented AI deal" })).json.id;
+    const id = (await call(alice, "POST", `/api/workspaces/${ws}/deals`, { name: "Invented AI deal", assetType: "Multifamily", location: "Vancouver" })).json.id;
     await call(alice, "PUT", `/api/deals/${id}/documents?name=fiction.txt`, undefined, new TextEncoder().encode(text));
     return id;
   };
-  const r = (field: string, value: number, location: string, quote: string, confidence = "high") => ({ field, value, location, quote, confidence, item: null, unit_seen: "$", file: "fiction.txt", note: null });
+  const r = (field: string, value: number, location: string, quote: string, confidence: "high" | "medium" | "low" = "high") => ({ field, value, location, quote, confidence, item: null, unit_seen: "$" as const, file: "fiction.txt", note: null });
   test("checks sources, agreement, conflicts, low confidence and reuse", async () => {
     const id = await setup();
-    const read = vi.fn(async () => ({ readings: [r("land_cost", 400000, "line 1", "$400,000"), r("soft_cost", 123, "line 1", "123"), r("other_cost", 7000, "line 3", "7000", "low")], conflicts: [{ field: "hard_cost", item: null, why: "Two stated amounts", values: [r("hard_cost", 400000, "line 1", "$400,000"), r("hard_cost", 500000, "line 4", "500000")] }], not_used: [] }));
+    const read = vi.fn(async (_request: ReaderRequest) => ({ readings: [r("land_cost", 400000, "line 1", "$400,000"), r("soft_cost", 123, "line 1", "123"), r("other_cost", 7000, "line 3", "7000", "low")], conflicts: [{ field: "hard_cost", item: null, why: "Two stated amounts", values: [r("hard_cost", 400000, "line 1", "$400,000"), r("hard_cost", 500000, "line 4", "500000")] }], not_used: [] }));
     await drain({ db, store, read });
     expect(read).toHaveBeenCalledTimes(1);
-    expect(read.mock.calls[0]![0].messages[0].content).toContain("[line 1] Land cost: $400,000");
+    expect(read.mock.calls[0]![0].messages[0]!.content).toContain("[line 1] Land cost: $400,000");
     const rows = await db.query<any>(`select * from assumptions where deal_id=$1`, [id]);
     const land = rows.filter(a => a.field_key === "land_cost");
     expect(land).toHaveLength(1);
@@ -3620,6 +3620,24 @@ describe("card 160a: the deal AI reader", () => {
     await db.query(`insert into jobs (kind,payload) values ('extract_document',$1)`, [JSON.stringify({ document_id: document.id })]);
     await drain({ db, store, read });
     expect(read).toHaveBeenCalledTimes(1);
+  });
+  test("waits for all documents and names disagreement with the rules", async () => {
+    const id = await setup();
+    await call(alice, "PUT", `/api/deals/${id}/documents?name=second.txt`, undefined, new TextEncoder().encode("A fictional second document."));
+    const read = vi.fn(async (_request: ReaderRequest) => ({ readings: [r("land_cost", 500000, "line 4", "500000")], conflicts: [], not_used: [] }));
+    await drain({ db, store, read });
+    expect(read).toHaveBeenCalledTimes(1);
+    expect(read.mock.calls[0]![0].messages[0]!.content).toContain("=== FILE second.txt ===");
+    const [land] = await db.query<any>(`select * from assumptions where deal_id=$1 and field_key='land_cost'`, [id]);
+    expect(land.status).toBe("conflicting");
+    expect(land.conflict_values.map((v: any) => v.value)).toEqual([400000, 500000]);
+    expect(land.sources.some((s: any) => s.rule === "ai")).toBe(true);
+    expect(land.sources.some((s: any) => s.rule !== "ai")).toBe(true);
+    // A retired document changes the hash; its stored reading no longer participates.
+    await db.query(`update documents set retired_at=now() where deal_id=$1 and name='second.txt'`, [id]);
+    await reconcileDeal(db, id);
+    const [after] = await db.query<any>(`select * from assumptions where deal_id=$1 and field_key='land_cost'`, [id]);
+    expect(after.sources.some((s: any) => s.rule === "ai")).toBe(false);
   });
   test("retries once, stores a safe failure and keeps the rule reader", async () => {
     const id = await setup();

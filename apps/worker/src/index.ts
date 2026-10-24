@@ -3,12 +3,14 @@
 // It drains the jobs table with leases, retries with backoff, and a dead
 // letter. It runs as the trusted service principal.
 
+import { readDeal, storedReadings, type ReaderProvider } from "./reader.ts";
+export type { ReaderProvider, ReaderRequest } from "./reader.ts";
 import Anthropic from "@anthropic-ai/sdk";
 import { FIELDS, FIELD_BY_KEY, runPolicy, type Currency, type Policy, type EngineInput, type FieldUnit, type RunResult } from "@agir/contracts";
 import { itemFold } from "@agir/numbers";
 import { renderArtifact, RendererUnavailableError, type ArtifactInput } from "@agir/artifacts";
 import { sha256Hex, type BlobStore, type Db } from "@agir/db";
-import { applyLabels, applySuggestions, chooseByArithmetic, checkArithmetic, consolidate, extractCandidates, figureOrder, kindOf, labelPhrase, labelUnit, offerable, offeredIds, parseDocument, ocrPdf, REMEMBERED_NOTE, withoutLabelled, type SourcedCandidate } from "@agir/extraction";
+import { AI_LOW_CONFIDENCE_NOTE, applyLabels, applySuggestions, chooseByArithmetic, checkArithmetic, consolidate, extractCandidates, figureOrder, kindOf, labelPhrase, labelUnit, offerable, offeredIds, parseDocument, ocrPdf, REMEMBERED_NOTE, withoutLabelled, type SourcedCandidate } from "@agir/extraction";
 
 export const MAX_UPLOAD_BYTES = 75 * 1024 * 1024;
 
@@ -22,7 +24,7 @@ export type SuggestRequest = {
 export type SuggestReply = { model: string; stop_reason: string | null; text: string };
 export type SuggestionProvider = (request: SuggestRequest) => Promise<SuggestReply>;
 
-export type WorkerDeps = { db: Db; store: BlobStore; log?: (event: Record<string, unknown>) => void; suggest?: SuggestionProvider };
+export type WorkerDeps = { db: Db; store: BlobStore; log?: (event: Record<string, unknown>) => void; suggest?: SuggestionProvider; read?: ReaderProvider };
 
 const SUGGEST_SYSTEM = `You label figures that a document reader could not label. For each figure, choose one catalog key, or "ignore".
 Never change, compute, sum or convert a value. Return only ids and keys.
@@ -184,6 +186,7 @@ async function extractDocument(deps: WorkerDeps, documentId: string) {
   const asSourced = (c: (typeof result.candidates)[number]): SourcedCandidate => ({ ...c, documentId: d.id, documentName: d.name });
   const suggestions = await suggestLabels(deps, d.workspace_id, offeredOf([...result.candidates, ...result.other].map(asSourced)));
   await db.transaction(async (tx) => {
+    await tx.query(`select id from deals where id=$1 for update`, [d.deal_id]);
     await tx.query(`delete from candidates where document_id = $1`, [d.id]);
     await tx.query(`delete from label_suggestions where document_id = $1`, [d.id]);
     for (const r of suggestions) {
@@ -203,6 +206,7 @@ async function extractDocument(deps: WorkerDeps, documentId: string) {
       `update documents set stage = 'extracted', stage_detail = $4, read_role = $5, candidate_count = $2, number_format = $3, updated_at = now() where id = $1`,
       [d.id, result.candidates.length, format, parsed.needsOcr ? `Read by OCR from ${parsed.pageCount} scanned ${parsed.pageCount === 1 ? "page" : "pages"}. Check every value against the page before approving it.` : null, result.notes.find(n => n.startsWith("Document kind: "))?.slice("Document kind: ".length) ?? null],
     );
+    await readDeal(tx, store, d.deal_id, d.workspace_id, deps.read);
     await tx.query(`insert into jobs (kind, payload) values ('reconcile_deal', $1)`, [JSON.stringify({ deal_id: d.deal_id })]);
   });
   for (const r of suggestions) if (r.error) await audit(db, d.workspace_id, d.deal_id, "document.suggestions_failed", "document", d.id, r.error);
@@ -321,10 +325,14 @@ export async function reconcileDeal(db: Db, dealId: string) {
         .filter((x) => !rememberedIds.includes(String(x.id)));
       ({ kept, dropped } = applySuggestions(sourced, offered, suggestions));
     }
-    const base = [...sourced, ...kept, ...remembered, ...labelled];
+    const ai = await storedReadings(tx, dealId);
+    const base = [...sourced, ...kept, ...remembered, ...labelled, ...ai];
     const assigned = new Set([...kept, ...remembered, ...labelled].map(c => `${c.documentId}|${c.location}|${c.raw}`));
     const chosen = chooseByArithmetic(consolidate(base, deal.currency), unlabelled.filter(f => !personLabelled.has(f) && !assigned.has(`${f.documentId}|${f.location}|${f.raw}`)));
     const proposals = checkArithmetic(consolidate([...base, ...chosen], deal.currency));
+    for (const p of proposals) {
+      if (!p.check && p.sources.length && p.sources.every(s => s.rule === "ai" && ai.some(a => a === s && a.confidence === "low"))) p.check = { outcome: "questions", note: AI_LOW_CONFIDENCE_NOTE };
+    }
     const existing = await tx.query<AssumptionRowDb>(
       `select id, field_key, item_key, status, value, source_kind, sources, conflict_values, reason, version from assumptions where deal_id = $1 for update`,
       [dealId],

@@ -6,3 +6,6 @@ export { applyLabels, applySuggestions, consolidate, figureOrder, LABELLED_NOTE,
 export { scoreExtraction, type GoldenEntry, type Score } from "./score.ts";
 export { ocrPdf } from "./ocr.ts";
 export { checkArithmetic, chooseByArithmetic } from "./arithmetic.ts";
+export { addressedText, addressedEntries } from "./addressed.ts";
+export * from "./verify-reading.ts";
+export * from "./reader-prompt.ts";
