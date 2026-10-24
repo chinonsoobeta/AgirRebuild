@@ -601,7 +601,7 @@ export function Review({ dealId }: { dealId: string }) {
             const rent = g.fields.every(k => ["unit_count", "unit_rent_monthly", "rentable_area_sf", "rent_psf_annual"].includes(k));
             const cost = g.fields.every(k => FIELD_BY_KEY.get(k)?.group === "budget");
             const loan = g.fields.every(k => ["senior", "mezzanine", "refinance"].includes(FIELD_BY_KEY.get(k)?.group ?? ""));
-            const fields = [...(rent ? [t("review.regionType")] : []), ...g.fields.map(k => L.field(k))].join(", ");
+            const fields = [...(rent ? [t("review.regionType")] : []), ...g.fields.map(k => L.field(k)).map(x => /^[A-ZÀ-Ý][a-zà-ÿ]/.test(x) ? x.charAt(0).toLowerCase() + x.slice(1) : x)].join(", "); // Card 137 audit: names sit mid-sentence; an acronym (GST/HST) keeps its case.
             return <div className="card stack" key={`${g.documentId}:${g.source}:${g.table}`} style={{ gap: 8 }}>
               <strong>{g.documentName} · {g.table}</strong>
               <p>{rent || cost || loan ? t("review.regionIntro", { kind: t(rent ? "review.regionRent" : cost ? "review.regionBudget" : "review.regionLoan"), fields }) : t("review.regionOther", { fields })}</p>
