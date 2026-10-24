@@ -1492,6 +1492,7 @@ const FR_REASONS: [RegExp, string | ((m: RegExpMatchArray) => string)][] = [
   [/^Its source document was removed$/, "Son document source a été retiré"],
   [/^The label it was remembered from was removed; confirm or reject it$/, "L'étiquette dont elle avait été retenue a été retirée ; confirmez-la ou rejetez-la"],
   [/^The label it was remembered from was removed$/, "L'étiquette dont elle avait été retenue a été retirée"],
+  [/^The documents give this as parts that add up to it: (.+)$/, (m) => `Les documents l’indiquent en parties dont la somme donne ce montant : ${m[1]}`],
   [/^Labelled the same way before in this workspace; confirm it$/, "Étiqueté de la même façon auparavant dans cet espace ; à confirmer"],
   [/^The AI field is unknown or cannot be read from documents$/, "Le champ IA est inconnu ou ne peut pas être lu dans les documents"],
   [/^The AI item does not match this field$/, "Le type IA ne correspond pas à ce champ"],

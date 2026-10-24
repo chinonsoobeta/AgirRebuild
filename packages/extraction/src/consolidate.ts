@@ -33,6 +33,20 @@ function groupForm(list: readonly SourcedCandidate[]): string {
   return [...count].sort(([a, n], [b, m]) => m - n || (a < b ? -1 : a > b ? 1 : 0))[0]![0];
 }
 
+const money = (n: number) => `$${n.toLocaleString("en-US", { maximumFractionDigits: 2 })}`;
+/**
+ * A money conflict whose largest figure equals, within one dollar, the sum of all the others, each from its own place,
+ * is a total and its breakdown (card 144b). Returns the total and the note naming its parts, or null.
+ */
+function statedTotal(values: Proposal["values"]): { total: Proposal["values"][number]; note: string } | null {
+  if (values.length < 3) return null;
+  const total = values.at(-1)!, parts = values.slice(0, -1);
+  if (Math.abs(parts.reduce((n, v) => n + v.value, 0) - total.value) > 1) return null;
+  const places = values.map((v) => new Set(v.sources.map((s) => `${s.documentId}|${s.location}`)));
+  if (places.some((a, i) => places.some((b, j) => j > i && [...a].some((x) => b.has(x))))) return null;
+  return { total, note: `The documents give this as parts that add up to it: ${parts.map((v) => money(v.value)).join(" + ")}` };
+}
+
 const BUILDING_TOTAL_NOTE = "A whole-building count total, not a residential type";
 /** Compare count-only names with the complete residential mix across the supplied documents. */
 function buildingTotals(cs: readonly SourcedCandidate[]): Set<SourcedCandidate> {
@@ -90,6 +104,12 @@ export function consolidate(candidates: readonly SourcedCandidate[], dealCurrenc
       else values.push({ value: c.value!, sources: [c] });
     }
     values.sort((a, b) => a.value - b.value);
+    const breakdown = foreign.length === 0 && FIELD_BY_KEY.get(fieldKey)?.unit === "$" ? statedTotal(values) : null;
+    if (breakdown) {
+      // The total is the reading; every part stays in sources so a person can see it.
+      out.push({ fieldKey, itemKey: item || null, status: "needs_review", value: breakdown.total.value, sources: [...list], values: [breakdown.total], foreign, reason: breakdown.note });
+      continue;
+    }
     out.push({
       fieldKey,
       itemKey: item || null,
