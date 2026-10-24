@@ -5,6 +5,7 @@ import { join } from "node:path";
 import { randomUUID } from "node:crypto";
 import * as zlib from "node:zlib";
 import { asUser, fileStore, migrate, openPglite, type Db } from "@agir/db";
+import * as extraction from "@agir/extraction";
 import Anthropic from "@anthropic-ai/sdk";
 import { drain, reconcileDeal, type ReaderRequest, type SuggestRequest, type SuggestReply } from "@agir/worker";
 import { documentBytes, loadOracle } from "@agir/testkit";
@@ -3600,6 +3601,42 @@ describe("card 160a: the deal AI reader", () => {
     return id;
   };
   const r = (field: string, value: number, location: string, quote: string, confidence: "high" | "medium" | "low" = "high") => ({ field, value, location, quote, confidence, item: null, unit_seen: "$" as const, file: "fiction.txt", note: null });
+  test("calls the provider after committing extraction and queues reconciliation afterward", async () => {
+    const id = await setup();
+    let inTransaction = false;
+    const wrapped: Db = { ...db, transaction: fn => db.transaction(async tx => {
+      inTransaction = true;
+      try { return await fn(tx); } finally { inTransaction = false; }
+    }) };
+    const calls: boolean[] = [];
+    const read = vi.fn(async () => {
+      calls.push(inTransaction);
+      expect(inTransaction).toBe(false);
+      expect(await db.query(`select id from jobs where kind='reconcile_deal' and payload->>'deal_id'=$1`, [id])).toEqual([]);
+      return { readings: [], conflicts: [], not_used: [] };
+    });
+    await drain({ db: wrapped, store, read });
+    expect(calls).toEqual([false]);
+    expect((await db.query<any>(`select value from assumptions where deal_id=$1 and field_key='land_cost'`, [id]))[0].value).toBe(400000);
+  });
+  test.each(["parsing", "escaping"])("reconciles rules after a %s failure in readDeal", async failure => {
+    const id = await setup();
+    const parse = extraction.parseDocument;
+    let parses = 0;
+    const spy = vi.spyOn(extraction, "parseDocument").mockImplementation(async (...args) => {
+      if (failure === "parsing" && ++parses === 2) throw new Error("Reader parse failed");
+      return parse(...args);
+    });
+    const wrap = (base: Db): Db => ({ ...base, transaction: fn => base.transaction(tx => fn(wrap(tx))), query: (sql, params) => {
+      if (failure === "escaping" && sql.startsWith("select id from ai_readings")) throw new Error("Reader lookup failed");
+      return base.query(sql, params);
+    } });
+    const wrapped = wrap(db);
+    const read = vi.fn(async () => ({ readings: [], conflicts: [], not_used: [] }));
+    await drain({ db: wrapped, store, read });
+    spy.mockRestore();
+    expect((await db.query<any>(`select value from assumptions where deal_id=$1 and field_key='land_cost'`, [id]))[0]?.value).toBe(400000);
+  });
   test("checks sources, agreement, conflicts, low confidence and reuse", async () => {
     const id = await setup();
     const read = vi.fn(async (_request: ReaderRequest) => ({ readings: [r("land_cost", 400000, "line 1", "$400,000"), r("soft_cost", 123, "line 1", "123"), r("other_cost", 7000, "line 3", "7000", "low")], conflicts: [{ field: "hard_cost", item: null, why: "Two stated amounts", values: [r("hard_cost", 400000, "line 1", "$400,000"), r("hard_cost", 500000, "line 4", "500000")] }], not_used: [] }));

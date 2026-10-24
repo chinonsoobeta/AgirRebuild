@@ -17,6 +17,13 @@ const documents = [{ id: "d", name: "fiction.txt", document: d }];
 const reading: Reading = { field: "land_cost", item: null, value: 400, unit_seen: "$", file: "fiction.txt", location: "line 1", quote: "$400", note: null, confidence: "high" };
 describe("reading verification", () => {
   test.each([
+    ["Taux : 7,215 %\nTerrain : 1 250 000 $\nCoût : 2 500 000 $", "7,215 %", 7.215, "exit_cap_rate_pct", "%"],
+    ["Land: $1,250\nCost: $2,500.00", "1,250", 1250, "land_cost", "$"],
+  ] as const)("uses the document number format: %s", (fullText, quote, value, field, unit_seen) => {
+    const document = { ...doc("txt"), fullText, lines: [{ location: "line 1", text: fullText.split("\n")[0]! }] };
+    expect(verifyReading({ ...reading, quote, value, field, unit_seen }, [{ id: "d", name: reading.file, document }])).toMatchObject({ outcome: "verified", candidate: { value } });
+  });
+  test.each([
     [{ field: "unknown" }, "field"], [{ field: "sell_units" }, "field"], [{ item: "studio" }, "item"],
     [{ file: "absent" }, "address"], [{ location: "line 9" }, "address"],
     [{ quote: "900", value: 900 }, "quote"], [{ value: 500 }, "value"], [{ unit_seen: "years" }, "unit"],
