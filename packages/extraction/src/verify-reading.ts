@@ -1,5 +1,5 @@
 import { FIELD_BY_KEY } from "@agir/contracts";
-import { detectFormat, SF_PER_M2, tokenize } from "@agir/numbers";
+import { detectFormat, normalizeText, SCALE_RE, scaleOf, SF_PER_M2, tokenize } from "@agir/numbers";
 import { addressedEntries } from "./addressed.ts";
 import type { NormalizedDocument } from "./document.ts";
 import type { SourcedCandidate } from "./consolidate.ts";
@@ -22,7 +22,8 @@ export const READING_FAILURE = {
   unit: "The AI unit does not match this field",
 } as const;
 export const AI_LOW_CONFIDENCE_NOTE = "Please check: every source is a low-confidence AI reading";
-export type ReadingVerification = { outcome: string; candidate?: SourcedCandidate & { confidence: Reading["confidence"] } };
+export const AI_AMBIGUOUS_NOTE = "Please check: the separator in this figure could be a decimal point or a thousands group; the AI read it as shown";
+export type ReadingVerification = { outcome: string; candidate?: SourcedCandidate & { confidence: Reading["confidence"]; ambiguous?: true } };
 
 /** First failure wins. No model interpretation can bypass an address or number check. */
 export function verifyReading(reading: Reading, documents: readonly ReadingDocument[]): ReadingVerification {
@@ -34,7 +35,26 @@ export function verifyReading(reading: Reading, documents: readonly ReadingDocum
   const entries = doc ? addressedEntries(doc.document).filter(e => e.location === reading.location) : [];
   if (!doc || entries.length !== 1) return { outcome: READING_FAILURE.address };
   if (!entries[0]!.text.includes(reading.quote)) return { outcome: READING_FAILURE.quote };
-  const token = tokenize(reading.quote, detectFormat(doc.document.fullText)).find(t => t.value === reading.value);
+  const format = detectFormat(doc.document.fullText);
+  let ambiguous = false;
+  const token = tokenize(reading.quote, format).find(t => {
+    if (t.unit === "bps") return ["senior_rate_pct", "mezz_rate_pct", "refinance_rate_pct"].includes(field.key) && t.value !== null && t.value / 100 === reading.value;
+    if (t.value === reading.value) return true;
+    if (t.value !== null && format.decimal !== null) return false;
+    // Locate the scale after the digits, including when tokenize already consumed it.
+    const text = normalizeText(reading.quote).slice(t.start);
+    const digits = /^\s*\(?[-−‒–]?\s*(?:(?:US|CA|C|A)?\$|USD|CAD)?\s?(\d+([.,])\d{3})(?![\d.,])/.exec(text);
+    if (!digits) return false;
+    const scale = SCALE_RE.exec(text.slice(digits[0].length));
+    if (!scale) return false;
+    const sign = t.value !== null && t.value < 0 || /^\s*[(−‒–-]/.test(text) ? -1 : 1;
+    const decimal = Number(digits[1]!.replace(",", "."));
+    const grouped = Number(digits[1]!.replace(/[.,]/, ""));
+    const values = format.decimal ? [format.decimal === digits[2] ? decimal : grouped] : [decimal, grouped];
+    const matches = values.some(v => sign * v * scaleOf(scale[1]!) === reading.value);
+    if (matches) ambiguous = format.decimal === null;
+    return matches;
+  });
   if (!token) return { outcome: READING_FAILURE.value };
   let value = reading.value;
   const seen = reading.unit_seen;
@@ -47,9 +67,9 @@ export function verifyReading(reading: Reading, documents: readonly ReadingDocum
   else if (seen === "vacancy_%" && ["stabilized_occupancy_pct", "item_occupancy_pct"].includes(field.key)) value = 100 - value;
   else if (seen !== unit) return { outcome: READING_FAILURE.unit };
   return { outcome: "verified", candidate: {
-    fieldKey: field.key, itemKey: reading.item, value, unitSeen: seen, raw: token.raw,
+    fieldKey: field.key, itemKey: reading.item, value, unitSeen: token.unit === "bps" ? "bps (÷ 100)" : seen, raw: token.raw,
     documentId: doc.id, documentName: doc.name, location: reading.location, context: reading.quote,
-    rule: "ai", confidence: reading.confidence, ...(reading.note ? { note: reading.note } : {}),
+    rule: "ai", ...(ambiguous ? { ambiguous: true as const } : {}), confidence: reading.confidence, ...(reading.note ? { note: reading.note } : {}),
   } };
 }
 

@@ -262,7 +262,7 @@ export function itemFold(name: string): string {
 }
 
 // "m" is million only when it is not the m of m²: "$450 m²" is not $450,000,000.
-const SCALE_RE = /^\s?(billions?|bn|millions?|mm|mn|m(?!²)|thousands?|k)\b/i;
+export const SCALE_RE = /^\s?(billions?|bn|millions?|mm|mn|m(?!²)|thousands?|k)\b/i;
 // In a table cell nothing around the figure says it is money, so only the spellings that cannot be a metre or a millimetre count: "85 m" and "5 mm" are not millions.
 const CELL_SCALE_RE = /^(?:[kK]|MM?|bn|[Bb]illions?|[Mm]illions?|[Tt]housands?)$/;
 // "three quarters of the units" and "three quarters complete" are fractions, not spans of time.
@@ -374,7 +374,7 @@ function wordTokens(text: string): NumberToken[] {
   return out;
 }
 
-function scaleOf(word: string): number {
+export function scaleOf(word: string): number {
   const w = word.toLowerCase();
   if (w.startsWith("billion") || w === "bn") return 1e9;
   if (w.startsWith("million") || w === "mm" || w === "mn" || w === "m") return 1e6;

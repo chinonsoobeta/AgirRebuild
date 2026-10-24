@@ -3601,14 +3601,14 @@ describe("card 160a: the deal AI reader", () => {
     return id;
   };
   const r = (field: string, value: number, location: string, quote: string, confidence: "high" | "medium" | "low" = "high") => ({ field, value, location, quote, confidence, item: null, unit_seen: "$" as const, file: "fiction.txt", note: null });
-  test.each([false, true])("reviews an ambiguous AI scale unless rules agree: %s", async agrees => {
+  test.each([[false, "Loan: $1.216M", "$1.216M", 1216000], [true, "Loan: $1.216M", "$1.216M", 1216000], [false, "Prêt : 0,614 M$", "0,614 M$", 614000]] as const)("reviews an ambiguous AI scale unless rules agree: %s / %s", async (agrees, text, quote, value) => {
     const id = (await call(alice, "POST", `/api/workspaces/${ws}/deals`, { name: "Invented scaled loan", assetType: "Multifamily", location: "Vancouver" })).json.id;
-    await call(alice, "PUT", `/api/deals/${id}/documents?name=fiction.txt`, undefined, new TextEncoder().encode("Loan: $1.216M"));
-    if (agrees) await call(alice, "PUT", `/api/deals/${id}/documents?name=rules.txt`, undefined, new TextEncoder().encode("Senior loan amount: $1,216,000"));
-    const read = async () => ({ readings: [r("senior_loan_amount", 1216000, "line 1", "$1.216M")], conflicts: [], not_used: [] });
+    await call(alice, "PUT", `/api/deals/${id}/documents?name=fiction.txt`, undefined, new TextEncoder().encode(text));
+    if (agrees) await call(alice, "PUT", `/api/deals/${id}/documents?name=rules.txt`, undefined, new TextEncoder().encode("Land cost: $1,216,000"));
+    const read = async () => ({ readings: [r("land_cost", value, "line 1", quote)], conflicts: [], not_used: [] });
     await drain({ db, store, read });
-    const [loan] = await db.query<any>(`select * from assumptions where deal_id=$1 and field_key='senior_loan_amount'`, [id]);
-    expect(loan?.value).toBe(1216000);
+    const [loan] = await db.query<any>(`select * from assumptions where deal_id=$1 and field_key='land_cost'`, [id]);
+    expect(loan?.value).toBe(value);
     const ai = loan.sources.find((s: any) => s.rule === "ai");
     expect(ai).toBeDefined();
     if (agrees) expect(loan.sources.every((s: any) => !s.check_outcome)).toBe(true);

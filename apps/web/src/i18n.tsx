@@ -1471,6 +1471,7 @@ const FR_REASONS: [RegExp, string | ((m: RegExpMatchArray) => string)][] = [
   [/^The AI quote is not at this address$/, "La citation IA ne se trouve pas à cette adresse"],
   [/^The AI value is not written in its quote$/, "La valeur IA n’est pas écrite dans sa citation"],
   [/^The AI unit does not match this field$/, "L’unité IA ne correspond pas à ce champ"],
+  [/^Please check: the separator in this figure could be a decimal point or a thousands group; the AI read it as shown$/, "À vérifier : le séparateur de ce chiffre pourrait être une virgule décimale ou un séparateur de milliers; l’IA l’a lu comme indiqué"],
   [/^Please check: every source is a low-confidence AI reading$/, "À vérifier : chaque source est une lecture IA de faible confiance"],
   [/^Rejected in review$/, "Rejetée à l'examen"],
   [/^Second approver declined$/, "Refusée par le second approbateur"],

@@ -10,7 +10,7 @@ import { FIELDS, FIELD_BY_KEY, runPolicy, type Currency, type Policy, type Engin
 import { itemFold } from "@agir/numbers";
 import { renderArtifact, RendererUnavailableError, type ArtifactInput } from "@agir/artifacts";
 import { sha256Hex, type BlobStore, type Db } from "@agir/db";
-import { AI_LOW_CONFIDENCE_NOTE, applyLabels, applySuggestions, chooseByArithmetic, checkArithmetic, consolidate, extractCandidates, figureOrder, kindOf, labelPhrase, labelUnit, offerable, offeredIds, parseDocument, ocrPdf, REMEMBERED_NOTE, withoutLabelled, type SourcedCandidate } from "@agir/extraction";
+import { AI_AMBIGUOUS_NOTE, AI_LOW_CONFIDENCE_NOTE, applyLabels, applySuggestions, chooseByArithmetic, checkArithmetic, consolidate, extractCandidates, figureOrder, kindOf, labelPhrase, labelUnit, offerable, offeredIds, parseDocument, ocrPdf, REMEMBERED_NOTE, withoutLabelled, type SourcedCandidate } from "@agir/extraction";
 
 export const MAX_UPLOAD_BYTES = 75 * 1024 * 1024;
 
@@ -338,6 +338,7 @@ export async function reconcileDeal(db: Db, dealId: string) {
     const chosen = chooseByArithmetic(consolidate(base, deal.currency), unlabelled.filter(f => !personLabelled.has(f) && !assigned.has(`${f.documentId}|${f.location}|${f.raw}`)));
     const proposals = checkArithmetic(consolidate([...base, ...chosen], deal.currency));
     for (const p of proposals) {
+      if (!p.check && ai.some(a => a.ambiguous && p.sources.includes(a) && !p.sources.some(s => !ai.some(other => other === s && other.ambiguous) && s.value === a.value))) p.check = { outcome: "questions", note: AI_AMBIGUOUS_NOTE };
       if (!p.check && p.sources.length && p.sources.every(s => s.rule === "ai" && ai.some(a => a === s && a.confidence === "low"))) p.check = { outcome: "questions", note: AI_LOW_CONFIDENCE_NOTE };
     }
     const existing = await tx.query<AssumptionRowDb>(
