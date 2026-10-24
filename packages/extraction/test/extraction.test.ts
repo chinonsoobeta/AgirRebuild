@@ -9540,3 +9540,58 @@ test("card 135 window questions do not prevent a unique arithmetic interpretatio
   const [proposal] = checkArithmetic(consolidate([chosen!]));
   expect(proposal?.check?.outcome).toBe("questions");
 });
+
+
+describe("card 137b negated labels and permit figures", () => {
+  const read = async (...lines: string[]) => extractCandidates(await parseDocument(Buffer.from(["Notes", ...lines].join("\n")), "Invented Alder.txt"));
+  const termNote = "A loan's term, not the build period, hold or amortization";
+  test.each(["not the", "not a", "not an", "rather than the", "instead of the", "other than the", "pas le", "pas la", "pas les", "pas l'", "et non le", "et non la", "et non les"])("does not name a negated IO label: %s", async phrase => {
+    const got = await read(`Loan maturity (months), ${phrase} IO period: 30`);
+    expect(got.candidates).toHaveLength(0);
+    expect(got.other.find(c => c.value === 30)?.note).toBe(termNote);
+  });
+  test.each([",", ";", ")", ":"])("ends the negated phrase at %s", delimiter => {
+    expect(normalizeLabel(`not the land${delimiter} Hard costs`).label).toBe("hard costs");
+  });
+  test("does not name IO from negated words after a duration", async () => {
+    const got = await read("The loan has a 30-month maturity, not the IO period.");
+    expect(got.candidates).toHaveLength(0);
+    expect(got.other.find(c => c.value === 30)?.note).toBe(termNote);
+  });
+  test("refuses French maturity and keeps only the real IO period", async () => {
+    const fr = await read("Échéance du prêt (mois), pas la période d'intérêts seulement : 30");
+    expect(fr.candidates).toHaveLength(0);
+    expect(fr.other.find(c => c.value === 30)?.note).toBe(termNote);
+    const got = await read("Interest-only period (months): 14", "Loan maturity (months), not the IO period: 30");
+    const proposals = consolidate(got.candidates.map(c => ({...c, documentId: "alder", documentName: "alder.txt"})));
+    expect(proposals).toHaveLength(1);
+    expect(proposals[0]).toMatchObject({fieldKey: "senior_io_months", value: 14, status: "needs_review"});
+  });
+  test.each([
+    ["Hard costs, not the land: $2,000,000", "hard_cost", 2000000],
+    ["Interest-only period (months): 14", "senior_io_months", 14],
+    ["Période d'intérêts seulement (mois) : 14", "senior_io_months", 14],
+    ["Soft costs: $412,000", "soft_cost", 412000],
+    ["Soft costs incl. permits: $412,000", "soft_cost", 412000],
+    ["Honoraires et permis : 211 240 $", "soft_cost", 211240],
+    ["Architect and permits: $82,000", "soft_cost", 82000],
+    ["Design and permits: $82,000", "soft_cost", 82000],
+  ])("preserves %s", async (line, fieldKey, value) => {
+    expect((await read(String(line))).candidates).toEqual(expect.arrayContaining([expect.objectContaining({fieldKey, value})]));
+  });
+  test.each(["Permit charge: $9,850.", "$9,850 — Owner payment due when the permit is issued.", "Permis de construire : 11 240 $.", "Droits de permis : 11 240 $."])("shows a permit item: %s", async line => {
+    const got = await read(line);
+    expect(got.candidates).toHaveLength(0);
+    expect(got.other.find(c => c.value === 9850 || c.value === 11240)?.note).toBe("One soft-cost item (a permit), not the total soft cost; enter the total");
+  });
+  test("preserves the existing permit-fee refusal", async () => {
+    const got = await read("Building permit fees: $11,240.");
+    expect(got.candidates).toHaveLength(0);
+    expect(got.other.find(c => c.value === 11240)?.note).toBe("A fee or premium, not an input");
+  });
+  test("preserves a Permits budget row beside other soft rows", () => {
+    const rows = [["Cost", "Amount"], ["Permits", "11240"], ["Design", "82000"], ["Legal", "18000"]];
+    const got = extractCandidates({ kind: "xlsx", pageCount: null, lines: [], tables: [{name: "Budget", rows: rows.map((r, i) => r.map((text, j) => ({text, ref: `${String.fromCharCode(65 + j)}${i + 1}`})))}], needsOcr: false, fullText: rows.flat().join(" ") });
+    expect(got.candidates).toEqual(expect.arrayContaining([expect.objectContaining({fieldKey: "soft_cost", value: 11240})]));
+  });
+});
