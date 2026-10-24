@@ -3,7 +3,7 @@
 // It drains the jobs table with leases, retries with backoff, and a dead
 // letter. It runs as the trusted service principal.
 
-import { readDeal, storedReadings, type ReaderProvider } from "./reader.ts";
+import { currentDocuments, readDeal, storedReadings, type ReaderProvider } from "./reader.ts";
 export type { ReaderProvider, ReaderRequest } from "./reader.ts";
 import Anthropic from "@anthropic-ai/sdk";
 import { FIELDS, FIELD_BY_KEY, runPolicy, type Currency, type Policy, type EngineInput, type FieldUnit, type RunResult } from "@agir/contracts";
@@ -185,8 +185,8 @@ async function extractDocument(deps: WorkerDeps, documentId: string) {
   const format = result.format.mixed ? "mixed" : result.format.decimal === "." ? "1,234.56" : result.format.decimal === "," ? "1.234,56" : "not detected";
   const asSourced = (c: (typeof result.candidates)[number]): SourcedCandidate => ({ ...c, documentId: d.id, documentName: d.name });
   const suggestions = await suggestLabels(deps, d.workspace_id, offeredOf([...result.candidates, ...result.other].map(asSourced)));
+  let aiRead = false;
   await db.transaction(async (tx) => {
-    await tx.query(`select id from deals where id=$1 for update`, [d.deal_id]);
     await tx.query(`delete from candidates where document_id = $1`, [d.id]);
     await tx.query(`delete from label_suggestions where document_id = $1`, [d.id]);
     for (const r of suggestions) {
@@ -206,9 +206,16 @@ async function extractDocument(deps: WorkerDeps, documentId: string) {
       `update documents set stage = 'extracted', stage_detail = $4, read_role = $5, candidate_count = $2, number_format = $3, updated_at = now() where id = $1`,
       [d.id, result.candidates.length, format, parsed.needsOcr ? `Read by OCR from ${parsed.pageCount} scanned ${parsed.pageCount === 1 ? "page" : "pages"}. Check every value against the page before approving it.` : null, result.notes.find(n => n.startsWith("Document kind: "))?.slice("Document kind: ".length) ?? null],
     );
-    await readDeal(tx, store, d.deal_id, d.workspace_id, deps.read);
-    await tx.query(`insert into jobs (kind, payload) values ('reconcile_deal', $1)`, [JSON.stringify({ deal_id: d.deal_id })]);
+    aiRead = Boolean(deps.read || process.env.ANTHROPIC_API_KEY) && !(await currentDocuments(tx, d.deal_id)).some(doc => ["uploaded", "checking", "reading", "extracting"].includes(doc.stage));
+    if (!aiRead) await tx.query(`insert into jobs (kind, payload) values ('reconcile_deal', $1)`, [JSON.stringify({ deal_id: d.deal_id })]);
   });
+  if (aiRead) {
+    try {
+      await readDeal(db, store, d.deal_id, d.workspace_id, deps.read);
+    } finally {
+      await db.query(`insert into jobs (kind, payload) values ('reconcile_deal', $1)`, [JSON.stringify({ deal_id: d.deal_id })]);
+    }
+  }
   for (const r of suggestions) if (r.error) await audit(db, d.workspace_id, d.deal_id, "document.suggestions_failed", "document", d.id, r.error);
   await audit(db, d.workspace_id, d.deal_id, "document.extracted", "document", d.id, {
     candidates: result.candidates.length,

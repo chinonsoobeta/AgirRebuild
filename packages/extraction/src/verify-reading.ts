@@ -34,7 +34,7 @@ export function verifyReading(reading: Reading, documents: readonly ReadingDocum
   const entries = doc ? addressedEntries(doc.document).filter(e => e.location === reading.location) : [];
   if (!doc || entries.length !== 1) return { outcome: READING_FAILURE.address };
   if (!entries[0]!.text.includes(reading.quote)) return { outcome: READING_FAILURE.quote };
-  const token = tokenize(reading.quote, detectFormat(reading.quote)).find(t => t.value === reading.value);
+  const token = tokenize(reading.quote, detectFormat(doc.document.fullText)).find(t => t.value === reading.value);
   if (!token) return { outcome: READING_FAILURE.value };
   let value = reading.value;
   const seen = reading.unit_seen;

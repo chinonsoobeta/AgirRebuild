@@ -22,7 +22,7 @@ type DocumentRow = { id: string; name: string; sha256: string; storage_key: stri
 export const documentsHash = (docs: readonly { id: string; sha256: string }[]) => sha256Hex(new TextEncoder().encode(JSON.stringify(docs.map(d => [d.id, d.sha256]).sort((a, b) => a[0]! < b[0]! ? -1 : a[0]! > b[0]! ? 1 : 0))));
 export const currentDocuments = (db: Db, dealId: string) => db.query<DocumentRow>(`select id, name, sha256, storage_key, stage from documents where deal_id=$1 and retired_at is null order by id`, [dealId]);
 
-/** Called under the deal row lock after extraction, before the reconcile is queued. */
+/** Called after extraction commits, outside any transaction, before reconciliation. */
 export async function readDeal(db: Db, store: BlobStore, dealId: string, workspaceId: string, injected?: ReaderProvider) {
   const read = injected ?? (process.env.ANTHROPIC_API_KEY ? provider : null);
   if (!read) return;
@@ -50,7 +50,7 @@ export async function readDeal(db: Db, store: BlobStore, dealId: string, workspa
   }
   // Keep the text snapshot used by the boundary so database-only reconciles replay it exactly.
   const verification = response ? { documents, ...verifyReadings(response, documents) } : null;
-  await db.query(`insert into ai_readings (deal_id,workspace_id,model,prompt_version,documents_hash,request,response,outcome,error,verification) values ($1,$2,$3,$4,$5,$6,$7,$8,$9,$10)`, [dealId, workspaceId, model, READER_PROMPT_VERSION, hash, JSON.stringify(request), response && JSON.stringify(response), response ? "ok" : "failed", error && JSON.stringify(error), verification && JSON.stringify(verification)]);
+  await db.query(`insert into ai_readings (deal_id,workspace_id,model,prompt_version,documents_hash,request,response,outcome,error,verification) values ($1,$2,$3,$4,$5,$6,$7,$8,$9,$10) on conflict (deal_id, model, prompt_version, documents_hash) do nothing`, [dealId, workspaceId, model, READER_PROMPT_VERSION, hash, JSON.stringify(request), response && JSON.stringify(response), response ? "ok" : "failed", error && JSON.stringify(error), verification && JSON.stringify(verification)]);
 }
 
 /** No provider here: replay only the current document set and the current prompt version. */
