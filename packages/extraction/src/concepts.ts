@@ -79,6 +79,9 @@ export const SHARE_WORD = /\b(?:share|proportion|fraction|part)\b/;
 // A total may stand alone or specify the closing/uses, but never a named component.
 export const CLOSING_TOTAL = /^(?:(?:the|le|la) )?(?:grand total|total|sum|somme|all uses|overall)(?: (?:of|the|all|uses|at|close|closing|a|la|cloture|des|emplois))*$/;
 
+export const PERMIT_ITEM_NOTE = "One soft-cost item (a permit), not the total soft cost; enter the total";
+export const PERMIT_WORD = /\b(?:permits?|permis)\b/;
+
 export const CONCEPTS: readonly {
   fieldKey: string;
   budget?: true;
@@ -146,9 +149,10 @@ export const CONCEPTS: readonly {
     words: [/\b(?:interior finish package|work order|scope price|hard-costs?|suite installation|ouvrage|transformation|marche de travaux)\b/, /^(?=.*\b(?:gc|general contractor|crew|builder|trades?|conversion|renovation|installation|fit-up)\b)(?=.*\b(?:contracts?|lump sum|payments?|bill|price|spend|envelope|sum|cost)\b)/, /\b(?:construction|build|works|trades|framing|envelope|finishes|fit-out|fitout|shell|contractor|structure|site services|servicing|sitework|travaux|charpente|enveloppe|finitions|entrepreneur|chantier)\b/, /(?<!purchase of the )(?<!purchase of )\bbuilding\b(?!\s+(?:purchase|acquisition|price|basis))/],
     exclude: /\b(?:unallocated|loans?|banks?|lenders?|first-mortgage|advance|contribution|rents?|monthly|loyers?|mensuel\w*|quotes?|interest|insurance|management|supervision|fees?|permits?|design|drawings|period|months?|prets?|interets?|assurance|gestion|honoraires|permis)\b/,
   },
+  // Permit words identify a component; mapping refuses permit-only labels outside budget tables.
   {
     fieldKey: "soft_cost", unit: "$", budget: true,
-    words: [/\b(?:paper side|paperwork|advis[eo]rs?|outside services|professional[- ]services|development services|advice|consents|fees outside (?:the )?gc|soft (?:spend|charges)|services professionnels|demarches|frais (?:de )?(?:professionnels|montage)|professional(?: and)? (?:approval|people|spend))\b/, /\b(?:architect\w*|engineer(?!ed\b)\w*|design|drawings|plans|consultants?|permits?|approvals?|legal|accounting|surveys?|studies|project management|development management|professional fees|honoraires|etudes|permis|conception|juridique\w*|comptable\w*)\b/],
+    words: [/\b(?:paper side|paperwork|advis[eo]rs?|outside services|professional[- ]services|development services|advice|consents|fees outside (?:the )?gc|soft (?:spend|charges)|services professionnels|demarches|frais (?:de )?(?:professionnels|montage)|professional(?: and)? (?:approval|people|spend))\b/, /\b(?:architect\w*|engineer(?!ed\b)\w*|design|drawings|plans|consultants?|approvals?|legal|accounting|surveys?|studies|project management|development management|professional fees|honoraires|etudes|conception|juridique\w*|comptable\w*)\b/, PERMIT_WORD],
     exclude: /\b(?:development charges|dc|levies|interest|financing|frais de financement|redevances|interets?|loan|lender|pret|preteur|commissions?|loss(?:es)?|pertes?|courtage|courtiers?|garanties?|gestion|(?<!honoraires du )dossier|engagement|banques?|financements?|hypothecaires?)\b/,
   },
   {

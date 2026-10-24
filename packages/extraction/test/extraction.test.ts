@@ -9558,6 +9558,10 @@ describe("card 137b negated labels and permit figures", () => {
     expect(got.candidates).toHaveLength(0);
     expect(got.other.find(c => c.value === 30)?.note).toBe(termNote);
   });
+  test("keeps an affirmative label in the sentence after a negated label", async () => {
+    const got = await read("The promote is above the preference, not the GP equity share. cash equity pledged $1,250,000.");
+    expect(got.candidates).toEqual(expect.arrayContaining([expect.objectContaining({fieldKey: "equity_amount", value: 1250000})]));
+  });
   test("refuses French maturity and keeps only the real IO period", async () => {
     const fr = await read("Échéance du prêt (mois), pas la période d'intérêts seulement : 30");
     expect(fr.candidates).toHaveLength(0);
@@ -9584,14 +9588,24 @@ describe("card 137b negated labels and permit figures", () => {
     expect(got.candidates).toHaveLength(0);
     expect(got.other.find(c => c.value === 9850 || c.value === 11240)?.note).toBe("One soft-cost item (a permit), not the total soft cost; enter the total");
   });
+  test("keeps a neighboring soft-cost component shown when a permit item is shown", async () => {
+    const got = await read("Legal and Organizational Costs $40,115", "Permit charge $37,380", "Soft costs total $487,154");
+    expect(got.candidates.map(c => [c.fieldKey, c.value])).toEqual([["soft_cost", 487154]]);
+    expect(got.other.find(c => c.value === 40115)?.note).toBe("Other lines beside it name no field, so this line may be only part of its cost; enter the field by hand");
+    expect(got.other.find(c => c.value === 37380)?.note).toBe("One soft-cost item (a permit), not the total soft cost; enter the total");
+  });
+  test.each(["December 9, 2020 to permit the proposed increased height on the site.", "The policy does not permit the corporation to use reference 46946/0009."])("does not give non-money figures a permit-cost note: %s", async line => {
+    const got = await read(line);
+    expect(got.other.some(c => c.note?.includes("One soft-cost item (a permit)"))).toBe(false);
+  });
   test("preserves the existing permit-fee refusal", async () => {
     const got = await read("Building permit fees: $11,240.");
     expect(got.candidates).toHaveLength(0);
     expect(got.other.find(c => c.value === 11240)?.note).toBe("A fee or premium, not an input");
   });
   test("preserves a Permits budget row beside other soft rows", () => {
-    const rows = [["Cost", "Amount"], ["Permits", "11240"], ["Design", "82000"], ["Legal", "18000"]];
+    const rows = [["Line item", "Amount"], ["Land", "1000000"], ["Hard costs", "2000000"], ["Permits", "11240"], ["Design", "82000"], ["Legal", "18000"], ["Total", "3111240"]];
     const got = extractCandidates({ kind: "xlsx", pageCount: null, lines: [], tables: [{name: "Budget", rows: rows.map((r, i) => r.map((text, j) => ({text, ref: `${String.fromCharCode(65 + j)}${i + 1}`})))}], needsOcr: false, fullText: rows.flat().join(" ") });
-    expect(got.candidates).toEqual(expect.arrayContaining([expect.objectContaining({fieldKey: "soft_cost", value: 11240})]));
+    expect(got.candidates).toEqual(expect.arrayContaining([expect.objectContaining({fieldKey: "soft_cost", value: 111240, rule: "table:budget-sum", context: "Budget: Permits + Design + Legal"})]));
   });
 });

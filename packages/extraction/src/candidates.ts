@@ -1,4 +1,4 @@
-import { GROWTH_WORD, CONCEPTS, BANK_LENDER, LOAN_NOUN, CLOSING_TOTAL, STATED_TOTAL } from "./concepts.ts";
+import { PERMIT_ITEM_NOTE, GROWTH_WORD, CONCEPTS, BANK_LENDER, LOAN_NOUN, CLOSING_TOTAL, STATED_TOTAL } from "./concepts.ts";
 import { FIELD_BY_KEY, OUTPUT_LIKE_PHRASES } from "@agir/contracts";
 import { detectFormat, normalizeText, SF_PER_M2, tokenize, unitTypesIn, wholeUnitType, type CurrencyCode, type DocumentFormat, type NumberToken } from "@agir/numbers";
 import type { Cell, NormalizedDocument, Table } from "./document.ts";
@@ -1086,7 +1086,7 @@ function conceptLinesInBudget(doc: NormalizedDocument, result: ExtractionResult,
     return byLine.get(i) ?? byLine.set(i, { read: [], unread: [] }).get(i)!;
   };
   for (const c of result.candidates.slice(from)) at(c)?.read.push(c);
-  for (const o of result.other.slice(otherFrom)) if (o.note === "No field matches this label") at(o)?.unread.push(o);
+  for (const o of result.other.slice(otherFrom)) if (o.note === "No field matches this label" || o.note === PERMIT_ITEM_NOTE) at(o)?.unread.push(o);
   const blocks: number[][] = [];
   for (const i of [...byLine.keys()].sort((a, b) => a - b)) {
     const last = blocks.at(-1);

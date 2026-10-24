@@ -4,7 +4,7 @@
 // but it never becomes an input.
 
 import { FIELD_BY_KEY, FIELDS, OUTPUT_LIKE_PHRASES, type FieldDef } from "@agir/contracts";
-import { DECLINED_AFTER, LENDING_WORD, PRICE_WORD, REPAYMENT_WORD, IO_WORD, OWNER_WORD, CASH_IN_WORD, NOT_SENIOR_LENDER, OTHER_LENDER, LENDER_TEST, OTHER_RATE, SALE_WORD, SALE_COST_WORD, BUILD_DURATION, LETTING_WORD, TIME_WORD, KEEP_WORD, CLOSING_TOTAL, ASSUMPTION_HISTORY, OCCUPANCY_WORD, SETTLED_WORD, ACQUISITION_WORD, PROPERTY_WORD, RISK_WORD, HOLDING_WORD, RESIDUAL_COST, NOT_THIS_COST, NOT_RISK_COST, NOT_PROJECT_TOTAL, PROJECT_TOTAL, CONCEPTS, SENIOR_RANK, LOAN_PERIOD, STATED_TOTAL, DEBT_SERVICE, LOAN_ANAPHOR, LOAN_NOUN, MAIN_LENDER, MONTH_INDEX, NOT_A_BUDGET_LINE, NOT_CHOSEN_AFTER, LEAVING_AFTER, NOT_THE_DEALS_ASSUMPTION, NOT_THE_LOAN_AFTER, WHERE_IT_SITS } from "./concepts.ts";
+import { PERMIT_ITEM_NOTE, PERMIT_WORD, DECLINED_AFTER, LENDING_WORD, PRICE_WORD, REPAYMENT_WORD, IO_WORD, OWNER_WORD, CASH_IN_WORD, NOT_SENIOR_LENDER, OTHER_LENDER, LENDER_TEST, OTHER_RATE, SALE_WORD, SALE_COST_WORD, BUILD_DURATION, LETTING_WORD, TIME_WORD, KEEP_WORD, CLOSING_TOTAL, ASSUMPTION_HISTORY, OCCUPANCY_WORD, SETTLED_WORD, ACQUISITION_WORD, PROPERTY_WORD, RISK_WORD, HOLDING_WORD, RESIDUAL_COST, NOT_THIS_COST, NOT_RISK_COST, NOT_PROJECT_TOTAL, PROJECT_TOTAL, CONCEPTS, SENIOR_RANK, LOAN_PERIOD, STATED_TOTAL, DEBT_SERVICE, LOAN_ANAPHOR, LOAN_NOUN, MAIN_LENDER, MONTH_INDEX, NOT_A_BUDGET_LINE, NOT_CHOSEN_AFTER, LEAVING_AFTER, NOT_THE_DEALS_ASSUMPTION, NOT_THE_LOAN_AFTER, WHERE_IT_SITS } from "./concepts.ts";
 import { canonicalItem, codeOf, parenType, SF_PER_M2, unitTypesIn, wholeUnitType, type CurrencyCode, type NumberToken } from "@agir/numbers";
 
 // canonicalItem and itemFold live in @agir/numbers so the engine can use the same fold.
@@ -192,7 +192,11 @@ const OPINION_NOTE = "An opinion of rent, not the deal's assumption";
 const AREA_WORD_RE = /\b(area|sf|sq ft|superficie|surface|gla|nrsf|rsf)\b/;
 // A lender's condition, or a figure true only today, is not the stabilized assumption.
 const LENDER_CONDITION = "A lender's condition, not the occupancy assumption";
-const withoutNegatedCondition = (text: string) => text.replace(/\b(?:not (?:a |an? )?|pas (?:une? |de )?)(?:(?:funding|lending|financing|de financement)\s+)?(?:conditions?|requirements?|exigences?)\b/g, " ");
+// Only label words: a negated description ends at a label separator or sentence end.
+function withoutNegatedLabel(text: string): string {
+  return text.replace(/\b(?:not (?:the|an?)\s+|(?:rather than|instead of|other than) the\s+|pas (?:le|la|les)\s+|pas l(?:['’]\s*|\s+)|et non (?:le|la|les)\s+)[^,;):.]*/gi, " ");
+}
+const withoutNegatedCondition = (text: string) => withoutNegatedLabel(text).replace(/\b(?:not (?:a |an? )?|pas (?:une? |de )?)(?:(?:funding|lending|financing|de financement)\s+)?(?:conditions?|requirements?|exigences?)\b/g, " ");
 const CONDITION_RE = /\b(minimum|min|at least|before|prior to|until|consecutive months?|in order to|as a condition|conversion|first advance|funding|conditions?|covenants?|required|requires?|au moins|minimale?|avant|prealable\w*|deboursement|advances?|draws?|drawdowns?|disbursements?|holdbacks?|releas(?:es?|ed|ing)|funded|avances?|tirages?|debourse\w*|retenues? de garantie|versements?|libere\w*)\b/;
 // A leased or occupied share with a condition marker is the lender's condition, whatever field it names.
 const LEASED_RE = /\b(pre-?leas\w*|leased|occupied|pre-?lou\w*|loue\w*|occupe\w*|occupancy|occupation)\b/;
@@ -305,8 +309,9 @@ function without(text: string, words: RegExp, aliases: readonly string[] = ALL_A
 function lenderFigure(rawLabel: string, t: NumberToken, opts: MapOptions): string | null {
   const prose = opts.prose ?? false;
   // In prose the clause just before the number; in a label the whole label.
-  const clause = prose ? (rawLabel.split(/[,;(]|\band\b|\bet\b/).pop() ?? "") : rawLabel;
-  const words_ = (x: string) => foldText(x.replace(/\([^)]*\)/g, " ")).replace(/[^a-z0-9\s-]/g, " ").replace(/\s+/g, " ").trim();
+  const namingLabel = withoutNegatedLabel(rawLabel);
+  const clause = prose && namingLabel === rawLabel ? (namingLabel.split(/[,;(]|\band\b|\bet\b/).pop() ?? "") : namingLabel;
+  const words_ = (x: string) => foldText(withoutNegatedLabel(x).replace(/\([^)]*\)/g, " ")).replace(/[^a-z0-9\s-]/g, " ").replace(/\s+/g, " ").trim();
   let plain = words_(clause);
   // The words just after the number in its sentence ("5-year term", "3.1% insurance premium", "$25,000 per investor").
   const ctx = foldText(opts.context ?? "");
@@ -315,7 +320,7 @@ function lenderFigure(rawLabel: string, t: NumberToken, opts: MapOptions): strin
   const at = from >= 0 ? ctx.indexOf(raw, from) : ctx.indexOf(raw) === ctx.lastIndexOf(raw) ? ctx.indexOf(raw) : -1;
   // A figure in an aside ("0.5% ($18,000)") has no label of its own: the clause before it names it.
   if (prose && plain === "" && at >= 0) plain = words_((ctx.slice(0, at).split(/[,;]|\band\b|\bet\b/).pop() ?? "").replace("(", " "));
-  const tail = prose && at >= 0 ? ctx.slice(at + raw.length).replace(/^\s*[.,;]\s*/, "") : "";
+  const tail = prose && at >= 0 ? withoutNegatedLabel(ctx.slice(at + raw.length)).replace(/^\s*[.,;]\s*/, "") : "";
   const money = t.unit === "$" || t.unit === "$/mo" || t.currency || (!!opts.budgetConcept && !opts.prose && t.unit === null && Math.abs(t.value ?? 0) >= 1000);
 
   if (money && (PER_INVESTOR_RE.test(plain) || PER_INVESTOR_AFTER_RE.test(tail))) return "A per-investor amount, not the deal's equity";
@@ -328,8 +333,9 @@ function lenderFigure(rawLabel: string, t: NumberToken, opts: MapOptions): strin
   const capped = CAPPED_RE.test(near) && !(money && CAPPED_COST_RE.test(plain) && !LOAN_WORD_RE.test(plain));
   if ((LIMIT_RE.test(without(near.replace(/\b(exit|terminal|reversion|going[- ]out|outgoing|disposal|disposition|eventual sale|on sale|sale|sell|revente|vente|depart|sortie) cap of\b/g, "$1 cap"), LIMIT_RE)) || capped) && !COVERAGE_RE.test(plain)) return "A lender's limit, not the deal's figure";
   // The figure's own noun decides: an interest-only word before it or right after it makes it the IO period; one further on in the sentence does not.
-  const ownIo = IO_RE.test(plain) || IO_START_RE.test(prose && at >= 0 ? ctx.slice(at + raw.length) : foldText(opts.after ?? ""));
-  if ((t.unit === "months" || t.unit === "years") && ((TERM_RE.test(without(plain, TERM_RE)) && !AMORT_RE.test(plain)) || TERM_AFTER_RE.test(tail)) && !ownIo) return "A loan's term, not the build period, hold or amortization";
+  const ownIo = IO_RE.test(plain) || IO_START_RE.test(prose && at >= 0 ? tail : foldText(withoutNegatedLabel(opts.after ?? "")));
+  const durationUnit = t.unit ?? (namingLabel !== rawLabel ? normalizeLabel(rawLabel).labelUnit : null);
+  if ((durationUnit === "months" || durationUnit === "years") && ((TERM_RE.test(without(plain, TERM_RE)) && !AMORT_RE.test(plain)) || TERM_AFTER_RE.test(tail)) && !ownIo) return "A loan's term, not the build period, hold or amortization";
   // A fee named after a budget field or inside an "including" list is a part of that cost, not the figure's label.
   const full = without(words_(rawLabel), FEE_RE);
   const before = full.slice(0, Math.max(full.search(FEE_RE), 0));
@@ -402,7 +408,7 @@ export function normalizeLabel(raw: string): { label: string; labelUnit: LabelUn
   // A comma can introduce a duration unit followed by its timing basis.
   const duration = raw.match(/,\s*(months?|mos?|mois|years?|yrs?|ans?|années?|annees?)\b/i);
   if (!labelUnit && duration) labelUnit = /^(m|mo)/i.test(duration[1]!) ? "months" : "years";
-  const label = fieldThenType(duration ? raw.slice(0, duration.index) : raw)
+  const label = fieldThenType(withoutNegatedLabel(duration ? raw.slice(0, duration.index) : raw))
     .replace(/\([^)]*\)/g, " ")
     .replace(/²/g, "2")
     .toLowerCase()
@@ -941,6 +947,16 @@ export function mapToken(rawLabel: string, t: NumberToken, opts: MapOptions = {}
   // A description naming two cost fields by concept is shown, unless its own words already name its field.
   if (m.kind === "unmapped" && !opts.quote && (opts.budget || opts.budgetConcept) && t.unit === "$" && !/%/.test(opts.gap ?? opts.ahead ?? "") && joined.length === 2 && joined.every((part) => part.length === 1) && joined[0]![0]!.fieldKey !== joined[1]![0]!.fieldKey) return { kind: "ignored", reason: "This description names more than one budget field; enter each line separately" };
   if (m.kind === "unmapped" || (m.kind === "ignored" && m.reason === "A fee or premium, not an input" && ((SALE_WORD.test(named) && SALE_COST_WORD.test(named)) || /\b(?:frais de montage|honoraires du dossier|frais courants|frais annuels|selling-cost|growth|development levies|croissance)\b/.test(named))) || (m.kind === "ignored" && m.unitMismatch)) m = conceptField(rawLabel, t, opts) ?? m;
+  // A permit alone names one item; budget-table rows retain their existing reading.
+  if (!opts.budget && ((m.kind === "field" && m.fieldKey === "soft_cost") || (m.kind === "unmapped" && opts.prose)) && (t.currency || t.unit === "$" || (!opts.prose && t.unit === null && Math.abs(t.value ?? 0) >= 1000))) {
+    const permitLabel = normalizeLabel(rawLabel).label;
+    const soft = CONCEPTS.find(c => c.fieldKey === "soft_cost")!;
+    if (PERMIT_WORD.test(permitLabel)
+      && !FIELD_BY_KEY.get("soft_cost")!.aliases.some(a => hasPhrase(permitLabel, a))
+      && !soft.words.some(w => w.test(permitLabel.replace(new RegExp(PERMIT_WORD.source, "g"), " ")))) {
+      return { kind: "ignored", reason: PERMIT_ITEM_NOTE };
+    }
+  }
   // Card 127: another lender, a test, or a different kind of rate outranks every loan/equity reading.
   if (m.kind === "field" && (/^(?:senior_|mezz_|refinance_)/.test(m.fieldKey) || m.fieldKey === "equity_amount")) {
     const own = foldText(`${rawLabel} ${(opts.after ?? "").split(/[,;.]|\b(?:and|et)\b/)[0] ?? ""}`);
@@ -1036,7 +1052,7 @@ function conceptField(rawLabel: string, t: NumberToken, opts: MapOptions, financ
   if (!afterLabel && opts.prose && opts.context && !foldText(withoutTaxBasis(opts.context.slice(0, t.start)).replace(/,\s*all-in\s*:?\s*$/i, "")).trimEnd().endsWith(foldText(rawLabel).trim())) return null;
   const lead = afterLabel ? (opts.lead ?? "").split(/[,;]/).pop() ?? "" : "";
   const periodLabel = /,\s*(?:months?|mois|years?|ans?|années?)\s*$/i.test(rawLabel);
-  const normalized = normalizeLabel(opts.prose && !afterLabel && !periodLabel ? rawLabel.split(/[,;]/).pop() ?? "" : rawLabel);
+  const normalized = normalizeLabel(opts.prose && !afterLabel && !periodLabel ? withoutNegatedLabel(rawLabel).split(/[,;]/).pop() ?? "" : rawLabel);
   const { label, labelCode } = normalized;
   const statedUnit = !opts.prose && LOAN_NOUN.test(label) && !/\d/.test(label) ? /\b(?:years?|ans?|annees?)\b/.test(label) ? "years" : /\b(?:months?|mois)\b/.test(label) ? "months" : /%/.test(label) ? "%" : null : null;
   const labelUnit = normalized.labelUnit ?? statedUnit;
@@ -1102,7 +1118,9 @@ function mapSigned(rawLabel: string, t: NumberToken, opts: MapOptions = {}): Map
 
 function mapLabel(rawLabel: string, t: NumberToken, opts: MapOptions = {}): Mapped {
   const prose = opts.prose ?? false;
-  const norm = normalizeLabel(rawLabel);
+  const namingLabel = withoutNegatedLabel(rawLabel);
+  // When an earlier sentence negates a field, its reference words do not qualify this sentence's label.
+  const norm = normalizeLabel(prose && namingLabel !== rawLabel ? namingLabel.split(/\.\s+/).pop() ?? namingLabel : rawLabel);
   const { labelUnit, labelCode } = norm;
   let label = norm.label;
   // A budget field at the head of a label and a list of what it covers: the head names the figure, the list never does.
