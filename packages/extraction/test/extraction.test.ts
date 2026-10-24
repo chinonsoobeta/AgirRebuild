@@ -2294,16 +2294,16 @@ describe("totals and their parts", () => {
     expect(JSON.stringify([r.candidates, r.other, parsed.tables])).not.toContain("[object Object]");
     expect(pick(r)).toEqual([["land_cost", 100_000], ["hard_cost", 200_000], ["contingency", 10_000]]);
     expect(JSON.stringify(parsed.tables)).not.toContain("#REF");
-    expect(r.notes).toEqual(["This workbook has formulas with no saved results (B4). Open and save it in Excel to include them."]);
+    expect(r.notes).toEqual(["This workbook has formulas with no saved results (B4). Open and save it in Excel to include them.", "Document kind: unrecognized document (deal source)"]);
   });
-  test("negative: a workbook of plain values has no document note", async () => {
+  test("negative: a workbook of plain values has only its document kind note", async () => {
     const r = extractCandidates(await parseDocument(new Uint8Array(await (async () => {
       const ExcelJS = (await import("exceljs")).default;
       const wb = new ExcelJS.Workbook();
       wb.addWorksheet("Budget").addRows([["Item", "Amount"], ["Land", 100_000]]);
       return wb.xlsx.writeBuffer();
     })()), "p.xlsx"));
-    expect(r.notes).toEqual([]);
+    expect(r.notes).toEqual(["Document kind: unrecognized document (deal source)"]);
   });
   describe("workbook packages with absolute internal links", () => {
     async function twoSheetBytes(): Promise<Uint8Array> {
@@ -9165,6 +9165,9 @@ describe("figures must belong to this deal: audit of Card 128b", () => {
   test("a label-value list with dot leaders is not a table of contents", () => {
     expect(values(["Number of units .......... 48", "Loan amount ........ $6,200,000", "Interest rate ........ 5.25%"], "unit_count")).toEqual([48]);
     expect(values(["Number of units .......... 36", "Storeys .......... 4", "Parking stalls .......... 30"], "unit_count")).toEqual([36]);
+    const evidence = ["Appraisal report", ...Array(12).fill("The narrative describes the background and purpose of our housing development."), "Project budget", "Number of units .......... 48", "Loan amount ........ $6,200,000", "Interest rate ........ 5.25%"];
+    expect(values(evidence, "unit_count")).toEqual([48]);
+    expect(values(evidence, "senior_loan_amount")).toEqual([6200000]);
   });
   test("a table of contents is still refused", () => {
     expect(read("Executive summary .......... 3", "Unit mix .......... 7", "Number of units .......... 12", "Financing .......... 18").candidates).toEqual([]);
@@ -9173,4 +9176,123 @@ describe("figures must belong to this deal: audit of Card 128b", () => {
     expect(values(["Typical unit size 750 sf", "Typical two-bedroom rent $2,100 per month"], "unit_rent_monthly")).toEqual([2100]);
     expect(read("Typical market rent for two-bedroom units in the area is $1,900 per month.").candidates).toEqual([]);
   });
+});
+
+describe("document kind and subject sections (Card 128c)", () => {
+  const filler = Array.from({ length: 20 }, () => "The narrative explains the purpose and background of this document.");
+  const read = (...lines: string[]) => extractCandidates(toNormalized({ name: "invented.pdf", kind: "pdf", lines }));
+  const kinds: [string, string, string[], string[]][] = [
+    ["term sheet", "deal source", ["Term sheet"], ["Fiche de modalités"]],
+    ["commitment letter", "deal source", ["Commitment letter"], ["Lettre d'engagement"]],
+    ["credit letter", "deal source", ["Credit agreement"], ["Convention de crédit"]],
+    ["cost budget", "deal source", ["Project cost budget"], ["Budget des coûts du projet"]],
+    ["rent roll", "deal source", ["Rent roll"], ["État des loyers"]],
+    ["pro forma", "deal source", ["Financial pro forma"], ["Pro forma financier"]],
+    ["application form", "deal source", ["Application form", "Applicant: Linden Ltd."], ["Formulaire de demande", "Demandeur : Société des Pins"]],
+    ["email or letter", "deal source", ["From: builder@example.test"], ["Objet : notre projet"]],
+    ["appraisal", "evidence", ["Appraisal report"], ["Rapport d'évaluation"]],
+    ["broker brochure", "evidence", ["For sale", "Listed by Cedar Advisors", "Property summary"], ["À vendre", "Prix demandé", "Description de la propriété"]],
+    ["offering memorandum for one project", "evidence", ["Offering memorandum", "One project at 18 Linden Lane"], ["Notice d'offre", "Un projet au 18 rue des Pins"]],
+    ["single-project court record", "evidence", ["Court file no. AB-48", "Receiver's report", "Property: 18 Linden Lane"], ["Dossier de cour AB-48", "Rapport du séquestre", "Immeuble : 18 rue des Pins"]],
+    ["council report", "evidence", ["Council report"], ["Rapport au conseil"]],
+    ["business plan", "evidence", ["Business plan"], ["Plan d'affaires"]],
+    ["mortgage-fund offering", "context", ["Mortgage investment corporation", "Offering memorandum", "Mortgage portfolio"], ["Fonds hypothécaire", "Notice d'offre", "Portefeuille de prêts hypothécaires"]],
+    ["portfolio offering", "context", ["Offering memorandum", "We invest in a portfolio of properties."], ["Notice d'offre", "Nous investissons dans un portefeuille de projets."]],
+    ["portfolio business plan", "context", ["Business plan", "Future acquisitions", "Acquisitions and expansions"], ["Plan d'affaires", "Acquisitions futures", "Acquisitions et expansions"]],
+    ["portfolio listing", "context", ["For sale", "Properties can be purchased together or separately"], ["À vendre", "Les immeubles peuvent être achetés séparément"]],
+    ["market report", "context", ["Market report", "Vacancy rate statistics"], ["Rapport de marché", "Statistiques locatives"]],
+    ["organization budget", "context", ["Financial plan", "Consolidated operations budget"], ["Plan financier", "Budget des opérations consolidées"]],
+    ["strategy", "context", ["Housing strategy", "Several housing projects"], ["Stratégie de logement", "Plusieurs projets résidentiels"]],
+    ["guidebook", "context", ["Housing guidebook", "Table of contents"], ["Guide du logement", "Table des matières"]],
+    ["audit", "context", ["Auditor general report", "Table of contents"], ["Rapport du vérificateur général", "Table des matières"]],
+    ["policy research", "context", ["Housing research", "An institutional asset class"], ["Recherche sur le logement", "Une classe d'actifs institutionnels"]],
+    ["prototype feasibility study", "context", ["Feasibility study", "Prototype buildings"], ["Étude de faisabilité", "Bâtiments types"]],
+    ["multi-property court record", "context", ["Court file no. AB-48", ...Array.from({ length: 8 }, (_, i) => `Property: ${20+i} ${["Linden", "Birch", "Cedar", "Maple", "Aspen", "Willow", "Oak", "Fir"][i]} Street`)], ["Dossier de cour AB-48", ...Array.from({ length: 8 }, (_, i) => `Immeuble : ${20+i} rue des ${["Pins", "Lilas", "Ormes", "Saules", "Bouleaux", "Erables", "Chenes", "Cedres"][i]}`)]],
+    ["blank template", "context", ["Application form", "Applicant:", "Project:", "Loan amount:"], ["Formulaire de demande", "Demandeur :", "Projet :", "Montant demandé :"]],
+  ];
+  for (const [kind, role, en, fr] of kinds) test.each([en, fr].map(lines => ({lines})))(`${kind}: bilingual fingerprint $lines`, ({lines}) => {
+    const r = read(...lines, ...filler, "Land cost: $830,000");
+    expect(r.notes).toContain(`Document kind: ${kind} (${role})`);
+    if (role === "context") expect(r.candidates).toEqual([]);
+    else expect(r.candidates).toEqual(expect.arrayContaining([expect.objectContaining({fieldKey: "land_cost", value: 830000})]));
+  });
+  test.each([
+    ["Term sheet", "The fund is our lender."],
+    ["Market rent survey for 12 Elm Street", "Rent roll"],
+    ["Fiche de modalités", "Le fonds est notre prêteur."],
+    ["État des loyers", "Enquête de marché pour notre immeuble"],
+  ].map(lines => ({lines})))("deal-source trap $lines", ({lines}) => {
+    const r = read(...lines, ...filler, "Land cost: $830,000");
+    expect(r.notes.some(n => n.endsWith("(deal source)"))).toBe(true);
+    expect(r.candidates.some(c => c.fieldKey === "land_cost")).toBe(true);
+  });
+  test.each(["Business plan", "Plan d'affaires"])("subject sections survive %s", title => {
+    const sections = title === "Plan d'affaires"
+      ? ["Aperçu du marché", "Coûts de construction : 9 100 000 $", "Budget du projet", "Coûts de construction : 4 800 000 $"]
+      : ["Market overview", "Hard costs: $9,100,000", "Project budget", "Hard costs: $4,800,000"];
+    const r = read(title, ...filler, ...sections);
+    expect(r.candidates.filter(c => c.fieldKey === "hard_cost").map(c => c.value)).toEqual([4800000]);
+    expect(r.candidates.find(c => c.value === 4800000)?.note).toBe("Read from a business plan; check it");
+    expect(r.other.some(c => c.value === 9100000)).toBe(true);
+  });
+  test.each(["Market report", "Rapport de marché"])("context figures remain offerable with the same suggestions: %s", title => {
+    const r = read(title, "Vacancy rate statistics", "Statistiques locatives", ...filler, "Land cost: $830,000", "Unlabelled reserve: $65,000");
+    const c = r.other.find(c => c.value === 830000)!;
+    expect(c.note).toContain("This document looks like a market report");
+    expect(offerable(c)).toBe(true);
+    const f = {...c, note: c.note ?? null};
+    expect(suggestFields(f)).toEqual(suggestFields({...f, note: "No field matches this label"}));
+    expect(suggestFields(f)).toContain("land_cost");
+  });
+  test.each([["Market report", "Land cost: $830,000"], ["Guide du logement", "Coût du terrain : 830 000 $"]].map(lines => ({lines})))("short text stays a deal source: $lines", ({lines}) => {
+    const r = read(...lines);
+    expect(r.notes).toContain("Document kind: unrecognized document (deal source)");
+    expect(r.candidates.some(c => c.fieldKey === "land_cost")).toBe(true);
+  });
+  test("one signal is insufficient for context", () => {
+    const r = read("Market report", ...filler, "Land cost: $830,000");
+    expect(r.notes).toContain("Document kind: unrecognized document (deal source)");
+    expect(r.candidates.some(c => c.fieldKey === "land_cost")).toBe(true);
+  });
+  test.each([
+    ["Offering memorandum", "The issuer has units for sale in this project.", "Listed by Cedar Advisors"],
+    ["Notice d'offre", "Les unités à vendre sont proposées par la société.", "Souscription"],
+    ["Project investment", "The issuer offers units of the partnership.", "Risk factors"],
+  ])("securities precede sale prose: %s", (...lines) => {
+    expect(read(...lines, ...filler).notes).toContain("Document kind: offering memorandum for one project (evidence)");
+  });
+  test.each([
+    ["Project description", "Our building includes units for sale to residents."],
+    ["Description du projet", "Notre immeuble comprend des unités à vendre aux résidents."],
+    ["For sale", "Property summary"],
+  ])("sale words without a broker are insufficient: %s", (...lines) => {
+    expect(read(...lines, ...filler).notes).toContain("Document kind: unrecognized document (deal source)");
+  });
+  test.each([false, true])("one dominant court project survives other addresses: French=%s", french => {
+    const address = french ? "18 rue des Pins" : "18 Linden Street";
+    const others = Array.from({length: 5}, (_, i) => french ? `${30+i} rue des ${["Lilas", "Ormes", "Saules", "Bouleaux", "Erables"][i]}` : `${30+i} ${["Birch", "Cedar", "Maple", "Aspen", "Willow"][i]} Street`);
+    const r = read(french ? "Dossier de cour AB-49" : "Court file AB-49", ...Array(8).fill(address), ...others, ...filler, "Loan amount: $7,300,000");
+    expect(r.notes).toContain("Document kind: single-project court record (evidence)");
+    expect(r.candidates.some(c => c.value === 7300000)).toBe(true);
+  });
+  test.each(["Court file: the Properties", "Dossier de cour : portefeuille immobilier"])("court portfolio title: %s", title => {
+    expect(read(title, ...filler).notes).toContain("Document kind: multi-property court record (context)");
+  });
+
+  test.each([
+    ["Forward sale", "morgan@cedar.example", "Direct 604 555 0138", "Personal Real Estate Corporation"],
+    ["À vendre", "camille@pins.example", "514 555 0138", "Courtier immobilier"],
+  ])("broker contact block in either order: %s", (...lines) => {
+    expect(read(...lines, ...filler).notes).toContain("Document kind: broker brochure (evidence)");
+  });
+  test("court property addresses exclude repeated office contact blocks", () => {
+    const properties = ["21 Birch Rd", "31 Cedar Rd", "41 Maple Rd", "51 Aspen Rd", "61 Willow Rd", "71 Oak Rd", "81 Fir Rd", "91 Elm Rd"];
+    const r = read("Court file XY-93", ...Array(12).fill("Counsel: 400 Ash Street, Suite 320"), ...properties, ...filler);
+    expect(r.notes).toContain("Document kind: multi-property court record (context)");
+  });
+  test.each(["Project: Willow House", "Projet : Maison des Pins"])("a dominant named court project: %s", subject => {
+    const r = read("Court file XY-94", subject, ...Array(8).fill(subject.split(/:\s*/)[1]!), ...Array.from({length: 8}, (_, i) => `${20+i} ${["Linden", "Birch", "Cedar", "Maple", "Aspen", "Willow", "Oak", "Fir"][i]} Street`), ...filler);
+    expect(r.notes).toContain("Document kind: single-project court record (evidence)");
+  });
+
 });

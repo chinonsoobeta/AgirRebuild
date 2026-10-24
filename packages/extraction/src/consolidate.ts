@@ -1,6 +1,7 @@
 import { FIELD_BY_KEY, FIELDS } from "@agir/contracts";
 import { detectFormat, tokenize, unitTypesIn } from "@agir/numbers";
 import type { Candidate } from "./candidates.ts";
+import { originalKindNote } from "./document-kind.ts";
 import { CONCEPTS } from "./concepts.ts";
 import { commercialItem, canonicalItem, currencyOf, foldText, itemFold, outsideBounds } from "./mapping.ts";
 
@@ -111,7 +112,7 @@ const NO_MATCH_NOTES = ["No field matches this label", "No budget line matches t
 export const SUGGESTED_NOTE = "Suggested label, not read by Agir's rules; confirm it";
 
 /** A figure the reader found but could not label. Any refused figure (limit, fee, range, year, struck, per-basis, scale, not part of the deal) carries another note and is never offered. */
-export const offerable = (c: Candidate): boolean => c.fieldKey === null && c.value !== null && NO_MATCH_NOTES.includes(c.note ?? "");
+export const offerable = (c: Candidate): boolean => c.fieldKey === null && c.value !== null && NO_MATCH_NOTES.includes(originalKindNote(c.note));
 
 /** A stable id for each offered figure: its document, location and raw text, numbered when the same triple repeats. */
 export function offeredIds(offered: readonly SourcedCandidate[]): string[] {
@@ -207,8 +208,9 @@ const LOOKS_LIKE = /^Looks like (.+), but the number is not written as /;
  * itemized field needs an item name, so it is never suggested. Ties keep the order of FIELDS.
  */
 export function suggestFields(f: { raw: string; context: string; note: string | null; unitSeen?: string | null; value?: number | null }): string[] {
-  const looks = LOOKS_LIKE.exec(f.note ?? "")?.[1];
-  if (!looks && !NO_MATCH_NOTES.includes(f.note ?? "")) return [];
+  const note = originalKindNote(f.note);
+  const looks = LOOKS_LIKE.exec(note)?.[1];
+  if (!looks && !NO_MATCH_NOTES.includes(note)) return [];
   const token = f.unitSeen === undefined || f.value === undefined ? tokenize(f.raw, detectFormat(f.raw))[0] : undefined;
   const unitSeen = f.unitSeen !== undefined ? f.unitSeen : (token?.unit ?? null);
   // The figure's own clause names it best, as for the reader: the words before it, or after it when it leads its clause.

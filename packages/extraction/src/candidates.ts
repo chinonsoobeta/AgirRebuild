@@ -2,6 +2,7 @@ import { GROWTH_WORD, CONCEPTS, BANK_LENDER, LOAN_NOUN, CLOSING_TOTAL, STATED_TO
 import { FIELD_BY_KEY, OUTPUT_LIKE_PHRASES } from "@agir/contracts";
 import { detectFormat, normalizeText, SF_PER_M2, tokenize, unitTypesIn, wholeUnitType, type CurrencyCode, type DocumentFormat, type NumberToken } from "@agir/numbers";
 import type { Cell, NormalizedDocument, Table } from "./document.ts";
+import { applyDocumentKind } from "./document-kind.ts";
 import { unconditioned, commercialItem, commercialLabel, genericCommercial, PROPERTY_TAX_WORD, BASIS_AFTER_RE, CREDIT_NOTE, REPLACED_LOAN, DEPOSIT_NOTE, DEPOSIT_RE, LTV_BASIS, canonicalItem, costSentence, currencyOf, flagRead, flagSentence, hasPhrase, isOperatingTarget, isExitCapLabel, isTakeoutTimingLabel, isPlainRentLabel, loanNameOnly, loanTerm, mapToken, normalizeLabel, withoutTaxBasis, OLD_SHEET_RE, rankScope, SCENARIO_SHEET_NOTE, SCENARIO_SHEET_RE, SUPERSEDED_LABEL_NOTE, scopeIn, scopesIn, withCurrency, type MapOptions, type Mapped, type Scope } from "./mapping.ts";
 
 /** One value found in one document, with where it came from and why it was (or was not) mapped. */
@@ -3011,6 +3012,7 @@ export function extractCandidates(doc0: NormalizedDocument): ExtractionResult {
     return false;
   });
   dealFigures(doc, result);
+  applyDocumentKind(doc, result);
   // Within one document, the same field and value found twice is one candidate.
   const seen = new Set<string>();
   result.candidates = result.candidates.filter((c) => {
