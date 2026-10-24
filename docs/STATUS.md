@@ -248,6 +248,7 @@ later tasks build on earlier migrations. Review and merge them in order.
 | `task/144b-claude` | done | Card 144b: three or more figures where the largest equals the sum of the rest, within $1, become a stated total to check, with the parts named. v13: +11 right, −11 false conflicts, 0 wrong. Review shows the note. | Yes: consolidation. Merged on the owner's say-so |
 | `task/161-reader-gate` | done | Card 161: `docs/reader-gate.md`. The gate fails on any wrong value, trap, extra value or false conflict, or on fewer unseen items right than the baseline (544/550). 99% is the goal. | Not required |
 | `task/163-scaled-decimals` | done | Card 163: a money figure with a scale word and three digits after one separator ("$1.216M") reads by the document's decimal, or is refused when the document shows none; a "0" whole part is always a decimal ("0,614 M$" is 614,000). Before, both could be read 1,000 times too large. Finished by an Opus subagent after Codex ran out; audited by Claude. Dev bank, score and readings identical; one realdocs change (a $3.265 billion misreading in a conflict is now refused). Reader gate offline unchanged. | Not required |
+| `task/151-insured-limits` | done | Card 151: an insured refinance loan before premium fits both CMHC limits, the existing-property LTV and the new-construction loan-to-cost against total development cost (`refinance_ltc_limit`; owner decision 7). Insured draft policy hashes change; `policy-v1` and the non-insured drafts do not. Policies stay drafts. | Not required |
 
 The plan for small Canadian developers is [plan-small-developers.md](plan-small-developers.md).
 Release 1 steps 0 to 3 are built. Steps 4 and 5 are built on draft, unsigned policy and tables that
@@ -332,7 +333,7 @@ Where the code showed a better route than [the plan](plan-small-developers.md), 
 
 ## Card 94b — cited insured product floors (2026-10-19)
 
-Local draft for human review: Select points and Standard term choose the cited 1.10x / 1.20x / 1.30x floors. Stored-policy limits check minimum units, refinance LTV before premium, and amortization. Readiness requires the Standard term for 7+ units. Owner review is required for the existing-property LTV choice; no credit sign-off is implied.
+Local draft for human review: Select points and Standard term choose the cited 1.10x / 1.20x / 1.30x floors. Stored-policy limits check minimum units, refinance LTV before premium, and amortization. Readiness requires the Standard term for 7+ units. Card 151 lands owner decision 7 (2026-10-23): the loan before premium must fit both the existing-property LTV against the refinance value and the new-construction loan-to-cost against total development cost (Select 95%, Standard 100%); amortization uses the existing-property limits. The policies stay drafts until credit signs; no credit sign-off is implied.
 
 ## Fallback gate and held-out measurement (card 154)
 

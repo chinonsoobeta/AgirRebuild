@@ -81,7 +81,7 @@ export type Policy = {
   agreementTolerancePct: number;
   sourcePrecedence: readonly string[];
   stresses: readonly StressPreset[];
-  refinanceLimits?: { select: readonly { minPoints: number; maxLtvPct: number; maxAmortYears: number }[]; standard: { maxLtvPct: number; maxAmortYears: number }; minUnits: number };
+  refinanceLimits?: { select: readonly { minPoints: number; maxLtvPct: number; maxLtcPct?: number; maxAmortYears: number }[]; standard: { maxLtvPct: number; maxLtcPct?: number; maxAmortYears: number }; minUnits: number };
 };
 
 const { version: _v, gates: _g, ...SHARED } = POLICY_V1;
@@ -103,10 +103,12 @@ export const RENTAL_HOLD_DRAFT: Policy = {
 // CMHC, read 2026-10-19:
 // https://www.cmhc-schl.gc.ca/professionals/project-funding-and-mortgage-financing/mortgage-loan-insurance/multi-unit-insurance/mliselect
 // https://assets.cmhc-schl.gc.ca/sf/project/cmhc/pdfs/content/en/standard-rental-housing.pdf
-// Draft credit choice for owner review: existing-property LTV against the refinance value.
+// Owner decision 7 (2026-10-23): the stricter of CMHC's two columns. The loan before premium fits both the
+// existing-property LTV against the refinance value and the new-construction LTC against total development cost;
+// amortization uses the existing-property limits.
 const REFINANCE_LIMITS: NonNullable<Policy["refinanceLimits"]> = {
-  select: [{ minPoints: 50, maxLtvPct: 85, maxAmortYears: 40 }, { minPoints: 70, maxLtvPct: 95, maxAmortYears: 45 }, { minPoints: 100, maxLtvPct: 95, maxAmortYears: 50 }],
-  standard: { maxLtvPct: 85, maxAmortYears: 40 }, minUnits: 5,
+  select: [{ minPoints: 50, maxLtvPct: 85, maxLtcPct: 95, maxAmortYears: 40 }, { minPoints: 70, maxLtvPct: 95, maxLtcPct: 95, maxAmortYears: 45 }, { minPoints: 100, maxLtvPct: 95, maxLtcPct: 95, maxAmortYears: 50 }],
+  standard: { maxLtvPct: 85, maxLtcPct: 100, maxAmortYears: 40 }, minUnits: 5,
 };
 /** MLI Select: at least 50 stated points, with a 1.10x DCR floor. */
 export const RENTAL_HOLD_INSURED_DRAFT: Policy = {
@@ -241,7 +243,7 @@ const THRESHOLD_RULES: Record<string, [string, string, string, number, number, b
 function thresholdPaths(policy: Policy): string[] {
   return [...Object.keys(policy.gates).map((key) => `gates.${key}`), "maxLtcPct", "baseSizingDscrFloor", "maxFailedGatesForConditions", "agreementTolerancePct",
     ...policy.stresses.flatMap((stress) => Object.entries(stress).filter(([, value]) => typeof value === "number").map(([field]) => `stresses.${stress.key}.${field}`)),
-    ...(policy.refinanceLimits ? ["refinanceLimits.minUnits", ...["maxLtvPct", "maxAmortYears"].flatMap((field) => [`refinanceLimits.standard.${field}`, ...policy.refinanceLimits!.select.map((tier) => `refinanceLimits.select.${tier.minPoints}.${field}`)])] : [])];
+    ...(policy.refinanceLimits ? ["refinanceLimits.minUnits", ...["maxLtvPct", "maxLtcPct", "maxAmortYears"].flatMap((field) => [`refinanceLimits.standard.${field}`, ...policy.refinanceLimits!.select.map((tier) => `refinanceLimits.select.${tier.minPoints}.${field}`)])] : [])];
 }
 function thresholdLocation(policy: Policy, path: string): { object: Record<string, unknown>; field: string } {
   const parts = path.split(".");

@@ -26,6 +26,7 @@ export function runChecks(input: EngineInput, L: Ledger, policy: Policy, contrac
     const tier = [...limits.select].sort((a,b) => b.minPoints-a.minPoints).find(t => points >= t.minPoints) ?? limits.standard;
     if (units < limits.minUnits) out.push({ key: "insured_min_units", kind: "bound", severity: "error", expected: limits.minUnits, actual: units, message: `CMHC multi-unit insurance needs at least ${limits.minUnits} units; the deal has ${units}.` });
     if (L.refinance && L.refinance.newAmount > L.refinance.value * tier.maxLtvPct / 100 + 0.005) out.push({ key: "refinance_ltv_limit", kind: "bound", severity: "error", expected: tier.maxLtvPct, actual: L.refinance.value > 0 ? L.refinance.newAmount / L.refinance.value * 100 : undefined, message: `The refinance loan before premium exceeds the ${tier.maxLtvPct}% loan-to-value limit.` });
+    if (L.refinance && tier.maxLtcPct !== undefined && L.refinance.newAmount > L.tdc * tier.maxLtcPct / 100 + 0.005) out.push({ key: "refinance_ltc_limit", kind: "bound", severity: "error", expected: tier.maxLtcPct, actual: L.tdc > 0 ? L.refinance.newAmount / L.tdc * 100 : undefined, message: `The refinance loan before premium exceeds the ${tier.maxLtcPct}% loan-to-cost limit.` });
     if (input.refinance!.amortYears > tier.maxAmortYears) out.push({ key: "refinance_amort_limit", kind: "bound", severity: "error", expected: tier.maxAmortYears, actual: input.refinance!.amortYears, message: `Refinance amortization exceeds the ${tier.maxAmortYears}-year limit.` });
   }
 

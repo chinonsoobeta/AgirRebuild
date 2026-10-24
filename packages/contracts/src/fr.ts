@@ -258,6 +258,7 @@ export function checkText(lang: Lang, f: ReturnType<typeof numberFormat>, gate: 
   switch (c.key) {
     case "insured_min_units": return `L’assurance multilogement de la SCHL exige au moins ${f.value(e,"units")} ; le projet en compte ${f.value(a,"units")}.`;
     case "refinance_ltv_limit": return `Le prêt de refinancement avant la prime dépasse le plafond prêt-valeur de ${pct(e)}.`;
+    case "refinance_ltc_limit": return `Le prêt de refinancement avant la prime dépasse le plafond prêt-coût de ${pct(e)}.`;
     case "refinance_amort_limit": return `L’amortissement du refinancement dépasse le plafond de ${f.value(e,"years")}.`;
     case "debt_exceeds_cost":
       return `Les engagements de dette de ${$(a)} couvrent la totalité du coût de ${$(e)}. Les fonds propres seraient nuls ou négatifs : cette structure de capital ne peut pas exister.`;

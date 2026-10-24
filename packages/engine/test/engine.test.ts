@@ -1064,7 +1064,7 @@ describe("exit by refinancing and holding (card 60)", () => {
       const input=insured(4,50);
       input.refinance!.ltvPct=96;
       expect(contracts.runPolicy({policy:old},old.version)).toBe(old);
-      expect(underwrite(input,old).checks.some(c=>["insured_min_units","refinance_ltv_limit","refinance_amort_limit"].includes(c.key))).toBe(false);
+      expect(underwrite(input,old).checks.some(c=>["insured_min_units","refinance_ltv_limit","refinance_ltc_limit","refinance_amort_limit"].includes(c.key))).toBe(false);
     });
     test.each([["mliSelectPoints",-1],["mliSelectPoints",151],["mliSelectPoints",50.5],["termYears",0],["termYears",41],["termYears",5.5]] as const)("rejects invalid %s = %s", (key,value) => {
       const input=insured(); input.refinance![key]=value;
@@ -1319,7 +1319,7 @@ describe("exit by refinancing and holding (card 60)", () => {
         version: "rental-hold-insured-draft",
         gates: { ...RENTAL_HOLD_DRAFT.gates, dcrAfterRefinanceMin: 1.1 },
         baseSizingDscrFloor: 1.1,
-        refinanceLimits: { minUnits: 5, standard: {maxLtvPct:85,maxAmortYears:40}, select: [{minPoints:50,maxLtvPct:85,maxAmortYears:40},{minPoints:70,maxLtvPct:95,maxAmortYears:45},{minPoints:100,maxLtvPct:95,maxAmortYears:50}] },
+        refinanceLimits: { minUnits: 5, standard: {maxLtvPct:85,maxLtcPct:100,maxAmortYears:40}, select: [{minPoints:50,maxLtvPct:85,maxLtcPct:95,maxAmortYears:40},{minPoints:70,maxLtvPct:95,maxLtcPct:95,maxAmortYears:45},{minPoints:100,maxLtvPct:95,maxLtcPct:95,maxAmortYears:50}] },
       });
       expect(POLICIES["rental-hold-insured-draft"]).toBe(RENTAL_HOLD_INSURED_DRAFT);
     });

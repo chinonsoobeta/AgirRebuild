@@ -66,7 +66,7 @@ describe("selling the units (task 77)", () => {
     });
   });
   test("pins all three rental policies and selects only the new mode's policy", () => {
-    const expected = {"policy-v1": "9f95780101a9ecfe6444c47dd319c1cb8d77251d60700a1a4dde1733055296b9", "rental-hold-draft": "2fb3d651462684813c8207c60d86fe0a3d0785bc7220fa5a57a91968b9bd3ae8", "rental-hold-insured-draft": "1acd96e37d38fc6a4fb724c4fd565bd91ead4b5e938c2e6625b8de9b68eca206"};
+    const expected = {"policy-v1": "9f95780101a9ecfe6444c47dd319c1cb8d77251d60700a1a4dde1733055296b9", "rental-hold-draft": "2fb3d651462684813c8207c60d86fe0a3d0785bc7220fa5a57a91968b9bd3ae8", "rental-hold-insured-draft": "effd89a1bf841a81fe82b5a5d454bc07293d8a569e047bd2a76f450f9fa87eed"};
     for (const p of [contracts.POLICY_V1, contracts.RENTAL_HOLD_DRAFT, contracts.RENTAL_HOLD_INSURED_DRAFT]) expect(sha(p)).toBe(expected[p.version as keyof typeof expected]);
     expect(contracts.policyFor(small()).version).toBe("for-sale-draft");
     expect(contracts.policyFor(allEquityDeal())).toBe(contracts.POLICY_V1);
@@ -259,7 +259,7 @@ describe("selling the units (task 77)", () => {
     ]);
     expect(result.verdict.gates.filter(g=>g.status === "failed")).toHaveLength(select ? 3 : 4);
     expect(result.verdict.code).toBe("REJECT");
-    if (select) expect(result.checks.filter(c=>c.severity === "error" && ["insured_min_units","refinance_ltv_limit","refinance_amort_limit"].includes(c.key))).toEqual([]);
+    if (select) expect(result.checks.filter(c=>c.severity === "error" && ["insured_min_units","refinance_ltv_limit","refinance_ltc_limit","refinance_amort_limit"].includes(c.key))).toEqual([]);
     else {
       const warning=result.checks.find(c=>c.key === "base_sizing_dscr");
       expect(warning).toMatchObject({severity:"warning",expected:1.30,message:expect.stringContaining("under the 1.30x floor")});

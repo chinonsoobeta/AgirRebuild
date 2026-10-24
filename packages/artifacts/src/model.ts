@@ -208,7 +208,7 @@ export function customThresholdBlocks(f: Formatter, x: Pick<ArtifactInput,"polic
   });
   for (const check of standard.checks.filter((check) => check.severity === "error")) {
     const text = f.ident(plainTerm(f.lang,checkText(f.lang,numberFormat(f.lang),(key,en) => f.gate(key,en),check,x.standardPolicy.maxLtcPct)),`standard.check.${check.key}`);
-    items.push({ tone:"error", lenderCited: ["insured_min_units","refinance_ltv_limit","refinance_amort_limit"].includes(check.key), text: ["insured_min_units","refinance_ltv_limit","refinance_amort_limit"].includes(check.key) ? reportText(f.lang,"failsCmhcCheck",text) : text });
+    items.push({ tone:"error", lenderCited: ["insured_min_units","refinance_ltv_limit","refinance_ltc_limit","refinance_amort_limit"].includes(check.key), text: ["insured_min_units","refinance_ltv_limit","refinance_ltc_limit","refinance_amort_limit"].includes(check.key) ? reportText(f.lang,"failsCmhcCheck",text) : text });
   }
   // Base sizing is a warning, so it is not among the stored standard error checks. Its recorded base metric is policy-independent.
   const sizing = x.result.scenarios[0]?.metrics.find((metric) => metric.key === "sizing_dscr");
