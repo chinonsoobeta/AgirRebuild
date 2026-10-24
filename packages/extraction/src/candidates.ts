@@ -50,6 +50,12 @@ function regionAt(result: ExtractionResult, location: string | string[], rule: s
   return region;
 }
 
+/** Add what a reader knows about a cell's region; a cell no table registered is left alone rather than failing the document. */
+function markRegion(result: ExtractionResult, ref: string, known: Partial<Region>) {
+  const region = documentRegions.get(result)?.regions.get(ref);
+  if (region) Object.assign(region, known);
+}
+
 /** Register table identity and original row indexes before section readers slice the rows. */
 function tableRegions(table: Table, result: ExtractionResult, source?: Region["source"]) {
   const state = documentRegions.get(result);
@@ -1351,7 +1357,7 @@ function fromRentRoll(table: Table, headerRow: number, roles: Roles, result: Ext
     const otherProperty = OTHER_RENT_RE.test(fold(rowContext).replace(MARKET_NOW_RE, " "));
     // The roll's total row, an unrelated property or an ambiguous rent is shown.
     const totalRow = itemParts.some((p) => ROLL_TOTAL_RE.test(fold(p)));
-    if (totalRow) for (const cell of row) Object.assign(documentRegions.get(result)!.regions.get(cell.ref)!, { rowRole: "total" });
+    if (totalRow) for (const cell of row) markRegion(result, cell.ref, { rowRole: "total" });
     if (totalRow || roles.ambiguousRent || otherProperty) {
       for (const [i, cell] of row.entries()) {
         const t = roles.item.includes(i) ? null : cellToken(cell, result.format);
@@ -1919,7 +1925,7 @@ function fromBudget(table: Table, headerRow: number, roles: BudgetRoles, result:
     const usesTotal = USES_TOTAL_RE.test(labelCell.text.trim());
     const isTotal = statedTotal || usesTotal || TOTAL_RE.test(labelCell.text) || !!categoryTotal || !!trailingTotal?.test(labelCell.text);
     // Unread rows with nothing read or totalled above them are the whole table's breakdown of its first total.
-    for (const cell of row) Object.assign(documentRegions.get(result)!.regions.get(cell.ref)!, { rowRole: isTotal ? "total" : "line" });
+    for (const cell of row) markRegion(result, cell.ref, { rowRole: isTotal ? "total" : "line" });
     const bare = !started;
     if (isTotal) started = true;
     const lines = segment;
@@ -2262,7 +2268,7 @@ function readTable(table0: Table, result: ExtractionResult, notes: string[] = []
     if (cur.rows.length > 0) sections.push(cur);
   };
   table.rows.forEach((row, at) => {
-    if (regionHeading !== undefined) for (const cell of row) Object.assign(documentRegions.get(result)!.regions.get(cell.ref)!, { heading: regionHeading });
+    if (regionHeading !== undefined) for (const cell of row) markRegion(result, cell.ref, { heading: regionHeading });
     // A cell holding a home label with its figure ("Suites planned 3") makes the row a data row, not a header.
     const numeric = catOf.has(row) || row.some((c) => c.number !== undefined || (tokenize(c.text, result.format).length > 0 && homeRole(fold(c.text.replace(/\$?\s*\d[\d ,.\u00a0]*(?:\s*\$)?/g, " "))) !== null));
     if (cur.rent && (!filledCells(row).length || ROLL_TOTAL_RE.test(fold(row.find(c => c.text.trim())?.text ?? "")))) {
@@ -3011,7 +3017,7 @@ export function extractCandidates(doc0: NormalizedDocument): ExtractionResult {
   const documentScope = documentScopes.length === 1 ? documentScopes[0] : undefined;
   for (const t of doc.tables) {
     const heading = t.at ? regions.get(doc.lines[t.at - 1]?.location ?? "")?.heading : undefined;
-    if (heading !== undefined) for (const row of t.rows) for (const cell of row) Object.assign(regions.get(cell.ref)!, { heading });
+    if (heading !== undefined) for (const row of t.rows) for (const cell of row) markRegion(result, cell.ref, { heading });
     const [before, beforeOther] = [result.candidates.length, result.other.length];
     const owner = t.at ? comparisonHeading(doc.lines.slice(0,t.at).map(l => l.text), result.format) : "";
     fromTable(owner ? { ...t, name: `${t.name}: ${owner}` } : t, result, notes, t.at ? scopes[t.at - 1] : documentScope);
