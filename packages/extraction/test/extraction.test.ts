@@ -9649,3 +9649,9 @@ describe("parts that add up to a stated total are a breakdown (card 144b)", () =
     expect(p).toMatchObject({ status: "conflicting", value: null, reason: null });
   });
 });
+
+test("a lone scaled hard-cost figure never becomes a billion-dollar candidate (Card 163)", () => {
+  const text = "Hard costs: $1.216M";
+  const result = extractCandidates({ kind: "pdf", lines: [{ text, location: "page 1, line 1" }], tables: [], pageCount: 1, needsOcr: false, fullText: text });
+  expect(result.candidates.filter((c) => c.fieldKey === "hard_cost" && c.value === 1_216_000_000)).toEqual([]);
+});

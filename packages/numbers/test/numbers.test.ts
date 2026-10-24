@@ -52,6 +52,34 @@ describe("the V4 corruption probes now fail closed or read correctly", () => {
   });
 });
 
+describe("scaled three-digit figures (Card 163)", () => {
+  test.each([
+    ["$1.216M", US, 1_216_000],
+    ["$1.216M", EU, 1_216_000_000],
+    ["$1.216M", UNKNOWN, null],
+    ["0,614 M$", EU, 614_000],
+    ["0,614 M$", UNKNOWN, 614_000],
+    ["$0.614M", UNKNOWN, 614_000],
+    ["$1,216M", UNKNOWN, null],
+    ["$1,216M", US, 1_216_000_000],
+    ["$1.2M", UNKNOWN, 1_200_000],
+    ["$12,400", UNKNOWN, 12_400],
+    ["$0.614M", US, 614_000],
+    ["$0.614M", EU, null],
+    ["0,614 M$", US, null],
+    ["$0.614", UNKNOWN, 0.614],
+    ["$0.614", EU, null],
+  ] as const)("%s with document format %j reads %s", (line, format, value) => {
+    const token = first(line, format);
+    expect(token.value).toBe(value);
+    if (value === null) {
+      expect(token.refusal).toMatch(format.decimal
+        ? /uses a different decimal separator/
+        : /could be .* or .*; the document does not say which/);
+    }
+  });
+});
+
 describe("units and scale", () => {
   test("money scale words apply only to money", () => {
     expect(first("Loan of $34.5 million", US).value).toBe(34_500_000);
