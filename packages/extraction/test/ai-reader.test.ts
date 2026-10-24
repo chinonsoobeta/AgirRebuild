@@ -30,10 +30,17 @@ describe("reading verification", () => {
     for (const value of [6.21, 621]) expect(verifyReading({ ...reading, field: "exit_cap_rate_pct", value, unit_seen: "%", quote }, [{ ...documents[0]!, document }])).toEqual({ outcome: READING_FAILURE.value });
   });
   test.each([
-    ["Loan: $1.216M", 1216000], ["Prêt : 0,614 M$", 614000],
+    ["Loan: $1.216M", 1216000],
   ])("verifies the alternate scaled reading with review: %s", (quote, value) => {
     const document = { ...doc("txt"), fullText: quote, lines: [{ location: "line 1", text: quote }] };
     expect(verifyReading({ ...reading, quote, value }, [{ ...documents[0]!, document }])).toMatchObject({ outcome: "verified", candidate: { value, ambiguous: true } });
+  });
+  test("a zero whole part reads as a decimal without review: Prêt : 0,614 M$", () => {
+    const quote = "Prêt : 0,614 M$";
+    const document = { ...doc("txt"), fullText: quote, lines: [{ location: "line 1", text: quote }] };
+    const got = verifyReading({ ...reading, quote, value: 614000 }, [{ ...documents[0]!, document }]);
+    expect(got).toMatchObject({ outcome: "verified", candidate: { value: 614000 } });
+    expect(got.candidate).not.toHaveProperty("ambiguous");
   });
   test("requires the scale and respects settled document formatting", () => {
     const quote = "Loan: $1.216M";
@@ -41,7 +48,7 @@ describe("reading verification", () => {
     for (const value of [1216, 1.216]) expect(verifyReading({ ...reading, quote, value }, [{ ...documents[0]!, document }])).toEqual({ outcome: READING_FAILURE.value });
     const own = verifyReading({ ...reading, quote, value: 1216000000 }, [{ ...documents[0]!, document }]);
     expect(own.outcome).toBe("verified");
-    expect(own.candidate).not.toHaveProperty("ambiguous");
+    expect(own.candidate).toHaveProperty("ambiguous", true);
     document.fullText += "\nCost: $2,500,000.50";
     const settled = verifyReading({ ...reading, quote, value: 1216000 }, [{ ...documents[0]!, document }]);
     expect(settled.outcome).toBe("verified");
