@@ -1,5 +1,5 @@
 import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
-import { useEffect, useRef, useState, type FormEvent, type ReactNode } from "react";
+import { Fragment, useEffect, useRef, useState, type FormEvent, type ReactNode } from "react";
 import { FIELD_BY_KEY, FIELDS, tableSourceLabel } from "@agir/contracts";
 import { SF_PER_M2 } from "@agir/numbers";
 import { api, type Assumption, type Review as ReviewData, type Source } from "../api";
@@ -247,6 +247,7 @@ export function Review({ dealId }: { dealId: string }) {
   const unused = r.other.filter((o) => o.figureId && o.value !== null && !o.label).length;
   const itemNames = [...new Set(r.assumptions.map((a) => a.itemKey).filter((i): i is string => !!i))];
   const selectedDefaults = tickedDefaults.filter(key => r.missing.some(m => m.fieldKey === key && m.default !== null));
+  const lastMissing = r.todo.items.map(i => i.kind).lastIndexOf("missing");
   const plainPending = pending.filter(a => r.todo.items.some(item => item.kind === "needs_review" && item.assumptionId === a.id));
   const docsBusy = deal.data.documents.processing > 0;
   const summary: string[] = t("review.summary", { c: conflicts.length, m: r.missing.length, r: pending.length + awaiting.length, a: approved.length });
@@ -327,7 +328,7 @@ export function Review({ dealId }: { dealId: string }) {
   const aiEntryControl = (id: string, value: number) => editable && <>
     <button className="btn quiet small" type="button" onClick={() => { setAiEntry({ id, value, field: "", item: "" }); enter.reset(); setFormError(null); }}>{t("review.aiEnter")}</button>
     {aiEntry?.id === id && <div className="stack">
-      <select aria-label={t("review.col.input")} value={aiEntry.field} onChange={e => setAiEntry({ ...aiEntry, field: e.target.value, item: "" })}>
+      <select className="input" aria-label={t("review.col.input")} value={aiEntry.field} onChange={e => setAiEntry({ ...aiEntry, field: e.target.value, item: "" })}>
         <option value="">{t("review.useAs")}</option>
         {LABELLABLE.map(field => <option key={field.key} value={field.key}>{L.field(field.key)}</option>)}
       </select>
@@ -511,7 +512,7 @@ export function Review({ dealId }: { dealId: string }) {
     <div className="card" key={a.id} onClick={() => setFocus(a.id)} style={{ background: focused?.id === a.id ? "var(--sunken)" : undefined, cursor: "pointer" }}>
       <div>{name(a)}{a.sources.filter((s, i, all) => s.check_note && all.findIndex(x => x.check_note === s.check_note) === i).map((s, i) => <div key={i} className="small muted" style={s.check_outcome === "questions" ? { color: "var(--review-text)", fontWeight: 600 } : undefined}>{msg(s.check_note)}</div>)}{a.material && <span className="faint small">{t("review.materialTag")}</span>}</div>
       <div className="r num">{f.value(a.value, a.unit)}</div>
-      <div className="small muted">{a.sources.length > 1 ? t("review.agree", { n: a.sources.length }) : a.sources[0]?.document_name}</div>
+      <div className="small muted">{(() => { const docs = new Set(a.sources.filter((s) => a.value !== null && Math.abs(s.value - a.value) < 0.5).map((s) => s.document_id)); return docs.size > 1 ? t("review.agree", { n: docs.size }) : a.sources[0]?.document_name; })()}</div>
       <div className="r" style={{ whiteSpace: "nowrap" }}>
         {editable &&
           (editing === a.id ? (
@@ -578,21 +579,23 @@ export function Review({ dealId }: { dealId: string }) {
                 const problem = r.readiness.impossible.find(i => i.fieldKey === item.fieldKey && (i.itemKey || null) === item.itemKey)!;
                 return <div className="card" key={`impossible-${index}`}><strong>{L.item(problem)}</strong>{editable && (a ? modifyForm(a) : entryForm({ ...problem, unit: FIELD_BY_KEY.get(item.fieldKey)!.unit }, `impossible-${index}`, <span>{name(item)}</span>))}</div>;
               }
-              if (item.kind === "missing") return missingItem(r.missing.find(m => m.fieldKey === item.fieldKey && (m.itemKey || null) === item.itemKey)!);
+              if (item.kind === "missing") return <Fragment key={`missing-${index}`}>
+                {missingItem(r.missing.find(m => m.fieldKey === item.fieldKey && (m.itemKey || null) === item.itemKey)!)}
+                {index === lastMissing && editable && r.missing.some(m => m.default !== null) && <button className="btn small" type="button" disabled={!selectedDefaults.length || defaults.isPending} onClick={() => defaults.mutate(selectedDefaults)}>{t("review.acceptTickedDefaults", { n: selectedDefaults.length })}</button>}
+              </Fragment>;
               if ((item.kind === "please_check" || item.kind === "needs_review") && a) return pendingItem(a);
               if (item.kind === "awaiting" && a) return awaitingItem(a);
               if (item.kind === "ai_check") {
                 const aiIndex = r.todo.items.slice(0, index).filter(i => i.kind === "ai_check").length;
                 const check = r.aiReading!.pleaseCheck[aiIndex]!;
                 return <div className="card stack small" key={`ai-check-${aiIndex}`}>
-                  <strong>{L.field(check.field, check.item)} · {f.value(check.value, "")}</strong>
+                  <strong>{L.field(check.field, check.item)} · {f.value(check.value, FIELD_BY_KEY.get(check.field)?.unit ?? "")}</strong>
                   <span>{check.quote}</span><span>{check.file} · {msg(check.location)}</span><span>{msg(check.reason)}</span>
                   {aiEntryControl(`check-${aiIndex}`, check.value)}
                 </div>;
               }
               return null;
             })}
-            {editable && r.missing.some(m => m.default !== null) && <button className="btn small" type="button" disabled={!selectedDefaults.length || defaults.isPending} onClick={() => defaults.mutate(selectedDefaults)}>{t("review.acceptTickedDefaults", { n: selectedDefaults.length })}</button>}
             <ErrorText error={enter.error ?? defaults.error ?? label.error ?? formError} />
           </section>
 
