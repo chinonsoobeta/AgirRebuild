@@ -9609,3 +9609,43 @@ describe("card 137b negated labels and permit figures", () => {
     expect(got.candidates).toEqual(expect.arrayContaining([expect.objectContaining({fieldKey: "soft_cost", value: 111240, rule: "table:budget-sum", context: "Budget: Permits + Design + Legal"})]));
   });
 });
+
+describe("parts that add up to a stated total are a breakdown (card 144b)", () => {
+  const doc = (text: string): NormalizedDocument => ({ kind: "pdf", lines: [{ text, location: "page 1, line 1" }], tables: [], pageCount: 1, needsOcr: false, fullText: text });
+  const fig = (label: string, amount: string, docName: string, location: string): SourcedCandidate => {
+    const [c] = extractCandidates(doc(`${label}: ${amount}`)).candidates;
+    return { ...c!, location, documentId: docName, documentName: docName };
+  };
+  const land = (amount: string, location: string, docName = "Budget") => fig("Land cost", amount, docName, location);
+  const field = (ps: ReturnType<typeof consolidate>, key: string) => ps.find((p) => p.fieldKey === key)!;
+
+  test("two parts and their total read as the total, with the parts kept as its breakdown", () => {
+    const p = field(consolidate([land("$400,000", "page 1, line 3"), land("$600,000", "page 1, line 4"), land("$1,000,000", "page 2, line 1")]), "land_cost");
+    expect(p).toMatchObject({ status: "needs_review", value: 1_000_000, reason: "The documents give this as parts that add up to it: $400,000 + $600,000" });
+    expect(p.values.map((v) => v.value)).toEqual([1_000_000]);
+    expect(p.sources.map((s) => s.value).sort((a, b) => a! - b!)).toEqual([400_000, 600_000, 1_000_000]);
+  });
+  test("three parts and a total within one dollar", () => {
+    const p = field(consolidate([land("$250,000", "line 1"), land("$300,000", "line 2"), land("$450,000", "line 3"), land("$1,000,000.50", "line 9", "Summary")]), "land_cost");
+    expect(p).toMatchObject({ status: "needs_review", value: 1_000_000.5, reason: "The documents give this as parts that add up to it: $250,000 + $300,000 + $450,000" });
+    expect(p.sources).toHaveLength(4);
+  });
+  test("a sum off by more than a dollar stays a conflict", () => {
+    const p = field(consolidate([land("$400,000", "line 1"), land("$600,000", "line 2"), land("$1,000,002", "line 3")]), "land_cost");
+    expect(p).toMatchObject({ status: "conflicting", value: null, reason: null });
+    expect(p.values).toHaveLength(3);
+  });
+  test("two figures that differ stay a conflict", () => {
+    const p = field(consolidate([land("$400,000", "line 1"), land("$650,000", "line 2", "Appraisal")]), "land_cost");
+    expect(p).toMatchObject({ status: "conflicting", value: null, reason: null });
+  });
+  test("a figure of another field never makes a sum", () => {
+    const ps = consolidate([land("$400,000", "line 1"), land("$1,000,000", "line 2"), fig("Hard costs", "$600,000", "Budget", "line 3")]);
+    expect(field(ps, "land_cost")).toMatchObject({ status: "conflicting", value: null, reason: null });
+    expect(field(ps, "hard_cost")).toMatchObject({ status: "needs_review", value: 600_000 });
+  });
+  test("parts and a total at the same location do not qualify", () => {
+    const p = field(consolidate([land("$400,000", "line 1"), land("$600,000", "line 1"), land("$1,000,000", "line 1")]), "land_cost");
+    expect(p).toMatchObject({ status: "conflicting", value: null, reason: null });
+  });
+});
