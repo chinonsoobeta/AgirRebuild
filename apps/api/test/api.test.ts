@@ -3351,6 +3351,26 @@ describe("Card 132: document roles", () => {
     await work();
     expect((await docs())[0]).toMatchObject({role_set: null, read_role: "term sheet (deal source)"});
   });
+  // Audit of Card 132: the person's role must reach review, not only the stored figures.
+  test("a value rejected only because its document became background returns to review; a person's rejection stands", async () => {
+    const d = (await call(alice, "POST", `/api/workspaces/${ws}/deals`, {name: "Invented role review", assetType: "Multifamily"})).json.id;
+    const up = async (name: string, text: string) => (await call(alice, "PUT", `/api/deals/${d}/documents?name=${name}`, undefined, new TextEncoder().encode(text))).json.id;
+    const a = await up("terms-a.txt", "Term sheet\nLand cost: $830,000\n");
+    const b = await up("terms-b.txt", "Term sheet\nHard cost: $2,450,000\n");
+    await work();
+    const row = async (field: string) => (await call(alice, "GET", `/api/deals/${d}/review`)).json.assumptions.find((x: any) => x.fieldKey === field);
+    expect(await row("land_cost")).toMatchObject({status: "needs_review", value: 830000});
+    const hard = await row("hard_cost");
+    expect((await call(alice, "POST", `/api/assumptions/${hard.id}/review`, {action: "reject", reason: "Invented: not this deal's cost", version: hard.version})).status).toBe(200);
+    for (const id of [a, b]) expect((await call(alice, "POST", `/api/documents/${id}/role`, {role: "context"})).status).toBe(200);
+    await work();
+    expect(await row("land_cost")).toMatchObject({status: "rejected"});
+    for (const id of [a, b]) expect((await call(alice, "POST", `/api/documents/${id}/role`, {role: "deal_source"})).status).toBe(200);
+    await work();
+    expect(await row("land_cost")).toMatchObject({status: "needs_review", value: 830000});
+    expect((await row("land_cost")).sources).toHaveLength(1);
+    expect(await row("hard_cost")).toMatchObject({status: "rejected"});
+  });
   test("upload saves the role in the registration transaction", async () => {
     const d = (await call(alice, "POST", `/api/workspaces/${ws}/deals`, {name: "Invented background", assetType: "Multifamily"})).json.id;
     const r = await call(alice, "PUT", `/api/deals/${d}/documents?name=background.txt&role=context`, undefined, new TextEncoder().encode("Term sheet\nLand cost: $710,000\n"));

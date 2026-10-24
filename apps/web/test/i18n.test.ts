@@ -950,3 +950,21 @@ describe("card 125: review asks a person to verify document taxes", () => {
     } finally { vi.unstubAllGlobals(); }
   });
 });
+
+describe("a document's role: audit of Card 132", () => {
+  it("fills the role and the document name into the text, in both languages", () => {
+    for (const lang of ["en", "fr"] as const) {
+      const i = build(lang, () => {});
+      const role = i.t("docs.role.context");
+      for (const text of [
+        i.t("docs.role.agir", { role }),
+        i.t("docs.role.you", { role }),
+        i.t("docs.role.change", { name: "budget.xlsx" }),
+        i.t("docs.role.changed", { old: role, new: i.t("docs.role.deal_source") }),
+      ]) {
+        expect(text).not.toMatch(/[{}]/);
+        expect(text).toMatch(new RegExp(`${role}|budget\\.xlsx`));
+      }
+    }
+  });
+});

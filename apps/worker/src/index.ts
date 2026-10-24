@@ -462,7 +462,15 @@ export async function reconcileDeal(db: Db, dealId: string) {
           changed++;
         }
       } else if (e.status === "rejected") {
-        await tx.query(`update assumptions set sources = $2, updated_at = now() where id = $1`, [e.id, JSON.stringify(sources)]);
+        // Rejected only because its source went (no person acted): the source is back, so it waits for review as a new proposal would (audit of Card 132).
+        const [last] = await tx.query<{ action: string }>(`select action from assumption_events where assumption_id = $1 order by id desc limit 1`, [e.id]);
+        if (last?.action === "source_removed") {
+          await tx.query(`update assumptions set status = $2, value = $3, sources = $4, conflict_values = $5, reason = $6, version = version + 1, updated_at = now() where id = $1`, [
+            e.id, p.status, p.value, JSON.stringify(sources), p.status === "conflicting" ? JSON.stringify(conflictFromDocs) : null, reason,
+          ]);
+          await log(e.id, "source_returned", "rejected", p.status, e.value, p.value, reason ?? "Its document is read again");
+          changed++;
+        } else await tx.query(`update assumptions set sources = $2, updated_at = now() where id = $1`, [e.id, JSON.stringify(sources)]);
       }
     }
     for (const e of existing) {
