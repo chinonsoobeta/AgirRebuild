@@ -1405,8 +1405,12 @@ const FR_REASONS: [RegExp, string | ((m: RegExpMatchArray) => string)][] = [
   [/^The GP cash flows have no single IRR\.$/, "Les flux du commandité n'ont pas de TRI unique."],
   // Extraction notes and document states.
   [/^Could be the (.+) or the (.+); enter the one to use$/, (m) => {
-    const label = (text: string) => FR_FIELDS[FIELDS.find(f => f.label.toLowerCase() === text)?.key ?? ""] ?? text;
-    return `Il pourrait s’agir de ${label(m[1]!)} ou de ${label(m[2]!)}; saisissez le champ à utiliser`;
+    const label = (text: string) => { const fr = FR_FIELDS[FIELDS.find(f => f.label.toLowerCase() === text)?.key ?? ""]; return fr ? fr.charAt(0).toLowerCase() + fr.slice(1) : text; };
+    return `Il pourrait s’agir de ${label(m[1]!)} ou de ${label(m[2]!)} ; saisissez le champ à utiliser`;
+  }],
+  [/^One figure for both the (.+) and the (.+); enter each one$/, (m) => {
+    const label = (text: string) => { const fr = FR_FIELDS[FIELDS.find(f => f.label.toLowerCase() === text)?.key ?? ""]; return fr ? fr.charAt(0).toLowerCase() + fr.slice(1) : text; };
+    return `Un seul chiffre pour ${label(m[1]!)} et ${label(m[2]!)} ; saisissez chacun`;
   }],
   [/^Chosen because it closes: (.+)$/, (m) => `Choisi car il confirme : ${translateMessage(`Checked: ${m[1]}`).replace(/^Vérifié : /, "")}`],
   [/^Checked: the costs read add up to the stated total cost of (.+)$/, (m) => `Vérifié : les coûts lus correspondent au coût total déclaré de ${m[1]}`],

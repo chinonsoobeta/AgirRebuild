@@ -919,7 +919,11 @@ export function mapToken(rawLabel: string, t: NumberToken, opts: MapOptions = {}
   const duration = t.unit ?? normalizeLabel(rawLabel).labelUnit;
   if (!LOAN_PERIOD.test(localLabel) && !/\b(?:io|interest[- ]only|interest only|interets? seulement)\b/.test(localLabel) && (duration === "months" || duration === "years") && /\b(?:and|et)\b/.test(localLabel) && localLabel.split(/\b(?:and|et)\b/).every(part => part.trim())) {
     const periodFields = CONCEPTS.filter(c => ["months", "years"].includes(c.unit) && c.words.some(w => w.test(localLabel)) && (c.with ?? []).every(w => w.test(localLabel)));
-    if (new Set(periodFields.map(c => c.fieldKey)).size > 1) return ambiguous(periodFields.map(c => c.fieldKey), "More than one period field fits this figure");
+    if (new Set(periodFields.map(c => c.fieldKey)).size > 1) {
+      // Card 134 audit: "construction and lease-up: 24 months" is one figure for both periods, never one or the other, and no identity checks a period.
+      const keys = [...new Set(periodFields.map(c => c.fieldKey))];
+      return { kind: "ignored", reason: keys.length === 2 ? `One figure for both the ${FIELD_BY_KEY.get(keys[0]!)!.label.toLowerCase()} and the ${FIELD_BY_KEY.get(keys[1]!)!.label.toLowerCase()}; enter each one` : "More than one period field fits this figure" };
+    }
   }
   if (t.unit === "%" && /\b(?:and|et)\b/.test(localLabel)) {
     const parts = localLabel.split(/\b(?:and|et)\b/).map(part => FIELDS.filter(d => d.extractable && !d.itemized && d.unit === "%" && d.aliases.some(a => hasPhrase(part, a))).map(d => d.key));

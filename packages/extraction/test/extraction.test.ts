@@ -9488,4 +9488,10 @@ describe("card 134 arithmetic choice", () => {
     expect(three?.alternatives).toBeUndefined();
     expect(three?.note).toBe("More than one percentage field fits this figure");
   });
+  test("a period for both construction and lease-up is one figure for both, never a choice (card 134 audit)", () => {
+    const doc = (text: string): NormalizedDocument => ({ kind: "pdf", pageCount: 1, needsOcr: false, fullText: text, lines: [{text, location: "page 1, line 1"}], tables: [], notes: [] });
+    const both = extractCandidates(doc("We expect construction and leasing over 2 years.")).other.find(c => c.value === 2);
+    expect(both?.alternatives).toBeUndefined();
+    expect(both?.note).toBe("One figure for both the construction period and the lease-up period; enter each one");
+  });
 });
