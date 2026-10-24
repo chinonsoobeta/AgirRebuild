@@ -1021,6 +1021,43 @@ describe("exit by refinancing and holding (card 60)", () => {
         expect(runChecks(input,buildLedger(input),policyFor(input),null).some(c=>c.key === "refinance_amort_limit")).toBe(years>maxAmort);
       }
     });
+    test.each([[undefined,100],[50,95],[70,95],[100,95]])("tier %s has a cents boundary on loan-to-cost (card 151)", (points,maxLtc) => {
+      const input=insured(12,points,10);
+      delete input.refinance!.ltvPct;
+      const L0=buildLedger(input);
+      const policy=policyFor(input);
+      const tdc=L0.tdc;
+      const value=L0.refinance!.value;
+      for (const delta of [-0.01,0.01]) {
+        input.refinance!.amount=tdc*maxLtc/100+delta;
+        const tier=[...policy.refinanceLimits!.select].sort((a,b)=>b.minPoints-a.minPoints).find(t=>(points ?? 0) >= t.minPoints) ?? policy.refinanceLimits!.standard;
+        expect(input.refinance!.amount).toBeLessThanOrEqual(value*tier.maxLtvPct/100);
+        const checks=underwrite(input,policyFor(input)).checks;
+        expect(checks.some(c=>c.key === "refinance_ltv_limit")).toBe(false);
+        const ltc=checks.find(c=>c.key === "refinance_ltc_limit");
+        expect(ltc !== undefined).toBe(delta > 0);
+        if (ltc) expect(ltc).toMatchObject({ severity:"error", expected:maxLtc, message:`The refinance loan before premium exceeds the ${maxLtc}% loan-to-cost limit.` });
+      }
+    });
+    test("a loan over both limits gets both errors (card 151)", () => {
+      const input=insured(12,50,10);
+      delete input.refinance!.ltvPct;
+      const L0=buildLedger(input);
+      input.refinance!.amount=Math.max(L0.tdc,L0.refinance!.value)*1.01;
+      const keys=underwrite(input,policyFor(input)).checks.filter(c=>c.severity === "error").map(c=>c.key);
+      expect(keys).toEqual(expect.arrayContaining(["refinance_ltv_limit","refinance_ltc_limit"]));
+    });
+    test("a stored insured policy without loan-to-cost limits replays without the check (card 151)", () => {
+      const limits=RENTAL_HOLD_INSURED_DRAFT.refinanceLimits!;
+      const old={...RENTAL_HOLD_INSURED_DRAFT, refinanceLimits:{ select: limits.select.map(({minPoints,maxLtvPct,maxAmortYears})=>({minPoints,maxLtvPct,maxAmortYears})), standard:{maxLtvPct:limits.standard.maxLtvPct,maxAmortYears:limits.standard.maxAmortYears}, minUnits:limits.minUnits }} as typeof RENTAL_HOLD_INSURED_DRAFT;
+      const input=insured(12,50,10);
+      delete input.refinance!.ltvPct;
+      const L0=buildLedger(input);
+      input.refinance!.amount=Math.max(L0.tdc,L0.refinance!.value)*1.01;
+      const checks=underwrite(input,old).checks;
+      expect(checks.some(c=>c.key === "refinance_ltv_limit")).toBe(true);
+      expect(checks.some(c=>c.key === "refinance_ltc_limit")).toBe(false);
+    });
     test("an older stored insured policy replays without new limits and has a different hash", () => {
       const { refinanceLimits: _limits, ...old } = RENTAL_HOLD_INSURED_DRAFT;
       expect(sha(old)).not.toBe(sha(RENTAL_HOLD_INSURED_DRAFT));

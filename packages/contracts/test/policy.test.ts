@@ -85,6 +85,10 @@ describe("card 96a owner thresholds", () => {
     const result = effectivePolicy(POLICIES[version]!, { [version]: { "gates.dcrAfterRefinanceMin": entry(1.05) } }, {});
     expect(result.changes[0]).toMatchObject({ label: { en: "DCR after refinance", fr: "CCD après refinancement" }, unit: "x" });
   });
+  it("lists the insured loan-to-cost limits as editable percentages (card 151)", () => {
+    for (const path of ["refinanceLimits.select.50.maxLtcPct", "refinanceLimits.standard.maxLtcPct"]) expect(THRESHOLDS[version]!.find((t) => t.path === path)?.unit).toBe("%");
+    expect(changeMeta(version, { path: "refinanceLimits.select.50.maxLtcPct" }).unit).toBe("%");
+  });
   it("labels a stored change even when today's policy no longer has its path", () => {
     expect(changeMeta(version, { path: "gates.dcrAfterRefinanceMin" })).toEqual({ label: { en: "DCR after refinance", fr: "CCD après refinancement" }, unit: "x" });
     expect(changeMeta(version, { path: "refinanceLimits.select.80.maxLtvPct" }).unit).toBe("%");
