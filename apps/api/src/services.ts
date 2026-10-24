@@ -329,7 +329,8 @@ export async function regionGroups(tx: Db, dealId: string) {
     }
     const reason = a.sources.some(s => s.ocr) ? "read by OCR"
       : a.sources.some(s => s.check_outcome === "questions") ? "please check"
-      : a.sources.some(s => s.rule === "labelled" && s.labelled_by === actor?.id) ? "your own label"
+      // Card 137 audit: a remembered label is its author's too (card 113), so any source the caller labelled is left out.
+      : a.sources.some(s => !!s.labelled_by && s.labelled_by === actor?.id) ? "your own label"
       : FIELD_BY_KEY.get(a.field_key)?.verify ? "please check" : null;
     if (reason) g.leftOut.push({ id: a.id, reason });
     else {
