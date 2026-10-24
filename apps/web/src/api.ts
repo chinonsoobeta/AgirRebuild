@@ -68,6 +68,7 @@ export type Assumption = {
 };
 export type ReadinessItem = { fieldKey: string; itemKey?: string; label: string; detail?: string };
 export type Review = {
+  todo: { blocking: number; items: { kind: "conflict" | "impossible" | "missing" | "please_check" | "needs_review" | "awaiting" | "ai_check"; fieldKey: string; itemKey: string | null; assumptionId: string | null; blocking: boolean }[] };
   aiReading: null | { outcome: "ok" | "failed"; model: string; promptVersion: string; createdAt: string;
     notUsed: { value: number; file: string; location: string; quote: string; why: string; figureId: string | null }[];
     pleaseCheck: { field: string; item: string | null; value: number; file: string; location: string; quote: string; reason: string }[];

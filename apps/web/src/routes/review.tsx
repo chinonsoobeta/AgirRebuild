@@ -173,6 +173,7 @@ export function Review({ dealId }: { dealId: string }) {
   const [keeping, setKeeping] = useState<string | null>(null);
   const [aiEntry, setAiEntry] = useState<{ id: string; value: number; field: string; item: string } | null>(null);
   const [entering, setEntering] = useState<string | null>(null);
+  const [tickedDefaults, setTickedDefaults] = useState<string[]>([]);
   const [picked, setPicked] = useState<Record<string, number>>({});
   const [formError, setFormError] = useState<unknown>(null);
   // The deal first: if it says no reconcile is waiting, the review read after it is already current; if one is, the effect above reads it again when it is done.
@@ -221,7 +222,7 @@ export function Review({ dealId }: { dealId: string }) {
     mutationFn: (b: { documentId: string; figureId: string }) => api.del(`/deals/${dealId}/figure-labels`, b),
     onSuccess: () => refresh(),
   });
-  const defaults = useMutation({ mutationFn: (fields: string[]) => api.post(`/deals/${dealId}/defaults`, { fields }), onSuccess: () => refresh() });
+  const defaults = useMutation({ mutationFn: (fields: string[]) => api.post(`/deals/${dealId}/defaults`, { fields }), onSuccess: () => { setTickedDefaults([]); return refresh(); } });
   const bulk = useMutation({
     mutationFn: async (items: Assumption[]) => {
       for (const a of items) await api.post(`/assumptions/${a.id}/review`, { action: "approve", version: a.version });
@@ -245,7 +246,8 @@ export function Review({ dealId }: { dealId: string }) {
   const focused = r.assumptions.find((a) => a.id === focus) ?? conflicts[0] ?? pending[0];
   const unused = r.other.filter((o) => o.figureId && o.value !== null && !o.label).length;
   const itemNames = [...new Set(r.assumptions.map((a) => a.itemKey).filter((i): i is string => !!i))];
-  const defaultable = r.missing.filter((m) => m.default !== null);
+  const selectedDefaults = tickedDefaults.filter(key => r.missing.some(m => m.fieldKey === key && m.default !== null));
+  const plainPending = pending.filter(a => r.todo.items.some(item => item.kind === "needs_review" && item.assumptionId === a.id));
   const docsBusy = deal.data.documents.processing > 0;
   const summary: string[] = t("review.summary", { c: conflicts.length, m: r.missing.length, r: pending.length + awaiting.length, a: approved.length });
 
@@ -405,13 +407,136 @@ export function Review({ dealId }: { dealId: string }) {
     </form>
   );
 
+  const conflictItem = (a: Assumption) => {
+    const choice = picked[a.id];
+    const vals = (a.conflictValues ?? []).map((x) => x.value);
+    return (
+      <fieldset key={`conflict-${a.id}`} className={`card ${focused?.id === a.id ? "focus" : ""}`} onFocus={() => setFocus(a.id)} onClick={() => setFocus(a.id)} style={{ margin: 0 }}>
+        <legend className="sr-only">{name(a)}</legend>
+        <div className="row">
+          <span style={{ fontSize: 17, fontWeight: 600 }}>{name(a)}</span>
+          <StatusTag tone="stop" glyph={I.Conflict}>{t("review.conflicting")}</StatusTag>
+          {a.material && <span className="chip"><I.Lock />{t("common.material")}</span>}
+        </div>
+        {a.sources.some((s) => foreignIn(s, dealCurrency)) && a.reason && (
+          // A figure in another currency is never a choice: say why, show it, and leave the amount to be entered.
+          <div className="stack" style={{ gap: 8 }}>
+            <p>{msg(a.reason)}</p>
+            {a.sources.filter((s) => foreignIn(s, dealCurrency)).map((s, i) => <Quote key={i} s={s} currency={dealCurrency} fieldKey={a.sourceKind === "document" ? a.fieldKey : undefined} />)}
+          </div>
+        )}
+        <div style={{ display: "grid", gridTemplateColumns: "repeat(auto-fit, minmax(220px, 1fr))", gap: 12 }}>
+          {(a.conflictValues ?? []).map((v) => {
+            const conservative = a.conservative && v.value === (a.conservative === "max" ? Math.max(...vals) : Math.min(...vals));
+            return (
+              <label key={v.value} className="choice">
+                <input type="radio" name={`c-${a.id}`} checked={choice === v.value} onChange={() => setPicked({ ...picked, [a.id]: v.value })} disabled={!editable} />
+                <span className="stack" style={{ gap: 4 }}>
+                  <span className="val">{f.value(v.value, a.unit)}</span>
+                  <span className="small muted">{v.documents.map((d) => msg(d)).join(", ")}{conservative ? t("review.conservative") : ""}</span>
+                </span>
+              </label>
+            );
+          })}
+        </div>
+        {editing === a.id ? (
+          modifyForm(a)
+        ) : (
+          <div className="spread">
+            <span className="small faint">{vals.length > 0 ? t("review.choosingNote", { material: a.material }) : ""}</span>
+            {editable && (
+              <div className="row">
+                <button className={`btn small ${vals.length > 0 ? "quiet" : "primary"}`} type="button" onClick={() => setEditing(a.id)}>{t("review.enterDifferent")}</button>
+                {vals.length > 0 && <button className="btn primary small" type="button" disabled={choice === undefined || act.isPending} onClick={() => act.mutate({ id: a.id, action: "resolve", value: choice!, version: a.version })}>
+                  {choice === undefined ? t("review.choose") : t("review.resolveWith", { v: f.value(choice, a.unit) })}
+                </button>}
+              </div>
+            )}
+          </div>
+        )}
+      </fieldset>
+    );
+  };
+  const awaitingItem = (a: Assumption) => {
+    const mine = a.decidedById === me.user.id;
+    return (
+      <div key={`awaiting-${a.id}`} className="card">
+        <div className="row"><span style={{ fontSize: 17, fontWeight: 600 }}>{name(a)}</span><StatusTag tone="review" glyph={I.Lock}>{t("review.awaiting")}</StatusTag></div>
+        <p>
+          <span className="num" style={{ fontSize: 20 }}>{f.value(a.pendingValue, a.unit)}</span>{" "}
+          <span className="muted">{t("review.enteredBy", { who: a.decidedBy, old: a.value !== null ? f.value(a.value, a.unit) : null })}</span>
+        </p>
+        {a.reason && <p className="small muted">{t("review.reason", { r: a.reason })}</p>}
+        {editable && (
+          <div className="row">
+            {mine && solo
+              ? <button className="btn primary small" type="button" onClick={() => act.mutate({ id: a.id, action: "use_as_stated" })}>{t("review.useAsStated")}</button>
+              : <button className="btn primary small" type="button" disabled={mine} onClick={() => act.mutate({ id: a.id, action: "second_approve" })}>{t("review.confirm")}</button>}
+            <button className="btn quiet small" type="button" onClick={() => act.mutate({ id: a.id, action: "reject", reason: t("review.declined") })}>{t("review.decline")}</button>
+            {mine && !solo && <span className="why">{t("review.mine")}</span>}
+          </div>
+        )}
+      </div>
+    );
+  };
+  const missingItem = (m: ReviewData["missing"][number]) => {
+    const id = `m-${m.fieldKey}-${m.itemKey ?? ""}`;
+    return entryForm(m, id,
+      <>
+        <div className="spread">
+          <label htmlFor={id} style={{ fontWeight: 600 }}>{name(m)}</label>
+          <span className="small faint">{L.group(m.groupLabel ? groupKey(m.groupLabel) : "")}{m.default !== null ? t("review.default", { v: f.value(m.default, m.unit) }) : ""}{m.material ? t("review.materialTag") : ""}</span>
+        </div>
+        {editable && m.default !== null && <label className="row small">
+          <input type="checkbox" checked={selectedDefaults.includes(m.fieldKey)} onChange={e => setTickedDefaults(e.target.checked ? [...selectedDefaults, m.fieldKey] : selectedDefaults.filter(key => key !== m.fieldKey))} />
+          {t("review.useDefault", { v: f.value(m.default, m.unit) })}
+        </label>}
+        {m.detail && <p className="small muted">{msg(m.detail)}</p>}
+        {L.help(m.fieldKey, m.help) && <span className="help">{L.help(m.fieldKey, m.help)}</span>}
+        {m.likely.length > 0 && (
+          <div className="stack small" style={{ gap: 6 }}>
+            <span className="muted">{t("review.likely")}</span>
+            {m.likely.map((x) => (
+              <div key={`${x.documentId}|${x.figureId}`} className="spread">
+                <span>{x.document_name} <span className="faint">{msg(x.location)}</span> <span className="num">{x.context}</span></span>
+                {editable && <button className="btn quiet small" type="button" disabled={label.isPending} onClick={() => label.mutate({ documentId: x.documentId, figureId: x.figureId, fieldKey: m.fieldKey })}>{t("review.useFigure")}</button>}
+              </div>
+            ))}
+          </div>
+        )}
+      </>,
+    );
+  };
+  const pendingItem = (a: Assumption) => (
+    <div className="card" key={a.id} onClick={() => setFocus(a.id)} style={{ background: focused?.id === a.id ? "var(--sunken)" : undefined, cursor: "pointer" }}>
+      <div>{name(a)}{a.sources.filter((s, i, all) => s.check_note && all.findIndex(x => x.check_note === s.check_note) === i).map((s, i) => <div key={i} className="small muted" style={s.check_outcome === "questions" ? { color: "var(--review-text)", fontWeight: 600 } : undefined}>{msg(s.check_note)}</div>)}{a.material && <span className="faint small">{t("review.materialTag")}</span>}</div>
+      <div className="r num">{f.value(a.value, a.unit)}</div>
+      <div className="small muted">{a.sources.length > 1 ? t("review.agree", { n: a.sources.length }) : a.sources[0]?.document_name}</div>
+      <div className="r" style={{ whiteSpace: "nowrap" }}>
+        {editable &&
+          (editing === a.id ? (
+            modifyForm(a)
+          ) : keeping === a.id ? (
+            keepForm(a)
+          ) : (
+            <>
+              {keepsWithReason(a)
+                ? <button className="btn small" type="button" onClick={(e) => { e.stopPropagation(); setKeeping(a.id); }}>{t("review.keep")}</button>
+                : <button className="btn small" type="button" onClick={(e) => { e.stopPropagation(); act.mutate({ id: a.id, action: "approve", version: a.version }); }}>{t("review.approve")}</button>}{" "}
+              <button className="btn quiet small" type="button" onClick={(e) => { e.stopPropagation(); setEditing(a.id); }}>{t("review.edit")}</button>
+              <button className="btn quiet small" type="button" onClick={(e) => { e.stopPropagation(); act.mutate({ id: a.id, action: "reject", reason: t("review.rejectedInReview"), version: a.version }); }}>{t("review.reject")}</button>
+            </>
+          ))}
+      </div>
+    </div>
+  );
   const blockedLine = [
     conflicts.length && t("review.b.conflicts", { n: conflicts.length }),
     r.missing.length && t("review.b.missing", { n: r.missing.length }),
     pending.length && t("review.b.pending", { n: pending.length }),
     awaiting.length && t("review.b.awaiting", { n: awaiting.length }),
     r.readiness.impossible.length && t("review.b.impossible", { n: r.readiness.impossible.length }),
-  ].filter(Boolean).join("; ");
+  ].filter(Boolean).join(" ");
 
   return (
     <>
@@ -442,111 +567,34 @@ export function Review({ dealId }: { dealId: string }) {
             <Banner tone="neutral" title={t("review.clear")}>{t("review.clearBody")}{stated > 0 && ` ${t("review.statedWaiting", { n: stated })}`}</Banner>
           )}
 
-          {(conflicts.length > 0 || r.missing.length > 0 || awaiting.length > 0) && <h2 className="h-section">{t("review.needsDecision")}</h2>}
-
-          {conflicts.map((a) => {
-            const choice = picked[a.id];
-            const vals = (a.conflictValues ?? []).map((x) => x.value);
-            return (
-              <fieldset key={a.id} className={`card ${focused?.id === a.id ? "focus" : ""}`} onFocus={() => setFocus(a.id)} onClick={() => setFocus(a.id)} style={{ margin: 0 }}>
-                <legend className="sr-only">{name(a)}</legend>
-                <div className="row">
-                  <span style={{ fontSize: 17, fontWeight: 600 }}>{name(a)}</span>
-                  <StatusTag tone="stop" glyph={I.Conflict}>{t("review.conflicting")}</StatusTag>
-                  {a.material && <span className="chip"><I.Lock />{t("common.material")}</span>}
-                </div>
-                {a.sources.some((s) => foreignIn(s, dealCurrency)) && a.reason && (
-                  // A figure in another currency is never a choice: say why, show it, and leave the amount to be entered.
-                  <div className="stack" style={{ gap: 8 }}>
-                    <p>{msg(a.reason)}</p>
-                    {a.sources.filter((s) => foreignIn(s, dealCurrency)).map((s, i) => <Quote key={i} s={s} currency={dealCurrency} fieldKey={a.sourceKind === "document" ? a.fieldKey : undefined} />)}
-                  </div>
-                )}
-                <div style={{ display: "grid", gridTemplateColumns: "repeat(auto-fit, minmax(220px, 1fr))", gap: 12 }}>
-                  {(a.conflictValues ?? []).map((v) => {
-                    const conservative = a.conservative && v.value === (a.conservative === "max" ? Math.max(...vals) : Math.min(...vals));
-                    return (
-                      <label key={v.value} className="choice">
-                        <input type="radio" name={`c-${a.id}`} checked={choice === v.value} onChange={() => setPicked({ ...picked, [a.id]: v.value })} disabled={!editable} />
-                        <span className="stack" style={{ gap: 4 }}>
-                          <span className="val">{f.value(v.value, a.unit)}</span>
-                          <span className="small muted">{v.documents.map((d) => msg(d)).join(", ")}{conservative ? t("review.conservative") : ""}</span>
-                        </span>
-                      </label>
-                    );
-                  })}
-                </div>
-                {editing === a.id ? (
-                  modifyForm(a)
-                ) : (
-                  <div className="spread">
-                    <span className="small faint">{vals.length > 0 ? t("review.choosingNote", { material: a.material }) : ""}</span>
-                    {editable && (
-                      <div className="row">
-                        <button className={`btn small ${vals.length > 0 ? "quiet" : "primary"}`} type="button" onClick={() => setEditing(a.id)}>{t("review.enterDifferent")}</button>
-                        {vals.length > 0 && <button className="btn primary small" type="button" disabled={choice === undefined || act.isPending} onClick={() => act.mutate({ id: a.id, action: "resolve", value: choice!, version: a.version })}>
-                          {choice === undefined ? t("review.choose") : t("review.resolveWith", { v: f.value(choice, a.unit) })}
-                        </button>}
-                      </div>
-                    )}
-                  </div>
-                )}
-              </fieldset>
-            );
-          })}
-
-          {r.readiness.impossible.length > 0 && (
-            <div className="card">
-              <div className="row"><span style={{ fontSize: 17, fontWeight: 600 }}>{t("review.impossible")}</span><StatusTag tone="stop" glyph={I.Conflict}>{t("review.b.impossible", { n: r.readiness.impossible.length })}</StatusTag></div>
-              <ul className="stack" style={{ gap: 8, margin: 0, paddingLeft: 20 }}>
-                {r.readiness.impossible.map((i, k) => (
-                  <li key={`${i.fieldKey}-${i.itemKey ?? ""}-${k}`}>{L.item(i)}</li>
-                ))}
-              </ul>
-            </div>
-          )}
-
-          {r.missing.length > 0 && (
-            <div className="card">
-              <div className="spread">
-                <div className="row"><span style={{ fontSize: 17, fontWeight: 600 }}>{t("review.missing")}</span><StatusTag tone="stop" glyph={I.Missing}>{t("review.nMissing", { n: r.missing.length })}</StatusTag></div>
-                {editable && defaultable.length > 0 && (
-                  <button className="btn small" type="button" onClick={() => defaults.mutate(defaultable.map((m) => m.fieldKey))} disabled={defaults.isPending}>
-                    <I.Bookmark />{t("review.acceptDefaults", { n: defaultable.length })}
-                  </button>
-                )}
-              </div>
-              <p className="small muted">{t("review.missingBody", { defaults: defaultable.length > 0 })}</p>
-              <ErrorText error={enter.error ?? defaults.error ?? label.error ?? formError} />
-              {unused > 0 && (
-                <p className="small muted">{t("review.unusedLine", { n: unused })} <a href="#unused-figures" onClick={() => setOtherOpen(true)}>{t("review.unusedLink")}</a></p>
-              )}
-              {r.missing.map((m) => {
-                const id = `m-${m.fieldKey}-${m.itemKey ?? ""}`;
-                return entryForm(m, id,
-                  <>
-                    <div className="spread">
-                      <label htmlFor={id} style={{ fontWeight: 600 }}>{name(m)}</label>
-                      <span className="small faint">{L.group(m.groupLabel ? groupKey(m.groupLabel) : "")}{m.default !== null ? t("review.default", { v: f.value(m.default, m.unit) }) : ""}{m.material ? t("review.materialTag") : ""}</span>
-                    </div>
-                    {m.detail && <p className="small muted">{msg(m.detail)}</p>}
-                    {L.help(m.fieldKey, m.help) && <span className="help">{L.help(m.fieldKey, m.help)}</span>}
-                    {m.likely.length > 0 && (
-                      <div className="stack small" style={{ gap: 6 }}>
-                        <span className="muted">{t("review.likely")}</span>
-                        {m.likely.map((x) => (
-                          <div key={`${x.documentId}|${x.figureId}`} className="spread">
-                            <span>{x.document_name} <span className="faint">{msg(x.location)}</span> <span className="num">{x.context}</span></span>
-                            {editable && <button className="btn quiet small" type="button" disabled={label.isPending} onClick={() => label.mutate({ documentId: x.documentId, figureId: x.figureId, fieldKey: m.fieldKey })}>{t("review.useFigure")}</button>}
-                          </div>
-                        ))}
-                      </div>
-                    )}
-                  </>,
-                );
-              })}
-            </div>
-          )}
+          <section className="stack" style={{ gap: 12 }}>
+            <h2 className="h-section">{r.todo.blocking ? t("review.todoCount", { n: r.todo.blocking }) : t("review.todoReady")}</h2>
+            {editable && approvable(plainPending).length > 1 && <button className="btn small" type="button" disabled={bulk.isPending} onClick={() => { if (confirm(t("review.approveAllConfirm", { n: approvable(plainPending).length }))) bulk.mutate(approvable(plainPending)); }}>{t("review.approveAll", { n: approvable(plainPending).length })}</button>}
+            {r.missing.length > 0 && unused > 0 && <p className="small muted">{t("review.unusedLine", { n: unused })} <a href="#unused-figures" onClick={() => setOtherOpen(true)}>{t("review.unusedLink")}</a></p>}
+            {r.todo.items.map((item, index) => {
+              const a = r.assumptions.find(a => a.id === item.assumptionId);
+              if (item.kind === "conflict" && a) return conflictItem(a);
+              if (item.kind === "impossible") {
+                const problem = r.readiness.impossible.find(i => i.fieldKey === item.fieldKey && (i.itemKey || null) === item.itemKey)!;
+                return <div className="card" key={`impossible-${index}`}><strong>{L.item(problem)}</strong>{editable && (a ? modifyForm(a) : entryForm({ ...problem, unit: FIELD_BY_KEY.get(item.fieldKey)!.unit }, `impossible-${index}`, <span>{name(item)}</span>))}</div>;
+              }
+              if (item.kind === "missing") return missingItem(r.missing.find(m => m.fieldKey === item.fieldKey && (m.itemKey || null) === item.itemKey)!);
+              if ((item.kind === "please_check" || item.kind === "needs_review") && a) return pendingItem(a);
+              if (item.kind === "awaiting" && a) return awaitingItem(a);
+              if (item.kind === "ai_check") {
+                const aiIndex = r.todo.items.slice(0, index).filter(i => i.kind === "ai_check").length;
+                const check = r.aiReading!.pleaseCheck[aiIndex]!;
+                return <div className="card stack small" key={`ai-check-${aiIndex}`}>
+                  <strong>{L.field(check.field, check.item)} · {f.value(check.value, "")}</strong>
+                  <span>{check.quote}</span><span>{check.file} · {msg(check.location)}</span><span>{msg(check.reason)}</span>
+                  {aiEntryControl(`check-${aiIndex}`, check.value)}
+                </div>;
+              }
+              return null;
+            })}
+            {editable && r.missing.some(m => m.default !== null) && <button className="btn small" type="button" disabled={!selectedDefaults.length || defaults.isPending} onClick={() => defaults.mutate(selectedDefaults)}>{t("review.acceptTickedDefaults", { n: selectedDefaults.length })}</button>}
+            <ErrorText error={enter.error ?? defaults.error ?? label.error ?? formError} />
+          </section>
 
           {(r.tableNotices ?? []).map(p=><div className="card" key={p.fieldKey}>
             <p>{t("review.tableNow",{value:f.value(p.options[0]?.value,FIELDS.find(d=>d.key === p.fieldKey)?.unit ?? "$")})}</p>
@@ -595,29 +643,6 @@ export function Review({ dealId }: { dealId: string }) {
             </div>
           )}
 
-          {awaiting.map((a) => {
-            const mine = a.decidedById === me.user.id;
-            return (
-              <div key={a.id} className="card">
-                <div className="row"><span style={{ fontSize: 17, fontWeight: 600 }}>{name(a)}</span><StatusTag tone="review" glyph={I.Lock}>{t("review.awaiting")}</StatusTag></div>
-                <p>
-                  <span className="num" style={{ fontSize: 20 }}>{f.value(a.pendingValue, a.unit)}</span>{" "}
-                  <span className="muted">{t("review.enteredBy", { who: a.decidedBy, old: a.value !== null ? f.value(a.value, a.unit) : null })}</span>
-                </p>
-                {a.reason && <p className="small muted">{t("review.reason", { r: a.reason })}</p>}
-                {editable && (
-                  <div className="row">
-                    {mine && solo
-                      ? <button className="btn primary small" type="button" onClick={() => act.mutate({ id: a.id, action: "use_as_stated" })}>{t("review.useAsStated")}</button>
-                      : <button className="btn primary small" type="button" disabled={mine} onClick={() => act.mutate({ id: a.id, action: "second_approve" })}>{t("review.confirm")}</button>}
-                    <button className="btn quiet small" type="button" onClick={() => act.mutate({ id: a.id, action: "reject", reason: t("review.declined") })}>{t("review.decline")}</button>
-                    {mine && !solo && <span className="why">{t("review.mine")}</span>}
-                  </div>
-                )}
-              </div>
-            );
-          })}
-
           {(r.regions ?? []).map((g) => {
             const rent = g.fields.every(k => ["unit_count", "unit_rent_monthly", "rentable_area_sf", "rent_psf_annual"].includes(k));
             const cost = g.fields.every(k => FIELD_BY_KEY.get(k)?.group === "budget");
@@ -631,46 +656,6 @@ export function Review({ dealId }: { dealId: string }) {
               <ErrorText error={confirmRegion.variables?.documentId === g.documentId && confirmRegion.variables?.table === g.table ? confirmRegion.error : null} />
             </div>;
           })}
-          {pending.length > 0 && (
-            <div className="stack" style={{ gap: 12 }}>
-              <div className="spread">
-                <h2 className="h-section">{t("review.needsReview")} <span className="num faint" style={{ fontWeight: 400 }}>{pending.length}</span></h2>
-                {editable && approvable(pending).length > 1 && (
-                  <button className="btn small" type="button" disabled={bulk.isPending} onClick={() => { if (confirm(t("review.approveAllConfirm", { n: approvable(pending).length }))) bulk.mutate(approvable(pending)); }}>
-                    {t("review.approveAll", { n: approvable(pending).length })}
-                  </button>
-                )}
-              </div>
-              <table className="tbl">
-                <thead><tr><th>{t("review.col.input")}</th><th className="r">{t("review.col.value")}</th><th>{t("review.col.source")}</th><th className="r"><span className="sr-only">{t("docs.actions")}</span></th></tr></thead>
-                <tbody>
-                  {pending.map((a) => (
-                    <tr key={a.id} onClick={() => setFocus(a.id)} style={{ background: focused?.id === a.id ? "var(--sunken)" : undefined, cursor: "pointer" }}>
-                      <td>{name(a)}{a.sources.filter((s, i, all) => s.check_note && all.findIndex(x => x.check_note === s.check_note) === i).map((s, i) => <div key={i} className="small muted" style={s.check_outcome === "questions" ? { color: "var(--review-text)", fontWeight: 600 } : undefined}>{msg(s.check_note)}</div>)}{a.material && <span className="faint small">{t("review.materialTag")}</span>}</td>
-                      <td className="r num">{f.value(a.value, a.unit)}</td>
-                      <td className="small muted">{a.sources.length > 1 ? t("review.agree", { n: a.sources.length }) : a.sources[0]?.document_name}</td>
-                      <td className="r" style={{ whiteSpace: "nowrap" }}>
-                        {editable &&
-                          (editing === a.id ? (
-                            modifyForm(a)
-                          ) : keeping === a.id ? (
-                            keepForm(a)
-                          ) : (
-                            <>
-                              {keepsWithReason(a)
-                                ? <button className="btn small" type="button" onClick={(e) => { e.stopPropagation(); setKeeping(a.id); }}>{t("review.keep")}</button>
-                                : <button className="btn small" type="button" onClick={(e) => { e.stopPropagation(); act.mutate({ id: a.id, action: "approve", version: a.version }); }}>{t("review.approve")}</button>}{" "}
-                              <button className="btn quiet small" type="button" onClick={(e) => { e.stopPropagation(); setEditing(a.id); }}>{t("review.edit")}</button>
-                              <button className="btn quiet small" type="button" onClick={(e) => { e.stopPropagation(); act.mutate({ id: a.id, action: "reject", reason: t("review.rejectedInReview"), version: a.version }); }}>{t("review.reject")}</button>
-                            </>
-                          ))}
-                      </td>
-                    </tr>
-                  ))}
-                </tbody>
-              </table>
-            </div>
-          )}
           <ErrorText error={act.error ?? bulk.error} />
           <WindowConfirmation error={act.variables?.action === "resolve" ? act.error : null} busy={act.isPending} onConfirm={() => act.variables && act.mutate({...act.variables, confirmOutsideWindow: true})} />
 
@@ -722,14 +707,6 @@ export function Review({ dealId }: { dealId: string }) {
                   {editable && figure ? <UseAs o={figure} items={itemNames} busy={label.isPending} onSave={b => label.mutate(b)} /> : aiEntryControl(`unused-${i}`, item.value)}
                 </div>;
               })}
-            </section>}
-            {!!r.aiReading?.pleaseCheck.length && <section className="stack">
-              <h3>{t("review.aiCheck")}</h3>
-              {r.aiReading.pleaseCheck.map((item, i) => <div key={i} className="stack small">
-                <strong>{L.field(item.field, item.item)} · {f.value(item.value, "")}</strong>
-                <span>{item.quote}</span><span>{item.file} · {msg(item.location)}</span><span>{msg(item.reason)}</span>
-                {aiEntryControl(`check-${i}`, item.value)}
-              </div>)}
             </section>}
             <ErrorText error={label.error ?? unlabel.error} />
             <table className="tbl" style={{ marginTop: 12 }}>

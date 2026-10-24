@@ -365,8 +365,8 @@ describe("the review card in French", () => {
 
   it("audit of task 60d: counts what cannot be run as values to correct, since not every one is out of range", () => {
     const [enT, frT] = [build("en", () => {}).t, build("fr", () => {}).t];
-    expect(enT("review.b.impossible", { n: 1 })).toBe("1 input needs correcting");
-    expect(frT("review.b.impossible", { n: 2 })).toBe("2 données doivent être corrigées");
+    expect(enT("review.b.impossible", { n: 1 })).toBe("Correct 1 input that cannot be run together.");
+    expect(frT("review.b.impossible", { n: 2 })).toBe("Corrigez 2 données incompatibles avec le calcul.");
     expect(enT("status.outOfRange", { n: 1 })).toBe("1 to correct");
     expect(frT("status.outOfRange", { n: 1 })).toBe("1 à corriger");
   });

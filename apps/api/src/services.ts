@@ -344,6 +344,31 @@ export async function regionGroups(tx: Db, dealId: string) {
   return [...groups.values()].filter(g => g.ids.length >= 2);
 }
 
+/** Ordered actions for Review; readiness remains the authority for whether a run is blocked. */
+export function todoList(
+  readiness: Readiness,
+  assumptions: Pick<AssumptionDb, "id" | "field_key" | "item_key" | "status" | "sources">[],
+  aiReading: { pleaseCheck: { field: string; item: string | null }[] } | null,
+) {
+  type Kind = "conflict" | "impossible" | "missing" | "please_check" | "needs_review" | "awaiting" | "ai_check";
+  const items: { kind: Kind; fieldKey: string; itemKey: string | null; assumptionId: string | null; blocking: boolean }[] = [];
+  const add = (kind: Kind, fieldKey: string, itemKey: string | null, assumptionId: string | null, blocking = true) => items.push({ kind, fieldKey, itemKey, assumptionId, blocking });
+  for (const [kind, rows] of [["conflict", readiness.conflicting], ["impossible", readiness.impossible], ["missing", readiness.missing]] as const) {
+    for (const row of rows) {
+      const a = kind === "missing" ? undefined : assumptions.find(a => a.field_key === row.fieldKey && (a.item_key || null) === (row.itemKey || null));
+      add(kind, row.fieldKey, row.itemKey || null, a?.id ?? null);
+    }
+  }
+  for (const kind of ["please_check", "needs_review", "awaiting"] as const) {
+    for (const a of assumptions) {
+      const actual = a.status === "awaiting_second_approval" ? "awaiting" : a.status === "needs_review" ? (a.sources.some(s => s.check_outcome === "questions") ? "please_check" : "needs_review") : null;
+      if (actual === kind) add(kind, a.field_key, a.item_key || null, a.id);
+    }
+  }
+  for (const a of aiReading?.pleaseCheck ?? []) add("ai_check", a.field, a.item || null, null, false);
+  return { blocking: readiness.missing.length + readiness.conflicting.length + readiness.pending.length + readiness.impossible.length, items };
+}
+
 export async function reviewView(tx: Db, dealId: string, asOf: string) {
   const assumptions = await loadAssumptions(tx, dealId);
   const { readiness, gaps } = readinessFor(assumptions);
@@ -442,6 +467,7 @@ export async function reviewView(tx: Db, dealId: string, asOf: string) {
       .map((o) => ({ documentId: o.documentId, figureId: o.figureId!, document_name: o.document_name, location: o.location, raw: o.raw, context: o.context }));
   return {
     aiReading,
+    todo: todoList(readiness, assumptions, aiReading),
     readiness,
     regions: await regionGroups(tx, dealId),
     proposals,

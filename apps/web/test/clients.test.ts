@@ -395,7 +395,7 @@ describe("card 96c thresholds", () => {
 describe("card 150 one review list", () => {
   it("shows the blocking count, leaves defaults unticked and excludes please-check from Approve all", async () => {
     state.role = "owner";
-    const a = { ...stated(), status: "needs_review", sources: [{ document_name: "invented.txt", check_outcome: "questions", check_note: "Check this value" }] };
+    const a = { ...stated(), fieldKey: "land_cost", itemKey: null, status: "needs_review", sources: [{ document_name: "invented.txt", context: "Land cost: $800,000", raw: "$800,000", location: "line 1", check_outcome: "questions", check_note: "Check this value" }] };
     state.review = { assumptions: [a], missing: [{ fieldKey: "vacancy_pct", label: "Vacancy", unit: "%", default: 3, material: false, help: null, likely: [] }],
       readiness: { status: "blocked", impossible: [] }, notFound: [], choices: [], other: [], regions: [],
       todo: { blocking: 2, items: [{ kind: "missing", fieldKey: "vacancy_pct", itemKey: null, assumptionId: null, blocking: true }, { kind: "please_check", fieldKey: a.fieldKey, itemKey: a.itemKey, assumptionId: a.id, blocking: true }] } };
