@@ -99,6 +99,11 @@ describe("the whole workflow, from documents to an audit package", () => {
     const r = await call(alice, "POST", `/api/deals/${deal}/runs`);
     expect(r.status).toBe(200);
     run = r.json.id;
+    const [snapshot] = await db.query<any>(`select document_roles, input_snapshot from runs where id=$1`, [run]);
+    const roleDocs = await db.query(`select id, name, role_set, read_role from documents where deal_id=$1 and retired_at is null order by id`, [deal]);
+    expect(roleDocs.length).toBeGreaterThan(0);
+    expect(snapshot.document_roles).toEqual(roleDocs);
+    expect(snapshot.input_snapshot).not.toHaveProperty("document_roles");
     const view = (await call(alice, "GET", `/api/runs/${run}`)).json;
     // Oracle update (task 39, owner sign-off 2026-10-05): lease-up carrying costs leave the stated sources short, so the run rejects.
     expect(view.result.verdict.code).toBe("REJECT");
@@ -3311,6 +3316,48 @@ describe("card 96b owner thresholds", () => {
     expect((await call(owner, "POST", `/api/deals/${id}/thresholds`, { policyVersion: version, path: "gates.removedGateMin", value: null, reason: "Clear a value the policy no longer has" })).status).toBe(200);
     expect((await call(viewer, "GET", `/api/deals/${id}/thresholds`)).json.invalid).toEqual([]);
     expect((await call(owner, "POST", `/api/deals/${id}/runs`)).status).toBe(200);
+  });
+
+});
+
+
+describe("Card 132: document roles", () => {
+  test("roles re-read proposals, require an analyst, audit changes and ignore a repeated value", async () => {
+    const w = (await call(alice, "POST", "/api/workspaces", {name: "Role tests"})).json.id;
+    expect((await call(alice, "POST", `/api/workspaces/${w}/members`, {email: "carol@example.com", role: "viewer"})).status).toBe(200);
+    const d = (await call(alice, "POST", `/api/workspaces/${w}/deals`, {name: "Invented role deal", assetType: "Multifamily"})).json.id;
+    const uploaded = await call(alice, "PUT", `/api/deals/${d}/documents?name=budget.txt`, undefined, new TextEncoder().encode("Term sheet\nLand cost: $830,000\n"));
+    expect(uploaded.status).toBe(200);
+    const id = uploaded.json.id;
+    await work();
+    const docs = async () => (await call(alice, "GET", `/api/deals/${d}/documents`)).json;
+    expect((await docs())[0]).toMatchObject({role_set: null, read_role: "term sheet (deal source)", candidate_count: 1});
+    const set = (s: Session, role: string | null) => call(s, "POST", `/api/documents/${id}/role`, {role});
+    expect((await set(carol, "context")).status).toBe(403);
+    expect((await set(alice, "invalid")).status).toBe(422);
+    expect((await set(alice, "context")).status).toBe(200);
+    expect((await set(alice, "context")).status).toBe(200);
+    expect(await db.query(`select id from jobs where kind='extract_document' and payload->>'document_id'=$1 and status='queued'`, [id])).toHaveLength(1);
+    const events = await db.query<any>(`select payload from audit_events where action='document.role_set' and entity_id=$1`, [id]);
+    expect(events).toHaveLength(1);
+    expect(events[0].payload).toMatchObject({old: null, new: "context"});
+    await work();
+    expect((await docs())[0]).toMatchObject({role_set: "context", read_role: "term sheet (context, set by a person)", candidate_count: 0});
+    expect(await db.query(`select id from candidates where document_id=$1 and field_key is not null`, [id])).toHaveLength(0);
+    expect((await set(alice, "deal_source")).status).toBe(200);
+    await work();
+    expect((await docs())[0]).toMatchObject({role_set: "deal_source", candidate_count: 1});
+    expect((await set(alice, null)).status).toBe(200);
+    await work();
+    expect((await docs())[0]).toMatchObject({role_set: null, read_role: "term sheet (deal source)"});
+  });
+  test("upload saves the role in the registration transaction", async () => {
+    const d = (await call(alice, "POST", `/api/workspaces/${ws}/deals`, {name: "Invented background", assetType: "Multifamily"})).json.id;
+    const r = await call(alice, "PUT", `/api/deals/${d}/documents?name=background.txt&role=context`, undefined, new TextEncoder().encode("Term sheet\nLand cost: $710,000\n"));
+    expect(r.status).toBe(200);
+    await work();
+    const docs = (await call(alice, "GET", `/api/deals/${d}/documents`)).json;
+    expect(docs[0]).toMatchObject({role_set: "context", candidate_count: 0});
   });
 
 });

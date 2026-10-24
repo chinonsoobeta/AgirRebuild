@@ -9367,3 +9367,32 @@ describe("candidate regions (Card 130)", () => {
     for (const c of [...sheet.candidates, ...sheet.other]) expect(c.region).toMatchObject({ source: "sheet", table: "Willow sheet" });
   });
 });
+
+
+describe("Card 132: the person's document role", () => {
+  const doc = (title: string, extra: string[] = []) => toNormalized({ name: "invented.pdf", kind: "pdf", lines: [title, ...extra, ...Array.from({length: 20}, () => "The narrative explains the purpose and background of this document."), "Land cost: $830,000", "Hard costs: $2,400,000"] });
+  test("a person can read a context fingerprint as a deal source", () => {
+    const d = doc("Market report", ["Vacancy rate statistics"]);
+    expect(extractCandidates(d).candidates).toEqual([]);
+    const r = extractCandidates(d, {role: "deal source"});
+    expect(r.candidates).toEqual(expect.arrayContaining([expect.objectContaining({fieldKey: "land_cost", value: 830000})]));
+    expect(r.notes).toContain("Document kind: market report (deal source, set by a person)");
+  });
+  test("background proposes nothing and retains every figure", () => {
+    const d = doc("Term sheet"), before = extractCandidates(d);
+    const r = extractCandidates(d, {role: "context"});
+    expect(r.candidates).toEqual([]);
+    expect(r.other.map(c => [c.raw, c.value, c.location]).sort()).toEqual([...before.candidates, ...before.other].map(c => [c.raw, c.value, c.location]).sort());
+    expect(r.notes).toContain("Document kind: term sheet (context, set by a person)");
+  });
+  test("evidence adds the evidence note without renaming the kind", () => {
+    const r = extractCandidates(doc("Term sheet"), {role: "evidence"});
+    expect(r.candidates.find(c => c.fieldKey === "land_cost")?.note).toContain("Read from a term sheet; check it");
+    expect(r.notes).toContain("Document kind: term sheet (evidence, set by a person)");
+  });
+  test.each(contentScopeCases.slice(0, 5))("omitting the role preserves $name byte for byte", ({lines}) => {
+    const d = toNormalized({name: "sample.txt", kind: "txt", lines});
+    expect(JSON.stringify(extractCandidates(d, {}))).toBe(JSON.stringify(extractCandidates(d)));
+    expect(JSON.stringify(extractCandidates(d, {role: undefined}))).toBe(JSON.stringify(extractCandidates(d)));
+  });
+});
