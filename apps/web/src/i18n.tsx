@@ -272,6 +272,7 @@ const EN = {
   "qs.next": "Go to Review, then run",
   "review.materialNote": "Material field: a second, different person must confirm this value before it counts.",
   "review.saveValue": "Save value",
+  "review.useOutsideWindow": "Use this value",
   "review.missing": "Missing inputs",
   "review.nMissing": (p) => `${p.n} missing`,
   "review.acceptDefaults": (p) => `Accept ${p.n} ${s(p.n, "default", "defaults")}`,
@@ -878,6 +879,7 @@ const FR: Record<Key, Entry> = {
   "qs.next": "Passer à l'examen, puis à l'analyse",
   "review.materialNote": "Champ déterminant : une seconde personne, différente, doit confirmer cette valeur avant qu'elle compte.",
   "review.saveValue": "Enregistrer la valeur",
+  "review.useOutsideWindow": "Utiliser cette valeur",
   "review.missing": "Données manquantes",
   "review.nMissing": (p) => `${p.n} ${s(p.n, "manquante", "manquantes")}`,
   "review.acceptDefaults": (p) => `Accepter ${p.n} ${s(p.n, "valeur par défaut", "valeurs par défaut")}`,
@@ -1412,6 +1414,8 @@ const FR_REASONS: [RegExp, string | ((m: RegExpMatchArray) => string)][] = [
     const label = (text: string) => { const fr = FR_FIELDS[FIELDS.find(f => f.label.toLowerCase() === text)?.key ?? ""]; return fr ? fr.charAt(0).toLowerCase() + fr.slice(1) : text; };
     return `Un seul chiffre pour ${label(m[1]!)} et ${label(m[2]!)} ; saisissez chacun`;
   }],
+  [/^Please check: (.+) is usually between (.+) and (.+)$/, (m) => `À vérifier : ${FR_FIELDS[FIELDS.find(f => f.label === m[1])?.key ?? ""] ?? m[1]} se situe habituellement entre ${m[2]} et ${m[3]}`],
+  [/^(.+) is usually between (.+) and (.+)\. Please check before using this value\.$/, (m) => `${FR_FIELDS[FIELDS.find(f => f.label === m[1])?.key ?? ""] ?? m[1]} se situe habituellement entre ${m[2]} et ${m[3]}. Vérifiez avant d’utiliser cette valeur.`],
   [/^Chosen because it closes: (.+)$/, (m) => `Choisi car il confirme : ${translateMessage(`Checked: ${m[1]}`).replace(/^Vérifié : /, "")}`],
   [/^Checked: the costs read add up to the stated total cost of (.+)$/, (m) => `Vérifié : les coûts lus correspondent au coût total déclaré de ${m[1]}`],
   [/^Please check: this is more than the stated total cost of (.+)$/, (m) => `À vérifier : ce montant dépasse le coût total déclaré de ${m[1]}`],

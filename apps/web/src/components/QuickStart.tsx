@@ -3,7 +3,7 @@ import { Link } from "@tanstack/react-router";
 import { useState, type FormEvent } from "react";
 import { FIELDS, FIELD_BY_KEY, RENTAL_ONLY_FIELDS, TEMPLATES, heldSeniorAmortUnused } from "@agir/contracts";
 import { api, ApiError, type Review } from "../api";
-import { Banner, ErrorText } from "./ui";
+import { Banner, ErrorText, WindowConfirmation } from "./ui";
 import { useI18n } from "../i18n";
 
 type Entry = { fieldKey: string; itemKey: string | null; value: number };
@@ -23,15 +23,16 @@ export function QuickStart({ dealId }: { dealId: string }) {
   const reviewQ = ["review", dealId];
   const review = useQuery({ queryKey: reviewQ, queryFn: () => api.get<Review>(`/deals/${dealId}/review`) });
   const save = useMutation({
-    mutationFn: async ({ entries, reason }: { entries: Entry[]; reason: string }) => {
+    mutationFn: async ({ entries, reason, confirmOutsideWindow }: { entries: Entry[]; reason: string; confirmOutsideWindow?: string }) => {
       // Posting is not atomic: read what is already entered, and treat a 409 as done, so a retry resumes.
       const now = await qc.fetchQuery({ queryKey: reviewQ, queryFn: () => api.get<Review>(`/deals/${dealId}/review`), staleTime: 0 });
       const have = new Set(now.assumptions.filter((a) => KEPT.includes(a.status)).map((a) => `${a.fieldKey}|${a.itemKey ?? ""}`));
       for (const e of entries) {
         if (have.has(`${e.fieldKey}|${e.itemKey ?? ""}`)) continue;
         try {
-          await api.post(`/deals/${dealId}/values`, { ...e, reason });
+          await api.post(`/deals/${dealId}/values`, { ...e, reason, confirmOutsideWindow: confirmOutsideWindow === `${e.fieldKey}|${e.itemKey ?? ""}` });
         } catch (err) {
+          if (err instanceof ApiError && err.detail?.code === "outside_window") err.detail.entryKey = `${e.fieldKey}|${e.itemKey ?? ""}`;
           if (!(err instanceof ApiError && err.status === 409)) throw err;
         }
       }
@@ -125,7 +126,7 @@ export function QuickStart({ dealId }: { dealId: string }) {
   };
 
   return (
-    <form className="panel stack" style={{ gap: 16 }} onSubmit={submit}>
+    <form className="panel stack" style={{ gap: 16 }} onSubmit={submit} onChange={() => { if (!save.isPending) save.reset(); }}>
       <h2 className="h-section">{t("qs.title")}</h2>
       <p className="small muted">{t("qs.intro")}</p>
       <div className="field">
@@ -192,6 +193,9 @@ export function QuickStart({ dealId }: { dealId: string }) {
         <ul className="small muted" style={{ paddingLeft: 20 }}>{hidden.map((d) => <li key={d.key}>{t("qs.hiddenLine", { label: L.field(d.key), means: L.absent(d.key) })}</li>)}</ul>
       </details>
       <ErrorText error={formError ?? save.error} />
+      <WindowConfirmation error={save.error} busy={save.isPending} onConfirm={() => {
+        if (save.variables && save.error instanceof ApiError) save.mutate({...save.variables, confirmOutsideWindow: save.error.detail.entryKey});
+      }} />
       <div><button className="btn primary" type="submit" disabled={save.isPending}>{save.isPending ? t("qs.working") : t("qs.submit")}</button></div>
     </form>
   );

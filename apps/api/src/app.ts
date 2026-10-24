@@ -3,7 +3,7 @@ import { getConnInfo } from "@hono/node-server/conninfo";
 import { randomBytes } from "node:crypto";
 import { getCookie, setCookie, deleteCookie } from "hono/cookie";
 import { z } from "zod";
-import { validateThreshold, COUNTRIES, CURRENCIES, FIELDS, FIELD_GROUP_LABELS, METRICS, POLICIES, POLICY_V1, PROVINCE_CODES, REVIEW_MODES, runPolicy, type EngineInput, type Policy } from "@agir/contracts";
+import { FIELD_BY_KEY, outsideWindow, windowMessage, validateThreshold, COUNTRIES, CURRENCIES, FIELDS, FIELD_GROUP_LABELS, METRICS, POLICIES, POLICY_V1, PROVINCE_CODES, REVIEW_MODES, runPolicy, type EngineInput, type Policy } from "@agir/contracts";
 import { asUser, type BlobStore, type Db } from "@agir/db";
 import { breakeven, DRIVERS, driversFor, SALE_DRIVERS, EngineInputError, explore, grid, tornado, type DriverKey, type Shock } from "@agir/engine";
 import { canonicalItem, itemFold, kindOf } from "@agir/extraction";
@@ -25,6 +25,16 @@ async function createWorkspace(tx: Db, name: string, reviewMode?: string): Promi
 const INVITE_GONE = "This invitation is not available. It may have been used, revoked or expired.";
 
 const PG_STATUS: Record<string, number> = { "42501": 403, "28000": 401, P0002: 404, "22023": 422, "23505": 409, "40001": 409, "23514": 422, "22P02": 404 };
+
+// Keep the existing database functions responsible for saving values and their audit reasons.
+function windowReason(fieldKey: string, value: number, reason: string | null | undefined, confirmed?: boolean, requiresReason = true): string | null | undefined {
+  const field = FIELD_BY_KEY.get(fieldKey);
+  if (!field || !outsideWindow(field, value)) return reason;
+  if (!confirmed) throw new HttpError(422, `${windowMessage(field)}. Please check before using this value.`, {code: "outside_window", fieldKey, window: field.window});
+  // Preserve the existing requirement for a person's reason; the suffix cannot supply it.
+  if (requiresReason && (!reason || reason.trim().length < 10)) throw new HttpError(422, "Say why you are entering a different value (at least 10 characters)");
+  return `${reason ?? ""} (confirmed outside the usual range ${field.window!.min}–${field.window!.max})`;
+}
 
 export function createApp({ db, store, secureCookies, demoSignIn = false, trustProxy = false, now = () => new Date() }: AppDeps) {
   const app = new Hono<Env>();
@@ -49,6 +59,7 @@ export function createApp({ db, store, secureCookies, demoSignIn = false, trustP
   };
 
   app.onError((err, c) => {
+    if (err instanceof HttpError && err.body && typeof err.body === "object" && "code" in err.body && err.body.code === "outside_window") return c.json({ error: err.message, ...err.body }, 422);
     if (err instanceof HttpError) return c.json({ error: err.message, ...(err.body ? { detail: err.body } : {}) }, err.status as 400);
     if (err instanceof EngineInputError) return c.json({ error: err.message, problems: err.problems }, 422);
     if (err instanceof z.ZodError) return c.json({ error: "Some fields are missing or not valid.", issues: err.issues }, 422);
@@ -478,21 +489,24 @@ export function createApp({ db, store, secureCookies, demoSignIn = false, trustP
   app.post("/api/assumptions/:id/review", async (c) => {
     const body = z
       .object({
+        confirmOutsideWindow: z.boolean().optional(),
         action: z.enum(["approve", "resolve", "modify", "second_approve", "use_as_stated", "reject", "reopen"]),
         value: z.number().finite().nullable().optional(),
         reason: z.string().max(2000).nullable().optional(),
         version: z.number().int().nullable().optional(),
       })
       .parse(await c.req.json());
-    const [r] = await as(c, (tx) =>
-      tx.query(`select (a).status, (a).version from (select fn_review($1, $2, $3, $4, $5) a) x`, [
-        c.req.param("id"),
-        body.action,
-        body.value ?? null,
-        body.reason ?? null,
-        body.version ?? null,
-      ]),
-    );
+    const [r] = await as(c, async (tx) => {
+      let reason = body.reason;
+      if ((body.action === "modify" || body.action === "resolve") && body.value != null) {
+        const [a] = await tx.query<{field_key: string}>(`select field_key from assumptions where id=$1`, [c.req.param("id")]);
+        if (!a) throw new HttpError(404, "Assumption not found");
+        reason = windowReason(a.field_key, body.value, reason, body.confirmOutsideWindow, body.action === "modify");
+      }
+      return tx.query(`select (a).status, (a).version from (select fn_review($1, $2, $3, $4, $5) a) x`, [
+        c.req.param("id"), body.action, body.value ?? null, reason ?? null, body.version ?? null,
+      ]);
+    });
     return c.json(r);
   });
 
@@ -514,10 +528,10 @@ export function createApp({ db, store, secureCookies, demoSignIn = false, trustP
 
   app.post("/api/deals/:id/values", async (c) => {
     const body = z
-      .object({ fieldKey: z.string(), itemKey: z.string().max(60).nullable().optional(), value: z.number().finite(), reason: z.string().max(2000) })
+      .object({ confirmOutsideWindow: z.boolean().optional(), fieldKey: z.string(), itemKey: z.string().max(60).nullable().optional(), value: z.number().finite(), reason: z.string().max(2000) })
       .parse(await c.req.json());
     const [r] = await as(c, (tx) =>
-      tx.query(`select (a).status from (select fn_enter_value($1, $2, $3, $4, $5) a) x`, [c.req.param("id"), body.fieldKey, body.itemKey ?? null, body.value, body.reason]),
+      tx.query(`select (a).status from (select fn_enter_value($1, $2, $3, $4, $5) a) x`, [c.req.param("id"), body.fieldKey, body.itemKey ?? null, body.value, windowReason(body.fieldKey, body.value, body.reason, body.confirmOutsideWindow)]),
     );
     return c.json(r);
   });
@@ -528,6 +542,7 @@ export function createApp({ db, store, secureCookies, demoSignIn = false, trustP
     const b = z
       .object({
         name: z.string().trim().min(1, "Name the unit type or space").max(60).refine((n) => !n.includes("|"), "A name cannot contain \"|\""),
+        confirmOutsideWindow: z.boolean().optional(),
         unitCount: num,
         rentMonthly: num,
         areaSf: num,
@@ -541,12 +556,13 @@ export function createApp({ db, store, secureCookies, demoSignIn = false, trustP
     // One space between words, as the reader writes names; a type written in another case is the same type.
     const name = canonicalItem(b.name.replace(/\s+/g, " "));
     const values: [string, number | undefined][] = [["unit_count", b.unitCount], ["unit_rent_monthly", b.rentMonthly], ["rentable_area_sf", b.areaSf], ["rent_psf_annual", b.rentPsfAnnual], ["item_occupancy_pct", b.occupancyPct]];
+    const reasons = new Map(values.filter((entry): entry is [string, number] => entry[1] !== undefined).map(([key, value]) => [key, windowReason(key, value, b.reason, b.confirmOutsideWindow)]));
     await as(c, async (tx) => {
       const keys = await tx.query<{ item_key: string }>(`select distinct item_key from assumptions where deal_id = $1 and item_key <> '' and status <> 'rejected' order by item_key`, [c.req.param("id")]);
       const has = keys.find((k) => itemFold(k.item_key) === itemFold(name));
       if (has) throw new HttpError(409, `This deal already has ${has.item_key}; change its values instead.`);
       for (const [fieldKey, value] of values) {
-        if (value !== undefined) await tx.query(`select fn_enter_value($1, $2, $3, $4, $5)`, [c.req.param("id"), fieldKey, name, value, b.reason]);
+        if (value !== undefined) await tx.query(`select fn_enter_value($1, $2, $3, $4, $5)`, [c.req.param("id"), fieldKey, name, value, reasons.get(fieldKey)]);
       }
     });
     return c.json({ itemKey: name });

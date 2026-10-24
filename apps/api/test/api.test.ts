@@ -3284,7 +3284,7 @@ describe("card 96b owner thresholds", () => {
     expect((await call(owner,"POST",`/api/workspaces/${workspace}/thresholds`,{policyVersion:version,path:"gates.dcrAfterRefinanceMin",value:1.05,reason:"Owner rental credit threshold"})).status).toBe(200);
     const d = (await call(owner,"POST",`/api/workspaces/${workspace}/deals`,{name:"Halifax-style custom rental",assetType:"Multifamily",location:"Halifax",province:"NS"})).json.id;
     const values: [string,number,string?][] = [["land_cost",1000000],["hard_cost",0],["soft_cost",0],["contingency",0],["construction_months",0],["lease_up_months",0],["hold_years",3],["unit_count",12,"Residential"],["unit_rent_monthly",97.5,"Residential"],["stabilized_occupancy_pct",100],["expense_ratio_pct",0],["exit_cap_rate_pct",2],["selling_costs_pct",0],["senior_loan_amount",0],["refinance_and_hold",1],["refinance_month",12],["refinance_amount",500000],["refinance_rate_pct",0],["refinance_amort_years",40],["refinance_io_months",0],["refinance_insurance_premium_pct",4],["refinance_mli_select_points",50]];
-    for (const [fieldKey,value,itemKey] of values) expect((await call(owner,"POST",`/api/deals/${d}/values`,{fieldKey,value,itemKey,reason:"Fictional custom rental setup"})).status).toBe(200);
+    for (const [fieldKey,value,itemKey] of values) expect((await call(owner,"POST",`/api/deals/${d}/values`,{fieldKey,value,itemKey,reason:"Fictional custom rental setup",confirmOutsideWindow:true})).status).toBe(200); // Card 135 audit: this setup types implausible values on purpose, so the person confirms them.
     const made = await call(owner,"POST",`/api/deals/${d}/runs`); expect(made.status).toBe(200);
     expect((await call(owner,"POST",`/api/runs/${made.json.id}/artifacts`,{kind:"lender_package",format:"docx"})).status).toBe(200);
     await work();
@@ -3429,4 +3429,60 @@ test("card 134 persists alternatives and chooses for review until a person label
   const [labelled] = await db.query<any>(`select status, value, sources from assumptions where deal_id = $1 and field_key = 'refinance_ltv_pct'`, [d]);
   expect(labelled).toMatchObject({ status: "needs_review", value: 75 });
   expect(labelled.sources[0].rule).toBe("labelled");
+});
+
+
+describe("card 135 typed plausibility windows", () => {
+  let owner: Session, d: string;
+  const suffix = " (confirmed outside the usual range 1–15)";
+  beforeAll(async () => {
+    owner = await signup("windows135@example.com", "Window Owner", "solo");
+    const w = (await call(owner, "GET", "/api/me")).json.workspaces[0].id;
+    d = (await call(owner, "POST", `/api/workspaces/${w}/deals`, {name: "Invented Alder", assetType: "Multifamily", location: "Burnaby"})).json.id;
+  });
+  test("value entry asks, then saves confirmation in the stored reason and audit", async () => {
+    const body = {fieldKey: "senior_rate_pct", value: 16, reason: "Invented exceptional financing"};
+    const r = await call(owner, "POST", `/api/deals/${d}/values`, body);
+    expect(r.status).toBe(422);
+    expect(r.json).toMatchObject({code: "outside_window", fieldKey: body.fieldKey, window: {min: 1, max: 15}});
+    expect((await db.query(`select id from assumptions where deal_id=$1 and field_key=$2`, [d, body.fieldKey]))).toHaveLength(0);
+    expect((await call(owner, "POST", `/api/deals/${d}/values`, {...body, confirmOutsideWindow: true})).status).toBe(200);
+    const [a] = await db.query<any>(`select id, reason, value from assumptions where deal_id=$1 and field_key=$2`, [d, body.fieldKey]);
+    expect(a.value).toBe(16);
+    expect(a.reason).toBe(body.reason + suffix);
+    const events = await db.query<any>(`select payload from audit_events where entity_id=$1`, [a.id]);
+    expect(JSON.stringify(events)).toContain(body.reason + suffix);
+  });
+  test.each(["modify", "resolve"])("review %s asks before changing, then records confirmation", async action => {
+    const body = {fieldKey: "refinance_rate_pct", value: 5, reason: "Invented initial financing"};
+    const id = (await call(owner, "POST", `/api/workspaces/${(await call(owner,"GET","/api/me")).json.workspaces[0].id}/deals`, {name: `Invented ${action}`, assetType: "Multifamily"})).json.id;
+    expect((await call(owner, "POST", `/api/deals/${id}/values`, body)).status).toBe(200);
+    const [a] = await db.query<any>(`select id, version from assumptions where deal_id=$1 and field_key=$2`, [id, body.fieldKey]);
+    if (action === "resolve") await db.query(`update assumptions set status='conflicting', value=null, conflict_values='[{"value":16,"documents":[]},{"value":17,"documents":[]}]' where id=$1`, [a.id]);
+    const change = {action, value: 16, reason: "Invented revised financing", version: a.version};
+    const r = await call(owner, "POST", `/api/assumptions/${a.id}/review`, change);
+    expect(r.status).toBe(422);
+    expect(r.json).toMatchObject({code: "outside_window", fieldKey: body.fieldKey, window: {min: 1, max: 15}});
+    expect((await call(owner, "POST", `/api/assumptions/${a.id}/review`, {...change, confirmOutsideWindow: true})).status).toBe(200);
+    const [saved] = await db.query<any>(`select reason, value from assumptions where id=$1`, [a.id]);
+    expect(saved).toMatchObject({reason: change.reason + suffix, value: 16});
+    expect(JSON.stringify(await db.query(`select payload from audit_events where entity_id=$1`, [a.id]))).toContain(change.reason + suffix);
+  });
+  test("add item checks all values atomically and confirms only unusual fields", async () => {
+    const body = {name: "Alder studios", unitCount: 3, rentMonthly: 299, occupancyPct: 49, reason: "Invented affordable studios"};
+    const r = await call(owner, "POST", `/api/deals/${d}/items`, body);
+    expect(r.status).toBe(422);
+    expect(r.json).toMatchObject({code: "outside_window", fieldKey: "unit_rent_monthly", window: {min: 300, max: 15000}});
+    expect(await db.query(`select id from assumptions where deal_id=$1 and item_key <> ''`, [d])).toHaveLength(0);
+    expect((await call(owner, "POST", `/api/deals/${d}/items`, {...body, confirmOutsideWindow: true})).status).toBe(200);
+    const rows = await db.query<any>(`select field_key, reason from assumptions where deal_id=$1 and item_key <> ''`, [d]);
+    expect(rows.find(a => a.field_key === "unit_count").reason).toBe(body.reason);
+    expect(rows.find(a => a.field_key === "unit_rent_monthly").reason).toBe(body.reason + " (confirmed outside the usual range 300–15000)");
+    expect(rows.find(a => a.field_key === "item_occupancy_pct").reason).toBe(body.reason + " (confirmed outside the usual range 50–100)");
+  });
+  test("an inside value needs no confirmation or appended reason", async () => {
+    const reason = "Invented ordinary operating budget";
+    expect((await call(owner, "POST", `/api/deals/${d}/values`, {fieldKey: "expense_ratio_pct", value: 35, reason})).status).toBe(200);
+    expect((await db.query<any>(`select reason from assumptions where deal_id=$1 and field_key='expense_ratio_pct'`, [d]))[0].reason).toBe(reason);
+  });
 });

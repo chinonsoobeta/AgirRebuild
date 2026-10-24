@@ -9495,3 +9495,48 @@ describe("card 134 arithmetic choice", () => {
     expect(both?.note).toBe("One figure for both the construction period and the lease-up period; enter each one");
   });
 });
+
+
+describe("card 135 plausibility windows", () => {
+  const read = (fieldKey: string, value: number) => consolidate([{fieldKey, value, itemKey: null, raw: String(value), unitSeen: null, location: "line 1", context: "Invented Alder assumptions", rule: "test", documentId: "alder", documentName: "alder.txt"}]);
+  test.each([["expense_ratio_pct", 0, 65], ["variable_expense_pct", 0, 20], ["exit_cap_rate_pct", 2, 12], ["senior_rate_pct refinance_rate_pct", 1, 15], ["mezz_rate_pct", 4, 25], ["senior_amort_years mezz_amort_years refinance_amort_years", 5, 50], ["senior_io_months mezz_io_months refinance_io_months", 0, 60], ["unit_rent_monthly", 300, 15000], ["rent_psf_annual", 5, 150], ["stabilized_occupancy_pct", 80, 100], ["item_occupancy_pct", 50, 100], ["rent_growth_pct expense_growth_pct", 0, 6], ["selling_costs_pct", 0, 6], ["sales_commission_pct", 0, 8], ["deposit_pct", 0, 35], ["stated_ltc_pct refinance_ltv_pct", 40, 95], ["refinance_insurance_premium_pct", 0, 7], ["min_dscr_covenant", 1, 2], ["construction_months", 0, 60], ["lease_up_months", 0, 36], ["hold_years", 1, 30], ["preferred_return_pct", 0, 15], ["gp_promote_pct", 0, 50], ["lp_share_pct", 50, 100]])("window row %s", (keys, min, max) => {
+    for (const key of String(keys).split(" ")) {
+      for (const value of [Number(min), Number(min) + 0.01, Number(max) - 0.01, Number(max)]) expect(checkArithmetic(read(key, value))[0]!.check).toBeUndefined();
+      for (const value of [Number(min) - 0.01, Number(max) + 0.01]) {
+        const input = read(key, value), before = structuredClone(input);
+        const [got] = checkArithmetic(input);
+        expect(got!.check?.outcome).toBe("questions");
+        expect(got!.check?.note).toMatch(/^Please check: .+ is usually between .+ and .+$/);
+        const {check, ...unchanged} = got!;
+        expect(unchanged).toEqual(before[0]);
+        expect(input).toEqual(before);
+      }
+    }
+  });
+  test("does not check conflicts, rejected rows, or multiple values", () => {
+    const [p] = read("senior_rate_pct", 16);
+    for (const changed of [{...p!, status: "conflicting" as const}, {...p!, status: "rejected" as const}, {...p!, values: [...p!.values, ...p!.values]}]) expect(checkArithmetic([changed as typeof p & {}])[0]!.check).toBeUndefined();
+  });
+  test("formats percentage and rent windows and leaves totals alone", () => {
+    expect(checkArithmetic(read("senior_rate_pct", 16))[0]!.check?.note).toBe("Please check: Senior interest rate is usually between 1% and 15%");
+    expect(checkArithmetic(read("unit_rent_monthly", 299))[0]!.check?.note).toBe("Please check: Rent per unit per month is usually between $300 and $15,000");
+    expect(checkArithmetic(read("land_cost", 987654321))[0]!.check).toBeUndefined();
+  });
+  test("keeps an arithmetic question ahead of a window question", () => {
+    const [p] = read("unit_count", 10);
+    // Existing arithmetic is recomputed; a generated question must retain priority over the window.
+    const got = checkArithmetic([...read("unit_count", 21), {...p!, itemKey: "A", value: 20}, ...read("senior_rate_pct", 16)]);
+    expect(got[0]!.check?.note).toBe("Please check: the unit types read add up to 20, the documents state 21");
+  });
+});
+
+
+test("card 135 window questions do not prevent a unique arithmetic interpretation", () => {
+  const source = {raw: "96%", value: 96, fieldKey: null, itemKey: null, unitSeen: "%", location: "line 1", context: "Invented Alder financing", rule: "test", documentId: "alder", documentName: "alder.txt", alternatives: ["stated_ltc_pct", "refinance_ltv_pct"]};
+  const existing = consolidate([...[ ["senior_loan_amount", 5760000], ["stated_total_cost", 6000000] ] .map(([fieldKey, value]) => ({...source, fieldKey: String(fieldKey), value: Number(value), alternatives: undefined}))]);
+  const [chosen] = chooseByArithmetic(existing, [source]);
+  expect(chosen?.fieldKey).toBe("stated_ltc_pct");
+  expect(chosen?.value).toBe(96);
+  const [proposal] = checkArithmetic(consolidate([chosen!]));
+  expect(proposal?.check?.outcome).toBe("questions");
+});

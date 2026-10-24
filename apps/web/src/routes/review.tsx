@@ -3,7 +3,7 @@ import { useEffect, useRef, useState, type FormEvent, type ReactNode } from "rea
 import { FIELD_BY_KEY, FIELDS, tableSourceLabel } from "@agir/contracts";
 import { SF_PER_M2 } from "@agir/numbers";
 import { api, type Assumption, type Review as ReviewData, type Source } from "../api";
-import { Banner, canEdit, DealHeader, ErrorText, Glossary, StatusTag, useDeal, useSession } from "../components/ui";
+import { Banner, WindowConfirmation, canEdit, DealHeader, ErrorText, Glossary, StatusTag, useDeal, useSession } from "../components/ui";
 import * as I from "../components/icons";
 import { useI18n, type Lang } from "../i18n";
 
@@ -180,7 +180,7 @@ export function Review({ dealId }: { dealId: string }) {
     await qc.invalidateQueries({ queryKey: ["review", dealId] });
   };
   const act = useMutation({
-    mutationFn: (b: { id: string; action: string; value?: number | null; reason?: string | null; version?: number }) => api.post(`/assumptions/${b.id}/review`, b),
+    mutationFn: (b: { id: string; action: string; value?: number | null; reason?: string | null; version?: number; confirmOutsideWindow?: boolean }) => api.post(`/assumptions/${b.id}/review`, b),
     onSuccess: () => {
       setEditing(null);
       return refresh();
@@ -191,7 +191,7 @@ export function Review({ dealId }: { dealId: string }) {
     onSuccess: () => refresh(),
   });
   const enter = useMutation({
-    mutationFn: (b: { fieldKey: string; itemKey?: string | null; value: number; reason: string }) => api.post(`/deals/${dealId}/values`, b),
+    mutationFn: (b: { fieldKey: string; itemKey?: string | null; value: number; reason: string; confirmOutsideWindow?: boolean }) => api.post(`/deals/${dealId}/values`, b),
     onSuccess: () => {
       setEntering(null);
       return refresh();
@@ -200,7 +200,7 @@ export function Review({ dealId }: { dealId: string }) {
   const [adding, setAdding] = useState(false);
   const [perSf, setPerSf] = useState(false);
   const addItem = useMutation({
-    mutationFn: (b: Record<string, string | number>) => api.post(`/deals/${dealId}/items`, b),
+    mutationFn: (b: Record<string, string | number | boolean>) => api.post(`/deals/${dealId}/items`, b),
     onSuccess: () => {
       setAdding(false);
       return refresh();
@@ -263,6 +263,7 @@ export function Review({ dealId }: { dealId: string }) {
     <form
       className="stack"
       style={{ gap: 10, paddingTop: 4, textAlign: "left" }}
+      onChange={() => { if (!act.isPending) act.reset(); }}
       onSubmit={(e: FormEvent<HTMLFormElement>) => {
         e.preventDefault();
         setFormError(null);
@@ -279,6 +280,7 @@ export function Review({ dealId }: { dealId: string }) {
       <div className="field"><label htmlFor={`r-${a.id}`}>{t("review.why")}</label><input className="input" id={`r-${a.id}`} name="reason" minLength={10} required placeholder={t("review.whyHint")} /></div>
       {a.material && <p className="help row" style={{ gap: 6 }}><I.Lock />{t(solo ? "review.materialNoteSolo" : "review.materialNote")}</p>}
       <ErrorText error={formError ?? act.error} />
+      <WindowConfirmation error={act.variables?.id === a.id ? act.error : null} busy={act.isPending} onConfirm={() => act.variables && act.mutate({...act.variables, confirmOutsideWindow: true})} />
       <div className="row"><button className="btn primary small" type="submit">{t("review.saveValue")}</button><button className="btn quiet small" type="button" onClick={() => setEditing(null)}>{t("common.cancel")}</button></div>
     </form>
   );
@@ -289,6 +291,7 @@ export function Review({ dealId }: { dealId: string }) {
       key={id}
       className="stack"
       style={{ gap: 8, paddingTop: 12, borderTop: "1px solid var(--sunken)" }}
+      onChange={() => { if (!enter.isPending) enter.reset(); }}
       onSubmit={(e) => {
         e.preventDefault();
         setFormError(null);
@@ -301,6 +304,8 @@ export function Review({ dealId }: { dealId: string }) {
       }}
     >
       {head}
+      <ErrorText error={enter.variables?.fieldKey === m.fieldKey && enter.variables?.itemKey === (m.itemKey ?? null) ? enter.error : null} />
+      <WindowConfirmation error={enter.variables?.fieldKey === m.fieldKey && enter.variables?.itemKey === (m.itemKey ?? null) ? enter.error : null} busy={enter.isPending} onConfirm={() => enter.variables && enter.mutate({...enter.variables, confirmOutsideWindow: true})} />
       {editable && (
         <div className="row" style={{ alignItems: "flex-start" }}>
           <ValueInput unit={m.unit} id={id} label={name(m)} />
@@ -316,6 +321,7 @@ export function Review({ dealId }: { dealId: string }) {
     <form
       className="stack"
       style={{ gap: 12, paddingTop: 12 }}
+      onChange={() => { if (!addItem.isPending) addItem.reset(); }}
       onSubmit={(e) => {
         e.preventDefault();
         setFormError(null);
@@ -370,6 +376,7 @@ export function Review({ dealId }: { dealId: string }) {
         <button className="btn quiet small" type="button" style={{ height: 44 }} onClick={() => { setAdding(false); setFormError(null); }}>{t("common.cancel")}</button>
       </div>
       <ErrorText error={formError ?? addItem.error} />
+      <WindowConfirmation error={addItem.error} busy={addItem.isPending} onConfirm={() => addItem.variables && addItem.mutate({...addItem.variables, confirmOutsideWindow: true})} />
     </form>
   );
 
@@ -626,6 +633,7 @@ export function Review({ dealId }: { dealId: string }) {
             </div>
           )}
           <ErrorText error={act.error ?? bulk.error} />
+          <WindowConfirmation error={act.variables?.action === "resolve" ? act.error : null} busy={act.isPending} onConfirm={() => act.variables && act.mutate({...act.variables, confirmOutsideWindow: true})} />
 
           <details style={{ borderTop: "1px solid var(--rule)", paddingTop: 16 }} open={stated > 0 || undefined}>
             <summary>{t("review.approved")} <span className="num faint" style={{ fontWeight: 400 }}>{approved.length}</span></summary>

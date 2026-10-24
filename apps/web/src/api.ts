@@ -15,7 +15,7 @@ async function request<T>(method: string, path: string, body?: unknown, raw?: Bl
   });
   const text = await res.text();
   const data = text ? JSON.parse(text) : null;
-  if (!res.ok) throw new ApiError(res.status, data?.error ?? `Request failed (${res.status})`, data?.detail);
+  if (!res.ok) throw new ApiError(res.status, data?.error ?? `Request failed (${res.status})`, data?.detail ?? (data?.code === "outside_window" ? data : undefined));
   return data as T;
 }
 

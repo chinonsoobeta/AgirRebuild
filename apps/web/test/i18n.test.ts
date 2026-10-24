@@ -1,11 +1,12 @@
 import { describe, expect, it, vi } from "vitest";
+import { ApiError } from "../src/api.ts";
 import type { EngineInput, ReadinessItem } from "@agir/contracts";
 import { assemble, validateInput, EngineInputError } from "../../../packages/engine/src/index.ts";
 import validateSource from "../../../packages/engine/src/validate.ts?raw";
 import { allEquityDeal } from "../../../packages/engine/test/fixtures.ts";
 import { FIELDS, METRICS, POLICIES, tableSourceLabel, landTransferTaxOptions, gstHstNetOptions } from "@agir/contracts";
 import { SF_PER_M2 } from "@agir/numbers";
-import { reviewWaiting } from "../src/components/ui.tsx";
+import { reviewWaiting, WindowConfirmation } from "../src/components/ui.tsx";
 import { Quote, approvable, enteredInUnit, foreignIn, keepsWithReason } from "../src/routes/review.tsx";
 import { describeEvent } from "../src/routes/audit.tsx";
 import { I18nProvider, build, checkText, dealStatus, translateMessage, verdictText, type Key } from "../src/i18n.tsx";
@@ -1005,4 +1006,30 @@ it("translates card 134 arithmetic choice and alternative notes", () => {
   expect(translateMessage("Chosen because it closes: the loan and total cost agree with the stated loan-to-cost of 75%")).toBe("Choisi car il confirme : le prêt et le coût total correspondent au ratio prêt-coût déclaré de 75 %");
   expect(translateMessage("Could be the stated loan-to-cost or the refinance loan-to-value; enter the one to use")).toBe("Il pourrait s’agir de ratio prêt-coût déclaré ou de ratio prêt-valeur du refinancement ; saisissez le champ à utiliser");
   expect(translateMessage("One figure for both the construction period and the lease-up period; enter each one")).not.toMatch(/^One figure/);
+});
+
+
+it("card 135 translates a read window and an entry window", () => {
+  const read = "Please check: Operating expense ratio is usually between 10% and 65%";
+  const entry = "Operating expense ratio is usually between 10% and 65%. Please check before using this value.";
+  expect(build("en", () => {}).msg(read)).toBe(read);
+  expect(build("fr", () => {}).msg(read)).toBe("À vérifier : Ratio des charges d'exploitation se situe habituellement entre 10% et 65%");
+  expect(build("fr", () => {}).msg(entry)).toBe("Ratio des charges d'exploitation se situe habituellement entre 10% et 65%. Vérifiez avant d’utiliser cette valeur.");
+  expect(build("en", () => {}).t("review.useOutsideWindow")).toBe("Use this value");
+  expect(build("fr", () => {}).t("review.useOutsideWindow")).toBe("Utiliser cette valeur");
+});
+
+
+it.each(["en", "fr"] as const)("card 135 offers confirmation only for an outside-window error in %s", async lang => {
+  const { createElement: h } = await import("react");
+  const { renderToStaticMarkup } = await import("react-dom/server");
+  vi.stubGlobal("localStorage", {getItem: () => lang});
+  try {
+    const render = (error: unknown, busy = false) => renderToStaticMarkup(h(I18nProvider, {children: h(WindowConfirmation, {error, busy, onConfirm: () => {}})}));
+    const outside = new ApiError(422, "Window warning", {code: "outside_window"});
+    expect(render(outside)).toContain(build(lang, () => {}).t("review.useOutsideWindow"));
+    expect(render(outside, true)).toContain('disabled=""');
+    expect(render(new ApiError(422, "Hard bound"))).toBe("");
+    expect(render(null)).toBe("");
+  } finally { vi.unstubAllGlobals(); }
 });

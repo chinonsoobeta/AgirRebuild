@@ -296,3 +296,10 @@ export function useDeal(dealId: string, poll = false) {
   },[dealWorkspace,workspaceId,setWorkspace]);
   return query;
 }
+
+/** Retry the exact rejected payload only after the person confirms the window warning. */
+export function WindowConfirmation({ error, busy, onConfirm }: { error: unknown; busy: boolean; onConfirm: () => void }) {
+  const { t } = useI18n();
+  if (!(error instanceof ApiError && error.status === 422 && error.detail?.code === "outside_window")) return null;
+  return <button className="btn small" type="button" disabled={busy} onClick={onConfirm}>{t("review.useOutsideWindow")}</button>;
+}
