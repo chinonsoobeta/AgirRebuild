@@ -8,7 +8,7 @@ import { FIELDS, FIELD_BY_KEY, runPolicy, type Currency, type Policy, type Engin
 import { itemFold } from "@agir/numbers";
 import { renderArtifact, RendererUnavailableError, type ArtifactInput } from "@agir/artifacts";
 import { sha256Hex, type BlobStore, type Db } from "@agir/db";
-import { applyLabels, applySuggestions, checkArithmetic, consolidate, extractCandidates, figureOrder, kindOf, labelPhrase, labelUnit, offerable, offeredIds, parseDocument, ocrPdf, REMEMBERED_NOTE, withoutLabelled, type SourcedCandidate } from "@agir/extraction";
+import { applyLabels, applySuggestions, chooseByArithmetic, checkArithmetic, consolidate, extractCandidates, figureOrder, kindOf, labelPhrase, labelUnit, offerable, offeredIds, parseDocument, ocrPdf, REMEMBERED_NOTE, withoutLabelled, type SourcedCandidate } from "@agir/extraction";
 
 export const MAX_UPLOAD_BYTES = 75 * 1024 * 1024;
 
@@ -194,9 +194,9 @@ async function extractDocument(deps: WorkerDeps, documentId: string) {
     }
     for (const c of [...result.candidates, ...result.other]) {
       await tx.query(
-        `insert into candidates (document_id, deal_id, workspace_id, field_key, item_key, value, raw, unit_seen, location, context, rule, note)
-         values ($1,$2,$3,$4,$5,$6,$7,$8,$9,$10,$11,$12)`,
-        [d.id, d.deal_id, d.workspace_id, c.fieldKey, c.itemKey, c.value, c.raw, c.unitSeen, c.location, c.context, c.rule, c.note ?? null],
+        `insert into candidates (document_id, deal_id, workspace_id, field_key, item_key, value, raw, unit_seen, location, context, rule, note, alternatives)
+         values ($1,$2,$3,$4,$5,$6,$7,$8,$9,$10,$11,$12,$13)`,
+        [d.id, d.deal_id, d.workspace_id, c.fieldKey, c.itemKey, c.value, c.raw, c.unitSeen, c.location, c.context, c.rule, c.note ?? null, c.alternatives ?? null],
       );
     }
     await tx.query(
@@ -252,16 +252,16 @@ export async function reconcileDeal(db: Db, dealId: string) {
     if (!deal) return;
     const rows = await tx.query<{
       id: string; document_id: string; document_name: string; field_key: string; item_key: string | null; value: number;
-      raw: string; unit_seen: string | null; location: string; context: string; rule: string; note: string | null; needs_ocr: boolean;
+      raw: string; unit_seen: string | null; location: string; context: string; rule: string; note: string | null; alternatives: string[] | null; needs_ocr: boolean;
     }>(
-      `select c.id, c.document_id, d.name as document_name, c.field_key, c.item_key, c.value, c.raw, c.unit_seen, c.location, c.context, c.rule, c.note, d.needs_ocr
+      `select c.id, c.document_id, d.name as document_name, c.field_key, c.item_key, c.value, c.raw, c.unit_seen, c.location, c.context, c.rule, c.note, c.alternatives, d.needs_ocr
        from candidates c join documents d on d.id = c.document_id
        where c.deal_id = $1 and c.field_key is not null and c.value is not null and d.retired_at is null and d.stage = 'extracted'`,
       [dealId],
     );
     const toSourced = (r: (typeof rows)[number]): SourcedCandidate => ({
       fieldKey: r.field_key, itemKey: r.item_key, value: r.value, raw: r.raw, unitSeen: r.unit_seen, location: r.location,
-      context: r.context, rule: r.rule, ...(r.note ? { note: r.note } : {}), documentId: r.document_id, documentName: r.document_name, ...(r.needs_ocr ? { ocr: true } : {}),
+      context: r.context, rule: r.rule, ...(r.alternatives ? { alternatives: r.alternatives } : {}), ...(r.note ? { note: r.note } : {}), documentId: r.document_id, documentName: r.document_name, ...(r.needs_ocr ? { ocr: true } : {}),
     });
     const sourced = rows.map(toSourced);
     // A stored suggestion counts only while the workspace switch is on, and only after the boundary has checked it. The model is never called here.
@@ -272,7 +272,7 @@ export async function reconcileDeal(db: Db, dealId: string) {
     const unlabelled = figureOrder(
       (
         await tx.query<(typeof rows)[number]>(
-          `select c.id, c.document_id, d.name as document_name, c.field_key, c.item_key, c.value, c.raw, c.unit_seen, c.location, c.context, c.rule, c.note, d.needs_ocr
+          `select c.id, c.document_id, d.name as document_name, c.field_key, c.item_key, c.value, c.raw, c.unit_seen, c.location, c.context, c.rule, c.note, c.alternatives, d.needs_ocr
            from candidates c join documents d on d.id = c.document_id
            where c.deal_id = $1 and c.field_key is null and c.value is not null and d.retired_at is null and d.stage = 'extracted'`,
           [dealId],
@@ -321,7 +321,10 @@ export async function reconcileDeal(db: Db, dealId: string) {
         .filter((x) => !rememberedIds.includes(String(x.id)));
       ({ kept, dropped } = applySuggestions(sourced, offered, suggestions));
     }
-    const proposals = checkArithmetic(consolidate([...sourced, ...kept, ...remembered, ...labelled], deal.currency));
+    const base = [...sourced, ...kept, ...remembered, ...labelled];
+    const assigned = new Set([...kept, ...remembered, ...labelled].map(c => `${c.documentId}|${c.location}|${c.raw}`));
+    const chosen = chooseByArithmetic(consolidate(base, deal.currency), unlabelled.filter(f => !personLabelled.has(f) && !assigned.has(`${f.documentId}|${f.location}|${f.raw}`)));
+    const proposals = checkArithmetic(consolidate([...base, ...chosen], deal.currency));
     const existing = await tx.query<AssumptionRowDb>(
       `select id, field_key, item_key, status, value, source_kind, sources, conflict_values, reason, version from assumptions where deal_id = $1 for update`,
       [dealId],

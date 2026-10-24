@@ -5,4 +5,4 @@ export { canonicalItem, itemFold, currencyOf, mapToken, normalizeLabel, WAIVED_N
 export { applyLabels, applySuggestions, consolidate, figureOrder, LABELLED_NOTE, labelPhrase, labelUnit, offerable, REMEMBERED_NOTE, offeredIds, SUGGESTED_NOTE, suggestFields, withoutLabelled, type Proposal, type SourcedCandidate } from "./consolidate.ts";
 export { scoreExtraction, type GoldenEntry, type Score } from "./score.ts";
 export { ocrPdf } from "./ocr.ts";
-export { checkArithmetic } from "./arithmetic.ts";
+export { checkArithmetic, chooseByArithmetic } from "./arithmetic.ts";

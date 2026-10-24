@@ -1404,6 +1404,11 @@ const FR_REASONS: [RegExp, string | ((m: RegExpMatchArray) => string)][] = [
   [/^The LP cash flows have no single IRR\.$/, "Les flux des commanditaires n'ont pas de TRI unique."],
   [/^The GP cash flows have no single IRR\.$/, "Les flux du commandité n'ont pas de TRI unique."],
   // Extraction notes and document states.
+  [/^Could be the (.+) or the (.+); enter the one to use$/, (m) => {
+    const label = (text: string) => FR_FIELDS[FIELDS.find(f => f.label.toLowerCase() === text)?.key ?? ""] ?? text;
+    return `Il pourrait s’agir de ${label(m[1]!)} ou de ${label(m[2]!)}; saisissez le champ à utiliser`;
+  }],
+  [/^Chosen because it closes: (.+)$/, (m) => `Choisi car il confirme : ${translateMessage(`Checked: ${m[1]}`).replace(/^Vérifié : /, "")}`],
   [/^Checked: the costs read add up to the stated total cost of (.+)$/, (m) => `Vérifié : les coûts lus correspondent au coût total déclaré de ${m[1]}`],
   [/^Please check: this is more than the stated total cost of (.+)$/, (m) => `À vérifier : ce montant dépasse le coût total déclaré de ${m[1]}`],
   [/^Checked: the loan and total cost agree with the stated loan-to-cost of (.+)%$/, (m) => `Vérifié : le prêt et le coût total correspondent au ratio prêt-coût déclaré de ${m[1]} %`],

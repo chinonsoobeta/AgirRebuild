@@ -18,6 +18,7 @@ export type Region = {
 };
 
 export type Candidate = {
+  alternatives?: string[];
   region?: Region;
   fieldKey: string | null;
   itemKey: string | null;
@@ -163,6 +164,7 @@ function record(result: ExtractionResult, mapped: Mapped, token: NumberToken, ba
       value: token.value,
       unitSeen: token.unit,
       note: mapped.kind === "ignored" ? mapped.reason : "No field matches this label",
+      ...(mapped.kind === "ignored" && mapped.alternatives ? { alternatives: mapped.alternatives } : {}),
     });
   }
 }
@@ -904,7 +906,8 @@ function readSentence(sentence: { text: string; start: number }, para0: Paragrap
           usedKey ??= mapped.fieldKey;
           if (AMOUNT_SCOPE[mapped.fieldKey]) amounts.set(t, AMOUNT_SCOPE[mapped.fieldKey]!);
         } else if (!used || t.value !== null) {
-          other(t, "line:label-value", mapped.kind === "ignored" ? mapped.reason : used ? "Another number on this line was used" : "No field matches this label");
+          if (mapped.kind === "ignored" && mapped.alternatives) record(result, mapped, t, { region: regionAt(result, locationOf(t.start), "line:label-value"), raw: t.raw, location: locationOf(t.start), context: context.slice(0, 240), rule: "line:label-value" });
+          else other(t, "line:label-value", mapped.kind === "ignored" ? mapped.reason : used ? "Another number on this line was used" : "No field matches this label");
         }
       }
       return;

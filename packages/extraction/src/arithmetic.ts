@@ -1,4 +1,4 @@
-import type { Proposal } from "./consolidate.ts";
+import type { SourcedCandidate, Proposal } from "./consolidate.ts";
 
 const COSTS = new Set(["land_cost", "hard_cost", "soft_cost", "contingency", "other_cost", "development_charges", "land_transfer_tax", "gst_hst_net"]);
 const money = (n: number) => `$${n.toLocaleString("en-US", { maximumFractionDigits: 2 })}`;
@@ -37,7 +37,9 @@ export function checkArithmetic(proposals: Proposal[]): Proposal[] {
         if (parts.length >= 3 && close(sum, impliedTotal)) questionScale(total, impliedTotal);
         else questionScale(loan, expected);
       } else if (loan.value! > total.value! && !close(loan.value!, total.value!)) mark(loan, "questions", `Please check: this is more than the stated total cost of ${money(total.value!)}`);
-      else if (total.value! > 0 && Math.abs(loan.value! / total.value! * 100 - ltc.value!) <= 1) mark(loan, "confirms", `Checked: the loan and total cost agree with the stated loan-to-cost of ${ltc.value}%`);
+      else if (total.value! > 0 && Math.abs(loan.value! / total.value! * 100 - ltc.value!) <= 1) {
+        for (const p of [loan, ltc]) mark(p, "confirms", `Checked: the loan and total cost agree with the stated loan-to-cost of ${ltc.value}%`);
+      }
     }
   }
   const count = whole("unit_count"), types = eligible.filter(p => p.fieldKey === "unit_count" && p.itemKey !== null);
@@ -47,4 +49,22 @@ export function checkArithmetic(proposals: Proposal[]): Proposal[] {
     else mark(count, "questions", `Please check: the unit types read add up to ${sum}, the documents state ${count.value}`);
   }
   return out;
+}
+
+/** Choose only a unique closing interpretation of an otherwise unlabelled figure. */
+export function chooseByArithmetic(proposals: Proposal[], figures: SourcedCandidate[]): SourcedCandidate[] {
+  const before = checkArithmetic(proposals);
+  return figures.flatMap(figure => {
+    if (figure.fieldKey !== null || figure.value === null || figure.alternatives?.length !== 2 || new Set(figure.alternatives).size !== 2) return [];
+    const choices = figure.alternatives.flatMap(fieldKey => {
+      if (proposals.some(p => p.fieldKey === fieldKey)) return [];
+      const candidate = { ...figure, fieldKey, itemKey: null, rule: "arithmetic-choice" };
+      const trial: Proposal = { fieldKey, itemKey: null, status: "needs_review", value: figure.value, sources: [candidate], values: [{ value: figure.value!, sources: [candidate] }], foreign: [], reason: null };
+      const checked = checkArithmetic([...proposals, trial]);
+      const result = checked.at(-1)!;
+      if (result.check?.outcome !== "confirms" || checked.slice(0, -1).some((p, i) => p.check?.outcome === "questions" && before[i]?.check?.outcome !== "questions")) return [];
+      return [{ ...candidate, note: `Chosen because it closes: ${result.check.note.replace(/^Checked: /, "")}` }];
+    });
+    return choices.length === 1 ? choices : [];
+  });
 }

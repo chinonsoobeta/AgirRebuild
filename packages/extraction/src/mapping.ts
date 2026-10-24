@@ -14,8 +14,15 @@ export type LabelUnit = "$" | "%" | "months" | "years" | "sf" | "m2" | "x" | nul
 
 export type Mapped =
   | { kind: "field"; fieldKey: string; itemKey: string | null; value: number; unitSeen: string; quote?: true; concept?: true; note?: string }
-  | { kind: "ignored"; reason: string; unitMismatch?: true }
+  | { kind: "ignored"; reason: string; alternatives?: string[]; unitMismatch?: true }
   | { kind: "unmapped" };
+
+function ambiguous(keys: string[], reason: string): Mapped {
+  const alternatives = [...new Set(keys)];
+  return alternatives.length === 2
+    ? { kind: "ignored", alternatives, reason: `Could be the ${FIELD_BY_KEY.get(alternatives[0]!)!.label.toLowerCase()} or the ${FIELD_BY_KEY.get(alternatives[1]!)!.label.toLowerCase()}; enter the one to use` }
+    : { kind: "ignored", reason };
+}
 
 // Words that describe a figure rather than name a revenue component.
 const GENERIC = new Set([
@@ -912,11 +919,11 @@ export function mapToken(rawLabel: string, t: NumberToken, opts: MapOptions = {}
   const duration = t.unit ?? normalizeLabel(rawLabel).labelUnit;
   if (!LOAN_PERIOD.test(localLabel) && !/\b(?:io|interest[- ]only|interest only|interets? seulement)\b/.test(localLabel) && (duration === "months" || duration === "years") && /\b(?:and|et)\b/.test(localLabel) && localLabel.split(/\b(?:and|et)\b/).every(part => part.trim())) {
     const periodFields = CONCEPTS.filter(c => ["months", "years"].includes(c.unit) && c.words.some(w => w.test(localLabel)) && (c.with ?? []).every(w => w.test(localLabel)));
-    if (new Set(periodFields.map(c => c.fieldKey)).size > 1) return { kind: "ignored", reason: "More than one period field fits this figure" };
+    if (new Set(periodFields.map(c => c.fieldKey)).size > 1) return ambiguous(periodFields.map(c => c.fieldKey), "More than one period field fits this figure");
   }
   if (t.unit === "%" && /\b(?:and|et)\b/.test(localLabel)) {
     const parts = localLabel.split(/\b(?:and|et)\b/).map(part => FIELDS.filter(d => d.extractable && !d.itemized && d.unit === "%" && d.aliases.some(a => hasPhrase(part, a))).map(d => d.key));
-    if (parts.every(keys => keys.length) && new Set(parts.flat()).size > 1) return { kind: "ignored", reason: "More than one percentage field fits this figure" };
+    if (parts.every(keys => keys.length) && new Set(parts.flat()).size > 1) return ambiguous(parts.flat(), "More than one percentage field fits this figure");
   }
   let m = mapSigned(rawLabel, t, opts);
   // Card 127 audit: a lender capping or limiting the ratio, by any verb, states its limit.
@@ -1050,7 +1057,7 @@ function conceptField(rawLabel: string, t: NumberToken, opts: MapOptions, financ
     ? assumption && !opts.budget && c.words.some((w) => w.test(assumptionLabel)) && ((c.with ?? []).every((w) => w.test(assumptionLabel)) || !!c.basisAfter?.test(foldText(opts.after ?? ""))) && !c.exclude.test(assumptionContext)
     // After a typed figure, read assumptions, a risk allowance, or a rate in an established loan context; a loan noun or a vague budget word there names nothing.
     : (!afterLabel || (c.fieldKey === "contingency" && HOLDING_WORD.test(label) && RISK_WORD.test(label)) || (c.fieldKey === "senior_rate_pct" && opts.loanContext)) && (c.budget ? budgetLine && (c.fieldKey !== "development_charges" || opts.budget || !/\bwater and wastewater\b/.test(label)) && meanings.includes(c) && (c.fieldKey !== "land_cost" || !opts.prose || ACQUISITION_WORD.test(label) || /\b(?:dirt|ground) (?:cost|deal|price|basis)\b/.test(label)) : (c.unscoped || loan) && !(c.fieldKey === "senior_rate_pct" && LTV_BASIS_AFTER_RE.test(foldText(opts.after ?? ""))) && c.words.some((w) => w.test(label)) && (c.with ?? []).every(w => w.test(label))) && !c.exclude.test(c.budget || afterLabel ? folded : label)));
-  if (fits.length > 1 && fits.every(c => !c.budget && !c.assumption)) return { kind: "ignored", reason: "More than one financing field fits this figure" };
+  if (fits.length > 1 && fits.every(c => !c.budget && !c.assumption)) return ambiguous(fits.map(c => c.fieldKey), "More than one financing field fits this figure");
   if (fits.length !== 1) return null;
   const chosen = fits[0]!;
   // "To fill" after a figure is the lease-up only for the building or its units ("6 months to fill the staff positions" is not).
@@ -1153,7 +1160,7 @@ function mapLabel(rawLabel: string, t: NumberToken, opts: MapOptions = {}): Mapp
   const conjuncts = normalizeLabel(rawLabel.split(/[,;/]/).pop() ?? "").label.split(/\b(?:and|et)\b/);
   if (finance?.kind === "field" && CONCEPTS.find(c => c.fieldKey === finance.fieldKey)?.unscoped && conjuncts.length > 1) {
     const fields = conjuncts.map(part => FIELDS.filter(d => ["senior", "refinance", "waterfall"].includes(d.group) && d.aliases.some(a => hasPhrase(part.trim(), a)) && compatibleValue(d, t, label, labelUnit, labelCode, prose)).map(d => d.key));
-    if (fields.every(keys => keys.length > 0) && new Set(fields.flat()).size > 1) return { kind: "ignored", reason: "More than one financing field fits this figure" };
+    if (fields.every(keys => keys.length > 0) && new Set(fields.flat()).size > 1) return ambiguous(fields.flat(), "More than one financing field fits this figure");
   }
   const aliasField = FIELDS.some(d => d.extractable && !d.itemized && !["hard_cost", "soft_cost"].includes(d.key) && d.aliases.some(a => (!LOOSE_ALIASES.has(a) || a === "amort") && hasPhrase(label, a)) && compatibleValue(d, t, label, labelUnit, labelCode, prose));
   if (finance?.kind === "ignored" || (finance?.kind === "field" && (CONCEPTS.find(c => c.fieldKey === finance.fieldKey)?.unscoped || !aliasField))) return finance;

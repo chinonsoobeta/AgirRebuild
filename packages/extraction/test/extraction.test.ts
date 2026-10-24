@@ -9444,7 +9444,8 @@ describe("card 133 arithmetic", () => {
   });
   test("uses the money tolerance and the percentage-point tolerance", () => {
     const got = checkArithmetic(read(["land_cost", 1000000], ["hard_cost", 4000000], ["soft_cost", 990000], ["stated_total_cost", 6000000], ["senior_loan_amount", 4560000], ["stated_ltc_pct", 75]));
-    expect(got.filter(p => p.check?.outcome === "confirms")).toHaveLength(5);
+    expect(got.filter(p => p.fieldKey !== "stated_ltc_pct" && p.check?.outcome === "confirms")).toHaveLength(5);
+    expect(got.find(p => p.fieldKey === "stated_ltc_pct")?.check?.outcome).toBe("confirms");
     expect(checkArithmetic(read(["senior_loan_amount", 4570000], ["stated_total_cost", 6000000], ["stated_ltc_pct", 75])).every(p => !p.check)).toBe(true);
   });
 
@@ -9479,11 +9480,11 @@ describe("card 134 arithmetic choice", () => {
     expect(chooseByArithmetic(ps, [figure(null, 6000000, ["stated_total_cost", "refinance_month"])])).toEqual([]);
   });
   test("records two named alternatives but preserves the three-field refusal", () => {
-    const doc = (text: string): NormalizedDocument => ({ kind: "pdf", fullText: text, lines: [{text, location: "page 1, line 1"}], tables: [], notes: [] });
+    const doc = (text: string): NormalizedDocument => ({ kind: "pdf", pageCount: 1, needsOcr: false, fullText: text, lines: [{text, location: "page 1, line 1"}], tables: [], notes: [] });
     const two = extractCandidates(doc("Loan-to-cost and refinance LTV: 75%.")).other.find(c => c.value === 75);
     expect(two?.alternatives).toEqual(["stated_ltc_pct", "refinance_ltv_pct"]);
-    expect(two?.note).toMatch(/^Could be the .+ or the .+; enter the one to use$/);
-    const three = extractCandidates(doc("Loan-to-cost and refinance LTV and vacancy: 75%.")).other.find(c => c.value === 75);
+    expect(two?.note).toBe("Could be the stated loan-to-cost or the refinance loan-to-value; enter the one to use");
+    const three = extractCandidates(doc("Loan-to-cost and refinance LTV and stabilized occupancy: 75%.")).other.find(c => c.value === 75);
     expect(three?.alternatives).toBeUndefined();
     expect(three?.note).toBe("More than one percentage field fits this figure");
   });
