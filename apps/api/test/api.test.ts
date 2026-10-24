@@ -3814,3 +3814,84 @@ describe("fallback: no model", () => {
     }
   });
 });
+
+describe("card 155: production counts, no content", () => {
+  let mw: string, md: string;
+  const metrics = async () => (await db.query<any>(`select * from deal_metrics where deal_id = $1`, [md]))[0];
+  const review = async () => (await call(alice, "GET", `/api/deals/${md}/review`)).json;
+  const PERSON = ["assumption.approve", "assumption.second_approve", "assumption.use_as_stated", "assumption.modify", "assumption.reject", "assumption.resolve", "assumption.enter", "assumption.accept_default", "figure.labelled"];
+  const personActions = async () => Number((await db.query<any>(`select count(*)::int as n from audit_events where deal_id = $1 and actor is not null and action = any($2)`, [md, PERSON]))[0].n);
+
+  test("after an invented document set is read, the deal's counts are right", async () => {
+    mw = (await call(alice, "POST", "/api/workspaces", { name: "Counts", reviewMode: "solo" })).json.id;
+    expect((await call(alice, "POST", `/api/workspaces/${mw}/members`, { email: "bob@example.com", role: "admin" })).status).toBe(200);
+    md = (await call(alice, "POST", `/api/workspaces/${mw}/deals`, { name: "Counted Heights", assetType: "Multifamily", location: "Burnaby", province: "BC" })).json.id;
+    for (const doc of loadOracle("maple-heights").documents) {
+      expect((await call(alice, "PUT", `/api/deals/${md}/documents?name=${encodeURIComponent(doc.name)}`, undefined, await documentBytes(doc))).status).toBe(200);
+    }
+    expect((await call(alice, "PUT", `/api/deals/${md}/documents?name=blank.txt`, undefined, new TextEncoder().encode("Meeting notes\nNothing was decided.\n"))).status).toBe(200);
+    expect((await call(alice, "PUT", `/api/deals/${md}/documents?name=notes.txt`, undefined, new TextEncoder().encode("Project notes\nBanner allowance: $7,000\n"))).status).toBe(200);
+    await work();
+    const kinds = await db.query<any>(`select kind, count(*)::int as n from documents where deal_id = $1 group by kind`, [md]);
+    const m = await metrics();
+    for (const k of ["pdf", "xlsx", "csv", "docx", "txt"]) expect(m[`docs_${k}`]).toBe(kinds.find((r: any) => r.kind === k)?.n ?? 0);
+    expect(m.docs_txt).toBeGreaterThanOrEqual(2);
+    expect(m.docs_no_candidates).toBe(1);
+    const [rec] = await db.query<any>(`select payload from audit_events where deal_id = $1 and action = 'assumptions.reconciled' order by seq desc limit 1`, [md]);
+    expect(m.figures_read).toBe(rec.payload.proposals);
+    expect(m.figures_read).toBeGreaterThan(0);
+    expect(m).toMatchObject({ figures_confirmed_from_suggestion: 0, figures_typed: 0, actions_until_runnable: 0, first_run_at: null, minutes_upload_to_run: null });
+    expect(m.first_upload_at).not.toBeNull();
+  });
+
+  test("an entry, a label and a run update the right counts", async () => {
+    const other = (await review()).other.find((o: any) => o.raw === "$7,000");
+    expect((await call(alice, "POST", `/api/deals/${md}/figure-labels`, { documentId: other.documentId, figureId: other.figureId, fieldKey: "other_cost" })).status).toBe(200);
+    expect(await metrics()).toMatchObject({ actions_until_runnable: 1, figures_typed: 0 });
+    await work();
+    const have = new Set((await review()).assumptions.map((a: any) => a.fieldKey));
+    // Two optional dollar inputs no invented document states, so typing them settles new rows.
+    const [typed, later] = (await call(alice, "GET", "/api/catalog")).json.fields.filter((f: any) => f.unit === "$" && !f.required && !f.itemized && f.min === 0 && !have.has(f.key)).map((f: any) => f.key);
+    expect(later).toEqual(expect.any(String));
+    expect((await call(alice, "POST", `/api/deals/${md}/values`, { fieldKey: typed, value: 5000, reason: "Lender term sheet says so" })).status).toBe(200);
+    expect(await metrics()).toMatchObject({ actions_until_runnable: 2, figures_typed: 1 });
+    for (const a of (await review()).assumptions.filter((x: any) => x.status === "needs_review")) {
+      expect((await call(alice, "POST", `/api/assumptions/${a.id}/review`, { action: "approve", version: a.version })).status).toBe(200);
+    }
+    const before = await personActions();
+    expect((await metrics()).actions_until_runnable).toBe(before);
+    const r = await call(alice, "POST", `/api/deals/${md}/runs`);
+    expect(r.status).toBe(200);
+    const m = await metrics();
+    expect(m.first_run_at).not.toBeNull();
+    expect(m.minutes_upload_to_run).toBeGreaterThanOrEqual(0);
+    expect(m.actions_until_runnable).toBe(before);
+    // A person action after the first run does not change the count until runnable.
+    expect((await call(alice, "POST", `/api/deals/${md}/values`, { fieldKey: later, value: 2500, reason: "Lender term sheet revised" })).status).toBe(200);
+    expect(await metrics()).toMatchObject({ actions_until_runnable: before, figures_typed: 2 });
+  });
+
+  test("only the workspace owner reads the report", async () => {
+    expect((await call(bob, "GET", `/api/workspaces/${mw}/deal-metrics`)).status).toBe(403);
+    expect((await call(carol, "GET", `/api/workspaces/${mw}/deal-metrics`)).status).toBe(403);
+    const r = await call(alice, "GET", `/api/workspaces/${mw}/deal-metrics`);
+    expect(r.status).toBe(200);
+    expect(r.json.deals).toHaveLength(1);
+    expect(r.json.deals[0]).toMatchObject({ deal_id: md, name: "Counted Heights", figures_typed: 2 });
+    expect(r.json.totals).toMatchObject({ deals: 1, figures_typed: 2, docs_no_candidates: 1 });
+  });
+
+  test("a deal_metrics row holds no text: only numbers, timestamps and ids", async () => {
+    const cols = await db.query<any>(`select column_name, data_type from information_schema.columns where table_name = 'deal_metrics'`);
+    expect(cols.length).toBeGreaterThan(5);
+    for (const c of cols) expect(["integer", "bigint", "timestamp with time zone", "uuid"]).toContain(c.data_type);
+    const [row] = await db.query<any>(`select to_jsonb(m) as j from deal_metrics m where deal_id = $1`, [md]);
+    const uuid = /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/;
+    const stamp = /^\d{4}-\d{2}-\d{2}T\d{2}:\d{2}:\d{2}(\.\d+)?([+-]\d{2}:\d{2}|Z)$/;
+    for (const [k, v] of Object.entries(row.j)) {
+      if (v === null || typeof v === "number") continue;
+      expect(typeof v, k).toBe("string");
+      expect(uuid.test(v as string) || stamp.test(v as string), `${k} holds text`).toBe(true);
+    }
+  });
+});
