@@ -124,41 +124,37 @@ export function ReviewAccess() {
           <h2 className="h3" id="ra-list">{t("agirreview.list")}</h2>
           <p className="muted small">{t("agirreview.listBody")}</p>
           {reviewers.length === 0 ? <p className="muted">{t("agirreview.none")}</p> : (
-            <div className="scroll">
-              <table className="table">
-                <thead><tr><th scope="col">{t("agirreview.col.name")}</th><th scope="col">{t("agirreview.col.access")}</th></tr></thead>
-                <tbody>{reviewers.map((m) => (
-                  <tr key={m.id}>
-                    <td>{m.name}<span className="sub">{m.email}</span></td>
-                    <td>
+            // One reviewer under another: the side column is too narrow for a name, an email and two buttons side by side.
+            <ul className="ra-reviewers">
+              {reviewers.map((m) => (
+                <li key={m.id}>
+                  <div><strong>{m.name}</strong><span className="sub">{m.email}</span></div>
+                  <div className="stack tight">
+                    <span>{m.expires_at ? t(new Date(m.expires_at) > now ? "agirreview.until" : "agirreview.ended", { date: day(m.expires_at, lang) }) : null}</span>
+                    {extended?.id === m.id && <span className="small" role="status">{t("agirreview.extended", { name: m.name, date: day(extended.until, lang) })}</span>}
+                    {active(m) && (extending === m.id ? (
                       <div className="stack tight">
-                        <span>{m.expires_at ? t(new Date(m.expires_at) > now ? "agirreview.until" : "agirreview.ended", { date: f.date(m.expires_at) }) : null}</span>
-                        {extended?.id === m.id && <span className="small" role="status">{t("agirreview.extended", { name: m.name, date: day(extended.until, lang) })}</span>}
-                        {active(m) && (extending === m.id ? (
-                          <div className="stack tight">
-                            <Seg label={t("agirreview.extendBy")} value={extendDays} onChange={setExtendDays} options={longer(m.expires_at ?? "").map((d) => ({ value: d, label: t("agirreview.dayN", { n: d }) }))} />
-                            <div className="row">
-                              <button name="extend-confirm" value={m.id} className="btn primary sm" type="button" disabled={extend.isPending}
-                                onClick={() => extend.mutate({ id: m.id, email: m.email, days: Number(extendDays) })}>{t("agirreview.extendGo", { date: day(endsOn(Number(extendDays)), lang) })}</button>
-                              <button className="btn ghost sm" type="button" onClick={() => setExtending(null)}>{t("agirreview.extendCancel")}</button>
-                            </div>
-                          </div>
-                        ) : (
-                          <div className="row" style={{ gap: 8 }}>
-                            {m.expires_at && longer(m.expires_at).length > 0 && (
-                              <button name="extend" value={m.id} className="btn quiet sm" type="button" aria-label={t("agirreview.extendWho", { name: m.name })}
-                                onClick={() => { setExtending(m.id); setExtendDays(longer(m.expires_at!)[0]!); setExtended(null); extend.reset(); }}>{t("agirreview.extend")}</button>
-                            )}
-                            <button name="end" value={m.id} className="btn ghost sm" type="button" aria-label={t("agirreview.endWho", { name: m.name })} disabled={end.isPending}
-                              onClick={() => window.confirm(t("agirreview.endConfirm", { name: m.name })) && end.mutate(m.id)}>{t("agirreview.end")}</button>
-                          </div>
-                        ))}
+                        <Seg label={t("agirreview.extendBy")} value={extendDays} onChange={setExtendDays} options={longer(m.expires_at ?? "").map((d) => ({ value: d, label: t("agirreview.dayN", { n: d }) }))} />
+                        <div className="row">
+                          <button name="extend-confirm" value={m.id} className="btn primary sm" type="button" disabled={extend.isPending}
+                            onClick={() => extend.mutate({ id: m.id, email: m.email, days: Number(extendDays) })}>{t("agirreview.extendGo", { date: day(endsOn(Number(extendDays)), lang) })}</button>
+                          <button className="btn ghost sm" type="button" onClick={() => setExtending(null)}>{t("agirreview.extendCancel")}</button>
+                        </div>
                       </div>
-                    </td>
-                  </tr>
-                ))}</tbody>
-              </table>
-            </div>
+                    ) : (
+                      <div className="row" style={{ gap: 8 }}>
+                        {m.expires_at && longer(m.expires_at).length > 0 && (
+                          <button name="extend" value={m.id} className="btn quiet sm" type="button" aria-label={t("agirreview.extendWho", { name: m.name })}
+                            onClick={() => { setExtending(m.id); setExtendDays(longer(m.expires_at!)[0]!); setExtended(null); extend.reset(); }}>{t("agirreview.extend")}</button>
+                        )}
+                        <button name="end" value={m.id} className="btn ghost sm" type="button" aria-label={t("agirreview.endWho", { name: m.name })} disabled={end.isPending}
+                          onClick={() => window.confirm(t("agirreview.endConfirm", { name: m.name })) && end.mutate(m.id)}>{t("agirreview.end")}</button>
+                      </div>
+                    ))}
+                  </div>
+                </li>
+              ))}
+            </ul>
           )}
           <ErrorText error={extend.error ?? end.error} />
           <ErrorText error={members.error} />
