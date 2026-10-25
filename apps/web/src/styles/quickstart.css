@@ -1,1 +1,12 @@
 /* Styles for the quickstart area: design tokens only (var(--…)), no literal colours. */
+.qs-lead{margin-top:8px}
+.qs-grid{gap:18px}
+.qs-affix{display:flex;align-items:center;min-height:42px;border:1px solid var(--line-2);border-radius:9px;background:var(--surface);color:var(--ink)}
+.qs-affix:focus-within{border-color:var(--accent);outline:2px solid var(--accent);outline-offset:0}
+.qs-affix input{flex:1 1 auto;min-width:0;min-height:40px;border:0;background:transparent;padding:0 12px;color:inherit;font:inherit;text-align:right;font-variant-numeric:tabular-nums lining-nums}
+.qs-affix input:focus{outline:0}
+.qs-affix span{padding:0 12px;color:var(--ink-3)}
+.qs-units td{vertical-align:middle}
+.qs-units .input,.qs-units .qs-affix{min-width:120px}
+.qs-absent{margin:0;padding-left:20px;display:flex;flex-direction:column;gap:4px}
+.qs-notes{gap:16px}

@@ -73,8 +73,8 @@ describe("small condo quick start (task 84b)", () => {
   });
   it.each(["en", "fr"] as const)("renders the condo option in %s", (lang) => {
     state.lang = lang;
-    const label = lang === "en" ? "Small condo for sale (4–60 units)" : "Petit immeuble en copropriété à vendre (4 à 60 logements)";
-    expect(render()).toContain('<option value="condo">' + label + "</option>");
+    const [title, range] = lang === "en" ? ["Small condo for sale", "4 to 60 units"] : ["Petit immeuble en copropriété à vendre", "4 à 60 logements"];
+    expect(render()).toContain('value="condo"/><span><span class="t">' + title + '</span><span class="d">' + range + "</span>");
   });
   it.each([3_300_000, 0])("four condo units assemble a ready sale with loan %s", (loan) => {
     submitAnswers("condo", 4, loan);
