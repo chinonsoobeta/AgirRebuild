@@ -100,6 +100,11 @@ describe("card X4 thresholds in the open", () => {
     expect(text(card)).toContain("DCR after refinance");
     expect(card).not.toContain("<select");
   });
+  it("keeps each bound whole beside its name, with the notes on a line of their own", () => {
+    const card = thresholdsCard(render()).replace(/<details[\s\S]*<\/details>/g, "");
+    expect(card).toContain('<dl class="kv th-list">');
+    expect(card).toMatch(/<dt>DCR after refinance<\/dt><dd class="num">at least 1\.30<\/dd><dd class="small muted th-note">[^<]*set for this deal[^<]*<\/dd>/);
+  });
   it("puts the editor in a disclosure for the owner", () => {
     const card = thresholdsCard(render());
     expect(card).toMatch(/<details[^>]*>\s*<summary[^>]*>Change a threshold for this deal \(a reason is required\)<\/summary>/);
