@@ -1356,6 +1356,7 @@ const FR_REASONS: [RegExp, string | ((m: RegExpMatchArray) => string)][] = [
   [/^refinance term must be a whole number from (\d+) to (\d+)$/, (m) => `La durée du prêt de refinancement doit être un nombre entier de ${frNum(m[1]!)} à ${frNum(m[2]!)} ans`],
   [/^Quebec has no full QST rebate for purpose-built rentals /, "Le Québec n’offre aucun remboursement intégral de la TVQ pour les immeubles locatifs construits à cette fin (le remboursement intégral couvre uniquement la TPS). La TVQ de 9,975 % sur la juste valeur marchande à l’achèvement est payable, moins un remboursement pouvant atteindre 7 182 $ par logement, qui est nul à partir de 225 000 $ par logement. Saisissez le montant net."],
   [/^the deal has no province$/, "La province du projet n’est pas indiquée"],
+  [/^these tables are for deals in Canada; enter the amount yourself$/, "Ces tableaux valent pour les projets au Canada\u00a0; indiquez le montant vous-même"],
   [/^state the land cost first$/, "Indiquez d’abord le coût du terrain"],
   [/^the table needs a loan-to-value$/, "Le tableau exige un ratio prêt-valeur"],
   [/^state the refinance amortization first$/, "Indiquez d’abord l’amortissement du refinancement"],

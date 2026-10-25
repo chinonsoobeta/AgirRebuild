@@ -1,7 +1,7 @@
 import { FIELD_BY_KEY, tableSourceLabel } from "@agir/contracts";
 import { Link } from "@tanstack/react-router";
 import { useQueries, useQuery } from "@tanstack/react-query";
-import { Fragment, type ReactNode } from "react";
+import { type ReactNode } from "react";
 import { api, type DealOverview, type Metric, type RunView } from "../api";
 import { DealFrame, MetricValue, useDeal, useSession } from "../components/ui";
 import { Notice } from "../components/kit";
@@ -82,6 +82,118 @@ export function compareSummary(i: I18n, d: RunDiff, to: RunView, from: RunView):
   const vb = to.result.verdict.code;
   parts.push(va === vb ? t("compare.verdictSame", { v: L.verdict(vb) }) : t("compare.verdictMoved", { from: L.verdict(va), to: L.verdict(vb) }));
   return { title, body: parts.join(" ") };
+}
+
+/** One cell of a value column: its printed text, or a stored metric printed by `MetricValue`, or absent from that run. */
+type Cell = { text: string; metric?: Metric; absent?: true };
+/** A row of the comparison table: a group heading, or a figure with both runs' values, the change and where it comes from. */
+export type CompareRow =
+  | { kind: "group"; label: string }
+  | { kind: "row"; key: string; label: string; note?: string; source: string; showSource: boolean; a: Cell; b: Cell; change: string; numeric: boolean };
+
+const sourceOf = (i: I18n, x: Input) => (x.tableSource ? tableSourceLabel(x.tableSource, i.lang) : i.msg(x.source));
+const metricText = (i: I18n, m: Metric) => (m.status !== "VALID" || m.value === null ? i.t(m.status === "NOT_APPLICABLE" ? "common.notApplicable" : "common.notMeaningful") : i.f.value(m.value, m.unit));
+
+/**
+ * The comparison table's rows, built once for the screen and for the downloaded file. Every value is one a run or the API recorded;
+ * the change column is the screen's existing one (an open decision for the owner), and the refinance loan's says only whether it moved.
+ */
+export function comparisonRows(i: I18n, d: RunDiff, to: RunView, from: RunView): CompareRow[] {
+  const { t, f, L } = i;
+  const absent: Cell = { text: t("compare.absent"), absent: true };
+  const recorded = t("compare.csv.recorded", { a: from.number, b: to.number });
+  const delta = (x: number, y: number, unit: string) =>
+    x === y ? t("compare.same") : unit === "%" ? f.delta((y - x) * 100, "bps") : unit === "flag" ? t("compare.changed") : f.delta(y - x, unit);
+  const shown = (text: string, same: boolean) => (same ? t("compare.same") : text);
+  const inputRow = (key: string, x: Input | null, y: Input | null, source: string): CompareRow => {
+    const z = (y ?? x)!;
+    return { kind: "row", key, label: L.field(z.fieldKey, z.itemKey), source, showSource: true, numeric: true,
+      a: x ? { text: f.value(x.value, unitOf(x)) } : absent, b: y ? { text: f.value(y.value, unitOf(y)) } : absent,
+      change: x && y ? delta(x.value, y.value, unitOf(y)) : t("compare.changed") };
+  };
+  const metricRow = (p: MetricPair): CompareRow => {
+    const numeric = p.from?.status === "VALID" && p.to?.status === "VALID" && p.from.value !== null && p.to.value !== null;
+    return { kind: "row", key: p.key, label: L.metric(p.key), source: recorded, showSource: false, numeric: false,
+      a: p.from ? { text: metricText(i, p.from), metric: p.from } : absent, b: p.to ? { text: metricText(i, p.to), metric: p.to } : absent,
+      change: shown(numeric ? delta(p.from!.value!, p.to!.value!, p.unit) : t("compare.changed"), sameMetric(p.from, p.to)) };
+  };
+  const countRow = (key: string, label: string, x: string, y: string): CompareRow =>
+    ({ kind: "row", key, label, source: recorded, showSource: false, numeric: true, a: { text: x }, b: { text: y }, change: shown(t("compare.changed"), x === y) });
+  // The refinance loan, when both runs have it: worked out again from each run's recorded input by the engine that recorded it.
+  const ra = from.refinance, rb = to.refinance;
+  const refi = ra && rb ? {
+    moved: !near(ra.loan, rb.loan),
+    row: { kind: "row", key: "refinance_loan", label: t("compare.refinance"), showSource: false, numeric: true,
+      note: rb.stated || rb.ltvPct === null ? t("compare.refinanceStated") : t("compare.refinanceLtv", { pct: f.value(rb.ltvPct, "%") }),
+      source: t("compare.csv.refinance", { engine: to.engineVersion }),
+      a: { text: f.value(ra.loan, "$") }, b: { text: f.value(rb.loan, "$") }, change: shown(t("compare.changed"), near(ra.loan, rb.loan)) } as CompareRow,
+  } : null;
+  // It follows the coverage after refinancing, as on the Run screen, or ends its group's figures.
+  const withRefi = (pairs: MetricPair[], moved: boolean) => {
+    const rows = pairs.map(metricRow);
+    if (!refi || refi.moved !== moved) return rows;
+    const at = pairs.findIndex((p) => p.key === "dcr_after_refinance");
+    return at < 0 ? [...rows, refi.row] : [...rows.slice(0, at + 1), refi.row, ...rows.slice(at + 1)];
+  };
+  const gates = countRow("gates", t("compare.gates"), t("compare.ofTotal", { n: d.gates.from.passed, total: d.gates.from.total }), t("compare.ofTotal", { n: d.gates.to.passed, total: d.gates.to.total }));
+  const checks = countRow("checks", t("compare.checks"), t("compare.ofTotal", { n: d.checks.from.fired, total: d.checks.from.total }), t("compare.ofTotal", { n: d.checks.to.fired, total: d.checks.to.total }));
+  const verdict = countRow("verdict", t("compare.verdict"), L.verdict(from.result.verdict.code), L.verdict(to.result.verdict.code));
+  const gatesSame = JSON.stringify(d.gates.from) === JSON.stringify(d.gates.to);
+  const checksSame = JSON.stringify(d.checks.from) === JSON.stringify(d.checks.to);
+  const verdictSame = from.result.verdict.code === to.result.verdict.code;
+  const movedRows = [...withRefi(d.moved, true), ...(gatesSame ? [] : [gates]), ...(checksSame ? [] : [checks]), ...(verdictSame ? [] : [verdict])];
+  const stillRows = [...withRefi(d.still, false), ...(gatesSame ? [gates] : []), ...(checksSame ? [checks] : []), ...(verdictSame ? [verdict] : [])];
+  const group = (label: string): CompareRow => ({ kind: "group", label });
+  const { changed, added, removed } = d.inputs;
+  return [
+    ...(changed.length ? [group(t("compare.group.changed"))] : []),
+    ...changed.map((c) => inputRow(c.key, c.from, c.to, sourceKey(c.from) !== sourceKey(c.to) ? `${sourceOf(i, c.to)} · ${t("compare.was", { source: sourceOf(i, c.from) })}` : sourceOf(i, c.to))),
+    ...(added.length ? [group(t("compare.group.added"))] : []),
+    ...added.map((x) => inputRow(`+${inputKey(x)}`, null, x, sourceOf(i, x))),
+    ...(removed.length ? [group(t("compare.group.removed"))] : []),
+    ...removed.map((x) => inputRow(`-${inputKey(x)}`, x, null, sourceOf(i, x))),
+    ...(movedRows.length ? [group(t("compare.group.moved")), ...movedRows] : []),
+    ...(stillRows.length ? [group(t("compare.group.still")), ...stillRows] : []),
+  ];
+}
+
+/** The footer sentence: every figure is as recorded, and the refinance loan, when shown, is named as the one worked out again. */
+export const compareFoot = (i: I18n, rows: readonly CompareRow[]) => i.t(rows.some((r) => r.kind === "row" && r.key === "refinance_loan") ? "compare.footRefinance" : "compare.foot");
+
+/**
+ * One CSV field, quoted when it needs to be. A cell a spreadsheet would read as a formula starts with an apostrophe: one that begins
+ * with =, +, -, @, a tab or a return. That includes every signed change, so "+135 bps" opens as the text on screen, not an error.
+ */
+const csvField = (value: string) => {
+  const safe = /^[=+\-@\t\r]/.test(value) ? `'${value}` : value;
+  return /[",\r\n]/.test(safe) || /^\s|\s$/.test(safe) ? `"${safe.replaceAll('"', '""')}"` : safe;
+};
+const fileSafe = (name: string) => name.normalize("NFD").replace(/[\u0300-\u036f]/g, "").toLowerCase().replace(/[^a-z0-9]+/g, "-").replace(/^-+|-+$/g, "") || "deal";
+
+/** The comparison as a CSV file: the deal, the summary and footer sentences, then exactly the table's rows with a source for each. */
+export function comparisonFile(i: I18n, deal: string, to: RunView, from: RunView, heads: [string, string]): { name: string; text: string } {
+  const d = diffRuns(to, from);
+  const rows = comparisonRows(i, d, to, from);
+  const s = compareSummary(i, d, to, from);
+  const line = (cells: string[]) => [...cells, "", "", "", "", ""].slice(0, 5).map(csvField).join(",");
+  const lines = [
+    line([deal]), line([`${s.title} ${s.body}`]), line([compareFoot(i, rows)]), line([]),
+    line([i.t("compare.col.figure"), heads[0], heads[1], i.t("compare.col.change"), i.t("compare.col.source")]),
+    ...rows.map((r) => (r.kind === "group" ? line([r.label]) : line([r.note ? `${r.label} (${r.note})` : r.label, r.a.text, r.b.text, r.change, r.source]))),
+  ];
+  return { name: `agir-comparison-${fileSafe(deal)}-run-${from.number}-run-${to.number}.csv`, text: `\uFEFF${lines.join("\r\n")}\r\n` };
+}
+
+/** Saves a text file built in the browser, then lets its URL go. */
+export function saveFile(name: string, text: string) {
+  const url = URL.createObjectURL(new Blob([text], { type: "text/csv;charset=utf-8" }));
+  const a = document.createElement("a");
+  a.href = url;
+  a.download = name;
+  document.body.appendChild(a);
+  a.click();
+  a.remove();
+  setTimeout(() => URL.revokeObjectURL(url), 0);
 }
 
 type RunRow = { id: string; run_number: number; verdict_code: string; created_at: string };
@@ -168,7 +280,6 @@ export function Compare({ dealId, a, b, onPick }: { dealId: string; a?: string |
     const va = from.data;
     const d = diffRuns(vb, va);
     const s = compareSummary(i, d, vb, va);
-    const source = (x: Input) => (x.tableSource ? tableSourceLabel(x.tableSource, i.lang) : i.msg(x.source));
     const absent = <span className="muted">{t("compare.absent")}</span>;
     // Across two deals, each column head and the out-of-date notice name the run's deal.
     const across = va.dealId !== vb.dealId;
@@ -181,41 +292,10 @@ export function Compare({ dealId, a, b, onPick }: { dealId: string; a?: string |
     const staleName = staleRun && across ? nameOf(staleRun) : undefined;
     const stale = !va.fresh && !vb.fresh ? t("compare.staleBoth")
       : staleRun ? (staleName === undefined ? t("compare.staleOne", { n: staleRun.number }) : t("compare.staleOneOf", { n: staleRun.number, name: staleName })) : null;
-    const delta = (x: number, y: number, unit: string) =>
-      x === y ? t("compare.same") : unit === "%" ? f.delta((y - x) * 100, "bps") : unit === "flag" ? t("compare.changed") : f.delta(y - x, unit);
-    const change = (text: string, same: boolean) => <td className="r"><span className="delta same">{same ? t("compare.same") : text}</span></td>;
-    const group = (label: string) => <tr className="compare-group"><th colSpan={4} scope="colgroup">{label}</th></tr>;
-    const inputRow = (k: string, label: string, sub: ReactNode, x: Input | null, y: Input | null) => (
-      <tr key={k}>
-        <td>{label}<span className="sub">{sub}</span></td>
-        <td className="num r">{x ? f.value(x.value, unitOf(x)) : absent}</td>
-        <td className="num r">{y ? f.value(y.value, unitOf(y)) : absent}</td>
-        {x && y ? change(delta(x.value, y.value, unitOf(y)), false) : change(t("compare.changed"), false)}
-      </tr>
-    );
-    const metricRow = (p: MetricPair) => {
-      const moved = !sameMetric(p.from, p.to);
-      const numeric = p.from?.status === "VALID" && p.to?.status === "VALID" && p.from.value !== null && p.to.value !== null;
-      return (
-        <tr key={p.key}>
-          <td>{L.metric(p.key)}</td>
-          <td className="r">{p.from ? <MetricValue {...p.from} /> : absent}</td>
-          <td className="r">{p.to ? <MetricValue {...p.to} /> : absent}</td>
-          {change(numeric ? delta(p.from!.value!, p.to!.value!, p.unit) : t("compare.changed"), !moved)}
-        </tr>
-      );
-    };
-    const countRow = (k: string, label: string, x: string, y: string) => (
-      <tr key={k}><td>{label}</td><td className="num r">{x}</td><td className="num r">{y}</td>{change(t("compare.changed"), x === y)}</tr>
-    );
-    const gates = countRow("gates", t("compare.gates"), t("compare.ofTotal", { n: d.gates.from.passed, total: d.gates.from.total }), t("compare.ofTotal", { n: d.gates.to.passed, total: d.gates.to.total }));
-    const checks = countRow("checks", t("compare.checks"), t("compare.ofTotal", { n: d.checks.from.fired, total: d.checks.from.total }), t("compare.ofTotal", { n: d.checks.to.fired, total: d.checks.to.total }));
-    const verdict = countRow("verdict", t("compare.verdict"), L.verdict(va.result.verdict.code), L.verdict(vb.result.verdict.code));
-    const gatesSame = JSON.stringify(d.gates.from) === JSON.stringify(d.gates.to);
-    const checksSame = JSON.stringify(d.checks.from) === JSON.stringify(d.checks.to);
-    const verdictSame = va.result.verdict.code === vb.result.verdict.code;
-    const movedRows = [...d.moved.map(metricRow), ...(gatesSame ? [] : [gates]), ...(checksSame ? [] : [checks]), ...(verdictSame ? [] : [verdict])];
-    const stillRows = [...d.still.map(metricRow), ...(gatesSame ? [gates] : []), ...(checksSame ? [checks] : []), ...(verdictSame ? [verdict] : [])];
+    const rows = comparisonRows(i, d, vb, va);
+    const heads: [string, string] = [colHead(va), colHead(vb)];
+    const cell = (c: Cell, numeric: boolean) => (c.absent ? <td className="r">{absent}</td>
+      : c.metric ? <td className="r"><MetricValue {...c.metric} /></td> : <td className={numeric ? "num r" : "r"}>{c.text}</td>);
     return (
       <>
         {stale && <Notice tone="review" title={stale}>{t(!va.fresh && !vb.fresh ? "compare.staleBothBody" : "compare.staleOneBody")}</Notice>}
@@ -225,25 +305,26 @@ export function Compare({ dealId, a, b, onPick }: { dealId: string; a?: string |
             <thead>
               <tr>
                 <th scope="col">{t("compare.col.figure")}</th>
-                <th scope="col" className="r">{colHead(va)}</th>
-                <th scope="col" className="r">{colHead(vb)}</th>
+                <th scope="col" className="r">{heads[0]}</th>
+                <th scope="col" className="r">{heads[1]}</th>
                 <th scope="col" className="r">{t("compare.col.change")}</th>
               </tr>
             </thead>
             <tbody>
-              {d.inputs.changed.length > 0 && group(t("compare.group.changed"))}
-              {d.inputs.changed.map((c) => inputRow(c.key, L.field(c.to.fieldKey, c.to.itemKey),
-                <>{source(c.to)}{sourceKey(c.from) !== sourceKey(c.to) && <> · {t("compare.was", { source: source(c.from) })}</>}</>, c.from, c.to))}
-              {d.inputs.added.length > 0 && group(t("compare.group.added"))}
-              {d.inputs.added.map((x) => inputRow(`+${inputKey(x)}`, L.field(x.fieldKey, x.itemKey), source(x), null, x))}
-              {d.inputs.removed.length > 0 && group(t("compare.group.removed"))}
-              {d.inputs.removed.map((x) => inputRow(`-${inputKey(x)}`, L.field(x.fieldKey, x.itemKey), source(x), x, null))}
-              {movedRows.length > 0 && <Fragment>{group(t("compare.group.moved"))}{movedRows}</Fragment>}
-              {stillRows.length > 0 && <Fragment>{group(t("compare.group.still"))}{stillRows}</Fragment>}
+              {rows.map((r) => r.kind === "group"
+                ? <tr key={`group:${r.label}`} className="compare-group"><th colSpan={4} scope="colgroup">{r.label}</th></tr>
+                : (
+                  <tr key={r.key}>
+                    <td>{r.label}{(r.note ?? (r.showSource ? r.source : undefined)) !== undefined && <span className="sub">{r.note ?? r.source}</span>}</td>
+                    {cell(r.a, r.numeric)}
+                    {cell(r.b, r.numeric)}
+                    <td className="r"><span className="delta same">{r.change}</span></td>
+                  </tr>
+                ))}
             </tbody>
           </table>
           <div className="card-foot row between">
-            <span className="small muted">{t("compare.foot")}</span>
+            <span className="small muted">{compareFoot(i, rows)}</span>
             <div className="row">
               {/* Each run opens at its own address on its own deal's Run page; another deal's run is named after that deal. */}
               {[vb, va].map((r) => {
@@ -254,6 +335,9 @@ export function Compare({ dealId, a, b, onPick }: { dealId: string; a?: string |
                   </Link>
                 );
               })}
+              <button type="button" className="btn ghost sm" onClick={() => { const file = comparisonFile(i, o.deal.name, vb, va, heads); saveFile(file.name, file.text); }}>
+                {t("compare.download")}
+              </button>
             </div>
           </div>
         </div>

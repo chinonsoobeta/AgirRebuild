@@ -210,6 +210,6 @@ describe("comparing two runs", () => {
     expect(t.indexOf("Total development cost", still)).toBeGreaterThan(still);
     expect(state.nodes.filter((n) => n.tag === "select")).toHaveLength(2);
     expect(t).toContain("Open run 2");
-    expect(t).not.toContain("Download this comparison");
+    expect(t).toContain("Download this comparison");
   });
 });
