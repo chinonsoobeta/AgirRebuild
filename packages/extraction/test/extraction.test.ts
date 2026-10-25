@@ -9655,3 +9655,11 @@ test("a lone scaled hard-cost figure never becomes a billion-dollar candidate (C
   const result = extractCandidates({ kind: "pdf", lines: [{ text, location: "page 1, line 1" }], tables: [], pageCount: 1, needsOcr: false, fullText: text });
   expect(result.candidates.filter((c) => c.fieldKey === "hard_cost" && c.value === 1_216_000_000)).toEqual([]);
 });
+
+
+test("a lone senior rate after a label slash keeps three decimals (Card 164)", async () => {
+  const document = await parseDocument(Buffer.from("Senior rate / 5.375%"), "rate.txt");
+  expect(extractCandidates(document).candidates).toEqual([
+    expect.objectContaining({ fieldKey: "senior_rate_pct", value: 5.375 }),
+  ]);
+});

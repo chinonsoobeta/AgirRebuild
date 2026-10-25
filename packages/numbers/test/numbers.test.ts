@@ -25,10 +25,10 @@ describe("the V4 corruption probes now fail closed or read correctly", () => {
   test("space-grouped thousands read whole, never the tail", () => {
     expect(first("Common equity contribution: $31 200 000", UNKNOWN).value).toBe(31_200_000);
   });
-  test("an ambiguous rate is refused without document evidence", () => {
+  test("a percent unit settles three decimals without document evidence", () => {
     const t = first("Interest rate: 5.125%", UNKNOWN);
-    expect(t.value).toBeNull();
-    expect(t.refusal).toMatch(/could be/);
+    expect(t.value).toBe(5.125);
+    expect(t.refusal).toBeUndefined();
   });
   test("money, counts and areas group thousands: they never have three decimals", () => {
     expect(first("Rent: $2,850 per unit per month", UNKNOWN).value).toBe(2_850);
@@ -352,5 +352,40 @@ describe("letter-spaced digits and figures after 'per' (task 47)", () => {
     expect(first("Rent: $24.50 per SF", US)).toMatchObject({ value: 24.5, unit: "$/sf" });
     expect(first("Rentable area: 12,000 SF", US)).toMatchObject({ value: 12_000, unit: "sf" });
     expect(first("Closing 2026/10/01", US).value).toBe(2026);
+  });
+});
+
+
+describe("three-decimal rates and slashes after labels (Card 164)", () => {
+  test.each([
+    ["Exit cap rate 4.738%", UNKNOWN, [4.738]],
+    ["Exit cap rate 4.738 %", UNKNOWN, [4.738]],
+    ["Taux 4,738 %", UNKNOWN, [4.738]],
+    ["DSCR 1.208x", UNKNOWN, [1.208]],
+    ["Rate 5.375%", UNKNOWN, [5.375]],
+    ["Rate 5.375%", US, [5.375]],
+    ["Vacancy 1,250%", UNKNOWN, [1.25]],
+    ["Land / $1,658,477", UNKNOWN, [1658477]],
+    ["Land / $1,658,477", US, [1658477]],
+    ["Hold / 12 years", UNKNOWN, [12]],
+    ["Cost / 1,250 sf", UNKNOWN, [1250]],
+    ["$12 / 1,000 sf", UNKNOWN, [12, null]],
+    ["$2,500 per 1,000 sf", UNKNOWN, [2500, null]],
+    ["2026/10", UNKNOWN, [2026, 10]],
+    ["Rent $29.009/sf", UNKNOWN, [29009]],
+    ["4,738 %", US, [null]],
+    ["Taux 4,738 %", { ...EU, spaceGroups: true }, [4.738]],
+    ["12 $ / 1 000 pi²", { ...EU, spaceGroups: true }, [12, null]],
+    ["DSCR 1.208×", UNKNOWN, [1.208]],
+    ["DSCR 1.208 times", UNKNOWN, [1.208]],
+    ["DSCR 1,208 fois", UNKNOWN, [1.208]],
+    ["12 sf / 1,000 sf", UNKNOWN, [12, null]],
+  ] as const)("%s with format %j reads %j", (line, format, values) => {
+    const tokens = tokenize(line, format);
+    expect(tokens.map((t) => t.value)).toEqual(values);
+    tokens.forEach((t, i) => {
+      if (values[i] === null) expect(t.refusal).toMatch(line === "4,738 %" ? /different decimal separator/ : /basis of a ratio/);
+      else expect(t.refusal).toBeUndefined();
+    });
   });
 });
