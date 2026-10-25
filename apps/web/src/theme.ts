@@ -46,8 +46,8 @@ export function applyTheme(theme: Theme): void {
   if (typeof document !== "undefined") document.documentElement.dataset.theme = theme;
 }
 
-// One store for the whole page, so every toggle and the Settings control agree. Storage is
-// the source of truth when it works; a blocked storage keeps the choice in memory for this tab.
+// One store for the whole page, so every toggle and the Settings control agree. A choice made
+// in this tab is kept in memory and written to storage; at start the stored choice is used.
 let tabPref: ThemePref | null = null;
 let last: { pref: ThemePref; theme: Theme } = { pref: "light", theme: "light" };
 const listeners = new Set<() => void>();
@@ -67,7 +67,8 @@ const emit = () => listeners.forEach((l) => l());
 
 export const themeStore = {
   getSnapshot(): { pref: ThemePref; theme: Theme } {
-    const pref = storedPref() ?? tabPref ?? readPref();
+    // This tab's own choice wins: a storage that refuses writes may still return an older value.
+    const pref = tabPref ?? storedPref() ?? "light";
     const theme = resolveTheme(pref);
     if (last.pref !== pref || last.theme !== theme) last = { pref, theme };
     return last;

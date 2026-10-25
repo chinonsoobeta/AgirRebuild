@@ -295,3 +295,6 @@ legend{padding:0}
 .bill li.total{color:var(--ink);font-weight:700;border-top:2px solid var(--line-2)}
 .cardbox{display:flex;align-items:center;gap:12px;padding:12px 14px;border:1px solid var(--line);border-radius:10px;background:var(--surface)}
 .cardbox .chip-ic{width:38px;height:26px;border-radius:5px;background:var(--surface-2);border:1px solid var(--line)}
+
+/* Text for screen readers only. */
+.sr-only{position:absolute;width:1px;height:1px;overflow:hidden;clip:rect(0 0 0 0);white-space:nowrap}
