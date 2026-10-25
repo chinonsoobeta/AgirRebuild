@@ -852,8 +852,9 @@ export function createApp({ db, store, secureCookies, demoSignIn = false, trustP
 }
 
 // The base-case figures a share page shows, in this order (card Y2).
+// A sold run has no rental measures; its profit figures are its own (forsale.ts), so both sets are listed.
 const SHARED_FIGURES = ["total_development_cost", "cost_per_unit", "required_equity", "loan_to_cost", "dcr_after_refinance", "sizing_dscr",
-  "development_spread", "yield_on_cost", "profit_on_cost"] as const;
+  "development_spread", "yield_on_cost", "profit_on_cost", "profit_on_cost_for_sale", "margin_on_revenue"] as const;
 
 /**
  * What a share page adds about its run, read from what the run stored and never recomputed: everything here is

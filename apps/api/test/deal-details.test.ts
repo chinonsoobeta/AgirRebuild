@@ -255,6 +255,26 @@ describe("a fuller share page", () => {
     expect(empty.reason).toEqual(expect.any(String));
   });
 
+  test("a sold run's page carries the profit figures of a sale, and no exit cap rate", async () => {
+    const sold = await newDeal(alice, solo, "Sold details", { location: "Moncton", province: "NB" });
+    for (const [f, v, i] of [["sell_units", 1], ["land_cost", 100_000], ["hard_cost", 300_000], ["soft_cost", 20_000], ["contingency", 10_000],
+      ["construction_months", 12], ["senior_loan_amount", 0], ["unit_count", 2, "TH"], ["unit_sale_price", 400_000, "TH"],
+      ["presold_units_pct", 50], ["deposit_pct", 10], ["absorption_units_per_month", 1], ["sales_commission_pct", 4],
+      ["closing_lag_months", 0], ["unsold_carry_monthly", 100]] as [string, number, string?][]) await put(alice, sold, f, v, i);
+    const made = await call(alice, "POST", `/api/deals/${sold}/runs`);
+    expect(made.status).toBe(200);
+    const memo = (await call(alice, "POST", `/api/runs/${made.json.id}/artifacts`, { kind: "ic_memo", format: "pdf" })).json.id;
+    await work();
+    const link = await call(alice, "POST", `/api/artifacts/${memo}/share-links`, { term: "7d" });
+    expect(link.status).toBe(200);
+    const page = await call(null, "GET", `/api/share/${String(link.json.url).slice(3)}`);
+    expect(page.status).toBe(200);
+    expect(page.json).toMatchObject({ units: 2, exit: "for_sale" });
+    expect(page.json).not.toHaveProperty("exitCapPct");
+    const sale = page.json.figures.filter((f: any) => ["profit_on_cost_for_sale", "margin_on_revenue"].includes(f.key));
+    expect(sale.map((f: any) => [f.key, f.status])).toEqual([["profit_on_cost_for_sale", "VALID"], ["margin_on_revenue", "VALID"]]);
+  }, 120_000);
+
   test("a revoked link still answers 404 with no fields", async () => {
     const link = await share();
     expect((await call(alice, "POST", `/api/share-links/${link.id}/revoke`)).status).toBe(200);
