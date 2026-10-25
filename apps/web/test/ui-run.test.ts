@@ -61,7 +61,9 @@ describe("the run screen in the new design (card W8)", () => {
     expect(html).toContain('class="runlist"');
     expect(words).toContain(en.t("run.neverTitle"));
     expect(words).toMatch(/stop this run/i);
-    expect(words).not.toMatch(/under a minute|email you/i);
+    expect(words).not.toMatch(/under a minute/i);
+    // On the email branch the person is told about the email that card R1e sends when they leave.
+    expect(words).toContain("we will email you when it is done");
     expect(words).not.toMatch(/\d{1,2}:\d{2}/);
     expect(words).not.toContain(en.t("run.keyFigures"));
   });
