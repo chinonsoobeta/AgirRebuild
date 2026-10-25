@@ -146,3 +146,13 @@ describe("the deal path at narrow widths", () => {
     expect(base).toMatch(/\.path\{[^}]*row-gap:(2[4-9]|3\d)px/);
   });
 });
+
+describe("settings and the legal pages on a narrow screen", () => {
+  const narrow = base.split("\n").find((l) => l.startsWith("@media (max-width:900px){.set{")) ?? "";
+  it("take one column that can shrink to the screen, so a wide table scrolls inside its card instead of widening the page", () => {
+    expect(narrow).toContain(".set{grid-template-columns:minmax(0,1fr)}");
+  });
+  it("let the side list scroll away with the page instead of sticking over the content", () => {
+    expect(narrow).toContain(".set-nav,.toc{position:static}");
+  });
+});
