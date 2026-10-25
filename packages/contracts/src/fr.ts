@@ -95,20 +95,20 @@ export const FR_METRICS: Record<string, [string, string]> = {
 
 export const STRESS: Record<string, [string, string]> = {
   base: ["Base case", "Scénario de base"],
-  exit_cap: ["Exit cap +75 bps", "Taux de sortie +75 pb"],
-  cost: ["Costs +10%", "Coûts +10 %"],
-  rate: ["Interest rate +150 bps", "Taux d'intérêt +150 pb"],
-  rent: ["Rent -10%", "Loyers -10 %"],
-  occupancy: ["Occupancy -5 pts", "Occupation -5 pts"],
-  expense: ["Operating costs +5 pts", "Charges d'exploitation +5 pts"],
+  exit_cap: ["Exit cap +75 bps", "Taux de sortie +75\u00a0pb"],
+  cost: ["Costs +10%", "Coûts +10\u00a0%"],
+  rate: ["Interest rate +150 bps", "Taux d'intérêt +150\u00a0pb"],
+  rent: ["Rent -10%", "Loyers -10\u00a0%"],
+  occupancy: ["Occupancy -5 pts", "Occupation -5\u00a0pts"],
+  expense: ["Operating costs +5 pts", "Charges d'exploitation +5\u00a0pts"],
   combined: ["Combined", "Combiné"],
   // Selling the units (card 77).
-  prices: ["Prices -10%", "Prix -10 %"],
-  absorption: ["Absorption -30%", "Rythme de vente -30 %"],
-  costs: ["Costs +10%", "Coûts +10 %"],
-  rates: ["Interest rates +100 bps", "Taux d'intérêt +100 pb"],
-  construction: ["Construction +6 months", "Construction +6 mois"],
-  presales: ["Presales -15 pts", "Préventes -15 pts"],
+  prices: ["Prices -10%", "Prix -10\u00a0%"],
+  absorption: ["Absorption -30%", "Rythme de vente -30\u00a0%"],
+  costs: ["Costs +10%", "Coûts +10\u00a0%"],
+  rates: ["Interest rates +100 bps", "Taux d'intérêt +100\u00a0pb"],
+  construction: ["Construction +6 months", "Construction +6\u00a0mois"],
+  presales: ["Presales -15 pts", "Préventes -15\u00a0pts"],
 };
 
 export const GATES: Record<string, [string, string]> = {

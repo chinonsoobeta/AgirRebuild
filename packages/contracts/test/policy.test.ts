@@ -15,7 +15,7 @@ describe("card 96a stress labels", () => {
     const policy = POLICIES["rental-hold-draft"]!;
     const rate = policy.stresses.find((s) => s.key === "rate")!;
     expect(stressLabel({ ...rate, rateBps: 100 }, "en", rate)).toBe("Interest rate +100 bps");
-    expect(stressLabel({ ...rate, rateBps: 100 }, "fr", rate)).toBe("Taux d'intérêt +100 pb");
+    expect(stressLabel({ ...rate, rateBps: 100 }, "fr", rate)).toBe("Taux d'intérêt +100\u00a0pb");
     const combined = policy.stresses.find((s) => s.key === "combined")!;
     expect(stressLabel({ ...combined, rateBps: 100 }, "en", combined)).toBe("Combined: exit cap +75 bps, costs +10%, rate +100 bps, rent -10%, occupancy -5 pts, operating costs +5 pts");
     expect(stressLabel({ ...combined, rateBps: 100 }, "fr", combined)).toBe("Combiné\u00a0: taux de sortie +75\u00a0pb, coûts +10\u00a0%, taux +100\u00a0pb, loyers -10\u00a0%, occupation -5\u00a0pts, charges d'exploitation +5\u00a0pts");
