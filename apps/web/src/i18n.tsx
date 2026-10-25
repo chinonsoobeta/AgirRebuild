@@ -1499,6 +1499,7 @@ const FR_REASONS: [RegExp, string | ((m: RegExpMatchArray) => string)][] = [
   [/^That password is not right\.$/, "Ce mot de passe n'est pas le bon."],
   [/^That is already your email address\.$/, "C'est déjà votre adresse courriel."],
   [/^This link does not work any more\. It may have been used or expired\. Ask for a new one\.$/, "Ce lien ne fonctionne plus. Il a peut-être déjà servi ou expiré. Demandez-en un nouveau."],
+  [/^This link does not work any more\. It may have been used already, or be more than 7 days old\.$/, "Ce lien ne fonctionne plus. Il a peut-être déjà servi, ou il date de plus de 7 jours."],
   [/^Too many attempts\. Wait a while and try again\.$/, "Trop de tentatives. Patientez un moment, puis réessayez."],
   [/^That code is not right, or it has expired\. Check the latest email or ask for a new code\.$/, "Ce code n'est pas le bon, ou il a expiré. Vérifiez le dernier courriel ou demandez un nouveau code."],
   [/^An account with that email already exists\.$/, "Un compte existe déjà avec ce courriel."],
