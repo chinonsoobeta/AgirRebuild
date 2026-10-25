@@ -91,7 +91,10 @@ describe("the settings screen", () => {
     const ids = [...html.matchAll(/<section[^>]* id="([a-z]+)"/g)].map((m) => m[1]);
     expect(ids).toEqual(OWNER_SECTIONS);
     const words = text(html);
-    for (const s of ["Settings", "Workspace", "Appearance and language", "How values are reviewed", "Thresholds", "People", "What each role can do", "Clients", "Reading documents", "Logo on the lender package", "Counts", "Your account", "Elm Street", "Morgan Owner", "morgan@example.test", "Harbour Partners"]) expect(words).toContain(s);
+    for (const s of ["Settings", "Workspace", "Appearance and language", "How values are reviewed", "Thresholds", "People", "What each role can do", "Clients", "Reading documents", "Logo on the lender package", "Counts", "Your account", "morgan@example.test", "Harbour Partners"]) expect(words).toContain(s);
+    // The owner changes the workspace name and everyone changes their own name in a field (card Z1).
+    expect(html).toContain('value="Elm Street"');
+    expect(html).toContain('value="Morgan Owner"');
     expect(html).toContain('href="/settings/review-access"');
     expect(words).not.toMatch(/billing|paying|\bpay\b|C\$/i);
   });

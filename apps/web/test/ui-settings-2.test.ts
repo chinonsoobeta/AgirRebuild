@@ -150,7 +150,7 @@ describe("changing a person's role", () => {
 describe("clients across every deal", () => {
   it("lists a client and an open invitation from two deals, and leaves closed invitations out", async () => {
     state.deals = [deal("d1", "Larch Court", 2, 1, 5), deal("d2", "Harbour Lane", null, 0, 3)];
-    state.clients = { d1: [{ id: "u-priya", name: "Priya Nair", email: "priya@example.test", assigned_at: "2026-10-18T12:00:00Z" }] };
+    state.clients = { d1: [{ id: "u-priya", name: "Priya Nair", email: "priya@example.test", assigned_at: "2026-10-18T12:00:00Z", confirmed: 0, last_confirmed_at: null }] };
     state.invites = { d2: [invite("open"), invite("used", { used_at: "2026-10-23T12:00:00Z", used_by: "Dana" }), invite("revoked", { revoked_at: "2026-10-23T12:00:00Z" }),
       invite("old", { expires_at: "2000-01-01T00:00:00Z" })] };
     const html = render();
@@ -159,7 +159,7 @@ describe("clients across every deal", () => {
     expect(text(table.slice(0, table.indexOf("</thead>")))).toBe("Deal Client Status");
     const rows = [...table.matchAll(/<tr>([\s\S]*?)<\/tr>/g)].slice(1).map((m) => text(m[1]!));
     expect(rows).toHaveLength(2);
-    expect(rows.find((r) => r.startsWith("Larch Court"))).toMatch(/Priya Nair .*priya@example\.test .*Client since Oct(ober)? 18, 2026 Remove/);
+    expect(rows.find((r) => r.startsWith("Larch Court"))).toMatch(/Priya Nair .*priya@example\.test .*Client since Oct(ober)? 18, 2026, nothing confirmed yet Remove/);
     expect(rows.find((r) => r.startsWith("Harbour Lane"))).toMatch(/Invited Oct(ober)? 22, 2026 · link expires Nov(ember)? 5, 2099 Withdraw/);
     expect(text(clients)).not.toMatch(/Used by|Revoked|Expired|Copy link/);
 

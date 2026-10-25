@@ -122,19 +122,21 @@ export function CountsPanel({ workspaceId }: { workspaceId: string }) {
   // The plain totals (card X2) only count and add up records: deals, runs, report files, documents.
   const list = useQuery({ queryKey: ["deals", workspaceId], queryFn: () => api.get<DealOverview[]>(`/workspaces/${workspaceId}/deals`) });
   const sum = (n: (d: DealOverview) => number) => (list.data ?? []).reduce((total, d) => total + n(d), 0);
-  const q = useQuery({ queryKey: ["deal-metrics", workspaceId], queryFn: () => api.get<{ deals: DealCounts[]; totals: DealCounts & { deals: number } }>(`/workspaces/${workspaceId}/deal-metrics`) });
+  const q = useQuery({ queryKey: ["deal-metrics", workspaceId], queryFn: () => api.get<{ deals: DealCounts[]; totals: DealCounts & { deals: number; archived_deals?: number } }>(`/workspaces/${workspaceId}/deal-metrics`) });
   const cells = (r: DealCounts) => [
     [r.docs_pdf, r.docs_xlsx, r.docs_csv, r.docs_docx, r.docs_txt].join(" / "), r.docs_no_candidates, r.figures_read,
     r.figures_confirmed_from_suggestion, r.figures_typed, r.actions_until_runnable,
   ];
   const deals = q.data?.deals ?? [];
+  const archived = q.data?.totals.archived_deals ?? 0;
   return (
     <section className="card card-pad section" id="counts">
       <h2 className="h2">{t("counts.title")}</h2>
       <p className="muted">{t("counts.body")}</p>
       {list.data && (
         <Figures>
-          <Figure k={t("settings.ct.deals")} v={list.data.length} />
+          {/* The list leaves archived deals out; the counts say how many there are (card Z1). */}
+          <Figure k={t("settings.ct.deals")} v={list.data.length} s={archived > 0 ? t("settings.ct.archived", { n: archived }) : undefined} />
           <Figure k={t("settings.ct.runs")} v={sum((d) => d.run?.number ?? 0)} />
           <Figure k={t("settings.ct.reports")} v={sum((d) => d.reports)} />
           <Figure k={t("settings.ct.docs")} v={sum((d) => d.documents.total)} s={q.data ? t("settings.ct.typing", { n: q.data.totals.docs_no_candidates }) : undefined} />
@@ -164,6 +166,11 @@ export function CountsPanel({ workspaceId }: { workspaceId: string }) {
 }
 
 const day = (iso: string, lang: string) => new Date(iso).toLocaleDateString(lang === "fr" ? "fr-CA" : "en-CA", { year: "numeric", month: "long", day: "numeric" });
+/** A short day, as the board's "18 Oct"; the year only when it is not this year. */
+const shortDay = (iso: string, lang: string) => {
+  const d = new Date(iso);
+  return d.toLocaleDateString(lang === "fr" ? "fr-CA" : "en-CA", { month: "short", day: "numeric", ...(d.getFullYear() !== new Date().getFullYear() ? { year: "numeric" } : {}) });
+};
 
 /** Every deal's clients and open invitations in one table, and the form that invites a client to a deal (card X2). */
 function Clients() {
@@ -192,7 +199,9 @@ function Clients() {
       <tr key={`c-${d.deal.id}-${c.id}`}>
         <td>{d.deal.name}</td>
         <td>{c.name}<span className="sub">{c.email}</span></td>
-        <td>{t("settings.cl.since", { date: day(c.assigned_at, lang) })}{" "}
+        {/* The server counts only confirmations that still stand. */}
+        <td>{c.confirmed > 0 ? t("settings.cl.confirmed", { n: c.confirmed, date: c.last_confirmed_at ? shortDay(c.last_confirmed_at, lang) : "" })
+          : t("settings.cl.nothingYet", { date: day(c.assigned_at, lang) })}{" "}
           <button className="btn ghost sm" type="button" aria-label={t("settings.cl.removeOf", { name: c.name, deal: d.deal.name })} onClick={() => window.confirm(t("clients.removeConfirm")) && remove.mutate({ dealId: d.deal.id, id: c.id })}>{t("clients.remove")}</button></td>
       </tr>
     )),
@@ -296,6 +305,32 @@ export function Settings() {
     mutationFn: (b: { name: string; reviewMode: string }) => api.post<{ id: string }>(`/workspaces`, b),
     onSuccess: async (r) => { await qc.invalidateQueries({ queryKey: ["me"] }); setWorkspace(r.id); },
   });
+  // Card Z1: the workspace name, removing someone, your own name and the browsers you are signed in on.
+  const rename = useMutation({ mutationFn: (name: string) => api.post(`/workspaces/${workspaceId}/name`, { name }), onSuccess: () => qc.invalidateQueries({ queryKey: ["me"] }) });
+  const removeMember = useMutation({ mutationFn: (id: string) => api.del(`/workspaces/${workspaceId}/members/${id}`, {}), onSuccess: () => qc.invalidateQueries({ queryKey: ["members"] }) });
+  const myName = useMutation({ mutationFn: (name: string) => api.post(`/me/name`, { name }), onSuccess: () => qc.invalidateQueries({ queryKey: ["me"] }) });
+  const sessions = useQuery({ queryKey: ["sessions"], queryFn: () => api.get<{ count: number }>(`/me/sessions`) });
+  const [ended, setEnded] = useState<number | null>(null);
+  const endOthers = useMutation({
+    mutationFn: () => api.post<{ ended: number }>(`/me/sessions/end-others`),
+    onSuccess: (r: { ended: number }) => { setEnded(r.ended); return qc.invalidateQueries({ queryKey: ["sessions"] }); },
+  });
+  const count = typeof sessions.data?.count === "number" ? sessions.data.count : null;
+  const nameField = (id: string, label: string, value: string | undefined, save: (name: string) => unknown, pending: boolean) => (
+    <form
+      className="row"
+      style={{ alignItems: "flex-end" }}
+      aria-label={label}
+      onSubmit={(e: FormEvent<HTMLFormElement>) => {
+        e.preventDefault();
+        return save((e.currentTarget.elements.namedItem("name") as HTMLInputElement).value);
+      }}
+    >
+      <div className="field" style={{ flex: "1 1 260px", maxWidth: 360 }}><label htmlFor={id}>{label}</label>
+        <input className="input" id={id} name="name" required maxLength={120} key={value} defaultValue={value} /></div>
+      <button className="btn quiet" type="submit" disabled={pending}>{t("common.save")}</button>
+    </form>
+  );
   const ws = me.workspaces.find((w) => w.id === workspaceId);
   const others = me.workspaces.filter((w) => w.id !== workspaceId);
   const owner = role === "owner";
@@ -304,8 +339,10 @@ export function Settings() {
   const sections: { id: string; nav: string; show: boolean; node: ReactNode }[] = [
     { id: "workspace", nav: t("settings.nav.workspace"), show: true, node: (
       <Section id="workspace" title={t("settings.nav.workspace")} body={t("settings.ws.body")}>
+        {owner && nameField("ws-name", t("settings.ws.name"), ws?.name, (name) => rename.mutate(name), rename.isPending)}
+        <ErrorText error={rename.error} />
         <div>
-          <Row title={t("settings.ws.name")} body={ws?.name} />
+          {!owner && <Row title={t("settings.ws.name")} body={ws?.name} />}
           <Row title={t("settings.ws.role")} body={t(`settings.you.${role}`)} />
           <Row title={t("settings.ws.others")} body={others.length === 0 ? t("settings.ws.noOthers") : undefined} />
           {others.length > 0 && (
@@ -389,16 +426,20 @@ export function Settings() {
                 <td>{m.name}{m.id === me.user.id && <span className="sub">{t("settings.pp.you")}</span>}</td>
                 <td>{m.email}</td>
                 <td>{staffAdmin && m.id !== me.user.id && CHANGEABLE.includes(m.role) ? (
-                  <select className="select" aria-label={t("settings.pp.roleOf", { name: m.name })} value={m.role}
-                    onChange={(e) => e.target.value !== m.role && window.confirm(t("settings.pp.roleConfirm", { name: m.name, role: L.role(e.target.value) })) && setRole.mutate({ email: m.email, role: e.target.value })}>
-                    {CHANGEABLE.map((r) => <option key={r} value={r}>{cap(L.role(r))}</option>)}
-                  </select>
+                  <div className="row" style={{ gap: 8 }}>
+                    <select className="select" aria-label={t("settings.pp.roleOf", { name: m.name })} value={m.role}
+                      onChange={(e) => e.target.value !== m.role && window.confirm(t("settings.pp.roleConfirm", { name: m.name, role: L.role(e.target.value) })) && setRole.mutate({ email: m.email, role: e.target.value })}>
+                      {CHANGEABLE.map((r) => <option key={r} value={r}>{cap(L.role(r))}</option>)}
+                    </select>
+                    <button className="btn ghost sm" type="button" aria-label={t("settings.pp.removeOf", { name: m.name })}
+                      onClick={() => window.confirm(t("settings.pp.removeConfirm", { name: m.name })) && removeMember.mutate(m.id)}>{t("clients.remove")}</button>
+                  </div>
                 ) : cap(L.role(m.role))}{m.expires_at && <span className="sub">{new Date(m.expires_at) > new Date() ? t("settings.expires", { date: f.date(m.expires_at) }) : t("settings.expired")}</span>}</td>
               </tr>
             ))}</tbody>
           </table>
         </div>
-        <ErrorText error={setRole.error} />
+        <ErrorText error={setRole.error ?? removeMember.error} />
         {staffAdmin && <p className="hint">{t("settings.pp.rolesHint")}</p>}
         {staffAdmin && (
           <form
@@ -452,10 +493,23 @@ export function Settings() {
     { id: "counts", nav: t("settings.nav.counts"), show: owner, node: <CountsPanel workspaceId={workspaceId} /> },
     { id: "account", nav: t("settings.nav.account"), show: true, node: (
       <Section id="account" title={t("settings.nav.account")} body={t("settings.ac.body")}>
-        <dl className="grid2 set-dl">
-          <div><dt className="label">{t("settings.ac.name")}</dt><dd>{me.user.name}</dd></div>
+        {nameField("ac-name", t("settings.ac.name"), me.user.name, (name) => myName.mutate(name), myName.isPending)}
+        <ErrorText error={myName.error} />
+        <dl className="set-dl">
           <div><dt className="label">{t("settings.ac.email")}</dt><dd>{me.user.email}</dd></div>
         </dl>
+        {/* The server keeps no device names, so the count is said instead (card Z1). */}
+        <div>
+          <Row title={t("settings.ac.devices")}
+            body={count === null ? (sessions.error ? undefined : t("common.loading")) : count > 1 ? t("settings.ac.devicesN", { n: count }) : t("settings.ac.devicesOne")}>
+            {count !== null && count > 1 && (
+              <button className="btn quiet sm" type="button" disabled={endOthers.isPending}
+                onClick={() => { setEnded(null); return window.confirm(t("settings.ac.signOutConfirm")) && endOthers.mutate(undefined); }}>{t("settings.ac.signOutOthers")}</button>
+            )}
+          </Row>
+        </div>
+        {ended !== null && <p className="small" role="status">{t("settings.ac.ended", { n: ended })}</p>}
+        <ErrorText error={sessions.error ?? endOthers.error} />
       </Section>
     ) },
   ];

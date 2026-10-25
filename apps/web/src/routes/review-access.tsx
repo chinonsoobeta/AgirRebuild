@@ -46,6 +46,11 @@ export function ReviewAccess() {
       return qc.invalidateQueries({ queryKey: ["members"] });
     },
   });
+  // Ending access sets its end to now (fn_end_review); the row then reads "Ended" like an expired reviewer's.
+  const end = useMutation({
+    mutationFn: (id: string) => api.post(`/workspaces/${workspaceId}/review-grant/${id}/end`, {}),
+    onSuccess: () => { setExtending(null); setExtended(null); return qc.invalidateQueries({ queryKey: ["members"] }); },
+  });
   const back = <Link className="back" to="/settings"><I.Back />{t("agirreview.back")}</Link>;
 
   if (role !== "owner") {
@@ -59,6 +64,8 @@ export function ReviewAccess() {
 
   const reviewers = (members.data ?? []).filter((m) => m.role === "reviewer");
   const now = new Date();
+  // Access that has not ended yet; one with no end date has not ended either.
+  const active = (m: Member) => !m.expires_at || new Date(m.expires_at) > now;
   return (
     <div className="stack">
       <div>
@@ -127,9 +134,9 @@ export function ReviewAccess() {
                       <div className="stack tight">
                         <span>{m.expires_at ? t(new Date(m.expires_at) > now ? "agirreview.until" : "agirreview.ended", { date: f.date(m.expires_at) }) : null}</span>
                         {extended?.id === m.id && <span className="small" role="status">{t("agirreview.extended", { name: m.name, date: day(extended.until, lang) })}</span>}
-                        {m.expires_at && new Date(m.expires_at) > now && longer(m.expires_at).length > 0 && (extending === m.id ? (
+                        {active(m) && (extending === m.id ? (
                           <div className="stack tight">
-                            <Seg label={t("agirreview.extendBy")} value={extendDays} onChange={setExtendDays} options={longer(m.expires_at).map((d) => ({ value: d, label: t("agirreview.dayN", { n: d }) }))} />
+                            <Seg label={t("agirreview.extendBy")} value={extendDays} onChange={setExtendDays} options={longer(m.expires_at ?? "").map((d) => ({ value: d, label: t("agirreview.dayN", { n: d }) }))} />
                             <div className="row">
                               <button name="extend-confirm" value={m.id} className="btn primary sm" type="button" disabled={extend.isPending}
                                 onClick={() => extend.mutate({ id: m.id, email: m.email, days: Number(extendDays) })}>{t("agirreview.extendGo", { date: day(endsOn(Number(extendDays)), lang) })}</button>
@@ -137,8 +144,14 @@ export function ReviewAccess() {
                             </div>
                           </div>
                         ) : (
-                          <div><button name="extend" value={m.id} className="btn quiet sm" type="button" aria-label={t("agirreview.extendWho", { name: m.name })}
-                            onClick={() => { setExtending(m.id); setExtendDays(longer(m.expires_at!)[0]!); setExtended(null); extend.reset(); }}>{t("agirreview.extend")}</button></div>
+                          <div className="row" style={{ gap: 8 }}>
+                            {m.expires_at && longer(m.expires_at).length > 0 && (
+                              <button name="extend" value={m.id} className="btn quiet sm" type="button" aria-label={t("agirreview.extendWho", { name: m.name })}
+                                onClick={() => { setExtending(m.id); setExtendDays(longer(m.expires_at!)[0]!); setExtended(null); extend.reset(); }}>{t("agirreview.extend")}</button>
+                            )}
+                            <button name="end" value={m.id} className="btn ghost sm" type="button" aria-label={t("agirreview.endWho", { name: m.name })} disabled={end.isPending}
+                              onClick={() => window.confirm(t("agirreview.endConfirm", { name: m.name })) && end.mutate(m.id)}>{t("agirreview.end")}</button>
+                          </div>
                         ))}
                       </div>
                     </td>
@@ -147,7 +160,7 @@ export function ReviewAccess() {
               </table>
             </div>
           )}
-          <ErrorText error={extend.error} />
+          <ErrorText error={extend.error ?? end.error} />
           <ErrorText error={members.error} />
         </aside>
       </div>
