@@ -91,7 +91,7 @@ describe("the settings screen", () => {
     expect(ids).toEqual(OWNER_SECTIONS);
     const words = text(html);
     for (const s of ["Settings", "Workspace", "Appearance and language", "How values are reviewed", "Thresholds", "People", "What each role can do", "Clients", "Reading documents", "Logo on the lender package", "Counts", "Your account", "Elm Street", "Morgan Owner", "morgan@example.test", "Harbour Partners"]) expect(words).toContain(s);
-    expect(state.nodes.some((n) => n.tag === "a" && n.props.href === "/settings/review-access")).toBe(true);
+    expect(html).toContain('href="/settings/review-access"');
     expect(words).not.toMatch(/billing|paying|\bpay\b|C\$/i);
   });
 
@@ -113,7 +113,7 @@ describe("the settings screen", () => {
       expect(html).not.toContain(`id="${id}"`);
       expect(html).not.toContain(`href="#${id}"`);
     }
-    expect(state.nodes.some((n) => n.tag === "a" && n.props.href === "/settings/review-access")).toBe(false);
+    expect(html).not.toContain('href="/settings/review-access"');
     expect(state.nodes.some((n) => n.tag === "form" && n.props["aria-label"] === "Add someone to this workspace")).toBe(false);
   });
 
@@ -143,7 +143,7 @@ describe("the settings screen", () => {
   });
 
   it("shows a reviewer's end date in the people table", () => {
-    state.members = [{ id: "r1", name: "Riley Reviewer", email: "riley@example.test", role: "reviewer", expires_at: "2099-01-01T00:00:00Z" }];
+    state.members = [{ id: "r1", name: "Riley Reviewer", email: "riley@example.test", role: "reviewer", expires_at: "2099-06-15T12:00:00Z" }];
     const words = text(render(Settings));
     expect(words).toContain("Riley Reviewer");
     expect(words).toMatch(/until .*2099/);
@@ -186,8 +186,8 @@ describe("giving a reviewer access", () => {
   it("lists current and past reviewers with their end dates", () => {
     state.members = [
       { id: "a", name: "Ana Analyst", email: "ana@example.test", role: "analyst", expires_at: null },
-      { id: "r1", name: "Riley Reviewer", email: "riley@example.test", role: "reviewer", expires_at: "2099-01-01T00:00:00Z" },
-      { id: "r2", name: "Pat Past", email: "pat@example.test", role: "reviewer", expires_at: "2001-01-01T00:00:00Z" },
+      { id: "r1", name: "Riley Reviewer", email: "riley@example.test", role: "reviewer", expires_at: "2099-06-15T12:00:00Z" },
+      { id: "r2", name: "Pat Past", email: "pat@example.test", role: "reviewer", expires_at: "2001-06-15T12:00:00Z" },
     ];
     const words = text(render(ReviewAccess));
     expect(words).toContain("Riley Reviewer");
@@ -199,9 +199,9 @@ describe("giving a reviewer access", () => {
 
   it("tells someone who is not the owner, in one sentence, and links back to Settings", () => {
     state.role = "admin";
-    const words = text(render(ReviewAccess));
-    expect(words).toContain("Only the workspace owner can give a reviewer access.");
-    expect(state.nodes.some((n) => n.tag === "a" && n.props.href === "/settings")).toBe(true);
+    const html = render(ReviewAccess);
+    expect(text(html)).toContain("Only the workspace owner can give a reviewer access.");
+    expect(html).toContain('href="/settings"');
     expect(state.nodes.some((n) => n.tag === "form")).toBe(false);
   });
 
