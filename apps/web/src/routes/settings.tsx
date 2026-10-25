@@ -192,7 +192,7 @@ function Clients() {
         <td>{d.deal.name}</td>
         <td>{c.name}<span className="sub">{c.email}</span></td>
         <td>{t("settings.cl.since", { date: day(c.assigned_at, lang) })}{" "}
-          <button className="btn ghost sm" type="button" onClick={() => window.confirm(t("clients.removeConfirm")) && remove.mutate({ dealId: d.deal.id, id: c.id })}>{t("clients.remove")}</button></td>
+          <button className="btn ghost sm" type="button" aria-label={t("settings.cl.removeOf", { name: c.name, deal: d.deal.name })} onClick={() => window.confirm(t("clients.removeConfirm")) && remove.mutate({ dealId: d.deal.id, id: c.id })}>{t("clients.remove")}</button></td>
       </tr>
     )),
     ...(invites[i]?.data ?? []).filter((v) => !v.used_at && !v.revoked_at && new Date(v.expires_at) > now).map((v) => (
@@ -200,7 +200,7 @@ function Clients() {
         <td>{d.deal.name}</td>
         <td className="muted">{t("clients.link")}</td>
         <td>{t("settings.cl.invited", { date: day(v.created_at, lang), expires: day(v.expires_at, lang) })}{" "}
-          <button className="btn ghost sm" type="button" onClick={() => window.confirm(t("settings.cl.withdrawConfirm")) && withdraw.mutate({ dealId: d.deal.id, id: v.id })}>{t("settings.cl.withdraw")}</button></td>
+          <button className="btn ghost sm" type="button" aria-label={t("settings.cl.withdrawOf", { deal: d.deal.name })} onClick={() => window.confirm(t("settings.cl.withdrawConfirm")) && withdraw.mutate({ dealId: d.deal.id, id: v.id })}>{t("settings.cl.withdraw")}</button></td>
       </tr>
     )),
   ]);
