@@ -43,8 +43,8 @@ vi.mock("../src/i18n", async (original) => {
 vi.mock("@tanstack/react-router", async () => {
   const { createElement } = await import("react");
   return {
-    Link: ({ children, to, params, className }: { children: unknown; to: string; params?: { dealId?: string }; className?: string }) =>
-      createElement("a", { href: to.replace("$dealId", params?.dealId ?? ""), className }, children as string),
+    Link: ({ children, to, params, search, className }: { children: unknown; to: string; params?: { dealId?: string }; search?: Record<string, string>; className?: string }) =>
+      createElement("a", { href: `${to.replace("$dealId", params?.dealId ?? "")}${search ? `?${new URLSearchParams(search)}` : ""}`, className }, children as string),
     useNavigate: () => () => {},
     useRouterState: ({ select }: { select: (s: { location: { pathname: string } }) => string }) => select({ location: { pathname: "/deals/d1/run" } }),
   };
@@ -168,5 +168,25 @@ describe("the Compare button", () => {
     state.deals = undefined;
     expect(frame(overview("d1", "Tamarack Six", 1))).not.toContain("Compare runs");
     expect(frame(overview("d1", "Tamarack Six", 2))).toContain(">Compare runs</a>");
+  });
+});
+
+describe("opening a run from Compare", () => {
+  it("opens each run at its own address, and names the deal of a variant's run", () => {
+    const html = render(createElement(Compare, { dealId: "d1", a: "r1", b: "v1" }));
+    expect(html).toContain('href="/deals/d1/run?run=r1"');
+    expect(html).toContain('href="/deals/d2/run?run=v1"');
+    const words = text(html);
+    expect(words).toContain("Open run 1 ");
+    expect(words).toContain("Open run 3 of 60% refinance");
+  });
+  it("opens an older run of this deal too, not only the latest", () => {
+    const older = { ...runView("r0", "d1", 1, true, 7000), isLatest: false };
+    const latest = runView("r2", "d1", 2, true, 7200);
+    state.runsOf = { ...state.runsOf, d1: [row(latest), row(older)] };
+    state.byId = { ...state.byId, r0: older, r2: latest };
+    const html = render(createElement(Compare, { dealId: "d1", a: "r2", b: "r0" }));
+    expect(html).toContain('href="/deals/d1/run?run=r2"');
+    expect(html).toContain('href="/deals/d1/run?run=r0"');
   });
 });
