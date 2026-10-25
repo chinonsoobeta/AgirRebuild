@@ -1,9 +1,9 @@
 import { FIELD_BY_KEY, tableSourceLabel } from "@agir/contracts";
 import { Link } from "@tanstack/react-router";
-import { useQuery } from "@tanstack/react-query";
+import { useQueries, useQuery } from "@tanstack/react-query";
 import { Fragment, type ReactNode } from "react";
-import { api, type Metric, type RunView } from "../api";
-import { DealFrame, MetricValue, useDeal } from "../components/ui";
+import { api, type DealOverview, type Metric, type RunView } from "../api";
+import { DealFrame, MetricValue, useDeal, useSession } from "../components/ui";
 import { Notice } from "../components/kit";
 import { useI18n, type I18n } from "../i18n";
 import { layoutFor, useRun } from "./run";
@@ -82,20 +82,40 @@ export function compareSummary(i: I18n, d: RunDiff, to: RunView, from: RunView):
 }
 
 type RunRow = { id: string; run_number: number; verdict_code: string; created_at: string };
+/** A deal whose runs the pickers offer: this one, a deal copied from it, or the deal it was copied from. */
+type Group = { id: string; name: string; kind: "this" | "variant" | "original"; runs: RunRow[] };
+/** How many of each deal's newest runs the pickers mark current or out of date. */
+const FRESH_PER_DEAL = 10;
 
 export function Compare({ dealId, a, b, onPick }: { dealId: string; a?: string | undefined; b?: string | undefined; onPick?: (next: { a: string; b: string }) => void }) {
   const i = useI18n();
   const { t, f, L } = i;
   const deal = useDeal(dealId);
+  const { workspaceId } = useSession();
   const runs = useQuery({ queryKey: ["runs", dealId], queryFn: () => api.get<RunRow[]>(`/deals/${dealId}/runs`) });
   const list = runs.data ?? [];
-  // Default: the latest run against the one before it (the list is newest first).
+  // The other deals: those copied from this one that have run, then the one this deal was copied from.
+  const deals = useQuery({ queryKey: ["deals", workspaceId], queryFn: () => api.get<DealOverview[]>(`/workspaces/${workspaceId}/deals`) });
+  const copiedFrom = deal.data?.copiedFrom ?? null;
+  const others: Omit<Group, "runs">[] = [
+    ...(deals.data ?? []).filter((d) => d.run && d.deal.id !== dealId && d.copiedFrom?.id === dealId).map((d) => ({ id: d.deal.id, name: d.deal.name, kind: "variant" as const })),
+    ...(copiedFrom && copiedFrom.id !== dealId ? [{ id: copiedFrom.id, name: copiedFrom.name, kind: "original" as const }] : []),
+  ];
+  const otherRuns = useQueries({ queries: others.map((d) => ({ queryKey: ["runs", d.id], queryFn: () => api.get<RunRow[]>(`/deals/${d.id}/runs`) })) });
+  const groups: Group[] = [{ id: dealId, name: deal.data?.deal.name ?? "", kind: "this", runs: list }, ...others.map((d, k) => ({ ...d, runs: otherRuns[k]?.data ?? [] }))];
+  const elsewhere = groups.slice(1).flatMap((g) => g.runs);
+  // Current or out of date, from each listed run's own record; the newest few per deal only.
+  const listed = groups.flatMap((g) => g.runs.slice(0, FRESH_PER_DEAL));
+  const records = useQueries({ queries: listed.map((r) => ({ queryKey: ["run", r.id], queryFn: () => api.get<RunView>(`/runs/${r.id}`) })) });
+  const freshOf = new Map(listed.map((r, k) => [r.id, records[k]?.data?.fresh]));
+  // Default: the latest run against the one before it (the list is newest first); with one run here, against another deal's newest.
   const thisId = a ?? list[0]?.id;
-  const againstId = b ?? list.find((r) => r.id !== thisId)?.id;
+  const againstId = b ?? list.find((r) => r.id !== thisId)?.id ?? elsewhere.find((r) => r.id !== thisId)?.id;
   const to = useRun(thisId);
   const from = useRun(againstId);
   if (!deal.data) return <p className="muted">{t("common.loading")}</p>;
   const o = deal.data;
+  const othersLoading = !deals.data || otherRuns.some((q) => !q.data);
   const head = (
     <div className="page-head compare-head">
       <div>
@@ -104,8 +124,9 @@ export function Compare({ dealId, a, b, onPick }: { dealId: string; a?: string |
       </div>
     </div>
   );
-  if (!runs.data) return (<><DealFrame o={o} active="compare" /><div className="stack compare">{head}<p className="muted">{t("common.loading")}</p></div></>);
-  if (list.length < 2) {
+  if (!runs.data || (list.length === 1 && othersLoading && elsewhere.length === 0)) return (<><DealFrame o={o} active="compare" /><div className="stack compare">{head}<p className="muted">{t("common.loading")}</p></div></>);
+  // Comparing needs two runs of this deal, or one here and one of a variant or of the original.
+  if (list.length === 0 || list.length + elsewhere.length < 2) {
     return (
       <>
         <DealFrame o={o} active="compare" />
@@ -116,17 +137,24 @@ export function Compare({ dealId, a, b, onPick }: { dealId: string; a?: string |
       </>
     );
   }
-  const option = (r: RunRow) => <option key={r.id} value={r.id}>{t("compare.option", { n: r.run_number, date: f.date(r.created_at), verdict: L.verdict(r.verdict_code) })}</option>;
+  const option = (g: Group, r: RunRow) => {
+    const p = { n: r.run_number, date: f.date(r.created_at), verdict: L.verdict(r.verdict_code), name: g.name };
+    const label = g.kind === "this" ? t("compare.option", p) : t(g.kind === "variant" ? "compare.optionVariant" : "compare.optionOriginal", p);
+    const fresh = freshOf.get(r.id);
+    return <option key={r.id} value={r.id}>{fresh === undefined ? label : t("compare.withState", { label, state: t(fresh ? "compare.current" : "compare.outOfDate") })}</option>;
+  };
+  const groupLabel = (g: Group) => (g.kind === "this" ? t("compare.groupThis", { name: g.name }) : t(g.kind === "variant" ? "compare.groupVariant" : "compare.groupOriginal", { name: g.name }));
+  const options = groups.filter((g) => g.runs.length > 0).map((g) => <optgroup key={g.id} label={groupLabel(g)}>{g.runs.map((r) => option(g, r))}</optgroup>);
   const pick = (
     <div className="card card-pad pick">
       <div className="field">
         <label htmlFor="compare-a">{t("compare.this")}</label>
-        <select id="compare-a" className="select" value={thisId} onChange={(e) => onPick?.({ a: e.target.value, b: againstId! })}>{list.map(option)}</select>
+        <select id="compare-a" className="select" value={thisId} onChange={(e) => onPick?.({ a: e.target.value, b: againstId! })}>{options}</select>
       </div>
       <span className="muted compare-against" aria-hidden="true">{t("compare.against")}</span>
       <div className="field">
         <label htmlFor="compare-b" className="sr-only">{t("compare.againstLabel")}</label>
-        <select id="compare-b" className="select" value={againstId} onChange={(e) => onPick?.({ a: thisId!, b: e.target.value })}>{list.map(option)}</select>
+        <select id="compare-b" className="select" value={againstId} onChange={(e) => onPick?.({ a: thisId!, b: e.target.value })}>{options}</select>
       </div>
     </div>
   );
@@ -139,6 +167,17 @@ export function Compare({ dealId, a, b, onPick }: { dealId: string; a?: string |
     const s = compareSummary(i, d, vb, va);
     const source = (x: Input) => (x.tableSource ? tableSourceLabel(x.tableSource, i.lang) : i.msg(x.source));
     const absent = <span className="muted">{t("compare.absent")}</span>;
+    // Across two deals, each column head and the out-of-date notice name the run's deal.
+    const across = va.dealId !== vb.dealId;
+    const nameOf = (r: RunView) => groups.find((g) => g.id === r.dealId)?.name;
+    const colHead = (r: RunView) => {
+      const name = across ? nameOf(r) : undefined;
+      return name === undefined ? t("compare.col.run", { n: r.number, date: f.date(r.createdAt) }) : t("compare.col.runOf", { name, n: r.number, date: f.date(r.createdAt) });
+    };
+    const staleRun = !va.fresh ? va : !vb.fresh ? vb : null;
+    const staleName = staleRun && across ? nameOf(staleRun) : undefined;
+    const stale = !va.fresh && !vb.fresh ? t("compare.staleBoth")
+      : staleRun ? (staleName === undefined ? t("compare.staleOne", { n: staleRun.number }) : t("compare.staleOneOf", { n: staleRun.number, name: staleName })) : null;
     const delta = (x: number, y: number, unit: string) =>
       x === y ? t("compare.same") : unit === "%" ? f.delta((y - x) * 100, "bps") : unit === "flag" ? t("compare.changed") : f.delta(y - x, unit);
     const change = (text: string, same: boolean) => <td className="r"><span className="delta same">{same ? t("compare.same") : text}</span></td>;
@@ -176,14 +215,15 @@ export function Compare({ dealId, a, b, onPick }: { dealId: string; a?: string |
     const stillRows = [...d.still.map(metricRow), ...(gatesSame ? [gates] : []), ...(checksSame ? [checks] : []), ...(verdictSame ? [verdict] : [])];
     return (
       <>
+        {stale && <Notice tone="review" title={stale}>{t(!va.fresh && !vb.fresh ? "compare.staleBothBody" : "compare.staleOneBody")}</Notice>}
         <Notice tone="accent" title={s.title} role="status">{s.body}</Notice>
         <div className="card scroll">
           <table className="table">
             <thead>
               <tr>
                 <th scope="col">{t("compare.col.figure")}</th>
-                <th scope="col" className="r">{t("compare.col.run", { n: va.number, date: f.date(va.createdAt) })}</th>
-                <th scope="col" className="r">{t("compare.col.run", { n: vb.number, date: f.date(vb.createdAt) })}</th>
+                <th scope="col" className="r">{colHead(va)}</th>
+                <th scope="col" className="r">{colHead(vb)}</th>
                 <th scope="col" className="r">{t("compare.col.change")}</th>
               </tr>
             </thead>
@@ -202,7 +242,7 @@ export function Compare({ dealId, a, b, onPick }: { dealId: string; a?: string |
           <div className="card-foot row between">
             <span className="small muted">{t("compare.foot")}</span>
             <div className="row">
-              {[vb, va].filter((r) => r.isLatest).map((r) => (
+              {[vb, va].filter((r) => r.isLatest && r.dealId === dealId).map((r) => (
                 <Link key={r.id} to="/deals/$dealId/run" params={{ dealId }} className="btn quiet sm">{t("compare.open", { n: r.number })}</Link>
               ))}
             </div>

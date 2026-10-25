@@ -22,6 +22,7 @@ vi.mock("@tanstack/react-query", () => ({
     if (key === "run") return { data: state.byId[id] };
     return {};
   },
+  useQueries: (options: { queries: unknown[] }) => options.queries.map(() => ({})),
   useMutation: () => ({ mutate: () => {}, isPending: false, reset: () => {}, error: null }),
   useQueryClient: () => ({ invalidateQueries: async () => {} }),
 }));

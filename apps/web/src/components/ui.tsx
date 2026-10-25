@@ -247,6 +247,10 @@ export function DealFrame({ o, active }: { o: DealOverview; active: string }) {
   const navigate = useNavigate();
   const qc = useQueryClient();
   const dialog = useRef<HTMLDialogElement>(null);
+  // Compare needs two runs: two of this deal, or one here and one of a variant or of the original (the workspace's deals list, as Settings reads it).
+  const deals = useQuery({ queryKey: ["deals", o.deal.workspace_id], queryFn: () => api.get<DealOverview[]>(`/workspaces/${o.deal.workspace_id}/deals`), enabled: o.run?.number === 1 });
+  const related = (d: DealOverview) => d.deal.id !== o.deal.id && (d.copiedFrom?.id === o.deal.id || d.deal.id === o.copiedFrom?.id);
+  const canCompare = Boolean(o.run && (o.run.number >= 2 || deals.data?.some((d) => d.run && related(d))));
   const copy = useMutation({
     mutationFn: (name: string) => api.post<{ id: string }>(`/deals/${o.deal.id}/copy`, { name }),
     onSuccess: async (r) => {
@@ -272,7 +276,7 @@ export function DealFrame({ o, active }: { o: DealOverview; active: string }) {
         </div>
         <div className="actions">
           {o.run && <Link to="/deals/$dealId/explore" params={{ dealId: o.deal.id }} className="btn quiet sm">{t("explore.action")}</Link>}
-          {o.run && o.run.number >= 2 && <Link to="/deals/$dealId/compare" params={{ dealId: o.deal.id }} className="btn quiet sm">{t("compare.action")}</Link>}
+          {canCompare && <Link to="/deals/$dealId/compare" params={{ dealId: o.deal.id }} className="btn quiet sm">{t("compare.action")}</Link>}
           <Link to="/deals/$dealId/audit" params={{ dealId: o.deal.id }} className="btn quiet sm">{t("step.audit")}</Link>
           {canEdit(role) && (
             <button
