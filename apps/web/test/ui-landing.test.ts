@@ -34,7 +34,7 @@ describe("the landing page", () => {
     for (const id of ["how", "get", "canada", "engine", "questions"]) expect(out).toContain(`id="${id}"`);
     const words = text(out);
     expect(words).toContain("Decide whether to build, with numbers a lender can check.");
-    expect(words).toContain("Five steps, in the order a lender would ask for them");
+    expect(words).toContain("Five steps from your documents to a decision");
     expect(words).toContain("Three documents from one run");
     expect(words).toContain("Built for Canadian deals");
     expect(words).toContain("Only the engine makes numbers");
