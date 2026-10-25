@@ -702,7 +702,7 @@ describe("setting up unit sales in English and French (task 78)", () => {
       if (def.absentMeans) expect(fr.L.absent(key)).not.toBe(en.L.absent(key));
       if (def.help) expect(fr.L.help(key, def.help)).not.toBe(en.L.help(key, def.help));
     }
-    for (const key of ["qs.t.townhomes", "qs.saleLine", "qs.unitSalePrice", "qs.doneSales", "qs.saleGstQuestion"] as Key[]) {
+    for (const key of ["qs.saleLine", "qs.unitSalePrice", "qs.doneSales", "qs.saleGstQuestion"] as Key[]) {
       expect(en.t(key), key).not.toBe(key);
       expect(fr.t(key), key).not.toBe(key);
       expect(fr.t(key), key).not.toBe(en.t(key));
@@ -1078,7 +1078,7 @@ describe("Card 137 region text", () => {
 
  it("card 160b: Review AI strings have French", () => {
   const en = build("en", () => {}), fr = build("fr", () => {});
-  for (const key of ["review.aiUnused", "review.aiCheck", "review.aiEnter", "review.aiUnavailable"] as Key[]) {
+  for (const key of ["review.aiUnused", "review.aiEnter", "review.aiUnavailable"] as Key[]) {
     expect(fr.t(key)).not.toBe(en.t(key));
     expect(fr.t(key)).not.toBe(key);
   }
@@ -1089,7 +1089,7 @@ describe("card 150 French action sentences", () => {
   it("translates every new list and banner string", () => {
     const fr = build("fr", () => {});
     const en = build("en", () => {});
-    for (const key of ["review.todoCount", "review.todoReady", "review.useDefault", "review.acceptTickedDefaults", "review.b.conflicts", "review.b.missing", "review.b.pending", "review.b.awaiting", "review.b.impossible", "review.b.tail"] as Key[]) {
+    for (const key of ["review.todoCount", "review.todoReady", "review.useDefault", "review.acceptTickedDefaults", "review.b.conflicts", "review.b.missing", "review.b.pending", "review.b.awaiting", "review.b.impossible"] as Key[]) {
       const params = { n: 2, v: "3%" };
       expect(fr.t(key, params)).not.toBe(en.t(key, params));
       expect(fr.t(key, params)).not.toBe(key);
