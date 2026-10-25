@@ -8,7 +8,9 @@ import type { Lang } from "../src/i18n.tsx";
 // this device under "agir.terms"; L.metric, L.gate and the glossary follow it.
 const state = vi.hoisted(() => ({ lang: "en" as Lang }));
 vi.mock("@tanstack/react-query", () => ({
-  useQuery: () => ({ data: [] }),
+  useQueries: () => [],
+  // Lists answer empty; the workspace counts have not answered (they are an object, not a list).
+  useQuery: (o: { queryKey: unknown[] }) => (o.queryKey[0] === "deal-metrics" ? {} : { data: [] }),
   useMutation: () => ({ mutate: () => {}, isPending: false, reset: () => {}, error: null }),
   useQueryClient: () => ({ invalidateQueries: async () => {} }),
 }));
