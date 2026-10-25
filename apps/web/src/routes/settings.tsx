@@ -331,13 +331,16 @@ export function Settings() {
       <div className="field" style={{ flex: "1 1 260px", maxWidth: 360 }}><label htmlFor={id}>{label}</label>
         <input className="input" id={id} name="name" required maxLength={120} key={value} defaultValue={value} onChange={() => saved === which && setSaved(null)} /></div>
       <button className="btn quiet" type="submit" disabled={pending}>{t("common.save")}</button>
-      {saved === which && <span className="small muted" role="status">{t("settings.saved")}</span>}
+      {/* 42 px: the height of the field and the button, so the note sits on their middle in this bottom-aligned row. */}
+      {saved === which && <span className="small muted" role="status" style={{ lineHeight: "42px" }}>{t("settings.saved")}</span>}
     </form>
   );
   const ws = me.workspaces.find((w) => w.id === workspaceId);
   const others = me.workspaces.filter((w) => w.id !== workspaceId);
   const owner = role === "owner";
   const staffAdmin = role === "owner" || role === "admin";
+  // A client sees only its own deals, not the workspace: not its people, nor two settings only the owner reads and changes.
+  const member = role !== "client";
 
   const sections: { id: string; nav: string; show: boolean; node: ReactNode }[] = [
     { id: "workspace", nav: t("settings.nav.workspace"), show: true, node: (
@@ -395,7 +398,7 @@ export function Settings() {
         </div>
       </Section>
     ) },
-    { id: "review", nav: t("settings.nav.review"), show: true, node: (
+    { id: "review", nav: t("settings.nav.review"), show: member, node: (
       <Section id="review" title={t("settings.nav.review")} body={t("settings.rv.body")}>
         <div className="choices" role="radiogroup" aria-labelledby="review-h">
           {(["team", "solo"] as const).map((m) => (
@@ -419,7 +422,7 @@ export function Settings() {
         <Thresholds scope="workspaces" id={workspaceId} summary={t("thresholds.show")} />
       </Section>
     ) },
-    { id: "people", nav: t("settings.nav.people"), show: true, node: (
+    { id: "people", nav: t("settings.nav.people"), show: member, node: (
       <Section id="people" title={t("settings.nav.people")} body={t("settings.pp.body")}>
         <div className="scroll">
           <table className="table">
@@ -481,7 +484,7 @@ export function Settings() {
     { id: "clients", nav: t("settings.nav.clients"), show: staffAdmin, node: (
       <Section id="clients" title={t("clients.title")} body={t("clients.body")}><Clients /></Section>
     ) },
-    { id: "reading", nav: t("settings.nav.reading"), show: true, node: (
+    { id: "reading", nav: t("settings.nav.reading"), show: member, node: (
       <Section id="reading" title={t("settings.nav.reading")} body={t("settings.rd.body")}>
         <div>
           <Row title={t("settings.suggestOn")} body={t("settings.suggestNotice")}>

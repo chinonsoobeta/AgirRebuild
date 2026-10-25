@@ -18,3 +18,5 @@
 .set-each>summary{cursor:pointer;color:var(--ink-2);padding:4px 0}
 .set-each>summary:focus-visible{outline:2px solid var(--accent);outline-offset:2px}
 .set-each[open]>summary{margin-bottom:12px}
+/* The four totals fit in one row, as on the board; the shared 200 px minimum wrapped them three and one. */
+#counts .figs{grid-template-columns:repeat(auto-fit,minmax(min(150px,100%),1fr))}
