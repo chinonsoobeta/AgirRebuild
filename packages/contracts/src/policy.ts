@@ -194,7 +194,8 @@ export function stressLabel(preset: StressPreset, lang: "en" | "fr" = "en", stan
     if (sizes.every(([field, value]) => standard[field as keyof StressPreset] === value)) return lang === "fr" ? "Combiné" : "Combined";
     const pieces = sizes.map(([field, value]) => {
       const [en, fr, unit] = labels[field]!;
-      const suffix = unit === "%" ? (lang === "fr" ? " %" : "%") : ` ${lang === "fr" ? (unit === "bps" ? "pb" : unit === "months" ? "mois" : unit) : unit}`;
+      // French keeps a size with its unit: a no-break space before %, pb, mois and pts.
+      const suffix = lang === "fr" ? `\u00a0${unit === "bps" ? "pb" : unit === "months" ? "mois" : unit}` : unit === "%" ? "%" : ` ${unit}`;
       return `${idx ? fr : en} ${signed(value)}${suffix}`;
     });
     return `${lang === "fr" ? "Combiné\u00a0: " : "Combined: "}${pieces.join(", ")}`;
