@@ -127,21 +127,29 @@ describe("older audit events", () => {
     expect(state.infiniteKey.slice(0, 2)).toEqual(["audit", "d1"]);
     button("Documents")!.props.onClick();
     let html = text(render(createElement(Audit, { dealId: "d1" })));
-    expect(html).toContain("Showing the latest 3 of 3 matching events loaded");
+    expect(html).toContain("Showing the 3 matching events loaded so far.");
     expect(html).toContain(en.t("audit.capped"));
     await button("Show older events")!.props.onClick();
     expect(vi.mocked(api.get)).toHaveBeenCalledWith("/deals/d1/audit?before=101");
     html = text(render(createElement(Audit, { dealId: "d1" })));
     expect(html).toContain("Uploaded first.pdf");
-    expect(html).toContain("Showing the latest 4 of 4 matching events loaded");
+    expect(html).toContain("Showing all 4 matching events.");
     expect(button("Show older events")).toBeUndefined();
     expect(html).not.toContain(en.t("audit.capped"));
   });
   it("hides the button when the first page already reached the start", () => {
     state.pages = [Array.from({ length: 30 }, (_, k) => event(30 - k, "deal.created"))];
     const html = text(render(createElement(Audit, { dealId: "d1" })));
+    expect(html).toContain("Showing all 30 events.");
+    expect(html).not.toContain("30 of 30");
     expect(button("Show older events")).toBeUndefined();
     expect(html).not.toContain(en.t("audit.capped"));
+    state.pages = [[event(1, "deal.created")]];
+    expect(text(render(createElement(Audit, { dealId: "d1" })))).toContain("Showing the only event.");
+    state.lang = "fr";
+    state.pages = [Array.from({ length: 30 }, (_, k) => event(30 - k, "deal.created"))];
+    expect(text(render(createElement(Audit, { dealId: "d1" })))).toContain("Affichage des 30 événements.");
+    state.lang = "en";
   });
   it("hides the button when an older page comes back empty", async () => {
     state.pages = [newest()];
