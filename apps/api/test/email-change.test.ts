@@ -3,7 +3,7 @@ import { createHash } from "node:crypto";
 import { mkdtempSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
-import { fileStore, migrate, openPglite, type Db } from "@agir/db";
+import { fileStore, migrate, openPglite, type Db, type Row } from "@agir/db";
 import { createApp } from "../src/app.ts";
 import { memoryMailer, type Mail, type Mailer } from "../src/mailer.ts";
 
@@ -12,6 +12,8 @@ const ORIGIN = "https://agir.test";
 const PASSWORD = "correct horse battery";
 const TAKEN = "An account with that email already exists.";
 const DEAD = "This link does not work any more. It may have been used or expired. Ask for a new one.";
+// An undo link cannot be asked for again, so its dead-link sentence does not say to.
+const UNDO_DEAD = "This link does not work any more. It may have been used already, or be more than 7 days old.";
 let db: Db;
 const store = fileStore(mkdtempSync(join(tmpdir(), "agir-blobs-")));
 
@@ -234,7 +236,7 @@ describe("the undo link", () => {
     expect((await login(app, "undo-old@example.com", "a brand new passphrase")).status).toBe(200);
     const again = await undoLink(app, undo);
     expect(again.status).toBe(400);
-    expect(again.json.error).toBe(DEAD);
+    expect(again.json.error).toBe(UNDO_DEAD);
   });
 });
 
@@ -253,6 +255,26 @@ describe("the old address is held for the 7 days", () => {
     expect((await change(app, c, "held@example.com")).status).toBe(409);
     await db.query(`update email_tokens set expires_at = now() - interval '1 minute' where kind = 'undo_email_change' and email = 'held@example.com'`);
     expect((await call(app, null, "POST", "/api/auth/signup", { email: "held@example.com", name: "Someone Else", password: PASSWORD })).status).toBe(200);
+  });
+
+  test("the undo link is stored with the change, so the hold starts with it: when it cannot be stored, nothing changes", async () => {
+    const { app, mail } = fresh();
+    const s = await confirmedAccount(app, mail, "together-old@example.com");
+    await change(app, s, "together-new@example.com");
+    const token = linkIn(mailTo(mail, "together-new@example.com")[0]!.text, "email/confirm")!;
+    // The same database, except that storing an undo link fails.
+    const failing = (q: Db): Db => ({
+      query: <T extends Row>(sql: string, params?: unknown[]) =>
+        /insert into email_tokens/.test(sql) && params?.includes("undo_email_change") ? Promise.reject(new Error("storage failed")) : q.query<T>(sql, params),
+      transaction: (fn) => q.transaction((tx) => fn(failing(tx))),
+      close: () => q.close(),
+    });
+    const broken = createApp({ db: failing(db), store, secureCookies: false, mailer: memoryMailer(), publicOrigin: ORIGIN });
+    expect((await confirmLink(broken, token)).status).toBe(500);
+    expect((await me(app, s)).user).toMatchObject({ email: "together-old@example.com", email_verified: true });
+    // The link was not spent: opened again with storage working, it makes the change and the old address gets its undo link.
+    expect((await confirmLink(app, token)).json).toEqual({ email: "together-new@example.com" });
+    expect(linkIn(mailTo(mail, "together-old@example.com").at(-1)!.text, "email/undo")).toBeTruthy();
   });
 });
 

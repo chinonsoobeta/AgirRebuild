@@ -81,6 +81,7 @@ const person = (verified: boolean) => ({ user: { id: "me", name: "Morgan Owner",
   { id: "ws", name: "Elm Street", review_mode: "solo", label_suggestions: true, has_logo: false, role: "owner" },
 ] });
 const DEAD = "This link does not work any more. It may have been used or expired. Ask for a new one.";
+const UNDO_DEAD = "This link does not work any more. It may have been used already, or be more than 7 days old.";
 
 beforeEach(() => {
   Object.assign(state, { lang: "en", me: undefined, meError: null, hooks: [], effects: [] });
@@ -238,16 +239,16 @@ describe("the confirm and undo pages", () => {
   });
 
   it("a dead link: says it did not work, with the API's sentence and a way back to sign in", async () => {
-    for (const [C, path] of [[EmailConfirm, "/email/confirm"], [EmailUndo, "/email/undo"]] as const) {
+    for (const [C, path, sentence] of [[EmailConfirm, "/email/confirm", DEAD], [EmailUndo, "/email/undo", UNDO_DEAD]] as const) {
       state.hooks = [];
       at(path, "?token=old");
       render(C);
-      vi.mocked(api.post).mockRejectedValueOnce(new ApiError(400, DEAD));
+      vi.mocked(api.post).mockRejectedValueOnce(new ApiError(400, sentence));
       for (const e of state.effects) await e();
       await settle();
       const html = render(C);
       expect(text(html)).toContain("This link did not work");
-      expect(text(html)).toContain(DEAD);
+      expect(text(html)).toContain(sentence);
       expect(links(html, "/login")).toBe(true);
     }
   });
@@ -274,12 +275,12 @@ describe("the confirm and undo pages", () => {
     state.hooks = [];
     at("/email/undo", "?token=old");
     render(EmailUndo);
-    vi.mocked(api.post).mockRejectedValueOnce(new ApiError(400, DEAD));
+    vi.mocked(api.post).mockRejectedValueOnce(new ApiError(400, UNDO_DEAD));
     for (const e of state.effects) await e();
     await settle();
     const failed = text(render(EmailUndo));
     expect(failed).toContain("Ce lien n'a pas fonctionné");
-    expect(failed).toContain("Ce lien ne fonctionne plus. Il a peut-être déjà servi ou expiré. Demandez-en un nouveau.");
+    expect(failed).toContain("Ce lien ne fonctionne plus. Il a peut-être déjà servi, ou il date de plus de 7 jours.");
 
     const { err } = build("fr", vi.fn());
     expect(err(new ApiError(422, "That is already your email address."))).toBe("C'est déjà votre adresse courriel.");
