@@ -7,7 +7,7 @@ import type { Entry, FrenchOf } from "./entry";
 
 export const en = {
   "terms.title": "Finance terms",
-  "terms.body": "Show the plain words first, with the finance term one click away. Or show the finance terms up front. Reports always use the finance terms.",
+  "terms.body": "Show plain words first, with the finance terms in the glossary on Run and Review. Or show the finance terms up front. Reports always use the finance terms.",
   "terms.plain": "Plain words first",
   "terms.finance": "Finance terms first",
 
@@ -15,7 +15,7 @@ export const en = {
   "terms.metric.capitalized_interest": "Interest added to the cost",
   "terms.metric.leaseup_operating_cost": "Operating costs while the units fill",
   "terms.metric.hard_and_soft_cost": "Costs before financing",
-  "terms.metric.gross_potential_rent": "Rent if every unit is let (year 1)",
+  "terms.metric.gross_potential_rent": "Rent if every unit is rented (year 1)",
   "terms.metric.effective_gross_income": "Income collected (year 1)",
   "terms.metric.operating_expenses": "Operating costs (year 1)",
   "terms.metric.stabilized_noi": "Stabilized net operating income",
@@ -102,7 +102,7 @@ export const en = {
 
 export const fr: FrenchOf<typeof en> = {
   "terms.title": "Termes financiers",
-  "terms.body": "Montrer d'abord les mots simples, avec le terme financier à un clic. Ou montrer d'abord les termes financiers. Les rapports utilisent toujours les termes financiers.",
+  "terms.body": "Montrer d'abord les mots simples, avec les termes financiers dans le glossaire des pages Analyse et Examen. Ou montrer d'abord les termes financiers. Les rapports utilisent toujours les termes financiers.",
   "terms.plain": "Mots simples d'abord",
   "terms.finance": "Termes financiers d'abord",
 
