@@ -19,6 +19,8 @@ construction spend negative. A cost stress scales positive other costs; a credit
 and is never enlarged by a cost overrun. A deal with no credit computes exactly as before. Artifacts show the
 line as "Other costs (credit)" with its amount.
 
+<a id="funding"></a>
+
 **Funding (decision 2).** Equity first, then mezzanine, then senior. Each tranche accrues interest
 on its opening balance every month before `S`, capitalized while commitment remains; any
 shortfall is paid by equity. Required equity is solved so the debt is exactly fully drawn at `S`.
@@ -191,6 +193,20 @@ under, is fresh against the current hash of that version, and replays under its 
 artifact say "Draft policy, not signed by credit". A decision can still be recorded, and it names the policy
 version.
 
+### Readings settled by the owner (2026-10-24)
+
+- Monthly interest is the annual rate divided by 12 on the month's opening balance (see the existing [opening-balance funding sentence](#funding)).
+- The rate stress adds 1.50 percentage points to both the construction loan and the refinance loan.
+- The rent stress lowers unit rents by 10%, leaving other income unchanged.
+- The engine evaluates error checks on the base case; stressed runs feed only their gates.
+- The engine tests for one IRR root by scanning for NPV sign changes over a rate grid.
+- Hold year 1 uses today's rents, with growth starting in hold year 2.
+- Other income grows at the rent growth rate by hold year.
+- With no mezzanine loan, mezzanine DSCR is not applicable.
+- Property tax is included in break-even occupancy through fixed costs (see the existing [property-tax sentence](#property-tax)).
+- `total_debt` is the debt balance at stabilization (see the existing [balance-at-`S` funding sentence](#funding)).
+- The Alberta transfer-of-land fee counts each started $5,000 of value as a full step.
+
 ## Canadian cost lines and mortgage insurance
 
 **Card 94 — draft insured products (owner review required).** A positive premium and at least 50 stated MLI Select points selects the Select draft: post-refinance DCR gate and base sizing floor 1.10x. Otherwise the insured product is Standard: 5–6 units use 1.20x; 7+ units use 1.20x for a term of at least 10 years, or 1.30x for a shorter term. Readiness requires the term for 7+ Standard units. CMHC multi-unit insurance needs at least five units; 2–4-unit lender terms stay entered by a person.
@@ -255,6 +271,8 @@ equity first, then mezzanine, then senior.
 **Totals.** The three lines are part of costs before financing and of total development cost, as "other" costs
 with their own timing. No formula text changes: "other" includes these named lines. Interest on the debt that
 funds them is capitalized as for any cost, so total development cost rises by their sum plus that interest.
+
+<a id="property-tax"></a>
 
 **Property tax** is a fixed operating cost, added to the fixed part of decision 8 on top of
 `fixed_opex_annual`, or on top of the expense ratio's fixed dollars. It grows at expense growth, is charged in

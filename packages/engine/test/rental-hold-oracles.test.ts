@@ -11,7 +11,33 @@ const sourceHashes = {
   "fireweed-fourplex": "5f11ce3d5c3ef8498b80d4c0ffffcba26a12954bb6faa9511f0771167a4770df",
   "harbour-lane": "4852272c1a784f8998f8891284f6ca19f9e331c22500066ee2b677595b53a63b",
 } as const;
-type Inputs = Record<string, number> & { cost_curve?: string };
+type Inputs = {
+  land_cost: number;
+  hard_cost: number;
+  soft_cost: number;
+  contingency: number;
+  development_charges: number;
+  land_transfer_tax: number;
+  gst_hst_net: number;
+  construction_months: number;
+  lease_up_months: number;
+  hold_years: number;
+  stabilized_occupancy_pct: number;
+  expense_ratio_pct: number;
+  property_tax_annual: number;
+  rent_growth_pct: number;
+  expense_growth_pct: number;
+  exit_cap_rate_pct: number;
+  senior_loan_amount: number;
+  senior_rate_pct: number;
+  senior_io_months: number;
+  refinance_month: number;
+  refinance_ltv_pct: number;
+  refinance_rate_pct: number;
+  refinance_amort_years: number;
+  cost_curve?: string; lease_up_ramp?: number; leaseup_income_credited?: number;
+  other_income_annual?: number; refinance_insurance_premium_pct?: number; refinance_mli_select_points?: number;
+} & Partial<Record<`units_${"1bed" | "2bed" | "3bed"}` | `rent_${"1bed" | "2bed" | "3bed"}_monthly`, number>>;
 type Oracle = {
   inputs: Inputs; policy: string; verdict: string;
   base: Record<string, number | "NOT_APPLICABLE">;
