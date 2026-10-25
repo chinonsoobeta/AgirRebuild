@@ -160,7 +160,7 @@ describe("clients across every deal", () => {
     const rows = [...table.matchAll(/<tr>([\s\S]*?)<\/tr>/g)].slice(1).map((m) => text(m[1]!));
     expect(rows).toHaveLength(2);
     expect(rows.find((r) => r.startsWith("Larch Court"))).toMatch(/Priya Nair .*priya@example\.test .*Client since Oct(ober)? 18, 2026, nothing confirmed yet Remove/);
-    expect(rows.find((r) => r.startsWith("Harbour Lane"))).toMatch(/Invited Oct(ober)? 22, 2026 · link expires Nov(ember)? 5, 2099 Withdraw/);
+    expect(rows.find((r) => r.startsWith("Harbour Lane"))).toMatch(/Invited Oct(ober)? 22, 2026 · link expires Nov(ember)? 5, 2099 Make a new link Withdraw/);
     expect(text(clients)).not.toMatch(/Used by|Revoked|Expired|Copy link/);
 
     await buttons("Withdraw")[0]!.props.onClick();
