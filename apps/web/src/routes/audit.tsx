@@ -1,7 +1,7 @@
 import { THRESHOLDS, FIELD_BY_KEY } from "@agir/contracts";
 import { useMutation, useQuery } from "@tanstack/react-query";
 import { api, type AuditEvent } from "../api";
-import { DealHeader, StatusTag, useDeal, useSession } from "../components/ui";
+import { DealFrame, StatusTag, useDeal, useSession } from "../components/ui";
 import { useI18n, type I18n } from "../i18n";
 
 export function describeEvent(i: I18n, e: AuditEvent): string {
@@ -121,7 +121,7 @@ export function Audit({ dealId }: { dealId: string }) {
   if (!deal.data) return <p className="muted">{t("common.loading")}</p>;
   return (
     <>
-      <DealHeader o={deal.data} active="audit" />
+      <DealFrame o={deal.data} active="audit" />
       <div className="spread">
         <div className="stack" style={{ gap: 4 }}>
           <h2 className="h-section">{t("audit.title")}</h2>

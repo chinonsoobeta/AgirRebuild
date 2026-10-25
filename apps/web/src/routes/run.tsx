@@ -4,7 +4,7 @@ import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
 import { Fragment, useState } from "react";
 import { FIELD_BY_KEY } from "@agir/contracts";
 import { api, type Metric, type RunView } from "../api";
-import { Banner, canEdit, DealHeader, ErrorText, Glossary, MetricValue, StatusTag, useDeal, useSession, VerdictBadge } from "../components/ui";
+import { Banner, canEdit, DealFrame, ErrorText, Glossary, MetricValue, StatusTag, useDeal, useSession, VerdictBadge } from "../components/ui";
 import { Thresholds, StandardVerdict } from "../components/thresholds";
 import * as I from "../components/icons";
 import { checkText, dealStatus, useI18n, verdictText } from "../i18n";
@@ -91,7 +91,7 @@ export function Run({ dealId }: { dealId: string }) {
   if (!runId) {
     return (
       <>
-        <DealHeader o={o} active="run" />
+        <DealFrame o={o} active="run" />
         <div className="panel stack" style={{ gap: 16, maxWidth: 720 }}>
           <h2 className="h-section">{t("run.noRun")}</h2>
           <p className="muted">{t("run.noRunBody")}</p>
@@ -101,7 +101,7 @@ export function Run({ dealId }: { dealId: string }) {
       </>
     );
   }
-  if (!run.data) return (<><DealHeader o={o} active="run" /><p className="muted">{t("run.loading")}</p></>);
+  if (!run.data) return (<><DealFrame o={o} active="run" /><p className="muted">{t("run.loading")}</p></>);
   const v = run.data;
   const base = v.result.scenarios[0]!;
   const metric = (k: string, s = base) => s.metrics.find((m) => m.key === k)!;
@@ -109,7 +109,7 @@ export function Run({ dealId }: { dealId: string }) {
   const { sale, headline, stressKeys } = layoutFor(base.metrics);
   return (
     <>
-      <DealHeader o={o} active="run" />
+      <DealFrame o={o} active="run" />
       {!v.fresh && (
         <Banner tone="review" title={t("run.outOfDate", { n: v.number })}>
           <span>{v.staleReasons.map((r) => (STALE[r] ? t(STALE[r]) : r)).join(" ")} {t("run.outOfDateBody")}</span>

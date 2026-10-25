@@ -2,7 +2,7 @@ import { Link } from "@tanstack/react-router";
 import { useMutation, useQueryClient } from "@tanstack/react-query";
 import { useState, type FormEvent } from "react";
 import { api } from "../api";
-import { Banner, canDecide, DealHeader, ErrorText, useDeal, useSession, VerdictBadge } from "../components/ui";
+import { Banner, canDecide, DealFrame, ErrorText, useDeal, useSession, VerdictBadge } from "../components/ui";
 import { useI18n, verdictText } from "../i18n";
 import { useRun } from "./run";
 
@@ -29,7 +29,7 @@ export function DecisionStep({ dealId }: { dealId: string }) {
   if (!o.run || !run.data) {
     return (
       <>
-        <DealHeader o={o} active="decision" />
+        <DealFrame o={o} active="decision" />
         <Banner tone="neutral" title={t("decision.noRun")}>
           <span>{t(solo ? "decision.noRunBodySolo" : "decision.noRunBody")} <Link to="/deals/$dealId/run" params={{ dealId }}>{t("decision.goRun")}</Link>.</span>
         </Banner>
@@ -48,7 +48,7 @@ export function DecisionStep({ dealId }: { dealId: string }) {
   };
   return (
     <>
-      <DealHeader o={o} active="decision" />
+      <DealFrame o={o} active="decision" />
       <div className="side">
         <div className="stack" style={{ gap: 24 }}>
           <section className="panel stack" style={{ gap: 10 }}>

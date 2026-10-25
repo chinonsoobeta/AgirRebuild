@@ -2,7 +2,7 @@ import { Link, useNavigate, useRouterState } from "@tanstack/react-router";
 import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
 import { createContext, useContext, useEffect, useRef, useState, type FormEvent, type ReactNode } from "react";
 import { api, ApiError, type DealOverview, type Me, type Tone } from "../api";
-import { dealStatus, useI18n } from "../i18n";
+import { dealStatus, useI18n, type I18n } from "../i18n";
 import * as I from "./icons";
 import { Notice, Tag, ThemeToggle, type TagTone } from "./kit";
 
@@ -52,14 +52,20 @@ export const canDecide = (role: string) => role === "owner" || role === "admin";
 
 // ---- Shell ----------------------------------------------------------------------------
 
-export function LanguageSwitch() {
+export function LanguageSwitch({ className }: { className?: string }) {
   const { lang, setLang, t } = useI18n();
   return (
-    <button type="button" className="btn quiet small" style={{ alignSelf: "flex-start", paddingLeft: 0 }} lang={lang === "en" ? "fr" : "en"} onClick={() => setLang(lang === "en" ? "fr" : "en")}>
+    <button type="button" className={className ?? "btn quiet small"} style={className ? undefined : { alignSelf: "flex-start", paddingLeft: 0 }} lang={lang === "en" ? "fr" : "en"} onClick={() => setLang(lang === "en" ? "fr" : "en")}>
       {t("nav.language")}
     </button>
   );
 }
+
+const initials = (name: string, email: string) => {
+  const words = name.trim().split(/\s+/).filter(Boolean);
+  const letters = words.length > 1 ? words[0]![0]! + words[words.length - 1]![0]! : (words[0] ?? email).slice(0, 2);
+  return letters.toUpperCase();
+};
 
 export function Shell({ children }: { children: ReactNode }) {
   const { me, workspaceId, setWorkspace, role } = useSession();
@@ -72,36 +78,41 @@ export function Shell({ children }: { children: ReactNode }) {
     qc.clear();
     void navigate({ to: "/login" });
   };
+  const onDeals = path.startsWith("/deals") || path === "/";
+  const onSettings = path.startsWith("/settings");
   return (
-    <div className="shell">
-      <nav className="rail" aria-label="Main">
-        <Link to="/deals" className="brand" aria-label="Agir">
-          <i />
-          <b>agir</b>
+    <>
+      <header className="topbar">
+        <Link to="/deals" className="brand">
+          <span className="brand-mark">
+            <svg width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="3" strokeLinecap="round" strokeLinejoin="round" aria-hidden="true"><path d="M4 18L12 5l8 13" /><path d="M8 18h8" /></svg>
+          </span>
+          {t("shell.brand")}
         </Link>
-        <div className="nav">
-          <Link to="/deals" aria-current={path.startsWith("/deals") || path === "/" ? "page" : undefined}>{t("nav.deals")}</Link>
-          <Link to="/settings" aria-current={path.startsWith("/settings") ? "page" : undefined}>{t("nav.settings")}</Link>
-        </div>
-        <div className="rail-foot">
-          <div className="wide-only stack" style={{ gap: 8 }}>
-            <label className="sr-only" htmlFor="ws-select">{t("common.workspace")}</label>
-            {me.workspaces.length > 1 ? (
-              <select id="ws-select" value={workspaceId} onChange={(e) => setWorkspace(e.target.value)}>
+        <nav className="nav" aria-label={t("shell.mainNav")}>
+          <Link to="/deals" className={onDeals ? "current" : undefined} aria-current={onDeals ? "page" : undefined}>{t("nav.deals")}</Link>
+          <Link to="/settings" className={onSettings ? "current" : undefined} aria-current={onSettings ? "page" : undefined}>{t("nav.settings")}</Link>
+        </nav>
+        <div className="topbar-right">
+          {me.workspaces.length > 1 ? (
+            <>
+              <label className="sr-only" htmlFor="ws-select">{t("common.workspace")}</label>
+              <select id="ws-select" className="ws" value={workspaceId} onChange={(e) => setWorkspace(e.target.value)}>
                 {me.workspaces.map((w) => <option key={w.id} value={w.id}>{w.name}</option>)}
               </select>
-            ) : (
-              <span style={{ fontWeight: 600 }}>{me.workspaces[0]?.name}</span>
-            )}
-            <span className="faint">{me.user.name} · {L.role(role)}</span>
-          </div>
+            </>
+          ) : (
+            <span className="ws-name">{me.workspaces[0]?.name}</span>
+          )}
+          <LanguageSwitch className="toplink" />
           <ThemeToggle />
-          <LanguageSwitch />
-          <button type="button" className="btn quiet small" style={{ alignSelf: "flex-start", paddingLeft: 0 }} onClick={signOut}>{t("nav.signOut")}</button>
+          <span className="avatar" aria-hidden="true">{initials(me.user.name, me.user.email)}</span>
+          <span className="who">{me.user.name} · {L.role(role)}</span>
+          <button type="button" className="toplink" onClick={signOut}>{t("nav.signOut")}</button>
         </div>
-      </nav>
+      </header>
       <main className="page">{children}</main>
-    </div>
+    </>
   );
 }
 
@@ -160,7 +171,7 @@ export function Glossary() {
   );
 }
 
-// ---- Deal header and stepper ----------------------------------------------------------------
+// ---- Deal frame and path ----------------------------------------------------------------
 
 const STEPS = ["documents", "review", "run", "decision", "reports"] as const;
 
@@ -171,25 +182,15 @@ export function reviewWaiting(o: Pick<DealOverview, "documents" | "review">): bo
   return o.documents.processing > 0 || (o.documents.total === 0 && !hasValues);
 }
 
-export function DealHeader({ o, active }: { o: DealOverview; active: string }) {
-  const i = useI18n();
+type StepKey = (typeof STEPS)[number];
+export type PathState = { key: StepKey; text: string; tone: "done" | "stop" | "faint" | "normal" };
+
+/** What each of the five steps says about a deal, and in which tone. */
+export function pathStates(o: DealOverview, i: I18n, solo: boolean): PathState[] {
   const { t, L } = i;
-  const { solo, role } = useSession();
-  const navigate = useNavigate();
-  const qc = useQueryClient();
-  const dialog = useRef<HTMLDialogElement>(null);
-  const copy = useMutation({
-    mutationFn: (name: string) => api.post<{ id: string }>(`/deals/${o.deal.id}/copy`, { name }),
-    onSuccess: async (r) => {
-      dialog.current?.close();
-      await qc.invalidateQueries({ queryKey: ["deals"] });
-      void navigate({ to: "/deals/$dealId/review", params: { dealId: r.id } });
-    },
-  });
-  const defaultName = `${o.deal.name}${t("copy.suffix")}`.slice(0, 160);
   const status = dealStatus(i, o, solo);
   const order: string[] = [...STEPS];
-  const state = (key: string): { text: string; tone: "done" | "stop" | "faint" | "normal" } => {
+  const state = (key: StepKey): Omit<PathState, "key"> => {
     const past = order.indexOf(key) < order.indexOf(o.step);
     switch (key) {
       case "documents":
@@ -210,36 +211,82 @@ export function DealHeader({ o, active }: { o: DealOverview; active: string }) {
         return { text: o.reports ? t("step.ready", { n: o.reports }) : t("step.noneYet"), tone: o.reports ? "done" : "faint" };
     }
   };
+  return STEPS.map((key) => ({ key, ...state(key) }));
+}
+
+/** The five steps across the top of a deal: done, where the deal is (now), and the page being viewed (here). */
+export function DealPath({ o, active }: { o: DealOverview; active: string }) {
+  const i = useI18n();
+  const { solo } = useSession();
+  return (
+    <ol className="path" aria-label={i.t("step.steps")}>
+      {pathStates(o, i, solo).map((st) => {
+        const cls = ["step", st.tone === "done" && "done", o.step === st.key && "now", active === st.key && "here"].filter(Boolean).join(" ");
+        return (
+          <li key={st.key}>
+            <Link to={`/deals/$dealId/${st.key}`} params={{ dealId: o.deal.id }} className={cls} aria-current={active === st.key ? "step" : undefined}>
+              <span className="marker">{st.tone === "done" && <I.Check size={9} />}</span>
+              <span className="step-name">{i.t(`step.${st.key}`)}</span>
+              <span className={st.tone === "stop" ? "step-state stop" : st.tone === "faint" ? "step-state faint" : "step-state"}>
+                {st.tone === "stop" && <I.Stop size={12} />}
+                {st.text}
+              </span>
+            </Link>
+          </li>
+        );
+      })}
+    </ol>
+  );
+}
+
+/** The head of every deal page: back to the deals, the name and its facts, the actions, and the path. */
+export function DealFrame({ o, active }: { o: DealOverview; active: string }) {
+  const { t, L } = useI18n();
+  const { role } = useSession();
+  const navigate = useNavigate();
+  const qc = useQueryClient();
+  const dialog = useRef<HTMLDialogElement>(null);
+  const copy = useMutation({
+    mutationFn: (name: string) => api.post<{ id: string }>(`/deals/${o.deal.id}/copy`, { name }),
+    onSuccess: async (r) => {
+      dialog.current?.close();
+      await qc.invalidateQueries({ queryKey: ["deals"] });
+      void navigate({ to: "/deals/$dealId/review", params: { dealId: r.id } });
+    },
+  });
+  const defaultName = `${o.deal.name}${t("copy.suffix")}`.slice(0, 160);
   return (
     <>
-      <div className="stack" style={{ gap: 10 }}>
-        <Link to="/deals" className="small muted">{t("nav.deals")}</Link>
-        <div className="spread" style={{ alignItems: "flex-end" }}>
-          <div className="stack" style={{ gap: 6 }}>
-            <h1 className="h-title">{o.deal.name}</h1>
-            <span className="muted">{[L.asset(o.deal.asset_type), L.place(o.deal.location, o.deal.province), L.currency(o.deal.currency)].filter(Boolean).join(" · ")}</span>
-            {o.copiedFrom && (
-              <span className="small muted">{t("copy.variantOf")} <Link to="/deals/$dealId/review" params={{ dealId: o.copiedFrom.id }}>{o.copiedFrom.name}</Link></span>
-            )}
-          </div>
-          <div className="row">
-            {canEdit(role) && (
-              <button
-                className="btn small"
-                type="button"
-                onClick={() => {
-                  // Each opening starts from this deal's name in the current language, with no earlier error.
-                  const field = dialog.current?.querySelector<HTMLInputElement>("#cd-name");
-                  if (field) field.value = defaultName;
-                  copy.reset();
-                  dialog.current?.showModal();
-                }}
-              >
-                {t("copy.button")}
-              </button>
-            )}
-            <Link to="/deals/$dealId/audit" params={{ dealId: o.deal.id }} className="btn small">{t("step.audit")}</Link>
-          </div>
+      <div className="deal-head">
+        <div>
+          <Link to="/deals" className="back">
+            <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round" aria-hidden="true"><path d="M19 12H5M11 18l-6-6 6-6" /></svg>
+            {t("shell.allDeals")}
+          </Link>
+          <h1 className="deal-name">{o.deal.name}</h1>
+          <p className="meta">{[L.asset(o.deal.asset_type), L.place(o.deal.location, o.deal.province), L.currency(o.deal.currency)].filter(Boolean).join(" · ")}</p>
+          {o.copiedFrom && (
+            <p className="small muted variant-of">{t("copy.variantOf")} <Link to="/deals/$dealId/review" params={{ dealId: o.copiedFrom.id }}>{o.copiedFrom.name}</Link></p>
+          )}
+        </div>
+        <div className="actions">
+          {o.run && <Link to="/deals/$dealId/explore" params={{ dealId: o.deal.id }} className="btn quiet sm">{t("explore.title")}</Link>}
+          <Link to="/deals/$dealId/audit" params={{ dealId: o.deal.id }} className="btn quiet sm">{t("step.audit")}</Link>
+          {canEdit(role) && (
+            <button
+              className="btn quiet sm"
+              type="button"
+              onClick={() => {
+                // Each opening starts from this deal's name in the current language, with no earlier error.
+                const field = dialog.current?.querySelector<HTMLInputElement>("#cd-name");
+                if (field) field.value = defaultName;
+                copy.reset();
+                dialog.current?.showModal();
+              }}
+            >
+              {t("copy.button")}
+            </button>
+          )}
         </div>
       </div>
       <dialog ref={dialog} aria-labelledby="copy-deal-title">
@@ -249,30 +296,14 @@ export function DealHeader({ o, active }: { o: DealOverview; active: string }) {
             copy.mutate(String(new FormData(e.currentTarget).get("name")));
           }}
         >
-          <h2 id="copy-deal-title" className="h-section">{t("copy.title")}</h2>
+          <h2 id="copy-deal-title" className="h2">{t("copy.title")}</h2>
           <p className="muted">{t("copy.intro")}</p>
           <div className="field"><label htmlFor="cd-name">{t("copy.name")}</label><input className="input" id="cd-name" name="name" required maxLength={160} defaultValue={defaultName} /></div>
           <ErrorText error={copy.error} />
           <div className="row"><button className="btn primary" type="submit" disabled={copy.isPending}>{t("copy.create")}</button><button className="btn quiet" type="button" onClick={() => dialog.current?.close()}>{t("common.cancel")}</button></div>
         </form>
       </dialog>
-      <ol className="stepper" aria-label={t("step.steps")}>
-        {STEPS.map((key, n) => {
-          const st = state(key);
-          return (
-            <li key={key}>
-              <Link to={`/deals/$dealId/${key}`} params={{ dealId: o.deal.id }} aria-current={active === key ? "step" : undefined}>
-                <span className="step-name"><span className="num">0{n + 1}</span>{t(`step.${key}`)}</span>
-                <span className={`step-state ${st.tone === "stop" ? "stop" : st.tone === "faint" ? "faint" : ""}`}>
-                  {st.tone === "done" && <I.Check size={12} />}
-                  {st.tone === "stop" && <I.Stop size={12} />}
-                  {st.text}
-                </span>
-              </Link>
-            </li>
-          );
-        })}
-      </ol>
+      <DealPath o={o} active={active} />
     </>
   );
 }

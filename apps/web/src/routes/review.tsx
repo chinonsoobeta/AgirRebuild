@@ -3,7 +3,7 @@ import { Fragment, useEffect, useRef, useState, useId, type FormEvent, type Reac
 import { FIELD_BY_KEY, FIELDS, tableSourceLabel, pbrhExplanation } from "@agir/contracts";
 import { SF_PER_M2 } from "@agir/numbers";
 import { api, type Assumption, type Review as ReviewData, type Source } from "../api";
-import { Banner, WindowConfirmation, canEdit, DealHeader, ErrorText, Glossary, StatusTag, useDeal, useSession } from "../components/ui";
+import { Banner, WindowConfirmation, canEdit, DealFrame, ErrorText, Glossary, StatusTag, useDeal, useSession } from "../components/ui";
 import * as I from "../components/icons";
 import { useI18n, type Lang } from "../i18n";
 
@@ -549,7 +549,7 @@ export function Review({ dealId }: { dealId: string }) {
 
   return (
     <>
-      <DealHeader o={deal.data} active="review" />
+      <DealFrame o={deal.data} active="review" />
       {docsBusy && <Banner tone="neutral" title={t("review.stillReading")}>{t("review.stillReadingBody")}</Banner>}
       {updating && <p className="small muted" role="status">{t("review.updating")}</p>}
       <Glossary />

@@ -1,7 +1,7 @@
 import { Fragment, useState } from "react";
 import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
 import { api, type Artifact, type ShareLink, type ShareTerm } from "../api";
-import { Banner, canEdit, DealHeader, ErrorText, StatusTag, useDeal, useSession } from "../components/ui";
+import { Banner, canEdit, DealFrame, ErrorText, StatusTag, useDeal, useSession } from "../components/ui";
 import * as I from "../components/icons";
 import { useRun } from "./run";
 import { useI18n } from "../i18n";
@@ -59,7 +59,7 @@ export function Reports({ dealId }: { dealId: string }) {
   const fmtName = (x: string) => (x === "pdf" ? "PDF" : x === "docx" ? t("reports.word") : t("reports.excel"));
   return (
     <>
-      <DealHeader o={o} active="reports" />
+      <DealFrame o={o} active="reports" />
       {!o.run ? (
         <Banner tone="neutral" title={t("reports.needRun")}>{t("reports.needRunBody")}</Banner>
       ) : (

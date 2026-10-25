@@ -2,7 +2,7 @@ import { Link } from "@tanstack/react-router";
 import { useQuery } from "@tanstack/react-query";
 import { useEffect, useMemo, useState } from "react";
 import { api, type Metric, type RunView } from "../api";
-import { Banner, DealHeader, ErrorText, MetricValue, useDeal, useSession, VerdictBadge } from "../components/ui";
+import { Banner, DealFrame, ErrorText, MetricValue, useDeal, useSession, VerdictBadge } from "../components/ui";
 import * as I from "../components/icons";
 import { checkText, useI18n, verdictText } from "../i18n";
 import { GateOutcome, layoutFor, useRun } from "./run";
@@ -71,7 +71,7 @@ export function Explore({ dealId }: { dealId: string }) {
   if (!runId) {
     return (
       <>
-        <DealHeader o={deal.data} active="run" />
+        <DealFrame o={deal.data} active="run" />
         <Banner tone="neutral" title={t("explore.noRun")}><Link to="/deals/$dealId/run" params={{ dealId }}>{t("decision.goRun")}</Link></Banner>
       </>
     );
@@ -95,7 +95,7 @@ export function Explore({ dealId }: { dealId: string }) {
 
   return (
     <>
-      <DealHeader o={deal.data} active="run" />
+      <DealFrame o={deal.data} active="run" />
       <Banner tone="review" title={t("explore.banner")}>{t("explore.bannerBody", { n: deal.data.run!.number })}</Banner>
 
       <div className="two-col">

@@ -1,7 +1,7 @@
 import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
 import { useRef, useState } from "react";
 import { api, type DocumentRow } from "../api";
-import { canEdit, DealHeader, ErrorText, useDeal, useSession } from "../components/ui";
+import { canEdit, DealFrame, ErrorText, useDeal, useSession } from "../components/ui";
 import * as I from "../components/icons";
 import { QuickStart } from "../components/QuickStart";
 import { useI18n, type I18n } from "../i18n";
@@ -84,7 +84,7 @@ export function Documents({ dealId }: { dealId: string }) {
   const editable = canEdit(role);
   return (
     <>
-      <DealHeader o={deal.data} active="documents" />
+      <DealFrame o={deal.data} active="documents" />
       <div className="side">
         <div className="stack" style={{ gap: 20 }}>
           {editable && (

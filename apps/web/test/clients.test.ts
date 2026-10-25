@@ -40,7 +40,7 @@ vi.mock("../src/components/ui", async (original) => {
   const { createElement } = await import("react");
   return {
     ...ui,
-    DealHeader: () => createElement("header", null, "Deal header"),
+    DealFrame: () => createElement("header", null, "Deal header"),
     useDeal: () => ({ data: { deal: { currency: "CAD" }, run: { id: "run-1", number: 1, fresh: true }, documents: { total: 0, processing: 0, failed: 0 } } }),
     useSession: () => ({ solo: false, role: state.role, workspaceId: "ws", me: { user: { id: "me-id", name: "Me" }, workspaces: [] } }),
   };
