@@ -563,7 +563,13 @@ export function flattenMetrics(result: RunResult) {
   );
 }
 
-export async function createRun(tx: Db, dealId: string, asOf: string) {
+/** What a streamed run reports when its inputs are settled (card R1). Counts and names only; no financial figure. */
+export type RunFacts = { approved: number; defaults: number; policyVersion: string; policyDraft: boolean; exit: "sale" | "refinance_hold" | "for_sale";
+  constructionMonths: number; holdYears?: number; stresses: number; inputHash: string; engineVersion: string };
+/** A run's progress (card R1): each stage as it finishes, and `check`, which throws when a stop was asked for. */
+export type RunProgress = { stage(key: "inputs" | "ledger" | "loans" | "stresses" | "gates", at: Date, facts?: RunFacts): Promise<void> | void; check(): void };
+
+export async function createRun(tx: Db, dealId: string, asOf: string, progress?: RunProgress) {
   const assumptions = await loadAssumptions(tx, dealId);
   const { readiness, input } = readinessFor(assumptions);
   if (!input) throw new HttpError(409, "Underwriting is blocked until review is clear.", { readiness });
@@ -572,7 +578,22 @@ export async function createRun(tx: Db, dealId: string, asOf: string) {
   const { policy, changes, invalid } = effectivePolicy(base, layers.workspace, layers.deal);
   if (invalid.length) throw new HttpError(409, `A threshold set for ${base.version} no longer fits this policy: ${invalid.map((v) => `${v.path} (${v.layer})`).join(", ")}. Change or clear it under Thresholds, then run again.`, { invalid });
   const policyHash = sha256(canonicalJson(policy));
+  const inputHash = sha256(canonicalJson(input));
+  if (progress) {
+    await progress.stage("inputs", new Date(), {
+      approved: assumptions.filter((a) => a.status === "approved").length, defaults: assumptions.filter((a) => a.status === "default_accepted").length,
+      policyVersion: policy.version, policyDraft: policy.draft === true, exit: input.exit ?? "sale", constructionMonths: input.constructionMonths,
+      ...(input.exit === "for_sale" ? {} : { holdYears: input.holdYears }), stresses: policy.stresses.length, inputHash, engineVersion: ENGINE_VERSION,
+    });
+    progress.check();
+  }
   const result = runResult(ENGINE_VERSION,input,policy,policy.custom ? base : undefined);
+  // The engine is one synchronous call: its four stages finish together, when it returns.
+  if (progress) {
+    const at = new Date();
+    for (const key of ["ledger", "loans", "stresses", "gates"] as const) await progress.stage(key, at);
+    progress.check();
+  }
   const setters = changes.length ? await tx.query<{ id: string; name: string }>(`select id,name from users where id=any($1::uuid[])`, [[...new Set(changes.map((change) => change.setById))]]) : [];
   const policyChanges = changes.map((change) => ({ ...change, setBy: setters.find((user) => user.id === change.setById)?.name ?? "—" }));
   const used = assumptions
@@ -593,7 +614,6 @@ export async function createRun(tx: Db, dealId: string, asOf: string) {
       // Only when set, so a snapshot without a client's confirmation is what it was before card 89.
       ...(a.client_confirmed_at ? { clientConfirmedBy: a.client_confirmed_by_name, clientConfirmedAt: a.client_confirmed_at } : {}),
     }));
-  const inputHash = sha256(canonicalJson(input));
   const resultHash = sha256(canonicalJson(result));
   const [{ h }] = (await tx.query<{ h: string }>(`select fn_assumptions_hash($1) as h`, [dealId])) as [{ h: string }];
   const payload = {
@@ -613,6 +633,8 @@ export async function createRun(tx: Db, dealId: string, asOf: string) {
     checks: result.checks,
   };
   const [{ id }] = (await tx.query<{ id: string }>(`select fn_persist_run($1, $2) as id`, [dealId, JSON.stringify(payload)])) as [{ id: string }];
+  // A stop asked for before the commit rolls the run back: no run row, no audit event, no run number used.
+  progress?.check();
   return id;
 }
 

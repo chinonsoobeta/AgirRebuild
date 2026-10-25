@@ -2,6 +2,7 @@ import { Hono, type Context } from "hono";
 import { getConnInfo } from "@hono/node-server/conninfo";
 import { randomBytes } from "node:crypto";
 import { getCookie, setCookie, deleteCookie } from "hono/cookie";
+import { stream } from "hono/streaming";
 import { z } from "zod";
 import { FIELD_BY_KEY, outsideWindow, windowMessage, validateThreshold, COUNTRIES, CURRENCIES, FIELDS, FIELD_GROUP_LABELS, METRICS, POLICIES, POLICY_V1, PROVINCE_CODES, REVIEW_MODES, runPolicy, type EngineInput, type Policy } from "@agir/contracts";
 import { asUser, type BlobStore, type Db } from "@agir/db";
@@ -11,7 +12,9 @@ import { MAX_UPLOAD_BYTES } from "@agir/worker";
 import { checkPassword, countSessions, createSession, endOtherSessions, endSession, hashPassword, rateLimiter, SESSION_DAYS, userForSession } from "./auth.ts";
 import { thresholdsView, auditPackage, clientViewer, createRun, dealOverview, hideClientEvents, HttpError, labelRefusal, regionGroups, reviewView, runView, sha256 } from "./services.ts";
 
-export type AppDeps = { db: Db; store: BlobStore; secureCookies: boolean; demoSignIn?: boolean; trustProxy?: boolean; now?: () => Date };
+export type AppDeps = { db: Db; store: BlobStore; secureCookies: boolean; demoSignIn?: boolean; trustProxy?: boolean; now?: () => Date;
+  /** Tests only: awaited after each progress line of a streamed run, so a test can hold a run at a stage. */
+  progressHook?: (stage: string) => Promise<void> | void };
 type Env = { Variables: { user: { id: string; email: string; name: string } } };
 
 const COOKIE = "agir_session";
@@ -26,6 +29,24 @@ const INVITE_GONE = "This invitation is not available. It may have been used, re
 
 const PG_STATUS: Record<string, number> = { "42501": 403, "28000": 401, P0002: 404, "22023": 422, "23505": 409, "40001": 409, "23514": 422, "22P02": 404 };
 
+/** The status and body an error is answered with; shared by the error handler and a streamed run's error line. */
+function errorAnswer(err: unknown, path: string): { status: number; body: { error: string; [k: string]: unknown } } {
+  if (err instanceof HttpError && err.body && typeof err.body === "object" && "code" in err.body && err.body.code === "outside_window") return { status: 422, body: { error: err.message, ...err.body } };
+  if (err instanceof HttpError) return { status: err.status, body: { error: err.message, ...(err.body ? { detail: err.body } : {}) } };
+  if (err instanceof EngineInputError) return { status: 422, body: { error: err.message, problems: err.problems } };
+  if (err instanceof z.ZodError) return { status: 422, body: { error: "Some fields are missing or not valid.", issues: err.issues } };
+  const code = (err as { code?: string }).code;
+  if (code && PG_STATUS[code]) return { status: PG_STATUS[code]!, body: { error: code === "22P02" ? "Not found." : (err as Error).message } };
+  const shared = path.startsWith("/api/share/") || path.startsWith("/api/invite/");
+  console.error(JSON.stringify({ at: new Date().toISOString(), event: "api.error", path: shared ? "/api/share/…" : path, error: shared ? "Shared link request failed" : (err as Error).message }));
+  return { status: 500, body: { error: "Something went wrong on our side. It has been logged." } };
+}
+
+/** A run token: 32 random bytes the starting browser makes, in base64url (card R1). */
+const RUN_TOKEN = /^[A-Za-z0-9_-]{43}$/;
+/** Thrown by a streamed run's progress check when a stop was asked for; it rolls the run's transaction back. */
+class RunStopped extends Error {}
+
 // Keep the existing database functions responsible for saving values and their audit reasons.
 function windowReason(fieldKey: string, value: number, reason: string | null | undefined, confirmed?: boolean, requiresReason = true): string | null | undefined {
   const field = FIELD_BY_KEY.get(fieldKey);
@@ -36,7 +57,7 @@ function windowReason(fieldKey: string, value: number, reason: string | null | u
   return `${reason ?? ""} (confirmed outside the usual range ${field.window!.min}–${field.window!.max})`;
 }
 
-export function createApp({ db, store, secureCookies, demoSignIn = false, trustProxy = false, now = () => new Date() }: AppDeps) {
+export function createApp({ db, store, secureCookies, demoSignIn = false, trustProxy = false, now = () => new Date(), progressHook }: AppDeps) {
   const app = new Hono<Env>();
   const clientKey = (c: Context<Env>): string => {
     if (trustProxy) {
@@ -49,6 +70,10 @@ export function createApp({ db, store, secureCookies, demoSignIn = false, trustP
   const authLimit = rateLimiter(20, 60_000);
   const shareLimit = rateLimiter(60, 60_000);
   const inviteLimit = rateLimiter(60, 60_000);
+  const stopLimit = rateLimiter(60, 60_000);
+  // Streamed runs in progress, by run token (card R1). This map lives in this one API process: with several
+  // API processes, a stop could reach a process that is not running the run, so the map would need to be in the database.
+  const runsInProgress = new Map<string, { userId: string; dealId: string; stopRequested: boolean }>();
   const fileResponse = async (a: { kind: string; format: string; storage_key: string | null; run_number: number; deal: string; lang?: "en" | "fr" }, inline: boolean) => {
     const bytes = await store.get(a.storage_key!);
     const mime = { pdf: "application/pdf", docx: "application/vnd.openxmlformats-officedocument.wordprocessingml.document", xlsx: "application/vnd.openxmlformats-officedocument.spreadsheetml.sheet" }[a.format] ?? "application/octet-stream";
@@ -59,19 +84,12 @@ export function createApp({ db, store, secureCookies, demoSignIn = false, trustP
   };
 
   app.onError((err, c) => {
-    if (err instanceof HttpError && err.body && typeof err.body === "object" && "code" in err.body && err.body.code === "outside_window") return c.json({ error: err.message, ...err.body }, 422);
-    if (err instanceof HttpError) return c.json({ error: err.message, ...(err.body ? { detail: err.body } : {}) }, err.status as 400);
-    if (err instanceof EngineInputError) return c.json({ error: err.message, problems: err.problems }, 422);
-    if (err instanceof z.ZodError) return c.json({ error: "Some fields are missing or not valid.", issues: err.issues }, 422);
-    const code = (err as { code?: string }).code;
-    if (code && PG_STATUS[code]) return c.json({ error: code === "22P02" ? "Not found." : err.message }, PG_STATUS[code] as 400);
-    const shared = c.req.path.startsWith("/api/share/") || c.req.path.startsWith("/api/invite/");
-    console.error(JSON.stringify({ at: new Date().toISOString(), event: "api.error", path: shared ? "/api/share/…" : c.req.path, error: shared ? "Shared link request failed" : err.message }));
-    return c.json({ error: "Something went wrong on our side. It has been logged." }, 500);
+    const { status, body } = errorAnswer(err, c.req.path);
+    return c.json(body, status as 400);
   });
 
   // Shared links and invitations carry a secret in the path: rate-limited, never cached, never sent on as a referrer.
-  for (const [prefix, limit] of [["/api/share/*", shareLimit], ["/api/invite/*", inviteLimit]] as const) {
+  for (const [prefix, limit] of [["/api/share/*", shareLimit], ["/api/invite/*", inviteLimit], ["/api/runs/stop", stopLimit]] as const) {
     app.use(prefix, async (c, next) => {
       if (limit(clientKey(c))) await next();
       else c.res = c.json({ error: "Too many requests. Wait a minute." }, 429);
@@ -196,6 +214,17 @@ export function createApp({ db, store, secureCookies, demoSignIn = false, trustP
   app.get("/api/invite/:secret", async (c) => {
     const [live] = await db.query<{ workspace: string; deal: string; expires_at: string }>(`select * from fn_peek_client_invite($1)`, [sha256(c.req.param("secret"))]);
     return live ? c.json({ workspace: live.workspace, deal: live.deal, expiresAt: live.expires_at }) : c.json({ error: INVITE_GONE }, 404);
+  });
+
+  // Stopping a streamed run (card R1). The run token is the authority: only the browser that started the run holds it.
+  // No session check and no database: in local development the run's open transaction would make either wait until the run ends.
+  app.post("/api/runs/stop", async (c) => {
+    const body: unknown = await c.req.json().catch(() => null);
+    const token = body && typeof body === "object" && "token" in body && typeof body.token === "string" ? body.token : "";
+    const run = runsInProgress.get(token);
+    if (!run) return c.json({ error: "This run is not in progress. It may have finished." }, 404);
+    run.stopRequested = true;
+    return c.json({ stopping: true });
   });
 
   // Everything below needs a session.
@@ -653,8 +682,40 @@ export function createApp({ db, store, secureCookies, demoSignIn = false, trustP
 
   // ---- Runs --------------------------------------------------------------------------
   app.post("/api/deals/:id/runs", async (c) => {
-    const id = await as(c, (tx) => createRun(tx, c.req.param("id"), now().toISOString().slice(0,10)));
-    return c.json({ id });
+    if (c.req.query("progress") !== "1") {
+      const id = await as(c, (tx) => createRun(tx, c.req.param("id"), now().toISOString().slice(0,10)));
+      return c.json({ id });
+    }
+    // With progress=1 (card R1): the same run, answered as one JSON line a stage, then done, stopped or error.
+    const dealId = c.req.param("id"), asOf = now().toISOString().slice(0,10);
+    const token = c.req.header("x-run-token") ?? "";
+    if (!RUN_TOKEN.test(token)) return c.json({ error: "This run needs a valid run token." }, 422);
+    if (runsInProgress.has(token)) return c.json({ error: "A run with this token is already in progress." }, 409);
+    const run = { userId: c.get("user").id, dealId, stopRequested: false };
+    runsInProgress.set(token, run);
+    c.header("content-type", "application/x-ndjson");
+    c.header("cache-control", "no-store");
+    return stream(c, async (s) => {
+      // Not awaited, and never thrown: a browser that stops reading or goes away neither holds up nor fails the run.
+      const send = (line: object) => { try { void s.write(`${JSON.stringify(line)}\n`).catch(() => {}); } catch { /* the browser has gone */ } };
+      try {
+        const id = await as(c, (tx) => createRun(tx, dealId, asOf, {
+          stage: async (key, at, facts) => { send({ stage: key, at: at.toISOString(), ...(facts ? { facts } : {}) }); await progressHook?.(key); },
+          check: () => { if (run.stopRequested) throw new RunStopped(); },
+        }));
+        send({ stage: "record", at: new Date().toISOString() });
+        await progressHook?.("record");
+        send({ done: { id } });
+      } catch (err) {
+        if (err instanceof RunStopped) send({ stopped: true });
+        else {
+          const { status, body: { error, ...rest } } = errorAnswer(err, c.req.path);
+          send({ error: { status, message: error, ...rest } });
+        }
+      } finally {
+        runsInProgress.delete(token);
+      }
+    });
   });
 
   app.get("/api/deals/:id/runs", async (c) => {

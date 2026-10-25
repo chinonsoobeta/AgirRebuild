@@ -1,10 +1,10 @@
 import { stressLabel, tableSourceLabel, tableStaleWarning, pbrhExplanation } from "@agir/contracts";
 import { Link } from "@tanstack/react-router";
 import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
-import { Fragment, useState } from "react";
-import { Figure, Figures } from "../components/kit";
+import { Fragment, useRef, useState } from "react";
+import { Figure, Figures, Notice } from "../components/kit";
 import { FIELD_BY_KEY } from "@agir/contracts";
-import { api, type Metric, type Review, type RunView } from "../api";
+import { api, type Metric, type Review, type RunLine, type RunProgress, type RunStage, type RunView } from "../api";
 import { Banner, canEdit, DealFrame, ErrorText, Glossary, MetricValue, StatusTag, useDeal, useSession, VerdictBadge } from "../components/ui";
 import { policyName, StandardVerdict } from "../components/thresholds";
 import * as I from "../components/icons";
@@ -115,7 +115,78 @@ export function GateOutcome({ status }: { status: string }) {
   return <StatusTag tone="neutral" glyph={I.Dashed}>{status === "not_applicable" ? t("common.notApplicable") : t("run.notEvaluated")}</StatusTag>;
 }
 
-const STEPS = ["run.step.check", "run.step.ledger", "run.step.underwrite", "run.step.stress", "run.step.gates", "run.step.record"] as const;
+const STAGES: readonly RunStage[] = ["inputs", "ledger", "loans", "stresses", "gates", "record"];
+
+/** A run token (card R1): 32 random bytes in base64url, made here and held only by this browser; it is what can stop the run. */
+function runToken(): string {
+  const bytes = crypto.getRandomValues(new Uint8Array(32));
+  return btoa(String.fromCharCode(...bytes)).replace(/\+/g, "-").replace(/\//g, "_").replace(/=+$/, "");
+}
+
+/** A run in progress, stage by stage, as the run's own answer streams in (card R1). */
+export function RunInProgress({ n, startedAt, by, progress, stopping, onStop }: {
+  n: number; startedAt?: number | undefined; by?: string | undefined; progress: RunProgress; stopping: boolean; onStop: () => void;
+}) {
+  const i = useI18n();
+  const { t } = i;
+  const locale = i.lang === "fr" ? "fr-CA" : "en-CA";
+  const time = startedAt ? new Date(startedAt).toLocaleTimeString(locale, { hour: "numeric", minute: "2-digit" }) : undefined;
+  const clock = (at: string) => new Date(at).toLocaleTimeString(locale, { hour: "numeric", minute: "2-digit", second: "2-digit" });
+  const x = progress.facts;
+  const policy = x && policyName(i, x.policyVersion);
+  const current = STAGES.find((k) => !progress.stages[k]);
+  const words = { exit: x?.exit, months: x?.constructionMonths ?? 0, years: x?.holdYears, n: x?.stresses };
+  const hash = x && `${x.inputHash.slice(0, 4)} ${x.inputHash.slice(4, 8)} …`;
+  return (
+    <div className="with-aside">
+      <section className="card card-pad stack tight" aria-busy="true">
+        <div className="row"><span className="spin" aria-hidden="true" /><h2 className="h1">{t("run.inProgress", { n })}</h2></div>
+        <p className="small muted">{t("run.startedAt", { time })}</p>
+        <p className="lead">{x ? t("run.leadFacts", { approved: x.approved, defaults: x.defaults, policy, draft: x.policyDraft }) : t("run.inProgressLead")}</p>
+        <ol className="runlist" aria-label={t("run.stepsLabel")} aria-live="polite">
+          {STAGES.map((k) => {
+            const at = progress.stages[k];
+            return (
+              <li key={k} className={at ? "done" : k === current ? "on" : undefined}>
+                <span className="marker">{at && <I.Check size={10} />}</span>
+                {t(`run.stage.${k}`, { ...words, done: Boolean(at) })}
+                {at ? <span className="when num">{clock(at)}</span> : k === current && <span className="when">{t("run.now")}</span>}
+              </li>
+            );
+          })}
+        </ol>
+        <div className="card-foot row between">
+          <span className="small muted">{t("run.leave")}</span>
+          <button className="btn quiet sm" type="button" disabled={stopping} onClick={onStop}>{stopping ? t("run.stopping") : t("run.stop")}</button>
+        </div>
+      </section>
+      <aside className="stack">
+        <div className="card card-pad stack tight">
+          <h2 className="h3">{t("run.neverTitle")}</h2>
+          <p className="muted">{t("run.neverBody")}</p>
+        </div>
+        <div className="card card-pad stack tight">
+          <h2 className="h3">{t("run.inRun")}</h2>
+          <dl className="kv">
+            {x && <>
+              <dt>{t("run.kv.inputs")}</dt><dd className="hash">{hash}</dd>
+              <dt>{t("run.kv.policy")}</dt><dd>{x.policyDraft ? t("run.kv.policyDraft", { p: policy }) : policy}</dd>
+              <dt>{t("run.kv.engine")}</dt><dd>{x.engineVersion}</dd>
+            </>}
+            {by && <><dt>{t("run.kv.startedBy")}</dt><dd>{by}</dd></>}
+          </dl>
+          {n > 1 && <p className="small muted">{t("run.previousStays", { n: n - 1 })}</p>}
+        </div>
+      </aside>
+    </div>
+  );
+}
+
+/** After a stop: the run rolled back, so there is nothing to show but this. */
+export function RunStopped({ n }: { n: number }) {
+  const { t } = useI18n();
+  return <Notice tone="review" role="status">{t("run.stopped", { n })}</Notice>;
+}
 /** Operating years shown before "Show all". */
 const FIRST_YEARS = 5;
 
@@ -134,19 +205,37 @@ export function Run({ dealId, run: fromAddress }: { dealId: string; run?: string
   const review = useQuery({ queryKey: ["review", dealId], queryFn: () => api.get<Review>(`/deals/${dealId}/review`), enabled: inputsChanged });
   const [trace, setTrace] = useState<Metric | null>(null);
   const [allYears, setAllYears] = useState(false);
+  // A streamed run (card R1): its token, the stages as they finish, and whether a stop is being asked for.
+  const token = useRef("");
+  const [progress, setProgress] = useState<RunProgress>({ stages: {} });
+  const [stopping, setStopping] = useState(false);
+  const [stopped, setStopped] = useState<number | null>(null);
   const start = useMutation({
-    mutationFn: () => api.post<{ id: string }>(`/deals/${dealId}/runs`),
-    onSuccess: async (r) => {
-      setSelected(r.id);
+    mutationFn: (_n: number) => {
+      token.current = runToken();
+      setProgress({ stages: {} }); setStopping(false); setStopped(null);
+      return api.stream<RunLine>(`/deals/${dealId}/runs?progress=1`, { "x-run-token": token.current }, (line) => {
+        if ("stage" in line) setProgress((p) => ({ stages: { ...p.stages, [line.stage]: line.at }, facts: line.facts ?? p.facts }));
+      });
+    },
+    onSuccess: async (last, n) => {
+      if (!("done" in last)) { setStopped(n); return; }
+      setSelected(last.done.id);
       await Promise.all([qc.invalidateQueries({ queryKey: ["deal", dealId] }), qc.invalidateQueries({ queryKey: ["runs", dealId] }), qc.invalidateQueries({ queryKey: ["run"] })]);
     },
   });
+  const stop = () => {
+    setStopping(true);
+    // A refused stop (the run had just finished) needs no message: the run's own answer says how it ended.
+    api.post("/runs/stop", { token: token.current }).catch(() => setStopping(false));
+  };
   if (!deal.data) return <p className="muted">{t("common.loading")}</p>;
   const o = deal.data;
+  const next = Math.max(0, o.run?.number ?? 0, ...(runs.data ?? []).map((r) => r.run_number)) + 1;
   const blocked = o.review.status === "blocked";
   const why = dealStatus(i, o, solo).blockedParts.join(", ");
   const runBtn = (label: string, kind = "primary") => (
-    <button className={`btn ${kind}`} type="button" disabled={blocked || start.isPending || !canEdit(role)} onClick={() => start.mutate()}>
+    <button className={`btn ${kind}`} type="button" disabled={blocked || start.isPending || !canEdit(role)} onClick={() => start.mutate(next)}>
       {start.isPending ? t("run.running") : label}
     </button>
   );
@@ -158,29 +247,14 @@ export function Run({ dealId, run: fromAddress }: { dealId: string; run?: string
   );
 
   if (start.isPending) {
-    const next = Math.max(0, o.run?.number ?? 0, ...(runs.data ?? []).map((r) => r.run_number)) + 1;
-    const time = start.submittedAt ? new Date(start.submittedAt).toLocaleTimeString(i.lang === "fr" ? "fr-CA" : "en-CA", { hour: "numeric", minute: "2-digit" }) : undefined;
-    const by = me?.user.name;
     return (
       <>
         <DealFrame o={o} active="run" />
-        <div className="with-aside">
-          <section className="card card-pad stack tight" role="status" aria-busy="true">
-            <div className="row"><span className="spin" aria-hidden="true" /><h2 className="h1">{t("run.inProgress", { n: next })}</h2></div>
-            {(time || by) && <p className="small muted">{t("run.startedBy", { time, by })}</p>}
-            <p className="lead">{t("run.inProgressLead")}</p>
-            <ol className="runlist" aria-label={t("run.stepsLabel")}>
-              {STEPS.map((k) => <li key={k}>{t(k)}</li>)}
-            </ol>
-          </section>
-          <aside className="card card-pad stack tight">
-            <h2 className="h3">{t("run.neverTitle")}</h2>
-            <p className="muted">{t("run.neverBody")}</p>
-          </aside>
-        </div>
+        <RunInProgress n={next} startedAt={start.submittedAt || undefined} by={me?.user.name} progress={progress} stopping={stopping} onStop={stop} />
       </>
     );
   }
+  const stoppedNotice = stopped !== null && <RunStopped n={stopped} />;
 
   if (!runId) {
     return (
@@ -189,6 +263,7 @@ export function Run({ dealId, run: fromAddress }: { dealId: string; run?: string
         <section className="card card-pad stack run-empty">
           <h2 className="h2">{t("run.noRun")}</h2>
           <p className="lead">{t("run.noRunBody")}</p>
+          {stoppedNotice}
           <div className="row">{runBtn(t("run.run"))}</div>
           {reasons}
           <ErrorText error={start.error} />
@@ -248,6 +323,7 @@ export function Run({ dealId, run: fromAddress }: { dealId: string; run?: string
             )}
           </Banner>
         )}
+        {stoppedNotice}
         <ErrorText error={start.error} />
 
         <section className="card" aria-label={t("run.verdictAria")}>

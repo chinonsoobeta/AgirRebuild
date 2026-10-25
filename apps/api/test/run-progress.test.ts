@@ -132,7 +132,7 @@ describe("the streamed run", () => {
 
   test("refuses a missing or malformed token with 422 before running", async () => {
     const d = await newDeal(alice, "Bad tokens", BASE);
-    for (const headers of [{}, { "x-run-token": "short" }, { "x-run-token": `${token().slice(0, 42)}+` }, { "x-run-token": `${token()}A` }]) {
+    for (const headers of [{} as Record<string, string>, { "x-run-token": "short" }, { "x-run-token": `${token().slice(0, 42)}+` }, { "x-run-token": `${token()}A` }]) {
       const res = await streamed(alice, d, headers);
       expect(res.status).toBe(422);
     }

@@ -5,12 +5,6 @@ export const en = {
   "run.inProgress": (p) => `Run ${p.n} is in progress`,
   "run.inProgressLead": "The engine is working from the approved values under the deal's policy. Nothing on the other screens changes until it finishes.",
   "run.stepsLabel": "What a run does",
-  "run.step.check": "Check that every value the policy needs is approved",
-  "run.step.ledger": "Build the monthly ledger",
-  "run.step.underwrite": "Underwrite the loans and the exit",
-  "run.step.stress": "Apply the stresses",
-  "run.step.gates": "Test the gates and settle the verdict",
-  "run.step.record": "Write, hash and sign the run record",
   "run.neverTitle": "What a run never does",
   "run.neverBody": "It never fills in a missing figure, rounds a value to make a gate pass, or uses a default you have not ticked. If it finds a gap, it stops and tells you what to add.",
   "run.verdictAria": "Verdict",
@@ -42,7 +36,6 @@ export const en = {
   "run.historyCurrent": "Current",
   "run.historyChecking": "Checking whether it is current…",
   "run.historyOpen": "Open this run to see whether it is current.",
-  "run.startedBy": (p) => p.time && p.by ? `Started ${p.time} by ${p.by}` : p.time ? `Started ${p.time}` : `Started by ${p.by}`,
   "run.thresholdsLine": "This deal's thresholds are listed and changed on Review.",
   "run.thresholdsLink": "Go to the thresholds",
   "run.sub.perUnit": (p) => `${p.v} a unit`,
@@ -59,18 +52,35 @@ export const en = {
   "run.changed.added": (p) => `${p.label} was approved at ${p.now} after this run, which did not use it.`,
   "run.changed.removed": (p) => `${p.label} is no longer approved; this run used ${p.was}.`,
   "run.changed.more": (p) => `And ${p.n} more.`,
+  "run.startedAt": (p) => p.time ? `Started ${p.time} · usually a few seconds` : "A run usually takes a few seconds.",
+  "run.leadFacts": (p) => `The engine is working from ${p.approved === 1 ? "1 approved value" : `${p.approved} approved values`}${p.defaults ? ` and ${p.defaults === 1 ? "1 named default" : `${p.defaults} named defaults`}` : ""} under the “${p.policy}” policy${p.draft ? " (draft)" : ""}. Nothing you see on the other screens changes until it finishes.`,
+  "run.stage.inputs": (p) => p.done ? "Checked that every value the policy needs is approved" : "Checking that every value the policy needs is approved",
+  "run.stage.ledger": (p) => {
+    const months = p.months > 0 ? `${p.months} ${p.months === 1 ? "month" : "months"} of construction` : "";
+    const years = p.years === undefined ? "" : `${p.years} ${p.years === 1 ? "year" : "years"}`;
+    const detail = p.exit === "for_sale" ? (months ? `${months} and the sales` : "the sales")
+      : p.exit && years ? [months, p.exit === "refinance_hold" ? `${years} held` : `${years} to the sale`].filter(Boolean).join(", then ") : months;
+    return `${p.done ? "Built" : "Building"} the monthly ledger${detail ? `: ${detail}` : ""}`;
+  },
+  "run.stage.loans": (p) => `${p.done ? "Underwrote" : "Underwriting"} ${p.exit === "refinance_hold" ? "the loans, the refinance and the hold" : p.exit === "sale" ? "the loans and the sale"
+    : p.exit === "for_sale" ? "the construction loan and the sales" : "the loans and the exit"}`,
+  "run.stage.stresses": (p) => `${p.done ? "Applied" : "Applying"} ${p.n === undefined ? "the stresses" : p.n === 1 ? "the stress" : `the ${p.n} stresses`}`,
+  "run.stage.gates": (p) => p.done ? "Tested the gates and settled the verdict" : "Testing the gates and settling the verdict",
+  "run.stage.record": (p) => p.done ? "Wrote, hashed and signed the run record" : "Writing, hashing and signing the run record",
+  "run.now": "now",
+  "run.leave": "You can leave this page. The run carries on without you, and it will be here when you come back.",
+  "run.stop": "Stop this run",
+  "run.stopping": "Stopping…",
+  "run.inRun": "What is in this run",
+  "run.kv.startedBy": "Started by",
+  "run.previousStays": (p) => `Run ${p.n} stays available, as it is, until this one finishes.`,
+  "run.stopped": (p) => `Run ${p.n} was stopped. Nothing was recorded.`,
 } satisfies Record<string, Entry>;
 
 export const fr: FrenchOf<typeof en> = {
   "run.inProgress": (p) => `L'analyse ${p.n} est en cours`,
   "run.inProgressLead": "Le moteur travaille à partir des valeurs approuvées, selon la politique du projet. Rien ne change sur les autres écrans avant la fin.",
   "run.stepsLabel": "Ce que fait une analyse",
-  "run.step.check": "Vérifier que chaque valeur exigée par la politique est approuvée",
-  "run.step.ledger": "Construire le grand livre mensuel",
-  "run.step.underwrite": "Analyser le financement et la sortie",
-  "run.step.stress": "Appliquer les stress",
-  "run.step.gates": "Vérifier les seuils et arrêter le verdict",
-  "run.step.record": "Rédiger, hacher et signer le registre de l'analyse",
   "run.neverTitle": "Ce qu'une analyse ne fait jamais",
   "run.neverBody": "Elle ne comble jamais un chiffre manquant, n'arrondit jamais une valeur pour respecter un seuil et n'utilise jamais une valeur par défaut que vous n'avez pas cochée. Si elle trouve une lacune, elle s'arrête et vous indique quoi ajouter.",
   "run.verdictAria": "Verdict",
@@ -102,7 +112,6 @@ export const fr: FrenchOf<typeof en> = {
   "run.historyCurrent": "À jour",
   "run.historyChecking": "Vérification de l'état…",
   "run.historyOpen": "Ouvrez cette analyse pour savoir si elle est à jour.",
-  "run.startedBy": (p) => p.time && p.by ? `Lancée à ${p.time} par ${p.by}` : p.time ? `Lancée à ${p.time}` : `Lancée par ${p.by}`,
   "run.thresholdsLine": "Les seuils de ce projet sont présentés et modifiés à l'étape Examen.",
   "run.thresholdsLink": "Voir les seuils",
   "run.sub.perUnit": (p) => `${p.v} par logement`,
@@ -119,4 +128,30 @@ export const fr: FrenchOf<typeof en> = {
   "run.changed.added": (p) => `${p.label} a reçu la valeur ${p.now} après cette analyse, qui ne l'utilisait pas.`,
   "run.changed.removed": (p) => `${p.label} n'a plus de valeur approuvée\u00a0; cette analyse utilisait ${p.was}.`,
   "run.changed.more": (p) => p.n === 1 ? "Et 1 autre." : `Et ${p.n} autres.`,
+  "run.startedAt": (p) => p.time ? `Lancée à ${p.time} · habituellement quelques secondes` : "Une analyse prend habituellement quelques secondes.",
+  "run.leadFacts": (p) => `Le moteur travaille à partir de ${p.approved === 1 ? "1 valeur approuvée" : `${p.approved} valeurs approuvées`}${p.defaults ? ` et de ${p.defaults === 1 ? "1 valeur par défaut nommée" : `${p.defaults} valeurs par défaut nommées`}` : ""}, selon la politique « ${p.policy} »${p.draft ? " (provisoire)" : ""}. Rien de ce que vous voyez sur les autres écrans ne change avant la fin.`,
+  "run.stage.inputs": (p) => p.done ? "Chaque valeur exigée par la politique est approuvée" : "Vérification que chaque valeur exigée par la politique est approuvée",
+  "run.stage.ledger": (p) => {
+    const months = p.months > 0 ? `${p.months} mois de construction` : "";
+    const years = p.years === undefined ? "" : `${p.years} ${p.years === 1 ? "an" : "ans"}`;
+    const detail = p.exit === "for_sale" ? (months ? `${months} et les ventes` : "les ventes")
+      : p.exit && years ? [months, p.exit === "refinance_hold" ? `${years} de détention` : `${years} jusqu'à la vente`].filter(Boolean).join(", puis ") : months;
+    return `${p.done ? "Grand livre mensuel construit" : "Construction du grand livre mensuel"}${detail ? ` : ${detail}` : ""}`;
+  },
+  "run.stage.loans": (p) => p.exit === "refinance_hold" ? (p.done ? "Prêts, refinancement et détention analysés" : "Analyse des prêts, du refinancement et de la détention")
+    : p.exit === "sale" ? (p.done ? "Prêts et vente analysés" : "Analyse des prêts et de la vente")
+    : p.exit === "for_sale" ? (p.done ? "Prêt de construction et ventes analysés" : "Analyse du prêt de construction et des ventes")
+    : p.done ? "Financement et sortie analysés" : "Analyse du financement et de la sortie",
+  "run.stage.stresses": (p) => p.n === undefined ? (p.done ? "Stress appliqués" : "Application des stress")
+    : p.n === 1 ? (p.done ? "Stress appliqué" : "Application du stress") : p.done ? `${p.n} stress appliqués` : `Application des ${p.n} stress`,
+  "run.stage.gates": (p) => p.done ? "Seuils vérifiés et verdict arrêté" : "Vérification des seuils et détermination du verdict",
+  "run.stage.record": (p) => p.done ? "Registre de l'analyse rédigé, haché et signé" : "Rédaction, hachage et signature du registre de l'analyse",
+  "run.now": "en cours",
+  "run.leave": "Vous pouvez quitter cette page. L'analyse continue sans vous, et vous la retrouverez ici à votre retour.",
+  "run.stop": "Arrêter cette analyse",
+  "run.stopping": "Arrêt en cours…",
+  "run.inRun": "Ce que contient cette analyse",
+  "run.kv.startedBy": "Lancée par",
+  "run.previousStays": (p) => `L'analyse ${p.n} reste disponible, telle quelle, jusqu'à la fin de celle-ci.`,
+  "run.stopped": (p) => `L'analyse ${p.n} a été arrêtée. Rien n'a été enregistré.`,
 };

@@ -4,7 +4,7 @@ import { createElement } from "react";
 import { renderToStaticMarkup } from "react-dom/server";
 import * as runScreen from "../src/routes/run.tsx";
 import { build } from "../src/i18n.tsx";
-import type { RunFacts, RunProgress } from "../src/api";
+import { api, ApiError, type RunFacts, type RunLine, type RunProgress } from "../src/api";
 
 // Card R1: the run in progress, by stage, with Stop.
 const state = vi.hoisted(() => ({ lang: "en" as "en" | "fr" }));
@@ -21,7 +21,7 @@ const facts = (extra: Partial<RunFacts> = {}): RunFacts => ({ approved: 31, defa
 const twoDone = (f: RunFacts = facts()): RunProgress => ({ stages: { inputs: "2026-10-24T15:58:02Z", ledger: "2026-10-24T15:58:05Z" }, facts: f });
 const render = (progress: RunProgress, extra: object = {}) => renderToStaticMarkup(createElement(runScreen.RunInProgress,
   { n: 2, startedAt: STARTED, by: "Invented starter", progress, stopping: false, onStop: () => {}, ...extra }));
-const text = (html: string) => html.replace(/<[^>]*>/g, " ").replace(/&#x27;/g, "'").replace(/&quot;/g, "\"").replace(/&amp;/g, "&").replace(/\s+/g, " ");
+const text = (html: string) => html.replace(/<[^>]*>/g, " ").replace(/&#x27;/g, "'").replace(/&quot;/g, "\"").replace(/&amp;/g, "&").replace(/[ \t\r\n]+/g, " ");
 const items = (html: string) => [...html.slice(html.indexOf("<ol"), html.indexOf("</ol>")).matchAll(/<li[^>]*>(.*?)<\/li>/g)].map((m) => text(m[1]!).trim());
 const itemClasses = (html: string) => [...html.slice(html.indexOf("<ol"), html.indexOf("</ol>")).matchAll(/<li( class="([^"]*)")?/g)].map((m) => m[2] ?? "");
 const TIME = /\d{1,2}:\d{2}:\d{2}/;
@@ -115,5 +115,21 @@ describe("the run in progress (card R1)", () => {
       "A run with this token is already in progress.", "The connection closed before the run finished. Open the deal again to see whether it was recorded."]) {
       expect(fr.msg(sentence)).not.toBe(sentence);
     }
+  });
+
+  it("reads the streamed lines as they come, across chunks, and throws an error line as the plain route would", async () => {
+    const answer = (chunks: string[]) => new Response(new ReadableStream({ start(c) { for (const x of chunks) c.enqueue(new TextEncoder().encode(x)); c.close(); } }));
+    const fetch = vi.spyOn(globalThis, "fetch").mockResolvedValueOnce(answer(['{"stage":"inputs","at":"2026-10-24T15:58:02Z"}\n{"sta', 'ge":"ledger","at":"2026-10-24T15:58:05Z"}\n', '{"done":{"id":"r"}}\n']));
+    const seen: RunLine[] = [];
+    expect(await api.stream<RunLine>("/deals/d/runs?progress=1", { "x-run-token": "t" }, (l) => seen.push(l))).toEqual({ done: { id: "r" } });
+    expect(seen.map((l) => ("stage" in l ? l.stage : "done"))).toEqual(["inputs", "ledger", "done"]);
+    expect(fetch.mock.calls[0]![1]!.headers).toMatchObject({ "x-agir": "1", "x-run-token": "t" });
+    fetch.mockResolvedValueOnce(answer(['{"error":{"status":409,"message":"Underwriting is blocked until review is clear.","detail":{"readiness":{}}}}\n']));
+    const error = await api.stream("/deals/d/runs?progress=1", {}, () => {}).catch((e: unknown) => e);
+    expect(error).toBeInstanceOf(ApiError);
+    expect(error).toMatchObject({ status: 409, message: "Underwriting is blocked until review is clear.", detail: { readiness: {} } });
+    fetch.mockResolvedValueOnce(answer(['{"stage":"inputs","at":"2026-10-24T15:58:02Z"}\n']));
+    expect(await api.stream("/deals/d/runs?progress=1", {}, () => {}).catch((e: Error) => e.message)).toMatch(/^The connection closed before the run finished/);
+    fetch.mockRestore();
   });
 });
