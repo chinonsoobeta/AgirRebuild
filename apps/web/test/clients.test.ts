@@ -207,12 +207,13 @@ describe("the invitation page (task 89c)", () => {
   it("a dead link shows only the API sentence", () => {
     state.invite = undefined;
     state.inviteError = new ApiError(404, "This invitation is not available. It may have been used, revoked or expired.");
-    expect(text(page())).toBe("This invitation is not available. It may have been used, revoked or expired.");
+    // The top bar keeps the language switch; the page's main region holds only the API sentence.
+    expect(text(page().match(/<main[^>]*>([\s\S]*)<\/main>/)![1]!)).toBe("This invitation is not available. It may have been used, revoked or expired.");
   });
   it("signed out: names the workspace and deal and signs up with the invitation", async () => {
     state.meError = new ApiError(401, "Sign in to continue.");
     const html = text(page());
-    for (const s of ["Harbour Brokers", "Elm Street fourplex", "Name", "Email", "Password", "Create my account"]) expect(html).toContain(s);
+    for (const s of ["Harbour Brokers", "Elm Street fourplex", "Your name", "Email", "Password", "Create my account"]) expect(html).toContain(s);
     expect(buttons("Join as a client").length).toBe(0);
     const form = state.nodes.find((n) => n.tag === "form")!;
     const values: Record<string, string> = { name: "Dana Client", email: "dana@example.test", password: "a-long-password" };

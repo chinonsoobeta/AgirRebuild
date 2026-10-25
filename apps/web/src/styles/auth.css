@@ -1,1 +1,25 @@
 /* Styles for the auth area: design tokens only (var(--…)), no literal colours. */
+.auth-brand-lg{font-size:22px}
+.auth-brand-lg .brand-mark{width:26px;height:26px}
+.auth-pitch-top{display:flex;flex-direction:column;gap:40px}
+.auth-pitch-lead{max-width:48ch}
+.auth-side{display:flex;align-items:center;justify-content:center;padding:48px 32px}
+.auth-column{width:100%;max-width:420px;display:flex;flex-direction:column;gap:20px}
+.auth-card{width:100%;max-width:420px;display:flex;flex-direction:column;gap:20px}
+.auth-card-wide{max-width:480px}
+.auth-demo{gap:12px}
+.auth-sub{margin-top:6px}
+.auth-wide{width:100%}
+.auth-alt{text-align:center}
+.auth-lang{border:0;background:transparent;font:inherit;cursor:pointer}
+.auth-page{padding-top:72px}
+.auth-invite{display:flex;flex-direction:column;gap:24px;padding:40px}
+.auth-invite form{display:flex;flex-direction:column;gap:18px}
+.auth-invite .grid2{gap:18px}
+.auth-file{display:flex;flex-wrap:wrap;align-items:center;justify-content:space-between;gap:12px}
+.auth-file .sub{display:block;font-size:13px;color:var(--ink-3);margin-top:2px}
+.auth-file .acts{display:flex;gap:6px}
+@media (max-width:600px){.pitch{padding:40px 24px}.auth-side{padding:32px 16px}.auth-invite{padding:24px}}
+.auth-from{margin-bottom:10px}
+.auth-invite-body{margin-top:12px}
+.auth-meta{margin-top:6px}

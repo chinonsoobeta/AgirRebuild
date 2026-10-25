@@ -1,10 +1,9 @@
-import { useNavigate } from "@tanstack/react-router";
+import { Link, useNavigate } from "@tanstack/react-router";
 import { useQuery, useQueryClient } from "@tanstack/react-query";
 import { useState, type FormEvent } from "react";
 import { api, type DealOverview, type InvitePeek, type Me } from "../api";
-import { ErrorText } from "../components/ui";
 import { useI18n } from "../i18n";
-import { AuthFrame } from "./auth";
+import { FormError, SignedOutPage } from "./auth";
 
 /** The page an invitation link opens (card 89): outside the session gate. Signed out, it signs the person up as a client
  * of one deal; signed in, it joins them. A used, revoked or expired link shows the API's one sentence. */
@@ -16,8 +15,8 @@ export function Invite({ secret }: { secret: string }) {
   const me = useQuery({ queryKey: ["me"], queryFn: () => api.get<Me>("/me"), retry: false });
   const [error, setError] = useState<unknown>(null);
   const [busy, setBusy] = useState(false);
-  if (invite.error) return <main className="stack" style={{ gap: 12, padding: 24 }}><p>{err(invite.error)}</p></main>;
-  if (!invite.data || (!me.data && !me.error)) return <main style={{ padding: 24 }}><p className="muted">{t("common.loading")}</p></main>;
+  if (invite.error) return <SignedOutPage><p className="lead">{err(invite.error)}</p></SignedOutPage>;
+  if (!invite.data || (!me.data && !me.error)) return <SignedOutPage><p className="muted">{t("common.loading")}</p></SignedOutPage>;
   const run = async (step: () => Promise<void>) => {
     setBusy(true);
     setError(null);
@@ -51,29 +50,36 @@ export function Invite({ secret }: { secret: string }) {
       void navigate({ to: "/deals" });
     });
   };
+  const ws = invite.data.workspace;
   return (
-    <AuthFrame>
-      <div className="stack" style={{ gap: 16, maxWidth: 420 }}>
-        <h2 className="h-title" style={{ fontSize: 30 }}>{t("invite.title", { ws: invite.data.workspace, deal: invite.data.deal })}</h2>
-        <p className="muted">{t("invite.body")}</p>
+    <SignedOutPage>
+      <div className="card auth-invite">
+        <div>
+          <p className="muted auth-from">{t("auth.invite.from", { ws })}</p>
+          <h1 className="h1">{t("auth.invite.title", { deal: invite.data.deal })}</h1>
+          <p className="lead auth-invite-body">{t("invite.body")}</p>
+        </div>
         {me.data ? (
-          <div className="stack" style={{ gap: 8 }}>
+          <div className="stack tight">
             <div><button className="btn primary" type="button" disabled={busy} onClick={join}>{t("invite.join")}</button></div>
-            <ErrorText error={error} />
+            <FormError error={error} />
           </div>
         ) : (
           <form onSubmit={signup} noValidate>
-            <div className="field"><label htmlFor="name">{t("auth.name")}</label><input className="input" id="name" name="name" autoComplete="name" required /></div>
-            <div className="field"><label htmlFor="email">{t("auth.email")}</label><input className="input" id="email" name="email" type="email" autoComplete="username" required /></div>
-            <div className="field"><label htmlFor="password">{t("auth.password")}</label><input className="input" id="password" name="password" type="password" autoComplete="new-password" minLength={10} required /><span className="help">{t("auth.passwordHelp")}</span></div>
-            <ErrorText error={error} />
-            <div className="stack" style={{ gap: 8 }}>
-              <div><button className="btn primary" type="submit" disabled={busy}>{t("invite.create")}</button></div>
-              <span className="small muted">{t("invite.haveAccount")}</span>
+            <div className="grid2">
+              <div className="field"><label htmlFor="name">{t("auth.name")}</label><input className="input" id="name" name="name" autoComplete="name" required /></div>
+              <div className="field"><label htmlFor="email">{t("auth.email")}</label><input className="input" id="email" name="email" type="email" autoComplete="username" required /></div>
+            </div>
+            <div className="field"><label htmlFor="password">{t("auth.password")}</label><input className="input" id="password" name="password" type="password" autoComplete="new-password" minLength={10} required aria-describedby="password-hint" /><p className="hint" id="password-hint">{t("auth.passwordHelp")}</p></div>
+            <FormError error={error} />
+            <div className="row">
+              <button className="btn primary" type="submit" disabled={busy}>{t("invite.create")}</button>
+              <span className="small muted">{t("auth.invite.already")} <Link to="/login">{t("auth.invite.signIn")}</Link>{t("auth.invite.thenOpen")}</span>
             </div>
           </form>
         )}
+        <p className="small muted">{t("auth.invite.once", { ws })}</p>
       </div>
-    </AuthFrame>
+    </SignedOutPage>
   );
 }

@@ -1,6 +1,46 @@
 // Strings for the auth area. Keys start with "auth.".
 import type { Entry, FrenchOf } from "./entry";
 
-export const en = {} satisfies Record<string, Entry>;
+export const en = {
+  "auth.welcome": "Welcome back.",
+  "auth.pitchFoot": "Built for developers in Canada doing a few deals a year. Amounts are in Canadian dollars, and the interface is also available in French.",
+  "auth.signupPitch": "Your first workspace is created with your account. You can add people, or a second workspace for a partner, later in Settings.",
+  "auth.signupLead": "It takes a minute.",
+  "auth.nameHint": "As it should appear in the audit trail.",
+  "auth.modeTitle.solo": "On my own",
+  "auth.modeTitle.team": "With a team",
+  "auth.modeDesc.solo": "Values you enter are used right away and labelled as stated by you, until someone else confirms them.",
+  "auth.modeDesc.team": "A material value you enter by hand waits for a second person to confirm it before it counts.",
+  "auth.modeHint": "You can change this later in Settings. Each change is recorded.",
+  "auth.invite.from": (p) => `An invitation from ${p.ws}`,
+  "auth.invite.title": (p) => `You're invited to the deal ${p.deal} as a client.`,
+  "auth.invite.already": "Already have an account?",
+  "auth.invite.signIn": "Sign in",
+  "auth.invite.thenOpen": ", then open this link again.",
+  "auth.invite.once": (p) => `This link works once. If it has been used or revoked, ask ${p.ws} for a new one.`,
+  "auth.share.files": "Files",
+  "auth.share.packageHint": "A copy of the run, its inputs, its decisions and the audit trail's hash chain, for anyone who wants to check the figures.",
+  "auth.share.recorded": "Each opening is recorded for the person who made the link.",
+} satisfies Record<string, Entry>;
 
-export const fr: FrenchOf<typeof en> = {};
+export const fr: FrenchOf<typeof en> = {
+  "auth.welcome": "Bon retour.",
+  "auth.pitchFoot": "Conçu pour les promoteurs au Canada qui mènent quelques projets par année. Les montants sont en dollars canadiens, et l'interface est aussi offerte en anglais.",
+  "auth.signupPitch": "Votre premier espace de travail est créé avec votre compte. Vous pourrez ajouter des personnes, ou un second espace pour un partenaire, plus tard dans les Paramètres.",
+  "auth.signupLead": "Cela prend une minute.",
+  "auth.nameHint": "Tel qu'il doit apparaître dans le journal d'audit.",
+  "auth.modeTitle.solo": "Seul(e)",
+  "auth.modeTitle.team": "En équipe",
+  "auth.modeDesc.solo": "Les valeurs que vous saisissez sont utilisées tout de suite et indiquées comme déclarées par vous, jusqu'à ce qu'une autre personne les confirme.",
+  "auth.modeDesc.team": "Une valeur déterminante saisie à la main attend qu'une seconde personne la confirme avant de compter.",
+  "auth.modeHint": "Vous pourrez changer ce choix plus tard dans les Paramètres. Chaque changement est consigné.",
+  "auth.invite.from": (p) => `Une invitation de ${p.ws}`,
+  "auth.invite.title": (p) => `Vous êtes invité(e) au projet ${p.deal} comme client.`,
+  "auth.invite.already": "Vous avez déjà un compte ?",
+  "auth.invite.signIn": "Connectez-vous",
+  "auth.invite.thenOpen": ", puis ouvrez ce lien de nouveau.",
+  "auth.invite.once": (p) => `Ce lien ne fonctionne qu'une fois. S'il a déjà servi ou a été révoqué, demandez-en un nouveau à ${p.ws}.`,
+  "auth.share.files": "Fichiers",
+  "auth.share.packageHint": "Une copie du calcul, de ses données, de ses décisions et de la chaîne de hachage du journal d'audit, pour quiconque veut vérifier les chiffres.",
+  "auth.share.recorded": "Chaque ouverture est consignée pour la personne qui a créé le lien.",
+};

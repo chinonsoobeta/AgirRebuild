@@ -74,7 +74,7 @@ describe("sign in", () => {
     expect(labelled("password")).toBe(true);
     const words = text(html);
     for (const s of ["Sign in", "Welcome back.", "Email", "Password", "Create an account", "Every number traces to a document"]) expect(words).toContain(s);
-    expect(state.nodes.some((n) => n.tag === "a" && n.props.href === "/signup")).toBe(true);
+    expect(html).toContain('href="/signup"');
     expect(words).not.toMatch(/forgot/i);
     expect(state.nodes.some((n) => n.tag === "a" && /reset/.test(String(n.props.href)))).toBe(false);
     expect(words).not.toMatch(/terms/i);
@@ -113,13 +113,14 @@ describe("sign in", () => {
 
 describe("create an account", () => {
   it("has labelled name, email and password fields and the review-mode choice, solo by default", () => {
-    const words = text(render(createElement(Signup)));
+    const html = render(createElement(Signup));
+    const words = text(html);
     for (const id of ["name", "email", "password"]) expect(labelled(id)).toBe(true);
     for (const s of ["Create an account", "Your name", "At least 10 characters.", "How are values reviewed?", "On my own", "With a team", "I have an account"]) expect(words).toContain(s);
     const radios = state.nodes.filter((n) => n.tag === "input" && n.props.type === "radio");
     expect(radios.map((r) => [r.props.name, r.props.value, Boolean(r.props.checked)])).toEqual([["reviewMode", "solo", true], ["reviewMode", "team", false]]);
     expect(words).not.toMatch(/forgot|terms/i);
-    expect(state.nodes.some((n) => n.tag === "a" && n.props.href === "/login")).toBe(true);
+    expect(html).toContain('href="/login"');
     expect(buttons("Français").length).toBe(1);
   });
   it("posts the chosen review mode, then opens the deals", async () => {
@@ -142,10 +143,11 @@ describe("the invitation page", () => {
   it("signed out: names the workspace and the deal, with labelled fields and the language switch", () => {
     state.invite = { workspace: "Harbour Brokers", deal: "Elm Street fourplex" };
     state.meError = new ApiError(401, "Sign in to continue.");
-    const words = page();
+    const html = render(createElement(Invite, { secret }));
+    const words = text(html);
     for (const s of ["An invitation from Harbour Brokers", "Elm Street fourplex", "as a client", "Create my account", "This link works once."]) expect(words).toContain(s);
     for (const id of ["name", "email", "password"]) expect(labelled(id)).toBe(true);
-    expect(state.nodes.some((n) => n.tag === "a" && n.props.href === "/login")).toBe(true);
+    expect(html).toContain('href="/login"');
     expect(buttons("Français").length).toBe(1);
   });
   it("signed in: offers to join", () => {
