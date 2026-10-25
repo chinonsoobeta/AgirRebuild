@@ -1,4 +1,4 @@
-import { useState, type FormEvent } from "react";
+import { Fragment, useId, useState, type FormEvent, type ReactNode } from "react";
 import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
 import type { RunResult } from "@agir/contracts";
 import { api, ApiError, type ThresholdView } from "../api";
@@ -7,7 +7,7 @@ import { ErrorText, useSession } from "./ui";
 
 /** The same governed editor for workspace defaults and deal-specific values. A screen that already
     titles the section passes `summary` so the disclosure does not repeat its heading. */
-export function Thresholds({ scope, id, initialVersion = "", summary }: { scope: "workspaces" | "deals"; id: string; initialVersion?: string; summary?: string }) {
+export function Thresholds({ scope, id, initialVersion = "", summary, open }: { scope: "workspaces" | "deals"; id: string; initialVersion?: string; summary?: string; open?: boolean }) {
   const { t, lang, f } = useI18n();
   const { role } = useSession();
   const qc = useQueryClient();
@@ -19,7 +19,7 @@ export function Thresholds({ scope, id, initialVersion = "", summary }: { scope:
   const policies = query.data?.policies ?? [];
   const policy = policies.find((policy) => policy.version === chosen) ?? policies[0];
   const error = lang === "fr" && save.error instanceof ApiError && save.error.detail?.fr ? new Error(save.error.detail.fr) : save.error;
-  return <details className="stack">
+  return <details className="stack" open={open}>
     <summary className={summary ? undefined : "h3"}>{summary ?? t("threshold.title")}</summary>
     <ErrorText error={query.error ?? error} />
     {(query.data?.invalid ?? []).length > 0 && <div className="stack">
@@ -63,6 +63,45 @@ export function Thresholds({ scope, id, initialVersion = "", summary }: { scope:
         })}</tbody></table></div>
     </>}
   </details>;
+}
+
+/** A deal's thresholds in force, read-only: each one's bound and, when it is not the standard, where it was set.
+    It shows the policy of the deal's latest run, otherwise the first, with a select for the others. */
+export function ThresholdList({ dealId, children }: { dealId: string; children?: (version: string, invalid: boolean) => ReactNode }) {
+  const { t, lang, f } = useI18n();
+  const { role } = useSession();
+  const query = useQuery({ queryKey: ["thresholds", "deals", dealId], queryFn: () => api.get<ThresholdView>(`/deals/${dealId}/thresholds`) });
+  const runs = useQuery({ queryKey: ["runs", dealId], queryFn: () => api.get<{ policy_version?: string }[]>(`/deals/${dealId}/runs`) });
+  const [chosen, setChosen] = useState<string | null>(null);
+  const selectId = useId();
+  const policies = query.data?.policies ?? [];
+  const latest = runs.data?.[0]?.policy_version;
+  const policy = policies.find((p) => p.version === chosen) ?? policies.find((p) => p.version === latest) ?? policies[0];
+  const invalid = query.data?.invalid ?? [];
+  return <>
+    <ErrorText error={query.error} />
+    {policy && <>
+      {policies.length > 1
+        ? <label className="row small" htmlFor={selectId}><span className="muted">{t("threshold.strategy")}</span>
+          <select id={selectId} className="select" value={policy.version} onChange={(event) => setChosen(event.target.value)}>{policies.map((p) => <option key={p.version} value={p.version}>{p.version}</option>)}</select></label>
+        : <span className="small muted">{policy.version}</span>}
+      <dl className="kv th-list">{policy.thresholds.map((row) => {
+        const value = f.value(row.value, row.unit);
+        const changed = row.value !== row.standard;
+        const notes = [
+          changed && row.deal ? t("thresholds.setDeal") : changed && row.workspace ? t("thresholds.setWorkspace") : null,
+          row.looser && t("threshold.looser"), row.stressRemoved && t("threshold.removed"), row.lenderCited && t("thresholds.cited"),
+        ].filter(Boolean).join(" · ");
+        return <Fragment key={row.path}><dt>{row.label[lang]}</dt>
+          <dd className="num">{row.looserDirection === "lower" ? t("thresholds.atLeast", { value }) : row.looserDirection === "higher" ? t("thresholds.atMost", { value }) : value}</dd>
+          {notes && <dd className="small muted th-note">{notes}</dd>}</Fragment>;
+      })}</dl>
+    </>}
+    {invalid.length > 0 && <p className="hint">{t("threshold.invalid")}</p>}
+    {/* The owner clears these in the editor; anyone else still sees which values they are. */}
+    {invalid.length > 0 && role !== "owner" && <ul className="small">{invalid.map((v) => <li key={`${v.layer}-${v.version}-${v.path}`}>{v.version} · {v.path} = {v.value} ({t(v.layer === "deal" ? "threshold.layerDeal" : "threshold.layerWorkspace")}) · {v.error[lang]}</li>)}</ul>}
+    {policy && children?.(policy.version, invalid.length > 0)}
+  </>;
 }
 
 export function StandardVerdict({ custom, standard }: { custom: boolean; standard?: RunResult["standard"] }) {

@@ -6,3 +6,7 @@
 .rep-secret{flex:1 1 320px;width:auto;font-family:var(--mono);font-size:13px}
 /* Each report's name, with its state on the line below, the same in every card however narrow. */
 .rep-head{display:flex;flex-direction:column;align-items:flex-start;gap:8px}
+.rep-page-head{margin-bottom:0}
+/* The other language sits under the main actions, quieter. */
+.rep-other{margin-top:0}
+.rep-pick{max-width:520px}

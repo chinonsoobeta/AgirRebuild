@@ -23,6 +23,8 @@ import * as authStrings from "./strings/auth";
 import * as landingStrings from "./strings/landing";
 import * as agirreviewStrings from "./strings/agirreview";
 import * as thresholdsStrings from "./strings/thresholds";
+import * as termsStrings from "./strings/terms";
+import { termsStore, useTerms, type TermsPref } from "./terms";
 import { FR_VERIFY, FR_ABSENT, FR_FIELDS, FR_METRICS, STRESS, GATES, plainTerm, numberFormat, verdictText as sharedVerdictText, checkText as sharedCheckText, type VerdictLike, type CheckLike, CURRENCY_NAMES, FIELDS, FIELD_BY_KEY, METRIC_BY_KEY, placeLabel, type Currency, type ReadinessItem } from "@agir/contracts";
 
 export type Lang = "en" | "fr";
@@ -604,6 +606,7 @@ export const EN = {
   ...landingStrings.en,
   ...agirreviewStrings.en,
   ...thresholdsStrings.en,
+  ...termsStrings.en,
 } satisfies Record<string, Entry>;
 
 export type Key = keyof typeof EN;
@@ -1188,6 +1191,7 @@ export const FR: Record<Key, Entry> = {
   ...landingStrings.fr,
   ...agirreviewStrings.fr,
   ...thresholdsStrings.fr,
+  ...termsStrings.fr,
 };
 
 // ---- Catalog labels in French ------------------------------------------------------------
@@ -1475,6 +1479,17 @@ const FR_REASONS: [RegExp, string | ((m: RegExpMatchArray) => string)][] = [
   [/^A reviewer is added by requesting Agir review$/, "Un réviseur est ajouté en demandant une révision Agir"],
   [/^This person is an Agir reviewer; their access is changed by requesting Agir review$/, "Cette personne fait partie de la révision Agir ; son accès se modifie en demandant une révision Agir"],
   [/^Review access lasts between 1 and 90 days$/, "L'accès de révision dure de 1 à 90 jours"],
+  [/^Ownership is not granted by invitation$/, "La propriété d'un espace ne se donne pas par invitation"],
+  [/^A client is added to a deal, not to the workspace$/, "Un client s'ajoute à un projet, pas à l'espace"],
+  [/^No user with that email has an account$/, "Aucun compte n'existe avec ce courriel"],
+  [/^The owner's role cannot be changed$/, "Le rôle du propriétaire ne peut pas être changé"],
+  [/^This person is not a member of the workspace$/, "Cette personne n'est pas membre de l'espace"],
+  [/^The owner cannot be removed from the workspace$/, "Le propriétaire ne peut pas être retiré de l'espace"],
+  [/^This person is an Agir reviewer; end their review access instead$/, "Cette personne fait partie de la révision Agir\u00a0; mettez plutôt fin à son accès de révision"],
+  [/^This person is a client; remove them from the deal instead$/, "Cette personne est un client\u00a0; retirez-la plutôt du projet"],
+  [/^A workspace name is between 1 and 120 characters$/, "Le nom d'un espace compte de 1 à 120 caractères"],
+  [/^This person has no review access to end$/, "Cette personne n'a pas d'accès de révision en cours"],
+  [/^A name is between 1 and 120 characters$/, "Un nom compte de 1 à 120 caractères"],
   [/^This person is already a member of the workspace; a reviewer must be someone outside it$/, "Cette personne est déjà membre de l'espace ; un réviseur doit venir de l'extérieur de l'espace"],
   [/^Sign in to continue\.$/, "Connectez-vous pour continuer."],
   [/^That email and password do not match\.$/, "Ce courriel et ce mot de passe ne correspondent pas."],
@@ -1590,9 +1605,13 @@ function initialLang(): Lang {
   return typeof navigator !== "undefined" && navigator.language.toLowerCase().startsWith("fr") ? "fr" : "en";
 }
 
-export function build(lang: Lang, setLang: (l: Lang) => void) {
+/** `terms`: plain words first (the default) or finance terms first; it is read from the device when not given. */
+export function build(lang: Lang, setLang: (l: Lang) => void, terms: TermsPref = termsStore.getSnapshot()) {
   const dict = lang === "fr" ? FR : EN;
   const idx = lang === "fr" ? 1 : 0;
+  /** The plain-words name of a metric or gate, when plain words come first and one exists. */
+  const plainName = (kind: "metric" | "gate", key: string): string | undefined =>
+    terms === "plain" ? ((dict as Record<string, Entry>)[`terms.${kind}.${key}`] as string | undefined) : undefined;
   const t = <K extends Key>(key: K, p: Record<string, any> = {}): any => {
     const e = dict[key] as Entry;
     return typeof e === "function" ? e(p) : e;
@@ -1617,10 +1636,10 @@ export function build(lang: Lang, setLang: (l: Lang) => void) {
       return translateMessage(i.label) !== i.label || i.fieldKey === "input" ? sentence(i.label) : L.field(i.fieldKey, i.itemKey);
     },
     group: (g: string) => GROUPS[g]?.[idx] ?? g,
-    metric: (key: string) => plainTerm(lang, (lang === "fr" ? FR_METRICS[key]?.[0] : METRIC_BY_KEY.get(key)?.label) ?? key),
+    metric: (key: string) => plainName("metric", key) ?? plainTerm(lang, (lang === "fr" ? FR_METRICS[key]?.[0] : METRIC_BY_KEY.get(key)?.label) ?? key),
     formula: (key: string) => (lang === "fr" ? FR_METRICS[key]?.[1] : METRIC_BY_KEY.get(key)?.formula) ?? "",
     stress: (key: string, en: string) => plainTerm(lang, STRESS[key]?.[idx] ?? en),
-    gate: (key: string, en: string) => plainTerm(lang, GATES[key]?.[idx] ?? en),
+    gate: (key: string, en: string) => plainName("gate", key) ?? plainTerm(lang, GATES[key]?.[idx] ?? en),
     driver: (key: string) => DRIVERS_L[key]?.[idx] ?? key,
     /** One breakeven row as text: the sentence for a value, the reason for any other state. Every figure is the engine's. */
     breakeven: (r: BreakevenText, gate: { key: string; label: string; threshold: number; unit: string }) => {
@@ -1669,7 +1688,7 @@ export function build(lang: Lang, setLang: (l: Lang) => void) {
   };
   const msg = (text: string | null | undefined) => plainTerm(lang, lang === "fr" ? translateMessage(text) : text ?? "");
   const err = (e: unknown) => msg(e instanceof Error ? e.message : String(e ?? ""));
-  return { lang, setLang, t, f, L, msg, err };
+  return { lang, setLang, terms, t, f, L, msg, err };
 }
 
 export type I18n = ReturnType<typeof build>;
@@ -1686,7 +1705,8 @@ export function I18nProvider({ children }: { children: ReactNode }) {
     }
     document.documentElement.lang = l === "fr" ? "fr-CA" : "en";
   };
-  const value = useMemo(() => build(lang, setLang), [lang]);
+  const { terms } = useTerms();
+  const value = useMemo(() => build(lang, setLang, terms), [lang, terms]);
   if (typeof document !== "undefined") document.documentElement.lang = lang === "fr" ? "fr-CA" : "en";
   return <Ctx.Provider value={value}>{children}</Ctx.Provider>;
 }

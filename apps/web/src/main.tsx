@@ -73,6 +73,17 @@ const compare = createRoute({
     return <Compare key={dealId} dealId={dealId} a={a} b={b} onPick={(next) => void navigate({ search: next, replace: true })} />;
   },
 });
+// A run in the address (card X3): `run` opens that run first; picking another from the history still works on the page.
+const runStep = createRoute({
+  getParentRoute: () => deal,
+  path: "run",
+  validateSearch: (s: Record<string, unknown>): { run?: string } => (typeof s.run === "string" ? { run: s.run } : {}),
+  component: function RunStep() {
+    const { dealId } = deal.useParams();
+    const { run } = runStep.useSearch();
+    return <Run key={`${dealId}:${run ?? ""}`} dealId={dealId} run={run} />;
+  },
+});
 const dealIndex = createRoute({ getParentRoute: () => deal, path: "/", component: function DealIndex() { const { dealId } = deal.useParams(); return <Navigate to="/deals/$dealId/documents" params={{ dealId }} />; } });
 
 const routeTree = root.addChildren([
@@ -89,7 +100,7 @@ const routeTree = root.addChildren([
     newDeal,
     settings,
     reviewAccess,
-    deal.addChildren([dealIndex, step("documents", Documents), step("review", Review), step("run", Run), step("decision", DecisionStep), step("reports", Reports), step("audit", Audit), step("explore", Explore), compare]),
+    deal.addChildren([dealIndex, step("documents", Documents), step("review", Review), runStep, step("decision", DecisionStep), step("reports", Reports), step("audit", Audit), step("explore", Explore), compare]),
   ]),
 ]);
 const router = createRouter({ routeTree, defaultPreload: "intent" });

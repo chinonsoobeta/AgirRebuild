@@ -2,7 +2,7 @@ import { Link } from "@tanstack/react-router";
 import { useQuery } from "@tanstack/react-query";
 import { useState } from "react";
 import { api, type DealOverview } from "../api";
-import { canEdit, useSession } from "../components/ui";
+import { canDecide, canEdit, dealFacts, useSession } from "../components/ui";
 import { Tag } from "../components/kit";
 import { dealStatus, useI18n } from "../i18n";
 
@@ -21,6 +21,15 @@ const FILTERS = [
 
 /** The short state a deal's tag shows; the sentence beside it says the rest. */
 const tagKey = (d: DealOverview) => (d.step === "review" ? "blocked" : stale(d) ? "stale" : d.step === "decision" ? "decide" : d.step === "reports" ? "decided" : "progress");
+
+/** Whether this role can take the next step dealStatus names, in its order; anyone else is offered to open the deal. */
+function canTake(role: string, d: DealOverview): boolean {
+  // Upload, retry, resolve, enter, review or run.
+  if (d.documents.processing > 0 || d.review.status === "blocked" || !d.run || !d.run.fresh) return canEdit(role);
+  if (!d.decision) return canDecide(role);
+  // Anyone but a client can share a report by link; making the reports is an editor's.
+  return d.reports > 0 ? role !== "client" : canEdit(role);
+}
 
 const Arrow = () => (
   <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round" aria-hidden="true"><path d="M5 12h14M13 6l6 6-6 6" /></svg>
@@ -82,7 +91,9 @@ export function Deals() {
               <div>
                 <Link to={`/deals/$dealId/${d.step}`} params={{ dealId: d.deal.id }} className="deal-name sm">{d.deal.name}</Link>
                 <p className="small muted deal-meta">
-                  {[L.place(d.deal.location, d.deal.province), L.asset(d.deal.asset_type), d.documents.total ? t("deals.docs", { n: d.documents.total }) : ""].filter(Boolean).join(" · ")}
+                  {/* The board drops the asset type once the units and the exit say what the deal is. */}
+                  {[L.place(d.deal.location, d.deal.province), d.units != null && d.exit != null ? "" : L.asset(d.deal.asset_type), dealFacts(i, d.units, d.exit),
+                    d.documents.total ? t("deals.docs", { n: d.documents.total }) : ""].filter(Boolean).join(" · ")}
                 </p>
               </div>
               <div className="where">
@@ -95,7 +106,7 @@ export function Deals() {
               {waiting ? (
                 <span className="muted deal-next">{st.next}</span>
               ) : (
-                <Link to={`/deals/$dealId/${d.step}`} params={{ dealId: d.deal.id }} className="btn quiet">{st.next} <Arrow /></Link>
+                <Link to={`/deals/$dealId/${d.step}`} params={{ dealId: d.deal.id }} className="btn quiet">{canTake(role, d) ? st.next : t("deals.open")} <Arrow /></Link>
               )}
             </article>
           );
@@ -135,6 +146,7 @@ function FirstVisit({ name, editor }: { name: string; editor: boolean }) {
           <span className="go">{t("deals.way.qsGo")} <Arrow /></span>
         </Link>
       </div>
+      <p className="small muted empty-lead"><Link to="/legal" hash="privacy">{t("deals.privacy")}</Link></p>
     </div>
   );
 }

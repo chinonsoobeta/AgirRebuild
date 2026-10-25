@@ -47,7 +47,27 @@ function frLead(p: Counts): string {
   return sentences(present.map(([n, what], i) => `${w(n)}${i === 0 ? pl(n, " projet", " projets") : ""} ${pl(n, "est", "sont")} ${what(n)}`), " et ");
 }
 
+type Facts = { n: string; one: boolean; known: boolean; exit: "sale" | "refinance_hold" | "for_sale" | null };
+
+/** The units and how the deal ends, as the deal heading says them; "" when neither is known. */
+function enFacts({ n, one, known, exit }: Facts): string {
+  const units = (kind: string) => `${n} ${kind}${one ? "unit" : "units"}`;
+  if (!known) return exit === "refinance_hold" ? "kept and refinanced" : exit === "sale" ? "sold at the end of the hold" : exit === "for_sale" ? "for sale" : "";
+  return exit === "refinance_hold" ? `${units("rental ")}, kept and refinanced` : exit === "sale" ? `${units("rental ")}, sold at the end of the hold`
+    : exit === "for_sale" ? `${units("")} for sale` : units("");
+}
+
+function frFacts({ n, one, known, exit }: Facts): string {
+  const pl = (single: string, many: string) => (one ? single : many);
+  if (!known) return exit === "refinance_hold" ? "conservé et refinancé" : exit === "sale" ? "vendu à la fin de la détention" : exit === "for_sale" ? "à vendre" : "";
+  const rental = `${n} ${pl("logement locatif", "logements locatifs")}`;
+  return exit === "refinance_hold" ? `${rental}, ${pl("conservé et refinancé", "conservés et refinancés")}` : exit === "sale" ? `${rental}, ${pl("vendu", "vendus")} à la fin de la détention`
+    : exit === "for_sale" ? `${n} ${pl("logement", "logements")} à vendre` : `${n} ${pl("logement", "logements")}`;
+}
+
 export const en = {
+  "deals.facts": (p) => enFacts(p as Facts),
+  "deals.amountsIn": (p) => `amounts in ${p.c}`,
   "deals.lead": (p) => enLead(p as Counts),
   "deals.f.stale": "Out of date",
   "deals.tag.blocked": "Blocked",
@@ -55,6 +75,7 @@ export const en = {
   "deals.tag.progress": "In progress",
   "deals.tag.decided": "Decided",
   "deals.tag.stale": "Out of date",
+  "deals.open": "Open the deal",
   "deals.decidedOn": (p) => `Decided on ${p.date} against run ${p.n}.`,
   "deals.changedAfter": (p) => `An input, a threshold or the engine changed after run ${p.n}.`,
   "deals.atStep": (p) => `At step ${p.n} of 5, ${p.step}`,
@@ -66,9 +87,12 @@ export const en = {
   "deals.way.qsBody": "A few plain questions for a small rental or a for-sale project, each answer recorded with where it came from. You name the deal first, and the questions wait on its Documents step.",
   "deals.way.qsGo": "Quick start",
   "deals.emptyViewer": "There are no deals you can see yet.",
+  "deals.privacy": "How your data is handled",
 } satisfies Record<string, Entry>;
 
 export const fr: FrenchOf<typeof en> = {
+  "deals.facts": (p) => frFacts(p as Facts),
+  "deals.amountsIn": (p) => `montants en ${p.c}`,
   "deals.lead": (p) => frLead(p as Counts),
   "deals.f.stale": "Périmés",
   "deals.tag.blocked": "Bloqué",
@@ -76,6 +100,7 @@ export const fr: FrenchOf<typeof en> = {
   "deals.tag.progress": "En cours",
   "deals.tag.decided": "Décidé",
   "deals.tag.stale": "Périmé",
+  "deals.open": "Ouvrir le projet",
   "deals.decidedOn": (p) => `Décidé le ${p.date}, d'après l'analyse ${p.n}.`,
   "deals.changedAfter": (p) => `Une donnée, un seuil ou le moteur a changé depuis l'analyse ${p.n}.`,
   "deals.atStep": (p) => `Étape ${p.n} sur 5, ${p.step}`,
@@ -87,4 +112,5 @@ export const fr: FrenchOf<typeof en> = {
   "deals.way.qsBody": "Quelques questions simples pour un petit immeuble locatif ou un projet à vendre, chaque réponse étant consignée avec sa provenance. Vous nommez d'abord le projet, puis les questions vous attendent à son étape Documents.",
   "deals.way.qsGo": "Démarrage rapide",
   "deals.emptyViewer": "Il n'y a encore aucun projet que vous pouvez voir.",
+  "deals.privacy": "Comment vos données sont traitées",
 };

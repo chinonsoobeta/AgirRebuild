@@ -53,7 +53,7 @@ const base: DealOverview = {
   copiedFrom: null, step: "documents", status: { tone: "neutral", text: "" }, next: "",
   documents: { total: 0, processing: 0, failed: 0 }, updating: false,
   review: { approved: 0, needsReview: 0, conflicting: 0, awaitingSecond: 0, missing: 0, impossible: 0, status: "blocked" },
-  run: null, decision: null, reports: 0,
+  run: null, decision: null, reports: 0, units: null, exit: null,
 };
 const nothingYet = base;
 const reviewBlocked: DealOverview = { ...base, step: "review", documents: { total: 3, processing: 0, failed: 0 }, review: { ...base.review, approved: 5, conflicting: 2, missing: 1 } };
@@ -182,6 +182,17 @@ describe("the deal frame", () => {
     expect(out).toContain('aria-labelledby="copy-deal-title"');
   });
 
+  it("says the place, the units and how the deal ends, and the currency in words, as the boards do", () => {
+    const o: DealOverview = { ...decided, units: 6, exit: "refinance_hold", deal: { ...decided.deal, location: "Edmonton", province: "AB" } };
+    expect(render(createElement(DealFrame, { o, active: "run" }))).toContain('<p class="meta">Edmonton, Alberta · 6 rental units, kept and refinanced · amounts in Canadian dollars</p>');
+  });
+
+  it("keeps the asset type while the units or the exit are not known", () => {
+    expect(render(createElement(DealFrame, { o: decided, active: "run" }))).toContain('<p class="meta">Halifax, Nova Scotia · multifamily · amounts in Canadian dollars</p>');
+    const unitsOnly: DealOverview = { ...decided, units: 6 };
+    expect(render(createElement(DealFrame, { o: unitsOnly, active: "run" }))).toContain('<p class="meta">Halifax, Nova Scotia · multifamily · 6 units · amounts in Canadian dollars</p>');
+  });
+
   it("hides Explore changes without a run", () => {
     const out = render(createElement(DealFrame, { o: reviewBlocked, active: "review" }));
     expect(out).not.toContain("Explore changes");
@@ -199,6 +210,8 @@ describe("the deal frame", () => {
     const out = render(createElement(DealFrame, { o: decided, active: "run" }));
     expect(out).toContain("Tous les projets");
     expect(out).toContain("Explorer des changements");
+    const o: DealOverview = { ...decided, units: 6, exit: "refinance_hold" };
+    expect(render(createElement(DealFrame, { o, active: "run" }))).toContain("6 logements locatifs, conservés et refinancés · montants en dollars canadiens</p>");
   });
 });
 

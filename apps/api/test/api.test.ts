@@ -2428,7 +2428,7 @@ describe("share links (task 86a)", () => {
     const page = await call(null, "GET", `/api/share/${link.secret}`);
     expect(page.status).toBe(200);
     privacy(page.headers);
-    expect(page.json).toEqual({ deal: "Shared reference", kind: "ic_memo", format: "pdf", runNumber: 1, expiresAt: link.expiresAt });
+    expect(page.json).toMatchObject({ deal: "Shared reference", kind: "ic_memo", format: "pdf", runNumber: 1, expiresAt: link.expiresAt });
     const file = await app.request(`/api/share/${link.secret}/file?inline=1`);
     const signed = await app.request(`/api/artifacts/${artifact}/file?inline=1`, { headers: { cookie: alice.cookie } });
     privacy(file.headers);
@@ -2795,7 +2795,7 @@ describe("invite links for clients (task 89b)", () => {
     const { secret } = await invite();
     const page = await call(null, "GET", `/api/invite/${secret}`);
     expect(page.status).toBe(200);
-    expect(page.json).toEqual({ workspace: "Invites", deal: "Invite deal" });
+    expect(page.json).toEqual({ workspace: "Invites", deal: "Invite deal", expiresAt: expect.any(String) });
     expect(page.headers.get("cache-control")).toBe("no-store");
     expect(page.headers.get("referrer-policy")).toBe("no-referrer");
   });

@@ -38,3 +38,7 @@
 .info-inline{width:26px;height:26px;vertical-align:middle}
 .proposal-pick{display:flex;align-items:center;gap:8px}
 .proposal-pick>.select{flex:1 1 auto;min-width:0}
+/* The thresholds in force: the name takes the room and wraps, the bound stays whole on the right, and any note runs under both. */
+.th-list{grid-template-columns:minmax(0,1fr) auto;gap:6px 16px}
+.th-list dd.num{text-align:right;white-space:nowrap}
+.th-list .th-note{grid-column:1/-1;margin-top:-4px}

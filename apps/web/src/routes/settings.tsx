@@ -1,4 +1,4 @@
-import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
+import { useMutation, useQueries, useQuery, useQueryClient } from "@tanstack/react-query";
 import { Fragment, useState, type FormEvent, type ReactNode } from "react";
 import { Link } from "@tanstack/react-router";
 import { api, type ClientInvite, type DealClient, type DealOverview } from "../api";
@@ -6,7 +6,8 @@ import { ErrorText, useSession } from "../components/ui";
 import { Thresholds } from "../components/thresholds";
 import { useI18n } from "../i18n";
 import { useTheme, type ThemePref } from "../theme";
-import { Notice, Seg, Switch, Tag } from "../components/kit";
+import { TermsSeg } from "../components/terms-seg";
+import { Figure, Figures, Notice, Seg, Switch, Tag } from "../components/kit";
 
 /** A deal's clients and its invitation links (card 89). Admins and owners only; an invitation link is shown once. */
 export function ClientsPanel({ dealId }: { dealId: string }) {
@@ -118,16 +119,32 @@ type DealCounts = { deal_id?: string; name?: string; docs_pdf: number; docs_xlsx
   figures_read: number; figures_confirmed_from_suggestion: number; figures_typed: number; actions_until_runnable: number; minutes_upload_to_run?: number | null };
 export function CountsPanel({ workspaceId }: { workspaceId: string }) {
   const { t } = useI18n();
-  const q = useQuery({ queryKey: ["deal-metrics", workspaceId], queryFn: () => api.get<{ deals: DealCounts[]; totals: DealCounts & { deals: number } }>(`/workspaces/${workspaceId}/deal-metrics`) });
+  // The plain totals (card X2) only count and add up records: deals, runs, report files, documents.
+  const list = useQuery({ queryKey: ["deals", workspaceId], queryFn: () => api.get<DealOverview[]>(`/workspaces/${workspaceId}/deals`) });
+  const sum = (n: (d: DealOverview) => number) => (list.data ?? []).reduce((total, d) => total + n(d), 0);
+  const q = useQuery({ queryKey: ["deal-metrics", workspaceId], queryFn: () => api.get<{ deals: DealCounts[]; totals: DealCounts & { deals: number; archived_deals?: number } }>(`/workspaces/${workspaceId}/deal-metrics`) });
   const cells = (r: DealCounts) => [
     [r.docs_pdf, r.docs_xlsx, r.docs_csv, r.docs_docx, r.docs_txt].join(" / "), r.docs_no_candidates, r.figures_read,
     r.figures_confirmed_from_suggestion, r.figures_typed, r.actions_until_runnable,
   ];
   const deals = q.data?.deals ?? [];
+  const archived = q.data?.totals.archived_deals ?? 0;
   return (
     <section className="card card-pad section" id="counts">
       <h2 className="h2">{t("counts.title")}</h2>
       <p className="muted">{t("counts.body")}</p>
+      {list.data && (
+        <Figures>
+          {/* The list leaves archived deals out; the counts say how many there are (card Z1). */}
+          <Figure k={t("settings.ct.deals")} v={list.data.length} s={archived > 0 ? t("settings.ct.archived", { n: archived }) : undefined} />
+          <Figure k={t("settings.ct.runs")} v={sum((d) => d.run?.number ?? 0)} />
+          <Figure k={t("settings.ct.reports")} v={sum((d) => d.reports)} />
+          <Figure k={t("settings.ct.docs")} v={sum((d) => d.documents.total)} s={q.data ? t("settings.ct.typing", { n: q.data.totals.docs_no_candidates }) : undefined} />
+        </Figures>
+      )}
+      <ErrorText error={list.error} />
+      <details className="set-each">
+        <summary>{t("settings.ct.each")}</summary>
       {q.data && deals.length === 0 ? <p className="small muted">{t("counts.none")}</p> : deals.length > 0 && (
         <div className="scroll">
           <table className="table counts">
@@ -142,34 +159,114 @@ export function CountsPanel({ workspaceId }: { workspaceId: string }) {
           </table>
         </div>
       )}
+      </details>
       <ErrorText error={q.error} />
     </section>
   );
 }
 
-/** Choose a deal, then manage its clients. */
+const day = (iso: string, lang: string) => new Date(iso).toLocaleDateString(lang === "fr" ? "fr-CA" : "en-CA", { year: "numeric", month: "long", day: "numeric" });
+/** A short day, as the board's "18 Oct"; the year only when it is not this year. */
+const shortDay = (iso: string, lang: string) => {
+  const d = new Date(iso);
+  return d.toLocaleDateString(lang === "fr" ? "fr-CA" : "en-CA", { month: "short", day: "numeric", ...(d.getFullYear() !== new Date().getFullYear() ? { year: "numeric" } : {}) });
+};
+
+/** Every deal's clients and open invitations in one table, and the form that invites a client to a deal (card X2). */
 function Clients() {
-  const { t } = useI18n();
+  const { t, lang } = useI18n();
   const { workspaceId } = useSession();
+  const qc = useQueryClient();
   const deals = useQuery({ queryKey: ["deals", workspaceId], queryFn: () => api.get<DealOverview[]>(`/workspaces/${workspaceId}/deals`) });
-  const [dealId, setDealId] = useState<string | null>(null);
   const list = deals.data ?? [];
+  const clients = useQueries({ queries: list.map((d) => ({ queryKey: ["deal-clients", d.deal.id], queryFn: () => api.get<DealClient[]>(`/deals/${d.deal.id}/clients`) })) });
+  const invites = useQueries({ queries: list.map((d) => ({ queryKey: ["invites", d.deal.id], queryFn: () => api.get<ClientInvite[]>(`/deals/${d.deal.id}/invites`) })) });
+  const [dealId, setDealId] = useState<string | null>(null);
+  const [made, setMade] = useState<string | null>(null);
   const chosen = list.find((d) => d.deal.id === dealId)?.deal.id ?? list[0]?.deal.id;
+  const refresh = (id: string) => Promise.all([qc.invalidateQueries({ queryKey: ["deal-clients", id] }), qc.invalidateQueries({ queryKey: ["invites", id] })]);
+  const add = useMutation({ mutationFn: (b: { dealId: string; email: string }) => api.post(`/deals/${b.dealId}/clients`, { email: b.email }), onSuccess: (_r, b) => refresh(b.dealId) });
+  const remove = useMutation({ mutationFn: (b: { dealId: string; id: string }) => api.del(`/deals/${b.dealId}/clients/${b.id}`, {}), onSuccess: (_r, b) => refresh(b.dealId) });
+  const withdraw = useMutation({ mutationFn: (b: { dealId: string; id: string }) => api.post(`/invites/${b.id}/revoke`), onSuccess: (_r, b) => refresh(b.dealId) });
+  const invite = useMutation({
+    mutationFn: (id: string) => api.post<{ id: string; url: string }>(`/deals/${id}/invites`),
+    onSuccess: (r, id) => { setMade(window.location.origin + r.url); return refresh(id); },
+  });
+  const now = new Date();
+  // Used, revoked and expired invitations stay out: only a link that can still be used is listed.
+  const rows = list.flatMap((d, i) => [
+    ...(clients[i]?.data ?? []).map((c) => (
+      <tr key={`c-${d.deal.id}-${c.id}`}>
+        <td>{d.deal.name}</td>
+        <td>{c.name}<span className="sub">{c.email}</span></td>
+        {/* The server counts only confirmations that still stand. */}
+        <td>{c.confirmed > 0 ? t("settings.cl.confirmed", { n: c.confirmed, date: c.last_confirmed_at ? shortDay(c.last_confirmed_at, lang) : "" })
+          : t("settings.cl.nothingYet", { date: day(c.assigned_at, lang) })}{" "}
+          <button className="btn ghost sm" type="button" aria-label={t("settings.cl.removeOf", { name: c.name, deal: d.deal.name })} onClick={() => window.confirm(t("clients.removeConfirm")) && remove.mutate({ dealId: d.deal.id, id: c.id })}>{t("clients.remove")}</button></td>
+      </tr>
+    )),
+    ...(invites[i]?.data ?? []).filter((v) => !v.used_at && !v.revoked_at && new Date(v.expires_at) > now).map((v) => (
+      <tr key={`i-${v.id}`}>
+        <td>{d.deal.name}</td>
+        <td className="muted">{t("clients.link")}</td>
+        <td>{t("settings.cl.invited", { date: day(v.created_at, lang), expires: day(v.expires_at, lang) })}{" "}
+          <button className="btn ghost sm" type="button" aria-label={t("settings.cl.withdrawOf", { deal: d.deal.name })} onClick={() => window.confirm(t("settings.cl.withdrawConfirm")) && withdraw.mutate({ dealId: d.deal.id, id: v.id })}>{t("settings.cl.withdraw")}</button></td>
+      </tr>
+    )),
+  ]);
+  const waiting = [...clients, ...invites].some((q) => !q.data && !q.error);
+  const failed = [...clients, ...invites].find((q) => q.error)?.error ?? null;
+  if (!deals.data) return deals.error ? <ErrorText error={deals.error} /> : <p className="muted">{t("common.loading")}</p>;
+  if (list.length === 0) return <p className="muted">{t("clients.noDeals")}</p>;
   return (
     <>
-      {!deals.data ? <p className="muted">{t("common.loading")}</p> : list.length === 0 ? <p className="muted">{t("clients.noDeals")}</p> : (
-        <>
-          <div className="field" style={{ maxWidth: 360 }}><label htmlFor="c-deal">{t("clients.deal")}</label>
-            <select className="select" id="c-deal" value={chosen} onChange={(e) => setDealId(e.target.value)}>{list.map((d) => <option key={d.deal.id} value={d.deal.id}>{d.deal.name}</option>)}</select>
+      {rows.length > 0 ? (
+        <div className="scroll">
+          <table className="table">
+            <thead><tr><th scope="col">{t("clients.deal")}</th><th scope="col">{t("settings.cl.client")}</th><th scope="col">{t("settings.cl.status")}</th></tr></thead>
+            <tbody>{rows}</tbody>
+          </table>
+        </div>
+      ) : <p className="small muted">{waiting ? t("common.loading") : t("settings.cl.none")}</p>}
+      <ErrorText error={failed ?? remove.error ?? withdraw.error} />
+      <form
+        className="stack tight set-sub"
+        aria-labelledby="c-invite-h"
+        onSubmit={(e: FormEvent<HTMLFormElement>) => {
+          e.preventDefault();
+          const email = (e.currentTarget.elements.namedItem("email") as HTMLInputElement).value;
+          e.currentTarget.reset();
+          return chosen && add.mutate({ dealId: chosen, email });
+        }}
+      >
+        <div><h3 className="h3" id="c-invite-h">{t("settings.cl.inviteTitle")}</h3><p className="hint">{t("settings.cl.inviteBody")}</p></div>
+        <div className="field" style={{ maxWidth: 360 }}><label htmlFor="c-deal">{t("clients.deal")}</label>
+          <select className="select" id="c-deal" value={chosen} onChange={(e) => { setDealId(e.target.value); setMade(null); }}>{list.map((d) => <option key={d.deal.id} value={d.deal.id}>{d.deal.name}</option>)}</select>
+        </div>
+        <div className="row" style={{ alignItems: "flex-end" }}>
+          <div className="field" style={{ flex: "1 1 260px" }}><label htmlFor="c-email">{t("clients.add")}</label><input className="input" id="c-email" name="email" type="email" required /></div>
+          <button className="btn primary" type="submit">{t("settings.addBtn")}</button>
+        </div>
+        <ErrorText error={add.error} />
+        <div><button className="btn quiet" type="button" disabled={invite.isPending} onClick={() => { setMade(null); return chosen && invite.mutate(chosen); }}>{t("clients.invite")}</button></div>
+        {made && (
+          <div className="stack" style={{ gap: 6 }}>
+            <div className="row">
+              <input className="input" aria-label={t("clients.link")} readOnly value={made} style={{ flex: 1 }} />
+              <button className="btn quiet sm" type="button" onClick={() => navigator.clipboard.writeText(made)}>{t("share.copy")}</button>
+            </div>
+            <span className="small muted">{t("share.once")}</span>
           </div>
-          {chosen && <ClientsPanel key={chosen} dealId={chosen} />}
-        </>
-      )}
+        )}
+        <ErrorText error={invite.error} />
+      </form>
     </>
   );
 }
 
 const ROLE_ORDER = ["viewer", "reviewer", "analyst", "admin", "owner", "client"] as const;
+/** The roles the members route can set; owner, reviewer and client rows are never changed here. */
+const CHANGEABLE = ["admin", "analyst", "viewer"];
 const cap = (s: string) => s.charAt(0).toUpperCase() + s.slice(1);
 
 function Section({ id, title, body, children }: { id: string; title: ReactNode; body?: ReactNode; children?: ReactNode }) {
@@ -219,17 +316,56 @@ export function Settings() {
   const add = useMutation({ mutationFn: (b: { email: string; role: string }) => api.post(`/workspaces/${workspaceId}/members`, b), onSuccess: () => qc.invalidateQueries({ queryKey: ["members"] }) });
   const mode = useMutation({ mutationFn: (m: "team" | "solo") => api.post(`/workspaces/${workspaceId}/review-mode`, { mode: m }), onSuccess: () => qc.invalidateQueries({ queryKey: ["me"] }) });
   const suggest = useMutation({ mutationFn: (on: boolean) => api.post(`/workspaces/${workspaceId}/label-suggestions`, { on }), onSuccess: () => qc.invalidateQueries({ queryKey: ["me"] }) });
-  const create = useMutation({ mutationFn: (b: { name: string; reviewMode: string }) => api.post(`/workspaces`, b), onSuccess: () => qc.invalidateQueries({ queryKey: ["me"] }) });
+  const setRole = useMutation({ mutationFn: (b: { email: string; role: string }) => api.post(`/workspaces/${workspaceId}/members`, b), onSuccess: () => qc.invalidateQueries({ queryKey: ["members"] }) });
+  // The new workspace becomes the current one once the session knows it.
+  const create = useMutation({
+    mutationFn: (b: { name: string; reviewMode: string }) => api.post<{ id: string }>(`/workspaces`, b),
+    onSuccess: async (r) => { await qc.invalidateQueries({ queryKey: ["me"] }); setWorkspace(r.id); },
+  });
+  // Card Z1: the workspace name, removing someone, your own name and the browsers you are signed in on.
+  // Which name was just saved, so its form can say so until it is edited again.
+  const [saved, setSaved] = useState<"ws" | "me" | null>(null);
+  const rename = useMutation({ mutationFn: (name: string) => api.post(`/workspaces/${workspaceId}/name`, { name }), onSuccess: () => { setSaved("ws"); return qc.invalidateQueries({ queryKey: ["me"] }); } });
+  const removeMember = useMutation({ mutationFn: (id: string) => api.del(`/workspaces/${workspaceId}/members/${id}`, {}), onSuccess: () => qc.invalidateQueries({ queryKey: ["members"] }) });
+  const myName = useMutation({ mutationFn: (name: string) => api.post(`/me/name`, { name }), onSuccess: () => { setSaved("me"); return qc.invalidateQueries({ queryKey: ["me"] }); } });
+  const sessions = useQuery({ queryKey: ["sessions"], queryFn: () => api.get<{ count: number }>(`/me/sessions`) });
+  const [ended, setEnded] = useState<number | null>(null);
+  const endOthers = useMutation({
+    mutationFn: () => api.post<{ ended: number }>(`/me/sessions/end-others`),
+    onSuccess: (r: { ended: number }) => { setEnded(r.ended); return qc.invalidateQueries({ queryKey: ["sessions"] }); },
+  });
+  const count = typeof sessions.data?.count === "number" ? sessions.data.count : null;
+  const nameField = (which: "ws" | "me", id: string, label: string, value: string | undefined, save: (name: string) => unknown, pending: boolean) => (
+    <form
+      className="row"
+      style={{ alignItems: "flex-end" }}
+      aria-label={label}
+      onSubmit={(e: FormEvent<HTMLFormElement>) => {
+        e.preventDefault();
+        return save((e.currentTarget.elements.namedItem("name") as HTMLInputElement).value);
+      }}
+    >
+      <div className="field" style={{ flex: "1 1 260px", maxWidth: 360 }}><label htmlFor={id}>{label}</label>
+        <input className="input" id={id} name="name" required maxLength={120} key={value} defaultValue={value} onChange={() => saved === which && setSaved(null)} /></div>
+      <button className="btn quiet" type="submit" disabled={pending}>{t("common.save")}</button>
+      {/* 42 px: the height of the field and the button, so the note sits on their middle in this bottom-aligned row. */}
+      {saved === which && <span className="small muted" role="status" style={{ lineHeight: "42px" }}>{t("settings.saved")}</span>}
+    </form>
+  );
   const ws = me.workspaces.find((w) => w.id === workspaceId);
   const others = me.workspaces.filter((w) => w.id !== workspaceId);
   const owner = role === "owner";
   const staffAdmin = role === "owner" || role === "admin";
+  // A client sees only its own deals, not the workspace: not its people, nor two settings only the owner reads and changes.
+  const member = role !== "client";
 
   const sections: { id: string; nav: string; show: boolean; node: ReactNode }[] = [
     { id: "workspace", nav: t("settings.nav.workspace"), show: true, node: (
       <Section id="workspace" title={t("settings.nav.workspace")} body={t("settings.ws.body")}>
+        {owner && nameField("ws", "ws-name", t("settings.ws.name"), ws?.name, (name) => rename.mutate(name), rename.isPending)}
+        <ErrorText error={rename.error} />
         <div>
-          <Row title={t("settings.ws.name")} body={ws?.name} />
+          {!owner && <Row title={t("settings.ws.name")} body={ws?.name} />}
           <Row title={t("settings.ws.role")} body={t(`settings.you.${role}`)} />
           <Row title={t("settings.ws.others")} body={others.length === 0 ? t("settings.ws.noOthers") : undefined} />
           {others.length > 0 && (
@@ -247,8 +383,8 @@ export function Settings() {
           onSubmit={(e: FormEvent<HTMLFormElement>) => {
             e.preventDefault();
             const fd = new FormData(e.currentTarget);
-            create.mutate({ name: String(fd.get("name")), reviewMode: String(fd.get("reviewMode")) });
             e.currentTarget.reset();
+            return create.mutate({ name: String(fd.get("name")), reviewMode: String(fd.get("reviewMode")) });
           }}
         >
           <div><h3 className="h3" id="ws-new-h">{t("settings.newWs")}</h3><p className="hint">{t("settings.ws.newBody")}</p></div>
@@ -273,10 +409,13 @@ export function Settings() {
             <Seg<"en" | "fr"> label={t("settings.language")} value={lang} onChange={setLang}
               options={[{ value: "en", label: t("settings.lang.en") }, { value: "fr", label: t("settings.lang.fr") }]} />
           </Row>
+          <Row title={t("terms.title")} body={t("terms.body")}>
+            <TermsSeg />
+          </Row>
         </div>
       </Section>
     ) },
-    { id: "review", nav: t("settings.nav.review"), show: true, node: (
+    { id: "review", nav: t("settings.nav.review"), show: member, node: (
       <Section id="review" title={t("settings.nav.review")} body={t("settings.rv.body")}>
         <div className="choices" role="radiogroup" aria-labelledby="review-h">
           {(["team", "solo"] as const).map((m) => (
@@ -300,7 +439,7 @@ export function Settings() {
         <Thresholds scope="workspaces" id={workspaceId} summary={t("thresholds.show")} />
       </Section>
     ) },
-    { id: "people", nav: t("settings.nav.people"), show: true, node: (
+    { id: "people", nav: t("settings.nav.people"), show: member, node: (
       <Section id="people" title={t("settings.nav.people")} body={t("settings.pp.body")}>
         <div className="scroll">
           <table className="table">
@@ -309,11 +448,22 @@ export function Settings() {
               <tr key={m.id}>
                 <td>{m.name}{m.id === me.user.id && <span className="sub">{t("settings.pp.you")}</span>}</td>
                 <td>{m.email}</td>
-                <td>{cap(L.role(m.role))}{m.expires_at && <span className="sub">{new Date(m.expires_at) > new Date() ? t("settings.expires", { date: f.date(m.expires_at) }) : t("settings.expired")}</span>}</td>
+                <td>{staffAdmin && m.id !== me.user.id && CHANGEABLE.includes(m.role) ? (
+                  <div className="row" style={{ gap: 8 }}>
+                    <select className="select" aria-label={t("settings.pp.roleOf", { name: m.name })} value={m.role}
+                      onChange={(e) => e.target.value !== m.role && window.confirm(t("settings.pp.roleConfirm", { name: m.name, role: L.role(e.target.value) })) && setRole.mutate({ email: m.email, role: e.target.value })}>
+                      {CHANGEABLE.map((r) => <option key={r} value={r}>{cap(L.role(r))}</option>)}
+                    </select>
+                    <button className="btn ghost sm" type="button" aria-label={t("settings.pp.removeOf", { name: m.name })}
+                      onClick={() => window.confirm(t("settings.pp.removeConfirm", { name: m.name })) && removeMember.mutate(m.id)}>{t("clients.remove")}</button>
+                  </div>
+                ) : cap(L.role(m.role))}{m.expires_at && <span className="sub">{new Date(m.expires_at) > new Date() ? t("settings.expires", { date: f.date(m.expires_at) }) : t("settings.expired")}</span>}</td>
               </tr>
             ))}</tbody>
           </table>
         </div>
+        <ErrorText error={setRole.error ?? removeMember.error} />
+        {staffAdmin && <p className="hint">{t("settings.pp.rolesHint")}</p>}
         {staffAdmin && (
           <form
             className="stack tight"
@@ -351,7 +501,7 @@ export function Settings() {
     { id: "clients", nav: t("settings.nav.clients"), show: staffAdmin, node: (
       <Section id="clients" title={t("clients.title")} body={t("clients.body")}><Clients /></Section>
     ) },
-    { id: "reading", nav: t("settings.nav.reading"), show: true, node: (
+    { id: "reading", nav: t("settings.nav.reading"), show: member, node: (
       <Section id="reading" title={t("settings.nav.reading")} body={t("settings.rd.body")}>
         <div>
           <Row title={t("settings.suggestOn")} body={t("settings.suggestNotice")}>
@@ -366,11 +516,24 @@ export function Settings() {
     { id: "counts", nav: t("settings.nav.counts"), show: owner, node: <CountsPanel workspaceId={workspaceId} /> },
     { id: "account", nav: t("settings.nav.account"), show: true, node: (
       <Section id="account" title={t("settings.nav.account")} body={t("settings.ac.body")}>
-        <dl className="grid2 set-dl">
-          <div><dt className="label">{t("settings.ac.name")}</dt><dd>{me.user.name}</dd></div>
+        {nameField("me", "ac-name", t("settings.ac.name"), me.user.name, (name) => myName.mutate(name), myName.isPending)}
+        <ErrorText error={myName.error} />
+        <dl className="set-dl">
           <div><dt className="label">{t("settings.ac.email")}</dt><dd>{me.user.email}{me.user.email_verified && <> <Tag tone="pass">{t("auth.verify.confirmed")}</Tag></>}</dd></div>
         </dl>
         {me.user.email_verified === false && <ConfirmEmail />}
+        {/* The server keeps no device names, so the count is said instead (card Z1). */}
+        <div>
+          <Row title={t("settings.ac.devices")}
+            body={count === null ? (sessions.error ? undefined : t("common.loading")) : count > 1 ? t("settings.ac.devicesN", { n: count }) : t("settings.ac.devicesOne")}>
+            {count !== null && count > 1 && (
+              <button className="btn quiet sm" type="button" disabled={endOthers.isPending}
+                onClick={() => { setEnded(null); return window.confirm(t("settings.ac.signOutConfirm")) && endOthers.mutate(undefined); }}>{t("settings.ac.signOutOthers")}</button>
+            )}
+          </Row>
+        </div>
+        {ended !== null && <p className="small" role="status">{t("settings.ac.ended", { n: ended })}</p>}
+        <ErrorText error={sessions.error ?? endOthers.error} />
       </Section>
     ) },
   ];

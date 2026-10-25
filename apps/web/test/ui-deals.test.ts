@@ -39,7 +39,7 @@ function deal(id: string, name: string, over: Partial<DealOverview>): DealOvervi
   return {
     deal: { id, workspace_id: "w1", name, asset_type: "Multifamily", location: "Halifax", currency: "CAD", country: "CA", province: "NS", created_at: "2026-10-01T00:00:00Z" },
     copiedFrom: null, step: "documents", status: { tone: "neutral", text: "" }, next: "", documents: { total: 3, processing: 0, failed: 0 }, updating: false,
-    review, run: null, decision: null, reports: 0, ...over,
+    review, run: null, decision: null, reports: 0, units: null, exit: null, ...over,
   };
 }
 const MIXED = [
@@ -79,6 +79,31 @@ describe("the deals list", () => {
     expect(text(rows[3]!)).toContain("Reading 3 documents");
     expect(text(rows[4]!)).toContain("Decided");
     expect(rows[4]).toMatch(/<a href="\/deals\/d5\/reports" class="btn quiet">[^]*Share the reports/);
+  });
+
+  it("offers to open the deal to someone who cannot take its next step", () => {
+    state.deals = MIXED;
+    const rows = () => renderToStaticMarkup(createElement(Deals)).split('<article class="deal"').slice(1);
+    state.role = "viewer";
+    let r = rows();
+    expect(r[0]).toMatch(/<a href="\/deals\/d1\/review" class="btn quiet">[^]*Open the deal/);
+    expect(r[0]).not.toContain("Resolve 2 conflicts");
+    expect(r[1]).toMatch(/class="btn quiet">[^]*Open the deal/);
+    expect(r[2]).toMatch(/class="btn quiet">[^]*Open the deal/);
+    // A viewer can share a report by link; a client cannot.
+    expect(r[4]).toMatch(/class="btn quiet">[^]*Share the reports/);
+    state.role = "client";
+    expect(rows()[4]).toMatch(/class="btn quiet">[^]*Open the deal/);
+    // An analyst works the deal but does not record the decision.
+    state.role = "analyst";
+    state.solo = false;
+    r = rows();
+    expect(r[0]).toMatch(/class="btn quiet">[^]*Resolve 2 conflicts/);
+    expect(r[1]).toMatch(/class="btn quiet">[^]*Open the deal/);
+    expect(r[1]).not.toContain("Record the decision");
+    state.role = "viewer";
+    state.lang = "fr";
+    expect(text(rows()[0]!)).toContain("Ouvrir le projet");
   });
 
   it("labels the filter chips with their counts", () => {

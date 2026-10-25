@@ -22,6 +22,9 @@ vi.mock("@tanstack/react-query", () => ({
     if (key === "run") return { data: state.byId[id] };
     return {};
   },
+  // Card Z2: the audit trail loads its events as pages; one page of fewer than 500 has reached the start.
+  useInfiniteQuery: () => ({ data: { pages: [state.events] }, hasNextPage: false, isFetchingNextPage: false, fetchNextPage: async () => {} }),
+  useQueries: (options: { queries: unknown[] }) => options.queries.map(() => ({})),
   useMutation: () => ({ mutate: () => {}, isPending: false, reset: () => {}, error: null }),
   useQueryClient: () => ({ invalidateQueries: async () => {} }),
 }));
@@ -177,6 +180,14 @@ describe("comparing two runs", () => {
     expect(d.still.map((m) => m.key)).toEqual(["total_development_cost"]);
     expect(d.gates).toEqual({ from: { passed: 1, total: 1 }, to: { passed: 1, total: 1 } });
     expect(d.checks).toEqual({ from: { fired: 0, total: 1 }, to: { fired: 0, total: 1 } });
+  });
+
+  it("keeps a figure apart from the other run only by floating-point noise under did not move", () => {
+    const noisy = runView("r2", 2, 8000, 114_220);
+    noisy.result.scenarios[0]!.metrics[1] = metric("total_development_cost", 1_667_571.00000001);
+    const d = diffRuns(noisy, one);
+    expect(d.moved.map((m) => m.key)).toEqual(["stabilized_noi"]);
+    expect(d.still.map((m) => m.key)).toEqual(["total_development_cost"]);
   });
 
   it("says what changed in one sentence, or that nothing did", () => {

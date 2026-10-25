@@ -19,8 +19,16 @@ export const en = {
   "audit.cat.reports": "Decisions and reports",
   "audit.cat.sharing": "Sharing",
   "audit.seq": (p) => `Event ${p.n}`,
-  "audit.shown": (p) => p.filtered ? `Showing the latest ${p.n} of ${p.m} matching events loaded.` : `Showing the latest ${p.n} of ${p.m} events loaded.`,
-  "audit.capped": (p) => `Only the latest ${p.n} events of this deal are loaded here.`,
+  // Under the list: how much of what is loaded it shows, and whether older events are still on the server (more).
+  "audit.shown": (p) => {
+    const what = p.filtered ? "matching events" : "events";
+    if (p.n < p.m) return `Showing the latest ${p.n} of ${p.m} ${what} loaded.`;
+    if (p.n === 0) return "";
+    const one = p.filtered ? "matching event" : "event";
+    if (p.more) return p.n === 1 ? `Showing the only ${one} loaded so far.` : `Showing the ${p.n} ${what} loaded so far.`;
+    return p.n === 1 ? `Showing the only ${one}.` : `Showing all ${p.n} ${what}.`;
+  },
+  "audit.capped": "Older events load when you ask for them.",
   "audit.older": "Show older events",
   "audit.package": "Download the audit package",
   "audit.noMatch": "No loaded event matches. Try another word or Everything.",
@@ -45,8 +53,15 @@ export const fr: FrenchOf<typeof en> = {
   "audit.cat.reports": "Décisions et rapports",
   "audit.cat.sharing": "Partage",
   "audit.seq": (p) => `Événement ${p.n}`,
-  "audit.shown": (p) => p.filtered ? `Affichage des ${p.n} plus récents des ${p.m} événements correspondants chargés.` : `Affichage des ${p.n} plus récents des ${p.m} événements chargés.`,
-  "audit.capped": (p) => `Seuls les ${p.n} événements les plus récents de ce projet sont chargés ici.`,
+  "audit.shown": (p) => {
+    const what = p.filtered ? "événements correspondants" : "événements";
+    if (p.n < p.m) return `Affichage des ${p.n} plus récents des ${p.m} ${what} chargés.`;
+    if (p.n === 0) return "";
+    const one = p.filtered ? "seul événement correspondant" : "seul événement";
+    if (p.more) return p.n === 1 ? `Affichage du ${one} chargé jusqu'ici.` : `Affichage des ${p.n} ${what} chargés jusqu'ici.`;
+    return p.n === 1 ? `Affichage du ${one}.` : `Affichage des ${p.n} ${what}.`;
+  },
+  "audit.capped": "Les événements plus anciens se chargent à votre demande.",
   "audit.older": "Afficher des événements plus anciens",
   "audit.package": "Télécharger le dossier d'audit",
   "audit.noMatch": "Aucun événement chargé ne correspond. Essayez un autre mot ou « Tout ».",

@@ -49,6 +49,21 @@ export async function endSession(db: Db, token: string | undefined) {
   if (token) await db.query(`delete from sessions where token_hash = $1`, [tokenHash(token)]);
 }
 
+/** The person's sessions that have not expired. */
+export async function countSessions(db: Db, userId: string): Promise<number> {
+  const [r] = await db.query<{ n: number }>(`select count(*)::int as n from sessions where user_id = $1 and expires_at > now()`, [userId]);
+  return r?.n ?? 0;
+}
+
+/** Ends every other session of the person, keeping the one with this token. Answers how many live ones ended. */
+export async function endOtherSessions(db: Db, userId: string, token: string): Promise<number> {
+  const rows = await db.query<{ live: boolean }>(`delete from sessions where user_id = $1 and token_hash <> $2 returning expires_at > now() as live`, [
+    userId,
+    tokenHash(token),
+  ]);
+  return rows.filter((r) => r.live).length;
+}
+
 /** A small fixed-window limiter for the sign-in endpoints. */
 export function rateLimiter(limit: number, windowMs: number) {
   const hits = new Map<string, { n: number; until: number }>();
