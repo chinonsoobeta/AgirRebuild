@@ -23,7 +23,9 @@ export type RunDiff = {
 
 const inputKey = (x: Input) => `${x.fieldKey}|${x.itemKey ?? ""}`;
 const sourceKey = (x: Input) => `${x.source}|${JSON.stringify(x.tableSource ?? null)}`;
-const sameMetric = (a: Metric | null, b: Metric | null) => Boolean(a && b && a.status === b.status && a.value === b.value);
+// Equal, or apart only by the engine's floating-point noise (31,000,000 against 31,000,000.00000001): such a figure did not move.
+const near = (x: number | null, y: number | null) => x === y || (x !== null && y !== null && Math.abs(x - y) <= 1e-9 * Math.max(1, Math.abs(x), Math.abs(y)));
+const sameMetric = (a: Metric | null, b: Metric | null) => Boolean(a && b && a.status === b.status && near(a.value, b.value));
 const gatesOf = (r: RunView): Count => ({ passed: r.result.verdict.gates.filter((g) => g.status === "passed").length, total: r.result.verdict.gates.length });
 const checksOf = (r: RunView): Fired => ({ fired: r.result.checks.filter((c) => c.severity !== "pass").length, total: r.result.checks.length });
 
