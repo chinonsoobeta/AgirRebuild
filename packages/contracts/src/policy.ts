@@ -197,7 +197,7 @@ export function stressLabel(preset: StressPreset, lang: "en" | "fr" = "en", stan
       const suffix = unit === "%" ? (lang === "fr" ? " %" : "%") : ` ${lang === "fr" ? (unit === "bps" ? "pb" : unit === "months" ? "mois" : unit) : unit}`;
       return `${idx ? fr : en} ${signed(value)}${suffix}`;
     });
-    return `${lang === "fr" ? "Combiné : " : "Combined: "}${pieces.join(", ")}`;
+    return `${lang === "fr" ? "Combiné\u00a0: " : "Combined: "}${pieces.join(", ")}`;
   }
   const template = STRESS[preset.key]?.[idx] ?? preset.label;
   return sizes.length ? template.replace(/[+-]\d+(?:[.,]\d+)?/, signed(sizes[0]![1])) : template;
