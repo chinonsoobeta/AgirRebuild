@@ -82,6 +82,7 @@ export const en = {
   "run.kv.startedBy": "Started by",
   "run.previousStays": (p) => `Run ${p.n} stays available, as it is, until this one finishes.`,
   "run.stopped": (p) => `Run ${p.n} was stopped. Nothing was recorded.`,
+  "run.reused": (p) => `Nothing has changed since run ${p.n}, so it stands. No new run was recorded.`,
 } satisfies Record<string, Entry>;
 
 export const fr: FrenchOf<typeof en> = {
@@ -168,4 +169,5 @@ export const fr: FrenchOf<typeof en> = {
   "run.kv.startedBy": "Lancée par",
   "run.previousStays": (p) => `L'analyse ${p.n} reste disponible, telle quelle, jusqu'à la fin de celle-ci.`,
   "run.stopped": (p) => `L'analyse ${p.n} a été arrêtée. Rien n'a été enregistré.`,
+  "run.reused": (p) => `Rien n'a changé depuis l'analyse ${p.n}, qui reste donc valable. Aucune nouvelle analyse n'a été enregistrée.`,
 };

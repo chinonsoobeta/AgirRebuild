@@ -206,6 +206,18 @@ export function RunStopped({ n }: { n: number }) {
   const { t } = useI18n();
   return <Notice tone="review" role="status">{t("run.stopped", { n })}</Notice>;
 }
+
+/** With nothing changed since the latest run, the server gives that run back instead of recording a new one
+ * (migration 0005). Its number when that happened, else null. */
+export function reusedRun(latest: { id: string; number: number } | null | undefined, doneId: string): number | null {
+  return latest && latest.id === doneId ? latest.number : null;
+}
+
+/** After a run that gave the latest run back: say so, rather than show it as if it were new. */
+export function RunReused({ n }: { n: number }) {
+  const { t } = useI18n();
+  return <Notice role="status">{t("run.reused", { n })}</Notice>;
+}
 /** Operating years shown before "Show all". */
 const FIRST_YEARS = 5;
 
@@ -230,16 +242,18 @@ export function Run({ dealId, run: fromAddress }: { dealId: string; run?: string
   const [progress, setProgress] = useState<RunProgress>({ stages: {} });
   const [stopping, setStopping] = useState(false);
   const [stopped, setStopped] = useState<number | null>(null);
+  const [reused, setReused] = useState<number | null>(null);
   const start = useMutation({
     mutationFn: (_n: number) => {
       token.current = runToken();
-      setProgress({ stages: {} }); setStopping(false); setStopped(null);
+      setProgress({ stages: {} }); setStopping(false); setStopped(null); setReused(null);
       return api.stream<RunLine>(`/deals/${dealId}/runs?progress=1`, { "x-run-token": token.current }, (line) => {
         if ("stage" in line) setProgress((p) => ({ stages: { ...p.stages, [line.stage]: line.at }, facts: line.facts ?? p.facts }));
       });
     },
     onSuccess: async (last, n) => {
       if (!("done" in last)) { setStopped(n); return; }
+      setReused(reusedRun(deal.data?.run, last.done.id));
       setSelected(last.done.id);
       await Promise.all([qc.invalidateQueries({ queryKey: ["deal", dealId] }), qc.invalidateQueries({ queryKey: ["runs", dealId] }), qc.invalidateQueries({ queryKey: ["run"] })]);
     },
@@ -274,7 +288,7 @@ export function Run({ dealId, run: fromAddress }: { dealId: string; run?: string
       </>
     );
   }
-  const stoppedNotice = stopped !== null && <RunStopped n={stopped} />;
+  const stoppedNotice = stopped !== null ? <RunStopped n={stopped} /> : reused !== null && <RunReused n={reused} />;
 
   if (!runId) {
     return (
