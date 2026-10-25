@@ -10,6 +10,7 @@ import * as engine from "../src/index.ts";
 const sourceHashes = {
   "fireweed-fourplex": "5f11ce3d5c3ef8498b80d4c0ffffcba26a12954bb6faa9511f0771167a4770df",
   "harbour-lane": "4852272c1a784f8998f8891284f6ca19f9e331c22500066ee2b677595b53a63b",
+  "tamarack-six": "b727e1e7741ee18e24e0c5c18a9f21fdb147b73272b1a14e8cebfe7537a043a0",
 } as const;
 type Inputs = {
   land_cost: number;
@@ -35,8 +36,8 @@ type Inputs = {
   refinance_ltv_pct: number;
   refinance_rate_pct: number;
   refinance_amort_years: number;
-  cost_curve?: string; lease_up_ramp?: number; leaseup_income_credited?: number;
-  other_income_annual?: number; refinance_insurance_premium_pct?: number; refinance_mli_select_points?: number;
+  cost_curve?: string; cost_spread?: string; lease_up_ramp?: number; leaseup_income_credited?: number;
+  other_income_annual?: number; refinance_insurance_premium_pct?: number | string; refinance_mli_select_points?: number;
 } & Partial<Record<`units_${"1bed" | "2bed" | "3bed"}` | `rent_${"1bed" | "2bed" | "3bed"}_monthly`, number>>;
 type Oracle = {
   inputs: Inputs; policy: string; verdict: string;
@@ -51,13 +52,13 @@ const toInput = (d: Inputs): EngineInput => ({
   revenue: (["1bed", "2bed", "3bed"] as const).filter((b) => d[`units_${b}`]).map((b) => ({ key: b, label: b, basis: "per_unit", units: d[`units_${b}`]!, rentMonthly: d[`rent_${b}_monthly`]! })),
   otherIncomeAnnual: d.other_income_annual ?? 0, constructionMonths: d.construction_months, leaseUpMonths: d.lease_up_months, holdYears: d.hold_years,
   stabilizedOccupancyPct: d.stabilized_occupancy_pct, expenseRatioPct: d.expense_ratio_pct, propertyTaxAnnual: d.property_tax_annual, rentGrowthPct: d.rent_growth_pct, expenseGrowthPct: d.expense_growth_pct,
-  leaseUpRamp: !!(d.lease_up_ramp ?? d.leaseup_income_credited), sCurveDraws: d.cost_curve ? d.cost_curve !== "straight-line" : true, exitCapPct: d.exit_cap_rate_pct, sellingCostsPct: 0,
+  leaseUpRamp: !!(d.lease_up_ramp ?? d.leaseup_income_credited), sCurveDraws: (d.cost_curve ?? d.cost_spread ?? "s-curve") !== "straight-line", exitCapPct: d.exit_cap_rate_pct, sellingCostsPct: 0,
   senior: { amount: d.senior_loan_amount, ratePct: d.senior_rate_pct, ioMonths: d.senior_io_months },
-  refinance: { month: d.refinance_month, ltvPct: d.refinance_ltv_pct, ratePct: d.refinance_rate_pct, amortYears: d.refinance_amort_years, ioMonths: 0, ...(d.refinance_insurance_premium_pct ? { insurancePremiumPct: d.refinance_insurance_premium_pct, mliSelectPoints: d.refinance_mli_select_points } : {}) },
+  refinance: { month: d.refinance_month, ltvPct: d.refinance_ltv_pct, ratePct: d.refinance_rate_pct, amortYears: d.refinance_amort_years, ioMonths: 0, ...(typeof d.refinance_insurance_premium_pct === "number" ? { insurancePremiumPct: d.refinance_insurance_premium_pct, mliSelectPoints: d.refinance_mli_select_points } : {}) },
   exit: "refinance_hold", stated: {},
 });
 
-test.each(["fireweed-fourplex", "harbour-lane"] as const)("matches every signed rental workbook result: %s", (slug) => {
+test.each(["fireweed-fourplex", "harbour-lane", "tamarack-six"] as const)("matches every signed rental workbook result: %s", (slug) => {
   const bytes = readFileSync(new URL(`../../../oracles/rental-hold/${slug}.outcome.json`, import.meta.url));
   expect(createHash("sha256").update(bytes).digest("hex")).toBe(sourceHashes[slug]);
   const oracle = JSON.parse(bytes.toString("utf8")) as Oracle;

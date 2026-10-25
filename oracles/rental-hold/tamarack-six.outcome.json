@@ -1,0 +1,900 @@
+{
+  "slug": "tamarack-six",
+  "policy": "rental-hold-draft",
+  "builtBy": "Claude Opus 5.5 (claude-opus-5-5)",
+  "builtOn": "2026-10-24",
+  "inputs": {
+    "unit_count": 6,
+    "units_2bed": 4,
+    "rent_2bed_monthly": 2200,
+    "units_3bed": 2,
+    "rent_3bed_monthly": 2600,
+    "land_cost": 312000,
+    "hard_cost": 1100000,
+    "soft_cost": 140000,
+    "contingency": 55000,
+    "development_charges": 18000,
+    "cost_spread": "straight-line",
+    "construction_months": 10,
+    "lease_up_months": 2,
+    "lease_up_ramp": 0,
+    "stabilized_occupancy_pct": 97,
+    "expense_ratio_pct": 25,
+    "property_tax_annual": 8000,
+    "other_income_annual": 0,
+    "rent_growth_pct": 2.5,
+    "expense_growth_pct": 2.5,
+    "senior_loan_amount": 1100000,
+    "senior_rate_pct": 6.8,
+    "senior_io_months": 12,
+    "refinance_month": 12,
+    "refinance_ltv_pct": 65,
+    "refinance_rate_pct": 4.8,
+    "refinance_amort_years": 30,
+    "refinance_and_hold": 1,
+    "hold_years": 10,
+    "exit_cap_rate_pct": 5.5,
+    "ab_transfer_fee_base": 50,
+    "ab_transfer_fee_per_step": 5,
+    "ab_transfer_fee_step_value": 5000,
+    "gst_rate_pct": 5,
+    "pbrh_federal_rebate_pct": 100,
+    "provincial_part_pct": 0,
+    "pbrh_min_units_private_kitchen": 4,
+    "pbrh_min_long_term_rental_pct": 90,
+    "pbrh_start_after_year": 2023,
+    "pbrh_start_before_year": 2031,
+    "units_with_private_kitchens": 6,
+    "long_term_rental_pct": 100,
+    "construction_start_year": 2027,
+    "gate_development_spread_bps": 100,
+    "gate_dcr_after_refinance_x": 1.2,
+    "gate_sizing_dscr_combined_x": 1.2,
+    "gate_unrealized_equity_multiple_combined_x": 1,
+    "warning_sizing_dscr_base_x": 1.2,
+    "ltc_ceiling_pct": 85,
+    "convergence_tolerance": 0.005,
+    "stress_exit_cap_add_pts": 0.75,
+    "stress_cost_factor": 1.1,
+    "stress_rate_add_pts": 1.5,
+    "stress_rent_factor": 0.9,
+    "stress_occupancy_sub_pts": 5,
+    "stress_expense_add_pts": 5,
+    "irr_grid_start_monthly": -0.05,
+    "irr_grid_step_monthly": 0.0025,
+    "irr_guess_monthly": 0.01,
+    "land_transfer_tax": 365,
+    "gst_hst_net": 0,
+    "refinance_insurance_premium_pct": "not stated",
+    "scenario_flags": {
+      "base": {
+        "exit": 0,
+        "cost": 0,
+        "rate": 0,
+        "rent": 0,
+        "occ": 0,
+        "exp": 0
+      },
+      "exit_cap": {
+        "exit": 1,
+        "cost": 0,
+        "rate": 0,
+        "rent": 0,
+        "occ": 0,
+        "exp": 0
+      },
+      "cost": {
+        "exit": 0,
+        "cost": 1,
+        "rate": 0,
+        "rent": 0,
+        "occ": 0,
+        "exp": 0
+      },
+      "rate": {
+        "exit": 0,
+        "cost": 0,
+        "rate": 1,
+        "rent": 0,
+        "occ": 0,
+        "exp": 0
+      },
+      "rent": {
+        "exit": 0,
+        "cost": 0,
+        "rate": 0,
+        "rent": 1,
+        "occ": 0,
+        "exp": 0
+      },
+      "occupancy": {
+        "exit": 0,
+        "cost": 0,
+        "rate": 0,
+        "rent": 0,
+        "occ": 1,
+        "exp": 0
+      },
+      "expense": {
+        "exit": 0,
+        "cost": 0,
+        "rate": 0,
+        "rent": 0,
+        "occ": 0,
+        "exp": 1
+      },
+      "combined": {
+        "exit": 1,
+        "cost": 1,
+        "rate": 1,
+        "rent": 1,
+        "occ": 1,
+        "exp": 1
+      }
+    }
+  },
+  "tableArithmetic": {
+    "land_transfer_tax": {
+      "row": "A3.2 (rules/tables.md, AB row: transfer of land $50 + $5 per $5,000 of value, each started $5,000 a full step)",
+      "value": 365,
+      "arithmetic": "Alberta has no land transfer tax. Fee = $50 + $5 x ROUNDUP(312,000 / 5,000) = 50 + 5 x 63 = $365.00"
+    },
+    "gst_hst_net": {
+      "row": "A4.2 (rules/tables.md section 3 and 3a, purpose-built rental housing rebate)",
+      "value": 0,
+      "arithmetic": "6 units >= 4, 100% >= 90%, start 2027 in (2023-09-13, 2031): qualifies. Net = FMV x (5% x (1 - 100%) + 0%) = FMV x 0 = $0.00"
+    },
+    "refinance_premium": {
+      "row": "1a (not used)",
+      "value": "not stated",
+      "arithmetic": "Conventional refinance; no premium is stated or computed."
+    }
+  },
+  "base": {
+    "total_development_cost": 1667570.97294152,
+    "capitalized_interest": 34082.6396081895,
+    "leaseup_operating_cost": 8123.33333333333,
+    "hard_and_soft_cost": 1625365,
+    "gross_potential_rent": 168000,
+    "effective_gross_income": 162960,
+    "operating_expenses": 48740,
+    "stabilized_noi": 114220,
+    "yield_on_cost": 6.84948358141068,
+    "development_spread": 134.948358141068,
+    "exit_value": "NOT_APPLICABLE",
+    "net_sale_proceeds": "NOT_APPLICABLE",
+    "development_profit": "NOT_APPLICABLE",
+    "profit_on_cost": "NOT_APPLICABLE",
+    "total_debt": 1100000,
+    "mezz_interest_accrued": "NOT_APPLICABLE",
+    "loan_to_cost": 65.9642088911903,
+    "required_equity": 567570.972941523,
+    "debt_yield": 10.3836363636364,
+    "sizing_dscr": 1.34395800922175,
+    "sizing_dscr_year1": 1.34395800922175,
+    "contractual_dscr": 1.34395800922175,
+    "senior_dscr_year1": 1.34395800922175,
+    "mezz_dscr_year1": "NOT_APPLICABLE",
+    "io_dscr_year1": 1.52700534759358,
+    "break_even_occupancy": 79.5998656740654,
+    "cash_on_cash_year1": 5.15040885830889,
+    "cumulative_cash_shortfall": 0,
+    "equity_multiple": "NOT_APPLICABLE",
+    "equity_irr": "NOT_APPLICABLE",
+    "peak_equity": 567570.972941524,
+    "refinance_net_proceeds": 249872.727272728,
+    "cost_per_unit": 277928.495490254,
+    "stabilization_month": 12,
+    "sale_month": "NOT_APPLICABLE",
+    "refinance_cash_returned": 249872.727272728,
+    "cash_left_in_deal": 317698.245668795,
+    "dcr_after_refinance": 1.34395800922175,
+    "cash_on_cash_after_refinance": 9.20125498522431,
+    "stated_value": 2593547.7895895,
+    "unrealized_equity_multiple": 3.84419906056503,
+    "unrealized_equity_irr": 19.2340436409413
+  },
+  "stresses": {
+    "exit_cap": {
+      "total_development_cost": 1667570.97294152,
+      "capitalized_interest": 34082.6396081895,
+      "leaseup_operating_cost": 8123.33333333333,
+      "hard_and_soft_cost": 1625365,
+      "gross_potential_rent": 168000,
+      "effective_gross_income": 162960,
+      "operating_expenses": 48740,
+      "stabilized_noi": 114220,
+      "yield_on_cost": 6.84948358141068,
+      "development_spread": 59.9483581410684,
+      "exit_value": "NOT_APPLICABLE",
+      "net_sale_proceeds": "NOT_APPLICABLE",
+      "development_profit": "NOT_APPLICABLE",
+      "profit_on_cost": "NOT_APPLICABLE",
+      "total_debt": 1100000,
+      "mezz_interest_accrued": "NOT_APPLICABLE",
+      "loan_to_cost": 65.9642088911903,
+      "required_equity": 567570.972941523,
+      "debt_yield": 10.3836363636364,
+      "sizing_dscr": 1.52722501047926,
+      "sizing_dscr_year1": 1.52722501047926,
+      "contractual_dscr": 1.52722501047926,
+      "senior_dscr_year1": 1.52722501047926,
+      "mezz_dscr_year1": "NOT_APPLICABLE",
+      "io_dscr_year1": 1.52700534759358,
+      "break_even_occupancy": 73.5293103646061,
+      "cash_on_cash_year1": 6.94728244876686,
+      "cumulative_cash_shortfall": 0,
+      "equity_multiple": "NOT_APPLICABLE",
+      "equity_irr": "NOT_APPLICABLE",
+      "peak_equity": 567570.972941524,
+      "refinance_net_proceeds": 87888.0000000007,
+      "cost_per_unit": 277928.495490254,
+      "stabilization_month": 12,
+      "sale_month": "NOT_APPLICABLE",
+      "refinance_cash_returned": 87888.0000000007,
+      "cash_left_in_deal": 479682.972941522,
+      "dcr_after_refinance": 1.52722501047926,
+      "cash_on_cash_after_refinance": 8.22017057342344,
+      "stated_value": 2282322.05483876,
+      "unrealized_equity_multiple": 3.42087814439808,
+      "unrealized_equity_irr": 15.2875745318988
+    },
+    "cost": {
+      "total_development_cost": 1827963.68183983,
+      "capitalized_interest": 31938.8485065009,
+      "leaseup_operating_cost": 8123.33333333333,
+      "hard_and_soft_cost": 1787901.5,
+      "gross_potential_rent": 168000,
+      "effective_gross_income": 162960,
+      "operating_expenses": 48740,
+      "stabilized_noi": 114220,
+      "yield_on_cost": 6.24848300514583,
+      "development_spread": 74.8483005145828,
+      "exit_value": "NOT_APPLICABLE",
+      "net_sale_proceeds": "NOT_APPLICABLE",
+      "development_profit": "NOT_APPLICABLE",
+      "profit_on_cost": "NOT_APPLICABLE",
+      "total_debt": 1100000,
+      "mezz_interest_accrued": "NOT_APPLICABLE",
+      "loan_to_cost": 60.176250268433,
+      "required_equity": 727963.681839834,
+      "debt_yield": 10.3836363636364,
+      "sizing_dscr": 1.34395800922175,
+      "sizing_dscr_year1": 1.34395800922175,
+      "contractual_dscr": 1.34395800922175,
+      "senior_dscr_year1": 1.34395800922175,
+      "mezz_dscr_year1": "NOT_APPLICABLE",
+      "io_dscr_year1": 1.52700534759358,
+      "break_even_occupancy": 79.5998656740654,
+      "cash_on_cash_year1": 4.01561594304945,
+      "cumulative_cash_shortfall": 0,
+      "equity_multiple": "NOT_APPLICABLE",
+      "equity_irr": "NOT_APPLICABLE",
+      "peak_equity": 727963.681839834,
+      "refinance_net_proceeds": 249872.727272728,
+      "cost_per_unit": 304660.613639972,
+      "stabilization_month": 12,
+      "sale_month": "NOT_APPLICABLE",
+      "refinance_cash_returned": 249872.727272728,
+      "cash_left_in_deal": 478090.954567107,
+      "dcr_after_refinance": 1.34395800922175,
+      "cash_on_cash_after_refinance": 6.11436493167682,
+      "stated_value": 2593547.7895895,
+      "unrealized_equity_multiple": 2.99720419495575,
+      "unrealized_equity_irr": 14.7135727824839
+    },
+    "rate": {
+      "total_development_cost": 1674724.82313673,
+      "capitalized_interest": 41236.4898033971,
+      "leaseup_operating_cost": 8123.33333333333,
+      "hard_and_soft_cost": 1625365,
+      "gross_potential_rent": 168000,
+      "effective_gross_income": 162960,
+      "operating_expenses": 48740,
+      "stabilized_noi": 114220,
+      "yield_on_cost": 6.82022493618193,
+      "development_spread": 132.022493618193,
+      "exit_value": "NOT_APPLICABLE",
+      "net_sale_proceeds": "NOT_APPLICABLE",
+      "development_profit": "NOT_APPLICABLE",
+      "profit_on_cost": "NOT_APPLICABLE",
+      "total_debt": 1100000,
+      "mezz_interest_accrued": "NOT_APPLICABLE",
+      "loan_to_cost": 65.6824324093865,
+      "required_equity": 574724.82313673,
+      "debt_yield": 10.3836363636364,
+      "sizing_dscr": 1.13919095820042,
+      "sizing_dscr_year1": 1.13919095820042,
+      "contractual_dscr": 1.13919095820042,
+      "senior_dscr_year1": 1.13919095820042,
+      "mezz_dscr_year1": "NOT_APPLICABLE",
+      "io_dscr_year1": 1.25104052573932,
+      "break_even_occupancy": 88.6929395776092,
+      "cash_on_cash_year1": 2.42826844218217,
+      "cumulative_cash_shortfall": 0,
+      "equity_multiple": "NOT_APPLICABLE",
+      "equity_irr": "NOT_APPLICABLE",
+      "peak_equity": 574724.823136731,
+      "refinance_net_proceeds": 249872.727272728,
+      "cost_per_unit": 279120.803856122,
+      "stabilization_month": 12,
+      "sale_month": "NOT_APPLICABLE",
+      "refinance_cash_returned": 249872.727272728,
+      "cash_left_in_deal": 324852.095864003,
+      "dcr_after_refinance": 1.13919095820042,
+      "cash_on_cash_after_refinance": 4.29606632904688,
+      "stated_value": 2593547.7895895,
+      "unrealized_equity_multiple": 3.44836202983247,
+      "unrealized_equity_irr": 16.8022864356181
+    },
+    "rent": {
+      "total_development_cost": 1666927.45896941,
+      "capitalized_interest": 34118.1256360798,
+      "leaseup_operating_cost": 7444.33333333333,
+      "hard_and_soft_cost": 1625365,
+      "gross_potential_rent": 151200,
+      "effective_gross_income": 146664,
+      "operating_expenses": 44666,
+      "stabilized_noi": 101998,
+      "yield_on_cost": 6.1189225392604,
+      "development_spread": 61.8922539260396,
+      "exit_value": "NOT_APPLICABLE",
+      "net_sale_proceeds": "NOT_APPLICABLE",
+      "development_profit": "NOT_APPLICABLE",
+      "profit_on_cost": "NOT_APPLICABLE",
+      "total_debt": 1100000,
+      "mezz_interest_accrued": "NOT_APPLICABLE",
+      "loan_to_cost": 65.9896742405384,
+      "required_equity": 566927.458969413,
+      "debt_yield": 9.27254545454546,
+      "sizing_dscr": 1.34395800922175,
+      "sizing_dscr_year1": 1.34395800922175,
+      "contractual_dscr": 1.34395800922175,
+      "senior_dscr_year1": 1.34395800922175,
+      "mezz_dscr_year1": "NOT_APPLICABLE",
+      "io_dscr_year1": 1.36360962566845,
+      "break_even_occupancy": 79.7352779141941,
+      "cash_on_cash_year1": 4.60451498348521,
+      "cumulative_cash_shortfall": 0,
+      "equity_multiple": "NOT_APPLICABLE",
+      "equity_irr": "NOT_APPLICABLE",
+      "peak_equity": 566927.458969414,
+      "refinance_net_proceeds": 105430.90909091,
+      "cost_per_unit": 277821.243161569,
+      "stabilization_month": 12,
+      "sale_month": "NOT_APPLICABLE",
+      "refinance_cash_returned": 105430.90909091,
+      "cash_left_in_deal": 461496.549878503,
+      "dcr_after_refinance": 1.34395800922175,
+      "cash_on_cash_after_refinance": 5.65643660838005,
+      "stated_value": 2316027.73106767,
+      "unrealized_equity_multiple": 3.22913272985364,
+      "unrealized_equity_irr": 14.1575999222322
+    },
+    "occupancy": {
+      "total_development_cost": 1667239.26470848,
+      "capitalized_interest": 34100.9313751432,
+      "leaseup_operating_cost": 7773.33333333333,
+      "hard_and_soft_cost": 1625365,
+      "gross_potential_rent": 168000,
+      "effective_gross_income": 154560,
+      "operating_expenses": 46640,
+      "stabilized_noi": 107920,
+      "yield_on_cost": 6.47297615191844,
+      "development_spread": 97.2976151918439,
+      "exit_value": "NOT_APPLICABLE",
+      "net_sale_proceeds": "NOT_APPLICABLE",
+      "development_profit": "NOT_APPLICABLE",
+      "profit_on_cost": "NOT_APPLICABLE",
+      "total_debt": 1100000,
+      "mezz_interest_accrued": "NOT_APPLICABLE",
+      "loan_to_cost": 65.9773329050249,
+      "required_equity": 567239.264708476,
+      "debt_yield": 9.8109090909091,
+      "sizing_dscr": 1.34395800922175,
+      "sizing_dscr_year1": 1.34395800922175,
+      "contractual_dscr": 1.34395800922175,
+      "senior_dscr_year1": 1.34395800922175,
+      "mezz_dscr_year1": "NOT_APPLICABLE",
+      "io_dscr_year1": 1.4427807486631,
+      "break_even_occupancy": 75.5595999259774,
+      "cash_on_cash_year1": 4.86917493952976,
+      "cumulative_cash_shortfall": 0,
+      "equity_multiple": "NOT_APPLICABLE",
+      "equity_irr": "NOT_APPLICABLE",
+      "peak_equity": 567239.264708478,
+      "refinance_net_proceeds": 175418.181818183,
+      "cost_per_unit": 277873.210784746,
+      "stabilization_month": 12,
+      "sale_month": "NOT_APPLICABLE",
+      "refinance_cash_returned": 175418.181818183,
+      "cash_left_in_deal": 391821.082890293,
+      "dcr_after_refinance": 1.34395800922175,
+      "cash_on_cash_after_refinance": 7.04910310609583,
+      "stated_value": 2450496.21303186,
+      "unrealized_equity_multiple": 3.52732883638284,
+      "unrealized_equity_irr": 16.4990933623014
+    },
+    "expense": {
+      "total_development_cost": 1668858.00088574,
+      "capitalized_interest": 34011.667552409,
+      "leaseup_operating_cost": 9481.33333333333,
+      "hard_and_soft_cost": 1625365,
+      "gross_potential_rent": 168000,
+      "effective_gross_income": 162960,
+      "operating_expenses": 56888,
+      "stabilized_noi": 106072,
+      "yield_on_cost": 6.35596317623804,
+      "development_spread": 85.5963176238035,
+      "exit_value": "NOT_APPLICABLE",
+      "net_sale_proceeds": "NOT_APPLICABLE",
+      "development_profit": "NOT_APPLICABLE",
+      "profit_on_cost": "NOT_APPLICABLE",
+      "total_debt": 1100000,
+      "mezz_interest_accrued": "NOT_APPLICABLE",
+      "loan_to_cost": 65.9133371093393,
+      "required_equity": 568858.000885742,
+      "debt_yield": 9.6429090909091,
+      "sizing_dscr": 1.34395800922175,
+      "sizing_dscr_year1": 1.34395800922175,
+      "contractual_dscr": 1.34395800922175,
+      "senior_dscr_year1": 1.34395800922175,
+      "mezz_dscr_year1": "NOT_APPLICABLE",
+      "io_dscr_year1": 1.41807486631016,
+      "break_even_occupancy": 80.8411219732049,
+      "cash_on_cash_year1": 4.77217777419788,
+      "cumulative_cash_shortfall": 0,
+      "equity_multiple": "NOT_APPLICABLE",
+      "equity_irr": "NOT_APPLICABLE",
+      "peak_equity": 568858.000885743,
+      "refinance_net_proceeds": 153578.181818183,
+      "cost_per_unit": 278143.000147624,
+      "stabilization_month": 12,
+      "sale_month": "NOT_APPLICABLE",
+      "refinance_cash_returned": 153578.181818183,
+      "cash_left_in_deal": 415279.81906756,
+      "dcr_after_refinance": 1.34395800922175,
+      "cash_on_cash_after_refinance": 6.53701765377608,
+      "stated_value": 2408534.41724161,
+      "unrealized_equity_multiple": 3.42394986581851,
+      "unrealized_equity_irr": 15.6995787534806
+    },
+    "combined": {
+      "total_development_cost": 1834859.03293113,
+      "capitalized_interest": 38668.9995977919,
+      "leaseup_operating_cost": 8288.53333333333,
+      "hard_and_soft_cost": 1787901.5,
+      "gross_potential_rent": 151200,
+      "effective_gross_income": 139104,
+      "operating_expenses": 49731.2,
+      "stabilized_noi": 89372.8,
+      "yield_on_cost": 4.87082649925591,
+      "development_spread": -137.917350074409,
+      "exit_value": "NOT_APPLICABLE",
+      "net_sale_proceeds": "NOT_APPLICABLE",
+      "development_profit": "NOT_APPLICABLE",
+      "profit_on_cost": "NOT_APPLICABLE",
+      "total_debt": 1100000,
+      "mezz_interest_accrued": "NOT_APPLICABLE",
+      "loan_to_cost": 59.9501095319997,
+      "required_equity": 734859.032931126,
+      "debt_yield": 8.12480000000002,
+      "sizing_dscr": 1.29453517977321,
+      "sizing_dscr_year1": 1.29453517977321,
+      "contractual_dscr": 1.29453517977321,
+      "senior_dscr_year1": 1.29453517977321,
+      "mezz_dscr_year1": "NOT_APPLICABLE",
+      "io_dscr_year1": 0.978891566265062,
+      "break_even_occupancy": 78.5514057440467,
+      "cash_on_cash_year1": 2.76709866842001,
+      "cumulative_cash_shortfall": 0,
+      "equity_multiple": "NOT_APPLICABLE",
+      "equity_irr": "NOT_APPLICABLE",
+      "peak_equity": 905381.912931125,
+      "refinance_net_proceeds": -170522.879999998,
+      "cost_per_unit": 305809.838821854,
+      "stabilization_month": 12,
+      "sale_month": "NOT_APPLICABLE",
+      "refinance_cash_returned": -170522.879999998,
+      "cash_left_in_deal": 905381.912931123,
+      "dcr_after_refinance": 1.29453517977321,
+      "cash_on_cash_after_refinance": 2.24593337072201,
+      "stated_value": 1785830.08704862,
+      "unrealized_equity_multiple": 1.44993087625204,
+      "unrealized_equity_irr": 3.87063626691848
+    }
+  },
+  "gates": [
+    {
+      "key": "development_spread",
+      "scenario": "base",
+      "threshold": 100,
+      "value": 134.948358141068,
+      "pass": true
+    },
+    {
+      "key": "dcr_after_refinance",
+      "scenario": "base",
+      "threshold": 1.2,
+      "value": 1.34395800922175,
+      "pass": true
+    },
+    {
+      "key": "sizing_dscr",
+      "scenario": "combined",
+      "threshold": 1.2,
+      "value": 1.29453517977321,
+      "pass": true
+    },
+    {
+      "key": "unrealized_equity_multiple",
+      "scenario": "combined",
+      "threshold": 1,
+      "value": 1.44993087625204,
+      "pass": true
+    }
+  ],
+  "checks": [
+    {
+      "key": "debt_at_or_above_total_cost",
+      "severity": "error",
+      "fired": false,
+      "value": 1100000,
+      "limit": 1667570.97294152,
+      "margin": 567570.972941523
+    },
+    {
+      "key": "ltc_above_ceiling",
+      "severity": "error",
+      "fired": false,
+      "value": 65.9642088911903,
+      "limit": 85,
+      "margin": 19.0357911088097
+    },
+    {
+      "key": "equity_wipeout",
+      "severity": "error",
+      "fired": false,
+      "value": 2593547.7895895,
+      "limit": 1091337.23807646,
+      "margin": 1502210.55151304
+    },
+    {
+      "key": "funding_not_converged",
+      "severity": "error",
+      "fired": false,
+      "value": 0,
+      "limit": 0.005,
+      "margin": 0.005
+    },
+    {
+      "key": "senior_amortization_missing",
+      "severity": "error",
+      "fired": false,
+      "value": 12,
+      "limit": 12,
+      "margin": 0
+    },
+    {
+      "key": "sizing_dscr_below_warning_floor",
+      "severity": "warning",
+      "fired": false,
+      "value": 1.34395800922175,
+      "limit": 1.2,
+      "margin": 0.143958009221753
+    }
+  ],
+  "verdict": "APPROVE",
+  "errors": [],
+  "tolerance": {
+    "money": 1.0,
+    "percent": 0.01,
+    "multiple": 0.001
+  },
+  "openQuestions": [
+    {
+      "id": "S1",
+      "status": "settled by the owner",
+      "topic": "Lease-up operating cost",
+      "ruleUsed": "Part of total development cost; charged months C to S-1.",
+      "affects": [
+        "total_development_cost",
+        "leaseup_operating_cost",
+        "required_equity",
+        "capitalized_interest"
+      ]
+    },
+    {
+      "id": "S2",
+      "status": "settled by the owner",
+      "topic": "Refinance flow sign",
+      "ruleUsed": "A negative refinance flow counts as a contribution; all positive equity flows are distributions.",
+      "affects": [
+        "unrealized_equity_multiple",
+        "unrealized_equity_irr"
+      ]
+    },
+    {
+      "id": "S3",
+      "status": "settled by the owner",
+      "topic": "Cost stress and the land transfer fee",
+      "ruleUsed": "Scaled x1.10 like every other cost line; not recomputed from the table.",
+      "affects": [
+        "cost and combined stress metrics"
+      ]
+    },
+    {
+      "id": "S4",
+      "status": "settled by the owner",
+      "topic": "Year-1 sizing before the refinance",
+      "ruleUsed": "Interest-only while senior_io_months >= refinance month (no hold months precede R here).",
+      "affects": [
+        "sizing_dscr",
+        "sizing_dscr_year1"
+      ]
+    },
+    {
+      "id": "S5",
+      "status": "settled by the owner",
+      "topic": "Forward window",
+      "ruleUsed": "Forward NOI and dcr_after_refinance use months R to R+11; the new loan's first payment is due in month R.",
+      "affects": [
+        "dcr_after_refinance",
+        "cash_on_cash_after_refinance",
+        "refinance_net_proceeds"
+      ]
+    },
+    {
+      "id": "S6",
+      "status": "settled by the owner",
+      "topic": "Expense stress",
+      "ruleUsed": "Does not move property tax; each stress is a full re-run with fixed expense dollars = ratio x that run's year-1 EGI.",
+      "affects": [
+        "all stress metrics"
+      ]
+    },
+    {
+      "id": "S7",
+      "status": "settled by the owner",
+      "topic": "Funding order",
+      "ruleUsed": "Equity first, then senior; interest capitalized while commitment remains.",
+      "affects": [
+        "required_equity",
+        "capitalized_interest"
+      ]
+    },
+    {
+      "id": "S8",
+      "status": "settled by the owner",
+      "topic": "Premium",
+      "ruleUsed": "No premium stated: refinance_premium_added is not reported.",
+      "affects": [
+        "refinance_premium_added"
+      ]
+    },
+    {
+      "id": "S9",
+      "status": "settled by the owner",
+      "topic": "Cents",
+      "ruleUsed": "Each cost line allocated separately: month = ROUND(cumulative share) - previous ROUND; every line sums exactly.",
+      "affects": [
+        "total_development_cost"
+      ]
+    },
+    {
+      "id": "S10",
+      "status": "settled by the owner",
+      "topic": "Monthly interest",
+      "ruleUsed": "Annual rate / 12 on the opening balance.",
+      "affects": [
+        "capitalized_interest"
+      ]
+    },
+    {
+      "id": "S11",
+      "status": "settled by the owner",
+      "topic": "Rate and rent stresses",
+      "ruleUsed": "Rate +1.50 points on the construction and refinance loans; rent stress moves unit rents only.",
+      "affects": [
+        "rate, rent, combined stress metrics"
+      ]
+    },
+    {
+      "id": "S12",
+      "status": "settled by the owner",
+      "topic": "Error checks",
+      "ruleUsed": "Evaluated on the base case only; stresses feed only their gates.",
+      "affects": [
+        "checks",
+        "verdict"
+      ]
+    },
+    {
+      "id": "S13",
+      "status": "settled by the owner",
+      "topic": "IRR",
+      "ruleUsed": "Monthly rate annualized (1+r)^12 - 1; one root tested by a sign scan over a rate grid.",
+      "affects": [
+        "unrealized_equity_irr"
+      ]
+    },
+    {
+      "id": "S14",
+      "status": "settled by the owner",
+      "topic": "Growth timing",
+      "ruleUsed": "Hold year 1 at today's rents; growth from year 2; other income grows at rent growth.",
+      "affects": [
+        "stated_value",
+        "sizing_dscr",
+        "unrealized_equity_multiple"
+      ]
+    },
+    {
+      "id": "S15",
+      "status": "settled by the owner",
+      "topic": "DSCR with no mezzanine",
+      "ruleUsed": "Senior DSCR year 1 = sizing DSCR; mezzanine DSCR NOT_APPLICABLE.",
+      "affects": [
+        "senior_dscr_year1",
+        "mezz_dscr_year1"
+      ]
+    },
+    {
+      "id": "S16",
+      "status": "settled by the owner",
+      "topic": "Break-even occupancy",
+      "ruleUsed": "(Year-1 fixed costs + property tax + debt service due) / year-1 rent; other income excluded.",
+      "affects": [
+        "break_even_occupancy"
+      ]
+    },
+    {
+      "id": "S17",
+      "status": "settled by the owner",
+      "topic": "Total debt and solve",
+      "ruleUsed": "total_debt is the balance at S; the solve runs 30 iterations, last two agreeing within half a cent.",
+      "affects": [
+        "total_debt",
+        "required_equity"
+      ]
+    },
+    {
+      "id": "Q1",
+      "status": "reading used",
+      "topic": "Value basis of the AB transfer-of-land fee",
+      "ruleUsed": "The fee's 'value' is land_cost ($312,000): 63 started steps, fee $365.",
+      "affects": [
+        "land_transfer_tax",
+        "total_development_cost",
+        "required_equity"
+      ]
+    },
+    {
+      "id": "Q2",
+      "status": "reading used",
+      "topic": "Deal row labels A3.2 and A4.2",
+      "ruleUsed": "tables.md has no rows numbered A3.2/A4.2; read as the AB row of the land-transfer table and section 3/3a (PBRH).",
+      "affects": [
+        "land_transfer_tax",
+        "gst_hst_net"
+      ]
+    },
+    {
+      "id": "Q3",
+      "status": "reading used",
+      "topic": "Lease-up operating cost rounding",
+      "ruleUsed": "Monthly amount (year-1 fixed costs / 12) is not rounded to cents; only construction cost lines are cent-allocated.",
+      "affects": [
+        "leaseup_operating_cost",
+        "total_development_cost"
+      ]
+    },
+    {
+      "id": "Q4",
+      "status": "reading used",
+      "topic": "Which costs the cost stress scales",
+      "ruleUsed": "Land, hard, soft, contingency, development charges, land transfer fee and GST/HST net x1.10; not lease-up operating costs (driven by operating inputs) and not the senior commitment.",
+      "affects": [
+        "cost and combined stress metrics"
+      ]
+    },
+    {
+      "id": "Q5",
+      "status": "reading used",
+      "topic": "Capitalized interest and the commitment",
+      "ruleUsed": "Capitalized interest is a senior draw against the commitment; 'fully drawn at S' means balance incl. interest = commitment.",
+      "affects": [
+        "required_equity",
+        "total_debt",
+        "capitalized_interest"
+      ]
+    },
+    {
+      "id": "Q6",
+      "status": "reading used",
+      "topic": "total_debt when R = S",
+      "ruleUsed": "Balance at S = construction senior balance before the month-S refinance ($1,100,000), not the new loan.",
+      "affects": [
+        "total_debt",
+        "debt_yield"
+      ]
+    },
+    {
+      "id": "Q7",
+      "status": "reading used",
+      "topic": "io_dscr_year1 when R = S",
+      "ruleUsed": "Uses the construction senior balance at S x senior rate, although that loan is retired in month S.",
+      "affects": [
+        "io_dscr_year1"
+      ]
+    },
+    {
+      "id": "Q8",
+      "status": "reading used",
+      "topic": "Operating flow dates",
+      "ruleUsed": "Each hold year's cash flow is dated at its end, (S + 12y)/12; year 10 shares (T+1)/12 with the unrealized flow.",
+      "affects": [
+        "unrealized_equity_irr",
+        "peak_equity"
+      ]
+    },
+    {
+      "id": "Q9",
+      "status": "reading used",
+      "topic": "Exit-cap stress",
+      "ruleUsed": "Moves the LTV-sized refinance loan, the stated value and that run's development spread.",
+      "affects": [
+        "exit_cap and combined stress metrics"
+      ]
+    },
+    {
+      "id": "Q10",
+      "status": "reading used",
+      "topic": "Senior amortization not stated",
+      "ruleUsed": "Not needed: R <= max(IO months, S), so the construction loan never amortizes; the missing-amortization error does not fire.",
+      "affects": [
+        "checks"
+      ]
+    },
+    {
+      "id": "Q11",
+      "status": "reading used",
+      "topic": "Zero-coverage convention",
+      "ruleUsed": "A DSCR with zero debt service is the string 'not meaningful' (null), never 0.",
+      "affects": [
+        "sizing_dscr",
+        "contractual_dscr"
+      ]
+    },
+    {
+      "id": "Q12",
+      "status": "reading used",
+      "topic": "economic-model.md vs metrics.md",
+      "ruleUsed": "Followed economic-model.md: TDC includes operating costs during lease-up (metrics.md omits them); mezz_dscr_year1 NOT_APPLICABLE though metrics.md defines it.",
+      "affects": [
+        "total_development_cost",
+        "mezz_dscr_year1"
+      ]
+    },
+    {
+      "id": "Q13",
+      "status": "reading used",
+      "topic": "GST/HST net without a fair market value",
+      "ruleUsed": "Net = FMV x (5% x (1 - 100%) + 0) = 0 for any FMV; FMV left unstated.",
+      "affects": [
+        "gst_hst_net"
+      ]
+    },
+    {
+      "id": "Q14",
+      "status": "reading used",
+      "topic": "cash_left_in_deal and peak_equity",
+      "ruleUsed": "cash_left uses required equity (TDC - commitments); peak equity = max cumulative (contributions - distributions) over dated flows.",
+      "affects": [
+        "cash_left_in_deal",
+        "peak_equity",
+        "cash_on_cash_after_refinance"
+      ]
+    }
+  ]
+}
