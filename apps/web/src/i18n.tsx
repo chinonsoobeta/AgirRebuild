@@ -23,6 +23,8 @@ import * as authStrings from "./strings/auth";
 import * as landingStrings from "./strings/landing";
 import * as agirreviewStrings from "./strings/agirreview";
 import * as thresholdsStrings from "./strings/thresholds";
+import * as termsStrings from "./strings/terms";
+import { termsStore, useTerms, type TermsPref } from "./terms";
 import { FR_VERIFY, FR_ABSENT, FR_FIELDS, FR_METRICS, STRESS, GATES, plainTerm, numberFormat, verdictText as sharedVerdictText, checkText as sharedCheckText, type VerdictLike, type CheckLike, CURRENCY_NAMES, FIELDS, FIELD_BY_KEY, METRIC_BY_KEY, placeLabel, type Currency, type ReadinessItem } from "@agir/contracts";
 
 export type Lang = "en" | "fr";
@@ -604,6 +606,7 @@ export const EN = {
   ...landingStrings.en,
   ...agirreviewStrings.en,
   ...thresholdsStrings.en,
+  ...termsStrings.en,
 } satisfies Record<string, Entry>;
 
 export type Key = keyof typeof EN;
@@ -1188,6 +1191,7 @@ export const FR: Record<Key, Entry> = {
   ...landingStrings.fr,
   ...agirreviewStrings.fr,
   ...thresholdsStrings.fr,
+  ...termsStrings.fr,
 };
 
 // ---- Catalog labels in French ------------------------------------------------------------
@@ -1590,9 +1594,13 @@ function initialLang(): Lang {
   return typeof navigator !== "undefined" && navigator.language.toLowerCase().startsWith("fr") ? "fr" : "en";
 }
 
-export function build(lang: Lang, setLang: (l: Lang) => void) {
+/** `terms`: plain words first (the default) or finance terms first; it is read from the device when not given. */
+export function build(lang: Lang, setLang: (l: Lang) => void, terms: TermsPref = termsStore.getSnapshot()) {
   const dict = lang === "fr" ? FR : EN;
   const idx = lang === "fr" ? 1 : 0;
+  /** The plain-words name of a metric or gate, when plain words come first and one exists. */
+  const plainName = (kind: "metric" | "gate", key: string): string | undefined =>
+    terms === "plain" ? ((dict as Record<string, Entry>)[`terms.${kind}.${key}`] as string | undefined) : undefined;
   const t = <K extends Key>(key: K, p: Record<string, any> = {}): any => {
     const e = dict[key] as Entry;
     return typeof e === "function" ? e(p) : e;
@@ -1617,10 +1625,10 @@ export function build(lang: Lang, setLang: (l: Lang) => void) {
       return translateMessage(i.label) !== i.label || i.fieldKey === "input" ? sentence(i.label) : L.field(i.fieldKey, i.itemKey);
     },
     group: (g: string) => GROUPS[g]?.[idx] ?? g,
-    metric: (key: string) => plainTerm(lang, (lang === "fr" ? FR_METRICS[key]?.[0] : METRIC_BY_KEY.get(key)?.label) ?? key),
+    metric: (key: string) => plainName("metric", key) ?? plainTerm(lang, (lang === "fr" ? FR_METRICS[key]?.[0] : METRIC_BY_KEY.get(key)?.label) ?? key),
     formula: (key: string) => (lang === "fr" ? FR_METRICS[key]?.[1] : METRIC_BY_KEY.get(key)?.formula) ?? "",
     stress: (key: string, en: string) => plainTerm(lang, STRESS[key]?.[idx] ?? en),
-    gate: (key: string, en: string) => plainTerm(lang, GATES[key]?.[idx] ?? en),
+    gate: (key: string, en: string) => plainName("gate", key) ?? plainTerm(lang, GATES[key]?.[idx] ?? en),
     driver: (key: string) => DRIVERS_L[key]?.[idx] ?? key,
     /** One breakeven row as text: the sentence for a value, the reason for any other state. Every figure is the engine's. */
     breakeven: (r: BreakevenText, gate: { key: string; label: string; threshold: number; unit: string }) => {
@@ -1669,7 +1677,7 @@ export function build(lang: Lang, setLang: (l: Lang) => void) {
   };
   const msg = (text: string | null | undefined) => plainTerm(lang, lang === "fr" ? translateMessage(text) : text ?? "");
   const err = (e: unknown) => msg(e instanceof Error ? e.message : String(e ?? ""));
-  return { lang, setLang, t, f, L, msg, err };
+  return { lang, setLang, terms, t, f, L, msg, err };
 }
 
 export type I18n = ReturnType<typeof build>;
@@ -1686,7 +1694,8 @@ export function I18nProvider({ children }: { children: ReactNode }) {
     }
     document.documentElement.lang = l === "fr" ? "fr-CA" : "en";
   };
-  const value = useMemo(() => build(lang, setLang), [lang]);
+  const { terms } = useTerms();
+  const value = useMemo(() => build(lang, setLang, terms), [lang, terms]);
   if (typeof document !== "undefined") document.documentElement.lang = lang === "fr" ? "fr-CA" : "en";
   return <Ctx.Provider value={value}>{children}</Ctx.Provider>;
 }
