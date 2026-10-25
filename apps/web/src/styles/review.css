@@ -33,5 +33,3 @@
 .rv-link{color:var(--accent)}
 .rv-unused-body{border-top:1px solid var(--line)}
 .rv-aside{gap:16px}
-/* The shared thresholds editor sits inside its aside card here, so its own panel frame goes. */
-.rv-thresholds details.panel{border:0;padding:0;margin:0;background:none;box-shadow:none}

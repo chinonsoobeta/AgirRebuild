@@ -1,6 +1,6 @@
 /* Agir design system: a port of the accepted design's agir.css (interface-design/agir.css).
    Tokens live on :root (light) and :root[data-theme="dark"]; every class is the design's,
-   without the .agir prefix. Area styles go in styles/<area>.css; old route classes in legacy.css.
+   without the .agir prefix. Area styles go in styles/<area>.css.
    BC Sans: see docs/THIRD_PARTY.md. */
 @font-face{font-family:"BC Sans";src:url("/fonts/bc-sans/BCSans-Light.woff2") format("woff2");font-weight:300;font-style:normal;font-display:swap}
 @font-face{font-family:"BC Sans";src:url("/fonts/bc-sans/BCSans-LightItalic.woff2") format("woff2");font-weight:300;font-style:italic;font-display:swap}
@@ -116,7 +116,7 @@ legend{padding:0}
 .switch.on::after{left:19px}
 
 /* Tables */
-.scroll{overflow-x:auto}
+.scroll{position:relative;overflow-x:auto}
 .table{width:100%;border-collapse:collapse;font-size:15px}
 .table th{font-weight:400;font-size:13px;color:var(--ink-3);text-align:left;padding:10px 12px;border-bottom:1px solid var(--line);white-space:nowrap}
 .table td{padding:13px 12px;border-bottom:1px solid var(--line);vertical-align:top}
@@ -298,3 +298,19 @@ legend{padding:0}
 
 /* Text for screen readers only. */
 .sr-only{position:absolute;width:1px;height:1px;overflow:hidden;clip:rect(0 0 0 0);white-space:nowrap}
+
+/* Shared rules kept from the old system when it was removed (card U20). They stay last so they
+   cascade as before. A card with no inner card-head, card-pad, card-foot, scroll or table child
+   is padded and stacked itself. */
+.card:not(:has(>.card-head,>.card-pad,>.card-foot,>.scroll,>.table)){padding:20px 22px;display:flex;flex-direction:column;gap:14px}
+.choice>span{min-width:0;overflow-wrap:anywhere}
+.error-text{font-size:13px;color:var(--stop);font-weight:700}
+.not-meaningful{color:var(--ink-2);font-style:italic}
+dialog{border:1px solid var(--line);border-radius:12px;padding:0;background:var(--surface);color:var(--ink);width:min(520px,92vw)}
+dialog::backdrop{background:var(--backdrop)}
+dialog form{padding:24px;display:flex;flex-direction:column;gap:16px}
+
+/* Less motion for people who ask for it: no spinning, no sliding. */
+@media (prefers-reduced-motion:reduce){
+  *,*::before,*::after{animation:none!important;transition:none!important;scroll-behavior:auto!important}
+}

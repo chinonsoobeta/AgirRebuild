@@ -9,5 +9,3 @@
 .set-vh{position:absolute;width:1px;height:1px;padding:0;margin:-1px;overflow:hidden;clip:rect(0 0 0 0);white-space:nowrap;border:0}
 .set-nav a:focus-visible{outline:2px solid var(--accent);outline-offset:2px}
 .set section[id]{scroll-margin-top:24px}
-/* The shared thresholds editor sits inside its section card here, so its own panel frame goes. */
-.set-thresholds details.panel{border:0;padding:0;margin:0;background:none;box-shadow:none}

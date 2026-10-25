@@ -74,7 +74,7 @@ describe("the top bar", () => {
     expect(out).toMatch(/<a href="\/deals" class="current" aria-current="page">Deals<\/a>/);
     expect(out).toMatch(/<a href="\/settings"[^>]*>Settings<\/a>/);
     expect(out).not.toMatch(/<a href="\/settings"[^>]*aria-current/);
-    expect(out).toContain('<main class="page">content</main>');
+    expect(out).toContain('<main class="page" id="main-content" tabindex="-1">content</main>');
     expect(out).not.toContain('class="rail"');
   });
 

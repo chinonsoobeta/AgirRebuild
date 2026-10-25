@@ -2,7 +2,7 @@
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import { createElement } from "react";
 import { readFileSync } from "node:fs";
-const styles=readFileSync(new URL("../src/styles/legacy.css",import.meta.url),"utf8");
+const styles=readFileSync(new URL("../src/styles/base.css",import.meta.url),"utf8");
 import { randomBytes } from "node:crypto";
 import { renderToStaticMarkup } from "react-dom/server";
 import { api, ApiError, type Assumption } from "../src/api";
@@ -341,7 +341,7 @@ describe("card 94c table proposal controls", () => {
 describe("card 97c deal rendering", () => {
   it("contains the absolute Actions label inside the narrow Review scroll box", () => {
     expect(styles).toMatch(/\.sr-only\s*\{[^}]*position:\s*absolute/);
-    expect(styles).toMatch(/\.tbl\s*\{[^}]*position:\s*relative[^}]*\}/);
+    expect(styles).toMatch(/\.scroll\s*\{[^}]*position:\s*relative[^}]*\}/);
   });
   it("a deal route switches from workspace X to the deal's workspace Y", async () => {
     const {useDeal}=await vi.importActual<typeof import("../src/components/ui")>("../src/components/ui");

@@ -5,8 +5,9 @@ import { api, ApiError, type ThresholdView } from "../api";
 import { checkText, useI18n } from "../i18n";
 import { ErrorText, useSession } from "./ui";
 
-/** The same governed editor for workspace defaults and deal-specific values. */
-export function Thresholds({ scope, id, initialVersion = "" }: { scope: "workspaces" | "deals"; id: string; initialVersion?: string }) {
+/** The same governed editor for workspace defaults and deal-specific values. A screen that already
+    titles the section passes `summary` so the disclosure does not repeat its heading. */
+export function Thresholds({ scope, id, initialVersion = "", summary }: { scope: "workspaces" | "deals"; id: string; initialVersion?: string; summary?: string }) {
   const { t, lang, f } = useI18n();
   const { role } = useSession();
   const qc = useQueryClient();
@@ -18,11 +19,11 @@ export function Thresholds({ scope, id, initialVersion = "" }: { scope: "workspa
   const policies = query.data?.policies ?? [];
   const policy = policies.find((policy) => policy.version === chosen) ?? policies[0];
   const error = lang === "fr" && save.error instanceof ApiError && save.error.detail?.fr ? new Error(save.error.detail.fr) : save.error;
-  return <details className="panel stack">
-    <summary className="h-section">{t("threshold.title")}</summary>
+  return <details className="stack">
+    <summary className={summary ? undefined : "h3"}>{summary ?? t("threshold.title")}</summary>
     <ErrorText error={query.error ?? error} />
     {(query.data?.invalid ?? []).length > 0 && <div className="stack">
-      <p className="why">{t("threshold.invalid")}</p>
+      <p className="hint">{t("threshold.invalid")}</p>
       <ul>{(query.data?.invalid ?? []).map((v) => {
         const own = (scope === "deals" ? "deal" : "workspace") === v.layer;
         const clear = (event: FormEvent<HTMLFormElement>) => {
@@ -33,13 +34,13 @@ export function Thresholds({ scope, id, initialVersion = "" }: { scope: "workspa
           <p className="muted">{v.setByName} · {f.date(v.setAt)} · {v.reason}</p>
           {role === "owner" && own && <form className="row" onSubmit={clear}>
             <input aria-label={t("threshold.reason")} className="input" name="reason" required placeholder={t("threshold.reason")} />
-            <button className="btn quiet small" type="submit" value="clear-invalid" disabled={save.isPending}>{t("threshold.clear")}</button>
+            <button className="btn quiet sm" type="submit" value="clear-invalid" disabled={save.isPending}>{t("threshold.clear")}</button>
           </form>}</li>;
       })}</ul>
     </div>}
     {policy && <>
-      <label className="field">{t("threshold.strategy")}<select className="select" value={policy.version} onChange={(event) => setChosen(event.target.value)}>{policies.map((policy) => <option key={policy.version} value={policy.version}>{policy.version}</option>)}</select></label>
-      <table className="tbl small"><thead><tr><th>{t("threshold.name")}</th><th>{t("threshold.standard")}</th>{scope === "deals" && <th>{t("threshold.workspace")}</th>}<th>{t("threshold.yours")}</th></tr></thead>
+      <label className="field"><span className="label">{t("threshold.strategy")}</span><select className="select" value={policy.version} onChange={(event) => setChosen(event.target.value)}>{policies.map((policy) => <option key={policy.version} value={policy.version}>{policy.version}</option>)}</select></label>
+      <div className="scroll"><table className="table"><thead><tr><th>{t("threshold.name")}</th><th>{t("threshold.standard")}</th>{scope === "deals" && <th>{t("threshold.workspace")}</th>}<th>{t("threshold.yours")}</th></tr></thead>
         <tbody>{policy.thresholds.map((row) => {
           const own = scope === "deals" ? row.deal : row.workspace;
           const note = row.deal ?? row.workspace;
@@ -50,16 +51,16 @@ export function Thresholds({ scope, id, initialVersion = "" }: { scope: "workspa
             const clear = (event.nativeEvent as SubmitEvent).submitter?.getAttribute("value") === "clear";
             save.mutate({ policyVersion: policy.version, path: row.path, value: clear ? null : Number(form.get("value")), reason: String(form.get("reason")) });
           };
-          return <tr key={row.path}><td>{row.label[lang]}<div className="muted">{t("threshold.range", { min: row.min, max: row.max, unit: row.unit, whole: row.integer ? t("threshold.whole") : "" })}</div>{flags && <p className="why">{flags}</p>}</td>
+          return <tr key={row.path}><td>{row.label[lang]}<div className="muted">{t("threshold.range", { min: row.min, max: row.max, unit: row.unit, whole: row.integer ? t("threshold.whole") : "" })}</div>{flags && <p className="hint">{flags}</p>}</td>
             <td>{f.value(row.standard,row.unit)}</td>{scope === "deals" && <td>{row.workspace ? f.value(row.workspace.value,row.unit) : t("threshold.standard")}</td>}
             <td>{role === "owner" ? <form className="stack" key={`${policy.version}-${row.value}-${own?.setAt}`} onSubmit={submit}>
               <input aria-label={row.label[lang]} className="input" type="number" name="value" required defaultValue={row.value} min={row.min} max={row.max} step={row.integer ? 1 : "any"} />
               <input aria-label={t("threshold.reason")} className="input" name="reason" required placeholder={t("threshold.reason")} />
-              <div className="row"><button className="btn small" type="submit" value="save" disabled={save.isPending}>{t("threshold.save")}</button><button className="btn quiet small" type="submit" value="clear" disabled={!own || save.isPending}>{t("threshold.clear")}</button></div>
+              <div className="row"><button className="btn primary sm" type="submit" value="save" disabled={save.isPending}>{t("threshold.save")}</button><button className="btn quiet sm" type="submit" value="clear" disabled={!own || save.isPending}>{t("threshold.clear")}</button></div>
             </form> : f.value(row.value,row.unit)}
               {note && <p className="muted">{note.setByName} · {f.date(note.setAt)} · {note.reason}</p>}
             </td></tr>;
-        })}</tbody></table>
+        })}</tbody></table></div>
     </>}
   </details>;
 }

@@ -853,10 +853,10 @@ export function Review({ dealId }: { dealId: string }) {
         </div>
 
         <aside className="stack rv-aside" aria-label={t("review.aside")}>
-          <section className="card card-pad stack tight rv-thresholds">
+          <section className="card card-pad stack tight">
             <h2 className="h3">{t("review.thresholds")}</h2>
             <p className="small muted">{t("review.thresholdsBody")}</p>
-            <Thresholds scope="deals" id={dealId} />
+            <Thresholds scope="deals" id={dealId} summary={t("thresholds.show")} />
           </section>
           <Notice>{t(solo ? "review.modeSolo" : "review.modeTeam")}</Notice>
           <Notice title={t("review.recorded")}>{t("review.recordedBody")}</Notice>

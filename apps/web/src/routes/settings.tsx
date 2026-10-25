@@ -280,7 +280,7 @@ export function Settings() {
     ) },
     { id: "thresholds", nav: t("settings.nav.thresholds"), show: true, node: (
       <Section id="thresholds" title={t("settings.nav.thresholds")} body={t("settings.th.body")}>
-        <div className="set-thresholds"><Thresholds scope="workspaces" id={workspaceId} /></div>
+        <Thresholds scope="workspaces" id={workspaceId} summary={t("thresholds.show")} />
       </Section>
     ) },
     { id: "people", nav: t("settings.nav.people"), show: true, node: (
