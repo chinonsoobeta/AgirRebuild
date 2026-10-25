@@ -104,7 +104,7 @@ describe("the decision screen (card W9)", () => {
     s.lang = "fr";
     const html = render(createElement(DecisionStep, { dealId: "d" }));
     expect(html).toContain("Les décisions sont permanentes.");
-    expect(html).toContain("Approuver avec conditions");
+    expect(html).toContain("Approuver sous conditions");
   });
 });
 

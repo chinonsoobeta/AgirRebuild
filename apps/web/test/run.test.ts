@@ -319,7 +319,7 @@ describe("share links on the web (task 86b)", () => {
     queryState.run = { result: rental };
     queryState.artifacts = [{ ...artifact("french", "ready"), lang: "fr" }];
     expect(render()).toContain("Français, traduction provisoire");
-    const make = queryState.nodes.filter((n) => n.tag === "button" && n.props.className === "btn" && n.props.type === "button");
+    const make = queryState.nodes.filter((n) => n.tag === "button" && n.props.name === "generate");
     for (const b of make) await b.props.onClick();
     const bodies = vi.mocked(api.post).mock.calls.filter(([path]) => path.endsWith("/artifacts")).map(([, body]) => body as { kind: string; lang: string });
     expect(bodies.length).toBeGreaterThan(1);
@@ -329,7 +329,7 @@ describe("share links on the web (task 86b)", () => {
     render(); await button("Share").props.onClick();
     const choices = render();
     for (const term of ["24 hours", "7 days", "30 days", "No expiry"]) expect(choices).toContain(term);
-    queryState.nodes.find((n) => n.tag === "select")!.props.onChange({ target: { value: "24h" } });
+    button("24 hours").props.onClick();
     render(); await button("Make link").props.onClick();
     const made = render();
     expect(made).toContain("Copy this link now. It is not shown again.");
