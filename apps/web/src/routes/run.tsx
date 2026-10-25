@@ -115,6 +115,25 @@ export function GateOutcome({ status }: { status: string }) {
   return <StatusTag tone="neutral" glyph={I.Dashed}>{status === "not_applicable" ? t("common.notApplicable") : t("run.notEvaluated")}</StatusTag>;
 }
 
+type Refinance = NonNullable<RunView["refinance"]>;
+const refinanceLine = (i: ReturnType<typeof useI18n>, r: Refinance) => {
+  const p = { value: i.f.value(r.value, "$"), month: i.f.value(r.month, "count") };
+  return r.stated || r.ltvPct === null ? i.t("run.refi.stated", p) : i.t("run.refi.ltv", { ...p, pct: i.f.value(r.ltvPct, "%") });
+};
+
+/** The trace panel for the refinance loan: how the engine sized it, and that it is worked out again, not stored (card R3). */
+export function RefinanceTrace({ refinance: r, engine }: { refinance: Refinance; engine: string }) {
+  const { t, f } = useI18n();
+  const p = { value: f.value(r.value, "$"), month: f.value(r.month, "count") };
+  return (
+    <>
+      <strong>{t("run.refi.howTitle")}</strong>
+      <div>{r.stated || r.ltvPct === null ? t("run.refi.howStated", p) : t("run.refi.howLtv", { ...p, pct: f.value(r.ltvPct, "%") })}</div>
+      <div>{t("run.refi.notStored", { engine })}</div>
+    </>
+  );
+}
+
 const STEPS = ["run.step.check", "run.step.ledger", "run.step.underwrite", "run.step.stress", "run.step.gates", "run.step.record"] as const;
 /** Operating years shown before "Show all". */
 const FIRST_YEARS = 5;
@@ -133,6 +152,7 @@ export function Run({ dealId, run: fromAddress }: { dealId: string; run?: string
   const inputsChanged = run.data?.staleReasons.includes(INPUTS_CHANGED) ?? false;
   const review = useQuery({ queryKey: ["review", dealId], queryFn: () => api.get<Review>(`/deals/${dealId}/review`), enabled: inputsChanged });
   const [trace, setTrace] = useState<Metric | null>(null);
+  const [refiTrace, setRefiTrace] = useState(false);
   const [allYears, setAllYears] = useState(false);
   const start = useMutation({
     mutationFn: () => api.post<{ id: string }>(`/deals/${dealId}/runs`),
@@ -233,6 +253,9 @@ export function Run({ dealId, run: fromAddress }: { dealId: string; run?: string
   const operating = v.result.annual.filter((y) => y.year > 0).length;
   const years = allYears ? v.result.annual : v.result.annual.filter((y) => y.year <= FIRST_YEARS);
   const notPassing = v.result.checks.filter((c) => c.severity !== "pass").length;
+  // The refinance loan follows the coverage after refinancing, or ends the figures when the layout has no such figure.
+  const refi = v.refinance;
+  const refiAfter = figures.includes("dcr_after_refinance") ? "dcr_after_refinance" : figures[figures.length - 1];
   return (
     <>
       <DealFrame o={o} active="run" />
@@ -289,11 +312,15 @@ export function Run({ dealId, run: fromAddress }: { dealId: string; run?: string
                 : m.status === "VALID" ? context[k]?.() : undefined;
               return (
                 <Fragment key={k}>
-                  <Figure k={<button type="button" className="run-fig-btn" aria-pressed={trace?.key === k} onClick={() => setTrace(m)}>{L.metric(k)}</button>} v={<MetricValue {...m} />} s={sub} />
+                  <Figure k={<button type="button" className="run-fig-btn" aria-pressed={trace?.key === k} onClick={() => { setTrace(m); setRefiTrace(false); }}>{L.metric(k)}</button>} v={<MetricValue {...m} />} s={sub} />
                   {/* A held deal's partner returns (card 88): report arithmetic, not metrics, so they have no formula trace. */}
                   {p && ([["run.heldLpIrr", p.lpIrr, "%"], ["run.heldGpIrr", p.gpIrr, "%"], ["run.heldPromote", p.promote, "$"]] as const).map(([label, value, unit]) => (
                     <Figure key={label} k={t(label)} v={<MetricValue value={value} unit={unit} status={value === null ? "NOT_MEANINGFUL" : "VALID"} />} />
                   ))}
+                  {refi && k === refiAfter && (
+                    <Figure k={<button type="button" className="run-fig-btn" aria-pressed={refiTrace} onClick={() => { setTrace(null); setRefiTrace(true); }}>{t("run.refi.label")}</button>}
+                      v={<span className="num">{f.value(refi.loan, "$")}</span>} s={refinanceLine(i, refi)} />
+                  )}
                 </Fragment>
               );
             })}
@@ -305,6 +332,7 @@ export function Run({ dealId, run: fromAddress }: { dealId: string; run?: string
               <div>= <MetricValue {...trace} /></div>
               {trace.status !== "VALID" && <div>{i.msg(trace.reason)}</div>}
             </>}
+            {refiTrace && refi && <RefinanceTrace refinance={refi} engine={v.engineVersion} />}
             <span className="src">{t("run.selectFigure")}</span>
           </div>
           <Glossary />

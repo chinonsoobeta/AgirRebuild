@@ -59,6 +59,13 @@ export const en = {
   "run.changed.added": (p) => `${p.label} was approved at ${p.now} after this run, which did not use it.`,
   "run.changed.removed": (p) => `${p.label} is no longer approved; this run used ${p.was}.`,
   "run.changed.more": (p) => `And ${p.n} more.`,
+  "run.refi.label": "Refinance loan",
+  "run.refi.ltv": (p) => `${p.pct} of a ${p.value} value at month ${p.month}`,
+  "run.refi.stated": (p) => `As stated, against a ${p.value} value at month ${p.month}`,
+  "run.refi.howTitle": "How the refinance loan is sized",
+  "run.refi.howLtv": (p) => `The engine values the building at the next 12 months' net operating income over the exit cap rate, which gives ${p.value} at month ${p.month}, and lends ${p.pct} of it.`,
+  "run.refi.howStated": (p) => `The loan is the amount the inputs state. The engine values the building at the next 12 months' net operating income over the exit cap rate, which gives ${p.value} at month ${p.month}.`,
+  "run.refi.notStored": (p) => `It is worked out from this run's recorded inputs by the same engine version (${p.engine}); it is not stored with the run.`,
 } satisfies Record<string, Entry>;
 
 export const fr: FrenchOf<typeof en> = {
@@ -119,4 +126,11 @@ export const fr: FrenchOf<typeof en> = {
   "run.changed.added": (p) => `${p.label} a reçu la valeur ${p.now} après cette analyse, qui ne l'utilisait pas.`,
   "run.changed.removed": (p) => `${p.label} n'a plus de valeur approuvée\u00a0; cette analyse utilisait ${p.was}.`,
   "run.changed.more": (p) => p.n === 1 ? "Et 1 autre." : `Et ${p.n} autres.`,
+  "run.refi.label": "Prêt de refinancement",
+  "run.refi.ltv": (p) => `${p.pct} d'une valeur de ${p.value} au mois ${p.month}`,
+  "run.refi.stated": (p) => `Tel qu'indiqué, pour une valeur de ${p.value} au mois ${p.month}`,
+  "run.refi.howTitle": "Comment le prêt de refinancement est calculé",
+  "run.refi.howLtv": (p) => `Le moteur évalue l'immeuble au revenu net d'exploitation des 12\u00a0mois suivants divisé par le taux de capitalisation de sortie, soit ${p.value} au mois ${p.month}, et prête ${p.pct} de cette valeur.`,
+  "run.refi.howStated": (p) => `Le prêt est le montant indiqué dans les données. Le moteur évalue l'immeuble au revenu net d'exploitation des 12\u00a0mois suivants divisé par le taux de capitalisation de sortie, soit ${p.value} au mois ${p.month}.`,
+  "run.refi.notStored": (p) => `Il est calculé à partir des données consignées de cette analyse par la même version du moteur (${p.engine})\u00a0; il n'est pas conservé avec l'analyse.`,
 };

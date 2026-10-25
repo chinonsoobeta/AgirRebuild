@@ -17,7 +17,7 @@ import {
   type Readiness,
   type RunResult,
 } from "@agir/contracts";
-import { assemble, canonicalJson, ENGINE_VERSION, heldPartnerReturns, replay } from "@agir/engine";
+import { assemble, buildLedger, canonicalJson, ENGINE_VERSION, heldPartnerReturns, replay } from "@agir/engine";
 import { currentDocuments, documentsHash, type Db } from "@agir/db";
 import { applyLabels, figureOrder, itemFold, labelPhrase, labelUnit, offeredIds, suggestFields, type ReaderResponse, type ReadingVerification, READER_PROMPT_VERSION, type SourcedCandidate } from "@agir/extraction";
 
@@ -403,8 +403,11 @@ export function todoList(
 export async function reviewView(tx: Db, dealId: string, asOf: string) {
   const assumptions = await loadAssumptions(tx, dealId);
   const { readiness, gaps } = readinessFor(assumptions);
-  const [deal] = await tx.query<{province: string | null}>(`select province from deals where id = $1`, [dealId]);
-  const province = deal?.province;
+  const [deal] = await tx.query<{country: string; province: string | null}>(`select country, province from deals where id = $1`, [dealId]);
+  // The tables are Canadian: a deal elsewhere is told so, and a Canadian deal with no province is asked for one.
+  const outside = deal !== undefined && deal.country !== "CA";
+  const province = outside ? null : deal?.province;
+  const noProvince = outside ? "these tables are for deals in Canada; enter the amount yourself" : "the deal has no province";
   const approved = assumptions.filter(a => ENGINE_READABLE_STATUSES.includes(a.status) && a.value !== null);
   const value = (key: string) => approved.find(a => a.field_key === key && !a.item_key)?.value ?? undefined;
   const unapprovedUnits = assumptions.some(a => a.field_key === "unit_count" && !ENGINE_READABLE_STATUSES.includes(a.status));
@@ -424,18 +427,18 @@ export async function reviewView(tx: Db, dealId: string, asOf: string) {
   };
   if (offered.has("land_transfer_tax")) {
     const land = value("land_cost");
-    propose("land_transfer_tax", province ? landTable(province,asOf) : undefined, !province ? {unavailable:"the deal has no province"} : land === undefined ? {unavailable:"state the land cost first"} : landTransferTaxOptions({province,value:land,asOf}));
+    propose("land_transfer_tax", province ? landTable(province,asOf) : undefined, !province ? {unavailable:noProvince} : land === undefined ? {unavailable:"state the land cost first"} : landTransferTaxOptions({province,value:land,asOf}));
   }
-  if (offered.has("gst_hst_net")) propose("gst_hst_net",GST_HST,!province ? {unavailable:"the deal has no province"} : unapprovedUnits ? {unavailable:"approve the unit counts first"} : gstHstNetOptions({province,units,selling:value("sell_units") === 1,asOf}));
+  if (offered.has("gst_hst_net")) propose("gst_hst_net",GST_HST,!province ? {unavailable:noProvince} : unapprovedUnits ? {unavailable:"approve the unit counts first"} : gstHstNetOptions({province,units,selling:value("sell_units") === 1,asOf}));
   if (offered.has("refinance_insurance_premium_pct")) {
     const ltvPct=value("refinance_ltv_pct"), amortYears=value("refinance_amort_years");
-    const premium = !province ? {unavailable:"the deal has no province"} : unapprovedUnits ? {unavailable:"approve the unit counts first"} : units < 5 ? {unavailable:"CMHC multi-unit insurance needs at least 5 units; enter the premium yourself"}
+    const premium = !province ? {unavailable:noProvince} : unapprovedUnits ? {unavailable:"approve the unit counts first"} : units < 5 ? {unavailable:"CMHC multi-unit insurance needs at least 5 units; enter the premium yourself"}
       : ltvPct === undefined || value("refinance_amount") !== undefined ? {unavailable:"the table needs a loan-to-value"}
       : amortYears === undefined ? {unavailable:"state the refinance amortization first"}
       : cmhcPremium({ltvPct,amortYears,points:value("refinance_mli_select_points"),asOf});
     propose("refinance_insurance_premium_pct",CMHC_PREMIUM,"value" in premium ? {options:[{key:"cmhc",label:premium.label,value:premium.value}]} : premium);
   }
-  if (offered.has("refinance_premium_tax_pct")) propose("refinance_premium_tax_pct",province ? PREMIUM_TAX_TABLES[province as keyof typeof PREMIUM_TAX_TABLES] : undefined,!province ? {unavailable:"the deal has no province"} : premiumTaxOptions({province,asOf}));
+  if (offered.has("refinance_premium_tax_pct")) propose("refinance_premium_tax_pct",province ? PREMIUM_TAX_TABLES[province as keyof typeof PREMIUM_TAX_TABLES] : undefined,!province ? {unavailable:noProvince} : premiumTaxOptions({province,asOf}));
   const tableNotices: Proposal[] = [];
   for (let index=proposals.length-1; index>=0; index--) {
     const proposal=proposals[index]!;
@@ -641,6 +644,17 @@ export async function runView(tx: Db, runId: string) {
   const { input } = run.input_snapshot;
   const held = input.exit === "refinance_hold" && input.waterfall ? heldPartnerReturns(run.result.equityFlows, input.waterfall) : null;
   const positive = (flows: readonly { amount: number }[]) => flows.filter((f) => f.amount > 0).reduce((n, f) => n + f.amount, 0);
+  // The refinance loan (card R3) is the engine's own ledger replayed on the run's recorded input: not one of the run's signed figures.
+  // Only under the engine version that recorded the run, and left out if the ledger cannot be built.
+  let refinance: { loan: number; value: number; month: number; ltvPct: number | null; stated: boolean } | null = null;
+  if (input.refinance && run.engine_version === ENGINE_VERSION) {
+    try {
+      const r = buildLedger(input).refinance;
+      if (r) refinance = { loan: r.newAmount, value: r.value, month: r.month, ltvPct: input.refinance.ltvPct ?? null, stated: input.refinance.amount !== undefined };
+    } catch {
+      refinance = null;
+    }
+  }
   return {
     id: run.id,
     dealId: run.deal_id,
@@ -662,6 +676,7 @@ export async function runView(tx: Db, runId: string) {
     decisions,
     ...(held ? { heldPartners: { lpIrr: held.withValue.lpIrr, gpIrr: held.withValue.gpIrr, promote: held.withValue.promote,
       paidLp: positive(held.paid.lp), paidGp: positive(held.paid.gp), paidPromote: held.paid.promote } } : {}),
+    ...(refinance ? { refinance } : {}),
   };
 }
 

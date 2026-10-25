@@ -56,6 +56,14 @@ export const en = {
   "compare.foot": "Figures are as each run recorded them. Nothing here is recomputed.",
   "compare.open": (p) => `Open run ${p.n}`,
   "compare.openOf": (p) => `Open run ${p.n} of ${p.name}`,
+  "compare.footRefinance": "Figures are as each run recorded them, except the refinance loan, which the same engine works out again from each run's recorded inputs.",
+  "compare.refinance": "Refinance loan",
+  "compare.refinanceLtv": (p) => `${p.pct} of the stabilized value`,
+  "compare.refinanceStated": "As stated",
+  "compare.download": "Download this comparison",
+  "compare.col.source": "Source",
+  "compare.csv.recorded": (p) => `Run ${p.a} and run ${p.b}, recorded`,
+  "compare.csv.refinance": (p) => `Worked out by engine ${p.engine} from each run's recorded inputs; not stored with the runs`,
 } satisfies Record<string, Entry>;
 
 export const fr: FrenchOf<typeof en> = {
@@ -113,4 +121,12 @@ export const fr: FrenchOf<typeof en> = {
   "compare.foot": "Les chiffres sont ceux que chaque analyse a consignés. Rien ici n'est recalculé.",
   "compare.open": (p) => `Ouvrir l'analyse ${p.n}`,
   "compare.openOf": (p) => `Ouvrir l'analyse ${p.n} de ${p.name}`,
+  "compare.footRefinance": "Les chiffres sont ceux que chaque analyse a consignés, sauf le prêt de refinancement, que le même moteur recalcule à partir des données consignées de chaque analyse.",
+  "compare.refinance": "Prêt de refinancement",
+  "compare.refinanceLtv": (p) => `${p.pct} de la valeur stabilisée`,
+  "compare.refinanceStated": "Tel qu'indiqué",
+  "compare.download": "Télécharger cette comparaison",
+  "compare.col.source": "Source",
+  "compare.csv.recorded": (p) => `Analyses ${p.a} et ${p.b}, consignées`,
+  "compare.csv.refinance": (p) => `Calculé par le moteur ${p.engine} à partir des données consignées de chaque analyse\u00a0; non conservé avec les analyses`,
 };

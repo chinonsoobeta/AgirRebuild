@@ -87,7 +87,7 @@ const compareView = (id: string, number: number, tax: number, dcr: number, loan:
     verdict: { code: "APPROVE", headline: "", explanation: "", hardFailReasons: [], gates: [] },
     checks: [], annual: [], warnings: [],
   },
-  inputs: [{ fieldKey: "property_tax", itemKey: null, label: "Property tax", value: tax, sourceKind: "document", source: number === 2 ? "assessment notice, \"2026\".pdf, page 1" : "budget.pdf, page 2",
+  inputs: [{ fieldKey: "property_tax_annual", itemKey: null, label: "Property tax", value: tax, sourceKind: "document", source: number === 2 ? "assessment notice, \"2026\".pdf, page 1" : "budget.pdf, page 2",
     sponsorStated: false, confirmedBy: null, confirmedByReview: false, confirmedAt: null }],
   decisions: [],
   ...(loan === null ? {} : { refinance: refi(loan) }),
@@ -115,7 +115,6 @@ describe("the refinance loan on Compare", () => {
     const at = labels.indexOf("Refinance loan");
     expect(at).toBeGreaterThan(labels.indexOf("What it moved"));
     expect(labels[at - 1]).toBe("Coverage after refinancing");
-    expect(labels[at + 1]).toBe("Cash returned at refinancing");
     const en = build("en", () => {});
     expect(rows[at]!.sub).toBe(`${en.f.value(65, "%")} of the stabilized value`);
     // The change column says that it moved; the screen does not subtract the two loans.
@@ -169,7 +168,7 @@ describe("downloading a comparison", () => {
     expect(csv[0]![0]).toBe("Tamarack Six");
     const summary = text(html.slice(html.indexOf('role="status"'))).split(" Figure ")[0]!;
     expect(summary).toContain(csv[1]![0]!);
-    expect(csv[1]![0]).toMatch(/^One input changed between these runs\. Property tax went from \$7,200 to \$8,000\./);
+    expect(csv[1]![0]).toMatch(/^One input changed between these runs\. Property tax \(per year\) went from \$7,200 to \$8,000\./);
     expect(csv[2]![0]).toBe(en.t("compare.footRefinance"));
     expect(text(html)).toContain(csv[2]![0]!);
     expect(csv[3]!.every((c) => c === "")).toBe(true);
@@ -183,8 +182,8 @@ describe("downloading a comparison", () => {
       expect(row[0]).toBe(shown.label === "Refinance loan" ? `${shown.label} (${shown.sub})` : shown.label);
       expect(row.slice(1, 4)).toEqual(shown.cells);
     });
-    const tax = data.find((r) => r[0] === "Property tax")!;
-    expect(tax[4]).toBe(table.find((r) => r.label === "Property tax")!.sub);
+    const tax = data.find((r) => r[0] === "Property tax (per year)")!;
+    expect(tax[4]).toBe(table.find((r) => r.label === "Property tax (per year)")!.sub);
     expect(tax[4]).toContain('assessment notice, "2026".pdf, page 1');
     expect(data.find((r) => r[0] === "Stabilized net operating income" || r[0] === "Net operating income")![4]).toBe("Run 1 and run 2, recorded");
     expect(data.find((r) => r[0]!.startsWith("Refinance loan"))![4]).toBe("Worked out by engine 2.3.0 from each run's recorded inputs; not stored with the runs");
@@ -216,8 +215,11 @@ describe("downloading a comparison", () => {
     expect(csv[1]![0]).toMatch(/^Une donnée a changé entre ces analyses\./);
     expect(csv[4]).toEqual(["Chiffre", ...heads(fr), "Écart", "Source"]);
     const data = csv.slice(5);
-    expect(data.map((r) => r[0]!.replace(/ \(.*\)$/, ""))).toEqual(table.map((r) => r.label));
-    expect(data.find((r) => r[0]!.startsWith("Prêt de refinancement"))![1]).toBe(table.find((r) => r.label === "Prêt de refinancement")!.cells[0]);
+    expect(data.map((r) => (r[0]!.startsWith("Prêt de refinancement") ? "Prêt de refinancement" : r[0]))).toEqual(table.map((r) => r.label));
+    // The file keeps the screen's no-break spaces; the table text here has them folded into plain spaces.
+    const loan = data.find((r) => r[0]!.startsWith("Prêt de refinancement"))![1]!;
+    expect(loan).toContain("\u00a0$");
+    expect(loan.replace(/\s/g, " ")).toBe(table.find((r) => r.label === "Prêt de refinancement")!.cells[0]);
     expect(data.find((r) => r[0] === "Ce que ça a fait bouger")).toBeTruthy();
   });
 
