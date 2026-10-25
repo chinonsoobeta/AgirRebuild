@@ -28,6 +28,7 @@ describe("card 94a cited tables", () => {
   it("Quebec published annual thresholds and municipal options", () => {
     expect(land("QC",500_000)[0]!.value).toBe(5610.50);
     expect(land("QC",500_000,"2027-01-05")[0]!.value).toBe(5565);
+    expect(land("QC",500_000,"2027-12-31")[0]!.value).toBe(5565);
     expect(land("QC",800_000)[1]!.value).toBe(13360.50);
     expect(land("QC",700_000)[2]!.value).toBe(9349);
   });
@@ -94,9 +95,9 @@ describe("card 125: document taxes require verification", () => {
 describe("card 152 owner-signed tables for invented rentals", () => {
   it("records each signed row and its individual re-check date", () => {
     const dates: Record<string,string> = {
-      "cmhc-premium":"2027-01-31", "toronto-land":"2027-04-01", "ns-land":"2027-07-31",
+      "cmhc-premium":"2027-01-31", "toronto-land":"2027-04-01", "ns-land":"2027-07-31", "qc-land-2027":"2028-01-15",
       ...Object.fromEntries(["bc-land","mb-land","on-land","nb-land","pe-land","ab-land","nl-land","sk-land","gst-hst-pbrh","on-premium-tax","sk-premium-tax"].map(id=>[id,"2027-04-30"])),
-      ...Object.fromEntries(["qc-land-2026","qc-land-2027","montreal-land","qc-premium-tax"].map(id=>[id,"2027-01-15"])),
+      ...Object.fromEntries(["qc-land-2026","montreal-land","qc-premium-tax"].map(id=>[id,"2027-01-15"])),
     };
     expect(TABLES.map(t=>t.id).sort()).toEqual(Object.keys(dates).sort());
     for (const t of TABLES) {
