@@ -2,7 +2,7 @@
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import { createElement } from "react";
 import { readFileSync } from "node:fs";
-const styles=readFileSync(new URL("../src/styles.css",import.meta.url),"utf8");
+const styles=readFileSync(new URL("../src/styles/legacy.css",import.meta.url),"utf8");
 import { randomBytes } from "node:crypto";
 import { renderToStaticMarkup } from "react-dom/server";
 import { api, ApiError, type Assumption } from "../src/api";

@@ -5,15 +5,33 @@ import { PREMIUM_TAX_HELP_FR } from "@agir/contracts";
 // 51,962,556 and 6.45% in English, 51 962 556 $ and 6,45 % in French.
 
 import { createContext, useContext, useMemo, useState, type ReactNode } from "react";
+import type { Entry } from "./strings/entry";
+import * as shellStrings from "./strings/shell";
+import * as dealsStrings from "./strings/deals";
+import * as newdealStrings from "./strings/newdeal";
+import * as quickstartStrings from "./strings/quickstart";
+import * as documentsStrings from "./strings/documents";
+import * as reviewStrings from "./strings/review";
+import * as runStrings from "./strings/run";
+import * as decisionStrings from "./strings/decision";
+import * as reportsStrings from "./strings/reports";
+import * as exploreStrings from "./strings/explore";
+import * as auditStrings from "./strings/audit";
+import * as compareStrings from "./strings/compare";
+import * as settingsStrings from "./strings/settings";
+import * as authStrings from "./strings/auth";
+import * as landingStrings from "./strings/landing";
+import * as agirreviewStrings from "./strings/agirreview";
 import { FR_VERIFY, FR_ABSENT, FR_FIELDS, FR_METRICS, STRESS, GATES, plainTerm, numberFormat, verdictText as sharedVerdictText, checkText as sharedCheckText, type VerdictLike, type CheckLike, CURRENCY_NAMES, FIELDS, FIELD_BY_KEY, METRIC_BY_KEY, placeLabel, type Currency, type ReadinessItem } from "@agir/contracts";
 
 export type Lang = "en" | "fr";
 
 // ---- Interface strings -------------------------------------------------------------------
-type Entry = string | ((p: Record<string, any>) => string | string[]);
 const s = (n: number, one: string, many: string) => (n === 1 ? one : many);
 
-const EN = {
+// Each area keeps its new strings in strings/<area>.ts; they are spread last, so a key
+// defined twice is a type error.
+export const EN = {
   "threshold.citedFailures": "Fails cited lender rules under Agir's standard",
   "threshold.invalid": "These saved values no longer fit the policy, which changed after they were set. Runs are refused until each is changed or cleared.",
   "threshold.layerDeal": "deal", "threshold.layerWorkspace": "workspace",
@@ -631,11 +649,27 @@ const EN = {
   "settings.expired": "expired",
   "settings.language": "Language",
   "settings.languageBody": "The interface and its numbers follow this choice. It is remembered on this device.",
+  ...shellStrings.en,
+  ...dealsStrings.en,
+  ...newdealStrings.en,
+  ...quickstartStrings.en,
+  ...documentsStrings.en,
+  ...reviewStrings.en,
+  ...runStrings.en,
+  ...decisionStrings.en,
+  ...reportsStrings.en,
+  ...exploreStrings.en,
+  ...auditStrings.en,
+  ...compareStrings.en,
+  ...settingsStrings.en,
+  ...authStrings.en,
+  ...landingStrings.en,
+  ...agirreviewStrings.en,
 } satisfies Record<string, Entry>;
 
 export type Key = keyof typeof EN;
 
-const FR: Record<Key, Entry> = {
+export const FR: Record<Key, Entry> = {
   "threshold.citedFailures": "Règles citées du prêteur non respectées selon le standard d'Agir",
   "threshold.invalid": "Ces valeurs enregistrées ne correspondent plus à la politique, modifiée depuis. Les analyses sont refusées tant que chacune n'est pas modifiée ou effacée.",
   "threshold.layerDeal": "projet", "threshold.layerWorkspace": "espace de travail",
@@ -1260,6 +1294,23 @@ const FR: Record<Key, Entry> = {
   "settings.expired": "expiré",
   "settings.language": "Langue",
   "settings.languageBody": "L'interface et ses nombres suivent ce choix. Il est mémorisé sur cet appareil.",
+
+  ...shellStrings.fr,
+  ...dealsStrings.fr,
+  ...newdealStrings.fr,
+  ...quickstartStrings.fr,
+  ...documentsStrings.fr,
+  ...reviewStrings.fr,
+  ...runStrings.fr,
+  ...decisionStrings.fr,
+  ...reportsStrings.fr,
+  ...exploreStrings.fr,
+  ...auditStrings.fr,
+  ...compareStrings.fr,
+  ...settingsStrings.fr,
+  ...authStrings.fr,
+  ...landingStrings.fr,
+  ...agirreviewStrings.fr,
 };
 
 // ---- Catalog labels in French ------------------------------------------------------------

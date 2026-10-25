@@ -1,0 +1,120 @@
+/* Classes today's routes use that the design (base.css) does not define, re-expressed with
+   the design's tokens, plus small compatibility rules for old markup. Each route card moves
+   its route to base.css classes; the last card deletes this file. No uppercase, no tracking. */
+
+/* Old token names used in inline styles, pointing at the design's tokens. */
+:root{--paper:var(--bg);--sunken:var(--surface-2);--rule:var(--line);--rule-strong:var(--line-2);--nav-active:var(--surface-2);--pass-text:var(--pass);--pass-tint:var(--pass-soft);--review-text:var(--review);--review-tint:var(--review-soft);--stop-text:var(--stop);--stop-tint:var(--stop-soft);--stop-deep:var(--stop);--none:var(--ink-2);--none-tint:var(--surface-2);--sans:var(--font);--serif:var(--font)}
+
+/* Type */
+.serif{font-family:var(--font);font-weight:300}
+.faint{color:var(--ink-3)}
+.h-display{font-weight:300;font-size:40px;line-height:1.15;letter-spacing:-.012em}
+.h-title{font-weight:300;font-size:34px;line-height:1.15;letter-spacing:-.012em}
+.h-section{font-size:17px;font-weight:700;line-height:1.35}
+.help,.why{font-size:13px;color:var(--ink-3);line-height:1.45}
+.error-text{font-size:13px;color:var(--stop);font-weight:700}
+.not-meaningful{color:var(--ink-2);font-style:italic}
+.sr-only{position:absolute;width:1px;height:1px;overflow:hidden;clip:rect(0 0 0 0);white-space:nowrap}
+
+/* Shell: the sidebar until the top bar replaces it */
+.shell{display:flex;min-height:100vh}
+.rail{width:232px;flex-shrink:0;padding:28px 16px;background:var(--surface);border-right:1px solid var(--line);display:flex;flex-direction:column;gap:32px;position:sticky;top:0;height:100vh}
+.brand i{display:block;width:12px;height:12px;border-radius:3px;background:var(--accent)}
+.rail .brand{padding:0 10px}
+.rail .nav{flex-direction:column;gap:2px}
+.nav a[aria-current="page"]{background:var(--surface-2);color:var(--ink)}
+.rail-foot{margin-top:auto;padding:0 10px;display:flex;flex-direction:column;gap:8px;font-size:13px}
+.rail-foot select{width:100%;min-height:36px;border:1px solid var(--line-2);border-radius:8px;background:var(--surface);color:var(--ink);padding:0 8px}
+.rail-foot .btn.quiet{border-color:transparent;background:transparent;color:var(--accent)}
+.shell>main.page{flex:1 1 auto;min-width:0;display:flex;flex-direction:column;gap:28px}
+
+/* Layout */
+.spread{display:flex;align-items:center;justify-content:space-between;gap:16px;flex-wrap:wrap}
+.grow{flex-grow:1}
+.two-col{display:grid;grid-template-columns:minmax(0,1.25fr) minmax(0,1fr);gap:32px;align-items:start}
+.side{display:grid;grid-template-columns:minmax(0,1fr) 340px;gap:32px;align-items:start}
+
+/* Buttons: old modifiers */
+.btn.small{min-height:34px;padding:0 12px;font-size:14px;border-radius:8px}
+.btn:not(.primary):not(.quiet):not(.ghost):not(.danger){background:var(--surface);color:var(--ink);border-color:var(--line-2)}
+.btn:not(.primary):not(.quiet):not(.ghost):not(.danger):hover{background:var(--surface-2)}
+.btn:disabled,.btn[aria-disabled="true"]{opacity:.55;cursor:default}
+
+/* Tags and chips: old modifiers */
+.tag.neutral,.tag.none{background:var(--surface-2);color:var(--ink-2)}
+.tag.outline{background:var(--surface);border:1px solid currentColor}
+.tag.plain{gap:6px}
+span.chip{gap:6px;min-height:26px;padding:0 10px;font-size:13px;cursor:default}
+span.chip:hover{background:var(--surface)}
+
+/* Forms */
+.field>.label-text{font-size:15px;color:var(--ink)}
+.input-affix{display:flex;align-items:center;min-height:42px;border:1px solid var(--line-2);border-radius:9px;background:var(--surface);color:var(--ink)}
+.input-affix:focus-within{border-color:var(--accent);outline:2px solid var(--accent);outline-offset:0}
+.input-affix input{flex-grow:1;min-width:0;min-height:40px;border:0;background:transparent;padding:0 12px;font-variant-numeric:tabular-nums lining-nums}
+.input-affix input:focus{outline:0}
+.input-affix span{padding:0 12px;color:var(--ink-3)}
+.input-affix select{border:0;background:transparent;min-height:40px;padding:0 8px;color:var(--ink-3)}
+.choice:has(input:checked){border-color:var(--accent);background:var(--accent-soft)}
+.choice .val{font-size:20px;font-variant-numeric:tabular-nums lining-nums}
+.choice>span{min-width:0;overflow-wrap:anywhere}
+
+/* Panels, old cards and tables */
+.panel{background:var(--surface);border:1px solid var(--line);border-radius:12px;box-shadow:var(--shadow);padding:20px 22px}
+.card:not(:has(>.card-head,>.card-pad,>.card-foot,>.scroll,>.table)){padding:20px 22px;display:flex;flex-direction:column;gap:14px}
+.card.focus{outline:2px solid var(--accent);outline-offset:-1px}
+.tbl{width:100%;background:var(--surface);border:1px solid var(--line);font-size:15px}
+.tbl th{text-align:left;padding:10px 18px;font-size:13px;font-weight:400;color:var(--ink-3);border-bottom:1px solid var(--line);white-space:nowrap}
+.tbl td,.tbl tbody th{padding:12px 18px;border-bottom:1px solid var(--line);vertical-align:top;text-align:left;font-weight:400}
+.tbl tbody th{font-size:inherit;color:var(--ink);white-space:normal}
+.tbl td.r{white-space:nowrap}
+.tbl tbody tr:last-child td,.tbl tbody tr:last-child th{border-bottom:0}
+.tbl .r{text-align:right;font-variant-numeric:tabular-nums lining-nums}
+.tbl tr.emph{background:var(--surface-2)}
+.tbl tr.emph td,.tbl tr.emph th{font-weight:700}
+.formula{padding:16px 18px;background:var(--surface-2);border-radius:10px;font-size:14px;line-height:1.8;font-variant-numeric:tabular-nums lining-nums}
+.source-quote{padding:10px 12px;background:var(--surface-2);border-radius:8px;font-family:var(--mono);font-size:13px;line-height:1.6;color:var(--ink-2);word-break:break-word}
+.source-quote mark{background:var(--accent-soft);color:var(--ink);border-bottom:2px solid var(--accent-line);padding:0 2px}
+.bar:has(>span:not(.lo,.hi,.mid)){display:flex;gap:2px;height:8px;background:transparent;border-radius:0}
+.bar>span:not(.lo,.hi,.mid){display:block}
+
+/* The deal's step list, until the path replaces it */
+.stepper{margin:0;padding:0;list-style:none;display:grid;grid-template-columns:repeat(5,minmax(0,1fr))}
+.stepper li a{display:flex;flex-direction:column;gap:4px;padding:14px 16px 16px 0;border-top:2px solid var(--line-2);color:var(--ink);min-height:72px}
+.stepper li a:hover{text-decoration:none}
+.stepper li a:hover .step-name{text-decoration:underline}
+.stepper li a[aria-current="step"]{border-top-color:var(--accent)}
+.stepper li a[aria-current="step"] .step-name{font-weight:700;color:var(--accent)}
+.step-name .num{font-size:13px;color:var(--ink-3);margin-right:8px}
+.step-state{display:inline-flex;align-items:center;gap:6px}
+.step-state.stop{color:var(--stop)}
+
+/* Sign-in pages, until their card */
+.auth{min-height:100vh;display:grid;grid-template-columns:minmax(0,1fr) minmax(0,1fr)}
+.auth-left{padding:72px 80px;background:var(--surface-2);border-right:1px solid var(--line);display:flex;flex-direction:column;justify-content:space-between;gap:48px}
+.auth-right{padding:72px 80px;display:flex;flex-direction:column;justify-content:center}
+.auth form{max-width:420px;display:flex;flex-direction:column;gap:18px}
+
+/* Dialog */
+dialog{border:1px solid var(--line);border-radius:12px;padding:0;background:var(--surface);color:var(--ink);width:min(520px,92vw)}
+dialog::backdrop{background:var(--backdrop)}
+dialog form{padding:24px;display:flex;flex-direction:column;gap:16px}
+
+@media (max-width:1100px){
+  .two-col,.side{grid-template-columns:minmax(0,1fr)}
+  .shell>main.page{padding:28px 24px 56px}
+}
+@media (max-width:760px){
+  .shell{flex-direction:column}
+  .rail{width:auto;height:auto;position:static;flex-direction:row;align-items:center;padding:12px 16px;border-right:0;border-bottom:1px solid var(--line);gap:16px}
+  .rail .nav{flex-direction:row}
+  .rail-foot{margin-left:auto;margin-top:0;padding:0;flex-direction:row;align-items:center;gap:4px}
+  .rail-foot .wide-only{display:none}
+  .tbl{position:relative;display:block;overflow-x:auto;max-width:100%}
+  .stepper{grid-template-columns:repeat(5,minmax(120px,1fr));overflow-x:auto}
+  .auth{grid-template-columns:minmax(0,1fr)}
+  .auth-left{border-right:0;border-bottom:1px solid var(--line);padding:40px 24px}
+  .auth-right{padding:40px 24px}
+  .h-display{font-size:32px}
+  .h-title{font-size:28px}
+}

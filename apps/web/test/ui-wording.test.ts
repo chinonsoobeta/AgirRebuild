@@ -26,6 +26,9 @@ describe("interface wording", () => {
     expect(Object.values(EN).filter((e) => typeof e === "string").length).toBeGreaterThan(100);
     expect(Object.values(FR).filter((e) => typeof e === "string").length).toBeGreaterThan(100);
   });
+  it("has a French entry for every English key, and no other", () => {
+    expect(Object.keys(FR).sort()).toEqual(Object.keys(EN).sort());
+  });
   it("uses no capitalised word in English except real acronyms", () => {
     expect(shouting(EN)).toEqual([]);
   });

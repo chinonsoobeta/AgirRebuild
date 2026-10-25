@@ -153,18 +153,18 @@ describe("the kit", () => {
     expect(radio).toContain("<fieldset");
     expect(radio).toContain('<legend class="label">Your decision</legend>');
     expect(radio).toContain('<div class="choices">');
-    expect(radio).toContain('<label class="choice on"><input type="radio" name="d" value="approve" checked=""/><span><span class="t">Approve</span><span class="d">Go ahead as the run stands.</span></span></label>');
+    expect(radio).toContain('<label class="choice on"><input type="radio" name="d" checked="" value="approve"/><span><span class="t">Approve</span><span class="d">Go ahead as the run stands.</span></span></label>');
     expect(radio).toContain('<label class="choice"><input type="radio" name="d" value="reject"/><span><span class="t">Reject</span></span></label>');
     const boxes = renderToStaticMarkup(createElement(ChoiceCards, { name: "k", legend: "Keep", multiple: true, value: ["reject"], onChange: () => {}, options }));
     expect(boxes).toContain('<label class="choice"><input type="checkbox" name="k" value="approve"/>');
-    expect(boxes).toContain('<label class="choice on"><input type="checkbox" name="k" value="reject" checked=""/>');
+    expect(boxes).toContain('<label class="choice on"><input type="checkbox" name="k" checked="" value="reject"/>');
   });
 });
 
 describe("the shared status pieces, in the design's look", () => {
   it("StatusTag is a tag with a dot, keeping its text", () => {
-    expect(renderToStaticMarkup(createElement(StatusTag, { tone: "review" }, "Needs review"))).toBe('<span class="tag review">Needs review</span>');
-    expect(renderToStaticMarkup(createElement(StatusTag, { tone: "neutral" }, "Reading"))).toBe('<span class="tag">Reading</span>');
+    expect(renderToStaticMarkup(createElement(StatusTag, { tone: "review", children: "Needs review" }))).toBe('<span class="tag review">Needs review</span>');
+    expect(renderToStaticMarkup(createElement(StatusTag, { tone: "neutral", children: "Reading" }))).toBe('<span class="tag">Reading</span>');
   });
   it("VerdictBadge is a toned tag in sentence case", () => {
     const badge = (code: string) => html(createElement(VerdictBadge, { code }));

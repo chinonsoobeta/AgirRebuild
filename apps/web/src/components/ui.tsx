@@ -4,6 +4,7 @@ import { createContext, useContext, useEffect, useRef, useState, type FormEvent,
 import { api, ApiError, type DealOverview, type Me, type Tone } from "../api";
 import { dealStatus, useI18n } from "../i18n";
 import * as I from "./icons";
+import { Notice, Tag, ThemeToggle, type TagTone } from "./kit";
 
 // ---- Session and workspace -----------------------------------------------------------
 
@@ -94,6 +95,7 @@ export function Shell({ children }: { children: ReactNode }) {
             )}
             <span className="faint">{me.user.name} · {L.role(role)}</span>
           </div>
+          <ThemeToggle />
           <LanguageSwitch />
           <button type="button" className="btn quiet small" style={{ alignSelf: "flex-start", paddingLeft: 0 }} onClick={signOut}>{t("nav.signOut")}</button>
         </div>
@@ -105,17 +107,18 @@ export function Shell({ children }: { children: ReactNode }) {
 
 // ---- Status -------------------------------------------------------------------------------
 
-const TONE_GLYPH: Record<Tone, (p: { size?: number }) => React.JSX.Element> = { pass: I.Check, review: I.Eye, stop: I.Stop, neutral: I.Spinner };
-
+/** A status as the design's tag: a dot and a word. A glyph, when one is given, stands in for the dot. */
 export function StatusTag({ tone, children, glyph }: { tone: Tone; children: ReactNode; glyph?: (p: { size?: number }) => React.JSX.Element }) {
-  const G = glyph ?? TONE_GLYPH[tone];
-  return <span className={`tag ${tone}`}><G size={14} />{children}</span>;
+  const cls = tone === "neutral" ? "tag" : `tag ${tone}`;
+  if (!glyph) return <span className={cls}>{children}</span>;
+  const G = glyph;
+  return <span className={`${cls} plain`}><G size={14} />{children}</span>;
 }
 
+const VERDICT_TONE: Record<string, TagTone> = { APPROVE: "pass", APPROVE_WITH_CONDITIONS: "review", REJECT: "stop" };
 export function VerdictBadge({ code }: { code: string }) {
   const { L } = useI18n();
-  const G = code === "APPROVE" ? I.Check : code === "APPROVE_WITH_CONDITIONS" ? I.Eye : code === "REJECT" ? I.Stop : I.Dashed;
-  return <span className={`badge ${code}`}><G size={14} />{L.verdict(code)}</span>;
+  return <Tag tone={VERDICT_TONE[code] ?? "neutral"}>{L.verdict(code)}</Tag>;
 }
 
 export function MetricValue({ value, unit, status, reason }: { value: number | null; unit: string; status: string; reason?: string | undefined }) {
@@ -131,16 +134,7 @@ export function MetricValue({ value, unit, status, reason }: { value: number | n
 }
 
 export function Banner({ tone, title, children }: { tone: "stop" | "review" | "neutral"; title: string; children?: ReactNode }) {
-  const G = tone === "stop" ? I.Stop : tone === "review" ? I.Eye : I.Dashed;
-  return (
-    <div className={`banner ${tone}`} role="status">
-      <G size={18} />
-      <div className="stack" style={{ gap: 4 }}>
-        <strong>{title}</strong>
-        {children}
-      </div>
-    </div>
-  );
+  return <Notice tone={tone === "neutral" ? undefined : tone} title={title} role="status">{children}</Notice>;
 }
 
 export function ErrorText({ error }: { error: unknown }) {
