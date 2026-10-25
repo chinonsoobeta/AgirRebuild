@@ -176,4 +176,8 @@ describe("making a new link for an open invitation", () => {
   it("translates the server's sentence for an invitation that is gone", () => {
     expect(translateMessage("This invitation is not there any more.")).toBe("Cette invitation n'existe plus.");
   });
+  it("translates the sentences for an invitation already used or withdrawn, or not found", () => {
+    expect(translateMessage("This invitation is already used or revoked.")).toBe("Cette invitation a déjà été utilisée ou annulée.");
+    expect(translateMessage("Invitation not found")).toBe("Cette invitation n'existe plus.");
+  });
 });
