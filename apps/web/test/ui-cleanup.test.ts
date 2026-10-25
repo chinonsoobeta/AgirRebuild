@@ -154,5 +154,8 @@ describe("settings and the legal pages on a narrow screen", () => {
   });
   it("let the side list scroll away with the page instead of sticking over the content", () => {
     expect(narrow).toContain(".set-nav,.toc{position:static}");
+    // After the sticky rules, which would otherwise win at the same specificity.
+    const at = (start: string) => base.split("\n").findIndex((l) => l.startsWith(start));
+    expect(at("@media (max-width:900px){.set{")).toBeGreaterThan(Math.max(at(".set-nav{"), at(".toc{")));
   });
 });
