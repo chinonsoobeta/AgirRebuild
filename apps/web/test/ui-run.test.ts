@@ -53,15 +53,15 @@ describe("the run screen in the new design (card W8)", () => {
       { id: "run-1", run_number: 1, verdict_code: "APPROVE", created_at: "2026-10-22T10:00:00Z", created_by: "Invented author" }];
   });
 
-  it("shows the in-progress card while the run is pending, with the steps and no stop button or times", () => {
+  it("shows the in-progress card while the run is pending, with the steps, Stop, and no times before a stage finishes (card R1)", () => {
     state.pending = true;
     const html = render();
     const words = text(html);
     expect(words).toContain(en.t("run.inProgress", { n: 3 }));
     expect(html).toContain('class="runlist"');
     expect(words).toContain(en.t("run.neverTitle"));
-    expect(words).not.toMatch(/stop this run/i);
-    expect(words).not.toMatch(/\bnow\b|under a minute|email you/i);
+    expect(words).toMatch(/stop this run/i);
+    expect(words).not.toMatch(/under a minute|email you/i);
     expect(words).not.toMatch(/\d{1,2}:\d{2}/);
     expect(words).not.toContain(en.t("run.keyFigures"));
   });

@@ -19,14 +19,58 @@ async function request<T>(method: string, path: string, body?: unknown, raw?: Bl
   return data as T;
 }
 
+/** A POST answered with one JSON object a line (a run's progress, card R1). Each line goes to `onLine` as it comes;
+    an `error` line throws ApiError, as the plain route would have. Returns the last line. */
+async function streamLines<T extends object>(path: string, headers: Record<string, string>, onLine: (line: T) => void): Promise<T> {
+  const res = await fetch(`/api${path}`, { method: "POST", credentials: "same-origin", headers: { "x-agir": "1", ...headers } });
+  if (!res.ok || !res.body) {
+    const text = await res.text();
+    const data = text ? JSON.parse(text) : null;
+    throw new ApiError(res.status, data?.error ?? `Request failed (${res.status})`, data?.detail);
+  }
+  const reader = res.body.getReader();
+  const decoder = new TextDecoder();
+  let buffered = "";
+  let last: T | undefined;
+  const take = (raw: string) => {
+    if (!raw.trim()) return;
+    const line = JSON.parse(raw);
+    if (line?.error) throw new ApiError(line.error.status, line.error.message, line.error.detail);
+    last = line;
+    onLine(line);
+  };
+  for (;;) {
+    const { done, value } = await reader.read();
+    if (done) break;
+    buffered += decoder.decode(value, { stream: true });
+    for (let n = buffered.indexOf("\n"); n >= 0; n = buffered.indexOf("\n")) {
+      take(buffered.slice(0, n));
+      buffered = buffered.slice(n + 1);
+    }
+  }
+  take(buffered + decoder.decode());
+  if (!last || !("done" in last || "stopped" in last)) throw new ApiError(0, RUN_CUT_OFF);
+  return last;
+}
+/** The stream ended without its last line: the run may or may not have been recorded. */
+const RUN_CUT_OFF = "The connection closed before the run finished. Open the deal again to see whether it was recorded.";
+
 export const api = {
   get: <T>(p: string) => request<T>("GET", p),
+  stream: streamLines,
   post: <T>(p: string, body?: unknown) => request<T>("POST", p, body ?? {}),
   upload: <T>(p: string, file: File, method: "PUT" | "POST" = "PUT") => request<T>(method, p, undefined, file),
   del: <T>(p: string, body: unknown) => request<T>("DELETE", p, body),
 };
 
 // ---- Response shapes ---------------------------------------------------------------
+/** A streamed run (card R1). */
+export type RunStage = "inputs" | "ledger" | "loans" | "stresses" | "gates" | "record";
+export type RunFacts = { approved: number; defaults: number; policyVersion: string; policyDraft: boolean; exit: "sale" | "refinance_hold" | "for_sale";
+  constructionMonths: number; holdYears?: number | undefined; stresses: number; inputHash: string; engineVersion: string };
+export type RunLine = { stage: RunStage; at: string; facts?: RunFacts } | { done: { id: string } } | { stopped: true };
+/** What the screen holds while a run streams: the time each stage finished, and the facts from the inputs stage. */
+export type RunProgress = { stages: Partial<Record<RunStage, string>>; facts?: RunFacts | undefined };
 export type Me = { user: { id: string; email: string; name: string }; workspaces: { id: string; name: string; review_mode: "team" | "solo"; label_suggestions: boolean; has_logo: boolean; role: "owner" | "admin" | "analyst" | "viewer" | "reviewer" | "client" }[] };
 export type Tone = "pass" | "review" | "stop" | "neutral";
 export type DealOverview = {
