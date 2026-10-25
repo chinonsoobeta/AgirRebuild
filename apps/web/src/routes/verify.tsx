@@ -64,7 +64,10 @@ export function Verify() {
   }, [token, qc]);
 
   const signedIn = Boolean(me.data);
-  const loading = !me.data && !me.error;
+  // Refetching a signed-out session puts it back to loading; once answered, the page stays as it was.
+  const answered = useRef(false);
+  if (me.data || me.error) answered.current = true;
+  const loading = !me.data && !me.error && !answered.current;
   const otherError = me.error && !(me.error instanceof ApiError && me.error.status === 401) ? me.error : null;
 
   const submit = async (e: FormEvent<HTMLFormElement>) => {
