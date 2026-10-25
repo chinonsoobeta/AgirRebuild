@@ -118,17 +118,22 @@ export function LogoPanel({ workspaceId, hasLogo }: { workspaceId: string; hasLo
 type DealCounts = { deal_id?: string; name?: string; docs_pdf: number; docs_xlsx: number; docs_csv: number; docs_docx: number; docs_txt: number; docs_no_candidates: number;
   figures_read: number; figures_confirmed_from_suggestion: number; figures_typed: number; actions_until_runnable: number; minutes_upload_to_run?: number | null };
 export function CountsPanel({ workspaceId }: { workspaceId: string }) {
-  const { t } = useI18n();
+  const { t, lang } = useI18n();
   // The plain totals (card X2) only count and add up records: deals, runs, report files, documents.
   const list = useQuery({ queryKey: ["deals", workspaceId], queryFn: () => api.get<DealOverview[]>(`/workspaces/${workspaceId}/deals`) });
   const sum = (n: (d: DealOverview) => number) => (list.data ?? []).reduce((total, d) => total + n(d), 0);
-  const q = useQuery({ queryKey: ["deal-metrics", workspaceId], queryFn: () => api.get<{ deals: DealCounts[]; totals: DealCounts & { deals: number; archived_deals?: number } }>(`/workspaces/${workspaceId}/deal-metrics`) });
+  const q = useQuery({ queryKey: ["deal-metrics", workspaceId], queryFn: () => api.get<{ deals: DealCounts[]; totals: DealCounts & { deals: number; archived_deals?: number;
+    runs?: number; first_run_at?: string | null; reports?: number; reports_shared?: number } }>(`/workspaces/${workspaceId}/deal-metrics`) });
   const cells = (r: DealCounts) => [
     [r.docs_pdf, r.docs_xlsx, r.docs_csv, r.docs_docx, r.docs_txt].join(" / "), r.docs_no_candidates, r.figures_read,
     r.figures_confirmed_from_suggestion, r.figures_typed, r.actions_until_runnable,
   ];
   const deals = q.data?.deals ?? [];
   const archived = q.data?.totals.archived_deals ?? 0;
+  // Runs and report files are counted by the server for the deals that are not archived (card R4).
+  const totals = q.data?.totals;
+  const runs = typeof totals?.runs === "number" ? totals.runs : null;
+  const reports = typeof totals?.reports === "number" ? totals.reports : null;
   return (
     <section className="card card-pad section" id="counts">
       <h2 className="h2">{t("counts.title")}</h2>
@@ -137,8 +142,8 @@ export function CountsPanel({ workspaceId }: { workspaceId: string }) {
         <Figures>
           {/* The list leaves archived deals out; the counts say how many there are (card Z1). */}
           <Figure k={t("settings.ct.deals")} v={list.data.length} s={archived > 0 ? t("settings.ct.archived", { n: archived }) : undefined} />
-          <Figure k={t("settings.ct.runs")} v={sum((d) => d.run?.number ?? 0)} />
-          <Figure k={t("settings.ct.reports")} v={sum((d) => d.reports)} />
+          <Figure k={t("settings.ct.runs")} v={runs ?? "—"} s={runs !== null && runs > 0 && totals?.first_run_at ? t("settings.ct.since", { date: sinceDay(totals.first_run_at, lang) }) : undefined} />
+          <Figure k={t("settings.ct.reports")} v={reports ?? "—"} s={totals?.reports_shared ? t("settings.ct.shared", { n: totals.reports_shared }) : undefined} />
           <Figure k={t("settings.ct.docs")} v={sum((d) => d.documents.total)} s={q.data ? t("settings.ct.typing", { n: q.data.totals.docs_no_candidates }) : undefined} />
         </Figures>
       )}
@@ -171,6 +176,16 @@ const shortDay = (iso: string, lang: string) => {
   const d = new Date(iso);
   return d.toLocaleDateString(lang === "fr" ? "fr-CA" : "en-CA", { month: "short", day: "numeric", ...(d.getFullYear() !== new Date().getFullYear() ? { year: "numeric" } : {}) });
 };
+
+/** The day runs began, as the board's "1 Oct 2026": always with its year. */
+const sinceDay = (iso: string, lang: string) => new Date(iso).toLocaleDateString(lang === "fr" ? "fr-CA" : "en-CA", { month: "short", day: "numeric", year: "numeric" });
+
+/** A signed-in session as the server lists it (card R4); `device` is null for one made before devices were kept. */
+type SignedIn = { device: string | null; signedInAt: string; current: boolean };
+const DEVICE_SLUG: Record<string, "mac" | "iphone" | "ipad" | "androidPhone" | "androidTablet" | "windows" | "linux" | "chromebook"> = {
+  Mac: "mac", iPhone: "iphone", iPad: "ipad", "Android phone": "androidPhone", "Android tablet": "androidTablet", "Windows PC": "windows", "Linux computer": "linux", Chromebook: "chromebook",
+};
+const deviceSlug = (device: string | null) => (device && DEVICE_SLUG[device]) || "unknown";
 
 /** Every deal's clients and open invitations in one table, and the form that invites a client to a deal (card X2). */
 function Clients() {
@@ -328,7 +343,7 @@ export function Settings() {
   const rename = useMutation({ mutationFn: (name: string) => api.post(`/workspaces/${workspaceId}/name`, { name }), onSuccess: () => { setSaved("ws"); return qc.invalidateQueries({ queryKey: ["me"] }); } });
   const removeMember = useMutation({ mutationFn: (id: string) => api.del(`/workspaces/${workspaceId}/members/${id}`, {}), onSuccess: () => qc.invalidateQueries({ queryKey: ["members"] }) });
   const myName = useMutation({ mutationFn: (name: string) => api.post(`/me/name`, { name }), onSuccess: () => { setSaved("me"); return qc.invalidateQueries({ queryKey: ["me"] }); } });
-  const sessions = useQuery({ queryKey: ["sessions"], queryFn: () => api.get<{ count: number }>(`/me/sessions`) });
+  const sessions = useQuery({ queryKey: ["sessions"], queryFn: () => api.get<{ count: number; devices: SignedIn[] }>(`/me/sessions`) });
   const [ended, setEnded] = useState<number | null>(null);
   const endOthers = useMutation({
     mutationFn: () => api.post<{ ended: number }>(`/me/sessions/end-others`),
@@ -522,10 +537,17 @@ export function Settings() {
           <div><dt className="label">{t("settings.ac.email")}</dt><dd>{me.user.email}{me.user.email_verified && <> <Tag tone="pass">{t("auth.verify.confirmed")}</Tag></>}</dd></div>
         </dl>
         {me.user.email_verified === false && <ConfirmEmail />}
-        {/* The server keeps no device names, so the count is said instead (card Z1). */}
+        {/* Each live session by the kind of device it signed in from, this one first (card R4). */}
         <div>
           <Row title={t("settings.ac.devices")}
-            body={count === null ? (sessions.error ? undefined : t("common.loading")) : count > 1 ? t("settings.ac.devicesN", { n: count }) : t("settings.ac.devicesOne")}>
+            body={!sessions.data?.devices ? (sessions.error ? undefined : t("common.loading")) : (
+              <ul className="set-list">
+                {sessions.data.devices.map((d, i) => (
+                  <li key={i}>{d.current ? t(`settings.ac.this.${deviceSlug(d.device)}`)
+                    : t("settings.ac.signedIn", { device: t(`settings.ac.a.${deviceSlug(d.device)}`), date: shortDay(d.signedInAt, lang) })}</li>
+                ))}
+              </ul>
+            )}>
             {count !== null && count > 1 && (
               <button className="btn quiet sm" type="button" disabled={endOthers.isPending}
                 onClick={() => { setEnded(null); return window.confirm(t("settings.ac.signOutConfirm")) && endOthers.mutate(undefined); }}>{t("settings.ac.signOutOthers")}</button>

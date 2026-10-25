@@ -26,12 +26,30 @@ export const PASSWORD_RULE = z.string().min(10, "Use at least 10 characters").ma
 const tokenHash = (t: string) => createHash("sha256").update(t).digest("hex");
 export const SESSION_DAYS = 14;
 
-export async function createSession(db: Db, userId: string): Promise<string> {
+export type DeviceLabel = "Mac" | "iPhone" | "iPad" | "Android phone" | "Android tablet" | "Windows PC" | "Linux computer" | "Chromebook";
+
+/** The kind of device a browser's user agent names, or null when it cannot tell. Never the browser or its version. */
+export function deviceLabel(userAgent: string | undefined): DeviceLabel | null {
+  const ua = (userAgent ?? "").slice(0, 512);
+  if (!ua || /Windows Phone/i.test(ua)) return null;
+  if (/iPad/.test(ua)) return "iPad";
+  if (/iPhone/.test(ua)) return "iPhone";
+  if (/Android/i.test(ua)) return /Mobile/i.test(ua) ? "Android phone" : "Android tablet";
+  if (/CrOS/.test(ua)) return "Chromebook";
+  if (/Windows NT/i.test(ua)) return "Windows PC";
+  if (/Macintosh|Mac OS X/.test(ua)) return "Mac";
+  if (/Linux|X11/.test(ua)) return "Linux computer";
+  return null;
+}
+
+/** Starts a session. `device` is the label from deviceLabel, never the user agent itself. */
+export async function createSession(db: Db, userId: string, device?: DeviceLabel | null): Promise<string> {
   const token = randomBytes(32).toString("base64url");
-  await db.query(`insert into sessions (token_hash, user_id, expires_at) values ($1, $2, now() + ($3 || ' days')::interval)`, [
+  await db.query(`insert into sessions (token_hash, user_id, expires_at, device) values ($1, $2, now() + ($3 || ' days')::interval, $4)`, [
     tokenHash(token),
     userId,
     String(SESSION_DAYS),
+    device ?? null,
   ]);
   return token;
 }
@@ -53,6 +71,15 @@ export async function endSession(db: Db, token: string | undefined) {
 export async function countSessions(db: Db, userId: string): Promise<number> {
   const [r] = await db.query<{ n: number }>(`select count(*)::int as n from sessions where user_id = $1 and expires_at > now()`, [userId]);
   return r?.n ?? 0;
+}
+
+/** The person's live sessions: the kind of device and when it signed in, the current one first, then newest first. Never a token or its hash. */
+export async function listSessions(db: Db, userId: string, token: string | undefined): Promise<{ device: string | null; signedInAt: string; current: boolean }[]> {
+  const rows = await db.query<{ device: string | null; created_at: string | Date; current: boolean }>(
+    `select device, created_at, token_hash = $2 as current from sessions where user_id = $1 and expires_at > now() order by token_hash = $2 desc, created_at desc`,
+    [userId, token ? tokenHash(token) : ""],
+  );
+  return rows.map((r) => ({ device: r.device, signedInAt: new Date(r.created_at).toISOString(), current: r.current }));
 }
 
 /** Ends every other session of the person, keeping the one with this token. Answers how many live ones ended. */

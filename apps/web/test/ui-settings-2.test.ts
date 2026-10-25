@@ -205,7 +205,7 @@ describe("clients across every deal", () => {
 describe("plain counts", () => {
   it("shows the owner the four totals, with documents that needed typing", () => {
     state.deals = [deal("d1", "Larch Court", 3, 2, 10), deal("d2", "Harbour Lane", null, 5, 4)];
-    state.metrics = { deals: [], totals: { deals: 2, docs_no_candidates: 2 } };
+    state.metrics = { deals: [], totals: { deals: 2, docs_no_candidates: 2, runs: 3, first_run_at: null, reports: 7, reports_shared: 0 } };
     const counts = section(render(), "counts");
     const figs = [...counts.matchAll(/<dt class="k">([^<]+)<\/dt><dd class="v">([^<]+)<\/dd>(?:<dd class="s">([^<]+)<\/dd>)?/g)].map((m) => [m[1], m[2], m[3]]);
     expect(figs).toEqual([["Deals", "2", undefined], ["Runs", "3", undefined], ["Reports made", "7", undefined], ["Documents read", "14", "2 needed typing"]]);

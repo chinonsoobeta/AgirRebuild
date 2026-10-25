@@ -6,7 +6,7 @@ import type { Context, Hono } from "hono";
 import { getCookie, setCookie } from "hono/cookie";
 import { z } from "zod";
 import type { Db } from "@agir/db";
-import { createSession, hashPassword, PASSWORD_RULE, rateLimiter, userForSession } from "./auth.ts";
+import { createSession, deviceLabel, hashPassword, PASSWORD_RULE, rateLimiter, userForSession } from "./auth.ts";
 import type { Mailer } from "./mailer.ts";
 
 type Kind = "verify_email" | "reset_password";
@@ -161,7 +161,7 @@ export function emailAuth({ db, mailer, publicOrigin, cookie, cookieOpts, client
         return id;
       });
       if (!userId) return c.json({ error: "This link does not work any more. It may have been used or expired. Ask for a new one." }, 400);
-      setCookie(c, cookie, await createSession(db, userId), cookieOpts);
+      setCookie(c, cookie, await createSession(db, userId, deviceLabel(c.req.header("user-agent"))), cookieOpts);
       return c.json({ ok: true });
     });
   }

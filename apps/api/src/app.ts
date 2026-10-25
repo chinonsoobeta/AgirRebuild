@@ -8,7 +8,7 @@ import { asUser, type BlobStore, type Db } from "@agir/db";
 import { breakeven, DRIVERS, driversFor, SALE_DRIVERS, EngineInputError, explore, grid, tornado, type DriverKey, type Shock } from "@agir/engine";
 import { canonicalItem, itemFold, kindOf } from "@agir/extraction";
 import { MAX_UPLOAD_BYTES } from "@agir/worker";
-import { checkPassword, countSessions, createSession, endOtherSessions, endSession, hashPassword, PASSWORD_RULE, rateLimiter, SESSION_DAYS, userForSession } from "./auth.ts";
+import { checkPassword, countSessions, createSession, deviceLabel, endOtherSessions, endSession, hashPassword, listSessions, PASSWORD_RULE, rateLimiter, SESSION_DAYS, userForSession } from "./auth.ts";
 import { emailAuth } from "./email-auth.ts";
 import type { Mailer } from "./mailer.ts";
 import { thresholdsView, auditPackage, clientViewer, createRun, dealOverview, hideClientEvents, HttpError, labelRefusal, regionGroups, reviewView, runView, sha256 } from "./services.ts";
@@ -125,7 +125,7 @@ export function createApp({ db, store, secureCookies, demoSignIn = false, trustP
         return u!.id;
       });
       await emailFlows.sendVerification({ id: userId, email });
-      setCookie(c, COOKIE, await createSession(db, userId), cookieOpts);
+      setCookie(c, COOKIE, await createSession(db, userId, deviceLabel(c.req.header("user-agent"))), cookieOpts);
       return c.json({ ok: true });
     }
     const [u] = await db.query<{ id: string }>(`insert into users (email, name, password_hash) values ($1, $2, $3) returning id`, [
@@ -135,7 +135,7 @@ export function createApp({ db, store, secureCookies, demoSignIn = false, trustP
     ]);
     await asUser(db, u!.id, (tx) => createWorkspace(tx, `${body.name.split(" ")[0]}'s workspace`, body.reviewMode));
     await emailFlows.sendVerification({ id: u!.id, email });
-    setCookie(c, COOKIE, await createSession(db, u!.id), cookieOpts);
+    setCookie(c, COOKIE, await createSession(db, u!.id, deviceLabel(c.req.header("user-agent"))), cookieOpts);
     return c.json({ ok: true });
   });
 
@@ -144,7 +144,7 @@ export function createApp({ db, store, secureCookies, demoSignIn = false, trustP
     const body = z.object({ email: z.string(), password: z.string() }).parse(await c.req.json());
     const [u] = await db.query<{ id: string; password_hash: string }>(`select id, password_hash from users where email = $1`, [body.email.toLowerCase()]);
     if (!u || !(await checkPassword(body.password, u.password_hash))) return c.json({ error: "That email and password do not match." }, 401);
-    setCookie(c, COOKIE, await createSession(db, u.id), cookieOpts);
+    setCookie(c, COOKIE, await createSession(db, u.id, deviceLabel(c.req.header("user-agent"))), cookieOpts);
     return c.json({ ok: true });
   });
 
@@ -158,7 +158,7 @@ export function createApp({ db, store, secureCookies, demoSignIn = false, trustP
       const email = who === "analyst" ? "demo@agir.local" : "reviewer@agir.local";
       const [u] = await db.query<{ id: string }>(`select id from users where email = $1`, [email]);
       if (!u) return c.json({ error: "The demo data has not been seeded." }, 404);
-      setCookie(c, COOKIE, await createSession(db, u.id), cookieOpts);
+      setCookie(c, COOKIE, await createSession(db, u.id, deviceLabel(c.req.header("user-agent"))), cookieOpts);
       return c.json({ ok: true });
     });
   }
@@ -236,7 +236,10 @@ export function createApp({ db, store, secureCookies, demoSignIn = false, trustP
   });
 
   // Sessions are read and ended with the service principal, as sign-out does; the session middleware checked this one.
-  app.get("/api/me/sessions", async (c) => c.json({ count: await countSessions(db, c.get("user").id) }));
+  app.get("/api/me/sessions", async (c) => {
+    const id = c.get("user").id;
+    return c.json({ count: await countSessions(db, id), devices: await listSessions(db, id, getCookie(c, COOKIE)) });
+  });
 
   app.post("/api/me/sessions/end-others", async (c) => {
     const ended = await endOtherSessions(db, c.get("user").id, getCookie(c, COOKIE)!);
@@ -361,17 +364,31 @@ export function createApp({ db, store, secureCookies, demoSignIn = false, trustP
   // ---- Production counts (card 155): counts and durations per deal, never content; the owner only. ----------
   app.get("/api/workspaces/:ws/deal-metrics", async (c) => {
     const ws = z.string().uuid().parse(c.req.param("ws"));
-    const { deals, archived } = await as(c, async (tx) => {
+    const { deals, archived, runCounts } = await as(c, async (tx) => {
       const [m] = await tx.query<{ role: string }>(`select role from workspace_members where workspace_id = $1 and user_id = agir_uid()`, [ws]);
       if (m?.role !== "owner") throw new HttpError(403, "Only the workspace owner can see production counts.");
       const deals = await tx.query<Record<string, unknown>>(`select m.*, d.name from deal_metrics m join deals d on d.id = m.deal_id where m.workspace_id = $1 order by d.created_at`, [ws]);
       const [a] = await tx.query<{ n: number }>(`select count(*)::int as n from deals where workspace_id = $1 and archived_at is not null`, [ws]);
-      return { deals, archived: a?.n ?? 0 };
+      // Card R4, for the deals that are not archived: every run and when the first one was made; the ready files of
+      // each deal's latest run (the deals list's rule); and how many of those files have been shared by a link,
+      // revoked or not. That counts files shared, not how often a link was opened.
+      const [r] = await tx.query<{ n: number; first: string | Date | null }>(
+        `select count(*)::int as n, min(r.created_at) as first from runs r join deals d on d.id = r.deal_id where d.workspace_id = $1 and d.archived_at is null`,
+        [ws],
+      );
+      const [f] = await tx.query<{ n: number; shared: number }>(
+        `select count(*)::int as n, count(*) filter (where exists (select 1 from share_links l where l.artifact_id = a.id))::int as shared
+         from latest_runs lr join deals d on d.id = lr.deal_id join artifacts a on a.run_id = lr.id and a.status = 'ready'
+         where d.workspace_id = $1 and d.archived_at is null`,
+        [ws],
+      );
+      const runCounts = { runs: r?.n ?? 0, first_run_at: r?.first ? new Date(r.first).toISOString() : null, reports: f?.n ?? 0, reports_shared: f?.shared ?? 0 };
+      return { deals, archived: a?.n ?? 0, runCounts };
     });
     const summed = ["docs_pdf", "docs_xlsx", "docs_csv", "docs_docx", "docs_txt", "docs_deal_source", "docs_evidence", "docs_context", "docs_no_candidates", "figures_read", "figures_confirmed_from_suggestion", "figures_typed", "actions_until_runnable"];
-    const totals: Record<string, number> = { deals: deals.length, archived_deals: archived };
+    const totals: Record<string, number | string | null> = { deals: deals.length, archived_deals: archived };
     for (const k of summed) totals[k] = deals.reduce((n, d) => n + Number(d[k] ?? 0), 0);
-    return c.json({ deals, totals });
+    return c.json({ deals, totals: { ...totals, ...runCounts } });
   });
 
   // ---- Deals ----------------------------------------------------------------------
