@@ -91,6 +91,17 @@ export const en = {
   "settings.ac.body": "These apply to you across every workspace.",
   "settings.ac.name": "Your name",
   "settings.ac.email": "Email",
+  "settings.pp.removeOf": (p) => `Remove ${p.name} from this workspace`,
+  "settings.pp.removeConfirm": (p) => `Remove ${p.name} from this workspace? They lose every deal in it at once. What they did stays in the audit trail.`,
+  "settings.cl.confirmed": (p) => `Confirmed ${p.n} ${p.n === 1 ? "value" : "values"}${p.date ? ` · ${p.date}` : ""}`,
+  "settings.cl.nothingYet": (p) => `Client since ${p.date}, nothing confirmed yet`,
+  "settings.ct.archived": (p) => `Not counting ${p.n} archived`,
+  "settings.ac.devices": "Where you are signed in",
+  "settings.ac.devicesN": (p) => `You are signed in on ${p.n} browsers or devices, this one included.`,
+  "settings.ac.devicesOne": "You are signed in on this browser only.",
+  "settings.ac.signOutOthers": "Sign out everywhere else",
+  "settings.ac.signOutConfirm": "Sign out on every other browser and device? Each one will have to sign in again. This one stays signed in.",
+  "settings.ac.ended": (p) => p.n === 0 ? "No other browser or device was signed in." : p.n === 1 ? "Signed out on 1 other browser or device." : `Signed out on ${p.n} other browsers or devices.`,
 } satisfies Record<string, Entry>;
 
 export const fr: FrenchOf<typeof en> = {
@@ -183,4 +194,15 @@ export const fr: FrenchOf<typeof en> = {
   "settings.ac.body": "Ces renseignements s'appliquent à vous dans tous vos espaces.",
   "settings.ac.name": "Votre nom",
   "settings.ac.email": "Courriel",
+  "settings.pp.removeOf": (p) => `Retirer ${p.name} de cet espace`,
+  "settings.pp.removeConfirm": (p) => `Retirer ${p.name} de cet espace\u00a0? Cette personne perd d'un coup l'accès à chaque projet de l'espace. Ce qu'elle a fait reste dans la piste d'audit.`,
+  "settings.cl.confirmed": (p) => `A confirmé ${p.n} ${p.n === 1 ? "valeur" : "valeurs"}${p.date ? ` · ${p.date}` : ""}`,
+  "settings.cl.nothingYet": (p) => `Client depuis le ${p.date}, aucune valeur confirmée pour l'instant`,
+  "settings.ct.archived": (p) => `Sans compter ${p.n} ${p.n === 1 ? "archivé" : "archivés"}`,
+  "settings.ac.devices": "Où vous êtes connecté",
+  "settings.ac.devicesN": (p) => `Vous êtes connecté sur ${p.n} navigateurs ou appareils, y compris celui-ci.`,
+  "settings.ac.devicesOne": "Vous êtes connecté sur ce navigateur seulement.",
+  "settings.ac.signOutOthers": "Vous déconnecter partout ailleurs",
+  "settings.ac.signOutConfirm": "Vous déconnecter de tous les autres navigateurs et appareils\u00a0? Chacun devra se reconnecter. Celui-ci reste connecté.",
+  "settings.ac.ended": (p) => p.n === 0 ? "Aucun autre navigateur ni appareil n'était connecté." : p.n === 1 ? "Déconnecté de 1 autre navigateur ou appareil." : `Déconnecté de ${p.n} autres navigateurs ou appareils.`,
 };
