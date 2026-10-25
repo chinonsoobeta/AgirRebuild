@@ -13,7 +13,7 @@ work it describes.
 | `npm run gate -- --tier=release` | Both typechecks, 198 tests in 9 files (119 on `main`), web build | 2026-10-03, `task/12-reading-gaps` (the stack 05, 07, 06, 08, 09, 10, 11, 12) |
 | CI replay: fresh `git clone`, `npm ci`, then `VITEST_MAX_WORKERS=2 npm run gate -- --tier=pr` and `--tier=release` | `npm ci` accepts the lockfile; both tiers pass, 198 tests; swap unchanged | 2026-10-03, `task/12-reading-gaps` |
 | `VITEST_MAX_WORKERS=2 npm run gate -- --tier=release` | The same gate with two test workers: peak memory about 1 GB, no swap | 2026-10-01 |
-| `npx tsc -p apps/web/tsconfig.json --noEmit` and `VITEST_MAX_WORKERS=2 npx vitest run apps/web` | Web typecheck clean; 524 web tests in 18 files pass. The release gate was not run for this record | 2026-10-25, `ui/u21-status` (= `ui/redesign` 38a90f1) |
+| `npx tsc -p apps/web/tsconfig.json --noEmit` and `VITEST_MAX_WORKERS=2 npx vitest run apps/web` | Web typecheck clean; 542 web tests in 20 files pass | 2026-10-25, `ui/redesign` `f365f67` |
 | `AGIR_DATA_DIR=<empty folder> PORT=8791 npm start` | Builds the web app, applies `0001` to `0007`, seeds six deals, serves on that port. An empty data folder leaves `.data/` untouched | 2026-10-03, `task/08-plain-language` |
 
 The `npm start` row was last run on 2026-10-03; migrations now go to `0029` on `main` and `ui/redesign`
@@ -306,17 +306,23 @@ own `ui/*` branch off `ui/redesign` and was merged back after the audit. Web onl
 | U17 | `ui/u17-email-and-reset` | API only: email verification and password reset, single-use tokens stored as hashes in migration `0030`, a `Mailer` with a development file mailer. Branched from `main` at `3ca9877` |
 | W12 | `ui/w12-email` | The confirm-your-email and reset-password screens on top of U17. Built on `ui/redesign` as of W3 (`ae2a3a6`), so it is behind `ui/redesign` and will need the later cards merged in |
 
-State of the branches: F1, F2 and W1 to W11 are merged into `ui/redesign` (head `38a90f1`); none of it is on `main`
-or pushed. U17 and W12 are not merged anywhere. They touch sign-in and add a migration, so they need the owner's
+State of the branches: F1, F2, W1 to W11, U20 (the old styles removed, an accessibility pass) and U21-words (a
+wording and French pass) are merged into `ui/redesign`, followed by the fixes from a browser walk of every screen
+on 2026-10-25 (listed in `INTERFACE-BUILD-LOG.md`). None of it is on `main` or pushed. U17 and W12 are not merged
+anywhere. They touch sign-in and add a migration, so they need the owner's
 review (plan rule 7), and they must not reach production before there is a mail provider: on the U17 branch,
 development writes each email to the data folder's `mail/` directory and production sends nothing
 (`apps/api/src/main.ts` and `apps/api/src/mailer.ts` on that branch). Nothing in the app is gated on a verified email.
 
-U20 (removing the old styles, an accessibility pass) and U21-words (a wording and French pass) are in progress on
-their own branches and will be merged into `ui/redesign` after this record.
+The browser walk ran the app from the `ui/redesign` worktree with an empty data folder and no model key
+(`env -u ANTHROPIC_API_KEY AGIR_DATA_DIR=<empty folder> PORT=8792 npm run start`): every screen at 1360 and 900 px,
+light and dark, with spot checks in French, signed in and signed out. It used the seeded deals and made a deal, a
+decision, a share link and a threshold change in that throwaway folder. Model reading was not tried, because it
+needs the key.
 
-To try it: check out `ui/redesign` in a worktree and use the `AGIR_DATA_DIR=<empty folder> PORT=… npm start`
-command under "Verified commands". It was not run for this record.
+French typography: in every French string, the space before `:`, `;`, `?`, `!` and `»`, after `«`, and between a
+digit and `%` or `$` is a no-break space. `proposals/ui-cards/fr-spacing.mjs` in `agir-reading-work/`, outside the
+repository, checks the string tables (`node fr-spacing.mjs <repo root> --check`) and can fix them.
 
 Left out on purpose, because a person must decide first (the plan's "Decisions the owner still holds"):
 

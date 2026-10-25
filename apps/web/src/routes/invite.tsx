@@ -60,7 +60,7 @@ export function Invite({ secret }: { secret: string }) {
         <div>
           <p className="muted auth-from">{t("auth.invite.from", { ws })}</p>
           <h1 className="h1">{t("auth.invite.title", { deal: invite.data.deal })}</h1>
-          <p className="lead auth-invite-body">{t("invite.body")}</p>
+          <p className="lead auth-invite-body">{t("invite.body", { ws })}</p>
         </div>
         {me.data ? (
           <div className="stack tight">
