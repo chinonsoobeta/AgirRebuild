@@ -76,7 +76,7 @@ export function Reports({ dealId }: { dealId: string }) {
       traced ? t("reports.tracedN", { n: traced }) : t("reports.fromRun", { n: r.number })];
     return (
       <div key={k.kind} className="card card-pad stack tight">
-        <div className="row between"><h3 className="h3">{kind(k.kind)}</h3>{tag}</div>
+        <div className="rep-head"><h3 className="h3">{kind(k.kind)}</h3>{tag}</div>
         <p className="muted">{t(`reports.kd.${k.kind}`)}</p>
         <p className="small muted">{facts.join(" · ")}</p>
         <div className="row rep-acts">
@@ -119,7 +119,7 @@ export function Reports({ dealId }: { dealId: string }) {
             <div className="grid3">
               {KINDS.filter((k) => k.kind !== "partner_memo" || partnerMemo).map(kindCard)}
               <div className="card card-pad stack tight">
-                <div className="row between"><h3 className="h3">{t("reports.package")}</h3><Tag tone="pass">{t("reports.always")}</Tag></div>
+                <div className="rep-head"><h3 className="h3">{t("reports.package")}</h3><Tag tone="pass">{t("reports.always")}</Tag></div>
                 <p className="muted">{t("reports.kd.audit")}</p>
                 <p className="small muted">{t("reports.builtOnRequest")}</p>
                 <div className="row rep-acts"><a className="btn quiet sm" href={`/api/runs/${o.run.id}/audit-package`}><I.Download />{t("common.download")}</a></div>

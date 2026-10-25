@@ -11,6 +11,8 @@ export function describeEvent(i: I18n, e: AuditEvent): string {
   const fr = i.lang === "fr";
   const kind = (k: string) => (k === "ic_memo" ? i.t("reports.memo") : k === "lender_package" ? i.t("reports.lender") : k === "build_decision" ? i.t("reports.buildDecision") : k === "partner_memo" ? i.t("reports.partnerMemo") : i.t("reports.modelExport"));
   const field = () => i.L.field(p.field, p.item || null);
+  // A file's format as the reports screen names it: PDF, Word or Excel.
+  const format = (f: unknown) => (f === "pdf" ? "PDF" : f === "docx" ? i.t("reports.word") : f === "xlsx" ? i.t("reports.excel") : String(f));
   switch (e.action) {
     case "policy.threshold_changed": {
       const threshold = THRESHOLDS[p.version]?.find((threshold) => threshold.path === p.path);
@@ -48,14 +50,14 @@ export function describeEvent(i: I18n, e: AuditEvent): string {
     case "decision.recorded":
       return fr
         ? `A consigné la décision «\u00a0${i.L.decision(p.decision).toLowerCase()}\u00a0» pour l'analyse ${p.run_number}${p.against_verdict ? ", contraire au verdict" : ""}`
-        : `Recorded the decision "${String(p.decision).replace(/_/g, " ")}" on run ${p.run_number}${p.against_verdict ? ", against the verdict" : ""}`;
-    case "artifact.requested": return fr ? `A demandé\u00a0: ${kind(p.kind)} (${p.format})` : `Requested a ${String(p.kind).replace(/_/g, " ")} (${p.format})`;
-    case "artifact.ready": return fr ? `A diffusé\u00a0: ${kind(p.kind)} (${p.format})` : `Released a ${String(p.kind).replace(/_/g, " ")} (${p.format})`;
+        : `Recorded the decision "${i.L.decision(p.decision)}" on run ${p.run_number}${p.against_verdict ? ", against the verdict" : ""}`;
+    case "artifact.requested": return fr ? `A demandé\u00a0: ${kind(p.kind)} (${format(p.format)})` : `Requested the ${kind(p.kind)} (${format(p.format)})`;
+    case "artifact.ready": return fr ? `A diffusé\u00a0: ${kind(p.kind)} (${format(p.format)})` : `Released the ${kind(p.kind)} (${format(p.format)})`;
     case "artifact.blocked": return fr ? "A bloqué un rapport\u00a0: chiffres sans source" : "Blocked a report: figures without a source";
     case "share.created": {
       const terms: Record<string, string> = fr ? { "24h": "24 heures", "7d": "7 jours", "30d": "30 jours", none: "Sans expiration" }
         : { "24h": "24 hours", "7d": "7 days", "30d": "30 days", none: "No expiry" };
-      return fr ? `A partagé un lien\u00a0: ${kind(p.kind)} (${p.format}), ${terms[p.term] ?? ""}` : `Shared a link to the ${kind(p.kind)} (${p.format}), ${terms[p.term] ?? ""}`;
+      return fr ? `A partagé un lien\u00a0: ${kind(p.kind)} (${format(p.format)}), ${terms[p.term] ?? ""}` : `Shared a link to the ${kind(p.kind)} (${format(p.format)}), ${terms[p.term] ?? ""}`;
     }
     case "share.revoked": return fr ? "A révoqué un lien partagé" : "Revoked a shared link";
     case "share.opened": {

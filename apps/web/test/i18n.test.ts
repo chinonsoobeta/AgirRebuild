@@ -844,7 +844,7 @@ describe("partner memo wording (task 84d)", () => {
   });
   it.each(["artifact.requested", "artifact.ready"])("%s names the partner memo in both languages", (action) => {
     const event = { seq: 1, action, entity: "artifact", entity_id: null, payload: { kind: "partner_memo", format: "pdf" }, hash: "", created_at: "", actor: null };
-    expect(describeEvent(en, event)).toBe(`${action === "artifact.requested" ? "Requested" : "Released"} a partner memo (pdf)`);
+    expect(describeEvent(en, event)).toBe(`${action === "artifact.requested" ? "Requested" : "Released"} the Partner memo (PDF)`);
     expect(describeEvent(fr, event)).toContain("Note aux partenaires");
   });
 });
@@ -852,7 +852,7 @@ describe("partner memo wording (task 84d)", () => {
 
 describe("share-link wording (task 86b)", () => {
   it.each([
-    ["share.created", { kind: "ic_memo", format: "pdf", term: "7d" }, "Shared a link to the Committee memo (pdf), 7 days", "A partagé un lien\u00a0: Mémo du comité (pdf), 7 jours"],
+    ["share.created", { kind: "ic_memo", format: "pdf", term: "7d" }, "Shared a link to the Committee memo (PDF), 7 days", "A partagé un lien\u00a0: Mémo du comité (PDF), 7 jours"],
     ["share.revoked", {}, "Revoked a shared link", "A révoqué un lien partagé"],
     ["share.opened", { what: "page" }, "Opened a shared link: the page", "A ouvert un lien partagé\u00a0: la page"],
     ["share.opened", { what: "file" }, "Opened a shared link: the report", "A ouvert un lien partagé\u00a0: le rapport"],

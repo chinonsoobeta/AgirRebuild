@@ -10,7 +10,8 @@ export function Share({ secret }: { secret: string }) {
   const { t, f, err, lang } = useI18n();
   const shared = useQuery({ queryKey: ["share", secret], queryFn: () => api.get<SharedReport>(`/share/${secret}`) });
   const base = `/api/share/${secret}`;
-  if (shared.error) return <SignedOutPage><p className="lead">{err(shared.error)}</p></SignedOutPage>;
+  // Only the API's sentence, as the page's heading: a link that does not open says nothing more.
+  if (shared.error) return <SignedOutPage><h1 className="h2">{err(shared.error)}</h1></SignedOutPage>;
   if (!shared.data) return <SignedOutPage><p className="muted">{t("common.loading")}</p></SignedOutPage>;
   const s = shared.data;
   const kind = s.kind === "ic_memo" ? t("reports.memo") : s.kind === "lender_package" ? t("reports.lender") : s.kind === "build_decision" ? t("reports.buildDecision") : s.kind === "partner_memo" ? t("reports.partnerMemo") : t("reports.modelExport");
