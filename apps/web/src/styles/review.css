@@ -34,3 +34,7 @@
 .rv-link{color:var(--accent)}
 .rv-unused-body{border-top:1px solid var(--line)}
 .rv-aside{gap:16px}
+/* The rebate's info button sits inline at the end of its label. */
+.info-inline{width:26px;height:26px;vertical-align:middle}
+.proposal-pick{display:flex;align-items:center;gap:8px}
+.proposal-pick>.select{flex:1 1 auto;min-width:0}

@@ -150,16 +150,20 @@ export function TableProposal({ proposal, unit, onUse, busy }: { proposal: impor
   const amount = (n: number) => unit === "$" ? new Intl.NumberFormat(lang === "fr" ? "fr-CA" : "en-CA",{style:"currency",currency:"CAD",currencyDisplay:"narrowSymbol",minimumFractionDigits:2,maximumFractionDigits:2}).format(n) : f.value(n,unit);
   return <div className="stack tight small">
     <div>{t("review.proposed",{value:option ? amount(option.value) : "—",publisher:proposal.publisher,date:proposal.effective})}{" "}<a href={proposal.url} target="_blank" rel="noreferrer">{t("review.proposalSource")}</a></div>
-    {proposal.options.length > 1 ? <select className="select" aria-label={t("review.proposalOption")} value={selected} onChange={e=>setSelected(e.target.value)}>
-      <option value="">{t("review.proposalPlaceholder")}</option>
-      {proposal.options.map((o,index)=><option key={index} value={index}>{o.label.split(" — ").map(msg).join(" — ")} — {amount(o.value)}</option>)}
-    </select> : <span>{option?.label.split(" — ").map(msg).join(" — ")}</span>}
-    {proposal.tableId === "gst-hst-pbrh" && option?.key === "pbrh" && <span>
-      <button type="button" className="btn quiet sm" aria-label={msg("Why GST/HST net is $0")} aria-expanded={infoOpen} aria-controls={infoId}
+    {/* The rebate's reason sits beside its label, not on a line of its own. */}
+    {(() => {
+      const pbrh = proposal.tableId === "gst-hst-pbrh" && option?.key === "pbrh";
+      const info = pbrh ? <button type="button" className="iconbtn info-inline" aria-label={msg("Why GST/HST net is $0")} aria-expanded={infoOpen} aria-controls={infoId}
         onMouseEnter={()=>setInfoOpen(true)} onMouseLeave={()=>setInfoOpen(false)} onFocus={()=>setInfoOpen(true)} onBlur={()=>setInfoOpen(false)}
-        onClick={()=>setInfoOpen(true)} onKeyDown={e=>{if (e.key === "Escape") setInfoOpen(false);}}>ⓘ</button>
-      <span id={infoId} hidden={!infoOpen}>{pbrhExplanation(proposal.readOn,lang)}</span>
-    </span>}
+        onClick={()=>setInfoOpen(true)} onKeyDown={e=>{if (e.key === "Escape") setInfoOpen(false);}}><I.Info size={16} /></button> : null;
+      return <>
+        {proposal.options.length > 1 ? <div className="proposal-pick"><select className="select" aria-label={t("review.proposalOption")} value={selected} onChange={e=>setSelected(e.target.value)}>
+          <option value="">{t("review.proposalPlaceholder")}</option>
+          {proposal.options.map((o,index)=><option key={index} value={index}>{o.label.split(" — ").map(msg).join(" — ")} — {amount(o.value)}</option>)}
+        </select>{info}</div> : <span>{option?.label.split(" — ").map(msg).join(" — ")}{info && " "}{info}</span>}
+        {pbrh && <span id={infoId} hidden={!infoOpen}>{pbrhExplanation(proposal.readOn,lang)}</span>}
+      </>;
+    })()}
     {canEdit(role) && <div><button className="btn quiet sm" type="button" disabled={busy || !option} onClick={()=>option && onUse({fieldKey:proposal.fieldKey,tableId:proposal.tableId,optionKey:option.key})}>{t("review.useProposal")}</button></div>}
   </div>;
 }
