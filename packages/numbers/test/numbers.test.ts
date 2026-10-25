@@ -444,18 +444,31 @@ describe("Card 166: dollars after a figure are currency", () => {
     ["500 dollars", UNKNOWN, 500, null],
     ["500 dollar", UNKNOWN, 500, null],
     ["500 DOLLARS", UNKNOWN, 500, null],
-    ["500 de dollars", UNKNOWN, 500, null],
     ["3.226 million dollars", US, 3226000, null],
     ["3,2 millions de dollars", EU, 3200000, null],
     ["500 dollars US", UNKNOWN, 500, "USD"],
     ["500 dollars U.S.", UNKNOWN, 500, "USD"],
     ["500 dollars USD", UNKNOWN, 500, "USD"],
     ["2 million dollars américains", UNKNOWN, 2000000, "USD"],
+    ["500 dollars U.S", UNKNOWN, 500, "USD"],
+    ["500 dollars americains", UNKNOWN, 500, "USD"],
+    ["3,2 millions de dollars US", EU, 3200000, "USD"],
+    ["2,024 dollars", UNKNOWN, 2024, null],
+    ["850 dollars", UNKNOWN, 850, null],
   ] as const)("%s names money and its currency", (text, format, value, currencyCode) => {
     expect(tokenize(text, format)).toEqual([expect.objectContaining({ value, unit: "$", currency: true, currencyCode })]);
   });
-  test.each(["500 US dollars", "500 dollarsworth"])("%s keeps its plain-number reading", text => {
+  test.each(["500 US dollars", "500 dollarsworth", "500 de dollars", "500 usd", "500 cad", "500 cadres"])("%s keeps its plain-number reading", text => {
     expect(tokenize(text, UNKNOWN)).toEqual([expect.objectContaining({ value: 500, unit: null, currency: false, currencyCode: null })]);
+  });
+  test("a lot number before cadastre is not money", () => {
+    expect(tokenize("Lot 1 234 567 cadastre du Québec", UNKNOWN)).toEqual([expect.objectContaining({ value: 1234567, unit: null, currency: false, currencyCode: null })]);
+  });
+  test.each([["All figures in 2024 dollars", 2024], ["Costs (1999 dollars)", 1999]] as const)("a year before dollars in %s is not money", (text, value) => {
+    expect(tokenize(text, UNKNOWN)).toEqual([expect.objectContaining({ value, unit: null, currency: false, currencyCode: null })]);
+  });
+  test("a footnote between a scale word and de dollars is not money", () => {
+    expect(tokenize("571 millions 1 de dollars", UNKNOWN).map(t => [t.value, t.unit])).toEqual([[571, null], [1, null]]);
   });
 });
 

@@ -133,4 +133,12 @@ describe("Card 166: the verifier reads the quoted figure in context", () => {
     const document = { ...doc("txt"), fullText: quote, lines: [{ location: "line 1", text: quote }] };
     expect(extractCandidates(document).candidates.map(c => [c.fieldKey, c.value])).toEqual([["construction_months", 21]]);
   });
+  test.each(["Coûts de construction : 5,2 millions 1 de dollars", "Land cost: 500 usd"])("the fallback reader reads no money from %s", quote => {
+    const document = { ...doc("txt"), fullText: quote, lines: [{ location: "line 1", text: quote }] };
+    expect(extractCandidates(document).candidates).toEqual([]);
+  });
+  test.each(["Hard costs in 2024 dollars: 5,000,000", "Hard costs in 2024 dollars: $5,000,000"])("the fallback reader takes the amount, not the year, from %s", quote => {
+    const document = { ...doc("txt"), fullText: quote, lines: [{ location: "line 1", text: quote }] };
+    expect(extractCandidates(document).candidates.map(c => [c.fieldKey, c.value])).toEqual([["hard_cost", 5000000]]);
+  });
 });
