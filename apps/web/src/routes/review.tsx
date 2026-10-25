@@ -260,8 +260,12 @@ export function Review({ dealId }: { dealId: string }) {
   const approved = r.assumptions.filter((a) => a.status === "approved" || a.status === "default_accepted");
   const stated = approved.filter((a) => a.sponsorStated).length;
   const rejected = by("rejected");
-  // A choice Agir never reads from documents, once made, is an approved value; it is listed again under the choices.
-  const madeChoices = approved.filter((a) => FIELD_BY_KEY.get(a.fieldKey)?.extractable === false);
+  // A choice, once made, is an approved value; it is listed again under the choices. The test is readiness's own for
+  // a choice: an optional, single field no document is read for, whose absence has a stated meaning.
+  const madeChoices = approved.filter((a) => {
+    const d = FIELD_BY_KEY.get(a.fieldKey);
+    return !!d && d.extractable === false && !d.itemized && d.required === false && !!d.absentMeans;
+  });
   const focused = pending.find((a) => a.id === focus) ?? pending[0];
   const unused = r.other.filter((o) => o.figureId && o.value !== null && !o.label).length;
   const itemNames = [...new Set(r.assumptions.map((a) => a.itemKey).filter((i): i is string => !!i))];
