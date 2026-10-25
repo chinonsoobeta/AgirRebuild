@@ -168,7 +168,10 @@ export function createApp({ db, store, secureCookies, demoSignIn = false, trustP
         `select * from fn_open_share_link($1, $2)`, [sha256(c.req.param("secret")!), what]);
       if (!link) return c.json({ error: "This link is not available. It may have expired or been revoked." }, 404);
       if (what === "page") {
-        const [run] = await db.query<{ result: import("@agir/contracts").RunResult; input_snapshot: { policy?: Policy; standardPolicy?: Policy; policyChanges?: import("@agir/contracts").PolicyChange[] } }>(`select result,input_snapshot from runs where id=$1`, [link.run_id]);
+        const [run] = await db.query<{ result: import("@agir/contracts").RunResult; input_snapshot: { input: EngineInput; policy?: Policy; standardPolicy?: Policy; policyChanges?: import("@agir/contracts").PolicyChange[] };
+          policy_version: string; created_at: string; location: string; currency: string | null; workspace: string }>(
+          `select r.result, r.input_snapshot, r.policy_version, r.created_at, d.location, d.currency, w.name as workspace
+           from runs r join deals d on d.id = r.deal_id join workspaces w on w.id = d.workspace_id where r.id = $1`, [link.run_id]);
         let standardFailures: { en: string[]; fr: string[] } | undefined;
         if (run?.input_snapshot.policy?.custom) {
           const { Formatter, customThresholdBlocks } = await import("@agir/artifacts");
@@ -176,7 +179,8 @@ export function createApp({ db, store, secureCookies, demoSignIn = false, trustP
           const failures = (lang: "en" | "fr") => customThresholdBlocks(new Formatter(run.result,lang,x.policy.maxLtcPct),x).flatMap((block) => block.type === "checks" ? block.items.filter((item) => item.lenderCited).map((item) => item.text) : []);
           standardFailures = { en: failures("en"), fr: failures("fr") };
         }
-        return c.json({ deal: link.deal_name, kind: link.kind, format: link.format, runNumber: link.run_number, expiresAt: link.expires_at, ...(standardFailures ? { standardFailures } : {}) });
+        return c.json({ deal: link.deal_name, kind: link.kind, format: link.format, runNumber: link.run_number, expiresAt: link.expires_at,
+          ...(run ? sharedRunFacts(run) : {}), ...(standardFailures ? { standardFailures } : {}) });
       }
       if (what === "file") {
         const [artifact] = await db.query<{ lang: "en" | "fr" }>(`select lang from artifacts where id = $1`, [link.artifact_id]);
@@ -190,8 +194,8 @@ export function createApp({ db, store, secureCookies, demoSignIn = false, trustP
   }
 
   app.get("/api/invite/:secret", async (c) => {
-    const [live] = await db.query<{ workspace: string; deal: string }>(`select * from fn_peek_client_invite($1)`, [sha256(c.req.param("secret"))]);
-    return live ? c.json(live) : c.json({ error: INVITE_GONE }, 404);
+    const [live] = await db.query<{ workspace: string; deal: string; expires_at: string }>(`select * from fn_peek_client_invite($1)`, [sha256(c.req.param("secret"))]);
+    return live ? c.json({ workspace: live.workspace, deal: live.deal, expiresAt: live.expires_at }) : c.json({ error: INVITE_GONE }, 404);
   });
 
   // Everything below needs a session.
@@ -409,7 +413,11 @@ export function createApp({ db, store, secureCookies, demoSignIn = false, trustP
       const [d] = await tx.query<{ staff: boolean }>(`select agir_is_staff(workspace_id) as staff from deals where id = $1`, [c.req.param("id")]);
       if (!d) throw new HttpError(404, "Deal not found");
       if (!d.staff) throw new HttpError(403, "Your role in this workspace does not allow this action");
-      return tx.query(`select u.id, u.name, u.email, dc.created_at as assigned_at from deal_clients dc join users u on u.id = dc.user_id
+      // A confirmation stands until its value changes (0018's trigger clears it), so these count only the ones that still stand.
+      return tx.query(`select u.id, u.name, u.email, dc.created_at as assigned_at,
+          (select count(*)::int from assumptions a where a.deal_id = dc.deal_id and a.client_confirmed_by = dc.user_id) as confirmed,
+          (select max(a.client_confirmed_at) from assumptions a where a.deal_id = dc.deal_id and a.client_confirmed_by = dc.user_id) as last_confirmed_at
+        from deal_clients dc join users u on u.id = dc.user_id
         where dc.deal_id = $1 order by u.name`, [c.req.param("id")]);
     });
     return c.json(rows);
@@ -826,18 +834,50 @@ export function createApp({ db, store, secureCookies, demoSignIn = false, trustP
   });
 
   // ---- Audit ------------------------------------------------------------------------------
+  // The newest 500 events; ?before=<seq> reads the 500 before that one. An empty array means there is nothing older.
   app.get("/api/deals/:id/audit", async (c) => {
+    const { before } = z.object({ before: z.string().regex(/^[1-9][0-9]{0,14}$/).transform(Number).optional() }).parse(c.req.query());
     const rows = await as(c, async (tx) =>
       hideClientEvents(await clientViewer(tx, c.req.param("id")), await tx.query<{ entity_id: string | null; payload: unknown }>(
         `select e.seq, e.action, e.entity, e.entity_id, e.payload, e.hash, e.created_at, u.name as actor
-         from audit_events e left join users u on u.id = e.actor where e.deal_id = $1 order by e.seq desc limit 500`,
-        [c.req.param("id")],
+         from audit_events e left join users u on u.id = e.actor where e.deal_id = $1 and ($2::bigint is null or e.seq < $2::bigint)
+         order by e.seq desc limit 500`,
+        [c.req.param("id"), before ?? null],
       )),
     );
     return c.json(rows);
   });
 
   return app;
+}
+
+// The base-case figures a share page shows, in this order (card Y2).
+const SHARED_FIGURES = ["total_development_cost", "cost_per_unit", "required_equity", "loan_to_cost", "dcr_after_refinance", "sizing_dscr",
+  "development_spread", "yield_on_cost", "profit_on_cost"] as const;
+
+/**
+ * What a share page adds about its run, read from what the run stored and never recomputed: everything here is
+ * already printed in the shared file. Units are counted from the stored input, as the report counts them.
+ */
+function sharedRunFacts(run: { result: import("@agir/contracts").RunResult; input_snapshot: { input: EngineInput; policy?: Policy; standardPolicy?: Policy };
+  policy_version: string; created_at: string; location: string; currency: string | null; workspace: string }) {
+  const { input } = run.input_snapshot;
+  const { code, gates, hardFailReasons, headline, explanation } = run.result.verdict;
+  const metrics = run.result.scenarios[0]?.metrics ?? [];
+  const items: readonly { units: number }[] = input.forSale ? input.forSale.units : input.revenue;
+  return {
+    workspace: run.workspace,
+    location: run.location,
+    currency: run.currency,
+    runAt: run.created_at,
+    units: items.reduce((n, item) => n + item.units, 0),
+    exit: input.exit ?? "sale",
+    policyDraft: runPolicy(run.input_snapshot, run.policy_version)?.draft === true,
+    verdict: { code, gates, hardFailReasons, headline, explanation },
+    errorChecks: run.result.checks.filter((check) => check.severity === "error").length,
+    figures: SHARED_FIGURES.flatMap((key) => metrics.filter((m) => m.key === key).map((m) => ({ key: m.key, unit: m.unit, value: m.value, status: m.status, reason: m.reason }))),
+    ...(input.forSale ? {} : { exitCapPct: input.exitCapPct }),
+  };
 }
 
 const LOGO_MAX_BYTES = 500 * 1024;
