@@ -15,10 +15,16 @@ work it describes.
 | `VITEST_MAX_WORKERS=2 npm run gate -- --tier=release` | The same gate with two test workers: peak memory about 1 GB, no swap | 2026-10-01 |
 | `npx tsc -p apps/web/tsconfig.json --noEmit` and `VITEST_MAX_WORKERS=2 npx vitest run apps/web` | Web typecheck clean; 542 web tests in 20 files pass | 2026-10-25, `ui/redesign` `6fee9c4` |
 | `env -u ANTHROPIC_API_KEY NODE_OPTIONS=--max-old-space-size=3072 VITEST_MAX_WORKERS=2 npm run gate -- --tier=release` | Both typechecks, 5991 tests in 35 files, the no-model fallback test (1 passed, 242 skipped), web build | 2026-10-25, `ui/redesign` `6fee9c4` |
-| `env -u ANTHROPIC_API_KEY AGIR_DATA_DIR=<empty folder> PORT=8792 npm start` | Builds the web app, applies `0001` to `0029`, seeds six deals, serves on that port. An empty data folder leaves `.data/` untouched | 2026-10-25, `ui/redesign` (the browser walk) |
+| `env -u ANTHROPIC_API_KEY NODE_OPTIONS=--max-old-space-size=3072 VITEST_MAX_WORKERS=2 npm run gate -- --tier=release` | Both typechecks, 6158 tests in 47 files, the no-model fallback test (1 passed, 242 skipped), web build; web alone 679 tests in 30 files | 2026-10-25, `ui/y-screens` `a60dd32` |
+| The same gate | 6185 tests in 49 files, the fallback test, web build; web alone 694 tests in 31 files | 2026-10-25, `ui/w12-email` `9c4a1a7` |
+| The same gate | 5833 tests in 19 files, the fallback test, web build | 2026-10-25, `fix/threshold-labels` `1d6a234` |
+| The same gate on `ui/w12-email` `9c4a1a7` with `fix/threshold-labels` merged in a throwaway worktree | 6192 tests in 49 files, the fallback test, web build; no conflicts | 2026-10-25 (the worktree was then removed) |
+| `env -u ANTHROPIC_API_KEY AGIR_DATA_DIR=<empty folder> PORT=8792 npm start` | Builds the web app, applies the migrations, seeds six deals, serves on that port. An empty data folder leaves `.data/` untouched | 2026-10-25, `ui/redesign` (first browser walk) and `ui/y-screens` (second walk) |
 
-The `npm start` row was run from `ui/redesign`, where migrations go to `0029` as on `main` (`0030` on the U17
-branch, which was not started).
+The first walk ran on `ui/redesign`, where migrations go to `0029` as on `main`. The second ran on `ui/y-screens`,
+which adds `0031` and `0032`. `0030` is on `ui/w12-email` only. The three touch different objects (`0030` a new table
+and a column on `users`; `0031` and `0032` functions of their own names), so a database that already has `0031` and
+`0032` can take `0030` after them.
 
 `npm start` without `AGIR_DATA_DIR` migrates `.data/` in place, and a migration cannot be undone there.
 Point it at an empty folder to try a branch.
@@ -323,7 +329,7 @@ own `ui/*` branch off `ui/redesign` and was merged back after the audit. Web onl
 | Z1 | `ui/z1-people` | The screens for Y1 |
 | Z2 | `ui/z2-deal-details` | The screens for Y2 |
 | P1 | `ui/p1-names` | Each policy named in words, as the Run and Decision boards do, where the screens printed its version id; short English messages under a table proposal start with a capital |
-| P2 | `fix/threshold-labels` | From `main`: stress thresholds named in words in English ("Exit cap: Exit cap shock", not "exit_cap: …"), and no-break spaces in their French labels and in the reports' removed-stress line |
+| P2 | `fix/threshold-labels` | From `main`: stress thresholds named in words in English ("Exit cap: Exit cap shock", not "exit_cap: …"), and no-break spaces in their French labels, in the French stress names ("Coûts +10 %") and in the reports' removed-stress line |
 
 State of the branches: F1, F2, W1 to W11, U20 (the old styles removed, an accessibility pass), U21-words (a
 wording and French pass) and X1 to X6 are merged into `ui/redesign`, with the fixes from a browser walk of every
