@@ -40,6 +40,54 @@ function useResend() {
   return { send, status };
 }
 
+/**
+ * Changing the email address (card R6), on Settings and on this page. The server asks for the current password. An
+ * unconfirmed address changes at once ({ changed }); a confirmed one changes only when the link sent to the new address is
+ * opened ({ pending }). Shows the result sentence in place of the form; `onChanged` runs after `me` is refreshed.
+ */
+export function ChangeEmail({ current, verified, onCancel, onChanged }: { current: string; verified: boolean; onCancel: () => void; onChanged?: () => void }) {
+  const { t } = useI18n();
+  const qc = useQueryClient();
+  const [done, setDone] = useState<{ pending: boolean; email: string; old: string } | null>(null);
+  const [error, setError] = useState<unknown>(null);
+  const [busy, setBusy] = useState(false);
+  const submit = async (e: FormEvent<HTMLFormElement>) => {
+    e.preventDefault();
+    const field = (k: string) => (e.currentTarget.elements.namedItem(k) as HTMLInputElement).value;
+    const email = field("email").trim();
+    const password = field("password");
+    setError(null);
+    setBusy(true);
+    try {
+      const r = await api.post<{ pending?: true; changed?: true }>("/me/email", { email, password });
+      setDone({ pending: Boolean(r.pending), email, old: current });
+      if (r.changed) {
+        await qc.invalidateQueries({ queryKey: ["me"] });
+        onChanged?.();
+      }
+    } catch (err) {
+      setError(err);
+    } finally {
+      setBusy(false);
+    }
+  };
+  if (done) return <p className="small" role="status">{done.pending ? t("auth.email.pending", { email: done.email, old: done.old }) : t("auth.email.changed", { email: done.email })}</p>;
+  return (
+    <form id="change-email" className="stack tight" onSubmit={submit} noValidate>
+      <div className="field"><label htmlFor="ce-email">{t("auth.email.new")}</label>
+        <input className="input" id="ce-email" name="email" type="email" autoComplete="email" required /></div>
+      <div className="field"><label htmlFor="ce-password">{t("auth.email.password")}</label>
+        <input className="input" id="ce-password" name="password" type="password" autoComplete="current-password" required /></div>
+      <FormError error={error} />
+      <div className="row">
+        <button className="btn primary" type="submit" disabled={busy}>{t("auth.email.submit")}</button>
+        <button className="btn quiet" type="button" onClick={onCancel}>{t("auth.email.cancel")}</button>
+      </div>
+      {verified && <p className="small muted">{t("auth.email.tell", { old: current })}</p>}
+    </form>
+  );
+}
+
 /** The page a confirmation email links to, and the page after signing up: outside the session gate. */
 export function Verify() {
   const { t } = useI18n();
@@ -51,6 +99,7 @@ export function Verify() {
   const [badCode, setBadCode] = useState(false);
   const [busy, setBusy] = useState(false);
   const resend = useResend();
+  const [changing, setChanging] = useState(false);
   const me = useQuery({ queryKey: ["me"], queryFn: () => api.get<Me>("/me"), retry: false });
   const posted = useRef(false);
   useEffect(() => {
@@ -132,6 +181,9 @@ export function Verify() {
         </form>
         <p className="small muted">{t("auth.verify.nothing")} <button type="button" className="auth-linkbtn" onClick={resend.send}>{t("auth.verify.again")}</button>.</p>
         {resend.status}
+        <p className="small muted">{t("auth.email.wrong")} <button type="button" className="auth-linkbtn" onClick={() => setChanging(true)}>{t("auth.email.different")}</button>.</p>
+        {/* Once changed, the form closes and the sentence above names the new address from the refreshed `me`. */}
+        {changing && <ChangeEmail current={me.data.user.email} verified={false} onCancel={() => setChanging(false)} onChanged={() => setChanging(false)} />}
         <p className="small"><Link to="/deals">{t("auth.verify.skip")}</Link></p>
       </>
     );

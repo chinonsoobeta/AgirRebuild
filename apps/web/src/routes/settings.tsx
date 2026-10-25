@@ -3,6 +3,7 @@ import { Fragment, useState, type FormEvent, type ReactNode } from "react";
 import { Link } from "@tanstack/react-router";
 import { api, type ClientInvite, type DealClient, type DealOverview } from "../api";
 import { ErrorText, useSession } from "../components/ui";
+import { ChangeEmail } from "./verify";
 import { Thresholds } from "../components/thresholds";
 import { useI18n } from "../i18n";
 import { useTheme, type ThemePref } from "../theme";
@@ -332,6 +333,36 @@ function ConfirmEmail() {
   );
 }
 
+/** Card R6: a reset link to the person's own address, so a signed-in person can set a new password. */
+function PasswordRow({ email }: { email: string }) {
+  const { t } = useI18n();
+  const [sent, setSent] = useState(false);
+  const [error, setError] = useState<unknown>(null);
+  const [busy, setBusy] = useState(false);
+  const send = async () => {
+    setSent(false);
+    setError(null);
+    setBusy(true);
+    try {
+      await api.post("/auth/reset/send", { email });
+      setSent(true);
+    } catch (e) {
+      setError(e);
+    } finally {
+      setBusy(false);
+    }
+  };
+  return (
+    <div>
+      <Row title={t("settings.ac.password")} body={t("settings.ac.passwordBody")}>
+        <button className="btn quiet sm" type="button" disabled={busy} onClick={send}>{t("auth.reset.send")}</button>
+      </Row>
+      {sent && <p className="small" role="status">{t("settings.ac.passwordSent", { email })}</p>}
+      <ErrorText error={error} />
+    </div>
+  );
+}
+
 export function Settings() {
   const { t, f, L, lang, setLang } = useI18n();
   const { me, workspaceId, role, setWorkspace } = useSession();
@@ -355,6 +386,7 @@ export function Settings() {
   const myName = useMutation({ mutationFn: (name: string) => api.post(`/me/name`, { name }), onSuccess: () => { setSaved("me"); return qc.invalidateQueries({ queryKey: ["me"] }); } });
   const sessions = useQuery({ queryKey: ["sessions"], queryFn: () => api.get<{ count: number; devices: SignedIn[] }>(`/me/sessions`) });
   const [ended, setEnded] = useState<number | null>(null);
+  const [changingEmail, setChangingEmail] = useState(false);
   const endOthers = useMutation({
     mutationFn: () => api.post<{ ended: number }>(`/me/sessions/end-others`),
     onSuccess: (r: { ended: number }) => { setEnded(r.ended); return qc.invalidateQueries({ queryKey: ["sessions"] }); },
@@ -543,10 +575,14 @@ export function Settings() {
       <Section id="account" title={t("settings.nav.account")} body={t("settings.ac.body")}>
         {nameField("me", "ac-name", t("settings.ac.name"), me.user.name, (name) => myName.mutate(name), myName.isPending)}
         <ErrorText error={myName.error} />
-        <dl className="set-dl">
-          <div><dt className="label">{t("settings.ac.email")}</dt><dd>{me.user.email}{me.user.email_verified && <> <Tag tone="pass">{t("auth.verify.confirmed")}</Tag></>}</dd></div>
-        </dl>
+        <div>
+          <Row title={t("settings.ac.email")} body={<>{me.user.email}{me.user.email_verified && <> <Tag tone="pass">{t("auth.verify.confirmed")}</Tag></>}</>}>
+            <button className="btn quiet sm" type="button" aria-expanded={changingEmail} onClick={() => setChangingEmail(!changingEmail)}>{t("settings.ac.change")}</button>
+          </Row>
+        </div>
+        {changingEmail && <ChangeEmail current={me.user.email} verified={me.user.email_verified} onCancel={() => setChangingEmail(false)} />}
         {me.user.email_verified === false && <ConfirmEmail />}
+        <PasswordRow email={me.user.email} />
         {/* Each live session by the kind of device it signed in from, this one first (card R4). */}
         <div>
           <Row title={t("settings.ac.devices")}

@@ -21,6 +21,7 @@ import { Share, SharePreview } from "./routes/share";
 import { Invite } from "./routes/invite";
 import { Verify } from "./routes/verify";
 import { Reset } from "./routes/reset";
+import { EmailConfirm, EmailUndo } from "./routes/email-change";
 import { Home } from "./routes/landing";
 import { Legal } from "./routes/legal";
 import { I18nProvider } from "./i18n";
@@ -37,6 +38,9 @@ const invite = createRoute({ getParentRoute: () => root, path: "/i/$secret", com
 // Confirming an email address and resetting a password (card W12): outside the session gate, like sign-in.
 const verify = createRoute({ getParentRoute: () => root, path: "/verify", component: Verify });
 const reset = createRoute({ getParentRoute: () => root, path: "/reset", component: Reset });
+// The links in the change-of-address emails (card R6): outside the session gate, since they may be opened signed out.
+const emailConfirm = createRoute({ getParentRoute: () => root, path: "/email/confirm", component: EmailConfirm });
+const emailUndo = createRoute({ getParentRoute: () => root, path: "/email/undo", component: EmailUndo });
 // "/" and the terms sit outside the session gate: signed out, "/" is the landing page (card W4).
 const index = createRoute({ getParentRoute: () => root, path: "/", component: Home });
 const legal = createRoute({ getParentRoute: () => root, path: "/legal", component: Legal });
@@ -103,6 +107,8 @@ const routeTree = root.addChildren([
   invite,
   verify,
   reset,
+  emailConfirm,
+  emailUndo,
   index,
   legal,
   app.addChildren([
