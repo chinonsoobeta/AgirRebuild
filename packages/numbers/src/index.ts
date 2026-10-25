@@ -28,7 +28,7 @@
 //     "1 200 $ par année", "$1,640 a month".
 //  6f. Single digits (and single "," "." "%" marks) each set apart by one space ("1 6 2 , 5 0 0") are
 //      OCR's letter-spacing: the whole run is one refused token, never read in part and never joined.
-//      A figure directly after "per", "par", "for every", "pour chaque" or "/" is the basis of a ratio
+//      A figure directly after "per", "par", "for every", "pour chaque" or a slash after a figure is the basis of a ratio
 //      ("1.8 stalls per 1,000 SF"), never a value.
 //  7. Square metres are their own unit. The engine works in square feet, so a
 //     figure in m² is converted where it is mapped, never here.
@@ -154,6 +154,8 @@ export function parseCore(
   trailingDollar = false,
   /** A money scale word follows, so three decimal places are possible. */
   moneyScale = false,
+  /** A percent sign or multiple unit directly follows the figure. */
+  rateUnit = false,
 ): { value: number | null; refusal?: string } {
   const spaced = new RegExp(`[${SPACE_CLASS}]`).test(core);
   const plainSpaceGroups = (core.match(/ \d{3}/g) ?? []).length;
@@ -178,6 +180,9 @@ export function parseCore(
       if (format.decimal && format.decimal === sep) return contradicts();
     } else if (parts[1]!.length !== 3 || spaced || parts[0] === "0") {
       // A zero whole part cannot start a thousands group; spaces also establish grouping.
+      decimal = sep;
+      if (format.decimal && format.decimal !== sep) return contradicts();
+    } else if (rateUnit) {
       decimal = sep;
       if (format.decimal && format.decimal !== sep) return contradicts();
     } else if (grouping && !moneyScale) {
@@ -429,7 +434,7 @@ export function tokenize(line: string, format: DocumentFormat, cell = false): Nu
     let unit: TokenUnit = currency ? "$" : null;
     const upcoming = UNIT_RULES.find((r) => r.re.test(scale && currency ? rest.slice(scale[0].length) : rest))?.unit ?? null;
     const grouping = currency || upcoming === "units" || upcoming === "sf" || upcoming === "m2";
-    const parsed = parseCore(core!, format, grouping, Boolean(suffix?.[1]?.startsWith("$")), Boolean(scale && currency));
+    const parsed = parseCore(core!, format, grouping, Boolean(suffix?.[1]?.startsWith("$")), Boolean(scale && currency), !currency && /^(?:\s?%|\s?(?:[x×](?![a-z])|(?:times|fois)\b))/i.test(rest));
     let value = parsed.value;
     let refusal = parsed.refusal;
     // A scale word counts only in a money context: "18 M" alone is not $18,000,000.
@@ -483,9 +488,13 @@ export function tokenize(line: string, format: DocumentFormat, cell = false): Nu
       value = null;
       refusal = "A sign written in words; enter the figure by hand";
     }
-    // After "per" or a slash: the denominator of a ratio. A slash joining two digits ("2026/10") is a date unless a unit follows.
+    // After "per" or a slash following a figure: the denominator of a ratio. A slash joining two digits ("2026/10") is a date unless a unit follows.
     const before = text.slice(0, start);
-    if (value !== null && (BASIS_BEFORE_RE.test(before) || (/\/\s*$/.test(before) && (!/\d\/$/.test(before) || unit !== null)))) {
+    const slash = /\/\s*$/.exec(before);
+    const preceding = out.at(-1);
+    const ratioSlash = slash && preceding && /\d/.test(preceding.raw)
+      && /^\s*$/.test(text.slice(preceding.end, slash.index));
+    if (value !== null && (BASIS_BEFORE_RE.test(before) || (ratioSlash && (!/\d\/$/.test(before) || unit !== null)))) {
       value = null;
       refusal = BASIS_NOTE;
     }
