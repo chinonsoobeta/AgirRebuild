@@ -609,6 +609,10 @@ describe("card 58c: every audit action has a sentence in both languages", () => 
     expect(say("deal.copied", { name: "Fourplex, variant" })).toEqual(["Copied as Fourplex, variant", "A copié comme Fourplex, variant"]);
     expect(say("deal.created_as_copy", { name: "Fourplex" })).toEqual(["Created as a copy of Fourplex", "A créé comme copie de Fourplex"]);
   });
+  it("counts the values a reading found, one or several", () => {
+    expect(say("document.extracted", { candidates: 1 })).toEqual(["Read a document: 1 value found", "A lu un document\u00a0: 1 valeur trouvée"]);
+    expect(say("document.extracted", { candidates: 5 })).toEqual(["Read a document: 5 values found", "A lu un document\u00a0: 5 valeurs trouvées"]);
+  });
   it("says the old and new setting in words", () => {
     expect(describeEvent(en, ev("workspace.review_mode_changed", { from: "solo", to: "team" }))).toMatch(/Solo review.*Team review/);
     expect(describeEvent(fr, ev("workspace.review_mode_changed", { from: "solo", to: "team" }))).toMatch(/individuel.*équipe/i);
