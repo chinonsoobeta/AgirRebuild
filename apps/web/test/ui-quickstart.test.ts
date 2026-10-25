@@ -86,8 +86,8 @@ describe("quick start in the design's layout (card W6)", () => {
     expect(html).toContain(t("qs.hiddenLine", { label: L.field("mezz_loan_amount"), means: L.absent("mezz_loan_amount") }).replace(/'/g, "&#x27;"));
     expect(html).toMatch(/<label class="check"><input type="checkbox" name="accept"\/><span>[^<]+<\/span><\/label>/);
     expect(t("qs.accept")).toBe(lang === "en"
-      ? "Accept these defaults. Each one is recorded as a named default, not as a figure of mine."
-      : "Accepter ces valeurs par défaut. Chacune est consignée comme une valeur par défaut nommée, et non comme un chiffre de ma part.");
+      ? "Use these defaults. Each one is recorded as a named default, not as a figure you stated."
+      : "Utiliser ces valeurs par défaut. Chacune est consignée comme une valeur par défaut nommée, et non comme un chiffre que vous avez indiqué.");
   });
 
   it("still lists what is not asked when a sale template has no defaults", () => {
