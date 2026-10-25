@@ -41,6 +41,6 @@ export const fr: FrenchOf<typeof en> = {
   "auth.invite.thenOpen": ", puis ouvrez ce lien de nouveau.",
   "auth.invite.once": (p) => `Ce lien ne fonctionne qu'une fois. S'il a déjà servi, a été révoqué ou a expiré, demandez-en un nouveau à ${p.ws}.`,
   "auth.share.files": "Fichiers",
-  "auth.share.packageHint": "Une copie du calcul, de ses données, de ses décisions et de la chaîne de hachage de la piste d'audit, pour quiconque veut vérifier les chiffres.",
+  "auth.share.packageHint": "Une copie de l'analyse, de ses données, de ses décisions et de la chaîne de hachage de la piste d'audit, pour quiconque veut vérifier les chiffres.",
   "auth.share.recorded": "Chaque ouverture de ce lien est consignée dans la piste d'audit du projet.",
 };
