@@ -1,1 +1,7 @@
 /* Styles for the decision area: design tokens only (var(--…)), no literal colours. */
+.dec-lead{margin-top:8px}
+.dec-verdict{gap:10px}
+.dec-short{min-height:72px}
+.dec-list{list-style:none;margin:0;padding:0;display:flex;flex-direction:column;gap:12px}
+.dec-aside{gap:16px}
+.dec-kv{margin-top:6px}

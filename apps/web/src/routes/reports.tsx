@@ -2,22 +2,20 @@ import { Fragment, useState } from "react";
 import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
 import { api, type Artifact, type ShareLink, type ShareTerm } from "../api";
 import { Banner, canEdit, DealFrame, ErrorText, StatusTag, useDeal, useSession } from "../components/ui";
+import { Seg, Tag } from "../components/kit";
 import * as I from "../components/icons";
 import { useRun } from "./run";
 import { useI18n } from "../i18n";
 
-const OPTIONS = [
-  { kind: "ic_memo", format: "pdf" },
-  { kind: "ic_memo", format: "docx" },
-  { kind: "lender_package", format: "pdf" },
-  { kind: "lender_package", format: "docx" },
-  { kind: "build_decision", format: "pdf" },
-  { kind: "build_decision", format: "docx" },
-  { kind: "partner_memo", format: "pdf" },
-  { kind: "partner_memo", format: "docx" },
-  { kind: "model_export", format: "xlsx" },
+const KINDS = [
+  { kind: "ic_memo", formats: ["pdf", "docx"] },
+  { kind: "lender_package", formats: ["pdf", "docx"] },
+  { kind: "build_decision", formats: ["pdf", "docx"] },
+  { kind: "partner_memo", formats: ["pdf", "docx"] },
+  { kind: "model_export", formats: ["xlsx"] },
 ] as const;
 const TERMS: ShareTerm[] = ["24h", "7d", "30d", "none"];
+const newest = (a: Artifact, b: Artifact) => (a.created_at < b.created_at ? 1 : -1);
 
 export function Reports({ dealId }: { dealId: string }) {
   const { t, f, lang } = useI18n();
@@ -55,107 +53,177 @@ export function Reports({ dealId }: { dealId: string }) {
   });
   if (!deal.data) return <p className="muted">{t("common.loading")}</p>;
   const o = deal.data;
-  const kind = (k: string) => (k === "ic_memo" ? t("reports.memo") : k === "lender_package" ? t("reports.lender") : k === "build_decision" ? t("reports.buildDecision") : k === "partner_memo" ? t("reports.partnerMemo") : t("reports.modelExport"));
+  const all = arts.data ?? [];
+  const kind = (k: string) => t(KINDS.find((x) => x.kind === k) ? `reports.k.${k as (typeof KINDS)[number]["kind"]}` : "reports.k.model_export");
   const fmtName = (x: string) => (x === "pdf" ? "PDF" : x === "docx" ? t("reports.word") : t("reports.excel"));
+  const langName = (a: Pick<Artifact, "lang" | "kind">) => (a.lang === "fr" ? t("reports.frDraft") : t("reports.english"));
+  /** A file from an older run, or from a current run whose inputs have since changed. */
+  const outOfDate = (a: Artifact) => !o.run || a.run_id !== o.run.id || !o.run.fresh;
+  const sharedArt = all.find((a) => a.id === sharing);
+  const linkRows = links.data ?? [];
+
+  const kindCard = (k: (typeof KINDS)[number]) => {
+    const r = o.run!;
+    const want = k.kind === "model_export" ? "en" : lang;
+    const mine = all.filter((a) => a.kind === k.kind && a.run_id === r.id && a.lang === want).sort(newest);
+    const of = (fmt: string) => mine.find((a) => a.format === fmt);
+    const ready = mine.filter((a) => a.status === "ready");
+    const tag = ready.length ? <Tag tone="pass">{t("reports.ready")}</Tag>
+      : mine.some((a) => a.status === "queued") ? <Tag>{t("reports.rendering")}</Tag>
+      : <Tag tone="plain">{t("reports.notMade")}</Tag>;
+    const traced = ready.find((a) => a.provenance_entries)?.provenance_entries;
+    const facts = [k.formats.map(fmtName).join(" · "), k.kind === "model_export" ? t("reports.englishOnly") : want === "fr" ? t("reports.frDraft") : t("reports.english"),
+      traced ? t("reports.tracedN", { n: traced }) : t("reports.fromRun", { n: r.number })];
+    return (
+      <div key={k.kind} className="card card-pad stack tight">
+        <div className="row between"><h3 className="h3">{kind(k.kind)}</h3>{tag}</div>
+        <p className="muted">{t(`reports.kd.${k.kind}`)}</p>
+        <p className="small muted">{facts.join(" · ")}</p>
+        <div className="row rep-acts">
+          {k.formats.map((fmt) => {
+            const a = of(fmt);
+            // A ready file can be made again from the same run, for example after the workspace logo changes.
+            if (a?.status === "ready") return (
+              <Fragment key={fmt}>
+                <a className="btn quiet sm" href={`/api/artifacts/${a.id}/file`}><I.Download />{t("reports.downloadFmt", { f: fmtName(fmt) })}</a>
+                {canEdit(role) && (
+                  <button name="regenerate" value={`${k.kind}:${fmt}`} className="btn ghost sm" type="button" disabled={make.isPending}
+                    aria-label={t("reports.makeAgainFmt", { f: fmtName(fmt) })} onClick={() => make.mutate({ kind: k.kind, format: fmt })}>{t("reports.makeAgain")}</button>
+                )}
+              </Fragment>
+            );
+            if (a?.status === "queued") return null;
+            return (
+              <button key={fmt} name="generate" value={`${k.kind}:${fmt}`} className="btn primary sm" type="button" disabled={!canEdit(role) || make.isPending}
+                onClick={() => make.mutate({ kind: k.kind, format: fmt })}>{t("reports.generateFmt", { f: fmtName(fmt), n: r.number })}</button>
+            );
+          })}
+        </div>
+      </div>
+    );
+  };
+
   return (
     <>
       <DealFrame o={o} active="reports" />
-      {!o.run ? (
-        <Banner tone="neutral" title={t("reports.needRun")}>{t("reports.needRunBody")}</Banner>
-      ) : (
-        <div className="stack" style={{ gap: 12 }}>
-          {!o.run.fresh && <Banner tone="review" title={t("reports.stale", { n: o.run.number })}>{t("reports.staleBody")}</Banner>}
-          <h2 className="h-section">{t("reports.generate", { n: o.run.number })}</h2>
-          <div className="row">
-            {OPTIONS.filter((x) => x.kind !== "partner_memo" || partnerMemo).map((x) => (
-              <button key={`${x.kind}-${x.format}`} className="btn" type="button" disabled={!canEdit(role) || make.isPending} onClick={() => make.mutate(x)}>
-                {x.kind === "model_export" ? t("reports.model") : kind(x.kind)} <span className="faint">· {fmtName(x.format)}</span>
-              </button>
-            ))}
-            <a className="btn quiet" href={`/api/runs/${o.run.id}/audit-package`}><I.Download />{t("reports.package")}</a>
-          </div>
-          <p className="small faint">{t("reports.note")}</p>
-          <ErrorText error={make.error} />
+      <div className="stack">
+        <div>
+          <h2 className="h1">{t("reports.title")}</h2>
+          {o.run && <p className="lead rep-lead">{t("reports.lead", { n: o.run.number })}</p>}
         </div>
-      )}
-      <table className="tbl">
-        <thead><tr><th>{t("reports.col.report")}</th><th>{t("step.run")}</th><th>{t("reports.col.status")}</th><th>{t("reports.col.created")}</th><th className="r"><span className="sr-only">{t("common.download")}</span></th></tr></thead>
-        <tbody>
-          {(arts.data ?? []).map((a) => (
-            <Fragment key={a.id}>
-            <tr>
-              <td>{kind(a.kind)} <span className="faint">· {fmtName(a.format)}</span>{a.lang === "fr" && <span className="tag">{t("reports.frDraft")}</span>}</td>
-              <td className="num">{t("common.run", { n: a.run_number })}</td>
-              <td>
-                {a.status === "ready" && <StatusTag tone="pass">{t("reports.ready")}{a.provenance_entries ? t("reports.traced", { n: a.provenance_entries }) : ""}</StatusTag>}
-                {a.status === "queued" && <StatusTag tone="neutral">{t("reports.rendering")}</StatusTag>}
-                {(a.status === "blocked" || a.status === "failed") && (
-                  <div className="stack" style={{ gap: 4 }}><StatusTag tone="stop">{a.status === "blocked" ? t("reports.blocked") : t("reports.failed")}</StatusTag><span className="small muted">{a.error}</span></div>
-                )}
-              </td>
-              <td className="small muted">{f.date(a.created_at)}</td>
-              <td className="r" style={{ whiteSpace: "nowrap" }}>
-                {a.status === "ready" && a.format === "pdf" && <a className="btn quiet small" href={`/api/artifacts/${a.id}/file?inline=1`} target="_blank" rel="noreferrer">{t("common.open")}</a>}
-                {a.status === "ready" && <a className="btn small" href={`/api/artifacts/${a.id}/file`}><I.Download />{t("common.download")}</a>}
-                {a.status === "ready" && role !== "client" && <button className="btn quiet small" type="button" onClick={() => { setSharing(a.id); setMade(null); share.reset(); }}>{t("share.button")}</button>}
-              </td>
-            </tr>
-            {sharing === a.id && (
-              <tr>
-                <td colSpan={5}>
+        {!o.run ? (
+          <Banner tone="neutral" title={t("reports.needRun")}>{t("reports.needRunBody")}</Banner>
+        ) : (
+          <>
+            {!o.run.fresh && <Banner tone="review" title={t("reports.stale", { n: o.run.number })}>{t("reports.staleBody")}</Banner>}
+            <div className="grid3">
+              {KINDS.filter((k) => k.kind !== "partner_memo" || partnerMemo).map(kindCard)}
+              <div className="card card-pad stack tight">
+                <div className="row between"><h3 className="h3">{t("reports.package")}</h3><Tag tone="pass">{t("reports.always")}</Tag></div>
+                <p className="muted">{t("reports.kd.audit")}</p>
+                <p className="small muted">{t("reports.builtOnRequest")}</p>
+                <div className="row rep-acts"><a className="btn quiet sm" href={`/api/runs/${o.run.id}/audit-package`}><I.Download />{t("common.download")}</a></div>
+              </div>
+            </div>
+            <ErrorText error={make.error} />
+          </>
+        )}
+
+        <section className="section">
+          <h2 className="h2">{t("reports.madeSoFar")}</h2>
+          <div className="card scroll">
+            <table className="table">
+              <thead><tr><th>{t("reports.col.report")}</th><th>{t("step.run")}</th><th>{t("reports.col.status")}</th><th>{t("reports.col.made")}</th><th className="r"><span className="sr-only">{t("common.download")}</span></th></tr></thead>
+              <tbody>
+                {all.map((a) => (
+                  <tr key={a.id}>
+                    <td>{kind(a.kind)}<span className="sub">{fmtName(a.format)} · {langName(a)}</span></td>
+                    <td className="num">{t("common.run", { n: a.run_number })}</td>
+                    <td>
+                      {a.status === "ready" && (outOfDate(a)
+                        ? <><StatusTag tone="review">{t("reports.outOfDate")}</StatusTag> <span className="small muted">· {t("reports.outOfDateNote", { n: a.run_number })}</span></>
+                        : <><StatusTag tone="pass">{t("reports.ready")}</StatusTag>{a.provenance_entries ? <span className="small muted"> · {t("reports.tracedN", { n: a.provenance_entries })}</span> : null}</>)}
+                      {a.status === "queued" && <StatusTag tone="neutral">{t("reports.rendering")}</StatusTag>}
+                      {(a.status === "blocked" || a.status === "failed") && (
+                        <div className="stack tight rep-err"><StatusTag tone="stop">{a.status === "blocked" ? t("reports.blocked") : t("reports.failed")}</StatusTag><span className="small muted">{a.error}</span></div>
+                      )}
+                    </td>
+                    <td className="small muted">{f.date(a.created_at)}</td>
+                    <td>
+                      <div className="acts">
+                        {a.status === "ready" && <a className="btn quiet sm" href={`/api/artifacts/${a.id}/file`}><I.Download />{t("common.download")}</a>}
+                        {a.status === "ready" && a.format === "pdf" && <a className="btn ghost sm" href={`/api/artifacts/${a.id}/file?inline=1`} target="_blank" rel="noreferrer">{t("common.open")}</a>}
+                        {a.status === "ready" && role !== "client" && <button className="btn ghost sm" type="button" onClick={() => { setSharing(a.id); setMade(null); share.reset(); }}>{t("share.button")}</button>}
+                      </div>
+                    </td>
+                  </tr>
+                ))}
+                {arts.data?.length === 0 && <tr><td colSpan={5} className="muted">{t("reports.none")}</td></tr>}
+              </tbody>
+            </table>
+          </div>
+        </section>
+
+        {(linkRows.length > 0 || sharedArt) && (
+          <section className="section">
+            <div><h2 className="h2">{t("share.title")}</h2><p className="muted rep-share-lead">{t("reports.shareLead")}</p></div>
+            <div className="card">
+              {sharedArt && (
+                <div className="card-pad stack tight">
+                  <p>{t("reports.sharing", { what: `${kind(sharedArt.kind)} · ${fmtName(sharedArt.format)}`, n: sharedArt.run_number })}</p>
                   {made ? (
-                    <div className="stack" style={{ gap: 6 }}>
+                    <>
                       <div className="row">
-                        <input className="input" aria-label={t("share.link")} readOnly value={made} style={{ flex: 1 }} />
-                        <button className="btn small" type="button" onClick={() => navigator.clipboard.writeText(made)}>{t("share.copy")}</button>
+                        <input className="input rep-secret" aria-label={t("share.link")} readOnly value={made} />
+                        <button className="btn quiet" type="button" onClick={() => navigator.clipboard.writeText(made)}>{t("share.copy")}</button>
                       </div>
                       <p className="small muted">{t("share.once")}</p>
-                    </div>
+                    </>
                   ) : (
-                    <div className="row">
-                      <select className="input" aria-label={t("share.expires")} value={term} onChange={(e) => setTerm(e.target.value as ShareTerm)}>
-                        {TERMS.map((x) => <option key={x} value={x}>{t(`share.term.${x}`)}</option>)}
-                      </select>
-                      <button className="btn small primary" type="button" disabled={share.isPending} onClick={() => share.mutate({ artifact: a.id, term })}>{t("share.make")}</button>
+                    <>
+                      <span className="label" aria-hidden="true">{t("reports.term")}</span>
+                      <div className="row">
+                        <Seg label={t("reports.term")} value={term} onChange={setTerm} options={TERMS.map((x) => ({ value: x, label: t(`share.term.${x}`) }))} />
+                        <button className="btn primary" type="button" disabled={share.isPending} onClick={() => share.mutate({ artifact: sharedArt.id, term })}>{t("share.make")}</button>
+                      </div>
+                      <p className="small muted">{t("reports.onceNote")}</p>
                       <ErrorText error={share.error} />
-                    </div>
+                    </>
                   )}
-                </td>
-              </tr>
-            )}
-            </Fragment>
-          ))}
-          {arts.data?.length === 0 && <tr><td colSpan={5} className="muted">{t("reports.none")}</td></tr>}
-        </tbody>
-      </table>
-      {(links.data ?? []).length > 0 && (
-        <>
-          <h2 className="h-section">{t("share.title")}</h2>
-          <table className="tbl">
-            <thead><tr><th>{t("reports.col.report")}</th><th>{t("step.run")}</th><th>{t("share.by")}</th><th>{t("share.on")}</th><th>{t("share.expires")}</th><th className="r">{t("share.openings")}</th><th>{t("share.lastOpened")}</th><th>{t("reports.col.status")}</th><th className="r"><span className="sr-only">{t("share.revoke")}</span></th></tr></thead>
-            <tbody>
-              {links.data!.map((l) => {
-                const state = l.revoked_at ? "revoked" : l.expires_at && new Date(l.expires_at).getTime() <= Date.now() ? "expired" : "active";
-                return (
-                  <tr key={l.id}>
-                    <td>{kind(l.kind)} <span className="faint">· {fmtName(l.format)}</span></td>
-                    <td className="num">{t("common.run", { n: l.run_number })}</td>
-                    <td className="small muted">{l.created_by}</td>
-                    <td className="small muted">{f.date(l.created_at)}</td>
-                    <td className="small muted">{l.expires_at ? f.date(l.expires_at) : t("share.term.none")}</td>
-                    <td className="num">{l.openings}</td>
-                    <td className="small muted">{l.last_opened_at ? f.date(l.last_opened_at) : "—"}</td>
-                    <td><StatusTag tone={state === "active" ? "pass" : "neutral"}>{t(`share.${state}`)}</StatusTag></td>
-                    <td className="r">{state === "active" && <button className="btn quiet small" type="button" disabled={revoke.isPending} onClick={() => { if (window.confirm(t("share.confirm"))) return revoke.mutate(l.id); }}>{t("share.revoke")}</button>}</td>
-                  </tr>
-                );
-              })}
-            </tbody>
-          </table>
-          <ErrorText error={revoke.error} />
-        </>
-      )}
-      <p className="small faint">{t("reports.memoLang")}</p>
+                </div>
+              )}
+              {linkRows.length > 0 && (
+                <div className="scroll">
+                  <table className="table">
+                    <thead><tr><th>{t("reports.col.report")}</th><th>{t("step.run")}</th><th>{t("share.by")}</th><th>{t("share.on")}</th><th>{t("share.expires")}</th><th className="r">{t("share.openings")}</th><th>{t("share.lastOpened")}</th><th>{t("reports.col.status")}</th><th className="r"><span className="sr-only">{t("share.revoke")}</span></th></tr></thead>
+                    <tbody>
+                      {linkRows.map((l) => {
+                        const state = l.revoked_at ? "revoked" : l.expires_at && new Date(l.expires_at).getTime() <= Date.now() ? "expired" : "active";
+                        return (
+                          <tr key={l.id}>
+                            <td>{kind(l.kind)}<span className="sub">{fmtName(l.format)}</span></td>
+                            <td className="num">{t("common.run", { n: l.run_number })}</td>
+                            <td>{l.created_by}</td>
+                            <td className="small muted">{f.date(l.created_at)}</td>
+                            <td className="small muted">{l.expires_at ? f.date(l.expires_at) : t("share.term.none")}</td>
+                            <td className="r num">{l.openings}</td>
+                            <td className="small muted">{l.last_opened_at ? f.date(l.last_opened_at) : "—"}</td>
+                            <td><StatusTag tone={state === "active" ? "pass" : "neutral"}>{t(`share.${state}`)}</StatusTag></td>
+                            <td><div className="acts">{state === "active" && <button className="btn danger sm" type="button" disabled={revoke.isPending} onClick={() => { if (window.confirm(t("share.confirm"))) return revoke.mutate(l.id); }}>{t("share.revoke")}</button>}</div></td>
+                          </tr>
+                        );
+                      })}
+                    </tbody>
+                  </table>
+                </div>
+              )}
+            </div>
+            <ErrorText error={revoke.error} />
+          </section>
+        )}
+
+        <p className="small muted">{t("reports.closing")}</p>
+      </div>
     </>
   );
 }

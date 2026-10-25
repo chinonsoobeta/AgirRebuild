@@ -1,1 +1,6 @@
 /* Styles for the reports area: design tokens only (var(--…)), no literal colours. */
+.rep-lead{margin-top:8px}
+.rep-acts{margin-top:4px;gap:8px}
+.rep-err{gap:4px}
+.rep-share-lead{margin-top:4px}
+.rep-secret{flex:1 1 320px;width:auto;font-family:var(--mono);font-size:13px}

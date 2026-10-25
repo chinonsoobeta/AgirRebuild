@@ -108,7 +108,7 @@ describe("a client's controls (task 89c)", () => {
   it("a client's reports screen has no enabled report button and no share button", () => {
     state.artifacts = [{ id: "ready", kind: "lender_package", format: "pdf", status: "ready", error: null, sha256: null, created_at: "2026-10-19T12:00:00Z", run_id: "run-1", run_number: 1, provenance_entries: null }];
     render(createElement(Reports, { dealId: "deal-1" }));
-    const reportButtons = state.nodes.filter((n) => n.tag === "button" && n.props.type === "button" && n.props.className === "btn");
+    const reportButtons = state.nodes.filter((n) => n.tag === "button" && n.props.name === "generate");
     expect(reportButtons.length).toBeGreaterThan(0);
     expect(reportButtons.every((b) => b.props.disabled)).toBe(true);
     expect(buttons("Share").length).toBe(0);

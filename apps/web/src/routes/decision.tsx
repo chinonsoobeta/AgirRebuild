@@ -3,10 +3,14 @@ import { useMutation, useQueryClient } from "@tanstack/react-query";
 import { useState, type FormEvent } from "react";
 import { api } from "../api";
 import { Banner, canDecide, DealFrame, ErrorText, useDeal, useSession, VerdictBadge } from "../components/ui";
+import { ChoiceCards, Notice, Tag, type TagTone } from "../components/kit";
 import { useI18n, verdictText } from "../i18n";
 import { useRun } from "./run";
 
-const DECISIONS = ["approve", "approve_with_conditions", "reject", "return_to_underwriting"];
+const DECISIONS = ["approve", "approve_with_conditions", "reject", "return_to_underwriting"] as const;
+const TONE: Record<string, TagTone> = { approve: "pass", approve_with_conditions: "pass", reject: "stop", return_to_underwriting: "review" };
+/** The input hash, short: its first eight and last four characters. */
+const shortHash = (h: string) => (h.length > 16 ? `${h.slice(0, 8)} … ${h.slice(-4)}` : h);
 
 export function DecisionStep({ dealId }: { dealId: string }) {
   const i = useI18n();
@@ -49,63 +53,86 @@ export function DecisionStep({ dealId }: { dealId: string }) {
   return (
     <>
       <DealFrame o={o} active="decision" />
-      <div className="side">
-        <div className="stack" style={{ gap: 24 }}>
-          <section className="panel stack" style={{ gap: 10 }}>
-            <div className="row"><VerdictBadge code={verdict} /><span className="label">{t("common.run", { n: v.number })} · {f.date(v.createdAt)}</span></div>
-            <p className="serif" style={{ fontSize: 26, lineHeight: 1.25 }}>{vt.headline}</p>
-            <p className="muted">{vt.explanation}</p>
-          </section>
+      <div className="with-aside">
+        <div className="stack">
+          <div>
+            <h2 className="h1">{t(solo ? "decision.titleSolo" : "decision.title")}</h2>
+            <p className="lead dec-lead">{t("decision.lead", { n: v.number, v: L.verdict(verdict).toLowerCase() })}</p>
+          </div>
 
-          {v.decisions.length > 0 && (
-            <div className="stack">
-              <h2 className="h-section">{t("decision.recorded")}</h2>
-              {v.decisions.map((d) => (
-                <div key={d.id} className="panel stack" style={{ gap: 6 }}>
-                  <strong>{L.decision(d.decision)}</strong>
-                  <p>{d.rationale}</p>
-                  {d.conditions && <p className="muted">{t("decision.conditions", { c: d.conditions })}</p>}
-                  {d.override_reason && <p className="muted">{t("decision.against", { v: L.verdict(verdict).toLowerCase(), r: d.override_reason })}</p>}
-                  <span className="small faint">{d.decided_by} · {f.date(d.created_at)} · {t("decision.permanent")}</span>
-                </div>
-              ))}
+          <div className="card">
+            <div className="card-head">
+              <div className="row dec-verdict"><VerdictBadge code={verdict} /><span>{vt.headline}</span></div>
+              <span className="small muted">{t(v.fresh ? "decision.current" : "decision.outOfDate")}</span>
             </div>
-          )}
+            <div className="card-pad stack">
+              <p className="muted">{vt.explanation}</p>
+              {blockedReason ? (
+                <Notice tone="review" title={t("decision.cannot")} role="status">{blockedReason}</Notice>
+              ) : (
+                <form id="decision-form" className="stack" onSubmit={submit}>
+                  <ChoiceCards name="decision" legend={v.decisions.length ? t("decision.further") : t("decision.choose")} value={choice} onChange={setChoice}
+                    options={DECISIONS.map((k) => ({ value: k, title: L.decision(k), description: t(`decision.d.${k}`) }))} />
+                  <div className="field">
+                    <label htmlFor="rationale">{t(solo ? "decision.reasoningSolo" : "decision.reasoning")}</label>
+                    <textarea className="textarea" id="rationale" name="rationale" minLength={10} required placeholder={t("decision.reasoningHint")} />
+                  </div>
+                  {/* Conditions belong to "approve with conditions" only, so a permanent "approve" never carries any. */}
+                  {choice === "approve_with_conditions" && (
+                    <div className="field">
+                      <label htmlFor="conditions">{t("decision.conditionsLabel")}</label>
+                      <textarea className="textarea dec-short" id="conditions" name="conditions" minLength={5} required placeholder={t("decision.conditionsHint")} />
+                    </div>
+                  )}
+                  {against && (
+                    <div className="field">
+                      <label htmlFor="override">{t("decision.overrideLabel", { v: L.verdict(verdict).toLowerCase() })}</label>
+                      <textarea className="textarea" id="override" name="override" minLength={20} required aria-describedby="override-help" />
+                      <span className="small muted" id="override-help">{t("decision.overrideHelp")}</span>
+                    </div>
+                  )}
+                  <ErrorText error={record.error} />
+                  <div className="row">
+                    <button className="btn primary" type="submit" disabled={!choice || record.isPending}>{t("decision.record")}</button>
+                    <span className="small muted">{t("decision.permanentNote")}</span>
+                  </div>
+                </form>
+              )}
+            </div>
+          </div>
 
-          {blockedReason ? (
-            <Banner tone="review" title={t("decision.cannot")}>{blockedReason}</Banner>
-          ) : (
-            <form id="decision-form" className="panel stack" style={{ gap: 18 }} onSubmit={submit}>
-              <fieldset className="stack" style={{ border: 0, padding: 0, margin: 0, gap: 10 }}>
-                <legend className="h-section" style={{ marginBottom: 10 }}>{v.decisions.length ? t("decision.further") : t(solo ? "decision.titleSolo" : "decision.title")}</legend>
-                <div style={{ display: "grid", gridTemplateColumns: "repeat(2, minmax(0, 1fr))", gap: 10 }}>
-                  {DECISIONS.map((k) => (
-                    <label key={k} className="choice">
-                      <input type="radio" name="decision" value={k} checked={choice === k} onChange={() => setChoice(k)} required />
-                      <span>{L.decision(k)}</span>
-                    </label>
-                  ))}
-                </div>
-              </fieldset>
-              <div className="field"><label htmlFor="rationale">{t(solo ? "decision.reasoningSolo" : "decision.reasoning")}</label><textarea className="textarea" id="rationale" name="rationale" minLength={10} required /></div>
-              {choice === "approve_with_conditions" && (
-                <div className="field"><label htmlFor="conditions">{t("decision.conditionsLabel")}</label><textarea className="textarea" id="conditions" name="conditions" required /></div>
-              )}
-              {against && (
-                <div className="field">
-                  <label htmlFor="override">{t("decision.overrideLabel", { v: L.verdict(verdict).toLowerCase() })}</label>
-                  <textarea className="textarea" id="override" name="override" minLength={20} required />
-                  <span className="help">{t("decision.overrideHelp")}</span>
-                </div>
-              )}
-              <ErrorText error={record.error} />
-              <div className="row"><button className="btn primary" type="submit" disabled={!choice || record.isPending}>{t("decision.record")}</button><span className="why">{t("decision.permanentNote")}</span></div>
-            </form>
-          )}
+          <section className="section">
+            <h2 className="h2">{t("decision.recorded")}</h2>
+            {v.decisions.length === 0 ? (
+              <div className="card card-pad muted">{t("decision.empty")}</div>
+            ) : (
+              <ul className="dec-list">
+                {v.decisions.map((d) => (
+                  <li key={d.id} className="card card-pad stack tight">
+                    <div className="row"><Tag tone={TONE[d.decision] ?? "neutral"}>{L.decision(d.decision)}</Tag><span className="small muted">{t("decision.line", { n: v.number, who: d.decided_by, date: f.date(d.created_at) })}</span></div>
+                    <p>{d.rationale}</p>
+                    {d.conditions && <p className="muted">{t("decision.conditions", { c: d.conditions })}</p>}
+                    {d.override_reason && <p className="muted">{t("decision.against", { v: L.verdict(verdict).toLowerCase(), r: d.override_reason })}</p>}
+                  </li>
+                ))}
+              </ul>
+            )}
+          </section>
         </div>
-        <aside className="panel stack small muted" style={{ gap: 10 }}>
-          <span className="label">{t("decision.binds")}</span>
-          <span>{t("decision.bindsBody", { n: v.number })}</span>
+
+        <aside className="stack dec-aside">
+          <div className="card card-pad stack tight">
+            <h3 className="h3">{t("decision.binds")}</h3>
+            <p className="muted">{t("decision.bindsBody", { n: v.number })}</p>
+            <dl className="kv dec-kv">
+              <dt>{t("decision.kv.run")}</dt><dd>{t("decision.kv.runOn", { n: v.number, date: f.date(v.createdAt) })}</dd>
+              {v.policyVersion && <><dt>{t("decision.kv.policy")}</dt><dd>{v.policyDraft ? t("decision.kv.draft", { p: v.policyVersion }) : v.policyVersion}</dd></>}
+              {v.engineVersion && <><dt>{t("decision.kv.engine")}</dt><dd>{v.engineVersion}</dd></>}
+              {v.inputHash && <><dt>{t("decision.kv.inputs")}</dt><dd className="hash">{shortHash(v.inputHash)}</dd></>}
+            </dl>
+          </div>
+          <Notice>{t("decision.overrideNotice")}</Notice>
+          {canDecide(role) && <Notice>{t("decision.whoDecides", { role: L.role(role) })}</Notice>}
         </aside>
       </div>
     </>
