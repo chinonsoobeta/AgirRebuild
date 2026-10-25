@@ -3,7 +3,7 @@ import type { Entry, FrenchOf } from "./entry";
 
 export const en = {
   "auth.welcome": "Welcome back.",
-  "auth.pitchFoot": "Built for developers in Canada doing a few deals a year. Amounts are in Canadian dollars, and the interface is also available in French.",
+  "auth.pitchFoot": "Built for developers in Canada doing a few deals a year. Deals are in Canadian dollars unless you choose otherwise, and everything is also available in French.",
   "auth.signupPitch": "Your first workspace is created with your account. You can add people, or a second workspace for a partner, later in Settings.",
   "auth.signupLead": "It takes a minute.",
   "auth.nameHint": "As it should appear in the audit trail.",
@@ -17,15 +17,15 @@ export const en = {
   "auth.invite.already": "Already have an account?",
   "auth.invite.signIn": "Sign in",
   "auth.invite.thenOpen": ", then open this link again.",
-  "auth.invite.once": (p) => `This link works once. If it has been used or revoked, ask ${p.ws} for a new one.`,
+  "auth.invite.once": (p) => `This link works once. If it has been used, revoked or has expired, ask ${p.ws} for a new one.`,
   "auth.share.files": "Files",
   "auth.share.packageHint": "A copy of the run, its inputs, its decisions and the audit trail's hash chain, for anyone who wants to check the figures.",
-  "auth.share.recorded": "Each opening is recorded for the person who made the link.",
+  "auth.share.recorded": "Each time this link is opened, it is recorded in the deal's audit trail.",
 } satisfies Record<string, Entry>;
 
 export const fr: FrenchOf<typeof en> = {
   "auth.welcome": "Bon retour.",
-  "auth.pitchFoot": "Conçu pour les promoteurs au Canada qui mènent quelques projets par année. Les montants sont en dollars canadiens, et l'interface est aussi offerte en anglais.",
+  "auth.pitchFoot": "Conçu pour les promoteurs au Canada qui mènent quelques projets par année. Les projets sont en dollars canadiens, sauf si vous choisissez une autre devise, et tout est aussi offert en anglais.",
   "auth.signupPitch": "Votre premier espace de travail est créé avec votre compte. Vous pourrez ajouter des personnes, ou un second espace pour un partenaire, plus tard dans les Paramètres.",
   "auth.signupLead": "Cela prend une minute.",
   "auth.nameHint": "Tel qu'il doit apparaître dans le journal d'audit.",
@@ -39,8 +39,8 @@ export const fr: FrenchOf<typeof en> = {
   "auth.invite.already": "Vous avez déjà un compte ?",
   "auth.invite.signIn": "Connectez-vous",
   "auth.invite.thenOpen": ", puis ouvrez ce lien de nouveau.",
-  "auth.invite.once": (p) => `Ce lien ne fonctionne qu'une fois. S'il a déjà servi ou a été révoqué, demandez-en un nouveau à ${p.ws}.`,
+  "auth.invite.once": (p) => `Ce lien ne fonctionne qu'une fois. S'il a déjà servi, a été révoqué ou a expiré, demandez-en un nouveau à ${p.ws}.`,
   "auth.share.files": "Fichiers",
   "auth.share.packageHint": "Une copie du calcul, de ses données, de ses décisions et de la chaîne de hachage du journal d'audit, pour quiconque veut vérifier les chiffres.",
-  "auth.share.recorded": "Chaque ouverture est consignée pour la personne qui a créé le lien.",
+  "auth.share.recorded": "Chaque ouverture de ce lien est consignée dans la piste d'audit du projet.",
 };
