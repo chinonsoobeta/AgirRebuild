@@ -32,30 +32,41 @@ export function verifyReading(reading: Reading, documents: readonly ReadingDocum
   if (field.itemized ? !reading.item?.trim() : reading.item !== null) return { outcome: READING_FAILURE.item };
   const matches = documents.filter(d => d.name === reading.file);
   const doc = matches.length === 1 ? matches[0] : undefined;
-  const entries = doc ? addressedEntries(doc.document).filter(e => e.location === reading.location.replace(/^(.*![A-Z]+\d+)\.\.[A-Z]+\d+$/, "$1")) : [];
+  const location = reading.location.replace(/^(.*![A-Z]+\d+)\.\.[A-Z]+\d+$/, "$1");
+  const entries = doc ? addressedEntries(doc.document).filter(e => e.location === location) : [];
   if (!doc || entries.length !== 1) return { outcome: READING_FAILURE.address };
   if (!entries[0]!.text.includes(reading.quote)) return { outcome: READING_FAILURE.quote };
   const format = detectFormat(doc.document.fullText);
   let ambiguous = false;
-  const token = tokenize(reading.quote, format).find(t => {
-    if (t.unit === "bps") return ["senior_rate_pct", "mezz_rate_pct", "refinance_rate_pct"].includes(field.key) && t.value !== null && t.value / 100 === reading.value;
-    if (t.value === reading.value) return true;
+  const cell = doc.document.tables.some(table => table.rows.some(row => row.some(c => c.ref === location)));
+  const tokens = tokenize(reading.quote, format, cell);
+  const token = tokens.find(t => t.unit === "bps"
+    ? ["senior_rate_pct", "mezz_rate_pct", "refinance_rate_pct"].includes(field.key) && t.value !== null && t.value / 100 === reading.value
+    : t.value === reading.value) ?? tokens.find(t => {
+    if (t.unit === "bps") return false;
     if (t.value !== null && format.decimal !== null) return false;
     // Locate the scale after the digits, including when tokenize already consumed it.
     const text = normalizeText(reading.quote).slice(t.start);
     const digits = /^\s*\(?[-−‒–]?\s*(?:(?:US|CA|C|A)?\$|USD|CAD)?\s?(\d+([.,])\d{3})(?![\d.,])/.exec(text);
     if (!digits) return false;
     const scale = SCALE_RE.exec(text.slice(digits[0].length));
-    if (!scale) return false;
     const sign = t.value !== null && t.value < 0 || /^\s*[(−‒–-]/.test(text) ? -1 : 1;
     const decimal = Number(digits[1]!.replace(",", "."));
     const grouped = Number(digits[1]!.replace(/[.,]/, ""));
+    if (!scale) {
+      if (format.decimal !== null || field.min === undefined || field.max === undefined) return false;
+      const values = [sign * decimal, sign * grouped];
+      const inRange = (v: number) => v >= field.min! && v <= field.max!;
+      return values.filter(v => v === reading.value).length === 1 && inRange(reading.value)
+        && values.some(v => v !== reading.value && !inRange(v));
+    }
     const values = format.decimal ? [format.decimal === digits[2] ? decimal : grouped] : [decimal, grouped];
     const matches = values.some(v => Math.abs(sign * v * scaleOf(scale[1]!) - reading.value) < 0.005);
     if (matches) ambiguous = format.decimal === null;
     return matches;
   });
   if (!token) return { outcome: READING_FAILURE.value };
+  if (token.currencyCode !== null && token.currencyCode !== "CAD") return { outcome: READING_FAILURE.unit };
   let value = reading.value;
   const seen = reading.unit_seen;
   // The reader schema names money per unit and annual rent by their printed money/area unit.

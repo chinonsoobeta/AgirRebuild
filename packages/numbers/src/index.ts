@@ -99,10 +99,12 @@ const TOKEN_RE = new RegExp(
 // A currency mark written after the number: "1,200,000 USD", "1 250 000 $ US", "$ CA", "$ CAN", "$ CAD", or a
 // bare "18,75 $" (French). A bare dollar sign before a digit starts the next figure ("$5 $10"): not a suffix.
 const SUFFIX_RE = /^\s?(USD|CAD|\$\s?US\b|\$\s?(?:CAD|CAN?)\b|\$(?!\s?\d))/;
+const DOLLAR_RE = /^\s?((?:de\s+)?dollars?(?![\p{L}\p{N}])(?:\s+(?:USD|US|U\.S\.?|am[ée]ricains)(?![\p{L}\p{N}]))?)/iu;
 
 /** The currency a mark names: "US$", "USD", "$ US" are USD; "CA$", "C$", "CAD", "$ CA" are CAD; "A$" is AUD; a bare "$" names none. */
 export function codeOf(mark: string | undefined): CurrencyCode | null {
   const m = (mark ?? "").replace(/[\s$]/g, "");
+  if (/dollars?.*(?:USD|US|U\.S\.?|am[ée]ricains)$/iu.test(m)) return "USD";
   if (m === "US" || m === "USD") return "USD";
   if (m === "CA" || m === "C" || m === "CAN" || m === "CAD") return "CAD";
   return m === "A" ? "AUD" : null;
@@ -315,12 +317,14 @@ const DIGIT_WORDS = "one|two|three|four|five|six|seven|eight|nine|un|deux|trois|
 // "a" and "an" count only before a year ("a year"); "one and a half years" and "a year and a half" are 1.5 years; "five quarters" is fifteen months.
 const YEAR_NOUN = "years?|ans?|ann[ée]es?";
 const YEAR_FRACTION = String.raw`(?:\s+(?:and\s+(?:a\s+half|a\s+third|two\s+thirds)|et\s+(?:demie?|un\s+tiers|deux\s+tiers))(?![\p{L}\p{N}]))?`;
+const WORD_COMPOUND = String.raw`(?:${TENS})(?:-(?:${DIGIT_WORDS})|(?:\s+|\s+et\s+|-et-)(?:${DIGIT_WORDS}|une)(?=\s))`;
 const WORD_RE = new RegExp(
-  String.raw`(?<![\p{L}\p{N}-])((?:${TENS})-(?:${DIGIT_WORDS})|dix-sept|dix-huit|dix-neuf|${Object.keys(WORD_VALUES).filter((w) => !w.includes("-")).join("|")}|an?)(\s+and\s+a\s+half)?(?:-|\s+)(months?|mois|${YEAR_NOUN}|(?:quarters|trimestres)${NOT_FRACTION}(?!['’])|${TYPE_BED}(?:[\s-]+(?:units?|suites?|homes?|apartments?|logements?|unités?))?|(?:units?|suites?|homes?|apartments?|logements?|unités?)|${TYPE_NAMED})(?![\p{L}\p{N}])(${YEAR_FRACTION})`,
+  String.raw`(?<![\p{L}\p{N}-])(${WORD_COMPOUND}|dix-sept|dix-huit|dix-neuf|${Object.keys(WORD_VALUES).filter((w) => !w.includes("-")).join("|")}|an?)(\s+and\s+a\s+half)?(?:-|\s+)(months?|mois|${YEAR_NOUN}|(?:quarters|trimestres)${NOT_FRACTION}(?!['’])|${TYPE_BED}(?:[\s-]+(?:units?|suites?|homes?|apartments?|logements?|unités?))?|(?:units?|suites?|homes?|apartments?|logements?|unités?)|${TYPE_NAMED})(?![\p{L}\p{N}])(${YEAR_FRACTION})`,
   "giu",
 );
 // "twelve (12) months": the digits in parentheses after their own words are the figure, and the words are not a second one.
 const WORDS_THEN_PAREN = new RegExp(String.raw`(?<![\p{L}\p{N}-])((?:${TENS})-(?:${DIGIT_WORDS})|${Object.keys(WORD_VALUES).join("|")})\s+$`, "iu");
+const WORD_CONTINUES = new RegExp(String.raw`(?:${TENS})(?:\s+(?:et\s+)?|-et-)$`, "iu");
 const PRECEDING_NUMBER_WORD = /(?:(?:hundred|thousand|million|cents?|mille)\s+(?:and|et)|hundred|thousand|million|cents?|mille|(?<=[\p{L}\p{N}])-)\s*$/iu;
 
 // Card 111. A rate written in words ("five and a half percent", "cinq virgule cinq pour cent") or with a fraction ("5 1/2%", "5½ %") is one figure in %.
@@ -366,15 +370,15 @@ function wordTokens(text: string): NumberToken[] {
     // "any one unit", "un logement": one of a thing is not a count.
     if (unit === "units" && /^(one|un|une|an?)$/.test(word)) continue;
     const before = text.slice(0, m.index!);
-    if (PRECEDING_NUMBER_WORD.test(before)) continue;
+    if (PRECEDING_NUMBER_WORD.test(before) || WORD_CONTINUES.test(before)) continue;
     const fraction = m[2] || m[4] || "";
     const hasFraction = Boolean(fraction);
     // "a year": a duration, not "once a year", "$96,000 a year", "a year ago" or "a unit and a half".
     if (/^an?$/.test(word) && (unit !== "years" || /(?:once|twice|times|per|each|every|[\d%$])\s*$/i.test(before) || /^(?:[-'’]|\s+(?:ago|old|earlier|later|before)\b)/i.test(text.slice(m.index! + m[0].length)))) continue;
     if (hasFraction && unit !== "years") continue;
     if (quarters && /^(one|un|une|an?)$/.test(word)) continue;
-    const [a, b] = word.includes("-") ? word.split("-") : [word, null];
-    const base = /^an?$/.test(word) ? 1 : b === null || a === "dix" ? WORD_VALUES[word]! : WORD_VALUES[a!]! + WORD_VALUES[b]!;
+    const [a, b] = word.startsWith("dix-") ? [word, null] : word.split(/(?:-et-|\s+et\s+|[-\s]+)/);
+    const base = /^an?$/.test(word) ? 1 : b === undefined || b === null ? WORD_VALUES[word]! : WORD_VALUES[a!]! + WORD_VALUES[b]!;
     const value = quarters ? base * 3 : base + (/two\s+thirds|deux\s+tiers/i.test(fraction) ? 2 / 3 : /third|tiers/i.test(fraction) ? 1 / 3 : hasFraction ? 0.5 : 0);
     out.push({ raw: m[0], start: m.index!, end: m.index! + m[0].length, value, currency: false, currencyCode: null, unit, scaled: false, ...(quarters ? { quarters: true as const } : {}) });
   }
@@ -425,7 +429,9 @@ export function tokenize(line: string, format: DocumentFormat, cell = false): Nu
     let end = start + whole.length;
     const rest = text.slice(end);
     const scale = rest.match(SCALE_RE);
-    const suffix = (scale ? rest.slice(scale[0].length) : rest).match(SUFFIX_RE);
+    const afterScale = scale ? rest.slice(scale[0].length) : rest;
+    const dollarAllowed = (Boolean(scale) || !/^\s?de\s+/iu.test(afterScale)) && (Boolean(cur) || Boolean(scale) || !/^(?:19|20)\d{2}$/.test(core!));
+    const suffix = afterScale.match(SUFFIX_RE) ?? (dollarAllowed ? afterScale.match(DOLLAR_RE) : null);
     // In a cell, "185k" or "1.2M" with no unit after it is an amount, as "$185k" is in prose.
     const bare = cell && !cur && !suffix && scale && CELL_SCALE_RE.test(scale[1]!) && !UNIT_RULES.some((r) => !r.money && r.re.test(rest.slice(scale[0].length)));
     const currency = Boolean(cur) || Boolean(suffix) || Boolean(bare);
@@ -443,7 +449,7 @@ export function tokenize(line: string, format: DocumentFormat, cell = false): Nu
       scaled = true;
       end += scale[0].length;
     }
-    const mark = text.slice(end).match(SUFFIX_RE);
+    const mark = text.slice(end).match(SUFFIX_RE) ?? (currency && dollarAllowed ? text.slice(end).match(DOLLAR_RE) : null);
     if (mark) {
       currencyCode ??= codeOf(mark[1]);
       end += mark[0].length;
