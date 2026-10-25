@@ -165,7 +165,8 @@ details.stack:not([open]){gap:0}
 .deal-head{display:flex;flex-wrap:wrap;align-items:flex-start;justify-content:space-between;gap:16px 32px}
 .meta{color:var(--ink-2);margin-top:6px}
 .actions{display:flex;flex-wrap:wrap;gap:8px}
-.path{display:grid;grid-template-columns:repeat(auto-fit,minmax(min(150px,100%),1fr));margin:30px 0 36px;padding:0}
+/* Rows the path wraps into on a narrow screen stay apart, so a step's line and marker never cross the words of the step above. */
+.path{display:grid;grid-template-columns:repeat(auto-fit,minmax(min(150px,100%),1fr));row-gap:28px;margin:30px 0 36px;padding:0}
 .step{position:relative;display:flex;flex-direction:column;gap:4px;padding:18px 16px 0 0;color:var(--ink-2);border-top:2px solid var(--line-2)}
 .step:hover{text-decoration:none}
 .step:hover .step-name{text-decoration:underline}
