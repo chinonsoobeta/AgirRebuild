@@ -1,6 +1,7 @@
 // The signed-out home (card W4): what Agir does, from the Landing board, with every claim
 // true of the code today. No price, no hosting claim and no sample deal's figures.
 import { useQuery } from "@tanstack/react-query";
+import { useRef } from "react";
 import { Link, Navigate } from "@tanstack/react-router";
 import { api, ApiError, type Me } from "../api";
 import { useI18n } from "../i18n";
@@ -17,8 +18,13 @@ export function homeDecision(me: { isLoading: boolean; data?: unknown; error?: u
 
 export function Home() {
   const me = useQuery({ queryKey: ["me"], queryFn: () => api.get<Me>("/me"), retry: false });
-  const next = homeDecision(me);
-  if (next === "wait") return null;
+  // Refetching a signed-out session (say, when the window regains focus) puts it back to loading. The page keeps
+  // what it last showed until the new answer arrives, instead of going blank and jumping back to the top.
+  const shown = useRef<"deals" | "landing" | null>(null);
+  const decided = homeDecision(me);
+  if (decided !== "wait") shown.current = decided;
+  const next = decided === "wait" ? shown.current : decided;
+  if (!next) return null;
   if (next === "deals") return <Navigate to="/deals" />;
   return <Landing />;
 }

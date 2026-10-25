@@ -1,6 +1,6 @@
 import { Link, useNavigate } from "@tanstack/react-router";
 import { useQuery, useQueryClient } from "@tanstack/react-query";
-import { useState, type FormEvent } from "react";
+import { useRef, useState, type FormEvent } from "react";
 import { api, type DealOverview, type InvitePeek, type Me } from "../api";
 import { useI18n } from "../i18n";
 import { FormError, SignedOutPage } from "./auth";
@@ -13,10 +13,13 @@ export function Invite({ secret }: { secret: string }) {
   const qc = useQueryClient();
   const invite = useQuery({ queryKey: ["invite", secret], queryFn: () => api.get<InvitePeek>(`/invite/${secret}`), retry: false });
   const me = useQuery({ queryKey: ["me"], queryFn: () => api.get<Me>("/me"), retry: false });
+  // Refetching a signed-out session puts it back to loading; once answered, the page stays, with what was typed.
+  const answered = useRef(false);
+  if (me.data || me.error) answered.current = true;
   const [error, setError] = useState<unknown>(null);
   const [busy, setBusy] = useState(false);
   if (invite.error) return <SignedOutPage><p className="lead">{err(invite.error)}</p></SignedOutPage>;
-  if (!invite.data || (!me.data && !me.error)) return <SignedOutPage><p className="muted">{t("common.loading")}</p></SignedOutPage>;
+  if (!invite.data || (!me.data && !me.error && !answered.current)) return <SignedOutPage><p className="muted">{t("common.loading")}</p></SignedOutPage>;
   const run = async (step: () => Promise<void>) => {
     setBusy(true);
     setError(null);

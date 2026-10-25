@@ -10,6 +10,8 @@
 .ld-path .step{padding-bottom:4px}
 .ld-steps{list-style:none;padding:0}
 .ld-body{margin-top:8px}
+/* These cards space their own text, so the shared card gap is not added on top. */
+.ld-glimpse .card,.ld-three .card{gap:0}
 .ld-note{margin-top:18px;max-width:72ch}
 .ld-foot nav{display:flex;flex-wrap:wrap;align-items:center;gap:4px 0}
 .ld-foot .ld-lang{min-height:0;padding:0;color:var(--ink-2);font-size:13px}
