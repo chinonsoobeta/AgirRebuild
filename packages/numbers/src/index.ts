@@ -326,6 +326,8 @@ const WORD_RE = new RegExp(
 const WORDS_THEN_PAREN = new RegExp(String.raw`(?<![\p{L}\p{N}-])((?:${TENS})-(?:${DIGIT_WORDS})|${Object.keys(WORD_VALUES).join("|")})\s+$`, "iu");
 const WORD_CONTINUES = new RegExp(String.raw`(?:${TENS})(?:\s+(?:et\s+)?|-et-)$`, "iu");
 const PRECEDING_NUMBER_WORD = /(?:(?:hundred|thousand|million|cents?|mille)\s+(?:and|et)|hundred|thousand|million|cents?|mille|(?<=[\p{L}\p{N}])-)\s*$/iu;
+/** "seven to nine months": a number word, then a range word, ends right before this one. The range is not a value. */
+const WORD_RANGE_END = new RegExp(String.raw`(?<![\p{L}\p{N}-])(?:${WORD_COMPOUND}|${Object.keys(WORD_VALUES).join("|")})\s+(?:to|or|and|à|ou|et|[-–—])\s+$`, "iu");
 
 // Card 111. A rate written in words ("five and a half percent", "cinq virgule cinq pour cent") or with a fraction ("5 1/2%", "5½ %") is one figure in %.
 const PCT_MARK = String.raw`(?:\s?%|\s+(?:percent|per\s+cent|pour\s?cent|pct)(?![\p{L}]))`;
@@ -370,7 +372,7 @@ function wordTokens(text: string): NumberToken[] {
     // "any one unit", "un logement": one of a thing is not a count.
     if (unit === "units" && /^(one|un|une|an?)$/.test(word)) continue;
     const before = text.slice(0, m.index!);
-    if (PRECEDING_NUMBER_WORD.test(before) || WORD_CONTINUES.test(before)) continue;
+    if (PRECEDING_NUMBER_WORD.test(before) || WORD_CONTINUES.test(before) || WORD_RANGE_END.test(before)) continue;
     const fraction = m[2] || m[4] || "";
     const hasFraction = Boolean(fraction);
     // "a year": a duration, not "once a year", "$96,000 a year", "a year ago" or "a unit and a half".
