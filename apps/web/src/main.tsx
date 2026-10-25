@@ -14,6 +14,7 @@ import { DecisionStep } from "./routes/decision";
 import { Reports } from "./routes/reports";
 import { Audit } from "./routes/audit";
 import { Settings } from "./routes/settings";
+import { ReviewAccess } from "./routes/review-access";
 import { Explore } from "./routes/explore";
 import { Share } from "./routes/share";
 import { Invite } from "./routes/invite";
@@ -43,6 +44,7 @@ const index = createRoute({ getParentRoute: () => app, path: "/", component: () 
 const deals = createRoute({ getParentRoute: () => app, path: "/deals", component: Deals });
 const newDeal = createRoute({ getParentRoute: () => app, path: "/deals/new", component: NewDeal });
 const settings = createRoute({ getParentRoute: () => app, path: "/settings", component: Settings });
+const reviewAccess = createRoute({ getParentRoute: () => app, path: "/settings/review-access", component: ReviewAccess });
 const deal = createRoute({ getParentRoute: () => app, path: "/deals/$dealId", component: () => <Outlet /> });
 const step = <P extends string>(path: P, C: (p: { dealId: string }) => React.JSX.Element) =>
   createRoute({ getParentRoute: () => deal, path, component: function Step() { const { dealId } = deal.useParams(); return <C key={dealId} dealId={dealId} />; } });
@@ -58,6 +60,7 @@ const routeTree = root.addChildren([
     deals,
     newDeal,
     settings,
+    reviewAccess,
     deal.addChildren([dealIndex, step("documents", Documents), step("review", Review), step("run", Run), step("decision", DecisionStep), step("reports", Reports), step("audit", Audit), step("explore", Explore)]),
   ]),
 ]);

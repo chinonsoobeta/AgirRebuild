@@ -1,1 +1,3 @@
 /* Styles for the agirreview area: design tokens only (var(--…)), no literal colours. */
+.ra-lead{margin-top:8px;max-width:64ch}
+.ra-card .h3+p{margin-top:6px}
