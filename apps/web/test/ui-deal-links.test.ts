@@ -205,12 +205,14 @@ describe("Reports, shared links", () => {
   it("in French", () => {
     s.lang = "fr";
     s.artifacts = [art({ id: "lp" })];
-    s.links = [shareLink({ id: "active" })];
+    s.links = [shareLink({ id: "active" }), shareLink({ id: "fr", files: [{ kind: "build_decision", format: "docx", lang: "fr" }] })];
     const words = text(render(createElement(Reports, { dealId: "d" })));
     expect(words).toContain("Un lien ouvre une page en lecture seule avec les fichiers choisis et le dossier d'audit.");
     expect(words).toContain("Ce que vous partagez");
-    expect(words).toContain("Décision de construire (Word), Dossier pour le prêteur (PDF)");
-    expect(links((h) => h.startsWith("/deals/d/reports/preview/")).map(label)).toEqual(["Aperçu"]);
+    // On a French screen the English files say so, and a French file is named plainly.
+    expect(words).toContain("Décision de construire (Word, anglais), Dossier pour le prêteur (PDF, anglais)");
+    expect(words).toMatch(/Décision de construire \(Word\)(?!,)/);
+    expect(links((h) => h.startsWith("/deals/d/reports/preview/")).map(label)).toEqual(["Aperçu", "Aperçu"]);
   });
   it("a French screen with no ready file asks for a report first", () => {
     s.lang = "fr";

@@ -78,7 +78,9 @@ export function Reports({ dealId }: { dealId: string }) {
   const shareable = o.run ? all.filter((a) => a.status === "ready" && a.run_id === o.run!.id).sort(shareOrder) : [];
   const chosen = shareable.filter((a) => !unticked.includes(a.id)).map((a) => a.id);
   const tick = (id: string, on: boolean) => { setUnticked(on ? unticked.filter((x) => x !== id) : [...unticked, id]); setMade(null); share.reset(); };
-  const linkFile = (x: { kind: string; format: string; lang: string }) => t(x.lang === "fr" ? "reports.linkFileFr" : "reports.linkFile", { what: kind(x.kind), f: fmtName(x.format) });
+  // A file in the screen's language is named plainly; one in the other language says which.
+  const linkFile = (x: { kind: string; format: string; lang: string }) =>
+    t(x.lang === lang ? "reports.linkFile" : x.lang === "fr" ? "reports.linkFileFr" : "reports.linkFileEn", { what: kind(x.kind), f: fmtName(x.format) });
   /** The language a card does not make by default: French on an English screen, English on a French one. */
   const otherLang = lang === "fr" ? "en" : "fr";
   const otherName = otherLang === "fr" ? t("reports.frDraft") : t("reports.englishVersion");
