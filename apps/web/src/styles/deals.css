@@ -9,3 +9,9 @@
 .empty-title{font-size:32px}
 .empty .empty-lead{margin:14px auto 0}
 @media (max-width:900px){.deal-next{text-align:left}}
+@media (min-width:901px){
+  .deals-list{display:grid;grid-template-columns:minmax(0,1.1fr) minmax(0,1.4fr) auto;column-gap:32px}
+  .deals-list>*{grid-column:1/-1}
+  .deals-list>.deal{grid-template-columns:subgrid}
+  .deals-list>.deal>:last-child{justify-self:end}
+}

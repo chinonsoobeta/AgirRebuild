@@ -9,5 +9,8 @@
 .set-vh{position:absolute;width:1px;height:1px;padding:0;margin:-1px;overflow:hidden;clip:rect(0 0 0 0);white-space:nowrap;border:0}
 .set-nav a:focus-visible{outline:2px solid var(--accent);outline-offset:2px}
 .set section[id]{scroll-margin-top:24px}
-/* The shared thresholds editor sits inside its section card here, so its own panel frame goes. */
-.set-thresholds details.panel{border:0;padding:0;margin:0;background:none;box-shadow:none}
+/* The counts headers are long labels: they wrap, so the deal names can stay on one line. */
+.counts thead th{white-space:normal;vertical-align:bottom;min-width:5.5em}
+.counts td:first-child,.counts td:nth-child(2){white-space:nowrap}
+/* The total row reads like the rows above it, in bold, under a line. */
+.counts tfoot>tr>*{border-top:1px solid var(--line);border-bottom:0;vertical-align:top;font-size:15px;font-weight:700;color:var(--ink)}

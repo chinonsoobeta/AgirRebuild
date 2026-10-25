@@ -5,13 +5,10 @@ import { COUNTRIES, CURRENCIES, PROVINCES, type Country, type Currency } from "@
 import { api } from "../api";
 import { canEdit, ErrorText, useSession } from "../components/ui";
 import { useI18n } from "../i18n";
+import * as I from "../components/icons";
 
 // The kinds the API stores and displays through L.asset.
 const ASSET_TYPES = ["Multifamily", "Mixed-use", "Industrial", "Office", "Retail", "Hospitality", "Self storage", "Other"];
-
-const Back = () => (
-  <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round" aria-hidden="true"><path d="M19 12H5M11 18l-6-6 6-6" /></svg>
-);
 
 export function NewDeal() {
   const { t, L, lang } = useI18n();
@@ -43,7 +40,7 @@ export function NewDeal() {
   };
   return (
     <div className="newdeal">
-      <Link to="/deals" className="back"><Back />{t("newdeal.back")}</Link>
+      <Link to="/deals" className="back"><I.Back />{t("newdeal.back")}</Link>
       <div className="page-head">
         <div>
           <h1 className="h1">{t("deals.new")}</h1>

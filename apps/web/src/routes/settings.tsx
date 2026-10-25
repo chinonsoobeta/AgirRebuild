@@ -130,7 +130,7 @@ export function CountsPanel({ workspaceId }: { workspaceId: string }) {
       <p className="muted">{t("counts.body")}</p>
       {q.data && deals.length === 0 ? <p className="small muted">{t("counts.none")}</p> : deals.length > 0 && (
         <div className="scroll">
-          <table className="table">
+          <table className="table counts">
             <thead><tr><th>{t("counts.deal")}</th><th>{t("counts.docs")}</th><th className="r">{t("counts.noCandidates")}</th><th className="r">{t("counts.read")}</th>
               <th className="r">{t("counts.suggested")}</th><th className="r">{t("counts.typed")}</th><th className="r">{t("counts.actions")}</th><th className="r">{t("counts.minutes")}</th></tr></thead>
             <tbody>
@@ -297,7 +297,7 @@ export function Settings() {
     ) },
     { id: "thresholds", nav: t("settings.nav.thresholds"), show: true, node: (
       <Section id="thresholds" title={t("settings.nav.thresholds")} body={t("settings.th.body")}>
-        <div className="set-thresholds"><Thresholds scope="workspaces" id={workspaceId} /></div>
+        <Thresholds scope="workspaces" id={workspaceId} summary={t("thresholds.show")} />
       </Section>
     ) },
     { id: "people", nav: t("settings.nav.people"), show: true, node: (

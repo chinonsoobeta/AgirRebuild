@@ -1,6 +1,6 @@
 /* Agir design system: a port of the accepted design's agir.css (interface-design/agir.css).
    Tokens live on :root (light) and :root[data-theme="dark"]; every class is the design's,
-   without the .agir prefix. Area styles go in styles/<area>.css; old route classes in legacy.css.
+   without the .agir prefix. Area styles go in styles/<area>.css.
    BC Sans: see docs/THIRD_PARTY.md. */
 @font-face{font-family:"BC Sans";src:url("/fonts/bc-sans/BCSans-Light.woff2") format("woff2");font-weight:300;font-style:normal;font-display:swap}
 @font-face{font-family:"BC Sans";src:url("/fonts/bc-sans/BCSans-LightItalic.woff2") format("woff2");font-weight:300;font-style:italic;font-display:swap}
@@ -62,6 +62,8 @@ legend{padding:0}
 .deal-name.sm{font-weight:400;font-size:21px;line-height:1.3}
 .stack{display:flex;flex-direction:column;gap:24px}
 .stack.tight{gap:12px}
+/* A closed disclosure shows only its summary, with no gap left for the hidden content. */
+details.stack:not([open]){gap:0}
 .row{display:flex;flex-wrap:wrap;align-items:center;gap:12px}
 .between{justify-content:space-between}
 .grid2{display:grid;grid-template-columns:repeat(auto-fit,minmax(min(320px,100%),1fr));gap:24px}
@@ -116,7 +118,7 @@ legend{padding:0}
 .switch.on::after{left:19px}
 
 /* Tables */
-.scroll{overflow-x:auto}
+.scroll{position:relative;overflow-x:auto}
 .table{width:100%;border-collapse:collapse;font-size:15px}
 .table th{font-weight:400;font-size:13px;color:var(--ink-3);text-align:left;padding:10px 12px;border-bottom:1px solid var(--line);white-space:nowrap}
 .table td{padding:13px 12px;border-bottom:1px solid var(--line);vertical-align:top}
@@ -172,7 +174,9 @@ legend{padding:0}
 .step-state{font-size:13px;color:var(--ink-3)}
 .figs{display:grid;grid-template-columns:repeat(auto-fit,minmax(min(200px,100%),1fr));gap:16px}
 .fig{display:flex;flex-direction:column;gap:4px;padding:16px 18px;background:var(--surface);border:1px solid var(--line);border-radius:10px}
+.figs{margin:0}
 .fig .k{font-size:13px;color:var(--ink-3)}
+.fig dd{margin:0}
 .fig .v{font-size:24px;line-height:1.2;font-variant-numeric:tabular-nums lining-nums;letter-spacing:-.01em}
 .fig .s{font-size:13px;color:var(--ink-3)}
 .deals{display:flex;flex-direction:column;gap:12px}
@@ -208,6 +212,9 @@ legend{padding:0}
 .kv{display:grid;grid-template-columns:auto minmax(0,1fr);gap:8px 20px;font-size:14px}
 .kv dt{color:var(--ink-3);margin:0}
 .kv dd{margin:0;color:var(--ink)}
+.gloss{margin:12px 0 0;gap:10px}
+.gloss dt{font-weight:700}
+.gloss dd{margin:2px 0 0}
 .hash{font-family:var(--mono);font-size:13px;color:var(--ink-3)}
 .pitch{padding:64px 56px;display:flex;flex-direction:column;justify-content:space-between;gap:48px;background:var(--surface-2)}
 .pitch-h{font-size:34px;line-height:1.2;font-weight:300;letter-spacing:-.012em;max-width:22ch}
@@ -298,3 +305,21 @@ legend{padding:0}
 
 /* Text for screen readers only. */
 .sr-only{position:absolute;width:1px;height:1px;overflow:hidden;clip:rect(0 0 0 0);white-space:nowrap}
+
+/* Shared rules kept from the old system when it was removed (card U20). They stay last so they
+   cascade as before. A card with no inner card-head, card-pad, card-foot, scroll or table child
+   is padded and stacked itself. */
+.card:not(:has(>.card-head,>.card-pad,>.card-foot,>.scroll,>.table)){padding:20px 22px;display:flex;flex-direction:column;gap:14px}
+/* A card that asks for the standard padding keeps it, so every padded card lines up. */
+.card.card-pad{padding:24px}
+.choice>span{min-width:0;overflow-wrap:anywhere}
+.error-text{font-size:13px;color:var(--stop);font-weight:700}
+.not-meaningful{color:var(--ink-2);font-style:italic}
+dialog{border:1px solid var(--line);border-radius:12px;padding:0;background:var(--surface);color:var(--ink);width:min(520px,92vw)}
+dialog::backdrop{background:var(--backdrop)}
+dialog form{padding:24px;display:flex;flex-direction:column;gap:16px}
+
+/* Less motion for people who ask for it: no spinning, no sliding. */
+@media (prefers-reduced-motion:reduce){
+  *,*::before,*::after{animation:none!important;transition:none!important;scroll-behavior:auto!important}
+}

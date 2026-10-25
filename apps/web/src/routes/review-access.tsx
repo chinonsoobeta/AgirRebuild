@@ -5,6 +5,7 @@ import { api } from "../api";
 import { ErrorText, useSession } from "../components/ui";
 import { Notice, Seg } from "../components/kit";
 import { useI18n } from "../i18n";
+import * as I from "../components/icons";
 
 type Member = { id: string; name: string; email: string; role: string; expires_at: string | null };
 const DAYS = ["7", "14", "30"] as const;
@@ -31,7 +32,7 @@ export function ReviewAccess() {
       return qc.invalidateQueries({ queryKey: ["members"] });
     },
   });
-  const back = <Link className="back" to="/settings">{t("agirreview.back")}</Link>;
+  const back = <Link className="back" to="/settings"><I.Back />{t("agirreview.back")}</Link>;
 
   if (role !== "owner") {
     return (

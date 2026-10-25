@@ -13,7 +13,12 @@ work it describes.
 | `npm run gate -- --tier=release` | Both typechecks, 198 tests in 9 files (119 on `main`), web build | 2026-10-03, `task/12-reading-gaps` (the stack 05, 07, 06, 08, 09, 10, 11, 12) |
 | CI replay: fresh `git clone`, `npm ci`, then `VITEST_MAX_WORKERS=2 npm run gate -- --tier=pr` and `--tier=release` | `npm ci` accepts the lockfile; both tiers pass, 198 tests; swap unchanged | 2026-10-03, `task/12-reading-gaps` |
 | `VITEST_MAX_WORKERS=2 npm run gate -- --tier=release` | The same gate with two test workers: peak memory about 1 GB, no swap | 2026-10-01 |
-| `AGIR_DATA_DIR=<empty folder> PORT=8791 npm start` | Builds the web app, applies `0001` to `0007`, seeds six deals, serves on that port. An empty data folder leaves `.data/` untouched | 2026-10-03, `task/08-plain-language` |
+| `npx tsc -p apps/web/tsconfig.json --noEmit` and `VITEST_MAX_WORKERS=2 npx vitest run apps/web` | Web typecheck clean; 542 web tests in 20 files pass | 2026-10-25, `ui/redesign` `6fee9c4` |
+| `env -u ANTHROPIC_API_KEY NODE_OPTIONS=--max-old-space-size=3072 VITEST_MAX_WORKERS=2 npm run gate -- --tier=release` | Both typechecks, 5991 tests in 35 files, the no-model fallback test (1 passed, 242 skipped), web build | 2026-10-25, `ui/redesign` `6fee9c4` |
+| `env -u ANTHROPIC_API_KEY AGIR_DATA_DIR=<empty folder> PORT=8792 npm start` | Builds the web app, applies `0001` to `0029`, seeds six deals, serves on that port. An empty data folder leaves `.data/` untouched | 2026-10-25, `ui/redesign` (the browser walk) |
+
+The `npm start` row was run from `ui/redesign`, where migrations go to `0029` as on `main` (`0030` on the U17
+branch, which was not started).
 
 `npm start` without `AGIR_DATA_DIR` migrates `.data/` in place, and a migration cannot be undone there.
 Point it at an empty folder to try a branch.
@@ -23,9 +28,26 @@ The PDF test needs a headless Chromium: Playwright's cache, or `AGIR_CHROMIUM_PA
 
 ## Where the work is
 
-There is no remote. Everything is committed locally, and nothing is pushed or merged until the
-owner says so. Each task has its own branch, and each branch is stacked on the one before it, because
-later tasks build on earlier migrations. Review and merge them in order.
+The remote `origin` is `https://github.com/chinonsoobeta/AgirRebuild.git`, a **public** repository
+whose default branch is `main` (`gh repo view`, 2026-10-25). `main` is pushed: on 2026-10-25 `origin/main` and
+`main` were both at `3ca9877` (card 153b), as last fetched; nothing was fetched for this record. Nothing else is
+pushed, and nothing is merged into `main` until the owner says so.
+
+Which branch holds what today (2026-10-25):
+
+- `main`: every reading and engine card through 153b, and the interface as it was before the redesign.
+- `ui/redesign`: the interface redesign (cards F1, F2, W1 to W11), based on `main` at `3ca9877`. Local only.
+  See "Interface redesign" below.
+- `ui/u17-email-and-reset` and `ui/w12-email`: email verification and password reset, held for the owner's review.
+- Not merged into `main` (`git branch --no-merged main`): the `ui/*` branches, and `task/144b-claude`, `task/154-claude`,
+  `task/155-claude`, `task/161-reader-gate`, `task/163-scaled-decimals`, `task/71-reimbursement-and-plans`,
+  `task/85a-hard-fail-in-reports`, `task/85a2-hard-fail-in-reports`, `task/85b-partners-sheet`, `task/85b2-partners-sheet`
+  and `task/85c-quick-start-partners`. Whether each of those `task/*` branches was superseded or is still wanted was
+  not checked for this record.
+
+The table below is the history of the task branches, kept as it was written. Most of them are merged into `main`
+(`git branch --merged main`); when they were open, each was stacked on the one before it, because later tasks
+build on earlier migrations.
 
 | Branch | Plan step | What it does | Human review (plan rule 7) |
 |---|---|---|---|
@@ -260,11 +282,69 @@ people still own (listed below). Step 6 (accounts, billing, deployment) is on ho
 accounts exist; the share links it lists are built. Release 3's broker items (clients, invitations,
 the logo) are built.
 
+## Interface redesign (2026-10-24 to 25)
+
+The web app was rebuilt from the design canvas the owner accepted on 2026-10-25 (28 boards; BC Sans, a top bar,
+the five steps as a path, light and dark). The plan is `INTERFACE-BUILD-PLAN.md` and the record of each card, its
+audit and fixes is `INTERFACE-BUILD-LOG.md`, both in `agir-reading-work/` outside the repository. Each card had its
+own `ui/*` branch off `ui/redesign` and was merged back after the audit. Web only, except U17.
+
+| Card | Branch | What the screen does now |
+|---|---|---|
+| F1 | `ui/f1-foundations` | BC Sans (in `apps/web/public/fonts/bc-sans/`, notices in `docs/THIRD_PARTY.md`), the design tokens, light and dark themes chosen before first paint, per-area string tables, the interface kit. The three old font packages are gone |
+| F2 | `ui/f2-shell` | The top bar replaces the side rail; each deal has a frame (name, place, actions) and the five-step path with a state for each step; one theme store for the page |
+| W1 | `ui/w1-deals` | Deals home as a list with search, filters and each deal's next step; a first-visit page; New deal is its own page at `/deals/new` |
+| W2 | `ui/w2-settings` | Settings with an on-page nav and a table of what each role can do; giving a reviewer access (7, 14 or 30 days) moved to `/settings/review-access`; the thresholds editor stays in Settings |
+| W3 | `ui/w3-auth` | Sign in, create an account, the invitation and the shared link, with the language switch on each; the development sign-in is kept |
+| W4 | `ui/w4-landing` | A landing page at `/` when signed out (no price), and a terms and privacy page at `/legal` marked as a draft in both languages |
+| W5 | `ui/w5-documents` | Documents: drop zone, the role choices, a table of each file's stages, retry and the quick start link |
+| W6 | `ui/w6-quickstart` | The quick start laid out as the board; named defaults still need an explicit tick |
+| W7 | `ui/w7-review` | Review: a numbered to-do, then conflicts, missing, pending, approved and choices, with the deal's thresholds and the review mode in an aside |
+| W8 | `ui/w8-run` | Run: the verdict, key figures, gates, stresses, checks and the run record; a card listing what a run does while one is in progress (there is no stop button, because the API has none) |
+| W9 | `ui/w9-decision-reports` | Decision (approve, approve with conditions, reject, return to underwriting) and Reports (report cards, what was made so far, shared links) |
+| W10 | `ui/w10-explore` | Explore changes on the same five endpoints as before, with a heat grid |
+| W11 | `ui/w11-audit-compare` | The audit trail with the chain check, search and filters, and a new screen at `/deals/$dealId/compare` that compares two stored runs without recomputing anything |
+| U17 | `ui/u17-email-and-reset` | API only: email verification and password reset, single-use tokens stored as hashes in migration `0030`, a `Mailer` with a development file mailer. Branched from `main` at `3ca9877` |
+| W12 | `ui/w12-email` | The confirm-your-email and reset-password screens on top of U17. Built on `ui/redesign` as of W3 (`ae2a3a6`), so it is behind `ui/redesign` and will need the later cards merged in |
+
+State of the branches: F1, F2, W1 to W11, U20 (the old styles removed, an accessibility pass) and U21-words (a
+wording and French pass) are merged into `ui/redesign`, followed by the fixes from a browser walk of every screen
+on 2026-10-25 (listed in `INTERFACE-BUILD-LOG.md`). None of it is on `main` or pushed. U17 and W12 are not merged
+anywhere. They touch sign-in and add a migration, so they need the owner's
+review (plan rule 7), and they must not reach production before there is a mail provider: on the U17 branch,
+development writes each email to the data folder's `mail/` directory and production sends nothing
+(`apps/api/src/main.ts` and `apps/api/src/mailer.ts` on that branch). Nothing in the app is gated on a verified email.
+
+The browser walk ran the app from the `ui/redesign` worktree with an empty data folder and no model key
+(`env -u ANTHROPIC_API_KEY AGIR_DATA_DIR=<empty folder> PORT=8792 npm run start`): every screen at 1360 and 900 px,
+light and dark, with spot checks in French, signed in and signed out. It used the seeded deals and made a deal, a
+decision, a share link and a threshold change in that throwaway folder. Model reading was not tried, because it
+needs the key.
+
+French typography: in every French string, the space before `:`, `;`, `?`, `!` and `»`, after `«`, and between a
+digit and `%` or `$` is a no-break space. `proposals/ui-cards/fr-spacing.mjs` in `agir-reading-work/`, outside the
+repository, checks the string tables (`node fr-spacing.mjs <repo root> --check`) and can fix them.
+
+Left out on purpose, because a person must decide first (the plan's "Decisions the owner still holds"):
+
+- The "Unlock reports" board and any payment: it needs a price, a Stripe account, GST/HST registration and the
+  go-ahead to take payments. Reports stay ungated. No price appears anywhere, the landing page included.
+- Sending real email: it needs a mail provider.
+- A paid "Agir review" request: it needs the reviewers and a price. The screen built is the existing grant of
+  reviewer access, which is workspace-wide and owner-only.
+- Where the thresholds editor lives: kept in Settings, as the plan proposes, until the owner says otherwise.
+- The terms and privacy text at `/legal` is a draft until a lawyer has reviewed it.
+- The French interface is not a translator's work. Two terms need the translator's choice: "état des loyers" for
+  rent roll and "lettre d'offre" for term sheet.
+- Deal names in BC Sans Light at 34 px, as the canvas shows, unless the owner wants Regular or Bold.
+- Also not built, because there is no API for them: a sample deal, removing a member, renaming, devices, deleting an
+  account, and a "stop this run" button.
+
 ## Model suggestions
 
 A model may suggest a label for a figure the reader could not label; a person confirms it (task 50b).
 
-- **The switch:** per workspace, off by default, changed only by the owner (Settings, "Label suggestions"). With it off, no document text leaves the server and reconcile ignores stored suggestions.
+- **The switch:** per workspace, off by default, changed only by the owner (Settings, "Label suggestions"). With it off, no figure is sent for a label suggestion and reconcile ignores stored suggestions. This switch does not cover the AI reader (cards 160a and 160b): whenever `ANTHROPIC_API_KEY` is set, the worker sends the text of a deal's extracted documents to Claude (`AGIR_READER_MODEL`, default `claude-opus-5-5`) for every workspace (`apps/worker/src/reader.ts` line 25, `apps/worker/src/index.ts` line 209). Without the key the rules alone read.
 - **The provider and region:** Anthropic's Claude API, processed in the United States. Only the figure, its stored context and the extractable field catalog are sent, never a deal or workspace name.
 - **Environment:** `ANTHROPIC_API_KEY` (without it the worker makes no call), `AGIR_SUGGEST_MODEL` (default `claude-opus-5-5`), `AGIR_SUGGEST_EFFORT` (default `medium`). Installed SDK: `@anthropic-ai/sdk` 0.133.0.
 - A suggestion is checked by `applySuggestions` and arrives as `needs_review` or a conflict, tagged "Suggested label, please confirm". Nothing is approved by itself.
@@ -286,8 +366,25 @@ A model may suggest a label for a figure the reader could not label; a person co
   statement, or a number-free document statement (card 99). A figure with none of these, including a "$" in an
   Excel format (Bergendal's figures carry no mark at all), is the deal's currency. A statement that holds a
   number ("in 2025 US dollars") is not read. Other currencies than CAD, USD and AUD are not recognised.
-- **CI runs on GitHub.** `.github/workflows/gate.yml` has passed on every push of `main` since card 104
-  (last checked 2026-10-20: the run for `ae2f0e6`, card 108, succeeded).
+- **CI runs on GitHub.** `.github/workflows/gate.yml` runs on every push of `main` (last checked 2026-10-25 with
+  `gh run list`: the run for card 153b, `3ca9877`, succeeded). The `ui/*` branches are not pushed, so CI has not run on them.
+- **The chain check covers every workspace.** `GET /api/workspaces/:ws/audit/verify` (`apps/api/src/app.ts` line 306)
+  calls `fn_verify_audit_chain()` (`packages/db/migrations/0002_functions.sql` line 86, security definer), which walks
+  every row of `audit_events`. The route does not check that the caller is a member of `:ws`, and the count it returns
+  is the number of events in the whole system, so any signed-in person learns it. The audit package's `audit_chain`
+  check uses the same function (`apps/api/src/services.ts` line 648).
+- **The audit package cannot be checked on its own.** It holds the deal's events with `prev_hash` and `hash`
+  (`apps/api/src/services.ts` line 647) but not the actor or the deal, which each hash covers, and the chain runs
+  through every deal and workspace, so someone holding only the package cannot recompute it.
+- **Anyone can create an account.** `POST /api/auth/signup` (`apps/api/src/app.ts` line 100) is open and gives each new
+  person a workspace of their own.
+- **Uploads are not scanned for malware.** The worker makes structural checks only (`apps/worker/src/index.ts` line 144).
+- **Files are stored on the local disk**, under the data folder's `blobs/` (`apps/api/src/main.ts`, `fileStore` in
+  `packages/db/src/storage.ts`).
+- **There is no deployment configuration** in the repository: no container, host or platform file. `AGIR_ENV=production`
+  only requires `DATABASE_URL` and `AGIR_RUN_SIGNING_SECRET` (`apps/api/src/main.ts`).
+- **AI reading cannot be turned off per workspace.** See "Model suggestions": the AI reader runs for every workspace
+  whenever the key is set (the owner made AI reading the default on 2026-10-24); only removing the key stops it.
 - **French documents are read only where a label matches an alias.** Aliases and table headers are fixed
   word orders; a phrasing no alias lists is not mapped, and a figure the label's parenthesis qualifies
   ("Intérêts seulement (mezzanine)") is read from the label without the parenthesis, so it can fall to the
@@ -321,7 +418,12 @@ Where the code showed a better route than [the plan](plan-small-developers.md), 
 
 ## Needs a person
 
-- The GitHub repository: its name, and the push.
+- Whether `chinonsoobeta/AgirRebuild` should be public, as it is today.
+- Review of U17 and W12 (sign-in, a migration) before they are merged, and a mail provider before they reach production.
+- The interface redesign on `ui/redesign`: the owner's review before it is merged into `main`.
+- The open decisions listed under "Interface redesign": price, Stripe and GST/HST, Agir reviewers and their price, the
+  thresholds editor's place, the deal-name weight, and the two French terms.
+- Whether open sign-up stays, and malware scanning, file storage and hosting before any real customer.
 - Reference deals and outcome sheets for the Canadian cases (oracles are people-owned): a fourplex rental
   in Edmonton, a 12-unit MLI Select rental in Halifax, 8 townhomes for sale in Ontario, a 30-unit condo in BC.
   Each needs an independently built workbook.
@@ -330,8 +432,10 @@ Where the code showed a better route than [the plan](plan-small-developers.md), 
   presale deposit rules.
 - A qualified Canadian French translator to review the interface's French before release. An engineering pass on
   2026-10-03 made the terms consistent ("Examen" for the review step, the generic masculine for roles as elsewhere,
-  CMHC's "CCD" for the coverage ratio) and translated every `absentMeans`; it is not a translator's review.
-- Legal: wording that a memo is not an appraisal or advice; a privacy notice and terms under PIPEDA.
+  CMHC's "CCD" for the coverage ratio) and translated every `absentMeans`; it is not a translator's review. The
+  redesign's French strings and the draft terms at `/legal` need the same review.
+- Legal: wording that a memo is not an appraisal or advice; a privacy notice and terms under PIPEDA. A draft of the
+  terms and privacy text is at `/legal` on `ui/redesign`, marked as a draft until a lawyer has reviewed it.
 - Accounts: Stripe, Canadian hosting, and GST/HST registration for Agir's own sales.
 - Pricing: $99 to $299 per deal is a hypothesis to test with the first customers.
 

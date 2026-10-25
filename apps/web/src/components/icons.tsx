@@ -25,3 +25,7 @@ export const Moon = (p: P) => <S {...p}><path d="M13.6 9.6A5.8 5.8 0 116.4 2.4a4
 export const Sun = (p: P) => <S {...p}><circle cx="8" cy="8" r="2.7" /><path d="M8 1.3v1.4M8 13.3v1.4M3.3 3.3l1 1M11.7 11.7l1 1M1.3 8h1.4M13.3 8h1.4M3.3 12.7l1-1M11.7 4.3l1-1" /></S>;
 export const Info = (p: P) => <S {...p}><circle cx="8" cy="8" r="6" /><path d="M8 7.3v3.7M8 5v.1" /></S>;
 export const Warning = (p: P) => <S {...p}><path d="M8 2l6.5 11.5h-13z" /><path d="M8 6.5v3M8 11.6v.1" /></S>;
+/** The arrow on a back link (All deals, Settings). */
+export const Back = () => (
+  <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round" aria-hidden="true"><path d="M19 12H5M11 18l-6-6 6-6" /></svg>
+);

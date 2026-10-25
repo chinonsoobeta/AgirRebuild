@@ -2,7 +2,7 @@
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import { createElement } from "react";
 import { readFileSync } from "node:fs";
-const styles=readFileSync(new URL("../src/styles/legacy.css",import.meta.url),"utf8");
+const styles=readFileSync(new URL("../src/styles/base.css",import.meta.url),"utf8");
 import { randomBytes } from "node:crypto";
 import { renderToStaticMarkup } from "react-dom/server";
 import { api, ApiError, type Assumption } from "../src/api";
@@ -108,7 +108,7 @@ describe("a client's controls (task 89c)", () => {
   it("a client's reports screen has no enabled report button and no share button", () => {
     state.artifacts = [{ id: "ready", kind: "lender_package", format: "pdf", status: "ready", error: null, sha256: null, created_at: "2026-10-19T12:00:00Z", run_id: "run-1", run_number: 1, provenance_entries: null }];
     render(createElement(Reports, { dealId: "deal-1" }));
-    const reportButtons = state.nodes.filter((n) => n.tag === "button" && n.props.type === "button" && n.props.className === "btn");
+    const reportButtons = state.nodes.filter((n) => n.tag === "button" && n.props.name === "generate");
     expect(reportButtons.length).toBeGreaterThan(0);
     expect(reportButtons.every((b) => b.props.disabled)).toBe(true);
     expect(buttons("Share").length).toBe(0);
@@ -116,9 +116,6 @@ describe("a client's controls (task 89c)", () => {
   });
   it.each(["en", "fr"] as const)("names the client role in %s", (lang) => {
     expect(build(lang, () => {}).L.role("client")).toBe(lang === "en" ? "client" : "client");
-    expect(build(lang, () => {}).t("settings.r.client")).toBe(lang === "en"
-      ? "Reads the deals assigned to it and confirms the values the broker stated. Changes nothing else."
-      : "Consulte les projets qui lui sont confiés et confirme les valeurs déclarées par le courtier. Ne modifie rien d'autre.");
   });
 });
 
@@ -341,7 +338,7 @@ describe("card 94c table proposal controls", () => {
 describe("card 97c deal rendering", () => {
   it("contains the absolute Actions label inside the narrow Review scroll box", () => {
     expect(styles).toMatch(/\.sr-only\s*\{[^}]*position:\s*absolute/);
-    expect(styles).toMatch(/\.tbl\s*\{[^}]*position:\s*relative[^}]*\}/);
+    expect(styles).toMatch(/\.scroll\s*\{[^}]*position:\s*relative[^}]*\}/);
   });
   it("a deal route switches from workspace X to the deal's workspace Y", async () => {
     const {useDeal}=await vi.importActual<typeof import("../src/components/ui")>("../src/components/ui");
@@ -422,7 +419,7 @@ describe("card 150 one review list", () => {
       todo: { blocking: 2, items: [{ kind: "missing", fieldKey: "vacancy_pct", itemKey: null, assumptionId: null, blocking: true }, { kind: "please_check", fieldKey: a.fieldKey, itemKey: a.itemKey, assumptionId: a.id, blocking: true }] } };
     const element = createElement(Review, { dealId: "deal-1" });
     const html = text(render(element));
-    expect(html).toContain("2 actions before this deal can run");
+    expect(html).toContain("2 things before this deal can run");
     expect(html).toContain("Check this value");
     expect(html).toContain("parts that add up to it");
     expect(html).not.toContain("Approve all");

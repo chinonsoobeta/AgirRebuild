@@ -16,10 +16,13 @@ import { Audit } from "./routes/audit";
 import { Settings } from "./routes/settings";
 import { ReviewAccess } from "./routes/review-access";
 import { Explore } from "./routes/explore";
+import { Compare } from "./routes/compare";
 import { Share } from "./routes/share";
 import { Invite } from "./routes/invite";
 import { Verify } from "./routes/verify";
 import { Reset } from "./routes/reset";
+import { Home } from "./routes/landing";
+import { Legal } from "./routes/legal";
 import { I18nProvider } from "./i18n";
 
 const queryClient = new QueryClient({ defaultOptions: { queries: { staleTime: 5_000, retry: (n, e: any) => e?.status !== 401 && e?.status !== 403 && e?.status !== 404 && n < 2 } } });
@@ -34,6 +37,9 @@ const invite = createRoute({ getParentRoute: () => root, path: "/i/$secret", com
 // Confirming an email address and resetting a password (card W12): outside the session gate, like sign-in.
 const verify = createRoute({ getParentRoute: () => root, path: "/verify", component: Verify });
 const reset = createRoute({ getParentRoute: () => root, path: "/reset", component: Reset });
+// "/" and the terms sit outside the session gate: signed out, "/" is the landing page (card W4).
+const index = createRoute({ getParentRoute: () => root, path: "/", component: Home });
+const legal = createRoute({ getParentRoute: () => root, path: "/legal", component: Legal });
 const app = createRoute({
   getParentRoute: () => root,
   id: "app",
@@ -45,7 +51,6 @@ const app = createRoute({
     </SessionGate>
   ),
 });
-const index = createRoute({ getParentRoute: () => app, path: "/", component: () => <Navigate to="/deals" /> });
 const deals = createRoute({ getParentRoute: () => app, path: "/deals", component: Deals });
 const newDeal = createRoute({ getParentRoute: () => app, path: "/deals/new", component: NewDeal });
 const settings = createRoute({ getParentRoute: () => app, path: "/settings", component: Settings });
@@ -53,6 +58,21 @@ const reviewAccess = createRoute({ getParentRoute: () => app, path: "/settings/r
 const deal = createRoute({ getParentRoute: () => app, path: "/deals/$dealId", component: () => <Outlet /> });
 const step = <P extends string>(path: P, C: (p: { dealId: string }) => React.JSX.Element) =>
   createRoute({ getParentRoute: () => deal, path, component: function Step() { const { dealId } = deal.useParams(); return <C key={dealId} dealId={dealId} />; } });
+// Two runs side by side (card W11): `a` is this run, `b` the one it is compared against; both optional.
+const compare = createRoute({
+  getParentRoute: () => deal,
+  path: "compare",
+  validateSearch: (s: Record<string, unknown>): { a?: string; b?: string } => ({
+    ...(typeof s.a === "string" ? { a: s.a } : {}),
+    ...(typeof s.b === "string" ? { b: s.b } : {}),
+  }),
+  component: function CompareStep() {
+    const { dealId } = deal.useParams();
+    const { a, b } = compare.useSearch();
+    const navigate = compare.useNavigate();
+    return <Compare key={dealId} dealId={dealId} a={a} b={b} onPick={(next) => void navigate({ search: next, replace: true })} />;
+  },
+});
 const dealIndex = createRoute({ getParentRoute: () => deal, path: "/", component: function DealIndex() { const { dealId } = deal.useParams(); return <Navigate to="/deals/$dealId/documents" params={{ dealId }} />; } });
 
 const routeTree = root.addChildren([
@@ -62,13 +82,14 @@ const routeTree = root.addChildren([
   invite,
   verify,
   reset,
+  index,
+  legal,
   app.addChildren([
-    index,
     deals,
     newDeal,
     settings,
     reviewAccess,
-    deal.addChildren([dealIndex, step("documents", Documents), step("review", Review), step("run", Run), step("decision", DecisionStep), step("reports", Reports), step("audit", Audit), step("explore", Explore)]),
+    deal.addChildren([dealIndex, step("documents", Documents), step("review", Review), step("run", Run), step("decision", DecisionStep), step("reports", Reports), step("audit", Audit), step("explore", Explore), compare]),
   ]),
 ]);
 const router = createRouter({ routeTree, defaultPreload: "intent" });

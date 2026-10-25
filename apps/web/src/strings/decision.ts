@@ -1,6 +1,48 @@
 // Strings for the decision area. Keys start with "decision.".
 import type { Entry, FrenchOf } from "./entry";
 
-export const en = {} satisfies Record<string, Entry>;
+export const en = {
+  "decision.lead": (p) => `Recorded against run ${p.n}, which says ${p.v}. You can agree with it, add conditions, or decide against it with your reasons.`,
+  "decision.current": "Current · inputs unchanged since this run",
+  "decision.outOfDate": "Out of date · an input changed after this run",
+  "decision.choose": "What do you decide?",
+  "decision.d.approve": "Go ahead as the run stands.",
+  "decision.d.approve_with_conditions": "Go ahead once the conditions you name are met.",
+  "decision.d.reject": "Do not go ahead. Your reasons are recorded.",
+  "decision.d.return_to_underwriting": "Send it back for more work before anyone decides.",
+  "decision.reasoningHint": "In your own words. It is recorded with the decision and appears in the reports.",
+  "decision.conditionsHint": "For example, a fixed-price contract for the hard costs before the land closes",
+  "decision.empty": "Nothing yet. The first decision will appear here with its run number, the name of who made it and the date, and will stay in the record for good.",
+  "decision.line": (p) => `Run ${p.n} · ${p.who} · ${p.date}`,
+  "decision.kv.run": "Run",
+  "decision.kv.policy": "Policy",
+  "decision.kv.engine": "Engine",
+  "decision.kv.inputs": "Inputs",
+  "decision.kv.runOn": (p) => `${p.n} · ${p.date}`,
+  "decision.kv.draft": (p) => `${p.p}, draft, not signed by credit`,
+  "decision.overrideNotice": "If you approve against a reject verdict, Agir asks why. The reason is recorded with the decision and shown in every report.",
+  "decision.whoDecides": (p) => `Only a workspace admin or owner records a decision. Your role: ${p.role}.`,
+} satisfies Record<string, Entry>;
 
-export const fr: FrenchOf<typeof en> = {};
+export const fr: FrenchOf<typeof en> = {
+  "decision.lead": (p) => `Consignée pour l'analyse ${p.n}, dont le verdict est «\u00a0${p.v}\u00a0». Vous pouvez l'accepter, y ajouter des conditions ou décider autrement en donnant vos motifs.`,
+  "decision.current": "À jour · données inchangées depuis cette analyse",
+  "decision.outOfDate": "Périmée · une donnée a changé après cette analyse",
+  "decision.choose": "Que décidez-vous\u00a0?",
+  "decision.d.approve": "Aller de l'avant selon l'analyse.",
+  "decision.d.approve_with_conditions": "Aller de l'avant une fois remplies les conditions que vous fixez.",
+  "decision.d.reject": "Ne pas aller de l'avant. Vos motifs sont consignés.",
+  "decision.d.return_to_underwriting": "Renvoyer le dossier pour plus de travail avant toute décision.",
+  "decision.reasoningHint": "Dans vos mots. Consigné avec la décision et repris dans les rapports.",
+  "decision.conditionsHint": "Par exemple, un contrat à prix fixe pour les coûts de construction avant la clôture de l'achat du terrain",
+  "decision.empty": "Rien pour l'instant. La première décision s'affichera ici avec son numéro d'analyse, le nom de la personne qui l'a prise et la date, et restera au registre pour de bon.",
+  "decision.line": (p) => `Analyse ${p.n} · ${p.who} · ${p.date}`,
+  "decision.kv.run": "Analyse",
+  "decision.kv.policy": "Politique",
+  "decision.kv.engine": "Moteur",
+  "decision.kv.inputs": "Données",
+  "decision.kv.runOn": (p) => `${p.n} · ${p.date}`,
+  "decision.kv.draft": (p) => `${p.p}, provisoire, non approuvée par le crédit`,
+  "decision.overrideNotice": "Si vous approuvez malgré un verdict de rejet, Agir vous demande pourquoi. Le motif est consigné avec la décision et affiché dans chaque rapport.",
+  "decision.whoDecides": (p) => `Seul un administrateur ou le propriétaire de l'espace consigne une décision. Votre rôle\u00a0: ${p.role}.`,
+};

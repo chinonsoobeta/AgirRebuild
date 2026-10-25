@@ -1,42 +1,69 @@
 import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
+import { Link } from "@tanstack/react-router";
 import { useRef, useState } from "react";
 import { api, type DocumentRow } from "../api";
 import { canEdit, DealFrame, ErrorText, useDeal, useSession } from "../components/ui";
+import { ChoiceCards, Tag } from "../components/kit";
 import * as I from "../components/icons";
 import { QuickStart } from "../components/QuickStart";
 import { useI18n, type I18n } from "../i18n";
 
 const ROLE_CHOICES = ["", "deal_source", "evidence", "context"] as const;
 const ROLE_KEYS = { "": "docs.role.auto", deal_source: "docs.role.deal_source", evidence: "docs.role.evidence", context: "docs.role.context" } as const;
+const ROLE_DESCRIPTIONS = { "": "documents.role.autoD", deal_source: "documents.role.deal_sourceD", evidence: "documents.role.evidenceD", context: "documents.role.contextD" } as const;
 
-const SEGMENTS: Record<string, [string, string, string]> = {
-  uploaded: ["#9c978a", "#ddd8cc", "#ddd8cc"],
-  checking: ["#9c978a", "#ddd8cc", "#ddd8cc"],
-  rejected: ["#c8401f", "#ddd8cc", "#ddd8cc"],
-  reading: ["#15171c", "#9c978a", "#ddd8cc"],
-  read_failed: ["#15171c", "#c8401f", "#ddd8cc"],
-  extracting: ["#15171c", "#15171c", "#9c978a"],
-  extracted: ["#15171c", "#15171c", "#15171c"],
+type Dot = "done" | "on" | "fail" | "";
+/** The three stage dots (Checked · Read · Values) for each stage the worker sets. */
+const DOTS: Record<string, [Dot, Dot, Dot]> = {
+  uploaded: ["on", "", ""],
+  checking: ["on", "", ""],
+  rejected: ["fail", "", ""],
+  reading: ["done", "on", ""],
+  read_failed: ["done", "fail", ""],
+  extracting: ["done", "done", "on"],
+  extracted: ["done", "done", "done"],
 };
+const STAGE_KEYS: Record<string, string> = {
+  uploaded: "docs.stage.uploaded", checking: "docs.stage.checking", reading: "docs.stage.reading", extracting: "docs.stage.extracting",
+  rejected: "documents.stage.rejected", read_failed: "documents.stage.read_failed", extracted: "documents.stage.extracted",
+};
+const FAILED = ["rejected", "read_failed"];
+const DONE = ["extracted", ...FAILED];
+
+function Stages({ d, i }: { d: DocumentRow; i: I18n }) {
+  const dots = DOTS[d.stage] ?? DOTS.uploaded!;
+  const key = STAGE_KEYS[d.stage];
+  return (
+    <span className="stages" role="img" aria-label={key ? i.t(key as "docs.stage.reading") : d.stage}>
+      {dots.map((c, n) => (
+        <span key={n} className={c ? `st ${c}` : "st"} aria-hidden="true">
+          {c === "done" && <I.Check size={10} />}
+          {c === "fail" && <I.Cross size={10} />}
+        </span>
+      ))}
+    </span>
+  );
+}
+
 function Result({ d, i }: { d: DocumentRow; i: I18n }) {
   const { t, msg } = i;
-  if (d.stage === "rejected" || d.stage === "read_failed") {
-    return <span className="row" style={{ gap: 6, color: "var(--stop-text)", fontWeight: 500 }}><I.Stop />{d.stage_detail ? msg(d.stage_detail) : t("docs.unusable")}</span>;
+  if (FAILED.includes(d.stage)) {
+    return <span className="docs-fail">{t("docs.unusable")}{d.stage_detail && <span className="sub">{msg(d.stage_detail)}</span>}</span>;
   }
   if (d.stage !== "extracted") {
-    const key = `docs.stage.${d.stage}` as const;
-    return <span className="row muted" style={{ gap: 6 }}><I.Spinner />{["uploaded", "checking", "reading", "extracting"].includes(d.stage) ? t(key as "docs.stage.reading") : d.stage}</span>;
+    const key = STAGE_KEYS[d.stage];
+    return <Tag tone="plain"><I.Spinner />{key ? t(key as "docs.stage.reading") : d.stage}</Tag>;
   }
   return (
-    <div className="stack" style={{ gap: 4 }}>
-      <span className="muted">
-        {d.candidate_count === 0 ? t("docs.noValues") : t("docs.values", { n: d.candidate_count })}
-        {d.other_count > 0 && <span className="faint"> · {t("docs.other", { n: d.other_count })}</span>}
-      </span>
+    <>
+      {d.candidate_count === 0 ? t("docs.noValues") : t("docs.values", { n: d.candidate_count })}
+      {d.other_count > 0 && <span className="sub">{t("docs.other", { n: d.other_count })}</span>}
       {d.number_format && d.number_format !== "1,234.56" && d.number_format !== "not detected" && (
-        <span className="tag review" style={{ alignSelf: "flex-start" }}><I.Eye />{t("docs.format", { f: d.number_format })}</span>
+        <span className="sub docs-warn"><I.Eye />{t("docs.format", { f: d.number_format })}</span>
       )}
-    </div>
+      {d.stage_detail ? <span className="sub docs-warn"><I.Eye />{msg(d.stage_detail)}</span>
+        : d.needs_ocr && <span className="sub docs-warn"><I.Eye />{t("documents.ocr")}</span>}
+    </>
   );
 }
 
@@ -49,12 +76,13 @@ export function Documents({ dealId }: { dealId: string }) {
   const docs = useQuery({
     queryKey: ["documents", dealId],
     queryFn: () => api.get<DocumentRow[]>(`/deals/${dealId}/documents`),
-    refetchInterval: (q) => (q.state.data?.some((d) => !["extracted", "rejected", "read_failed"].includes(d.stage)) ? 1200 : false),
+    refetchInterval: (q) => (q.state.data?.some((d) => !DONE.includes(d.stage)) ? 1200 : false),
   });
   const input = useRef<HTMLInputElement>(null);
   const [uploadRole, setUploadRole] = useState("");
   const [dragging, setDragging] = useState(false);
   const [notes, setNotes] = useState<string[]>([]);
+  const [changing, setChanging] = useState<string | null>(null);
   const refresh = () => Promise.all([qc.invalidateQueries({ queryKey: ["documents", dealId] }), qc.invalidateQueries({ queryKey: ["deal", dealId] })]);
   const upload = useMutation({
     mutationFn: async (files: File[]) => {
@@ -82,15 +110,21 @@ export function Documents({ dealId }: { dealId: string }) {
   const pick = (list: FileList | null) => list && list.length && upload.mutate([...list]);
   if (!deal.data) return <p className="muted">{t("common.loading")}</p>;
   const editable = canEdit(role);
+  const list = docs.data ?? [];
+  const empty = docs.data?.length === 0;
+  const counts = [
+    ["documents.count.read", list.filter((d) => d.stage === "extracted").length],
+    ["documents.count.processing", list.filter((d) => !DONE.includes(d.stage)).length],
+    ["documents.count.failed", list.filter((d) => FAILED.includes(d.stage)).length],
+  ] as const;
   return (
     <>
       <DealFrame o={deal.data} active="documents" />
-      <div className="side">
-        <div className="stack" style={{ gap: 20 }}>
-          {editable && (
+      <div className="stack">
+        {editable && (
+          <div className="docs-top">
             <div
-              className="panel spread"
-              style={{ borderStyle: "dashed", borderColor: dragging ? "var(--ink)" : "var(--rule-strong)" }}
+              className={dragging ? "drop dragging" : "drop"}
               onDragOver={(e) => {
                 e.preventDefault();
                 setDragging(true);
@@ -102,84 +136,106 @@ export function Documents({ dealId }: { dealId: string }) {
                 pick(e.dataTransfer.files);
               }}
             >
-              <div className="row" style={{ gap: 16 }}>
-                <I.Upload size={28} />
-                <div className="stack" style={{ gap: 2 }}>
-                  <strong>{t("docs.drop")}</strong>
-                  <span className="small faint">{t("docs.types")}</span>
-                </div>
+              <I.Upload size={28} />
+              <p className="docs-drop">{t("docs.drop")}</p>
+              <p className="small muted">{t("docs.types")}</p>
+              <div className="row docs-drop-actions">
+                <button className="btn primary" type="button" disabled={upload.isPending} onClick={() => input.current?.click()}>{upload.isPending ? t("docs.uploading") : t("docs.choose")}</button>
+                {empty && <a className="btn ghost" href="#quick-start">{t("documents.quickStart")}</a>}
               </div>
-              <label className="stack small" style={{ gap: 4 }}>
-                {t("docs.role.question")}
-                <select value={uploadRole} onChange={e => setUploadRole(e.target.value)}>{roleOptions}</select>
-              </label>
-              <label className="btn" htmlFor="doc-upload">{upload.isPending ? t("docs.uploading") : t("docs.choose")}</label>
-              <input ref={input} id="doc-upload" type="file" multiple accept=".pdf,.xlsx,.csv,.docx,.txt" className="sr-only" onChange={(e) => pick(e.target.files)} />
+              <input ref={input} id="doc-upload" type="file" multiple accept=".pdf,.xlsx,.csv,.docx,.txt" className="sr-only" tabIndex={-1} aria-label={t("docs.choose")} onChange={(e) => pick(e.target.files)} />
             </div>
-          )}
-          {editable && docs.data?.length === 0 && <QuickStart dealId={dealId} />}
-          <ErrorText error={upload.error ?? act.error ?? setRole.error} />
-          {notes.map((n) => <p key={n} className="small muted">{n}</p>)}
-          <table className="tbl">
-            <thead><tr><th>{t("docs.col.doc")}</th><th style={{ width: 150 }}>{t("docs.col.stages")}</th><th>{t("docs.col.result")}</th><th className="r"><span className="sr-only">{t("docs.actions")}</span></th></tr></thead>
-            <tbody>
-              {(docs.data ?? []).map((d) => {
-                const seg = SEGMENTS[d.stage] ?? SEGMENTS.uploaded!;
-                const readRole = /\((deal source|evidence|context)(?:, set by a person)?\)$/.exec(d.read_role ?? "")?.[1];
-                const usedRole = readRole === "deal source" ? "deal_source" : readRole === "evidence" || readRole === "context" ? readRole : null;
-                const byPerson = d.read_role?.includes(", set by a person)");
-                return (
-                  <tr key={d.id}>
-                    <td>
-                      <div className="stack" style={{ gap: 2 }}>
-                        <a href={`/api/documents/${d.id}/file`} className="row" style={{ gap: 8, textDecoration: "none" }}><I.Doc />{d.name}</a>
-                        {usedRole && <span className="small muted">{t(byPerson ? "docs.role.you" : "docs.role.agir", { role: t(ROLE_KEYS[usedRole]) })}</span>}
-                        {editable && <select aria-label={t("docs.role.change", { name: d.name })} value={d.role_set ?? ""} disabled={setRole.isPending} onChange={e => setRole.mutate({ id: d.id, value: e.target.value })}>{roleOptions}</select>}
-                        <span className="small faint">{f.bytes(d.size_bytes)}{d.page_count ? ` · ${t("docs.pages", { n: d.page_count })}` : ""}{d.uploaded_by ? ` · ${d.uploaded_by}` : ""}</span>
-                      </div>
-                    </td>
-                    <td>
-                      <div role="img" aria-label={d.stage.replace(/_/g, " ")} style={{ display: "grid", gridTemplateColumns: "repeat(3, 1fr)", gap: 4, width: 120, marginTop: 8 }}>
-                        {seg.map((c, i) => <span key={i} style={{ height: 6, background: c, borderRadius: 1 }} />)}
-                      </div>
-                    </td>
-                    <td><Result d={d} i={i} /></td>
-                    <td className="r" style={{ whiteSpace: "nowrap" }}>
-                      {editable && d.stage === "read_failed" && (
-                        <button className="btn small" type="button" onClick={() => act.mutate({ id: d.id, action: "retry" })}><I.Retry />{t("docs.retry")}</button>
-                      )}
-                      {editable && (
-                        <button
-                          className="btn quiet small"
-                          type="button"
-                          onClick={() => {
-                            if (confirm(t("docs.removeConfirm", { name: d.name }))) act.mutate({ id: d.id, action: "retire" });
-                          }}
-                        >
-                          {t("docs.remove")}
-                        </button>
-                      )}
-                    </td>
-                  </tr>
-                );
-              })}
-              {docs.data?.length === 0 && <tr><td colSpan={4} className="muted">{t("docs.empty")}</td></tr>}
-            </tbody>
-          </table>
+            <div className="card card-pad">
+              <ChoiceCards
+                name="upload-role"
+                legend={t("docs.role.question")}
+                value={uploadRole}
+                onChange={setUploadRole}
+                options={ROLE_CHOICES.map((value) => ({ value, title: t(ROLE_KEYS[value]), description: t(ROLE_DESCRIPTIONS[value]) }))}
+              />
+            </div>
+          </div>
+        )}
+        <ErrorText error={upload.error ?? act.error ?? setRole.error} />
+        {notes.map((n) => <p key={n} className="small muted">{n}</p>)}
+
+        <div className="card">
+          <div className="card-head">
+            <h2 className="h2">{t("documents.title")}</h2>
+            {list.length > 0 && <span className="small muted">{counts.filter(([, n]) => n > 0).map(([k, n]) => t(k, { n })).join(" · ")}</span>}
+          </div>
+          <div className="scroll">
+            <table className="table">
+              <thead><tr><th>{t("docs.col.doc")}</th><th>{t("docs.col.stages")}</th><th>{t("docs.col.result")}</th><th>{t("documents.col.role")}</th><th className="r"><span className="sr-only">{t("docs.actions")}</span></th></tr></thead>
+              <tbody>
+                {list.map((d) => {
+                  const readRole = /\((deal source|evidence|context)(?:, set by a person)?\)$/.exec(d.read_role ?? "")?.[1];
+                  const usedRole = readRole === "deal source" ? "deal_source" : readRole === "evidence" || readRole === "context" ? readRole : null;
+                  const byPerson = d.read_role?.includes(", set by a person)");
+                  const open = changing === d.id;
+                  return (
+                    <tr key={d.id}>
+                      <td>
+                        <a href={`/api/documents/${d.id}/file`}>{d.name}</a>
+                        <span className="sub">
+                          {d.page_count ? `${t("docs.pages", { n: d.page_count })} · ` : ""}{f.bytes(d.size_bytes)} · {t("documents.added", { date: f.date(d.created_at), name: d.uploaded_by })}
+                        </span>
+                      </td>
+                      <td><Stages d={d} i={i} /></td>
+                      <td><Result d={d} i={i} /></td>
+                      <td>
+                        {usedRole ? t(byPerson ? "docs.role.you" : "docs.role.agir", { role: t(ROLE_KEYS[usedRole]) })
+                          : d.role_set ? t("docs.role.you", { role: t(ROLE_KEYS[d.role_set]) })
+                          : <><span aria-hidden="true" className="muted">—</span><span className="sr-only">{t("documents.noRole")}</span></>}
+                        {editable && (
+                          <span className="sub">
+                            <button type="button" className="docs-link" aria-expanded={open} aria-label={t("docs.role.change", { name: d.name })} onClick={() => setChanging(open ? null : d.id)}>{t("documents.change")}</button>
+                          </span>
+                        )}
+                        {editable && open && (
+                          <select className="docs-role" aria-label={t("docs.role.change", { name: d.name })} value={d.role_set ?? ""} disabled={setRole.isPending} onChange={e => { setRole.mutate({ id: d.id, value: e.target.value }); setChanging(null); }}>{roleOptions}</select>
+                        )}
+                      </td>
+                      <td>
+                        {editable && (
+                          <div className="acts">
+                            {d.stage === "read_failed" && (
+                              <button className="btn quiet sm" type="button" onClick={() => act.mutate({ id: d.id, action: "retry" })}>{t("docs.retry")}</button>
+                            )}
+                            <button
+                              className="btn ghost sm"
+                              type="button"
+                              onClick={() => {
+                                if (confirm(t("docs.removeConfirm", { name: d.name }))) act.mutate({ id: d.id, action: "retire" });
+                              }}
+                            >
+                              {t("docs.remove")}
+                            </button>
+                          </div>
+                        )}
+                      </td>
+                    </tr>
+                  );
+                })}
+                {empty && <tr><td colSpan={5} className="muted">{t("docs.empty")}</td></tr>}
+              </tbody>
+            </table>
+          </div>
+          <div className="card-foot small muted">
+            {t("docs.candidates")} <Link to="/deals/$dealId/review" params={{ dealId }}>{t("documents.toReview")}</Link>
+          </div>
         </div>
-        <aside className="stack" style={{ gap: 20 }} aria-label="About this step">
-          <div className="stack" style={{ gap: 10 }}>
-            <span className="label">{t("docs.what")}</span>
-            <ol className="stack small muted" style={{ gap: 10, margin: 0, paddingLeft: 20 }}>
-              <li><strong style={{ color: "var(--ink)" }}>{t("docs.what1")}</strong> {t("docs.what1b")}</li>
-              <li><strong style={{ color: "var(--ink)" }}>{t("docs.what2")}</strong> {t("docs.what2b")}</li>
-              <li><strong style={{ color: "var(--ink)" }}>{t("docs.what3")}</strong> {t("docs.what3b")}</li>
-            </ol>
+
+        {editable && empty && <div id="quick-start"><QuickStart dealId={dealId} /></div>}
+
+        <section className="section" aria-labelledby="docs-what">
+          <h2 className="h2" id="docs-what">{t("docs.what")}</h2>
+          <div className="grid3">
+            <div className="card card-pad"><h3 className="h3">{t("documents.step.checked")}</h3><p className="muted docs-what">{t("docs.what1b")}</p></div>
+            <div className="card card-pad"><h3 className="h3">{t("documents.step.read")}</h3><p className="muted docs-what">{t("docs.what2b")}</p></div>
+            <div className="card card-pad"><h3 className="h3">{t("documents.step.values")}</h3><p className="muted docs-what">{t("docs.what3b")}</p></div>
           </div>
-          <div className="formula" style={{ fontFamily: "var(--sans)", fontSize: 14, lineHeight: 1.55 }}>
-            {t("docs.candidates")}
-          </div>
-        </aside>
+        </section>
       </div>
     </>
   );

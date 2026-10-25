@@ -52,10 +52,10 @@ export const canDecide = (role: string) => role === "owner" || role === "admin";
 
 // ---- Shell ----------------------------------------------------------------------------
 
-export function LanguageSwitch({ className }: { className?: string }) {
+export function LanguageSwitch({ className }: { className: string }) {
   const { lang, setLang, t } = useI18n();
   return (
-    <button type="button" className={className ?? "btn quiet small"} style={className ? undefined : { alignSelf: "flex-start", paddingLeft: 0 }} lang={lang === "en" ? "fr" : "en"} onClick={() => setLang(lang === "en" ? "fr" : "en")}>
+    <button type="button" className={className} lang={lang === "en" ? "fr" : "en"} onClick={() => setLang(lang === "en" ? "fr" : "en")}>
       {t("nav.language")}
     </button>
   );
@@ -82,6 +82,7 @@ export function Shell({ children }: { children: ReactNode }) {
   const onSettings = path.startsWith("/settings");
   return (
     <>
+      <a className="skip" href="#main-content" onClick={(e) => { e.preventDefault(); document.getElementById("main-content")?.focus(); }}>{t("shell.skip")}</a>
       <header className="topbar">
         <Link to="/deals" className="brand">
           <span className="brand-mark">
@@ -111,7 +112,7 @@ export function Shell({ children }: { children: ReactNode }) {
           <button type="button" className="toplink" onClick={signOut}>{t("nav.signOut")}</button>
         </div>
       </header>
-      <main className="page">{children}</main>
+      <main className="page" id="main-content" tabIndex={-1}>{children}</main>
     </>
   );
 }
@@ -161,10 +162,10 @@ export function Glossary() {
   return (
     <details>
       <summary>{t("glossary.title")}</summary>
-      <dl className="stack" style={{ gap: 10, marginTop: 12 }}>
+      <dl className="stack gloss">
         {GLOSSARY.map((k) => {
           const [term, meaning] = t(`glossary.${k}`);
-          return <div key={k}><dt style={{ fontWeight: 600 }}>{term}</dt><dd className="muted">{meaning}</dd></div>;
+          return <div key={k}><dt>{term}</dt><dd className="muted">{meaning}</dd></div>;
         })}
       </dl>
     </details>
@@ -227,7 +228,7 @@ export function DealPath({ o, active }: { o: DealOverview; active: string }) {
             <Link to={`/deals/$dealId/${st.key}`} params={{ dealId: o.deal.id }} className={cls} aria-current={active === st.key ? "step" : undefined}>
               <span className="marker">{st.tone === "done" && <I.Check size={9} />}</span>
               <span className="step-name">{i.t(`step.${st.key}`)}</span>
-              <span className={st.tone === "stop" ? "step-state stop" : st.tone === "faint" ? "step-state faint" : "step-state"}>
+              <span className={st.tone === "stop" ? "step-state stop" : "step-state"}>
                 {st.tone === "stop" && <I.Stop size={12} />}
                 {st.text}
               </span>
@@ -260,7 +261,7 @@ export function DealFrame({ o, active }: { o: DealOverview; active: string }) {
       <div className="deal-head">
         <div>
           <Link to="/deals" className="back">
-            <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round" aria-hidden="true"><path d="M19 12H5M11 18l-6-6 6-6" /></svg>
+            <I.Back />
             {t("shell.allDeals")}
           </Link>
           <h1 className="deal-name">{o.deal.name}</h1>
@@ -270,7 +271,8 @@ export function DealFrame({ o, active }: { o: DealOverview; active: string }) {
           )}
         </div>
         <div className="actions">
-          {o.run && <Link to="/deals/$dealId/explore" params={{ dealId: o.deal.id }} className="btn quiet sm">{t("explore.title")}</Link>}
+          {o.run && <Link to="/deals/$dealId/explore" params={{ dealId: o.deal.id }} className="btn quiet sm">{t("explore.action")}</Link>}
+          {o.run && o.run.number >= 2 && <Link to="/deals/$dealId/compare" params={{ dealId: o.deal.id }} className="btn quiet sm">{t("compare.action")}</Link>}
           <Link to="/deals/$dealId/audit" params={{ dealId: o.deal.id }} className="btn quiet sm">{t("step.audit")}</Link>
           {canEdit(role) && (
             <button
@@ -326,5 +328,5 @@ export function useDeal(dealId: string, poll = false) {
 export function WindowConfirmation({ error, busy, onConfirm }: { error: unknown; busy: boolean; onConfirm: () => void }) {
   const { t } = useI18n();
   if (!(error instanceof ApiError && error.status === 422 && error.detail?.code === "outside_window")) return null;
-  return <button className="btn small" type="button" disabled={busy} onClick={onConfirm}>{t("review.useOutsideWindow")}</button>;
+  return <button className="btn quiet sm" type="button" disabled={busy} onClick={onConfirm}>{t("review.useOutsideWindow")}</button>;
 }

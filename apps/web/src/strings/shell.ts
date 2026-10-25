@@ -7,6 +7,7 @@ export const en = {
   "shell.brand": "Agir",
   "shell.mainNav": "Main",
   "shell.allDeals": "All deals",
+  "shell.skip": "Skip to the main content",
 } satisfies Record<string, Entry>;
 
 export const fr: FrenchOf<typeof en> = {
@@ -15,4 +16,5 @@ export const fr: FrenchOf<typeof en> = {
   "shell.brand": "Agir",
   "shell.mainNav": "Principal",
   "shell.allDeals": "Tous les projets",
+  "shell.skip": "Passer au contenu principal",
 };
