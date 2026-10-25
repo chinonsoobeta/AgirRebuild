@@ -426,11 +426,13 @@ describe("card 150 one review list", () => {
     // Two readings of one file are not two documents agreeing.
     expect(html).not.toContain("documents agree");
     // The defaults button sits under the missing inputs, before the items that follow them.
-    expect(html.indexOf("Accept the 0 ticked defaults")).toBeLessThan(html.indexOf("Check this value"));
+    const accept = html.indexOf("Accept the ticked defaults");
+    expect(accept).toBeGreaterThan(-1);
+    expect(accept).toBeLessThan(html.indexOf("Check this value"));
     const checks = state.nodes.filter(n => n.tag === "input" && n.props.type === "checkbox");
     expect(checks).toHaveLength(1);
     expect(checks.every(n => !n.props.checked && !n.props.defaultChecked)).toBe(true);
-    expect(buttons("Accept the 0 ticked defaults")[0]?.props.disabled).toBe(true);
+    expect(buttons("Accept the ticked defaults")[0]?.props.disabled).toBe(true);
     checks[0]!.props.onChange({ target: { checked: true } });
     render(element);
     await buttons("Accept the ticked default")[0]!.props.onClick();
