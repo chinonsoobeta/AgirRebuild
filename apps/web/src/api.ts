@@ -27,7 +27,7 @@ export const api = {
 };
 
 // ---- Response shapes ---------------------------------------------------------------
-export type Me = { user: { id: string; email: string; name: string }; workspaces: { id: string; name: string; review_mode: "team" | "solo"; label_suggestions: boolean; has_logo: boolean; role: "owner" | "admin" | "analyst" | "viewer" | "reviewer" | "client" }[] };
+export type Me = { user: { id: string; email: string; name: string; email_verified: boolean }; workspaces: { id: string; name: string; review_mode: "team" | "solo"; label_suggestions: boolean; has_logo: boolean; role: "owner" | "admin" | "analyst" | "viewer" | "reviewer" | "client" }[] };
 export type Tone = "pass" | "review" | "stop" | "neutral";
 export type DealOverview = {
   deal: {

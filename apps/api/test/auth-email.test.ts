@@ -40,7 +40,7 @@ async function signup(app: App, email: string): Promise<Session> {
 }
 const login = (app: App, email: string, password: string) => call(app, null, "POST", "/api/auth/login", { email, password });
 const tokenIn = (text: string, page: "verify" | "reset") => new RegExp(`${ORIGIN}/${page}\\?token=([A-Za-z0-9_-]+)`).exec(text)?.[1];
-const codeIn = (text: string) => /\b(\d{6})\b/.exec(text)?.[1];
+const codeIn = (text: string) => /code in Agir: (\d{6})\n/.exec(text)?.[1];
 const me = async (app: App, s: Session) => (await call(app, s, "GET", "/api/me")).json;
 
 beforeAll(async () => {

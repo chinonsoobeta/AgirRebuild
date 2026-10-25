@@ -5,6 +5,7 @@ import { serveStatic } from "@hono/node-server/serve-static";
 import { fileStore, migrate, openPglite, openPostgres } from "@agir/db";
 import { startWorker } from "@agir/worker";
 import { createApp } from "./app.ts";
+import { fileMailer, unsentMailer } from "./mailer.ts";
 import { DEMO, seedDemo } from "./seed.ts";
 
 const root = resolve(import.meta.dirname, "../../..");
@@ -34,6 +35,9 @@ if (env !== "production" && process.env.AGIR_SEED !== "0") {
 const app = createApp({ db, store, secureCookies: env === "production", demoSignIn: env !== "production" && process.env.AGIR_SEED !== "0",
   // Set it only when the API runs behind exactly one proxy that sets x-forwarded-for.
   trustProxy: process.env.AGIR_TRUST_PROXY === "1",
+  // No mail provider yet: development writes each email to the data folder's mail/ directory; production sends nothing.
+  mailer: env === "production" ? unsentMailer() : fileMailer(join(dataDir, "mail")),
+  publicOrigin: process.env.AGIR_PUBLIC_ORIGIN ?? `http://127.0.0.1:${port}`,
 });
 const webDist = join(root, "apps/web/dist");
 if (existsSync(webDist)) {
