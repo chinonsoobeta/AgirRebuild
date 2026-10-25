@@ -1,1 +1,15 @@
 /* Styles for the documents area: design tokens only (var(--…)), no literal colours. */
+.docs-top{display:grid;grid-template-columns:minmax(0,1.4fr) minmax(0,1fr);gap:24px;align-items:stretch}
+@media (max-width:900px){.docs-top{grid-template-columns:minmax(0,1fr)}}
+.docs-top .drop{justify-content:center;color:var(--ink-3);transition:border-color .15s,background .15s}
+.drop.dragging{border-color:var(--accent);background:var(--accent-soft)}
+.docs-drop{font-size:17px;color:var(--ink)}
+.docs-drop-actions{justify-content:center;margin-top:6px}
+.docs-fail{color:var(--stop)}
+.docs-fail .sub{color:var(--ink-2)}
+.table .sub.docs-warn{display:flex;gap:6px;align-items:flex-start;color:var(--review)}
+.docs-warn svg{flex:none;margin-top:2px}
+.docs-link{background:none;border:0;padding:0;font:inherit;color:var(--accent);cursor:pointer;text-decoration:underline;text-underline-offset:2px}
+.docs-link:hover{color:var(--ink)}
+.docs-role{margin-top:6px;max-width:100%}
+.docs-what{margin-top:6px}

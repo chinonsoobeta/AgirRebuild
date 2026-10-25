@@ -168,7 +168,7 @@ export const EN = {
   "next.memo": "Generate the IC memo",
 
   "docs.role.changed": (p) => `Changed the document role from ${p.old} to ${p.new}`,
-  "docs.role.question": "What are these documents?",
+  "docs.role.question": "What are the files you add?",
   "docs.role.auto": "Let Agir decide",
   "docs.role.deal_source": "About this deal",
   "docs.role.evidence": "Evidence about this deal",
@@ -806,7 +806,7 @@ export const FR: Record<Key, Entry> = {
   "next.memo": "Générer le mémo du comité",
 
   "docs.role.changed": (p) => `A changé le rôle du document : ${p.old} → ${p.new}`,
-  "docs.role.question": "Que sont ces documents ?",
+  "docs.role.question": "Que sont les fichiers que vous ajoutez\u00a0?",
   "docs.role.auto": "Laisser Agir décider",
   "docs.role.deal_source": "À propos de ce dossier",
   "docs.role.evidence": "Éléments à l’appui de ce dossier",
