@@ -19,7 +19,7 @@ import {
 } from "@agir/contracts";
 import { assemble, canonicalJson, ENGINE_VERSION, heldPartnerReturns, replay } from "@agir/engine";
 import { currentDocuments, documentsHash, type Db } from "@agir/db";
-import { applyLabels, figureOrder, labelPhrase, labelUnit, offeredIds, suggestFields, type ReaderResponse, type ReadingVerification, READER_PROMPT_VERSION, type SourcedCandidate } from "@agir/extraction";
+import { applyLabels, figureOrder, itemFold, labelPhrase, labelUnit, offeredIds, suggestFields, type ReaderResponse, type ReadingVerification, READER_PROMPT_VERSION, type SourcedCandidate } from "@agir/extraction";
 
 export const sha256 = (s: string) => createHash("sha256").update(s).digest("hex");
 /** The hash of each registered policy, by version. A run is fresh against the hash of the policy it was made under. */
@@ -267,10 +267,15 @@ export async function dealOverview(tx: Db, dealId: string) {
 const settled = (a: AssumptionDb) => a.status === "approved" || a.status === "default_accepted";
 const live = (rows: AssumptionDb[], fieldKey: string) => rows.filter((a) => a.field_key === fieldKey && a.status !== "rejected");
 
-/** The deal's units: the sum of its approved unit counts, or null while none is approved or any still waits. Never a partial count. */
+/**
+ * The deal's units: the sum of the approved counts of its unit types, as the run's revenue lines count them, or null
+ * while none is approved, any still waits, or one type is written two ways. A stated total is not added to the types.
+ * Never a partial count.
+ */
 function dealUnits(rows: AssumptionDb[]): number | null {
-  const items = live(rows, "unit_count");
-  return items.length > 0 && items.every(settled) ? items.reduce((n, a) => n + a.value!, 0) : null;
+  const items = live(rows, "unit_count").filter((a) => a.item_key);
+  const types = new Set(items.map((a) => itemFold(a.item_key)));
+  return items.length > 0 && types.size === items.length && items.every(settled) ? items.reduce((n, a) => n + a.value!, 0) : null;
 }
 
 /**
