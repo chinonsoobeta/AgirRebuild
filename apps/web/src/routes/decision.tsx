@@ -6,6 +6,7 @@ import { Banner, canDecide, DealFrame, ErrorText, useDeal, useSession, VerdictBa
 import { ChoiceCards, Notice, Tag, type TagTone } from "../components/kit";
 import { useI18n, verdictText } from "../i18n";
 import { useRun } from "./run";
+import { policyName } from "../components/thresholds";
 
 const DECISIONS = ["approve", "approve_with_conditions", "reject", "return_to_underwriting"] as const;
 const TONE: Record<string, TagTone> = { approve: "pass", approve_with_conditions: "pass", reject: "stop", return_to_underwriting: "review" };
@@ -126,7 +127,7 @@ export function DecisionStep({ dealId }: { dealId: string }) {
             <p className="muted">{t("decision.bindsBody", { n: v.number })}</p>
             <dl className="kv dec-kv">
               <dt>{t("decision.kv.run")}</dt><dd>{t("decision.kv.runOn", { n: v.number, date: f.date(v.createdAt) })}</dd>
-              {v.policyVersion && <><dt>{t("decision.kv.policy")}</dt><dd>{v.policyDraft ? t("decision.kv.draft", { p: v.policyVersion }) : v.policyVersion}</dd></>}
+              {v.policyVersion && <><dt>{t("decision.kv.policy")}</dt><dd>{v.policyDraft ? t("decision.kv.draft", { p: policyName(i, v.policyVersion) }) : policyName(i, v.policyVersion)}</dd></>}
               {v.engineVersion && <><dt>{t("decision.kv.engine")}</dt><dd>{v.engineVersion}</dd></>}
               {v.inputHash && <><dt>{t("decision.kv.inputs")}</dt><dd className="hash">{shortHash(v.inputHash)}</dd></>}
             </dl>

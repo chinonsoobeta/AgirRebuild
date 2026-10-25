@@ -80,7 +80,7 @@ describe("the run screen in the new design (card W8)", () => {
 
   it("says the policy is a draft not signed by credit on the verdict card", () => {
     const words = text(render());
-    expect(words).toContain(en.t("run.verdictLine", { n: 2, policy: result.policyVersion, draft: true }));
+    expect(words).toContain("Run 2 · Sale at the end of the hold, draft, not signed by credit");
     expect(en.t("run.verdictLine", { n: 2, policy: "p", draft: true })).toBe("Run 2 · p, draft, not signed by credit");
     expect(words).toContain(en.t("run.memoAction"));
     expect(words).toContain(en.t("run.again"));

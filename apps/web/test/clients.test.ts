@@ -315,7 +315,7 @@ describe("card 94c table proposal controls", () => {
   it("displays an unavailable proposal without acceptance", () => {
     state.role="owner";
     const html=render(createElement(TableProposal,{proposal:{...proposal([]),unavailable:"the table needs a loan-to-value"},unit:"%",onUse:vi.fn(),busy:false}));
-    expect(text(html)).toContain("the table needs a loan-to-value");
+    expect(text(html)).toContain("The table needs a loan-to-value");
     expect(buttons("Use this")).toHaveLength(0);
   });
   it("a client sees the proposal but no Use this control", () => {
