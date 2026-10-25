@@ -266,7 +266,8 @@ describe("the migration", () => {
   test("fills run_id and share_link_files for a link made before it", async () => {
     const old = await openPglite();
     try {
-      const before = migrationFiles().filter((m) => m.name < "0033");
+      // Every migration but 0033, so today's app can sign in (0034's session device, for one, touches nothing 0033 does).
+      const before = migrationFiles().filter((m) => !m.name.startsWith("0033"));
       await old.query(`create table schema_migrations (name text primary key, sha256 text not null, applied_at timestamptz not null default now())`);
       for (const m of before) {
         await old.transaction(async (tx) => {
