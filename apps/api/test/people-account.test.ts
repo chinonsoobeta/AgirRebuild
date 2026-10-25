@@ -215,14 +215,14 @@ describe("your sessions", () => {
     const sam = await idOf(first);
     // A session that has already expired is not counted.
     await db.query(`insert into sessions (token_hash, user_id, expires_at) values ('expired-test-hash', $1, now() - interval '1 day')`, [sam]);
-    expect((await call(first, "GET", "/api/me/sessions")).json).toEqual({ count: 2 });
-    expect((await call(alice, "GET", "/api/me/sessions")).json).toEqual({ count: 1 });
+    expect((await call(first, "GET", "/api/me/sessions")).json.count).toBe(2);
+    expect((await call(alice, "GET", "/api/me/sessions")).json.count).toBe(1);
     const r = await call(first, "POST", "/api/me/sessions/end-others");
     expect(r.status).toBe(200);
     expect(r.json).toEqual({ ended: 1 });
     expect((await call(second, "GET", "/api/me")).status).toBe(401);
     expect((await call(first, "GET", "/api/me")).status).toBe(200);
-    expect((await call(first, "GET", "/api/me/sessions")).json).toEqual({ count: 1 });
+    expect((await call(first, "GET", "/api/me/sessions")).json.count).toBe(1);
     // Other people's sessions are untouched.
     expect((await call(alice, "GET", "/api/me")).status).toBe(200);
     expect((await call(null, "GET", "/api/me/sessions")).status).toBe(401);

@@ -165,10 +165,10 @@ describe("your account", () => {
     expect(state.invalidate).toHaveBeenCalledWith({ queryKey: ["me"] });
   });
 
-  it("says how many browsers or devices you are signed in on, and signs out the others", async () => {
-    state.sessions = { count: 2 };
+  it("lists the devices you are signed in on, and signs out the others", async () => {
+    state.sessions = { count: 2, devices: [{ device: "Mac", signedInAt: "2026-10-22T12:00:00Z", current: true }, { device: null, signedInAt: "2026-10-22T12:00:00Z", current: false }] };
     let account = text(section(render(), "account"));
-    expect(account).toContain("You are signed in on 2 browsers or devices, this one included.");
+    expect(account).toContain("This Mac");
     const out = buttons("Sign out everywhere else");
     expect(out).toHaveLength(1);
     vi.mocked(window.confirm).mockReturnValueOnce(false);
@@ -177,22 +177,22 @@ describe("your account", () => {
     await out[0]!.props.onClick();
     expect(vi.mocked(api.post).mock.calls.some(([p]) => p === "/me/sessions/end-others")).toBe(true);
     expect(state.invalidate).toHaveBeenCalledWith({ queryKey: ["sessions"] });
-    state.sessions = { count: 1 };
+    state.sessions = { count: 1, devices: [{ device: "Mac", signedInAt: "2026-10-22T12:00:00Z", current: true }] };
     account = text(section(render(), "account"));
     expect(account).toContain("Signed out on 1 other browser or device.");
   });
 
   it("hides the button when this is the only one", () => {
-    state.sessions = { count: 1 };
+    state.sessions = { count: 1, devices: [{ device: null, signedInAt: "2026-10-22T12:00:00Z", current: true }] };
     const account = text(section(render(), "account"));
-    expect(account).toContain("You are signed in on this browser only.");
+    expect(account).toContain("This browser");
     expect(buttons("Sign out everywhere else")).toHaveLength(0);
   });
 
   it("is in French", () => {
     state.lang = "fr";
-    state.sessions = { count: 3 };
-    expect(text(section(render(), "account"))).toContain("Vous êtes connecté sur 3 navigateurs ou appareils, y compris celui-ci.");
+    state.sessions = { count: 1, devices: [{ device: "iPhone", signedInAt: "2026-10-22T12:00:00Z", current: true }] };
+    expect(text(section(render(), "account"))).toContain("Cet iPhone");
   });
 });
 
