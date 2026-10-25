@@ -81,6 +81,31 @@ describe("the deals list", () => {
     expect(rows[4]).toMatch(/<a href="\/deals\/d5\/reports" class="btn quiet">[^]*Share the reports/);
   });
 
+  it("offers to open the deal to someone who cannot take its next step", () => {
+    state.deals = MIXED;
+    const rows = () => renderToStaticMarkup(createElement(Deals)).split('<article class="deal"').slice(1);
+    state.role = "viewer";
+    let r = rows();
+    expect(r[0]).toMatch(/<a href="\/deals\/d1\/review" class="btn quiet">[^]*Open the deal/);
+    expect(r[0]).not.toContain("Resolve 2 conflicts");
+    expect(r[1]).toMatch(/class="btn quiet">[^]*Open the deal/);
+    expect(r[2]).toMatch(/class="btn quiet">[^]*Open the deal/);
+    // A viewer can share a report by link; a client cannot.
+    expect(r[4]).toMatch(/class="btn quiet">[^]*Share the reports/);
+    state.role = "client";
+    expect(rows()[4]).toMatch(/class="btn quiet">[^]*Open the deal/);
+    // An analyst works the deal but does not record the decision.
+    state.role = "analyst";
+    state.solo = false;
+    r = rows();
+    expect(r[0]).toMatch(/class="btn quiet">[^]*Resolve 2 conflicts/);
+    expect(r[1]).toMatch(/class="btn quiet">[^]*Open the deal/);
+    expect(r[1]).not.toContain("Record the decision");
+    state.role = "viewer";
+    state.lang = "fr";
+    expect(text(rows()[0]!)).toContain("Ouvrir le projet");
+  });
+
   it("labels the filter chips with their counts", () => {
     state.deals = MIXED;
     const t = text(renderToStaticMarkup(createElement(Deals)));
