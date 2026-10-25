@@ -169,8 +169,8 @@ export function createApp({ db, store, secureCookies, demoSignIn = false, trustP
       if (!link) return c.json({ error: "This link is not available. It may have expired or been revoked." }, 404);
       if (what === "page") {
         const [run] = await db.query<{ result: import("@agir/contracts").RunResult; input_snapshot: { input: EngineInput; policy?: Policy; standardPolicy?: Policy; policyChanges?: import("@agir/contracts").PolicyChange[] };
-          policy_version: string; created_at: string; location: string; currency: string | null; workspace: string }>(
-          `select r.result, r.input_snapshot, r.policy_version, r.created_at, d.location, d.currency, w.name as workspace
+          policy_version: string; created_at: string; location: string; province: string | null; currency: string | null; workspace: string }>(
+          `select r.result, r.input_snapshot, r.policy_version, r.created_at, d.location, d.province, d.currency, w.name as workspace
            from runs r join deals d on d.id = r.deal_id join workspaces w on w.id = d.workspace_id where r.id = $1`, [link.run_id]);
         let standardFailures: { en: string[]; fr: string[] } | undefined;
         if (run?.input_snapshot.policy?.custom) {
@@ -824,7 +824,7 @@ const SHARED_FIGURES = ["total_development_cost", "cost_per_unit", "required_equ
  * already printed in the shared file. Units are counted from the stored input, as the report counts them.
  */
 function sharedRunFacts(run: { result: import("@agir/contracts").RunResult; input_snapshot: { input: EngineInput; policy?: Policy; standardPolicy?: Policy };
-  policy_version: string; created_at: string; location: string; currency: string | null; workspace: string }) {
+  policy_version: string; created_at: string; location: string; province: string | null; currency: string | null; workspace: string }) {
   const { input } = run.input_snapshot;
   const { code, gates, hardFailReasons, headline, explanation } = run.result.verdict;
   const metrics = run.result.scenarios[0]?.metrics ?? [];
@@ -832,6 +832,7 @@ function sharedRunFacts(run: { result: import("@agir/contracts").RunResult; inpu
   return {
     workspace: run.workspace,
     location: run.location,
+    province: run.province,
     currency: run.currency,
     runAt: run.created_at,
     units: items.reduce((n, item) => n + item.units, 0),
