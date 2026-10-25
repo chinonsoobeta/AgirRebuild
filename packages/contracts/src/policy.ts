@@ -264,9 +264,12 @@ export const THRESHOLDS: Readonly<Record<string, readonly Threshold[]>> = Object
   const location = thresholdLocation(policy, path);
   const standard = location.object[location.field] as number;
   const stress = path.startsWith("stresses.");
-  const prefix = stress ? `${path.split(".")[1]}: ` : path.includes(".select.") ? `MLI Select ${path.split(".")[2]}: ` : path.includes(".standard.") ? "MLI Standard: " : "";
+  // A stress is named by its STRESS name with the size taken off; French puts a no-break space before the colon.
+  const stressName = (lang: 0 | 1) => STRESS[path.split(".")[1]!]?.[lang].replace(/\s*[+-]\d.*$/, "") ?? path.split(".")[1]!;
+  const mli = path.includes(".select.") ? `MLI Select ${path.split(".")[2]}` : path.includes(".standard.") ? "MLI Standard" : undefined;
+  const name: [string, string] | undefined = stress ? [stressName(0), stressName(1)] : mli ? [mli, mli] : undefined;
   const lenderCited = path.startsWith("refinanceLimits.") || (policy.version.startsWith("rental-hold-insured") && ["gates.dcrAfterRefinanceMin", "baseSizingDscrFloor"].includes(path));
-  return { path, label: { en: prefix + en, fr: (stress ? `${STRESS[path.split(".")[1]!]?.[1].replace(/\s*[+-]\d.*$/, "")}: ` : prefix) + fr }, unit, standard, min,
+  return { path, label: { en: name ? `${name[0]}: ${en}` : en, fr: name ? `${name[1]}\u00a0: ${fr}` : fr }, unit, standard, min,
     max: field === "maxFailedGatesForConditions" ? Object.keys(policy.gates).length : field === "agreementTolerancePct" ? standard : max,
     integer, lenderCited, looserDirection: stress ? "magnitude" : field === "agreementTolerancePct" || field.startsWith("max") ? "higher" : "lower" };
 })]));
