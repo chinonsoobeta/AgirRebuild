@@ -6,7 +6,7 @@ import { SF_PER_M2 } from "@agir/numbers";
 import { api, type Assumption, type Review as ReviewData, type Source } from "../api";
 import { Banner, WindowConfirmation, canEdit, DealFrame, ErrorText, Glossary, StatusTag, useDeal, useSession } from "../components/ui";
 import { Notice, Tag } from "../components/kit";
-import { Thresholds } from "../components/thresholds";
+import { ThresholdList, Thresholds } from "../components/thresholds";
 import * as I from "../components/icons";
 import { useI18n, type Lang } from "../i18n";
 
@@ -260,6 +260,8 @@ export function Review({ dealId }: { dealId: string }) {
   const approved = r.assumptions.filter((a) => a.status === "approved" || a.status === "default_accepted");
   const stated = approved.filter((a) => a.sponsorStated).length;
   const rejected = by("rejected");
+  // A choice Agir never reads from documents, once made, is an approved value; it is listed again under the choices.
+  const madeChoices = approved.filter((a) => FIELD_BY_KEY.get(a.fieldKey)?.extractable === false);
   const focused = pending.find((a) => a.id === focus) ?? pending[0];
   const unused = r.other.filter((o) => o.figureId && o.value !== null && !o.label).length;
   const itemNames = [...new Set(r.assumptions.map((a) => a.itemKey).filter((i): i is string => !!i))];
@@ -779,7 +781,7 @@ export function Review({ dealId }: { dealId: string }) {
             )}
           </section>
 
-          {r.choices.length > 0 && (
+          {(r.choices.length > 0 || madeChoices.length > 0) && (
             <section className="section" id="choices">
               <h2 className="h2">{t("review.choices")}</h2>
               <div className="card card-pad stack tight">
@@ -798,6 +800,12 @@ export function Review({ dealId }: { dealId: string }) {
                     </div>
                   );
                 })}
+                {madeChoices.map((a) => (
+                  <div key={a.id} className="row between rv-line">
+                    <span>{t("review.madeChoice", { field: name(a), value: f.value(a.value, a.unit), dflt: a.sourceKind === "default", who: a.decidedBy, you: !!a.decidedById && a.decidedById === me.user.id, date: a.decidedAt ? new Date(a.decidedAt).toLocaleDateString(lang === "fr" ? "fr-CA" : "en-CA", { year: "numeric", month: "short", day: "numeric" }) : null })}</span>
+                    {editable && <button className="btn ghost sm" type="button" disabled={act.isPending} onClick={() => act.mutate({ id: a.id, action: "reopen", version: a.version })}>{t("review.change")}</button>}
+                  </div>
+                ))}
               </div>
             </section>
           )}
@@ -857,10 +865,13 @@ export function Review({ dealId }: { dealId: string }) {
         </div>
 
         <aside className="stack rv-aside" aria-label={t("review.aside")}>
-          <section className="card card-pad stack tight">
+          <section className="card card-pad stack tight" id="thresholds">
             <h2 className="h3">{t("review.thresholds")}</h2>
             <p className="small muted">{t("review.thresholdsBody")}</p>
-            <Thresholds scope="deals" id={dealId} summary={t("thresholds.show")} />
+            <ThresholdList dealId={dealId}>
+              {(version, invalid) => role === "owner" && <Thresholds key={version} scope="deals" id={dealId} initialVersion={version} open={invalid || undefined} summary={t("thresholds.change")} />}
+            </ThresholdList>
+            {role !== "owner" && <p className="small muted">{t("thresholds.ownerOnly")}</p>}
           </section>
           <Notice>{t(solo ? "review.modeSolo" : "review.modeTeam")}</Notice>
           <Notice title={t("review.recorded")}>{t("review.recordedBody")}</Notice>

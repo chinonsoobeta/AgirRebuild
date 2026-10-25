@@ -56,9 +56,9 @@ const view = (): ThresholdView => {
   const first = "rental-hold-draft", insured = "rental-hold-insured-draft";
   const dcr = at(insured, "gates.dcrAfterRefinanceMin"), ltc = at(insured, "maxLtcPct");
   return { invalid: [], policies: [
-    { version: first, thresholds: THRESHOLDS[first]!.slice(0, 2).map((t) => ({ ...t, value: t.standard, layer: null, looser: false, stressRemoved: false, workspace: null, deal: null })) },
+    { version: first, thresholds: THRESHOLDS[first]!.filter((t) => !t.path.includes("dcrAfterRefinance")).slice(0, 2).map((t) => ({ ...t, value: t.standard, layer: null, looser: false, stressRemoved: false, workspace: null, deal: null })) },
     { version: insured, thresholds: [
-      { ...dcr, value: 1.1, layer: "deal", looser: true, stressRemoved: false, workspace: null, deal: { value: 1.1, setBy: "owner", setByName: "Dana", setAt: "2026-10-19T12:00:00Z", reason: "Lender term sheet" } },
+      { ...dcr, value: 1.3, layer: "deal", looser: false, stressRemoved: false, workspace: null, deal: { value: 1.3, setBy: "owner", setByName: "Dana", setAt: "2026-10-19T12:00:00Z", reason: "Lender term sheet" } },
       { ...ltc, value: 80, layer: "workspace", looser: false, stressRemoved: false, deal: null, workspace: { value: 80, setBy: "owner", setByName: "Dana", setAt: "2026-10-19T12:00:00Z", reason: "House rule" } },
     ] },
   ] };
@@ -83,7 +83,7 @@ describe("card X4 thresholds in the open", () => {
     const outside = card.replace(/<details[\s\S]*<\/details>/g, "");
     const words = text(outside);
     expect(words).toContain("DCR after refinance");
-    expect(words).toContain("at least 1.10");
+    expect(words).toContain("at least 1.30");
     expect(words).toContain("set for this deal");
     expect(words).toContain("CMHC's cited rule");
     expect(words).toContain("Maximum loan-to-cost");
@@ -110,12 +110,12 @@ describe("card X4 thresholds in the open", () => {
     expect(card).not.toContain("<details");
     expect(card).not.toContain("<form");
     expect(text(card)).toContain("Only the workspace owner changes thresholds.");
-    expect(text(card)).toContain("at least 1.10");
+    expect(text(card)).toContain("at least 1.30");
   });
   it("says it in French", () => {
     state.lang = "fr";
     const words = text(thresholdsCard(render()));
-    expect(words).toContain("au moins 1,10");
+    expect(words).toContain("au moins 1,30");
     expect(words).toContain("fixé pour ce projet");
     expect(words).toContain("Modifier un seuil pour ce projet");
   });
@@ -125,19 +125,19 @@ describe("card X4 choices already made", () => {
   it("lists a made choice with its value, who chose it and when, and a Change button", () => {
     const html = choices(render());
     expect(text(html)).toContain("Credit income during lease-up");
-    expect(text(html)).toMatch(/Refinance term: 10 years, chosen by you on [^.]+\./);
+    expect(text(html)).toMatch(/Refinance term: 10 yr, chosen by you on [^.]+\./);
     expect(buttonLabels(html)).toContain("Change");
   });
   it("names someone else and shows the section when only made choices remain", () => {
     const r = payload(); r.choices = []; r.assumptions[1] = { ...r.assumptions[1]!, decidedById: "dana", decidedBy: "Dana" }; state.review = r;
     const html = choices(render());
-    expect(text(html)).toMatch(/Refinance term: 10 years, chosen by Dana on [^.]+\./);
+    expect(text(html)).toMatch(/Refinance term: 10 yr, chosen by Dana on [^.]+\./);
   });
   it("lists a made choice without the button for a viewer and a client", () => {
     for (const role of ["viewer", "client"]) {
       state.role = role;
       const html = choices(render());
-      expect(text(html)).toContain("Refinance term: 10 years");
+      expect(text(html)).toContain("Refinance term: 10 yr");
       expect(buttonLabels(html)).not.toContain("Change");
     }
   });

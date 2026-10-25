@@ -20,7 +20,9 @@ export const en = {
   "review.otherIntro": (p) => `${p.n} ${s(p.n, "figure", "figures")} in your documents ${s(p.n, "was", "were")} not used. They are shown so nothing is hidden, and you can label one as an input.`,
   "review.aside": "About this review",
   "review.thresholds": "Thresholds",
-  "review.thresholdsBody": "What this deal is judged against. The owner can change a threshold for this deal; a reason is required and recorded.",
+  "review.thresholdsBody": "What this deal is judged against. A change and its reason are recorded.",
+  "review.madeChoice": (p) => `${p.field}: ${p.value}${p.dflt ? ", the default" : ""}${p.who || p.date ? `, ${p.dflt ? "accepted" : "chosen"}${p.who ? ` by ${p.you ? "you" : p.who}` : ""}${p.date ? ` on ${p.date}` : ""}` : ""}.`,
+  "review.change": "Change",
   "review.modeSolo": "You review on your own. A material value you enter by hand is used right away and labelled as stated by you until someone else confirms it.",
   "review.modeTeam": "You review as a team. A material value someone enters by hand counts only once a second, different person confirms it.",
 } satisfies Record<string, Entry>;
@@ -42,7 +44,9 @@ export const fr: FrenchOf<typeof en> = {
   "review.otherIntro": (p) => `${p.n} ${s(p.n, "chiffre", "chiffres")} de vos documents ${s(p.n, "n'a pas été utilisé", "n'ont pas été utilisés")}. Ils sont affichés pour que rien ne soit caché, et vous pouvez en libeller un comme donnée.`,
   "review.aside": "À propos de cet examen",
   "review.thresholds": "Seuils",
-  "review.thresholdsBody": "Ce à quoi ce projet est comparé. Le propriétaire peut modifier un seuil pour ce projet ; une justification est exigée et consignée.",
+  "review.thresholdsBody": "Ce à quoi ce projet est comparé. Une modification et son motif sont consignés.",
+  "review.madeChoice": (p) => `${p.field}\u00a0: ${p.value}${p.dflt ? ", valeur par défaut" : ""}${p.who || p.date ? `, ${p.dflt ? "acceptée" : "choix fait"}${p.who ? ` par ${p.you ? "vous" : p.who}` : ""}${p.date ? ` le ${p.date}` : ""}` : ""}.`,
+  "review.change": "Modifier",
   "review.modeSolo": "Vous examinez seul. Une valeur déterminante saisie à la main est utilisée tout de suite et marquée comme déclarée par vous jusqu'à ce qu'une autre personne la confirme.",
   "review.modeTeam": "Vous examinez en équipe. Une valeur déterminante saisie à la main ne compte qu'une fois confirmée par une seconde personne, différente.",
 };
