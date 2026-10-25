@@ -1,1 +1,27 @@
 /* Styles for the landing area: design tokens only (var(--…)), no literal colours. */
+
+/* The signed-out top bar spans the page; the board's .ld-bar sits inside .topbar. */
+.ld-bar-full{padding:0;max-width:none;width:100%}
+.ld-lang{border:0;background:transparent;font:inherit;cursor:pointer}
+.ld-for{margin-top:16px}
+.ld-glimpse-lead{margin-top:6px}
+/* A figure-free picture of the five steps: the design's path, as a list. */
+.ld-path{list-style:none;margin:28px 0 8px;grid-template-columns:repeat(5,minmax(0,1fr))}
+.ld-path .step{padding-bottom:4px}
+.ld-steps{list-style:none;padding:0}
+.ld-body{margin-top:8px}
+.ld-note{margin-top:18px;max-width:72ch}
+.ld-foot nav{display:flex;flex-wrap:wrap;align-items:center;gap:4px 0}
+.ld-foot .ld-lang{min-height:0;padding:0;color:var(--ink-2);font-size:13px}
+.ld-foot .ld-lang:hover{background:transparent;text-decoration:underline}
+
+/* The terms and privacy page */
+.legal-draft{margin-bottom:28px}
+.legal-draft p+p{margin-top:6px}
+.legal-toc-part{display:flex;flex-direction:column;gap:2px}
+.legal-toc-part+.legal-toc-part{margin-top:12px}
+.toc a.legal-toc-head{font-weight:700;color:var(--ink)}
+.legal h3{font-size:17px;font-weight:700;margin:24px 0 8px}
+.legal section>section:first-of-type h3{margin-top:12px}
+.legal .notice{margin-bottom:12px}
+.legal>section+section{margin-top:40px;padding-top:28px;border-top:1px solid var(--line)}

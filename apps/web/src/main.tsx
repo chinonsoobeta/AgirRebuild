@@ -18,6 +18,8 @@ import { ReviewAccess } from "./routes/review-access";
 import { Explore } from "./routes/explore";
 import { Share } from "./routes/share";
 import { Invite } from "./routes/invite";
+import { Home } from "./routes/landing";
+import { Legal } from "./routes/legal";
 import { I18nProvider } from "./i18n";
 
 const queryClient = new QueryClient({ defaultOptions: { queries: { staleTime: 5_000, retry: (n, e: any) => e?.status !== 401 && e?.status !== 403 && e?.status !== 404 && n < 2 } } });
@@ -29,6 +31,9 @@ const signup = createRoute({ getParentRoute: () => root, path: "/signup", compon
 const share = createRoute({ getParentRoute: () => root, path: "/s/$secret", component: function SharedLink() { const { secret } = share.useParams(); return <Share secret={secret} />; } });
 // An invitation to be a client of one deal (card 89): outside the session gate, like a shared link.
 const invite = createRoute({ getParentRoute: () => root, path: "/i/$secret", component: function Invitation() { const { secret } = invite.useParams(); return <Invite secret={secret} />; } });
+// "/" and the terms sit outside the session gate: signed out, "/" is the landing page (card W4).
+const index = createRoute({ getParentRoute: () => root, path: "/", component: Home });
+const legal = createRoute({ getParentRoute: () => root, path: "/legal", component: Legal });
 const app = createRoute({
   getParentRoute: () => root,
   id: "app",
@@ -40,7 +45,6 @@ const app = createRoute({
     </SessionGate>
   ),
 });
-const index = createRoute({ getParentRoute: () => app, path: "/", component: () => <Navigate to="/deals" /> });
 const deals = createRoute({ getParentRoute: () => app, path: "/deals", component: Deals });
 const newDeal = createRoute({ getParentRoute: () => app, path: "/deals/new", component: NewDeal });
 const settings = createRoute({ getParentRoute: () => app, path: "/settings", component: Settings });
@@ -55,8 +59,9 @@ const routeTree = root.addChildren([
   signup,
   share,
   invite,
+  index,
+  legal,
   app.addChildren([
-    index,
     deals,
     newDeal,
     settings,
