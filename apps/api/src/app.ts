@@ -345,13 +345,14 @@ export function createApp({ db, store, secureCookies, demoSignIn = false, trustP
       const [a] = await tx.query<{ n: number }>(`select count(*)::int as n from deals where workspace_id = $1 and archived_at is not null`, [ws]);
       // Card R4, for the deals that are not archived: every run and when the first one was made; the ready files of
       // each deal's latest run (the deals list's rule); and how many of those files have been shared by a link,
-      // revoked or not. That counts files shared, not how often a link was opened.
+      // revoked or not, counting each file once however many links share it (card R2's share_link_files). That counts
+      // files shared, not how often a link was opened.
       const [r] = await tx.query<{ n: number; first: string | Date | null }>(
         `select count(*)::int as n, min(r.created_at) as first from runs r join deals d on d.id = r.deal_id where d.workspace_id = $1 and d.archived_at is null`,
         [ws],
       );
       const [f] = await tx.query<{ n: number; shared: number }>(
-        `select count(*)::int as n, count(*) filter (where exists (select 1 from share_links l where l.artifact_id = a.id))::int as shared
+        `select count(*)::int as n, count(*) filter (where exists (select 1 from share_link_files l where l.artifact_id = a.id))::int as shared
          from latest_runs lr join deals d on d.id = lr.deal_id join artifacts a on a.run_id = lr.id and a.status = 'ready'
          where d.workspace_id = $1 and d.archived_at is null`,
         [ws],

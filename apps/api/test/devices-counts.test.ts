@@ -150,11 +150,15 @@ describe("runs and reports in the production counts", () => {
     ]);
     return a!.id;
   };
-  const share = async (deal: string, ws: string, artifactId: string, by: string, revoked = false) => {
-    await db.query(
-      `insert into share_links (workspace_id, deal_id, artifact_id, token_hash, term, created_by, revoked_at) values ($1, $2, $3, $4, 'none', $5, $6)`,
-      [ws, deal, artifactId, `share-${randomUUID()}`, by, revoked ? new Date().toISOString() : null],
+  // A link to one or more files of a run, as card R2 stores it: the link names the run, and each file is a share_link_files row.
+  const share = async (deal: string, ws: string, artifactIds: string | string[], by: string, revoked = false) => {
+    const ids = [artifactIds].flat();
+    const [link] = await db.query<{ id: string }>(
+      `insert into share_links (workspace_id, deal_id, run_id, token_hash, term, created_by, revoked_at)
+       select $1, $2, a.run_id, $4, 'none', $5, $6 from artifacts a where a.id = $3 returning id`,
+      [ws, deal, ids[0], `share-${randomUUID()}`, by, revoked ? new Date().toISOString() : null],
     );
+    for (const id of ids) await db.query(`insert into share_link_files (link_id, artifact_id) values ($1, $2)`, [link!.id, id]);
   };
 
   test("count only the deals that are not archived, the latest run's ready files, and the files shared by a link", async () => {
@@ -184,6 +188,21 @@ describe("runs and reports in the production counts", () => {
     expect(totals.reports).toBe(2);
     expect(totals.reports_shared).toBe(1);
     expect(totals.archived_deals).toBe(1);
+  });
+
+  test("a link to several files counts each of them, and a file in two links counts once", async () => {
+    const owner = await signup("lena@example.com", "Lena Links");
+    const me = await idOf(owner);
+    const ws = (await call(owner, "GET", "/api/me")).json.workspaces[0].id;
+    const deal = (await call(owner, "POST", `/api/workspaces/${ws}/deals`, { name: "Spruce Lane", assetType: "Multifamily", location: "Victoria", province: "BC" })).json.id;
+    const r = await run(deal, ws, 1, "2026-10-02T15:00:00Z");
+    const a = await artifact(deal, ws, r);
+    const b = await artifact(deal, ws, r);
+    await artifact(deal, ws, r);
+    await share(deal, ws, [a, b], me);
+    await share(deal, ws, a, me, true);
+    const totals = (await call(owner, "GET", `/api/workspaces/${ws}/deal-metrics`)).json.totals;
+    expect(totals).toMatchObject({ reports: 3, reports_shared: 2 });
   });
 
   test("a workspace with no runs has no first run", async () => {
