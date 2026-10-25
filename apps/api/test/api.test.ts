@@ -3234,7 +3234,7 @@ describe("card 94c table proposals", () => {
   test("requires an explicit province, despite free-text Halifax", async () => {
     const r=await review(await make());
     expect(r.proposals).toHaveLength(3);
-    for (const p of r.proposals) {expect(p.options).toEqual([]);expect(p.unavailable).toBe("the deal has no province");}
+    for (const p of r.proposals) {expect(p.options).toEqual([]);expect(p.unavailable).toBe("these tables are for deals in Canada; enter the amount yourself");}
   });
   test("requires approved prerequisites, and an LTV rather than a refinance amount", async () => {
     const d=await make("NS",false), r=await review(d);
