@@ -858,6 +858,8 @@ describe("partner memo wording (task 84d)", () => {
 describe("share-link wording (task 86b)", () => {
   it.each([
     ["share.created", { kind: "ic_memo", format: "pdf", term: "7d" }, "Shared a link to the Committee memo (PDF), 7 days", "A partagé un lien\u00a0: Mémo du comité (PDF), 7 jours"],
+    ["share.created", { run_id: "r", artifact_ids: ["a", "b", "c"], term: "30d" }, "Shared a link to 3 files, 30 days", "A partagé un lien vers 3 fichiers, 30 jours"],
+    ["share.created", { run_id: "r", artifact_ids: ["a"], term: "none" }, "Shared a link to 1 file, no expiry", "A partagé un lien vers 1 fichier, sans expiration"],
     ["share.revoked", {}, "Revoked a shared link", "A révoqué un lien partagé"],
     ["share.opened", { what: "page" }, "Opened a shared link: the page", "A ouvert un lien partagé\u00a0: la page"],
     ["share.opened", { what: "file" }, "Opened a shared link: the report", "A ouvert un lien partagé\u00a0: le rapport"],

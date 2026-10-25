@@ -55,9 +55,15 @@ export function describeEvent(i: I18n, e: AuditEvent): string {
     case "artifact.ready": return fr ? `A diffusé\u00a0: ${kind(p.kind)} (${format(p.format)})` : `Released the ${kind(p.kind)} (${format(p.format)})`;
     case "artifact.blocked": return fr ? "A bloqué un rapport\u00a0: chiffres sans source" : "Blocked a report: figures without a source";
     case "share.created": {
-      const terms: Record<string, string> = fr ? { "24h": "24 heures", "7d": "7 jours", "30d": "30 jours", none: "Sans expiration" }
-        : { "24h": "24 hours", "7d": "7 days", "30d": "30 days", none: "No expiry" };
-      return fr ? `A partagé un lien\u00a0: ${kind(p.kind)} (${format(p.format)}), ${terms[p.term] ?? ""}` : `Shared a link to the ${kind(p.kind)} (${format(p.format)}), ${terms[p.term] ?? ""}`;
+      const terms: Record<string, string> = fr ? { "24h": "24 heures", "7d": "7 jours", "30d": "30 jours", none: "sans expiration" }
+        : { "24h": "24 hours", "7d": "7 days", "30d": "30 days", none: "no expiry" };
+      const term = terms[p.term] ? `, ${terms[p.term]}` : "";
+      // A link to a run's chosen files (card R2) names how many; an older one-file link names its report.
+      if (Array.isArray(p.artifact_ids)) {
+        const n = p.artifact_ids.length;
+        return fr ? `A partagé un lien vers ${n} ${n === 1 ? "fichier" : "fichiers"}${term}` : `Shared a link to ${n} ${n === 1 ? "file" : "files"}${term}`;
+      }
+      return fr ? `A partagé un lien\u00a0: ${kind(p.kind)} (${format(p.format)})${term}` : `Shared a link to the ${kind(p.kind)} (${format(p.format)})${term}`;
     }
     case "share.revoked": return fr ? "A révoqué un lien partagé" : "Revoked a shared link";
     case "share.opened": {

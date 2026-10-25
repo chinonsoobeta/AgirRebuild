@@ -108,10 +108,17 @@ export type RunView = {
 };
 export type Artifact = { lang: "en" | "fr"; id: string; kind: string; format: string; status: string; error: string | null; sha256: string | null; created_at: string; run_id: string; run_number: number; provenance_entries: number | null };
 export type ShareTerm = "24h" | "7d" | "30d" | "none";
-export type ShareLink = { id: string; artifact_id: string; kind: string; format: string; run_number: number; term: ShareTerm; expires_at: string | null; created_at: string;
+/** A link shares a run's files together (card R2): `files` in the shared page's order; `kind` and `format` are the first one's.
+ *  `artifact_id` is set only for a link made by the older one-file route. */
+export type ShareLink = { id: string; artifact_id: string | null; run_id: string; kind: string; format: string; run_number: number;
+  files: { kind: string; format: string; lang: "en" | "fr" }[]; term: ShareTerm; expires_at: string | null; created_at: string;
   created_by: string | null; revoked_at: string | null; revoked_by: string | null; openings: number; last_opened_at: string | null };
+/** One file of a shared link; `traced` is the number of traced figures the file recorded, null when it recorded none. */
+export type SharedFile = { id: string; kind: string; format: string; lang: "en" | "fr"; traced: number | null };
 export type SharedReport = {
   standardFailures?: { en: string[]; fr: string[] }; deal: string; kind: string; format: string; runNumber: number; expiresAt: string | null;
+  /** The link's files (card R2); `kind` and `format` above are the first one's. */
+  files?: SharedFile[];
   /** What the shared run stored, never recomputed (card Y2). A link whose run cannot be read has none of these. */
   workspace?: string; location?: string; province?: string | null; currency?: string | null; runAt?: string;
   units?: number; exit?: "sale" | "refinance_hold" | "for_sale"; policyDraft?: boolean;

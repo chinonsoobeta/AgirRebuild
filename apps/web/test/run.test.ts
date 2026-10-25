@@ -286,9 +286,9 @@ describe("the run screen shows the partners (task 85d)", () => {
 
 describe("share links on the web (task 86b)", () => {
   const artifact = (id: string, status: string) => ({ id, kind: "ic_memo", format: "pdf", status, error: null, sha256: null,
-    created_at: "2026-10-19T12:00:00Z", run_id: "run", run_number: 1, provenance_entries: null });
-  const link = (id: string, expires_at: string | null, revoked_at: string | null = null) => ({ id, artifact_id: "ready", kind: "ic_memo", format: "pdf",
-    run_number: 1, term: expires_at ? "7d" : "none", expires_at, created_at: "2026-10-19T12:00:00Z", created_by: "Alice Analyst",
+    created_at: "2026-10-19T12:00:00Z", run_id: "sale-run", run_number: 1, provenance_entries: null });
+  const link = (id: string, expires_at: string | null, revoked_at: string | null = null) => ({ id, artifact_id: "ready", run_id: "sale-run", kind: "ic_memo", format: "pdf",
+    files: [{ kind: "ic_memo", format: "pdf", lang: "en" }], run_number: 1, term: expires_at ? "7d" : "none", expires_at, created_at: "2026-10-19T12:00:00Z", created_by: "Alice Analyst",
     revoked_at, revoked_by: revoked_at ? "Bob Approver" : null, openings: 3, last_opened_at: "2026-10-19T13:00:00Z" });
   const render = (element: Parameters<typeof renderToStaticMarkup>[0] = createElement(Reports, { dealId: "links" })) => {
     queryState.index = 0; queryState.nodes = [];
@@ -310,11 +310,12 @@ describe("share links on the web (task 86b)", () => {
     vi.stubGlobal("navigator", { clipboard: { writeText: vi.fn(async () => {}) } });
   });
   afterEach(() => { queryState.interactive = false; queryState.artifacts = []; queryState.links = []; queryState.lang = "en"; vi.unstubAllGlobals(); });
+  // Card R2: files are chosen with a checkbox each, not a Share button per row.
   it.each(["owner", "analyst", "viewer"])("%s can share only the ready report", (role) => {
     queryState.role = role; render();
-    const buttons = queryState.nodes.filter((n) => n.tag === "button" && n.props.children === "Share");
-    expect(buttons.length).toBe(1);
-    expect(Boolean(buttons[0]!.props.disabled)).toBe(false);
+    const boxes = queryState.nodes.filter((n) => n.tag === "input" && n.props.type === "checkbox");
+    expect(boxes.map((b) => b.props.value)).toEqual(["ready"]);
+    expect(Boolean(button("Make link").props.disabled)).toBe(false);
   });
   it("card 93c: requests the interface language, keeps Excel English, and labels French drafts", async () => {
     queryState.lang = "fr";
@@ -328,7 +329,6 @@ describe("share links on the web (task 86b)", () => {
     for (const body of bodies) expect(body.lang).toBe(body.kind === "model_export" ? "en" : "fr");
   });
   it("offers four terms, makes a link and shows its once-only copy field after success", async () => {
-    render(); await button("Share").props.onClick();
     const choices = render();
     for (const term of ["24 hours", "7 days", "30 days", "No expiry"]) expect(choices).toContain(term);
     button("24 hours").props.onClick();
@@ -338,7 +338,8 @@ describe("share links on the web (task 86b)", () => {
     const input = queryState.nodes.find((n) => n.tag === "input" && n.props.readOnly)!;
     expect(Boolean(input)).toBe(true);
     expect(input.props.value === `https://agir.test/s/${queryState.secret}`).toBe(true);
-    expect(vi.mocked(api.post).mock.calls.some(([path, body]) => path === "/artifacts/ready/share-links" && (body as { term: string }).term === "24h")).toBe(true);
+    expect(vi.mocked(api.post).mock.calls.some(([path, body]) => path === "/runs/sale-run/share-links" && (body as { term: string }).term === "24h"
+      && JSON.stringify((body as { artifacts: string[] }).artifacts) === '["ready"]')).toBe(true);
     await button("Copy").props.onClick();
     const copy = vi.mocked(navigator.clipboard.writeText);
     expect(copy.mock.calls.length).toBe(1);

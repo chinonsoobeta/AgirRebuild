@@ -9,4 +9,6 @@
 .rep-page-head{margin-bottom:0}
 /* The other language sits under the main actions, quieter. */
 .rep-other{margin-top:0}
-.rep-pick{max-width:520px}
+/* The files a link shares, one checkbox each (card R2). */
+.rep-pick{display:flex;flex-direction:column;gap:8px}
+.rep-pick legend{margin-bottom:4px}

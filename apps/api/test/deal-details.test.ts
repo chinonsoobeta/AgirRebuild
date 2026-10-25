@@ -233,7 +233,9 @@ describe("a fuller share page", () => {
     const [stored] = await db.query<{ result: any; input_snapshot: any; created_at: string }>(`select result, input_snapshot, created_at from runs where id = $1`, [runId]);
     const [deal] = await db.query<{ location: string; currency: string }>(`select location, currency from deals where id = $1`, [d]);
     const view = (await call(alice, "GET", `/api/runs/${runId}`)).json;
-    const { figures, verdict, runAt, ...rest } = page.json;
+    // Card R2: the page also lists the link's files.
+    const { figures, verdict, runAt, files, ...rest } = page.json;
+    expect(files).toMatchObject([{ id: artifact, kind: "ic_memo", format: "pdf", lang: "en" }]);
     expect(rest).toEqual({
       deal: "Held details", kind: "ic_memo", format: "pdf", runNumber: 1, expiresAt: link.expiresAt,
       workspace: "Details", location: deal!.location, province: "BC", currency: deal!.currency, units: 10, exit: "refinance_hold",
