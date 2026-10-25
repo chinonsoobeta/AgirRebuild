@@ -136,7 +136,7 @@ export function Explore({ dealId }: { dealId: string }) {
                 <div key={d.key} className="field">
                   <div className="row between">
                     <label htmlFor={id}>{L.driver(d.key)}</label>
-                    <output htmlFor={id} className="num">{now}{v !== 0 && <span className="muted"> · {t("explore.runShock")}</span>}</output>
+                    <output htmlFor={id} className="num">{now}{v !== 0 && <span className="muted"> {t("explore.runShock")}</span>}</output>
                   </div>
                   <input
                     id={id}

@@ -4,7 +4,7 @@ import type { Entry, FrenchOf } from "./entry";
 export const en = {
   "explore.back": (p) => `Back to run ${p.n}`,
   "explore.helper": "Drag a slider and the figures re-run. The run itself does not change.",
-  "explore.runShock": "run: no change",
+  "explore.runShock": "from the run",
   "explore.gateNeeds": (p) => `The gate needs ${p.t}`,
   "explore.verdictWith": (p) => `${p.v} with these changes`,
   "explore.swing": (p) => `${p.lo} and ${p.hi}`,
@@ -20,7 +20,7 @@ export const en = {
 export const fr: FrenchOf<typeof en> = {
   "explore.back": (p) => `Retour à l'analyse ${p.n}`,
   "explore.helper": "Déplacez un curseur et les chiffres sont recalculés. L'analyse elle-même ne change pas.",
-  "explore.runShock": "analyse : aucun changement",
+  "explore.runShock": "par rapport à l'analyse",
   "explore.gateNeeds": (p) => `Le critère exige ${p.t}`,
   "explore.verdictWith": (p) => `${p.v} avec ces changements`,
   "explore.swing": (p) => `${p.lo} et ${p.hi}`,
