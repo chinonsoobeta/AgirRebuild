@@ -77,10 +77,13 @@ export function DecisionStep({ dealId }: { dealId: string }) {
                     <label htmlFor="rationale">{t(solo ? "decision.reasoningSolo" : "decision.reasoning")}</label>
                     <textarea className="textarea" id="rationale" name="rationale" minLength={10} required placeholder={t("decision.reasoningHint")} />
                   </div>
-                  <div className="field">
-                    <label htmlFor="conditions">{t("decision.conditionsLabel")} <span className="muted">{t("decision.ifAny")}</span></label>
-                    <textarea className="textarea dec-short" id="conditions" name="conditions" required={choice === "approve_with_conditions"} placeholder={t("decision.conditionsHint")} />
-                  </div>
+                  {/* Conditions belong to "approve with conditions" only, so a permanent "approve" never carries any. */}
+                  {choice === "approve_with_conditions" && (
+                    <div className="field">
+                      <label htmlFor="conditions">{t("decision.conditionsLabel")}</label>
+                      <textarea className="textarea dec-short" id="conditions" name="conditions" minLength={5} required placeholder={t("decision.conditionsHint")} />
+                    </div>
+                  )}
                   {against && (
                     <div className="field">
                       <label htmlFor="override">{t("decision.overrideLabel", { v: L.verdict(verdict).toLowerCase() })}</label>

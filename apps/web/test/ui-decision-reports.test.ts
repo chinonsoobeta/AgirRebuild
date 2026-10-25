@@ -87,6 +87,20 @@ describe("the decision screen (card W9)", () => {
     for (const text of ["9.8.7", "rental-hold-test", "draft, not signed by credit", "7f3a91c0"]) expect(html).toContain(text);
     expect(html).not.toContain("7f3a91c0aaaabbbbccccddddeeeeffff0000111122223333e2d4");
   });
+  it("asks for conditions only when the choice is approve with conditions", () => {
+    s.interactive = true;
+    const field = () => s.nodes.find((n) => n.tag === "textarea" && n.props.name === "conditions");
+    const pick = (v: string) => s.nodes.find((n) => n.tag === "input" && n.props.value === v)!.props.onChange();
+    render(createElement(DecisionStep, { dealId: "d" }));
+    expect(field()).toBeUndefined();
+    pick("approve");
+    render(createElement(DecisionStep, { dealId: "d" }));
+    expect(field()).toBeUndefined();
+    pick("approve_with_conditions");
+    render(createElement(DecisionStep, { dealId: "d" }));
+    expect(field()!.props.required).toBe(true);
+    expect(field()!.props.minLength).toBe(5);
+  });
   it("lists a recorded decision with who, conditions and reasoning", () => {
     s.run = run({ decisions: [{ id: "x", decision: "approve_with_conditions", rationale: "Sound enough to proceed.", conditions: "Fixed-price contract first", override_reason: null, created_at: "2026-10-24T16:00:00Z", decided_by: "Pat Owner" }] });
     const html = render(createElement(DecisionStep, { dealId: "d" }));
@@ -150,6 +164,19 @@ describe("the reports screen (card W9)", () => {
     expect(html).toContain('class="seg"');
     for (const term of ["24 hours", "7 days", "30 days", "No expiry"]) expect(s.nodes.some((n) => n.tag === "button" && n.props.children === term)).toBe(true);
     expect(html).toContain("Make link");
+  });
+  it("an editor can make a ready report again from the same run, and a viewer cannot", async () => {
+    s.artifacts = [{ id: "a1", kind: "lender_package", format: "pdf", lang: "en", status: "ready", error: null, sha256: null, created_at: "2026-10-24T16:12:00Z", run_id: "run-2", run_number: 2, provenance_entries: null }];
+    render(createElement(Reports, { dealId: "d" }));
+    const again = s.nodes.filter((n) => n.tag === "button" && n.props.name === "regenerate");
+    expect(again.map((b) => b.props.value)).toEqual(["lender_package:pdf"]);
+    expect(again[0]!.props["aria-label"]).toBe("Make the PDF file again");
+    await again[0]!.props.onClick();
+    const body = vi.mocked(api.post).mock.calls.find(([p]) => p === "/runs/run-2/artifacts")![1];
+    expect(body).toEqual({ kind: "lender_package", format: "pdf", lang: "en" });
+    s.role = "viewer";
+    render(createElement(Reports, { dealId: "d" }));
+    expect(s.nodes.some((n) => n.tag === "button" && n.props.name === "regenerate")).toBe(false);
   });
   it("a viewer cannot generate", () => {
     s.role = "viewer";

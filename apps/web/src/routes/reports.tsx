@@ -1,4 +1,4 @@
-import { useState } from "react";
+import { Fragment, useState } from "react";
 import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
 import { api, type Artifact, type ShareLink, type ShareTerm } from "../api";
 import { Banner, canEdit, DealFrame, ErrorText, StatusTag, useDeal, useSession } from "../components/ui";
@@ -82,7 +82,16 @@ export function Reports({ dealId }: { dealId: string }) {
         <div className="row rep-acts">
           {k.formats.map((fmt) => {
             const a = of(fmt);
-            if (a?.status === "ready") return <a key={fmt} className="btn quiet sm" href={`/api/artifacts/${a.id}/file`}><I.Download />{t("reports.downloadFmt", { f: fmtName(fmt) })}</a>;
+            // A ready file can be made again from the same run, for example after the workspace logo changes.
+            if (a?.status === "ready") return (
+              <Fragment key={fmt}>
+                <a className="btn quiet sm" href={`/api/artifacts/${a.id}/file`}><I.Download />{t("reports.downloadFmt", { f: fmtName(fmt) })}</a>
+                {canEdit(role) && (
+                  <button name="regenerate" value={`${k.kind}:${fmt}`} className="btn ghost sm" type="button" disabled={make.isPending}
+                    aria-label={t("reports.makeAgainFmt", { f: fmtName(fmt) })} onClick={() => make.mutate({ kind: k.kind, format: fmt })}>{t("reports.makeAgain")}</button>
+                )}
+              </Fragment>
+            );
             if (a?.status === "queued") return null;
             return (
               <button key={fmt} name="generate" value={`${k.kind}:${fmt}`} className="btn primary sm" type="button" disabled={!canEdit(role) || make.isPending}
