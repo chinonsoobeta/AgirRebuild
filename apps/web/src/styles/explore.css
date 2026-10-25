@@ -17,7 +17,7 @@
 .explore-controls .field{min-width:180px}
 .explore-head{margin-bottom:0}
 .explore-head .lead{margin-top:8px}
-.explore-drivers{gap:20px}
+.card.explore-drivers{gap:20px}
 .explore-block{display:block}
 .explore-select{width:auto;min-height:36px}
 .explore-caption{caption-side:top;text-align:left;padding-bottom:6px;font-size:13px;color:var(--ink-3)}

@@ -1,7 +1,7 @@
 /* Styles for the newdeal area: design tokens only (var(--…)), no literal colours. */
 .newdeal{max-width:800px;margin:0 auto}
 .newdeal-lead{margin-top:8px}
-.newdeal-form{display:flex;flex-direction:column;gap:22px}
+.card.newdeal-form{display:flex;flex-direction:column;gap:22px}
 .newdeal-pair{gap:18px}
 .newdeal-currency{max-width:320px}
 .newdeal-actions{padding-top:6px}
