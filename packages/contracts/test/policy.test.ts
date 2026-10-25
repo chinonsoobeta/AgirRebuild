@@ -129,3 +129,13 @@ describe("card P2 threshold labels", () => {
     for (const threshold of all) expect(threshold.label.fr, threshold.path).not.toMatch(/[^ ]:/);
   });
 });
+
+describe("card P2 French stress names keep a size with its unit", () => {
+  it("every French STRESS name has a no-break space between a digit and its unit", () => {
+    for (const [key, [, fr]] of Object.entries(STRESS)) expect(fr, key).not.toMatch(/\d (?:%|pb|mois|pts)/);
+  });
+  it("a changed single stress keeps the no-break space", () => {
+    const cost = POLICIES["rental-hold-draft"]!.stresses.find((s) => s.key === "cost")!;
+    expect(stressLabel({ ...cost, costPct: 12 }, "fr", cost)).toBe("Coûts +12\u00a0%");
+  });
+});
