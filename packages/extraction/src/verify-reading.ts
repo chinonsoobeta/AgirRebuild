@@ -25,11 +25,20 @@ export const AI_LOW_CONFIDENCE_NOTE = "Please check: every source is a low-confi
 export const AI_AMBIGUOUS_NOTE = "Please check: the separator in this figure could be a decimal point or a thousands group; the AI read it as shown";
 export type ReadingVerification = { outcome: string; candidate?: SourcedCandidate & { confidence: Reading["confidence"]; ambiguous?: true } };
 
+const UNIT_COUNT_TOTAL_NAMES = new Set([
+  "total", "grand total", "total units", "total unit", "units total", "total unit count", "total number of units",
+  "building total", "total logements", "total des logements", "nombre total de logements", "logements au total",
+]);
+
 /** First failure wins. No model interpretation can bypass an address or number check. */
 export function verifyReading(reading: Reading, documents: readonly ReadingDocument[]): ReadingVerification {
   const field = FIELD_BY_KEY.get(reading.field);
   if (!field?.extractable) return { outcome: READING_FAILURE.field };
-  if (field.itemized ? !reading.item?.trim() : reading.item !== null) return { outcome: READING_FAILURE.item };
+  const foldedItem = reading.item?.toLowerCase().normalize("NFD").replace(/[\u0300-\u036f]/g, "")
+    .replace(/\s+/g, " ").trim().replace(/\p{P}+$/u, "").trim();
+  const wholeUnitCount = field.key === "unit_count" && (!reading.item?.trim() || UNIT_COUNT_TOTAL_NAMES.has(foldedItem!));
+  const itemKey = wholeUnitCount ? null : reading.item;
+  if (field.itemized ? !wholeUnitCount && !itemKey?.trim() : itemKey !== null) return { outcome: READING_FAILURE.item };
   const matches = documents.filter(d => d.name === reading.file);
   const doc = matches.length === 1 ? matches[0] : undefined;
   const location = reading.location.replace(/^(.*![A-Z]+\d+)\.\.[A-Z]+\d+$/, "$1");
@@ -78,7 +87,7 @@ export function verifyReading(reading: Reading, documents: readonly ReadingDocum
   else if (seen === "vacancy_%" && ["stabilized_occupancy_pct", "item_occupancy_pct"].includes(field.key)) value = 100 - value;
   else if (seen !== unit) return { outcome: READING_FAILURE.unit };
   return { outcome: "verified", candidate: {
-    fieldKey: field.key, itemKey: reading.item, value, unitSeen: token.unit === "bps" ? "bps (÷ 100)" : seen, raw: token.raw,
+    fieldKey: field.key, itemKey, value, unitSeen: token.unit === "bps" ? "bps (÷ 100)" : seen, raw: token.raw,
     documentId: doc.id, documentName: doc.name, location: reading.location, context: reading.quote,
     rule: "ai", ...(ambiguous ? { ambiguous: true as const } : {}), confidence: reading.confidence, ...(reading.note ? { note: reading.note } : {}),
   } };
