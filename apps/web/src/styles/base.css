@@ -255,7 +255,8 @@ details.stack:not([open]){gap:0}
 .ld-foot p{max-width:60ch}
 /* Settings */
 .set{display:grid;grid-template-columns:minmax(0,220px) minmax(0,1fr);gap:40px;align-items:start}
-@media (max-width:900px){.set{grid-template-columns:1fr}}
+/* One column on a narrow screen: it can shrink to the screen, and the side list (settings, or the legal pages' contents) sits above the content and scrolls away, in a wrapping row for settings. */
+@media (max-width:900px){.set{grid-template-columns:minmax(0,1fr)}.set-nav,.toc{position:static}.set-nav{flex-direction:row;flex-wrap:wrap}}
 .set-nav{position:sticky;top:24px;display:flex;flex-direction:column;gap:2px}
 .set-nav a{padding:8px 12px;border-radius:8px;color:var(--ink-2)}
 .set-nav a:hover{background:var(--surface-2);text-decoration:none;color:var(--ink)}
