@@ -2,7 +2,7 @@
 import type { Entry, FrenchOf } from "./entry";
 
 export const en = {
-  "audit.lead": "Every event is chained to the one before it by a hash. Nothing in this list can be edited or deleted, and anyone with the audit package can check it.",
+  "audit.lead": "Every event is chained to the one before it by a hash, and nothing in this list can be edited or deleted. The audit package carries this deal's events with their hashes and the result of the chain check.",
   "audit.checked": (p) => p.ok
     ? `The check read all ${p.n} events Agir has recorded, in every workspace, from the first one; each hash matched the event before it and its own contents.`
     : `The check read ${p.n} events Agir has recorded, in every workspace, from the first one, and stopped at event ${p.at}: its hash does not match the event before it or its own contents.`,
@@ -28,7 +28,7 @@ export const en = {
 } satisfies Record<string, Entry>;
 
 export const fr: FrenchOf<typeof en> = {
-  "audit.lead": "Chaque événement est lié au précédent par une empreinte. Rien dans cette liste ne peut être modifié ni supprimé, et quiconque a le dossier d'audit peut le vérifier.",
+  "audit.lead": "Chaque événement est lié au précédent par une empreinte, et rien dans cette liste ne peut être modifié ni supprimé. Le dossier d'audit contient les événements de ce projet avec leurs empreintes et le résultat de la vérification de la chaîne.",
   "audit.checked": (p) => p.ok
     ? `La vérification a lu les ${p.n} événements qu'Agir a consignés, dans tous les espaces de travail, depuis le premier ; chaque empreinte correspond à l'événement précédent et à son propre contenu.`
     : `La vérification a lu ${p.n} événements qu'Agir a consignés, dans tous les espaces de travail, depuis le premier, et s'est arrêtée à l'événement ${p.at} : son empreinte ne correspond pas à l'événement précédent ou à son propre contenu.`,
