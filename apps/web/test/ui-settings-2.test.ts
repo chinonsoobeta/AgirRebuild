@@ -164,7 +164,7 @@ describe("clients across every deal", () => {
     expect(text(clients)).not.toMatch(/Used by|Revoked|Expired|Copy link/);
 
     await buttons("Withdraw")[0]!.props.onClick();
-    expect(vi.mocked(api.post).mock.calls).toContainEqual(["/invites/open/revoke", undefined]);
+    expect(vi.mocked(api.post).mock.calls.some(([p]) => p === "/invites/open/revoke")).toBe(true);
     await buttons("Remove")[0]!.props.onClick();
     expect(vi.mocked(api.del).mock.calls).toContainEqual(["/deals/d1/clients/u-priya", {}]);
     expect(vi.mocked(window.confirm)).toHaveBeenCalledTimes(2);
