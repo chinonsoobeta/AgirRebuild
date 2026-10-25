@@ -52,10 +52,10 @@ export const canDecide = (role: string) => role === "owner" || role === "admin";
 
 // ---- Shell ----------------------------------------------------------------------------
 
-export function LanguageSwitch({ className }: { className?: string }) {
+export function LanguageSwitch({ className }: { className: string }) {
   const { lang, setLang, t } = useI18n();
   return (
-    <button type="button" className={className ?? "btn quiet small"} style={className ? undefined : { alignSelf: "flex-start", paddingLeft: 0 }} lang={lang === "en" ? "fr" : "en"} onClick={() => setLang(lang === "en" ? "fr" : "en")}>
+    <button type="button" className={className} lang={lang === "en" ? "fr" : "en"} onClick={() => setLang(lang === "en" ? "fr" : "en")}>
       {t("nav.language")}
     </button>
   );
@@ -82,6 +82,7 @@ export function Shell({ children }: { children: ReactNode }) {
   const onSettings = path.startsWith("/settings");
   return (
     <>
+      <a className="skip" href="#main-content" onClick={(e) => { e.preventDefault(); document.getElementById("main-content")?.focus(); }}>{t("shell.skip")}</a>
       <header className="topbar">
         <Link to="/deals" className="brand">
           <span className="brand-mark">
@@ -111,7 +112,7 @@ export function Shell({ children }: { children: ReactNode }) {
           <button type="button" className="toplink" onClick={signOut}>{t("nav.signOut")}</button>
         </div>
       </header>
-      <main className="page">{children}</main>
+      <main className="page" id="main-content" tabIndex={-1}>{children}</main>
     </>
   );
 }
@@ -227,7 +228,7 @@ export function DealPath({ o, active }: { o: DealOverview; active: string }) {
             <Link to={`/deals/$dealId/${st.key}`} params={{ dealId: o.deal.id }} className={cls} aria-current={active === st.key ? "step" : undefined}>
               <span className="marker">{st.tone === "done" && <I.Check size={9} />}</span>
               <span className="step-name">{i.t(`step.${st.key}`)}</span>
-              <span className={st.tone === "stop" ? "step-state stop" : st.tone === "faint" ? "step-state faint" : "step-state"}>
+              <span className={st.tone === "stop" ? "step-state stop" : "step-state"}>
                 {st.tone === "stop" && <I.Stop size={12} />}
                 {st.text}
               </span>
@@ -327,5 +328,5 @@ export function useDeal(dealId: string, poll = false) {
 export function WindowConfirmation({ error, busy, onConfirm }: { error: unknown; busy: boolean; onConfirm: () => void }) {
   const { t } = useI18n();
   if (!(error instanceof ApiError && error.status === 422 && error.detail?.code === "outside_window")) return null;
-  return <button className="btn small" type="button" disabled={busy} onClick={onConfirm}>{t("review.useOutsideWindow")}</button>;
+  return <button className="btn quiet sm" type="button" disabled={busy} onClick={onConfirm}>{t("review.useOutsideWindow")}</button>;
 }

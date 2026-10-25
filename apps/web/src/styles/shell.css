@@ -14,3 +14,8 @@ ol.path{list-style:none}
 .step-state.stop{display:inline-flex;align-items:center;gap:5px;color:var(--stop)}
 .step-state.stop svg{flex:none}
 .variant-of{margin-top:4px}
+
+/* The skip link: hidden until focused, then shown over the top bar. */
+.skip{position:absolute;left:16px;top:-100px;z-index:10;padding:8px 14px;border-radius:8px;background:var(--surface);color:var(--accent);border:1px solid var(--line-2);box-shadow:var(--shadow)}
+.skip:focus{top:12px}
+#main-content:focus{outline:0}

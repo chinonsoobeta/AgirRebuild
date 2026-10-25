@@ -22,6 +22,7 @@ import * as settingsStrings from "./strings/settings";
 import * as authStrings from "./strings/auth";
 import * as landingStrings from "./strings/landing";
 import * as agirreviewStrings from "./strings/agirreview";
+import * as thresholdsStrings from "./strings/thresholds";
 import { FR_VERIFY, FR_ABSENT, FR_FIELDS, FR_METRICS, STRESS, GATES, plainTerm, numberFormat, verdictText as sharedVerdictText, checkText as sharedCheckText, type VerdictLike, type CheckLike, CURRENCY_NAMES, FIELDS, FIELD_BY_KEY, METRIC_BY_KEY, placeLabel, type Currency, type ReadinessItem } from "@agir/contracts";
 
 export type Lang = "en" | "fr";
@@ -665,6 +666,7 @@ export const EN = {
   ...authStrings.en,
   ...landingStrings.en,
   ...agirreviewStrings.en,
+  ...thresholdsStrings.en,
 } satisfies Record<string, Entry>;
 
 export type Key = keyof typeof EN;
@@ -1311,6 +1313,7 @@ export const FR: Record<Key, Entry> = {
   ...authStrings.fr,
   ...landingStrings.fr,
   ...agirreviewStrings.fr,
+  ...thresholdsStrings.fr,
 };
 
 // ---- Catalog labels in French ------------------------------------------------------------

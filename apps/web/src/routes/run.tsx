@@ -180,7 +180,7 @@ export function Run({ dealId }: { dealId: string }) {
           </div>
         </section>
 
-        <Thresholds scope="deals" id={dealId} initialVersion={v.policyVersion} />
+        <div className="card card-pad"><Thresholds scope="deals" id={dealId} initialVersion={v.policyVersion} /></div>
 
         <section className="section">
           <h2 className="h2">{t("run.keyFigures")}</h2>
