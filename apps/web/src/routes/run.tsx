@@ -4,9 +4,9 @@ import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
 import { Fragment, useState } from "react";
 import { Figure, Figures } from "../components/kit";
 import { FIELD_BY_KEY } from "@agir/contracts";
-import { api, type Metric, type RunView } from "../api";
+import { api, type Metric, type Review, type RunView } from "../api";
 import { Banner, canEdit, DealFrame, ErrorText, Glossary, MetricValue, StatusTag, useDeal, useSession, VerdictBadge } from "../components/ui";
-import { Thresholds, StandardVerdict } from "../components/thresholds";
+import { StandardVerdict } from "../components/thresholds";
 import * as I from "../components/icons";
 import { checkText, dealStatus, useI18n, verdictText } from "../i18n";
 
@@ -40,15 +40,73 @@ export function layoutFor(metrics: readonly Pick<Metric, "key" | "status">[]) {
     stressKeys: held ? ["sizing_dscr", "dcr_after_refinance", "unrealized_equity_multiple"] : ["sizing_dscr", "equity_multiple", "profit_on_cost"] };
 }
 
+/** The key figures the board leads with, in its order (card X3); every other figure of the layout follows them. */
+const HELD_LEAD = ["total_development_cost", "required_equity", "stabilized_noi", "yield_on_cost", "development_spread", "dcr_after_refinance",
+  "refinance_cash_returned", "cash_on_cash_after_refinance", "break_even_occupancy", "unrealized_equity_multiple", "unrealized_equity_irr"];
+const RENTAL_LEAD = ["total_development_cost", "required_equity", "stabilized_noi", "yield_on_cost", "development_spread"];
+const SALE_LEAD = ["total_development_cost", "required_equity", "net_sales_revenue"];
+
+function figureOrder(metrics: readonly Pick<Metric, "key">[], layout: { sale: boolean; headline: string[] }) {
+  const held = !layout.sale && metrics.some((m) => m.key === "stated_value");
+  const lead = (layout.sale ? SALE_LEAD : held ? HELD_LEAD : RENTAL_LEAD).filter((k) => metrics.some((m) => m.key === k));
+  return [...lead, ...layout.headline.filter((k) => !lead.includes(k))];
+}
+
+/** The stress table: income (or sales), cost and spread first, then the layout's keys, then anything else a gate reads under stress. */
+function stressColumns(sale: boolean, stressKeys: string[], gates: readonly { metricKey: string; scenario: string }[], baseKey: string) {
+  const first = sale ? ["net_sales_revenue", "total_development_cost"] : ["stabilized_noi", "total_development_cost", "development_spread"];
+  return [...new Set([...first, ...stressKeys, ...gates.filter((g) => g.scenario !== baseKey).map((g) => g.metricKey)])];
+}
+
+const INPUTS_CHANGED = "An approved input changed after this run.";
+type Change = { fieldKey: string; itemKey: string | null; now?: { value: number; unit: string }; was?: { value: number; unit: string } };
+/** Approved values that differ from the ones the run used, matched on field and item. Both are shown as recorded; nothing is subtracted. */
+function changedInputs(inputs: RunView["inputs"], assumptions: Review["assumptions"]): Change[] {
+  const key = (field: string, item: string | null) => `${field}\u0000${item || ""}`;
+  const unit = (field: string, fallback: string) => FIELD_BY_KEY.get(field)?.unit ?? fallback;
+  const ran = new Map(inputs.map((x) => [key(x.fieldKey, x.itemKey), x]));
+  const seen = new Set<string>();
+  const out: Change[] = [];
+  for (const a of assumptions) {
+    if ((a.status !== "approved" && a.status !== "default_accepted") || a.value === null) continue;
+    const k = key(a.fieldKey, a.itemKey);
+    seen.add(k);
+    const x = ran.get(k);
+    const now = { value: a.value, unit: unit(a.fieldKey, a.unit) };
+    if (!x) out.push({ fieldKey: a.fieldKey, itemKey: a.itemKey || null, now });
+    else if (x.value !== a.value) out.push({ fieldKey: a.fieldKey, itemKey: a.itemKey || null, now, was: { value: x.value, unit: unit(x.fieldKey, "count") } });
+  }
+  for (const x of inputs) {
+    if (!seen.has(key(x.fieldKey, x.itemKey))) out.push({ fieldKey: x.fieldKey, itemKey: x.itemKey || null, was: { value: x.value, unit: unit(x.fieldKey, "count") } });
+  }
+  return out;
+}
+/** Changes named in the out-of-date banner before "and N more". */
+const SHOWN_CHANGES = 5;
+/** Runs in the history whose own status is fetched. */
+const CHECKED_RUNS = 10;
+
 export function useRun(runId: string | undefined) {
   return useQuery({ queryKey: ["run", runId], queryFn: () => api.get<RunView>(`/runs/${runId}`), enabled: Boolean(runId) });
 }
 
 const STALE: Record<string, "run.stale.inputs" | "run.stale.policy" | "run.stale.engine"> = {
-  "An approved input changed after this run.": "run.stale.inputs",
+  [INPUTS_CHANGED]: "run.stale.inputs",
   "The policy thresholds changed after this run.": "run.stale.policy",
   "The engine was updated after this run.": "run.stale.engine",
 };
+
+const staleText = (t: ReturnType<typeof useI18n>["t"], reasons: readonly string[]) => reasons.map((r) => (STALE[r] ? t(STALE[r]) : r)).join(" ");
+
+/** A run's status in the history, from its own record: current, or out of date and why. */
+function HistoryStatus({ id }: { id: string }) {
+  const { t } = useI18n();
+  const r = useRun(id);
+  if (!r.data) return <span className="muted">{r.isError ? t("run.historyOpen") : t("run.historyChecking")}</span>;
+  if (r.data.fresh) return <>{t("run.historyCurrent")}</>;
+  const reasons = staleText(t, r.data.staleReasons);
+  return <>{reasons ? t("run.staleLine", { reasons }) : t("run.stale")}</>;
+}
 
 export function GateOutcome({ status }: { status: string }) {
   const { t } = useI18n();
@@ -61,16 +119,19 @@ const STEPS = ["run.step.check", "run.step.ledger", "run.step.underwrite", "run.
 /** Operating years shown before "Show all". */
 const FIRST_YEARS = 5;
 
-export function Run({ dealId }: { dealId: string }) {
+export function Run({ dealId, run: fromAddress }: { dealId: string; run?: string | undefined }) {
   const i = useI18n();
   const { t, f, L } = i;
-  const { role, solo } = useSession();
+  const { role, solo, me } = useSession();
   const qc = useQueryClient();
   const deal = useDeal(dealId);
-  const [selected, setSelected] = useState<string | null>(null);
+  const [selected, setSelected] = useState<string | null>(fromAddress ?? null);
   const runs = useQuery({ queryKey: ["runs", dealId], queryFn: () => api.get<{ id: string; run_number: number; verdict_code: string; created_at: string; created_by: string }[]>(`/deals/${dealId}/runs`) });
   const runId = selected ?? deal.data?.run?.id;
   const run = useRun(runId);
+  // The approved values, only to name what changed when the shown run is out of date because of them.
+  const inputsChanged = run.data?.staleReasons.includes(INPUTS_CHANGED) ?? false;
+  const review = useQuery({ queryKey: ["review", dealId], queryFn: () => api.get<Review>(`/deals/${dealId}/review`), enabled: inputsChanged });
   const [trace, setTrace] = useState<Metric | null>(null);
   const [allYears, setAllYears] = useState(false);
   const start = useMutation({
@@ -98,12 +159,15 @@ export function Run({ dealId }: { dealId: string }) {
 
   if (start.isPending) {
     const next = Math.max(0, o.run?.number ?? 0, ...(runs.data ?? []).map((r) => r.run_number)) + 1;
+    const time = start.submittedAt ? new Date(start.submittedAt).toLocaleTimeString(i.lang === "fr" ? "fr-CA" : "en-CA", { hour: "numeric", minute: "2-digit" }) : undefined;
+    const by = me?.user.name;
     return (
       <>
         <DealFrame o={o} active="run" />
         <div className="with-aside">
           <section className="card card-pad stack tight" role="status" aria-busy="true">
             <div className="row"><span className="spin" aria-hidden="true" /><h2 className="h1">{t("run.inProgress", { n: next })}</h2></div>
+            {(time || by) && <p className="small muted">{t("run.startedBy", { time, by })}</p>}
             <p className="lead">{t("run.inProgressLead")}</p>
             <ol className="runlist" aria-label={t("run.stepsLabel")}>
               {STEPS.map((k) => <li key={k}>{t(k)}</li>)}
@@ -137,8 +201,33 @@ export function Run({ dealId }: { dealId: string }) {
   const base = v.result.scenarios[0]!;
   const metric = (k: string, s = base) => s.metrics.find((m) => m.key === k)!;
   const vt = verdictText(i, v.result.verdict, v.result.checks, solo);
-  const { sale, headline, stressKeys } = layoutFor(base.metrics);
-  const stale = v.staleReasons.map((r) => (STALE[r] ? t(STALE[r]) : r)).join(" ");
+  const layout = layoutFor(base.metrics);
+  const { sale } = layout;
+  const figures = figureOrder(base.metrics, layout);
+  const columns = stressColumns(sale, layout.stressKeys, v.result.verdict.gates, base.key);
+  const stale = staleText(t, v.staleReasons);
+  const changes = inputsChanged && review.data ? changedInputs(v.inputs, review.data.assumptions) : [];
+  const changeText = (c: Change) => {
+    const label = L.field(c.fieldKey, c.itemKey);
+    const now = c.now && f.value(c.now.value, c.now.unit), was = c.was && f.value(c.was.value, c.was.unit);
+    return now && was ? t("run.changed.value", { label, now, was }) : now ? t("run.changed.added", { label, now }) : t("run.changed.removed", { label, was });
+  };
+  // A sub-line shows a recorded value as it is, and only when that value is valid or the input is present; never 0 in its place.
+  const valid = (k: string) => { const m = base.metrics.find((x) => x.key === k); return m && m.status === "VALID" && m.value !== null ? f.value(m.value, m.unit) : undefined; };
+  const given = (k: string, unit?: string) => { const x = v.inputs.find((y) => y.fieldKey === k); return x && Number.isFinite(x.value) ? f.value(x.value, unit ?? FIELD_BY_KEY.get(k)?.unit ?? "count") : undefined; };
+  const so = (value: string | undefined, line: (v: string) => string) => (value === undefined ? undefined : line(value));
+  const context: Record<string, () => string | undefined> = {
+    total_development_cost: () => so(valid("cost_per_unit"), (x) => t("run.sub.perUnit", { v: x })),
+    required_equity: () => so(valid("loan_to_cost"), (x) => t("run.sub.loanToCost", { v: x })),
+    stabilized_noi: () => so(valid("effective_gross_income"), (x) => t("run.sub.income", { v: x })),
+    yield_on_cost: () => so(given("exit_cap_rate_pct"), (x) => t("run.sub.capRate", { v: x })),
+    refinance_cash_returned: () => so(valid("cash_left_in_deal"), (x) => t("run.sub.leftIn", { v: x })),
+    cash_on_cash_after_refinance: () => so(valid("cash_on_cash_year1"), (x) => t("run.sub.year1", { v: x })),
+    break_even_occupancy: () => so(given("stabilized_occupancy_pct"), (x) => t("run.sub.occupancy", { v: x })),
+    unrealized_equity_multiple: () => t("run.sub.stated"),
+    unrealized_equity_irr: () => so(given("hold_years", ""), (x) => t("run.sub.hold", { n: x })),
+    net_sales_revenue: () => so(valid("gross_sales_revenue"), (x) => t("run.sub.sales", { v: x })),
+  };
   const scenarioLabel = (key: string) => L.stress(key, v.result.scenarios.find((s) => s.key === key)?.label ?? key);
   const gateFor = (k: string) => v.result.verdict.gates.find((g) => g.metricKey === k && g.scenario === base.key);
   const operating = v.result.annual.filter((y) => y.year > 0).length;
@@ -151,6 +240,12 @@ export function Run({ dealId }: { dealId: string }) {
         {!v.fresh && (
           <Banner tone="review" title={t("run.outOfDate", { n: v.number })}>
             <span>{stale} {t("run.outOfDateBody")}</span>
+            {changes.length > 0 && (
+              <ul className="run-changes">
+                {changes.slice(0, SHOWN_CHANGES).map((c) => <li key={`${c.fieldKey}:${c.itemKey ?? ""}`}>{changeText(c)}</li>)}
+                {changes.length > SHOWN_CHANGES && <li>{t("run.changed.more", { n: changes.length - SHOWN_CHANGES })}</li>}
+              </ul>
+            )}
           </Banner>
         )}
         <ErrorText error={start.error} />
@@ -167,6 +262,7 @@ export function Run({ dealId }: { dealId: string }) {
               <p className="muted">{vt.explanation}</p>
               <p className="small muted">{v.fresh ? t("run.currentLine") : t("run.staleLine", { reasons: stale })}</p>
               <StandardVerdict custom={v.policyCustom ?? false} standard={v.result.standard} />
+              <p className="small muted">{t("run.thresholdsLine")} <Link to="/deals/$dealId/review" params={{ dealId }} hash="thresholds">{t("run.thresholdsLink")}</Link></p>
             </div>
             <div className="stack tight run-verdict-actions">
               {/* An out-of-date run cannot be decided on, so running again comes first. */}
@@ -182,16 +278,15 @@ export function Run({ dealId }: { dealId: string }) {
           </div>
         </section>
 
-        <div className="card card-pad"><Thresholds scope="deals" id={dealId} initialVersion={v.policyVersion} /></div>
-
         <section className="section">
           <h2 className="h2">{t("run.keyFigures")}</h2>
           <Figures>
-            {headline.map((k) => {
+            {figures.map((k) => {
               const m = metric(k);
               const g = gateFor(k);
               const p = k === "unrealized_equity_irr" ? v.heldPartners : undefined;
-              const sub = m.status !== "VALID" && m.reason ? i.msg(m.reason) : g ? t("run.gateNeeds", { v: f.value(g.threshold, g.unit) }) : undefined;
+              const sub = m.status !== "VALID" && m.reason ? i.msg(m.reason) : g ? t("run.gateNeeds", { v: f.value(g.threshold, g.unit) })
+                : m.status === "VALID" ? context[k]?.() : undefined;
               return (
                 <Fragment key={k}>
                   <Figure k={<button type="button" className="run-fig-btn" aria-pressed={trace?.key === k} onClick={() => setTrace(m)}>{L.metric(k)}</button>} v={<MetricValue {...m} />} s={sub} />
@@ -237,16 +332,19 @@ export function Run({ dealId }: { dealId: string }) {
 
         <section className="section">
           <div><h2 className="h2">{t("run.underStress")}</h2><p className="muted">{t("run.underStressLead")}</p></div>
-          <div className="card scroll">
+          <div className="card scroll run-stress">
             <table className="table">
-              <thead><tr><th scope="col">{t("run.col.scenario")}</th>{stressKeys.map((k) => <th scope="col" key={k} className="r">{L.metric(k)}</th>)}</tr></thead>
+              <thead><tr><th scope="col">{t("run.col.scenario")}</th>{columns.map((k) => <th scope="col" key={k} className="r">{L.metric(k)}</th>)}</tr></thead>
               <tbody>
                 {v.result.scenarios.map((s) => (
                   <tr key={s.key} className={s.key === "combined" ? "run-combined" : undefined}>
                     <th scope="row" className="run-rowhead">
                       {v.policy?.custom && v.policy.stresses.some((stress) => stress.key === s.key) ? stressLabel(v.policy.stresses.find((stress) => stress.key === s.key)!, i.lang, v.standardPolicy?.stresses.find((stress) => stress.key === s.key)) : L.stress(s.key, s.label)}{s.key === "combined" && <span className="muted">{t("run.readByGates")}</span>}
                     </th>
-                    {stressKeys.map((k) => { const m = metric(k, s); return <td key={k} className="r"><MetricValue {...m} /></td>; })}
+                    {columns.map((k) => {
+                      const m = s.metrics.find((x) => x.key === k);
+                      return <td key={k} className="r">{m ? <MetricValue {...m} /> : <span className="not-meaningful">{t("common.notMeasured")}</span>}</td>;
+                    })}
                   </tr>
                 ))}
               </tbody>
@@ -324,15 +422,16 @@ export function Run({ dealId }: { dealId: string }) {
               <h3 className="h3">{t("run.history")}</h3>
               <div className="scroll">
                 <table className="table run-history">
-                  <thead><tr><th scope="col">{t("run.historyCol.run")}</th><th scope="col">{t("run.historyCol.verdict")}</th><th scope="col">{t("run.historyCol.shown")}</th></tr></thead>
+                  <thead><tr><th scope="col">{t("run.historyCol.run")}</th><th scope="col">{t("run.historyCol.verdict")}</th><th scope="col">{t("run.historyCol.status")}</th><th scope="col">{t("run.historyCol.shown")}</th></tr></thead>
                   <tbody>
-                    {runs.data!.map((r) => (
+                    {runs.data!.map((r, n) => (
                       <tr key={r.id}>
                         <th scope="row" className="run-rowhead">
                           <button type="button" className="btn ghost sm" aria-pressed={r.id === v.id} onClick={() => setSelected(r.id)}>{t("common.run", { n: r.run_number })}</button>
                           <span className="sub">{f.date(r.created_at)}</span>
                         </th>
                         <td><VerdictBadge code={r.verdict_code} /></td>
+                        <td className="run-status">{n < CHECKED_RUNS || r.id === v.id ? <HistoryStatus id={r.id} /> : <span className="muted">{t("run.historyOpen")}</span>}</td>
                         <td className="muted">{r.id === v.id ? t("run.historyShown") : null}</td>
                       </tr>
                     ))}
