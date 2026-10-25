@@ -23,3 +23,7 @@
 .auth-from{margin-bottom:10px}
 .auth-invite-body{margin-top:12px}
 .auth-meta{margin-top:6px}
+.auth-forgot{text-align:right}
+.auth-linkbtn{border:0;padding:0;background:transparent;font:inherit;color:var(--accent);cursor:pointer}
+.auth-linkbtn:hover{text-decoration:underline}
+.auth-code{letter-spacing:.2em;font-size:20px}

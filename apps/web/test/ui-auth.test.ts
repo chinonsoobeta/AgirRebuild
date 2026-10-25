@@ -68,15 +68,15 @@ beforeEach(() => {
 afterEach(() => { vi.unstubAllGlobals(); });
 
 describe("sign in", () => {
-  it("has labelled email and password fields, a link to create an account, the language switch, and no reset link", () => {
+  it("has labelled email and password fields, a link to create an account, the language switch, and the reset link (card W12)", () => {
     const html = render(createElement(Login));
     expect(labelled("email")).toBe(true);
     expect(labelled("password")).toBe(true);
     const words = text(html);
     for (const s of ["Sign in", "Welcome back.", "Email", "Password", "Create an account", "Every number traces to a document"]) expect(words).toContain(s);
     expect(html).toContain('href="/signup"');
-    expect(words).not.toMatch(/forgot/i);
-    expect(state.nodes.some((n) => n.tag === "a" && /reset/.test(String(n.props.href)))).toBe(false);
+    expect(words).toContain("Forgot your password?");
+    expect(html).toContain('href="/reset"');
     expect(words).not.toMatch(/terms/i);
     expect(html).toContain("split");
     expect(buttons("Français").length).toBe(1);
@@ -123,13 +123,13 @@ describe("create an account", () => {
     expect(html).toContain('href="/login"');
     expect(buttons("Français").length).toBe(1);
   });
-  it("posts the chosen review mode, then opens the deals", async () => {
+  it("posts the chosen review mode, then asks to confirm the email address (card W12)", async () => {
     render(createElement(Signup));
     state.nodes.find((n) => n.tag === "input" && n.props.value === "team")!.props.onChange();
     render(createElement(Signup));
     await submit({ name: "Dana", email: "d@example.test", password: "a-long-password" });
     expect(vi.mocked(api.post).mock.calls[0]).toEqual(["/auth/signup", { name: "Dana", email: "d@example.test", password: "a-long-password", reviewMode: "team" }]);
-    expect(state.navigate.mock.calls[0]![0]).toEqual({ to: "/deals" });
+    expect(state.navigate.mock.calls[0]![0]).toEqual({ to: "/verify" });
   });
   it("French", () => {
     state.lang = "fr";

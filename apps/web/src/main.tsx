@@ -18,6 +18,8 @@ import { ReviewAccess } from "./routes/review-access";
 import { Explore } from "./routes/explore";
 import { Share } from "./routes/share";
 import { Invite } from "./routes/invite";
+import { Verify } from "./routes/verify";
+import { Reset } from "./routes/reset";
 import { I18nProvider } from "./i18n";
 
 const queryClient = new QueryClient({ defaultOptions: { queries: { staleTime: 5_000, retry: (n, e: any) => e?.status !== 401 && e?.status !== 403 && e?.status !== 404 && n < 2 } } });
@@ -29,6 +31,9 @@ const signup = createRoute({ getParentRoute: () => root, path: "/signup", compon
 const share = createRoute({ getParentRoute: () => root, path: "/s/$secret", component: function SharedLink() { const { secret } = share.useParams(); return <Share secret={secret} />; } });
 // An invitation to be a client of one deal (card 89): outside the session gate, like a shared link.
 const invite = createRoute({ getParentRoute: () => root, path: "/i/$secret", component: function Invitation() { const { secret } = invite.useParams(); return <Invite secret={secret} />; } });
+// Confirming an email address and resetting a password (card W12): outside the session gate, like sign-in.
+const verify = createRoute({ getParentRoute: () => root, path: "/verify", component: Verify });
+const reset = createRoute({ getParentRoute: () => root, path: "/reset", component: Reset });
 const app = createRoute({
   getParentRoute: () => root,
   id: "app",
@@ -55,6 +60,8 @@ const routeTree = root.addChildren([
   signup,
   share,
   invite,
+  verify,
+  reset,
   app.addChildren([
     index,
     deals,

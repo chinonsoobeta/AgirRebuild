@@ -63,6 +63,8 @@ const render = (C: unknown) => { state.index = 0; state.nodes = []; return rende
 const text = (html: string) => html.replace(/<[^>]*>/g, " ").replace(/&#x27;|&#39;/g, "'").replace(/&quot;/g, '"').replace(/&amp;/g, "&").replace(/\s+/g, " ").trim();
 const label = (n: { props: Record<string, any> }): string => { const c = n.props.children; return Array.isArray(c) ? c.filter((x) => typeof x === "string").join("") : typeof c === "string" ? c : ""; };
 const button = (name: string) => state.nodes.find((n) => n.tag === "button" && label(n) === name);
+// The mocked Link renders an <a> outside the captured JSX nodes, so links are found in the markup.
+const links = (html: string, href: string) => html.includes(`href="${href}"`);
 const input = (id: string) => state.nodes.find((n) => n.tag === "input" && n.props.id === id);
 const submit = async (values: Record<string, string>) => {
   const form = state.nodes.find((n) => n.tag === "form")!;
@@ -99,14 +101,15 @@ describe("the confirm-your-email page", () => {
   it("signed in and not confirmed: the address, the code form, send it again and skip", async () => {
     at("/verify");
     state.me = person(false);
-    const words = text(render(Verify));
+    const html = render(Verify);
+    const words = text(html);
     for (const s of ["Check your email", "morgan@example.test", "60 minutes", "Continue", "send it again", "Skip for now"]) expect(words).toContain(s);
     expect(words).not.toMatch(/different email|on this device|receipts/i);
     const code = input("code")!;
     expect(code.props.inputMode).toBe("numeric");
     expect(code.props.autoComplete).toBe("one-time-code");
     expect(state.nodes.some((n) => n.tag === "label" && n.props.htmlFor === "code")).toBe(true);
-    expect(state.nodes.some((n) => n.tag === "a" && n.props.href === "/deals")).toBe(true);
+    expect(links(html, "/deals")).toBe(true);
     await submit({ code: "123456" });
     expect(vi.mocked(api.post).mock.calls[0]).toEqual(["/auth/verify", { code: "123456" }]);
     expect(state.navigate.mock.calls[0]![0]).toEqual({ to: "/deals" });
@@ -126,16 +129,16 @@ describe("the confirm-your-email page", () => {
   it("signed in and already confirmed: says so, with a link to the deals", () => {
     at("/verify");
     state.me = person(true);
-    const words = text(render(Verify));
-    expect(words).toContain("Your email address is confirmed.");
+    const html = render(Verify);
+    expect(text(html)).toContain("Your email address is confirmed.");
     expect(input("code")).toBeUndefined();
-    expect(state.nodes.some((n) => n.tag === "a" && n.props.href === "/deals")).toBe(true);
+    expect(links(html, "/deals")).toBe(true);
   });
   it("signed out with no token: asks them to open the link or sign in", () => {
     at("/verify");
     state.meError = new ApiError(401, "Sign in to continue.");
-    render(Verify);
-    expect(state.nodes.some((n) => n.tag === "a" && n.props.href === "/login")).toBe(true);
+    const html = render(Verify);
+    expect(links(html, "/login")).toBe(true);
     expect(input("code")).toBeUndefined();
   });
   it("French", () => {
@@ -182,7 +185,7 @@ describe("the reset-password page", () => {
     await submit({ password: "a-long-password", password2: "a-long-password" });
     const html = render(Reset);
     expect(text(html)).toContain("This link has been used or has expired.");
-    expect(state.nodes.some((n) => n.tag === "a" && n.props.href === "/reset")).toBe(true);
+    expect(links(html, "/reset")).toBe(true);
     expect(state.navigate).not.toHaveBeenCalled();
   });
   it("French", () => {
@@ -197,9 +200,8 @@ describe("the reset-password page", () => {
 
 describe("sign in", () => {
   it("links to the reset page", () => {
-    render(Login);
-    const link = state.nodes.find((n) => n.tag === "a" && n.props.href === "/reset");
-    expect(link && label(link)).toBe("Forgot your password?");
+    const html = render(Login);
+    expect(html).toContain('<a href="/reset">Forgot your password?</a>');
   });
 });
 
@@ -209,7 +211,7 @@ describe("settings, your account", () => {
     const html = render(Settings);
     const account = text(html.slice(html.indexOf('id="account"')));
     expect(account).toContain("Your email address is not confirmed yet.");
-    expect(state.nodes.some((n) => n.tag === "a" && n.props.href === "/verify")).toBe(true);
+    expect(links(html, "/verify")).toBe(true);
     expect(account).not.toContain("Confirmed");
     await button("Send a new link")!.props.onClick();
     expect(vi.mocked(api.post).mock.calls).toContainEqual(["/auth/verify/send", {}]);

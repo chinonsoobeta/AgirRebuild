@@ -49,15 +49,16 @@ export function FormError({ error }: { error: unknown }) {
   return <Notice tone="stop" role="alert">{err(error)}</Notice>;
 }
 
-/** The split layout of sign-in and sign-up: the pitch on the left, the form on the right. */
-function AuthFrame({ pitch, foot, children }: { pitch: string; foot?: string; children: ReactNode }) {
+/** The split layout of the signed-out forms: the pitch on the left, the form on the right. `heading` replaces the pitch's
+ * usual first line. */
+export function AuthFrame({ heading, pitch, foot, children }: { heading?: string; pitch: string; foot?: string; children: ReactNode }) {
   const { t } = useI18n();
   return (
     <div className="split">
       <section className="pitch">
         <div className="auth-pitch-top">
           <div className="row between"><Brand large /><SignedOutControls /></div>
-          <p className="pitch-h">{t("auth.pitch")}</p>
+          <p className="pitch-h">{heading ?? t("auth.pitch")}</p>
           <p className="lead auth-pitch-lead">{pitch}</p>
         </div>
         {foot && <p className="small muted">{foot}</p>}
@@ -122,7 +123,7 @@ export function Login() {
             <p className="muted auth-sub">{t("auth.welcome")}</p>
           </div>
           <div className="field"><label htmlFor="email">{t("auth.email")}</label><input className="input" id="email" name="email" type="email" autoComplete="username" required /></div>
-          <div className="field"><label htmlFor="password">{t("auth.password")}</label><input className="input" id="password" name="password" type="password" autoComplete="current-password" required /></div>
+          <div className="field"><label htmlFor="password">{t("auth.password")}</label><input className="input" id="password" name="password" type="password" autoComplete="current-password" required /><p className="small auth-forgot"><Link to="/reset">{t("auth.reset.title")}</Link></p></div>
           <FormError error={error} />
           <button className="btn primary auth-wide" type="submit" disabled={busy}>{busy ? t("auth.signingIn") : t("auth.signIn")}</button>
           <p className="small auth-alt"><Link to="/signup">{t("auth.createAccount")}</Link></p>
@@ -146,7 +147,8 @@ export function Signup() {
     try {
       await api.post("/auth/signup", body);
       await qc.invalidateQueries();
-      void navigate({ to: "/deals" });
+      // The API has sent a confirmation email: the next page asks for its code.
+      void navigate({ to: "/verify" });
     } catch (err) {
       setError(err);
     }

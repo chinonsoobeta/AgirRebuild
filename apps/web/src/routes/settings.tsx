@@ -6,7 +6,7 @@ import { ErrorText, useSession } from "../components/ui";
 import { Thresholds } from "../components/thresholds";
 import { useI18n } from "../i18n";
 import { useTheme, type ThemePref } from "../theme";
-import { Notice, Seg, Switch } from "../components/kit";
+import { Notice, Seg, Switch, Tag } from "../components/kit";
 
 /** A deal's clients and its invitation links (card 89). Admins and owners only; an invitation link is shown once. */
 export function ClientsPanel({ dealId }: { dealId: string }) {
@@ -193,6 +193,23 @@ function Row({ title, body, children }: { title: ReactNode; body?: ReactNode; ch
   );
 }
 
+/** The address is not confirmed yet (card W12): send a new link, or enter the code on /verify. */
+function ConfirmEmail() {
+  const { t } = useI18n();
+  const send = useMutation({ mutationFn: () => api.post("/auth/verify/send", {}) });
+  return (
+    <div className="stack tight">
+      <Notice tone="review">{t("auth.verify.notYet")}</Notice>
+      <div className="row">
+        <button className="btn quiet sm" type="button" disabled={send.isPending} onClick={() => send.mutate()}>{t("auth.verify.newLink")}</button>
+        <Link to="/verify">{t("auth.verify.enterCode")}</Link>
+      </div>
+      {send.isSuccess && <p className="small muted" role="status">{t("auth.verify.againSent")}</p>}
+      <ErrorText error={send.error} />
+    </div>
+  );
+}
+
 export function Settings() {
   const { t, f, L, lang, setLang } = useI18n();
   const { me, workspaceId, role, setWorkspace } = useSession();
@@ -351,8 +368,9 @@ export function Settings() {
       <Section id="account" title={t("settings.nav.account")} body={t("settings.ac.body")}>
         <dl className="grid2 set-dl">
           <div><dt className="label">{t("settings.ac.name")}</dt><dd>{me.user.name}</dd></div>
-          <div><dt className="label">{t("settings.ac.email")}</dt><dd>{me.user.email}</dd></div>
+          <div><dt className="label">{t("settings.ac.email")}</dt><dd>{me.user.email}{me.user.email_verified && <> <Tag tone="pass">{t("auth.verify.confirmed")}</Tag></>}</dd></div>
         </dl>
+        {me.user.email_verified === false && <ConfirmEmail />}
       </Section>
     ) },
   ];
