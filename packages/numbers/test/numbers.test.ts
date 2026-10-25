@@ -397,3 +397,75 @@ describe("three-decimal rates and slashes after labels (Card 164)", () => {
     expect(unknown[0]!.refusal).toMatch(/does not say which/);
   });
 });
+
+
+describe("Card 166: compound duration words", () => {
+  test.each([
+    ["vingt et un mois", 21, "months"],
+    ["trente et un mois", 31, "months"],
+    ["quarante et un mois", 41, "months"],
+    ["cinquante et un mois", 51, "months"],
+    ["soixante et un mois", 61, "months"],
+    ["twenty one months", 21, "months"],
+    ["thirty six months", 36, "months"],
+    ["twenty one years", 21, "years"],
+    ["twenty one quarters", 63, "months"],
+    ["vingt et un trimestres", 63, "months"],
+    ["twenty-one months", 21, "months"],
+    ["vingt-deux mois", 22, "months"],
+    ["vingt et un ans", 21, "years"],
+    ["vingt et une années", 21, "years"],
+    ["vingt-et-un mois", 21, "months"],
+    ["trente-et-un mois", 31, "months"],
+    ["vingt-et-une années", 21, "years"],
+    ["twenty one years and a half", 21.5, "years"],
+    ["twenty one units", 21, "units"],
+    ["twenty one studios", 21, "units"],
+    ["vingt et un logements", 21, "units"],
+  ] as const)("%s reads the complete compound", (text, value, unit) => {
+    expect(tokenize(text, UNKNOWN).map(t => [t.raw, t.value, t.unit])).toEqual([[text, value, unit]]);
+  });
+  test.each(["soixante et onze mois", "soixante-et-onze mois", "quatre-vingts mois", "cent vingt mois", "one hundred twenty units", "one hundred twenty one units", "twenty one-month extensions", "thirty one-year terms"])("%s never reads the tail alone", text => {
+    expect(tokenize(text, UNKNOWN)).toEqual([]);
+  });
+  test.each([
+    ["twenty one-bedroom units", 20, "units"],
+    ["twenty one bedroom units", 20, "units"],
+    ["twenty two-bedroom units", 20, "units"],
+    ["twenty one (21) months", 21, "months"],
+    ["vingt et un (21) mois", 21, "months"],
+  ] as const)("%s keeps its reading", (text, value, unit) => {
+    expect(tokenize(text, UNKNOWN).map(t => [t.value, t.unit])).toEqual([[value, unit]]);
+  });
+});
+
+describe("Card 166: dollars after a figure are currency", () => {
+  test.each([
+    ["500 dollars", UNKNOWN, 500, null],
+    ["500 dollar", UNKNOWN, 500, null],
+    ["500 DOLLARS", UNKNOWN, 500, null],
+    ["500 de dollars", UNKNOWN, 500, null],
+    ["3.226 million dollars", US, 3226000, null],
+    ["3,2 millions de dollars", EU, 3200000, null],
+    ["500 dollars US", UNKNOWN, 500, "USD"],
+    ["500 dollars U.S.", UNKNOWN, 500, "USD"],
+    ["500 dollars USD", UNKNOWN, 500, "USD"],
+    ["2 million dollars américains", UNKNOWN, 2000000, "USD"],
+  ] as const)("%s names money and its currency", (text, format, value, currencyCode) => {
+    expect(tokenize(text, format)).toEqual([expect.objectContaining({ value, unit: "$", currency: true, currencyCode })]);
+  });
+  test.each(["500 US dollars", "500 dollarsworth"])("%s keeps its plain-number reading", text => {
+    expect(tokenize(text, UNKNOWN)).toEqual([expect.objectContaining({ value: 500, unit: null, currency: false, currencyCode: null })]);
+  });
+});
+
+describe("Card 166: bare scales still depend on cell context", () => {
+  test.each([
+    ["267.168K", false, 267.168, null],
+    ["267.168K", true, 267168, "$"],
+    ["185K", false, 185, null],
+    ["185K", true, 185000, "$"],
+  ] as const)("%s with cell=%s", (text, cell, value, unit) => {
+    expect(tokenize(text, US, cell)).toEqual([expect.objectContaining({ value, unit })]);
+  });
+});

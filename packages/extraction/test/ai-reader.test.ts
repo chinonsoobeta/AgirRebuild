@@ -1,5 +1,5 @@
 import { describe, expect, test } from "vitest";
-import { addressedText, verifyReading, READING_FAILURE, type NormalizedDocument, type Reading } from "../src/index.ts";
+import { addressedText, extractCandidates, verifyReading, READING_FAILURE, type NormalizedDocument, type Reading } from "../src/index.ts";
 import { SF_PER_M2 } from "@agir/numbers";
 const doc = (kind: NormalizedDocument["kind"]): NormalizedDocument => ({ kind, lines: [], tables: [], pageCount: null, needsOcr: false, fullText: "" });
 describe("addressed text", () => {
@@ -82,3 +82,55 @@ describe("reading verification", () => {
   const document = { ...doc("txt"), fullText: quote, lines: [{ location: "line 1", text: quote }] };
   expect(verifyReading({ ...reading, quote, value }, [{ ...documents[0]!, document }]).outcome).toBe("verified");
  });
+
+
+describe("Card 166: the verifier reads the quoted figure in context", () => {
+  test.each([
+    ["cell", "185K", "soft_cost", 185000, "$", "", "verified"],
+    ["cell", "1.2M", "hard_cost", 1200000, "$", "", "verified"],
+    ["cell", "267.168K", "soft_cost", 267168, "$", "Cost: $2,500.00", "verified"],
+    ["cell", "1.208", "min_dscr_covenant", 1.208, "x", "", "verified"],
+    ["line", "Minimum DSCR: 1.208", "min_dscr_covenant", 1.208, "x", "", "verified"],
+    ["line", "Minimum DSCR: 1.208", "min_dscr_covenant", 1208, "x", "", READING_FAILURE.value],
+    ["cell", "4.738", "exit_cap_rate_pct", 4.738, "%", "", "verified"],
+    ["line", "Rent growth 2.206", "rent_growth_pct", 2.206, "%", "", "verified"],
+    ["line", "Land 1.250", "land_cost", 1.25, "$", "", READING_FAILURE.value],
+    ["line", "Land 1.250", "land_cost", 1250, "$", "", READING_FAILURE.value],
+    ["line", "Construction budget | 3.226 million dollars", "hard_cost", 3226000, "$", "Cost: $2,500.00", "verified"],
+    ["line", "Budget de construction : 3,2 millions de dollars", "hard_cost", 3200000, "$", "Coût : 2 500,00 $", "verified"],
+    ["line", "Durée des travaux : vingt et un mois", "construction_months", 21, "months", "", "verified"],
+    ["line", "Construction period: twenty one months", "construction_months", 21, "months", "", "verified"],
+    ["line", "Construction period: twenty-one months", "construction_months", 21, "months", "", "verified"],
+    ["line", "500 dollars US", "land_cost", 500, "$", "", READING_FAILURE.unit],
+    ["line", "Land: US$1,250,000", "land_cost", 1250000, "$", "", READING_FAILURE.unit],
+    ["line", "Land: $1,250,000 USD", "land_cost", 1250000, "$", "", READING_FAILURE.unit],
+    ["line", "Land: 2 million dollars américains", "land_cost", 2000000, "$", "", READING_FAILURE.unit],
+    ["line", "Land: $1,250,000 CAD", "land_cost", 1250000, "$", "", "verified"],
+    ["line", "Land: C$1,250,000", "land_cost", 1250000, "$", "", "verified"],
+    ["line", "Période de détention : vingt et un ans", "hold_years", 21, "years", "", "verified"],
+    ["cell", "185K", "soft_cost", 185, "$", "", READING_FAILURE.value],
+  ] as const)("%s %s for %s = %s: %s %s %s", (where, quote, field, value, unit_seen, evidence, outcome) => {
+    const document = doc(where === "cell" ? "xlsx" : "txt");
+    document.fullText = [quote, evidence].filter(Boolean).join("\n");
+    const location = where === "cell" ? "Costs!B4" : "line 1";
+    if (where === "cell") document.tables = [{ name: "Costs", rows: [[{ ref: location, text: quote }]] }];
+    else document.lines = [{ location, text: quote }];
+    const got = verifyReading({ ...reading, location, quote, field, value, unit_seen }, [{ ...documents[0]!, document }]);
+    expect(got.outcome).toBe(outcome);
+    if (outcome === "verified") {
+      expect(got.candidate).toMatchObject({ value });
+      expect(got.candidate).not.toHaveProperty("ambiguous");
+    }
+  });
+  test("normalizes a cell range before reading its scaled amount", () => {
+    const document = doc("xlsx");
+    document.fullText = "185K";
+    document.tables = [{ name: "Costs", rows: [[{ ref: "Costs!B4", text: "185K" }]] }];
+    expect(verifyReading({ ...reading, location: "Costs!B4..D4", quote: "185K", field: "soft_cost", value: 185000 }, [{ ...documents[0]!, document }])).toMatchObject({ outcome: "verified", candidate: { value: 185000 } });
+  });
+  test("the fallback reader extracts twenty one construction months, never one", () => {
+    const quote = "Construction period: twenty one months";
+    const document = { ...doc("txt"), fullText: quote, lines: [{ location: "line 1", text: quote }] };
+    expect(extractCandidates(document).candidates.map(c => [c.fieldKey, c.value])).toEqual([["construction_months", 21]]);
+  });
+});
