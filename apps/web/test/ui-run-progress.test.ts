@@ -95,6 +95,15 @@ describe("the run in progress (card R1)", () => {
     expect(words).toContain("Run 2 was stopped. Nothing was recorded.");
   });
 
+  it("when nothing changed, says the latest run stands and that no new run was recorded", () => {
+    expect(runScreen.reusedRun({ id: "run-1", number: 1 }, "run-1")).toBe(1);
+    expect(runScreen.reusedRun({ id: "run-1", number: 1 }, "run-2")).toBeNull();
+    expect(runScreen.reusedRun(null, "run-1")).toBeNull();
+    expect(text(renderToStaticMarkup(createElement(runScreen.RunReused, { n: 1 })))).toContain("Nothing has changed since run 1, so it stands. No new run was recorded.");
+    state.lang = "fr";
+    expect(text(renderToStaticMarkup(createElement(runScreen.RunReused, { n: 1 })))).toContain("Rien n'a changé depuis l'analyse 1, qui reste donc valable. Aucune nouvelle analyse n'a été enregistrée.");
+  });
+
   it("has the French strings, with French spacing", () => {
     state.lang = "fr";
     const html = render(twoDone());
