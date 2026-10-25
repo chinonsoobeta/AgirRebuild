@@ -102,3 +102,18 @@ describe("card 96a owner thresholds", () => {
     expect(result.policy.stresses.find((s) => s.key === "combined")!.label).toContain("rate +100 bps");
   });
 });
+
+describe("card P2 threshold labels", () => {
+  const all = Object.values(THRESHOLDS).flat();
+  it("names every English threshold in words, never by a raw key", () => {
+    for (const threshold of all) expect(threshold.label.en, threshold.path).not.toContain("_");
+  });
+  it("names a stress threshold by the stress's name in both languages", () => {
+    const threshold = THRESHOLDS["policy-v1"]!.find((t) => t.path === "stresses.exit_cap.exitCapBps")!;
+    expect(threshold.label.en).toBe("Exit cap: Exit cap shock");
+    expect(threshold.label.fr).toBe("Taux de sortie : Choc du taux de sortie");
+  });
+  it("puts a no-break space before every colon in a French label", () => {
+    for (const threshold of all) expect(threshold.label.fr, threshold.path).not.toMatch(/[^ ]:/);
+  });
+});
