@@ -22,7 +22,7 @@ vi.mock("../src/i18n", async (original) => {
   return { ...i18n, useI18n: () => i18n.build(state.lang as Lang, () => {}) };
 });
 
-const html = (c: () => React.JSX.Element, lang: "en" | "fr" = "en") => {
+const html = (c: () => React.JSX.Element | null, lang: "en" | "fr" = "en") => {
   state.lang = lang;
   return renderToStaticMarkup(createElement(c));
 };
