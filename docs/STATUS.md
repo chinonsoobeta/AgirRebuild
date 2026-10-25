@@ -13,11 +13,12 @@ work it describes.
 | `npm run gate -- --tier=release` | Both typechecks, 198 tests in 9 files (119 on `main`), web build | 2026-10-03, `task/12-reading-gaps` (the stack 05, 07, 06, 08, 09, 10, 11, 12) |
 | CI replay: fresh `git clone`, `npm ci`, then `VITEST_MAX_WORKERS=2 npm run gate -- --tier=pr` and `--tier=release` | `npm ci` accepts the lockfile; both tiers pass, 198 tests; swap unchanged | 2026-10-03, `task/12-reading-gaps` |
 | `VITEST_MAX_WORKERS=2 npm run gate -- --tier=release` | The same gate with two test workers: peak memory about 1 GB, no swap | 2026-10-01 |
-| `npx tsc -p apps/web/tsconfig.json --noEmit` and `VITEST_MAX_WORKERS=2 npx vitest run apps/web` | Web typecheck clean; 542 web tests in 20 files pass | 2026-10-25, `ui/redesign` `f365f67` |
-| `AGIR_DATA_DIR=<empty folder> PORT=8791 npm start` | Builds the web app, applies `0001` to `0007`, seeds six deals, serves on that port. An empty data folder leaves `.data/` untouched | 2026-10-03, `task/08-plain-language` |
+| `npx tsc -p apps/web/tsconfig.json --noEmit` and `VITEST_MAX_WORKERS=2 npx vitest run apps/web` | Web typecheck clean; 542 web tests in 20 files pass | 2026-10-25, `ui/redesign` `6fee9c4` |
+| `env -u ANTHROPIC_API_KEY NODE_OPTIONS=--max-old-space-size=3072 VITEST_MAX_WORKERS=2 npm run gate -- --tier=release` | Both typechecks, 5991 tests in 35 files, the no-model fallback test (1 passed, 242 skipped), web build | 2026-10-25, `ui/redesign` `6fee9c4` |
+| `env -u ANTHROPIC_API_KEY AGIR_DATA_DIR=<empty folder> PORT=8792 npm start` | Builds the web app, applies `0001` to `0029`, seeds six deals, serves on that port. An empty data folder leaves `.data/` untouched | 2026-10-25, `ui/redesign` (the browser walk) |
 
-The `npm start` row was last run on 2026-10-03; migrations now go to `0029` on `main` and `ui/redesign`
-(`0030` on the U17 branch), and it has not been run again for this record.
+The `npm start` row was run from `ui/redesign`, where migrations go to `0029` as on `main` (`0030` on the U17
+branch, which was not started).
 
 `npm start` without `AGIR_DATA_DIR` migrates `.data/` in place, and a migration cannot be undone there.
 Point it at an empty folder to try a branch.
