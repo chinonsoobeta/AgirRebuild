@@ -255,8 +255,6 @@ details.stack:not([open]){gap:0}
 .ld-foot p{max-width:60ch}
 /* Settings */
 .set{display:grid;grid-template-columns:minmax(0,220px) minmax(0,1fr);gap:40px;align-items:start}
-/* One column on a narrow screen: it can shrink to the screen, and the side list (settings, or the legal pages' contents) sits above the content and scrolls away, in a wrapping row for settings. */
-@media (max-width:900px){.set{grid-template-columns:minmax(0,1fr)}.set-nav,.toc{position:static}.set-nav{flex-direction:row;flex-wrap:wrap}}
 .set-nav{position:sticky;top:24px;display:flex;flex-direction:column;gap:2px}
 .set-nav a{padding:8px 12px;border-radius:8px;color:var(--ink-2)}
 .set-nav a:hover{background:var(--surface-2);text-decoration:none;color:var(--ink)}
@@ -283,6 +281,8 @@ details.stack:not([open]){gap:0}
 .toc{display:flex;flex-direction:column;gap:2px;position:sticky;top:24px}
 .toc a{padding:6px 12px;border-radius:8px;color:var(--ink-2);font-size:14px}
 .toc a:hover{background:var(--surface-2);text-decoration:none;color:var(--ink)}
+/* One column on a narrow screen: it can shrink to the screen, and the side list (settings, or the legal pages' contents) sits above the content and scrolls away, in a wrapping row for settings. */
+@media (max-width:900px){.set{grid-template-columns:minmax(0,1fr)}.set-nav,.toc{position:static}.set-nav{flex-direction:row;flex-wrap:wrap}}
 /* Run in progress */
 .runlist{list-style:none;padding:0;display:flex;flex-direction:column}
 .runlist li{display:flex;align-items:center;gap:14px;padding:12px 0;border-top:1px solid var(--line);color:var(--ink-2)}
