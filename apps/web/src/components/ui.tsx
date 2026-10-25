@@ -156,15 +156,17 @@ export function ErrorText({ error }: { error: unknown }) {
 }
 
 /** What the main figures mean, in a sentence each. Shown on the Run and Review pages. */
-const GLOSSARY = ["dcr", "noi", "capRate", "yieldOnCost", "loanToCost", "equityIrr", "equityMultiple", "breakEven"] as const;
+/** Plain words first leads with the plain name and ends the meaning with the finance name; finance terms first leads with the finance name. */
+const GLOSSARY = ["dcr", "noi", "capRate", "yieldOnCost", "developmentSpread", "loanToCost", "equityIrr", "equityMultiple", "unrealizedMultiple", "breakEven"] as const;
 export function Glossary() {
-  const { t } = useI18n();
+  const { t, terms } = useI18n();
   return (
     <details>
       <summary>{t("glossary.title")}</summary>
       <dl className="stack gloss">
         {GLOSSARY.map((k) => {
-          const [term, meaning] = t(`glossary.${k}`);
+          const [term, meaning] = terms === "plain" ? t(`terms.gloss.${k}`)
+            : k === "developmentSpread" || k === "unrealizedMultiple" ? t(`terms.financeGloss.${k}`) : t(`glossary.${k}`);
           return <div key={k}><dt>{term}</dt><dd className="muted">{meaning}</dd></div>;
         })}
       </dl>

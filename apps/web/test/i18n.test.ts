@@ -54,8 +54,9 @@ describe("a figure in another currency, on review", () => {
 });
 
 describe("the plain-language layer", () => {
-  const en = build("en", () => {});
-  const fr = build("fr", () => {});
+  // These assert the finance names and the DSCR-to-DCR swap, so they read with finance terms first (card X1).
+  const en = build("en", () => {}, "finance");
+  const fr = build("fr", () => {}, "finance");
 
   it("shows DCR for DSCR, as a whole word only", () => {
     expect(en.msg("Base-case sizing DSCR of 1.05x is under the 1.20x floor.")).toBe("Base-case sizing DCR of 1.05x is under the 1.20x floor.");
@@ -386,8 +387,8 @@ describe("breakeven rows in both languages (task 38)", () => {
   const rowOf = (driver: keyof typeof shock, state: string) => ({
     gate: gate.key, driver, state, shock: state === "value" ? shock[driver] : null, limit: limit[driver], actual: state === "value" ? 15.2 : null, to: state === "value" ? [echo[driver]] : [], reason: state === "value" ? undefined : "x",
   });
-  const en = build("en", () => {});
-  const fr = build("fr", () => {});
+  const en = build("en", () => {}, "finance");
+  const fr = build("fr", () => {}, "finance");
 
   it("every driver and every state has a sentence, in English and in French", () => {
     for (const d of Object.keys(shock) as (keyof typeof shock)[]) {

@@ -6,6 +6,7 @@ import { ErrorText, useSession } from "../components/ui";
 import { Thresholds } from "../components/thresholds";
 import { useI18n } from "../i18n";
 import { useTheme, type ThemePref } from "../theme";
+import { TermsSeg } from "../components/terms-seg";
 import { Figure, Figures, Notice, Seg, Switch } from "../components/kit";
 
 /** A deal's clients and its invitation links (card 89). Admins and owners only; an invitation link is shown once. */
@@ -347,6 +348,9 @@ export function Settings() {
           <Row title={t("settings.language")} body={t("settings.languageBody")}>
             <Seg<"en" | "fr"> label={t("settings.language")} value={lang} onChange={setLang}
               options={[{ value: "en", label: t("settings.lang.en") }, { value: "fr", label: t("settings.lang.fr") }]} />
+          </Row>
+          <Row title={t("terms.title")} body={t("terms.body")}>
+            <TermsSeg />
           </Row>
         </div>
       </Section>
