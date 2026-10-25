@@ -17,6 +17,8 @@ work it describes.
 | `env -u ANTHROPIC_API_KEY NODE_OPTIONS=--max-old-space-size=3072 VITEST_MAX_WORKERS=2 npm run gate -- --tier=release` | Both typechecks, 5991 tests in 35 files, the no-model fallback test (1 passed, 242 skipped), web build | 2026-10-25, `ui/redesign` `6fee9c4` |
 | `env -u ANTHROPIC_API_KEY NODE_OPTIONS=--max-old-space-size=3072 VITEST_MAX_WORKERS=2 npm run gate -- --tier=release` | Both typechecks, 6158 tests in 47 files, the no-model fallback test (1 passed, 242 skipped), web build; web alone 679 tests in 30 files | 2026-10-25, `ui/y-screens` `a60dd32` |
 | The same gate | 6185 tests in 49 files, the fallback test, web build; web alone 694 tests in 31 files | 2026-10-25, `ui/w12-email` `9c4a1a7` |
+| The same gate | 6253 tests in 57 files, the fallback test, web build | 2026-10-25, `ui/y-screens` `3de8e3f` (wave 4) |
+| The same gate | 6284 tests in 60 files, the fallback test, web build | 2026-10-25, `ui/w12-email` `04951fb` (wave 4 and R1e) |
 | The same gate | 5833 tests in 19 files, the fallback test, web build | 2026-10-25, `fix/threshold-labels` `1d6a234` |
 | The same gate on `ui/w12-email` `9c4a1a7` with `fix/threshold-labels` merged in a throwaway worktree | 6192 tests in 49 files, the fallback test, web build; no conflicts | 2026-10-25 (the worktree was then removed) |
 | `env -u ANTHROPIC_API_KEY AGIR_DATA_DIR=<empty folder> PORT=8792 npm start` | Builds the web app, applies the migrations, seeds six deals, serves on that port. An empty data folder leaves `.data/` untouched | 2026-10-25, `ui/redesign` (first browser walk) and `ui/y-screens` (second walk) |
@@ -24,7 +26,9 @@ work it describes.
 The first walk ran on `ui/redesign`, where migrations go to `0029` as on `main`. The second ran on `ui/y-screens`,
 which adds `0031` and `0032`. `0030` is on `ui/w12-email` only. The three touch different objects (`0030` a new table
 and a column on `users`; `0031` and `0032` add or replace functions that `0030` does not touch), so a database that
-already has `0031` and `0032` can take `0030` after them.
+already has `0031` and `0032` can take `0030` after them. Wave 4 adds `0033` (the files of a share link) and `0034`
+(the kind of device of each session) on `ui/y-screens`; neither touches `email_tokens` or the column `0030` adds to
+`users`, so the same holds for them.
 
 `npm start` without `AGIR_DATA_DIR` migrates `.data/` in place, and a migration cannot be undone there.
 Point it at an empty folder to try a branch.
@@ -45,9 +49,12 @@ Which branch holds what today (2026-10-25):
 - `ui/redesign`: the interface redesign (cards F1, F2, W1 to W11, U20, U21, X1 to X6), based on `main` at
   `3ca9877`. Local only. See "Interface redesign" below.
 - `ui/y-screens`: `ui/redesign` plus people, account and deal details in the API (Y1 and Y2, migrations `0031` and
-  `0032`), their screens (Z1 and Z2), the policy names (P1) and the fixes from a second browser walk. Local only,
-  held for the owner's review.
-- `ui/w12-email`: `ui/y-screens` plus email verification and password reset (U17 and W12, migration `0030`). Held
+  `0032`), their screens (Z1 and Z2), the policy names (P1), the fixes from a second browser walk, and wave 4 (R1 to R5: a
+  run's progress by stage and Stop, one link for several files with a preview, the comparison download, the
+  refinance loan, device names, the counts' second lines and a new invitation link; migrations `0033` and `0034`).
+  Local only, held for the owner's review.
+- `ui/w12-email`: `ui/y-screens` plus email verification and password reset (U17 and W12, migration `0030`) and an
+  email to the person who started a run when it finishes after they left its page (R1e). Held
   for the owner's review and a mail provider. The three branches stack in this order and merge in this order.
 - `fix/threshold-labels`: from `main`, card P2 in `packages/contracts` and `packages/artifacts`. Held for the
   owner's review; it merges on its own.
@@ -312,7 +319,7 @@ own `ui/*` branch off `ui/redesign` and was merged back after the audit. Web onl
 | W5 | `ui/w5-documents` | Documents: drop zone, the role choices, a table of each file's stages, retry and the quick start link |
 | W6 | `ui/w6-quickstart` | The quick start laid out as the board; named defaults still need an explicit tick |
 | W7 | `ui/w7-review` | Review: a numbered to-do, then conflicts, missing, pending, approved and choices, with the deal's thresholds and the review mode in an aside |
-| W8 | `ui/w8-run` | Run: the verdict, key figures, gates, stresses, checks and the run record; a card listing what a run does while one is in progress (there is no stop button, because the API has none) |
+| W8 | `ui/w8-run` | Run: the verdict, key figures, gates, stresses, checks and the run record; a card listing what a run does while one is in progress (its stages and Stop came later, with R1) |
 | W9 | `ui/w9-decision-reports` | Decision (approve, approve with conditions, reject, return to underwriting) and Reports (report cards, what was made so far, shared links) |
 | W10 | `ui/w10-explore` | Explore changes on the same five endpoints as before, with a heat grid |
 | W11 | `ui/w11-audit-compare` | The audit trail with the chain check, search and filters, and a new screen at `/deals/$dealId/compare` that compares two stored runs without recomputing anything |
@@ -330,12 +337,19 @@ own `ui/*` branch off `ui/redesign` and was merged back after the audit. Web onl
 | Z2 | `ui/z2-deal-details` | The screens for Y2 |
 | P1 | `ui/p1-names` | Each policy named in words, as the Run and Decision boards do, where the screens printed its version id; short English messages under a table proposal start with a capital |
 | P2 | `fix/threshold-labels` | From `main`: stress thresholds named in words in English ("Exit cap: Exit cap shock", not "exit_cap: …"), and no-break spaces in their French labels, in the French stress names ("Coûts +10 %") and in the reports' removed-stress line |
+| R1 | `ui/r1-run-progress` | A run's progress by stage, streamed in the run's own response (`?progress=1`, one JSON line a stage), and "Stop this run", allowed by a run token only the starting browser holds. A stop before the commit records nothing. The tokens live in the API process's memory: several API processes would need them in the database |
+| R2 | `ui/r2-deal-links` | Migration `0033`: one share link for several of a run's files (`share_links.run_id`, `share_link_files`), chosen with checkboxes on Reports, and a preview of the page the link opens, which records no opening |
+| R3 | `ui/r3-compare-refinance` | Compare downloads exactly the rows on screen as a CSV (a cell a spreadsheet would read as a formula gets a leading apostrophe); Run and Compare show the refinance loan by replaying the stored input through `buildLedger` (same engine version only, marked as not a signed figure, never stored); a deal outside Canada says the tables are for deals in Canada |
+| R4 | `ui/r4-devices-counts` | Migration `0034`: each session keeps the kind of device it signed in from (one of eight labels, never the user agent), listed in Settings; the owner's counts gain their second lines |
+| R5 | `ui/r5-new-invite-link` | "Make a new link" for an open client invitation in place of "Copy link" (only a hash of an invitation is kept): one transaction withdraws the old one and makes a new one, shown once |
+| R1e | on `ui/w12-email` | The person who started a run gets an email when it is recorded after their browser left the page, with a link and no figures |
 
 State of the branches: F1, F2, W1 to W11, U20 (the old styles removed, an accessibility pass), U21-words (a
 wording and French pass) and X1 to X6 are merged into `ui/redesign`, with the fixes from a browser walk of every
 screen on 2026-10-25 (listed in `INTERFACE-BUILD-LOG.md`). Y1, Y2, Z1, Z2 and P1 are merged into `ui/y-screens`,
 with the fixes from a second walk of that branch (as the demo owner, with a throwaway client and reviewer, at
-1360, 900 and 390 px). Y1 and Y2 change `apps/api` and add migrations, so `ui/y-screens` needs the owner's review.
+1360, 900 and 390 px), and so is wave 4 (R1 to R5), which built the server work the first morning report had
+listed as left. Y1 and Y2 change `apps/api` and add migrations, so `ui/y-screens` needs the owner's review.
 None of it is on `main` or pushed. U17 and W12 are merged only into `ui/w12-email`, on top of `ui/y-screens`.
 They touch sign-in and add a migration, so they need the owner's
 review (plan rule 7), and they must not reach production before there is a mail provider: on the U17 branch,
@@ -366,9 +380,11 @@ Left out on purpose, because a person must decide first (the plan's "Decisions t
 - The French interface is not a translator's work. Two terms need the translator's choice: "état des loyers" for
   rent roll and "lettre d'offre" for term sheet.
 - Deal names in BC Sans Light at 34 px, as the canvas shows, unless the owner wants Regular or Bold.
-- Also not built, because there is no API for them: a sample deal, device names, deleting an account, run progress
-  by stage, a downloadable comparison, one link for a whole deal, and a "stop this run" button. Removing a member,
-  renaming the workspace and signing out other devices are built on `ui/y-screens`.
+- Also not built: a sample deal (who its values are attributed to in the audit trail, and whether a draft policy's
+  verdict may show on a public page, are the owner's calls) and deleting an account (it needs a retention decision:
+  the audit trail is hash-chained and holds names). Device names, run progress by stage, Stop, a downloadable
+  comparison, one link for several files, removing a member, renaming the workspace and signing out other devices
+  are built on `ui/y-screens`.
 - Compare and Explore show each change by subtracting two stored values in the browser (Explore did so on `main`
   already). A screen is not meant to derive a figure; the owner decides whether this display arithmetic stays or the
   API returns the changes. Compare treats a change under one part in a billion as no change.
@@ -454,7 +470,7 @@ Where the code showed a better route than [the plan](plan-small-developers.md), 
 - Whether `chinonsoobeta/AgirRebuild` should be public, as it is today.
 - Review of U17 and W12 (sign-in, a migration) before they are merged, and a mail provider before they reach production.
 - The interface redesign on `ui/redesign`: the owner's review before it is merged into `main`. Then `ui/y-screens`
-  (migrations `0031` and `0032`, server code for people, accounts and deal details) and `fix/threshold-labels`
+  (migrations `0031` to `0034`, server code for people, accounts, deal details, run progress and share links) and `fix/threshold-labels`
   (`packages/contracts`).
 - The open decisions listed under "Interface redesign": price, Stripe and GST/HST, Agir reviewers and their price, the
   thresholds editor's place, the deal-name weight, and the two French terms.
