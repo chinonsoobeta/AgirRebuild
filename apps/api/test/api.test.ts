@@ -3107,7 +3107,7 @@ describe("card 94c table proposals", () => {
     expect(land.options.find((o:any)=>o.label === "Halifax Regional Municipality").value).toBe(11250);
     const premium=r.proposals.find((p:any)=>p.fieldKey === "refinance_insurance_premium_pct");
     expect(premium.options[0].value).toBe(5.49);
-    expect(premium.options[0].reason).toBe(`Proposed from ${premium.publisher}, ${premium.title} (effective ${premium.effective}, read 2026-10-19): ${premium.options[0].label}.`);
+    expect(premium.options[0].reason).toBe(`Proposed from ${premium.publisher}, ${premium.title} (effective ${premium.effective}, read 2026-10-24): ${premium.options[0].label}.`);
     expect(r.proposals.find((p:any)=>p.fieldKey === "gst_hst_net").options[0].value).toBe(0);
     expect((await call(owner,"POST",`/api/deals/${d}/values`,{fieldKey:premium.fieldKey,...premium.options[0]})).json.status).toBe("approved");
     const accepted=await review(d);
@@ -3124,7 +3124,7 @@ describe("card 94c table proposals", () => {
     const r=await review(await make("NB"));
     const option=r.proposals.find((p:any)=>p.fieldKey === "land_transfer_tax").options[0];
     expect(option.label.endsWith(".")).toBe(true);
-    expect(option.reason).toBe(`Proposed from Government of New Brunswick, Real Property Transfer Tax Act (effective 2016-04-01, read 2026-10-19): ${option.label}`);
+    expect(option.reason).toBe(`Proposed from Government of New Brunswick, Real Property Transfer Tax Act (effective 2016-04-01, read 2026-10-24): ${option.label}`);
   });
   test("card 97b accepts a server-computed table value in solo and preserves its provenance in reports", async () => {
     const d=await make("NS");
@@ -3184,8 +3184,44 @@ describe("card 94c table proposals", () => {
     expect((await call(owner,"POST",`/api/deals/${d}/proposals/accept`,{fieldKey:p.fieldKey,tableId:p.tableId,optionKey:p.options[0].key})).status).toBe(200);
     expect((await review(d)).tableNotices).toEqual([]);
   });
+  test("card 152 accepts premium tax, preserves BASE hashes without it, and flags dated sources without changing results", async () => {
+    date="2026-10-24";
+    try {
+      const d=await make("ON");
+      for (const [fieldKey,value] of [["hard_cost",1000000],["soft_cost",100000],["contingency",50000],["construction_months",12],["lease_up_months",6],["hold_years",5],["stabilized_occupancy_pct",95],["expense_ratio_pct",30],["exit_cap_rate_pct",5],["selling_costs_pct",0],["senior_loan_amount",0],["refinance_rate_pct",4],["development_charges",0],["refinance_insurance_premium_pct",4]] as [string,number][]) expect((await call(owner,"POST",`/api/deals/${d}/values`,{fieldKey,value,reason:"Invented card 152 rental"})).status).toBe(200);
+      await call(owner,"POST",`/api/deals/${d}/values`,{fieldKey:"unit_rent_monthly",itemKey:"Residential",value:2000,reason:"Invented rent"});
+      const runDeal=async()=>{
+        const made=await call(owner,"POST",`/api/deals/${d}/runs`);expect(made.status).toBe(200);
+        return (await call(owner,"GET",`/api/runs/${made.json.id}`)).json;
+      };
+      const baseline=await runDeal();
+      expect([baseline.inputHash,baseline.resultHash]).toEqual(["ee2d078d9b89e7849c51f5be239defd59598d86ac8875d08676c2a0def1cd542","516d907c080ce2ca91fb56274de6c3494d2907cad2761fc68d886fba1fca6a02"]);
+      const proposal=(await review(d)).proposals.find((p:any)=>p.fieldKey === "refinance_premium_tax_pct");
+      expect(proposal).toMatchObject({tableId:"on-premium-tax",readOn:"2026-10-24",signedOn:"2026-10-24",recheckBy:"2027-04-30"});
+      expect((await call(owner,"POST",`/api/deals/${d}/proposals/accept`,{fieldKey:proposal.fieldKey,tableId:proposal.tableId,optionKey:"on"})).status).toBe(200);
+      const taxed=await runDeal();
+      const metric=(v:any,key:string)=>v.result.scenarios[0].metrics.find((m:any)=>m.key === key).value;
+      const premium=metric(taxed,"refinance_premium_added");
+      expect(metric(taxed,"refinance_cash_returned")).toBeCloseTo(metric(baseline,"refinance_cash_returned")-premium*.08,6);
+      expect(taxed.result.ledger.map((r:any)=>r.debtBalance)).toEqual(baseline.result.ledger.map((r:any)=>r.debtBalance));
+      expect(taxed.inputs.filter((a:any)=>a.fieldKey !== proposal.fieldKey)).toEqual(baseline.inputs);
+      expect(taxed.inputs.find((a:any)=>a.fieldKey === proposal.fieldKey).tableSource).toMatchObject({fields:[],readOn:"2026-10-24",signedOn:"2026-10-24",recheckBy:"2027-04-30"});
+      for (const day of ["2027-04-29","2027-04-30","2027-05-01"]) {
+        date=day;
+        const flagged=await runDeal(), a=flagged.inputs.find((a:any)=>a.fieldKey === proposal.fieldKey);
+        if (day === "2027-04-29") expect(a).not.toHaveProperty("tableStale");
+        else expect(a.tableStale).toBe(true);
+        expect(flagged.result).toEqual(taxed.result);
+        expect(flagged.inputHash).toBe(taxed.inputHash);expect(flagged.resultHash).toBe(taxed.resultHash);
+      }
+      await db.query(`update assumptions set source_table=(source_table::jsonb - 'recheckBy' - 'readOn' - 'signedOn')::text where deal_id=$1 and field_key=$2`,[d,proposal.fieldKey]);
+      const legacy=await runDeal();
+      expect(legacy.inputs.find((a:any)=>a.fieldKey === proposal.fieldKey)).not.toHaveProperty("tableStale");
+      expect(legacy.result).toEqual(taxed.result);
+    } finally {date="2026-10-20";}
+  });
   test("withholds every proposal at the re-check date", async () => {
-    const d=await make("NS"); date="2027-01-02";
+    const d=await make("NS"); date="2027-08-01";
     try {
       const r=await review(d);
       expect(r.proposals).toHaveLength(3);

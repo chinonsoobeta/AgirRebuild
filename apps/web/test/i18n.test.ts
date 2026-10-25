@@ -4,7 +4,7 @@ import type { EngineInput, ReadinessItem } from "@agir/contracts";
 import { assemble, validateInput, EngineInputError } from "../../../packages/engine/src/index.ts";
 import validateSource from "../../../packages/engine/src/validate.ts?raw";
 import { allEquityDeal } from "../../../packages/engine/test/fixtures.ts";
-import { FIELDS, METRICS, POLICIES, tableSourceLabel, landTransferTaxOptions, gstHstNetOptions } from "@agir/contracts";
+import { FIELDS, METRICS, POLICIES, tableSourceLabel, landTransferTaxOptions, gstHstNetOptions, premiumTaxOptions } from "@agir/contracts";
 import { SF_PER_M2 } from "@agir/numbers";
 import { reviewWaiting, WindowConfirmation } from "../src/components/ui.tsx";
 import { Quote, approvable, enteredInUnit, foreignIn, keepsWithReason } from "../src/routes/review.tsx";
@@ -891,7 +891,7 @@ it("card 93b: Approve all excludes OCR sources but keeps text sources", () => {
 
 describe("card 97a proposal translations", () => {
   it("translates every fixed land label and note, retaining published municipality names", () => {
-    const published=["Manitoba","Halifax Regional Municipality","Ville de Québec 2026","Montréal 2026","Toronto","AB","NL","SK"];
+    const published=["Manitoba","Halifax Regional Municipality","Ville de Québec 2026","Montréal 2026","Toronto"];
     for (const province of ["BC","MB","ON","QC","NB","PE","SK","AB","NL"]) {
       const result=landTransferTaxOptions({province,value:750000,asOf:"2026-10-20"});
       if (!("options" in result)) throw new Error(result.unavailable);
@@ -900,6 +900,18 @@ describe("card 97a proposal translations", () => {
         if (option.note) expect(translateMessage(option.note),option.note).not.toBe(option.note);
       }
     }
+  });
+  it("translates premium tax labels, unavailable rate and the stale flag", () => {
+    for (const province of ["ON","QC","SK"]) {
+      const result=premiumTaxOptions({province,asOf:"2026-10-24"});
+      if (!("options" in result)) throw new Error(result.unavailable);
+      for (const o of result.options) expect(translateMessage(o.label)).not.toBe(o.label);
+    }
+    for (const text of ["no verified public table; enter the rate (0 if none)", "MLI Select at 50 points lends up to 85% loan-to-value; enter the premium yourself.", "Published table past its re-check date (2027-04-30); check the source before relying on this value.", "refinance premium tax must be a number from 0 to 15"]) expect(translateMessage(text)).not.toBe(text);
+    expect(translateMessage("Published table past its re-check date (2027-04-30); check the source before relying on this value.")).toBe("Tableau publié dont la date de revérification (2027-04-30) est passée ; vérifiez la source avant de vous fier à cette valeur.");
+    const en=build("en",()=>{}),fr=build("fr",()=>{});
+    for (const value of [fr.L.field("refinance_premium_tax_pct"),fr.L.absent("refinance_premium_tax_pct")]) expect(value).not.toContain("refinance_premium_tax_pct");
+    expect(fr.L.field("refinance_premium_tax_pct")).not.toBe(en.L.field("refinance_premium_tax_pct"));
   });
   it.each(["ON","NB","PE"])("translates the %s rental rebate label and all conditions", province => {
     const result=gstHstNetOptions({province,units:12,selling:false,asOf:"2026-10-20"});

@@ -24,7 +24,7 @@ const rentalOnly = [
   "stabilized_occupancy_pct", "expense_ratio_pct", "fixed_opex_annual", "property_tax_annual", "variable_expense_pct",
   "other_income_annual", "rent_growth_pct", "expense_growth_pct", "lease_up_ramp", "exit_cap_rate_pct", "selling_costs_pct",
   "min_dscr_covenant", "refinance_month", "refinance_amount", "refinance_ltv_pct", "refinance_rate_pct", "refinance_amort_years",
-  "refinance_io_months", "refinance_insurance_premium_pct", "refinance_mli_select_points", "refinance_term_years", "refinance_and_hold",
+  "refinance_io_months", "refinance_insurance_premium_pct", "refinance_premium_tax_pct", "refinance_mli_select_points", "refinance_term_years", "refinance_and_hold",
   "senior_amort_years", "senior_io_months", "mezz_amort_years", "mezz_io_months",
 ];
 const requiredSale = ["presold_units_pct", "deposit_pct", "absorption_units_per_month", "sales_commission_pct", "closing_lag_months", "unsold_carry_monthly"];

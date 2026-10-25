@@ -1618,3 +1618,21 @@ describe("card 96d custom thresholds", () => {
     expect(text).toContain("Dana Analyst");
   });
 });
+
+
+describe("card 152 signed table notes in HTML reports", () => {
+  test.each(["en","fr"] as const)("prints and identifies the stale and rebate notes in %s", lang => {
+    const input=allEquityDeal(),result=underwrite(input,POLICY_V1);
+    const x: ArtifactInput={kind:"lender_package",lang,deal:{name:"Invented signed table rental",assetType:"Multifamily",location:"Ontario",province:"ON",currency:"CAD"},run:{id:"invented",runNumber:1,createdAt:"2027-04-30",engineVersion:result.engineVersion,policyVersion:result.policyVersion,policyHash:"p",inputHash:"i",resultHash:"r"},input,result,policy:POLICY_V1,decision:null,assumptions:[{fieldKey:"gst_hst_net",itemKey:null,label:"GST/HST net",unit:"$",value:0,sourceKind:"table",source:"Published table",tableStale:true,tableSource:{tableId:"gst-hst-pbrh",optionKey:"pbrh",publisher:"CRA",title:"Rebate",effective:"2026-06-21",recheckBy:"2027-04-30",readOn:"2026-10-24",fields:[],acceptedBy:"Invented owner"}}]};
+    const model=buildModel(x),text=visibleText(renderHtml(model));
+    expect(text).toContain(lang === "en" ? "Published table past its re-check date (2027-04-30); check the source before relying on this value." : "Tableau publié dont la date de revérification (2027-04-30) est passée ; vérifiez la source avant de vous fier à cette valeur.");
+    expect(text).toContain(lang === "en" ? "Source: CRA, read 2026-10-24." : "Source : ARC, consulté le 2026-10-24.");
+    expect(text).toContain(lang === "en" ? "at least 10 private rooms or suites" : "au moins 10 chambres ou suites privées");
+    expect(verifyProvenance(text,model.formatter.manifest).orphans).toEqual([]);
+    delete x.assumptions[0]!.tableStale;
+    delete x.assumptions[0]!.tableSource!.readOn;
+    const legacy=visibleText(renderHtml(buildModel(x)));
+    expect(legacy).not.toContain(lang === "en" ? "past its re-check date" : "date de revérification");
+    expect(legacy).toContain(lang === "en" ? "Source: CRA." : "Source : ARC.");
+  });
+});

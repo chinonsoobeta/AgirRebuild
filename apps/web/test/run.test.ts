@@ -390,3 +390,15 @@ describe("share links on the web (task 86b)", () => {
     expect(html).not.toContain(build(lang, () => {}).t("audit.worker"));
   });
 });
+
+
+describe("card 152 signed table notes on the run", () => {
+  it.each(["en","fr"] as const)("shows the stale warning and rebate explanation in %s", lang => {
+    queryState.lang=lang;
+    queryState.run={id:"invented-run",number:1,result:rental,fresh:true,staleReasons:[],policyVersion:rental.policyVersion,engineVersion:rental.engineVersion,createdAt:"2027-04-30",inputHash:"h",resultHash:"r",signed:"development key",inputs:[{fieldKey:"gst_hst_net",value:0,tableStale:true,tableSource:{tableId:"gst-hst-pbrh",optionKey:"pbrh",publisher:"CRA",title:"Rebate",effective:"2026-06-21",readOn:"2026-10-24",recheckBy:"2027-04-30",fields:[],acceptedBy:"Invented owner"}}]};
+    const html=renderToStaticMarkup(createElement(runScreen.Run,{dealId:"invented"})).replaceAll("&#x27;", "'");
+    expect(html).toContain(lang === "en" ? "Published table past its re-check date (2027-04-30); check the source before relying on this value." : "Tableau publié dont la date de revérification (2027-04-30) est passée ; vérifiez la source avant de vous fier à cette valeur.");
+    expect(html).toContain(lang === "en" ? "GST/HST net is $0" : "TPS/TVH nette de 0 $");
+    queryState.lang="en";
+  });
+});

@@ -1495,6 +1495,16 @@ describe("Canadian cost lines and a mortgage insurance premium, as entered value
     };
     const refi = { refinance_month: 12, refinance_amount: 800_000, refinance_rate_pct: 0, refinance_amort_years: 20 };
 
+    test("card 152 offers premium tax only with a positive premium and maps only stated rates", () => {
+      const def=FIELD_BY_KEY.get("refinance_premium_tax_pct");
+      expect(def).toMatchObject({required:false,material:false,extractable:false,conservative:"max",min:0,max:15,window:{min:0,max:10},aliases:[]});
+      for (const premium of [undefined,0,4]) {
+        const assembled=assemble(rows({...refi,...(premium === undefined ? {} : {refinance_insurance_premium_pct:premium,refinance_term_years:10})}));
+        expect(assembled.readiness.choices.some(c=>c.fieldKey === "refinance_premium_tax_pct")).toBe(premium === 4);
+        expect(assembled.input!.refinance).not.toHaveProperty("premiumTaxPct");
+      }
+      for (const rate of [0,8]) expect(assemble(rows({...refi,refinance_insurance_premium_pct:4,refinance_term_years:10,refinance_premium_tax_pct:rate})).input!.refinance).toHaveProperty("premiumTaxPct",rate);
+    });
     test("a field that is not stated is omitted from the input, never 0 and never undefined", () => {
       const { input } = assemble(rows(refi));
       expect(Object.keys(input!.budget).sort()).toEqual(["contingency", "hard", "land", "other", "soft"]);
@@ -1699,6 +1709,18 @@ describe("Canadian cost lines and a mortgage insurance premium, as entered value
     const amount4 = () => rental({ ...refi, amount: 1_000_000, insurancePremiumPct: 4, mliSelectPoints: 50 });
     const amount0 = () => rental({ ...refi, amount: 1_000_000 });
 
+    test("card 152 pays premium tax in cash only in the refinance month", () => {
+      const input=amount4(), baseline=buildLedger(input);
+      const taxed={...input,refinance:{...input.refinance!,premiumTaxPct:8}};
+      const ledger=buildLedger(taxed);
+      expect(ledger.refinance!.net).toBe(baseline.refinance!.net-3200);
+      expect(ledger.rows.map(r=>r.debtBalance)).toEqual(baseline.rows.map(r=>r.debtBalance));
+      expect(ledger.rows.map(r=>r.costDraw)).toEqual(baseline.rows.map(r=>r.costDraw));
+      expect(ledger.rows.filter((r,i)=>r.refinanceNet !== baseline.rows[i]!.refinanceNet).map(r=>r.month)).toEqual([12]);
+      expect(v(underwrite(taxed,POLICY_V1),"total_development_cost")).toBe(v(underwrite(input,POLICY_V1),"total_development_cost"));
+      for (const premiumTaxPct of [-1,15.01,NaN,Infinity]) expect(()=>underwrite({...input,refinance:{...input.refinance!,premiumTaxPct}},POLICY_V1)).toThrow("refinance premium tax must be a number from 0 to 15");
+      expect(()=>underwrite({...input,refinance:{...input.refinance!,premiumTaxPct:15}},POLICY_V1)).not.toThrow();
+    });
     test("a 4% premium on a $1,000,000 refinance gives a balance of $1,040,000", () => {
       const L = buildLedger(amount4());
       // Right after the month-12 payment the balance is 1,040,000 less one payment of 1,040,000 / 240 = 4,333.33.

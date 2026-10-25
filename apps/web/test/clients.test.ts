@@ -269,7 +269,27 @@ describe("the logo section of settings (task 89d)", () => {
 
 
 describe("card 94c table proposal controls", () => {
-  const proposal = (options = [{key:"cmhc",label:"CMHC MLI Select, 50 points",value:5.49,reason:"Proposed from CMHC, Multi-unit Fees and Premiums (effective 2025-07-14, read 2026-10-19): CMHC MLI Select, 50 points."}]) => ({fieldKey:"refinance_insurance_premium_pct",tableId:"cmhc-premium",title:"Multi-unit Fees and Premiums",publisher:"CMHC",url:"https://example.test/official",effective:"2025-07-14",options});
+  const proposal = (options = [{key:"cmhc",label:"CMHC MLI Select, 50 points",value:5.49,reason:"Proposed from CMHC, Multi-unit Fees and Premiums (effective 2025-07-14, read 2026-10-19): CMHC MLI Select, 50 points."}]) => ({fieldKey:"refinance_insurance_premium_pct",tableId:"cmhc-premium",title:"Multi-unit Fees and Premiums",publisher:"CMHC",url:"https://example.test/official",effective:"2025-07-14",readOn:"2026-10-24",signedOn:"2026-10-24",recheckBy:"2027-01-31",options});
+  it("card 152 opens the rebate explanation by hover, focus and click without accepting; Escape closes it", () => {
+    state.role="owner";
+    const onUse=vi.fn(),p={...proposal([{key:"pbrh",label:"Appears to qualify for the purpose-built rental rebate",value:0,reason:"Invented rental"}]),tableId:"gst-hst-pbrh",fieldKey:"gst_hst_net"};
+    const element=createElement(TableProposal,{proposal:p,unit:"$",onUse,busy:false});
+    render(element);
+    const info=()=>state.nodes.find(n=>n.tag === "button" && n.props["aria-controls"])!;
+    expect(info().props.type).toBe("button");expect(info().props["aria-expanded"]).toBe(false);
+    const id=info().props["aria-controls"];
+    for (const event of ["onMouseEnter","onFocus","onClick"]) {
+      info().props[event]();
+      const html=render(element);
+      expect(info().props["aria-expanded"]).toBe(true);
+      expect(html).toContain(`id="${id}"`);expect(text(html)).toContain("GST/HST net is $0");
+      expect(text(html)).toContain("Source: CRA, read 2026-10-24.");
+      info().props.onKeyDown({key:"Escape"});render(element);
+      expect(info().props["aria-expanded"]).toBe(false);
+      expect(onUse).not.toHaveBeenCalled();
+    }
+    buttons("Use this")[0]!.props.onClick();expect(onUse).toHaveBeenCalledOnce();
+  });
   it("shows a single proposal with source and accepts its exact value and reason", () => {
     state.role="owner"; const onUse=vi.fn(), p=proposal();
     const html=render(createElement(TableProposal,{proposal:p,unit:"%",onUse,busy:false}));
