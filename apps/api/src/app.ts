@@ -10,7 +10,7 @@ import { breakeven, DRIVERS, driversFor, SALE_DRIVERS, EngineInputError, explore
 import { canonicalItem, itemFold, kindOf } from "@agir/extraction";
 import { MAX_UPLOAD_BYTES } from "@agir/worker";
 import { checkPassword, countSessions, createSession, deviceLabel, endOtherSessions, endSession, hashPassword, listSessions, PASSWORD_RULE, rateLimiter, SESSION_DAYS, userForSession } from "./auth.ts";
-import { emailAuth } from "./email-auth.ts";
+import { addressTaken, emailAuth } from "./email-auth.ts";
 import type { Mailer } from "./mailer.ts";
 import { thresholdsView, auditPackage, clientViewer, createRun, dealOverview, hideClientEvents, HttpError, labelRefusal, regionGroups, reviewView, runView, sha256 } from "./services.ts";
 
@@ -128,8 +128,8 @@ export function createApp({ db, store, secureCookies, demoSignIn = false, trustP
         invite: z.string().min(1).max(200).optional() })
       .parse(await c.req.json());
     const email = body.email.toLowerCase();
-    const [exists] = await db.query(`select 1 from users where email = $1`, [email]);
-    if (exists) return c.json({ error: "An account with that email already exists." }, 409);
+    // Also refused while another account's undo link holds the address (card R6).
+    if (await addressTaken(db, email)) return c.json({ error: "An account with that email already exists." }, 409);
     // Through an invitation (card 89): a client of one deal, with no workspace of its own, in one transaction.
     if (body.invite) {
       const hash = sha256(body.invite);

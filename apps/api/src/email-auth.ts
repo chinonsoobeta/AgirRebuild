@@ -1,17 +1,48 @@
 // Card U17: email verification and password reset. Tokens are 32 random bytes and codes six random digits; both are
 // stored only as sha256 hashes and looked up or compared by hash. A token is single use and expires after 60 minutes.
 // Nothing in the app is gated on verification: email_verified_at only records it (an owner decision).
+// Card R6 adds changing the address: a change_email token sent to the new address, and an undo_email_change token that
+// the old address keeps for 7 days. Both carry the address they concern in email_tokens.email.
 import { randomBytes, randomInt, timingSafeEqual, createHash } from "node:crypto";
 import type { Context, Hono } from "hono";
 import { getCookie, setCookie } from "hono/cookie";
 import { z } from "zod";
 import type { Db } from "@agir/db";
-import { createSession, deviceLabel, hashPassword, PASSWORD_RULE, rateLimiter, userForSession } from "./auth.ts";
+import { checkPassword, createSession, deviceLabel, hashPassword, PASSWORD_RULE, rateLimiter, userForSession } from "./auth.ts";
 import type { Mailer } from "./mailer.ts";
 
-type Kind = "verify_email" | "reset_password";
+type Kind = "verify_email" | "reset_password" | "change_email" | "undo_email_change";
 const TOKEN_MINUTES = 60;
+const UNDO_DAYS = 7;
 const hash = (s: string) => createHash("sha256").update(s).digest("hex");
+const TAKEN = "An account with that email already exists.";
+const DEAD_LINK = "This link does not work any more. It may have been used or expired. Ask for a new one.";
+/** An undo link cannot be asked for again, so its dead-link sentence does not say to. */
+const UNDO_DEAD = "This link does not work any more. It may have been used already, or be more than 7 days old.";
+/**
+ * Stored in place of a password hash when an undo turns the password off. checkPassword accepts only values that start
+ * with "scrypt$", so no password signs in until the person chooses a new one through the reset link.
+ */
+const PASSWORD_OFF = "off";
+
+/**
+ * True when the address belongs to another account, or another account's live, unused undo link would put it back.
+ * The second part is the 7-day hold: nobody can take an address its former owner may still reclaim.
+ */
+export async function addressTaken(db: Db, email: string, exceptUserId?: string): Promise<boolean> {
+  const [r] = await db.query<{ taken: boolean }>(
+    `select exists (select 1 from users where email = $1 and id is distinct from $2::uuid)
+         or exists (select 1 from email_tokens where kind = 'undo_email_change' and email = $1 and used_at is null
+                      and expires_at > now() and user_id is distinct from $2::uuid) as taken`,
+    [email, exceptUserId ?? null],
+  );
+  return r?.taken ?? false;
+}
+
+/** Raised inside a transaction when the address turned out to be taken, so the transaction (and the spent token) rolls back. */
+class AddressTaken extends Error {}
+/** The address is taken: by the hold, or by another account (a unique-index race, code 23505). */
+const isTaken = (e: unknown) => e instanceof AddressTaken || (e as { code?: string }).code === "23505";
 
 export type EmailAuthDeps = {
   db: Db;
@@ -23,18 +54,30 @@ export type EmailAuthDeps = {
   clientKey: (c: Context<any>) => string;
 };
 
-/** Deletes the person's earlier tokens of this kind and stores a new one. Returns the token and code to send. */
-async function issue(db: Db, userId: string, kind: Kind): Promise<{ token: string; code: string | null }> {
+/**
+ * Stores a new token and returns it, with a code for verify_email. `held` gives the address a change_email or
+ * undo_email_change token carries, and its lifetime when it is not 60 minutes. It opens no transaction of its own, so it
+ * can be part of the caller's.
+ */
+async function addToken(q: Db, userId: string, kind: Kind, held?: { email: string; minutes?: number }): Promise<{ token: string; code: string | null }> {
   const token = randomBytes(32).toString("base64url");
   const code = kind === "verify_email" ? String(randomInt(0, 1_000_000)).padStart(6, "0") : null;
-  await db.transaction(async (tx) => {
-    await tx.query(`delete from email_tokens where user_id = $1 and kind = $2`, [userId, kind]);
-    await tx.query(
-      `insert into email_tokens (user_id, kind, token_hash, code_hash, expires_at) values ($1, $2, $3, $4, now() + ($5 || ' minutes')::interval)`,
-      [userId, kind, hash(token), code === null ? null : hash(code), String(TOKEN_MINUTES)],
-    );
-  });
+  await q.query(
+    `insert into email_tokens (user_id, kind, token_hash, code_hash, email, expires_at) values ($1, $2, $3, $4, $5, now() + ($6 || ' minutes')::interval)`,
+    [userId, kind, hash(token), code === null ? null : hash(code), held?.email ?? null, String(held?.minutes ?? TOKEN_MINUTES)],
+  );
   return { token, code };
+}
+
+/**
+ * Deletes the person's earlier tokens of this kind and stores a new one. Returns the token and code to send. Undo links
+ * are never replaced this way: the confirm route adds them (see there).
+ */
+async function issue(db: Db, userId: string, kind: Exclude<Kind, "undo_email_change">, held?: { email: string }) {
+  return db.transaction(async (tx) => {
+    await tx.query(`delete from email_tokens where user_id = $1 and kind = $2`, [userId, kind]);
+    return addToken(tx, userId, kind, held);
+  });
 }
 
 /** Spends a live token of this kind, once: the update succeeds for exactly one caller. */
@@ -44,6 +87,15 @@ async function spend(db: Db, token: string, kind: Kind): Promise<string | null> 
     [hash(token), kind],
   );
   return r?.user_id ?? null;
+}
+
+/** Spends a live change or undo token once, like spend, and returns what it carries. created_at is text, to keep its microseconds. */
+async function spendHeld(db: Db, token: string, kind: "change_email" | "undo_email_change") {
+  const [r] = await db.query<{ user_id: string; email: string; created_at: string }>(
+    `update email_tokens set used_at = now() where token_hash = $1 and kind = $2 and used_at is null and expires_at > now() returning user_id, email, created_at::text as created_at`,
+    [hash(token), kind],
+  );
+  return r ?? null;
 }
 
 function verifyMail(origin: string, token: string, code: string) {
@@ -80,6 +132,38 @@ function resetMail(origin: string, token: string) {
   };
 }
 
+function changeMail(origin: string, token: string) {
+  const link = `${origin}/email/confirm?token=${token}`;
+  return {
+    subject: "Confirm your new email address for Agir / Confirmez votre nouvelle adresse courriel pour Agir",
+    text: [
+      "To use this address for your Agir account, open this link:",
+      link,
+      `The link works once, for ${TOKEN_MINUTES} minutes. Until it is opened, the account keeps its current address. If you did not ask for this, you can ignore this email.`,
+      "",
+      "Pour utiliser cette adresse avec votre compte Agir, ouvrez ce lien :",
+      link,
+      `Le lien ne sert qu’une fois, pendant ${TOKEN_MINUTES} minutes. D’ici là, le compte garde son adresse actuelle. Si vous n’avez rien demandé, ignorez ce courriel.`,
+    ].join("\n"),
+  };
+}
+
+function changedMail(origin: string, token: string, newEmail: string) {
+  const link = `${origin}/email/undo?token=${token}`;
+  return {
+    subject: "Your Agir email address was changed / L’adresse courriel de votre compte Agir a changé",
+    text: [
+      `Your Agir account now uses ${newEmail}. If you made this change, there is nothing to do.`,
+      `If you did not, open this link within ${UNDO_DAYS} days. It puts this address back, signs every device out and sends you a link to choose a new password:`,
+      link,
+      "",
+      `Votre compte Agir utilise maintenant ${newEmail}. Si vous avez fait cette modification, vous n’avez rien à faire.`,
+      `Sinon, ouvrez ce lien d’ici ${UNDO_DAYS} jours. Il rétablit cette adresse, déconnecte tous les appareils et vous envoie un lien pour choisir un nouveau mot de passe :`,
+      link,
+    ].join("\n"),
+  };
+}
+
 export function emailAuth({ db, mailer, publicOrigin, cookie, cookieOpts, clientKey }: EmailAuthDeps) {
   const origin = publicOrigin.replace(/\/+$/, "");
   const verifySendLimit = rateLimiter(5, 60 * 60_000); // per person
@@ -87,7 +171,14 @@ export function emailAuth({ db, mailer, publicOrigin, cookie, cookieOpts, client
   const tokenLimit = rateLimiter(20, 60_000); // per address, for verify and reset
   const resetSendIpLimit = rateLimiter(10, 15 * 60_000); // per address
   const resetSendEmailLimit = rateLimiter(3, 60 * 60_000); // per email, whether or not it has an account
+  const changeLimit = rateLimiter(5, 60 * 60_000); // per person, counted before the password check, so it also limits guessing
   const tooMany = (c: Context<any>) => c.json({ error: "Too many attempts. Wait a while and try again." }, 429);
+  const taken = (c: Context<any>) => c.json({ error: TAKEN }, 409);
+  /** Sends a mail; a failure is logged with the kind only (no address, no link) and never undoes the caller's work. */
+  async function mail(kind: Kind, m: { to: string; subject: string; text: string }) {
+    try { await mailer.send(m); }
+    catch { console.error(JSON.stringify({ at: new Date().toISOString(), event: "mail.failed", kind })); }
+  }
 
   /** Sends a new verification email. A failure to send is logged without detail and never undoes the caller's work. */
   async function sendVerification(user: { id: string; email: string }) {
@@ -163,6 +254,110 @@ export function emailAuth({ db, mailer, publicOrigin, cookie, cookieOpts, client
       if (!userId) return c.json({ error: "This link does not work any more. It may have been used or expired. Ask for a new one." }, 400);
       setCookie(c, cookie, await createSession(db, userId, deviceLabel(c.req.header("user-agent"))), cookieOpts);
       return c.json({ ok: true });
+    });
+
+    // Changing the address (card R6). The route checks the session itself, like verify/send, because these routes are
+    // registered before the app's session middleware.
+    app.post("/api/me/email", async (c) => {
+      const user = await userForSession(db, getCookie(c, cookie));
+      if (!user) return c.json({ error: "Sign in to continue." }, 401);
+      if (!changeLimit(user.id)) return tooMany(c);
+      const body = z.object({ email: z.string().email().max(320), password: z.string().max(1000) }).parse(await c.req.json());
+      const email = body.email.toLowerCase();
+      const [u] = await db.query<{ password_hash: string; verified: boolean }>(
+        `select password_hash, email_verified_at is not null as verified from users where id = $1`, [user.id]);
+      // The current password first, so someone holding only the session learns nothing, not even whether an address has
+      // an account. 403, not 401: the web treats a 401 as signed out.
+      if (!u || !(await checkPassword(body.password, u.password_hash))) return c.json({ error: "That password is not right." }, 403);
+      if (email === user.email) return c.json({ error: "That is already your email address." }, 422);
+      if (await addressTaken(db, email, user.id)) return taken(c);
+
+      if (!u.verified) {
+        // Nobody has proved they own the current address, so nothing is lost by switching at once. Verification and reset
+        // links sent to it stop working: the address may be a stranger's (mistyped), so it must not be able to reset the
+        // password. The old address is not told, for the same reason.
+        try {
+          await db.transaction(async (tx) => {
+            await tx.query(`update users set email = $1 where id = $2`, [email, user.id]);
+            await tx.query(`delete from email_tokens where user_id = $1 and kind in ('verify_email', 'reset_password')`, [user.id]);
+          });
+        } catch (e) {
+          if (isTaken(e)) return taken(c);
+          throw e;
+        }
+        await sendVerification({ id: user.id, email });
+        return c.json({ changed: true });
+      }
+
+      // A confirmed address changes only when the new one is confirmed: until the link is opened, nothing changes.
+      // Asking again replaces the earlier link (issue deletes it).
+      const { token } = await issue(db, user.id, "change_email", { email });
+      await mail("change_email", { to: email, ...changeMail(origin, token) });
+      return c.json({ pending: true });
+    });
+
+    // Opening the link sent to the new address: no session needed, it may be opened on any device.
+    app.post("/api/auth/email/confirm", async (c) => {
+      if (!tokenLimit(clientKey(c))) return tooMany(c);
+      const { token } = z.object({ token: z.string().min(1).max(200) }).parse(await c.req.json());
+      let done: { newEmail: string; oldEmail: string; undo: string | null } | null;
+      try {
+        done = await db.transaction(async (tx) => {
+          const t = await spendHeld(tx, token, "change_email");
+          if (!t) return null;
+          // The address may have been taken, or put on hold, since the link was sent; rolling back keeps the link unspent.
+          if (await addressTaken(tx, t.email, t.user_id)) throw new AddressTaken();
+          const [old] = await tx.query<{ email: string; verified: boolean }>(
+            `select email, email_verified_at is not null as verified from users where id = $1 for update`, [t.user_id]);
+          // Opening the link proves the new address, so it is confirmed now. Sessions stay signed in.
+          await tx.query(`update users set email = $1, email_verified_at = now() where id = $2`, [t.email, t.user_id]);
+          // Verification links and codes were for the old address; they no longer mean anything.
+          await tx.query(`delete from email_tokens where user_id = $1 and kind = 'verify_email'`, [t.user_id]);
+          // A confirmed address that is replaced keeps a way back for 7 days: the answer to someone who took over the
+          // session and knew the password. The undo link is stored in this transaction, so the change never happens without
+          // it and the old address is held from the moment it is released. Earlier undo links are kept: each confirmed
+          // change leaves its own way back, and the oldest one wins (see the undo route).
+          const undo = old!.verified ? await addToken(tx, t.user_id, "undo_email_change", { email: old!.email, minutes: UNDO_DAYS * 24 * 60 }) : null;
+          return { newEmail: t.email, oldEmail: old!.email, undo: undo?.token ?? null };
+        });
+      } catch (e) {
+        if (isTaken(e)) return taken(c);
+        throw e;
+      }
+      if (!done) return c.json({ error: DEAD_LINK }, 400);
+      if (done.undo) await mail("undo_email_change", { to: done.oldEmail, ...changedMail(origin, done.undo, done.newEmail) });
+      return c.json({ email: done.newEmail });
+    });
+
+    // Opening the undo link sent to the old address: no session needed.
+    app.post("/api/auth/email/undo", async (c) => {
+      if (!tokenLimit(clientKey(c))) return tooMany(c);
+      const { token } = z.object({ token: z.string().min(1).max(200) }).parse(await c.req.json());
+      let restored: { user_id: string; email: string } | null;
+      try {
+        restored = await db.transaction(async (tx) => {
+          const t = await spendHeld(tx, token, "undo_email_change");
+          if (!t) return null;
+          // The old address comes back, confirmed (it was confirmed when it was replaced). The password is turned off
+          // (PASSWORD_OFF) and every session ends: whoever made the change may know the password and hold a session.
+          await tx.query(`update users set email = $1, email_verified_at = now(), password_hash = $2 where id = $3`, [t.email, PASSWORD_OFF, t.user_id]);
+          await tx.query(`delete from sessions where user_id = $1`, [t.user_id]);
+          // Every other unused token of the person ends, except undo links older than this one: the oldest undo wins. After
+          // A→B→C, B's link cannot undo A's (A's link survives it), while A's link ends B's.
+          await tx.query(
+            `delete from email_tokens where user_id = $1 and used_at is null and not (kind = 'undo_email_change' and created_at < $2::timestamptz)`,
+            [t.user_id, t.created_at]);
+          return t;
+        });
+      } catch (e) {
+        // Only a unique-index race can reach here: the hold keeps the address from everyone else.
+        if (isTaken(e)) return taken(c);
+        throw e;
+      }
+      if (!restored) return c.json({ error: UNDO_DEAD }, 400);
+      const reset = await issue(db, restored.user_id, "reset_password");
+      await mail("reset_password", { to: restored.email, ...resetMail(origin, reset.token) });
+      return c.json({ email: restored.email });
     });
   }
 
