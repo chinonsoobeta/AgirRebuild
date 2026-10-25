@@ -140,3 +140,9 @@ describe("the old styles", () => {
     expect(base).toMatch(/@media\s*\(prefers-reduced-motion:\s*reduce\)/);
   });
 });
+
+describe("the deal path at narrow widths", () => {
+  it("keeps wrapped rows apart, so a step's line and marker never cross the step above", () => {
+    expect(base).toMatch(/\.path\{[^}]*row-gap:(2[4-9]|3\d)px/);
+  });
+});
