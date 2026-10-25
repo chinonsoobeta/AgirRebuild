@@ -224,7 +224,7 @@ export function Audit({ dealId }: { dealId: string }) {
           </table>
           <div className="card-foot row between">
             <span className="small muted">
-              {t("audit.shown", { n: shown.length, m: matching.length, filtered })}
+              {t("audit.shown", { n: shown.length, m: matching.length, filtered, more: events.hasNextPage })}
               {events.hasNextPage && ` ${t("audit.capped")}`}
             </span>
             <div className="row">
