@@ -1,1 +1,6 @@
 /* Styles for the audit area: design tokens only (var(--…)), no literal colours. */
+.audit-head{margin-bottom:0}
+.audit-head .lead{margin-top:8px}
+.audit-checked{margin-top:8px;max-width:72ch}
+.audit-search{flex:1 1 280px}
+.audit-when{white-space:nowrap}

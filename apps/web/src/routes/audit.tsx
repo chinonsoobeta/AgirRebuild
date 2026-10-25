@@ -1,7 +1,9 @@
 import { THRESHOLDS, FIELD_BY_KEY } from "@agir/contracts";
-import { useMutation, useQuery } from "@tanstack/react-query";
+import { useQuery } from "@tanstack/react-query";
+import { useState } from "react";
 import { api, type AuditEvent } from "../api";
-import { DealFrame, StatusTag, useDeal, useSession } from "../components/ui";
+import { DealFrame, useDeal, useSession } from "../components/ui";
+import { Tag } from "../components/kit";
 import { useI18n, type I18n } from "../i18n";
 
 export function describeEvent(i: I18n, e: AuditEvent): string {
@@ -111,41 +113,108 @@ export function describeEvent(i: I18n, e: AuditEvent): string {
   }
 }
 
+export type AuditCategory = "values" | "documents" | "runs" | "reports" | "sharing";
+const CATEGORIES: readonly AuditCategory[] = ["values", "documents", "runs", "reports", "sharing"];
+
+/** The chip an action belongs to; null means it shows only under Everything. */
+export function categoryOf(action: string): AuditCategory | null {
+  const [head] = action.split(".");
+  if (head === "assumption" || head === "assumptions" || head === "figure" || head === "label") return "values";
+  if (head === "document") return "documents";
+  if (head === "run") return "runs";
+  if (head === "decision" || head === "artifact" || head === "logo") return "reports";
+  if (head === "share" || head === "invite" || head === "client" || head === "review" || head === "member") return "sharing";
+  return null;
+}
+
+const PAGE = 50;
+/** The API returns at most this many events, newest first. */
+const LOADED_MAX = 500;
+const shortHash = (h: string) => `${h.slice(0, 4)} ${h.slice(4, 8)} ${h.slice(8, 12)}…`;
+
 export function Audit({ dealId }: { dealId: string }) {
   const i = useI18n();
   const { t, f } = i;
   const { workspaceId } = useSession();
   const deal = useDeal(dealId);
+  const [category, setCategory] = useState<AuditCategory | "all">("all");
+  const [q, setQ] = useState("");
+  const [limit, setLimit] = useState(PAGE);
   const events = useQuery({ queryKey: ["audit", dealId], queryFn: () => api.get<AuditEvent[]>(`/deals/${dealId}/audit`) });
-  const verify = useMutation({ mutationFn: () => api.get<{ ok: boolean; events: number; broken_at: number | null }>(`/workspaces/${workspaceId}/audit/verify`) });
+  // fn_verify_audit_chain walks every event in the installation, in order: ok, how many it read, and where it stopped.
+  const verify = useQuery({
+    queryKey: ["audit-verify", workspaceId],
+    queryFn: () => api.get<{ ok: boolean; events: number; broken_at: number | null }>(`/workspaces/${workspaceId}/audit/verify`),
+  });
   if (!deal.data) return <p className="muted">{t("common.loading")}</p>;
+  const o = deal.data;
+  const who = (e: AuditEvent) => e.actor ?? (e.action === "share.opened" ? t("audit.someone") : t("audit.worker"));
+  const all = (events.data ?? []).map((e) => ({ e, text: describeEvent(i, e) }));
+  const needle = q.trim().toLowerCase();
+  const matching = all.filter(({ e, text }) => (category === "all" || categoryOf(e.action) === category)
+    && (!needle || `${text} ${who(e)} ${e.hash}`.toLowerCase().includes(needle)));
+  const shown = matching.slice(0, limit);
+  const filtered = category !== "all" || Boolean(needle);
+  const v = verify.data;
   return (
     <>
-      <DealFrame o={deal.data} active="audit" />
-      <div className="spread">
-        <div className="stack" style={{ gap: 4 }}>
-          <h2 className="h-section">{t("audit.title")}</h2>
-          <p className="small muted">{t("audit.body")}</p>
+      <DealFrame o={o} active="audit" />
+      <div className="stack audit">
+        <div className="page-head audit-head">
+          <div>
+            <h2 className="h1">{t("audit.title")}</h2>
+            <p className="lead">{t("audit.lead")}</p>
+            {v && <p className="small muted audit-checked">{t("audit.checked", { ok: v.ok, n: v.events, at: v.broken_at })}</p>}
+            {verify.error && <p className="small muted audit-checked" role="alert">{t("audit.verifyFailed")}</p>}
+          </div>
+          <div className="row">
+            {v ? <Tag tone={v.ok ? "pass" : "stop"}>{v.ok ? t("audit.intact", { n: v.events }) : t("audit.broken", { n: v.broken_at })}</Tag>
+              : verify.isFetching ? <Tag>{t("audit.checking")}</Tag> : null}
+            <button className="btn quiet" type="button" disabled={verify.isFetching} onClick={() => void verify.refetch()}>{t("audit.verifyAgain")}</button>
+          </div>
         </div>
+
         <div className="row">
-          {verify.data && (verify.data.ok ? <StatusTag tone="pass">{t("audit.intact", { n: verify.data.events })}</StatusTag> : <StatusTag tone="stop">{t("audit.broken", { n: verify.data.broken_at })}</StatusTag>)}
-          <button className="btn small" type="button" onClick={() => verify.mutate()}>{t("audit.verify")}</button>
+          <label className="search audit-search">
+            <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" aria-hidden="true"><circle cx="11" cy="11" r="7" /><path d="M20 20l-3.5-3.5" /></svg>
+            <input className="input" type="search" value={q} placeholder={t("audit.searchHint")} aria-label={t("audit.searchLabel")} onChange={(e) => { setQ(e.target.value); setLimit(PAGE); }} />
+          </label>
+          <div className="chips" role="group" aria-label={t("audit.chipsLabel")}>
+            {(["all", ...CATEGORIES] as const).map((c) => (
+              <button key={c} className={c === category ? "chip on" : "chip"} type="button" aria-pressed={c === category} onClick={() => { setCategory(c); setLimit(PAGE); }}>
+                {t(`audit.cat.${c}`)}
+              </button>
+            ))}
+          </div>
+        </div>
+
+        <div className="card scroll">
+          <table className="table">
+            <thead><tr><th scope="col">{t("audit.col.event")}</th><th scope="col">{t("audit.col.who")}</th><th scope="col">{t("audit.col.when")}</th><th scope="col">{t("audit.col.hash")}</th></tr></thead>
+            <tbody>
+              {shown.map(({ e, text }) => (
+                <tr key={e.seq}>
+                  <td>{text}<span className="sub">{t("audit.seq", { n: e.seq })}</span></td>
+                  <td>{who(e)}</td>
+                  <td className="muted audit-when">{f.date(e.created_at)}</td>
+                  <td className="hash" title={e.hash}>{shortHash(e.hash)}</td>
+                </tr>
+              ))}
+              {shown.length === 0 && events.data && <tr><td colSpan={4} className="muted">{t(filtered ? "audit.noMatch" : "audit.empty")}</td></tr>}
+            </tbody>
+          </table>
+          <div className="card-foot row between">
+            <span className="small muted">
+              {t("audit.shown", { n: shown.length, m: matching.length, filtered })}
+              {all.length >= LOADED_MAX && ` ${t("audit.capped", { n: LOADED_MAX })}`}
+            </span>
+            <div className="row">
+              {matching.length > shown.length && <button className="btn quiet sm" type="button" onClick={() => setLimit(limit + PAGE)}>{t("audit.older")}</button>}
+              {o.run && <a className="btn ghost sm" href={`/api/runs/${o.run.id}/audit-package`}>{t("audit.package")}</a>}
+            </div>
+          </div>
         </div>
       </div>
-      <table className="tbl">
-        <thead><tr><th style={{ width: 70 }}>#</th><th>{t("audit.col.event")}</th><th>{t("audit.col.who")}</th><th>{t("audit.col.when")}</th><th>{t("audit.col.hash")}</th></tr></thead>
-        <tbody>
-          {(events.data ?? []).map((e) => (
-            <tr key={e.seq}>
-              <td className="num faint">{e.seq}</td>
-              <td>{describeEvent(i, e)}</td>
-              <td className="small muted">{e.actor ?? (e.action === "share.opened" ? t("audit.someone") : t("audit.worker"))}</td>
-              <td className="small muted">{f.date(e.created_at)}</td>
-              <td className="num small faint">{e.hash.slice(0, 12)}</td>
-            </tr>
-          ))}
-        </tbody>
-      </table>
     </>
   );
 }

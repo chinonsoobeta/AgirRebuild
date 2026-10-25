@@ -132,6 +132,7 @@ describe("the audit trail", () => {
     expect(html).toContain("Showing the latest 100 of 120 events loaded");
     state.events = state.events.slice(0, 50);
     state.hooks = [];
+    render(createElement(Audit, { dealId: "d1" }));
     expect(button("Show older events")).toBeUndefined();
   });
 
