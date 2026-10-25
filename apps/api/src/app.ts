@@ -8,7 +8,7 @@ import { asUser, type BlobStore, type Db } from "@agir/db";
 import { breakeven, DRIVERS, driversFor, SALE_DRIVERS, EngineInputError, explore, grid, tornado, type DriverKey, type Shock } from "@agir/engine";
 import { canonicalItem, itemFold, kindOf } from "@agir/extraction";
 import { MAX_UPLOAD_BYTES } from "@agir/worker";
-import { checkPassword, createSession, endSession, hashPassword, rateLimiter, SESSION_DAYS, userForSession } from "./auth.ts";
+import { checkPassword, countSessions, createSession, endOtherSessions, endSession, hashPassword, rateLimiter, SESSION_DAYS, userForSession } from "./auth.ts";
 import { thresholdsView, auditPackage, clientViewer, createRun, dealOverview, hideClientEvents, HttpError, labelRefusal, regionGroups, reviewView, runView, sha256 } from "./services.ts";
 
 export type AppDeps = { db: Db; store: BlobStore; secureCookies: boolean; demoSignIn?: boolean; trustProxy?: boolean; now?: () => Date };
@@ -214,6 +214,20 @@ export function createApp({ db, store, secureCookies, demoSignIn = false, trustP
     return c.json({ user: c.get("user"), workspaces });
   });
 
+  app.post("/api/me/name", async (c) => {
+    const { name } = z.object({ name: z.string().min(1).max(120) }).parse(await c.req.json());
+    await as(c, (tx) => tx.query(`select fn_set_my_name($1)`, [name]));
+    return c.json({ ok: true });
+  });
+
+  // Sessions are read and ended with the service principal, as sign-out does; the session middleware checked this one.
+  app.get("/api/me/sessions", async (c) => c.json({ count: await countSessions(db, c.get("user").id) }));
+
+  app.post("/api/me/sessions/end-others", async (c) => {
+    const ended = await endOtherSessions(db, c.get("user").id, getCookie(c, COOKIE)!);
+    return c.json({ ended });
+  });
+
   app.get("/api/catalog", (c) =>
     c.json({ fields: FIELDS, groups: FIELD_GROUP_LABELS, metrics: METRICS, policy: POLICY_V1, policies: POLICIES }),
   );
@@ -290,6 +304,20 @@ export function createApp({ db, store, secureCookies, demoSignIn = false, trustP
     return c.json({ ok: true });
   });
 
+  app.post("/api/workspaces/:ws/name", async (c) => {
+    const ws = z.string().uuid().parse(c.req.param("ws"));
+    const { name } = z.object({ name: z.string().min(1).max(120) }).parse(await c.req.json());
+    await as(c, (tx) => tx.query(`select fn_rename_workspace($1, $2)`, [ws, name]));
+    return c.json({ ok: true });
+  });
+
+  app.post("/api/workspaces/:ws/review-grant/:userId/end", async (c) => {
+    const ws = z.string().uuid().parse(c.req.param("ws"));
+    const userId = z.string().uuid().parse(c.req.param("userId"));
+    await as(c, (tx) => tx.query(`select fn_end_review($1, $2)`, [ws, userId]));
+    return c.json({ ok: true });
+  });
+
   app.get("/api/workspaces/:ws/members", async (c) => {
     const rows = await as(c, (tx) =>
       tx.query(`select u.id, u.name, u.email, m.role, m.expires_at from workspace_members m join users u on u.id = m.user_id where m.workspace_id = $1 order by u.name`, [c.req.param("ws")]),
@@ -303,6 +331,13 @@ export function createApp({ db, store, secureCookies, demoSignIn = false, trustP
     return c.json({ ok: true });
   });
 
+  app.delete("/api/workspaces/:ws/members/:userId", async (c) => {
+    const ws = z.string().uuid().parse(c.req.param("ws"));
+    const userId = z.string().uuid().parse(c.req.param("userId"));
+    await as(c, (tx) => tx.query(`select fn_remove_member($1, $2)`, [ws, userId]));
+    return c.json({ ok: true });
+  });
+
   app.get("/api/workspaces/:ws/audit/verify", async (c) => {
     const [r] = await as(c, (tx) => tx.query(`select * from fn_verify_audit_chain()`));
     return c.json(r);
@@ -311,13 +346,15 @@ export function createApp({ db, store, secureCookies, demoSignIn = false, trustP
   // ---- Production counts (card 155): counts and durations per deal, never content; the owner only. ----------
   app.get("/api/workspaces/:ws/deal-metrics", async (c) => {
     const ws = z.string().uuid().parse(c.req.param("ws"));
-    const deals = await as(c, async (tx) => {
+    const { deals, archived } = await as(c, async (tx) => {
       const [m] = await tx.query<{ role: string }>(`select role from workspace_members where workspace_id = $1 and user_id = agir_uid()`, [ws]);
       if (m?.role !== "owner") throw new HttpError(403, "Only the workspace owner can see production counts.");
-      return tx.query<Record<string, unknown>>(`select m.*, d.name from deal_metrics m join deals d on d.id = m.deal_id where m.workspace_id = $1 order by d.created_at`, [ws]);
+      const deals = await tx.query<Record<string, unknown>>(`select m.*, d.name from deal_metrics m join deals d on d.id = m.deal_id where m.workspace_id = $1 order by d.created_at`, [ws]);
+      const [a] = await tx.query<{ n: number }>(`select count(*)::int as n from deals where workspace_id = $1 and archived_at is not null`, [ws]);
+      return { deals, archived: a?.n ?? 0 };
     });
     const summed = ["docs_pdf", "docs_xlsx", "docs_csv", "docs_docx", "docs_txt", "docs_deal_source", "docs_evidence", "docs_context", "docs_no_candidates", "figures_read", "figures_confirmed_from_suggestion", "figures_typed", "actions_until_runnable"];
-    const totals: Record<string, number> = { deals: deals.length };
+    const totals: Record<string, number> = { deals: deals.length, archived_deals: archived };
     for (const k of summed) totals[k] = deals.reduce((n, d) => n + Number(d[k] ?? 0), 0);
     return c.json({ deals, totals });
   });
