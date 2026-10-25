@@ -1,5 +1,5 @@
 import { describe, expect, test } from "vitest";
-import { addressedText, extractCandidates, verifyReading, READING_FAILURE, type NormalizedDocument, type Reading } from "../src/index.ts";
+import { addressedText, extractCandidates, consolidate, checkArithmetic, verifyReadings, verifyReading, READING_FAILURE, type NormalizedDocument, type Reading } from "../src/index.ts";
 import { SF_PER_M2 } from "@agir/numbers";
 const doc = (kind: NormalizedDocument["kind"]): NormalizedDocument => ({ kind, lines: [], tables: [], pageCount: null, needsOcr: false, fullText: "" });
 describe("addressed text", () => {
@@ -140,5 +140,52 @@ describe("Card 166: the verifier reads the quoted figure in context", () => {
   test.each(["Hard costs in 2024 dollars: 5,000,000", "Hard costs in 2024 dollars: $5,000,000"])("the fallback reader takes the amount, not the year, from %s", quote => {
     const document = { ...doc("txt"), fullText: quote, lines: [{ location: "line 1", text: quote }] };
     expect(extractCandidates(document).candidates.map(c => [c.fieldKey, c.value])).toEqual([["hard_cost", 5000000]]);
+  });
+});
+
+describe("Card 167: whole-building AI unit counts", () => {
+  const lines = ["Type A: 24 units", "Type B: 24 units", "Total units: 48", "Units: 7"];
+  const document = { ...doc("txt"), fullText: lines.join("\n"), lines: lines.map((text, i) => ({ location: `line ${i + 1}`, text })) };
+  const sources = [{ id: "d", name: "fiction.txt", document }];
+  const count = (item: string | null, line = 3): Reading => ({ ...reading, field: "unit_count", item, value: line === 4 ? 7 : line < 3 ? 24 : 48, unit_seen: "units", location: `line ${line}`, quote: lines[line - 1]! });
+
+  test.each([["total", 3], [null, 3], ["Total", 4]] as const)("verifies whole count %s at line %s", (item, line) => {
+    expect(verifyReading(count(item, line), sources)).toMatchObject({ outcome: "verified", candidate: { itemKey: null, value: line === 4 ? 7 : 48 } });
+  });
+  test.each([["total", 3], [null, 3], ["Total", 4]] as const)("checks whole count %s at line %s against the types", (item, line) => {
+    const candidates = [count("Type A", 1), count("Type B", 2), count(item, line)].flatMap(r => {
+      const result = verifyReading(r, sources);
+      return result.candidate ? [result.candidate] : [];
+    });
+    expect(checkArithmetic(consolidate(candidates, "CAD")).map(p => ({ itemKey: p.itemKey, value: p.value, check: p.check }))).toEqual([
+      { itemKey: null, value: line === 4 ? 7 : 48, check: line === 4
+        ? { outcome: "questions", note: "Please check: the unit types read add up to 48, the documents state 7" }
+        : { outcome: "confirms", note: "Checked: the unit types read add up to the stated total of 48" } },
+      { itemKey: "Type A", value: 24, check: undefined },
+      { itemKey: "Type B", value: 24, check: undefined },
+    ]);
+  });
+  test.each(["Total", "Grand Total", "Total Units", "Total Unit", "Units Total", "Total Unit Count", "Total Number of Units", "Building Total", "Total Logements", "Total des Logements", "Nombre total de logements", "Logements au Total", "  TÓTAL   UNITS :  ", "", " \t "])("normalizes whole-count item %j", item => {
+    expect(verifyReading(count(item), sources)).toMatchObject({ outcome: "verified", candidate: { itemKey: null } });
+  });
+  test.each(["All units", "Type A", "Totally renovated suites"])("preserves unit type %s", item => {
+    expect(verifyReading(count(item), sources)).toMatchObject({ outcome: "verified", candidate: { itemKey: item } });
+  });
+  test.each([null, "total"])("preserves monthly-rent item behavior for %s", item => {
+    const result = verifyReading({ ...count(item), field: "unit_rent_monthly", unit_seen: "$" }, sources);
+    expect(result).toMatchObject(item === null ? { outcome: READING_FAILURE.item } : { outcome: "verified", candidate: { itemKey: "total" } });
+  });
+  test.each([null, "Total"])("normalizes whole counts in conflicts for %s", item => {
+    const { field, note, confidence, ...value } = count(item);
+    const result = verifyReadings({ readings: [], conflicts: [{ field, item, values: [value], why: "Invented disagreement" }], not_used: [] }, sources);
+    expect(result.conflicts[0]).toMatchObject([{ outcome: "verified", candidate: { itemKey: null, note: "Invented disagreement" } }]);
+  });
+  test.each([
+    [{ location: "line 9" }, READING_FAILURE.address],
+    [{ quote: "Absent 48" }, READING_FAILURE.quote],
+    [{ value: 49 }, READING_FAILURE.value],
+    [{ unit_seen: "$" }, READING_FAILURE.unit],
+  ] as const)("still checks whole-count evidence %j", (change, outcome) => {
+    expect(verifyReading({ ...count(null), ...change }, sources)).toEqual({ outcome });
   });
 });
