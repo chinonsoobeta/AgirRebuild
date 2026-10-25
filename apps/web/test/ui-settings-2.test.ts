@@ -217,3 +217,16 @@ describe("plain counts", () => {
     expect(text(section(render(), "counts"))).not.toContain("needed typing");
   });
 });
+
+describe("a client's settings", () => {
+  it("leaves out the workspace's people, how values are reviewed and document reading, which a client does not see", () => {
+    state.role = "client";
+    const html = render();
+    for (const id of ["people", "review", "reading", "clients", "logo", "counts"]) {
+      expect(html).not.toContain(`id="${id}"`);
+      expect(html).not.toContain(`href="#${id}"`);
+    }
+    for (const id of ["workspace", "appearance", "thresholds", "roles", "account"]) expect(html).toContain(`id="${id}"`);
+    expect(text(html)).not.toContain("Everyone here can see every deal");
+  });
+});
