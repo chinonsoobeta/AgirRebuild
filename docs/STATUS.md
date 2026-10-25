@@ -305,7 +305,7 @@ own `ui/*` branch off `ui/redesign` and was merged back after the audit. Web onl
 | W10 | `ui/w10-explore` | Explore changes on the same five endpoints as before, with a heat grid |
 | W11 | `ui/w11-audit-compare` | The audit trail with the chain check, search and filters, and a new screen at `/deals/$dealId/compare` that compares two stored runs without recomputing anything |
 | U17 | `ui/u17-email-and-reset` | API only: email verification and password reset, single-use tokens stored as hashes in migration `0030`, a `Mailer` with a development file mailer. Branched from `main` at `3ca9877` |
-| W12 | `ui/w12-email` | The confirm-your-email and reset-password screens on top of U17. Built on `ui/redesign` as of W3 (`ae2a3a6`), so it is behind `ui/redesign` and will need the later cards merged in |
+| W12 | `ui/w12-email` | The confirm-your-email and reset-password screens on top of U17, with the finished `ui/redesign` merged in. Release gate passed on 2026-10-25 at `51a6bbd` (6018 tests in 37 files) |
 
 State of the branches: F1, F2, W1 to W11, U20 (the old styles removed, an accessibility pass) and U21-words (a
 wording and French pass) are merged into `ui/redesign`, followed by the fixes from a browser walk of every screen
@@ -314,6 +314,8 @@ anywhere. They touch sign-in and add a migration, so they need the owner's
 review (plan rule 7), and they must not reach production before there is a mail provider: on the U17 branch,
 development writes each email to the data folder's `mail/` directory and production sends nothing
 (`apps/api/src/main.ts` and `apps/api/src/mailer.ts` on that branch). Nothing in the app is gated on a verified email.
+Accounts made before U17 have never been sent a confirmation email, yet the signed-in confirm page says one was
+sent: decide whether they count as confirmed or get an email when U17 is deployed.
 
 The browser walk ran the app from the `ui/redesign` worktree with an empty data folder and no model key
 (`env -u ANTHROPIC_API_KEY AGIR_DATA_DIR=<empty folder> PORT=8792 npm run start`): every screen at 1360 and 900 px,
