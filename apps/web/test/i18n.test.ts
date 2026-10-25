@@ -1103,4 +1103,9 @@ describe("card 150 French action sentences", () => {
     }
     expect(fr.t("review.todoCount", { n: 2 })).toBe("2 points à régler avant de pouvoir lancer ce projet");
   });
+
+  it("names no count on the defaults button while none is ticked", () => {
+    expect(build("en", () => {}).t("review.acceptTickedDefaults", { n: 0 })).toBe("Accept the ticked defaults");
+    expect(build("fr", () => {}).t("review.acceptTickedDefaults", { n: 0 })).toBe("Accepter les valeurs par défaut cochées");
+  });
 });
