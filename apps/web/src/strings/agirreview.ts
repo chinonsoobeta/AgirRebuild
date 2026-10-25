@@ -37,7 +37,7 @@ export const en = {
   "agirreview.extended": (p) => `${p.name}'s access now ends on ${p.date}.`,
   "agirreview.end": "End access now",
   "agirreview.endWho": (p) => `End ${p.name}'s access now`,
-  "agirreview.endConfirm": (p) => `End ${p.name}'s access now? They can no longer open this workspace. What they confirmed stays, with their name.`,
+  "agirreview.endConfirm": (p) => `End ${p.name}'s access now? They can no longer open this workspace. What they confirmed stays, marked as confirmed by Agir review.`,
 } satisfies Record<string, Entry>;
 
 export const fr: FrenchOf<typeof en> = {
@@ -76,5 +76,5 @@ export const fr: FrenchOf<typeof en> = {
   "agirreview.extended": (p) => `L'accès de ${p.name} prend maintenant fin le ${p.date}.`,
   "agirreview.end": "Mettre fin à l'accès",
   "agirreview.endWho": (p) => `Mettre fin maintenant à l'accès de ${p.name}`,
-  "agirreview.endConfirm": (p) => `Mettre fin maintenant à l'accès de ${p.name}\u00a0? Cette personne ne pourra plus ouvrir cet espace. Ce qu'elle a confirmé reste, avec son nom.`,
+  "agirreview.endConfirm": (p) => `Mettre fin maintenant à l'accès de ${p.name}\u00a0? Cette personne ne pourra plus ouvrir cet espace. Ce qu'elle a confirmé reste, marqué comme confirmé par la révision Agir.`,
 };

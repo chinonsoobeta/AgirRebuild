@@ -306,9 +306,11 @@ export function Settings() {
     onSuccess: async (r) => { await qc.invalidateQueries({ queryKey: ["me"] }); setWorkspace(r.id); },
   });
   // Card Z1: the workspace name, removing someone, your own name and the browsers you are signed in on.
-  const rename = useMutation({ mutationFn: (name: string) => api.post(`/workspaces/${workspaceId}/name`, { name }), onSuccess: () => qc.invalidateQueries({ queryKey: ["me"] }) });
+  // Which name was just saved, so its form can say so until it is edited again.
+  const [saved, setSaved] = useState<"ws" | "me" | null>(null);
+  const rename = useMutation({ mutationFn: (name: string) => api.post(`/workspaces/${workspaceId}/name`, { name }), onSuccess: () => { setSaved("ws"); return qc.invalidateQueries({ queryKey: ["me"] }); } });
   const removeMember = useMutation({ mutationFn: (id: string) => api.del(`/workspaces/${workspaceId}/members/${id}`, {}), onSuccess: () => qc.invalidateQueries({ queryKey: ["members"] }) });
-  const myName = useMutation({ mutationFn: (name: string) => api.post(`/me/name`, { name }), onSuccess: () => qc.invalidateQueries({ queryKey: ["me"] }) });
+  const myName = useMutation({ mutationFn: (name: string) => api.post(`/me/name`, { name }), onSuccess: () => { setSaved("me"); return qc.invalidateQueries({ queryKey: ["me"] }); } });
   const sessions = useQuery({ queryKey: ["sessions"], queryFn: () => api.get<{ count: number }>(`/me/sessions`) });
   const [ended, setEnded] = useState<number | null>(null);
   const endOthers = useMutation({
@@ -316,7 +318,7 @@ export function Settings() {
     onSuccess: (r: { ended: number }) => { setEnded(r.ended); return qc.invalidateQueries({ queryKey: ["sessions"] }); },
   });
   const count = typeof sessions.data?.count === "number" ? sessions.data.count : null;
-  const nameField = (id: string, label: string, value: string | undefined, save: (name: string) => unknown, pending: boolean) => (
+  const nameField = (which: "ws" | "me", id: string, label: string, value: string | undefined, save: (name: string) => unknown, pending: boolean) => (
     <form
       className="row"
       style={{ alignItems: "flex-end" }}
@@ -327,8 +329,9 @@ export function Settings() {
       }}
     >
       <div className="field" style={{ flex: "1 1 260px", maxWidth: 360 }}><label htmlFor={id}>{label}</label>
-        <input className="input" id={id} name="name" required maxLength={120} key={value} defaultValue={value} /></div>
+        <input className="input" id={id} name="name" required maxLength={120} key={value} defaultValue={value} onChange={() => saved === which && setSaved(null)} /></div>
       <button className="btn quiet" type="submit" disabled={pending}>{t("common.save")}</button>
+      {saved === which && <span className="small muted" role="status">{t("settings.saved")}</span>}
     </form>
   );
   const ws = me.workspaces.find((w) => w.id === workspaceId);
@@ -339,7 +342,7 @@ export function Settings() {
   const sections: { id: string; nav: string; show: boolean; node: ReactNode }[] = [
     { id: "workspace", nav: t("settings.nav.workspace"), show: true, node: (
       <Section id="workspace" title={t("settings.nav.workspace")} body={t("settings.ws.body")}>
-        {owner && nameField("ws-name", t("settings.ws.name"), ws?.name, (name) => rename.mutate(name), rename.isPending)}
+        {owner && nameField("ws", "ws-name", t("settings.ws.name"), ws?.name, (name) => rename.mutate(name), rename.isPending)}
         <ErrorText error={rename.error} />
         <div>
           {!owner && <Row title={t("settings.ws.name")} body={ws?.name} />}
@@ -493,7 +496,7 @@ export function Settings() {
     { id: "counts", nav: t("settings.nav.counts"), show: owner, node: <CountsPanel workspaceId={workspaceId} /> },
     { id: "account", nav: t("settings.nav.account"), show: true, node: (
       <Section id="account" title={t("settings.nav.account")} body={t("settings.ac.body")}>
-        {nameField("ac-name", t("settings.ac.name"), me.user.name, (name) => myName.mutate(name), myName.isPending)}
+        {nameField("me", "ac-name", t("settings.ac.name"), me.user.name, (name) => myName.mutate(name), myName.isPending)}
         <ErrorText error={myName.error} />
         <dl className="set-dl">
           <div><dt className="label">{t("settings.ac.email")}</dt><dd>{me.user.email}</dd></div>

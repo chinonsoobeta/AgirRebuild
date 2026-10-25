@@ -1,6 +1,7 @@
 import { Link, useNavigate, useRouterState } from "@tanstack/react-router";
 import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
 import { createContext, useContext, useEffect, useRef, useState, type FormEvent, type ReactNode } from "react";
+import { CURRENCY_NAMES, type Currency } from "@agir/contracts";
 import { api, ApiError, type DealOverview, type Me, type Tone } from "../api";
 import { dealStatus, useI18n, type I18n } from "../i18n";
 import * as I from "./icons";
@@ -253,6 +254,7 @@ export function dealFacts(i: Pick<I18n, "t" | "f">, units: number | null | undef
 export function DealFrame({ o, active }: { o: DealOverview; active: string }) {
   const i = useI18n();
   const { t, L } = i;
+  const currency = CURRENCY_NAMES[o.deal.currency as Currency];
   const { role } = useSession();
   const navigate = useNavigate();
   const qc = useQueryClient();
@@ -279,7 +281,10 @@ export function DealFrame({ o, active }: { o: DealOverview; active: string }) {
             {t("shell.allDeals")}
           </Link>
           <h1 className="deal-name">{o.deal.name}</h1>
-          <p className="meta">{[L.asset(o.deal.asset_type), L.place(o.deal.location, o.deal.province), dealFacts(i, o.units, o.exit), L.currency(o.deal.currency)].filter(Boolean).join(" · ")}</p>
+          {/* As the boards: "Edmonton, Alberta · 6 rental units, kept and refinanced · amounts in Canadian dollars". The asset type
+              stays until the units and the exit say what the deal is, as on the deals home. */}
+          <p className="meta">{[L.place(o.deal.location, o.deal.province), o.units != null && o.exit != null ? "" : L.asset(o.deal.asset_type), dealFacts(i, o.units, o.exit),
+            currency ? t("deals.amountsIn", { c: currency[i.lang === "fr" ? 1 : 0] }) : L.currency(null)].filter(Boolean).join(" · ")}</p>
           {o.copiedFrom && (
             <p className="small muted variant-of">{t("copy.variantOf")} <Link to="/deals/$dealId/review" params={{ dealId: o.copiedFrom.id }}>{o.copiedFrom.name}</Link></p>
           )}
