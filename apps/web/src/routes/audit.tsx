@@ -25,7 +25,7 @@ export function describeEvent(i: I18n, e: AuditEvent): string {
     case "document.duplicate_ignored": return fr ? `A téléversé ${p.name} de nouveau\u00a0; la copie n'a pas été ajoutée` : `Uploaded ${p.name} again; the copy was not added`;
     case "document.verified": return fr ? "A vérifié un document\u00a0: type, taille et empreinte" : "Checked a document: type, size and fingerprint";
     case "document.rejected": return fr ? `A refusé un document\u00a0: ${i.msg(p.reason)}` : `Rejected a document: ${p.reason}`;
-    case "document.extracted": return fr ? `A lu un document\u00a0: ${p.candidates} valeurs trouvées` : `Read a document: ${p.candidates} values found`;
+    case "document.extracted": return fr ? `A lu un document\u00a0: ${i.t("docs.values", { n: p.candidates })}` : `Read a document: ${i.t("docs.values", { n: p.candidates })}`;
     case "document.role_set": {
       const role = (value: unknown) => i.t(value === "deal_source" ? "docs.role.deal_source" : value === "evidence" ? "docs.role.evidence" : value === "context" ? "docs.role.context" : "docs.role.auto");
       return i.t("docs.role.changed", { old: role(p.old), new: role(p.new) });
