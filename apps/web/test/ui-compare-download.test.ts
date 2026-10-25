@@ -180,8 +180,12 @@ describe("downloading a comparison", () => {
       expect(row).toHaveLength(5);
       if (shown.cells.length === 0) { expect(row).toEqual([shown.label, "", "", "", ""]); return; }
       expect(row[0]).toBe(shown.label === "Refinance loan" ? `${shown.label} (${shown.sub})` : shown.label);
-      expect(row.slice(1, 4)).toEqual(shown.cells);
+      // A cell that starts like a formula carries a leading apostrophe in the file and nowhere else.
+      expect(row.slice(1, 4).map((c) => c.replace(/^'(?=[=+\-@])/, ""))).toEqual(shown.cells);
     });
+    const signed = data.flat().filter((c) => /^'?[+-][\d$]/.test(c));
+    expect(signed.length).toBeGreaterThan(0);
+    expect(signed.every((c) => c.startsWith("'"))).toBe(true);
     const tax = data.find((r) => r[0] === "Property tax (per year)")!;
     expect(tax[4]).toBe(table.find((r) => r.label === "Property tax (per year)")!.sub);
     expect(tax[4]).toContain('assessment notice, "2026".pdf, page 1');

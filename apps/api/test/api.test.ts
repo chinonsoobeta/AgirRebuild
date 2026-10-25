@@ -3231,7 +3231,7 @@ describe("card 94c table proposals", () => {
       for (const p of r.proposals) { expect(p.options).toEqual([]); expect(p.unavailable).toContain("past its re-check date"); }
     } finally {date="2026-10-20";}
   });
-  test("requires an explicit province, despite free-text Halifax", async () => {
+  test("a deal outside Canada gets no table, even with free-text Halifax", async () => {
     const r=await review(await make());
     expect(r.proposals).toHaveLength(3);
     for (const p of r.proposals) {expect(p.options).toEqual([]);expect(p.unavailable).toBe("these tables are for deals in Canada; enter the amount yourself");}

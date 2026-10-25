@@ -160,9 +160,12 @@ export function comparisonRows(i: I18n, d: RunDiff, to: RunView, from: RunView):
 /** The footer sentence: every figure is as recorded, and the refinance loan, when shown, is named as the one worked out again. */
 export const compareFoot = (i: I18n, rows: readonly CompareRow[]) => i.t(rows.some((r) => r.kind === "row" && r.key === "refinance_loan") ? "compare.footRefinance" : "compare.foot");
 
-/** One CSV field, quoted when it needs to be; a cell that a spreadsheet would read as a formula starts with an apostrophe. */
+/**
+ * One CSV field, quoted when it needs to be. A cell a spreadsheet would read as a formula starts with an apostrophe: one that begins
+ * with =, +, -, @, a tab or a return. That includes every signed change, so "+135 bps" opens as the text on screen, not an error.
+ */
 const csvField = (value: string) => {
-  const safe = /^[=@\t\r]/.test(value) || /^[+-](?![\d$])/.test(value) ? `'${value}` : value;
+  const safe = /^[=+\-@\t\r]/.test(value) ? `'${value}` : value;
   return /[",\r\n]/.test(safe) || /^\s|\s$/.test(safe) ? `"${safe.replaceAll('"', '""')}"` : safe;
 };
 const fileSafe = (name: string) => name.normalize("NFD").replace(/[\u0300-\u036f]/g, "").toLowerCase().replace(/[^a-z0-9]+/g, "-").replace(/^-+|-+$/g, "") || "deal";
