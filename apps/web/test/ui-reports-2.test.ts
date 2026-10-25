@@ -153,7 +153,7 @@ describe("extending reviewer access (card X5)", () => {
   it("an active reviewer row has Extend, which posts the grant with that email", async () => {
     s.interactive = true;
     s.members = [
-      { id: "r1", name: "Riley Reviewer", email: "riley@example.test", role: "reviewer", expires_at: "2099-06-15T12:00:00Z" },
+      { id: "r1", name: "Riley Reviewer", email: "riley@example.test", role: "reviewer", expires_at: new Date(Date.now() + 3 * 86_400_000).toISOString() },
       { id: "r2", name: "Old Reviewer", email: "old@example.test", role: "reviewer", expires_at: "2020-01-01T12:00:00Z" },
     ];
     render(createElement(ReviewAccess));
@@ -167,5 +167,24 @@ describe("extending reviewer access (card X5)", () => {
     await s.nodes.find((n) => n.tag === "button" && n.props.name === "extend-confirm")!.props.onClick();
     expect(vi.mocked(api.post).mock.calls).toContainEqual(["/workspaces/ws/review-grant", { email: "riley@example.test", days: 30 }]);
     expect(text(render(createElement(ReviewAccess)))).toMatch(/Riley.*now ends on/);
+  });
+  it("offers only the lengths that end later than the access does now, and names the new end on the button", async () => {
+    s.interactive = true;
+    const inDays = (n: number) => new Date(Date.now() + n * 86_400_000).toISOString();
+    s.members = [
+      { id: "r1", name: "Riley Reviewer", email: "riley@example.test", role: "reviewer", expires_at: inDays(10) },
+      { id: "r3", name: "Long Reviewer", email: "long@example.test", role: "reviewer", expires_at: inDays(60) },
+    ];
+    render(createElement(ReviewAccess));
+    const ext = s.nodes.filter((n) => n.tag === "button" && n.props.name === "extend");
+    expect(ext.map((b) => b.props.value)).toEqual(["r1"]);
+    await ext[0]!.props.onClick();
+    const html = render(createElement(ReviewAccess));
+    const row = text(html.slice(html.indexOf("Riley Reviewer")));
+    expect(row).not.toMatch(/\b7 days\b/);
+    expect(row).toContain("14 days");
+    expect(row).toContain("30 days");
+    const confirm = s.nodes.find((n) => n.tag === "button" && n.props.name === "extend-confirm")!;
+    expect(label(confirm)).toMatch(/^Extend to [A-Z][a-z]+ \d{1,2}, \d{4}$/);
   });
 });
