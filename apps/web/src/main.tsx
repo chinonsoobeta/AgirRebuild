@@ -6,6 +6,7 @@ import { createRootRoute, createRoute, createRouter, Navigate, Outlet, RouterPro
 import { SessionGate, Shell } from "./components/ui";
 import { Login, Signup } from "./routes/auth";
 import { Deals } from "./routes/deals";
+import { NewDeal } from "./routes/newdeal";
 import { Documents } from "./routes/documents";
 import { Review } from "./routes/review";
 import { Run } from "./routes/run";
@@ -40,6 +41,7 @@ const app = createRoute({
 });
 const index = createRoute({ getParentRoute: () => app, path: "/", component: () => <Navigate to="/deals" /> });
 const deals = createRoute({ getParentRoute: () => app, path: "/deals", component: Deals });
+const newDeal = createRoute({ getParentRoute: () => app, path: "/deals/new", component: NewDeal });
 const settings = createRoute({ getParentRoute: () => app, path: "/settings", component: Settings });
 const deal = createRoute({ getParentRoute: () => app, path: "/deals/$dealId", component: () => <Outlet /> });
 const step = <P extends string>(path: P, C: (p: { dealId: string }) => React.JSX.Element) =>
@@ -54,6 +56,7 @@ const routeTree = root.addChildren([
   app.addChildren([
     index,
     deals,
+    newDeal,
     settings,
     deal.addChildren([dealIndex, step("documents", Documents), step("review", Review), step("run", Run), step("decision", DecisionStep), step("reports", Reports), step("audit", Audit), step("explore", Explore)]),
   ]),
