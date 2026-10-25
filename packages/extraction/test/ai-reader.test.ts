@@ -199,3 +199,28 @@ describe("Card 168: fallback reader word ranges", () => {
     expect(extractCandidates(document).candidates.filter(c => c.fieldKey === "lease_up_months").map(c => c.value)).toEqual(expected);
   });
 });
+
+describe("Card 169: a field's usual range settles three digits with review", () => {
+  test.each([
+    ["Rent: $29.009/sf/year", "rent_psf_annual", "Retail", "$/sf", 29.009, "verified", true],
+    ["Rent: $29.009/sf/year", "rent_psf_annual", "Retail", "$/sf", 29009, "verified", false],
+    ["Rent: $29,009/sf/year", "rent_psf_annual", "Retail", "$/sf", 29.009, "verified", true],
+    ["Rent: $1.250/sf/year", "rent_psf_annual", "Retail", "$/sf", 1.25, READING_FAILURE.value, false],
+    ["Rent: $1.250/sf/year", "rent_psf_annual", "Retail", "$/sf", 1250, "verified", false],
+    ["Rent: $250.500/sf/year", "rent_psf_annual", "Retail", "$/sf", 250.5, READING_FAILURE.value, false],
+    ["Rent: $29.50/sf/year", "rent_psf_annual", "Retail", "$/sf", 29.5, "verified", false],
+    ["Rent: $1.250 per month", "unit_rent_monthly", "Type A", "$", 1250, "verified", false],
+    ["Rent: $1.250 per month", "unit_rent_monthly", "Type A", "$", 1.25, READING_FAILURE.value, false],
+    ["Rent: $2.450 per month", "unit_rent_monthly", "Type A", "$", 2450, "verified", false],
+    ["Minimum DSCR: 1.208", "min_dscr_covenant", null, "x", 1.208, "verified", false],
+  ] as const)("%s for %s = %s %s %s %s %s", (quote, field, item, unit_seen, value, outcome, ambiguous) => {
+    const document = { ...doc("txt"), fullText: quote, lines: [{ location: "line 1", text: quote }] };
+    const got = verifyReading({ ...reading, quote, field, item, unit_seen, value }, [{ ...documents[0]!, document }]);
+    expect(got.outcome).toBe(outcome);
+    if (outcome === "verified") {
+      expect(got.candidate).toMatchObject({ value });
+      if (ambiguous) expect(got.candidate).toHaveProperty("ambiguous", true);
+      else expect(got.candidate).not.toHaveProperty("ambiguous");
+    }
+  });
+});
