@@ -379,7 +379,8 @@ describe("share links on the web (task 86b)", () => {
   it("a public 404 shows only the API sentence", async () => {
     queryState.shared = undefined;
     queryState.shareError = new ApiError(404, "This link is not available. It may have expired or been revoked.");
-    const text = (await sharePage()).replace(/<[^>]*>/g, "").trim();
+    // The top bar keeps the language switch; the page's main region holds only the API sentence.
+    const text = (await sharePage()).match(/<main[^>]*>([\s\S]*)<\/main>/)![1]!.replace(/<[^>]*>/g, "").trim();
     expect(text).toBe("This link is not available. It may have expired or been revoked.");
   });
   it.each(["en", "fr"] as const)("an anonymous opening uses the link-holder actor label in %s", (lang) => {
