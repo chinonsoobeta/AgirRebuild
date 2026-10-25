@@ -1,5 +1,6 @@
 import { Fragment, useState } from "react";
 import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
+import { Link } from "@tanstack/react-router";
 import { api, type Artifact, type ShareLink, type ShareTerm } from "../api";
 import { Banner, canEdit, DealFrame, ErrorText, StatusTag, useDeal, useSession } from "../components/ui";
 import { Seg, Tag } from "../components/kit";
@@ -16,6 +17,11 @@ const KINDS = [
 ] as const;
 const TERMS: ShareTerm[] = ["24h", "7d", "30d", "none"];
 const newest = (a: Artifact, b: Artifact) => (a.created_at < b.created_at ? 1 : -1);
+/** The order the shared page lists files in (card R2): by report, then PDF before Word, then English before French. */
+const SHARE_KINDS = ["build_decision", "lender_package", "partner_memo", "ic_memo", "model_export"];
+const SHARE_FORMATS = ["pdf", "docx", "xlsx"];
+const shareOrder = (a: Artifact, b: Artifact) => SHARE_KINDS.indexOf(a.kind) - SHARE_KINDS.indexOf(b.kind)
+  || SHARE_FORMATS.indexOf(a.format) - SHARE_FORMATS.indexOf(b.format) || Number(a.lang === "fr") - Number(b.lang === "fr") || newest(a, b);
 
 export function Reports({ dealId }: { dealId: string }) {
   const { t, f, lang } = useI18n();
@@ -35,17 +41,18 @@ export function Reports({ dealId }: { dealId: string }) {
   });
   const links = useQuery({ queryKey: ["share-links", dealId], queryFn: () => api.get<ShareLink[]>(`/deals/${dealId}/share-links`) });
   // Sharing is open to every staff role (card 86): a link is read-only and shows no more than its maker can see.
-  // A client (card 89) may not share.
-  const [sharing, setSharing] = useState<string | null>(null);
+  // A client (card 89) may not share. A link shares the ticked files of the current run (card R2); every one starts ticked.
+  const [unticked, setUnticked] = useState<string[]>([]);
   const toPicker = () => {
-    const el = typeof document === "undefined" ? null : document.getElementById("rep-share-file");
-    el?.scrollIntoView({ block: "center" });
-    el?.focus();
+    if (typeof document === "undefined") return;
+    document.getElementById("rep-share")?.scrollIntoView({ block: "start" });
+    document.getElementById("rep-share-pick")?.focus();
   };
   const [term, setTerm] = useState<ShareTerm>("7d");
   const [made, setMade] = useState<string | null>(null);
   const share = useMutation({
-    mutationFn: (b: { artifact: string; term: ShareTerm }) => api.post<{ id: string; url: string; expiresAt: string | null }>(`/artifacts/${b.artifact}/share-links`, { term: b.term }),
+    mutationFn: (b: { run: string; artifacts: string[]; term: ShareTerm }) =>
+      api.post<{ id: string; url: string; expiresAt: string | null }>(`/runs/${b.run}/share-links`, { term: b.term, artifacts: b.artifacts }),
     onSuccess: (r) => { setMade(window.location.origin + r.url); return qc.invalidateQueries({ queryKey: ["share-links", dealId] }); },
   });
   const revoke = useMutation({
@@ -67,9 +74,11 @@ export function Reports({ dealId }: { dealId: string }) {
   const outOfDate = (a: Artifact) => !o.run || a.run_id !== o.run.id || !o.run.fresh;
   const linkRows = links.data ?? [];
   const staff = role !== "client";
-  // Every ready file of this deal can be shared, newest first; the picker starts on the newest.
-  const shareable = all.filter((a) => a.status === "ready").sort(newest);
-  const sharedArt = shareable.find((a) => a.id === sharing) ?? shareable[0];
+  // The ready files of the current run can be shared, in the shared page's order.
+  const shareable = o.run ? all.filter((a) => a.status === "ready" && a.run_id === o.run!.id).sort(shareOrder) : [];
+  const chosen = shareable.filter((a) => !unticked.includes(a.id)).map((a) => a.id);
+  const tick = (id: string, on: boolean) => { setUnticked(on ? unticked.filter((x) => x !== id) : [...unticked, id]); setMade(null); share.reset(); };
+  const linkFile = (x: { kind: string; format: string; lang: string }) => t(x.lang === "fr" ? "reports.linkFileFr" : "reports.linkFile", { what: kind(x.kind), f: fmtName(x.format) });
   /** The language a card does not make by default: French on an English screen, English on a French one. */
   const otherLang = lang === "fr" ? "en" : "fr";
   const otherName = otherLang === "fr" ? t("reports.frDraft") : t("reports.englishVersion");
@@ -196,7 +205,6 @@ export function Reports({ dealId }: { dealId: string }) {
                       <div className="acts">
                         {a.status === "ready" && <a className="btn quiet sm" href={`/api/artifacts/${a.id}/file`}><I.Download />{t("common.download")}</a>}
                         {a.status === "ready" && a.format === "pdf" && <a className="btn ghost sm" href={`/api/artifacts/${a.id}/file?inline=1`} target="_blank" rel="noreferrer">{t("common.open")}</a>}
-                        {a.status === "ready" && staff && <button className="btn ghost sm" type="button" onClick={() => { setSharing(a.id); setMade(null); share.reset(); toPicker(); }}>{t("share.button")}</button>}
                       </div>
                     </td>
                   </tr>
@@ -212,21 +220,23 @@ export function Reports({ dealId }: { dealId: string }) {
             <div><h2 className="h2">{t("share.title")}</h2><p className="muted rep-share-lead">{t("reports.shareLead")}</p></div>
             <div className="card">
               <div className="card-pad stack tight">
-                {!sharedArt ? <p className="muted">{t("reports.shareNeedsFile")}</p> : (
+                {shareable.length === 0 || !o.run ? <p className="muted">{t("reports.shareNeedsFile")}</p> : (
                   <>
-                    <div className="field">
-                      <label htmlFor="rep-share-file">{t("reports.shareFile")}</label>
-                      <select id="rep-share-file" className="input rep-pick" value={sharedArt.id}
-                        onChange={(e) => { setSharing(e.target.value); setMade(null); share.reset(); }}>
-                        {shareable.map((a) => (
-                          <option key={a.id} value={a.id}>{t("reports.shareOption", { what: kind(a.kind), f: fmtName(a.format), l: langName(a), n: a.run_number })}</option>
-                        ))}
-                      </select>
-                    </div>
+                    <fieldset className="rep-pick">
+                      <legend className="label">{t("reports.shareWhat")}</legend>
+                      {shareable.map((a, n) => (
+                        <label key={a.id} className="check">
+                          <input type="checkbox" id={n === 0 ? "rep-share-pick" : undefined} value={a.id} checked={!unticked.includes(a.id)}
+                            onChange={(e) => tick(a.id, e.target.checked)} />
+                          <span>{[kind(a.kind), fmtName(a.format), langName(a)].join(" · ")}</span>
+                        </label>
+                      ))}
+                    </fieldset>
                     <span className="label" aria-hidden="true">{t("reports.term")}</span>
                     <div className="row">
                       <Seg label={t("reports.term")} value={term} onChange={setTerm} options={TERMS.map((x) => ({ value: x, label: t(`share.term.${x}`) }))} />
-                      <button className="btn primary" type="button" disabled={share.isPending} onClick={() => share.mutate({ artifact: sharedArt.id, term })}>{t("share.make")}</button>
+                      <button className="btn primary" type="button" disabled={share.isPending || chosen.length === 0}
+                        onClick={() => share.mutate({ run: o.run!.id, artifacts: chosen, term })}>{t("share.make")}</button>
                     </div>
                     {made ? (
                       <>
@@ -244,20 +254,21 @@ export function Reports({ dealId }: { dealId: string }) {
               {linkRows.length > 0 && (
                 <div className="scroll">
                   <table className="table">
-                    <thead><tr><th>{t("reports.col.report")}</th><th>{t("step.run")}</th><th>{t("share.by")}</th><th>{t("share.on")}</th><th>{t("share.expires")}</th><th className="r">{t("share.openings")}</th><th>{t("share.lastOpened")}</th><th>{t("reports.col.status")}</th><th className="r"><span className="sr-only">{t("share.revoke")}</span></th></tr></thead>
+                    <thead><tr><th>{t("share.by")}</th><th>{t("share.on")}</th><th>{t("step.run")}</th><th>{t("reports.col.files")}</th><th>{t("share.expires")}</th><th className="r">{t("share.openings")}</th><th>{t("share.lastOpened")}</th><th>{t("reports.col.status")}</th><th><span className="sr-only">{t("reports.preview")}</span></th><th className="r"><span className="sr-only">{t("share.revoke")}</span></th></tr></thead>
                     <tbody>
                       {linkRows.map((l) => {
                         const state = l.revoked_at ? "revoked" : l.expires_at && new Date(l.expires_at).getTime() <= Date.now() ? "expired" : "active";
                         return (
                           <tr key={l.id}>
-                            <td>{kind(l.kind)}<span className="sub">{fmtName(l.format)}</span></td>
-                            <td className="num">{t("common.run", { n: l.run_number })}</td>
                             <td>{l.created_by}</td>
                             <td className="small muted">{f.date(l.created_at)}</td>
+                            <td className="num">{t("common.run", { n: l.run_number })}</td>
+                            <td>{l.files.map(linkFile).join(", ")}</td>
                             <td className="small muted">{l.expires_at ? f.date(l.expires_at) : t("share.term.none")}</td>
                             <td className="r num">{l.openings}</td>
                             <td className="small muted">{l.last_opened_at ? f.date(l.last_opened_at) : "—"}</td>
                             <td><StatusTag tone={state === "active" ? "pass" : "neutral"}>{t(`share.${state}`)}</StatusTag></td>
+                            <td>{state === "active" && <Link className="btn ghost sm" to="/deals/$dealId/reports/preview/$linkId" params={{ dealId, linkId: l.id }}>{t("reports.preview")}</Link>}</td>
                             <td><div className="acts">{state === "active" && <button className="btn danger sm" type="button" disabled={revoke.isPending} onClick={() => { if (window.confirm(t("share.confirm"))) return revoke.mutate(l.id); }}>{t("share.revoke")}</button>}</div></td>
                           </tr>
                         );

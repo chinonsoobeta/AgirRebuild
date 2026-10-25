@@ -34,8 +34,11 @@ vi.mock("../src/i18n", async (original) => {
 });
 vi.mock("@tanstack/react-router", async () => {
   const { createElement } = await import("react");
-  return { Link: ({ to, params, children, className }: { to: string; params?: Record<string, string>; children: unknown; className?: string }) =>
-    createElement("a", { href: Object.entries(params ?? {}).reduce((h, [k, v]) => h.replace(`$${k}`, v), to), className }, children as string) };
+  return { Link: ({ to, params, children, className }: { to: string; params?: Record<string, string>; children: unknown; className?: string }) => {
+    const href = Object.entries(params ?? {}).reduce((h, [k, v]) => h.replace(`$${k}`, v), to);
+    s.nodes.push({ tag: "a", props: { href, children } });
+    return createElement("a", { href, className }, children as string);
+  } };
 });
 vi.mock("../src/api", async (original) => {
   const real = await original<typeof import("../src/api")>();

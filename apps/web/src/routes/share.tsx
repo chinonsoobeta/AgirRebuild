@@ -1,9 +1,10 @@
 import { CURRENCY_NAMES, type Currency } from "@agir/contracts";
 import { useQuery } from "@tanstack/react-query";
-import { api, type SharedReport } from "../api";
+import { Link } from "@tanstack/react-router";
+import { api, type SharedFile, type SharedReport, type ShareLink } from "../api";
 import * as I from "../components/icons";
 import { Figure, Figures, Tag } from "../components/kit";
-import { dealFacts, MetricValue, VerdictBadge } from "../components/ui";
+import { Banner, dealFacts, ErrorText, MetricValue, VerdictBadge } from "../components/ui";
 import { useI18n, verdictText, type I18n } from "../i18n";
 import { SignedOutPage } from "./auth";
 
@@ -56,53 +57,104 @@ function SharedRun({ s, i }: { s: SharedReport; i: I18n }) {
   );
 }
 
-/** The page a shared link opens: no session, read-only, one report and its run's audit package (card 86). */
-export function Share({ secret }: { secret: string }) {
+/** Where the page's files and audit package are served from: the link's own addresses, or the signed-in ones in a preview. */
+type Addresses = { file: (f: SharedFile | null, inline: boolean) => string; auditPackage?: string };
+
+/**
+ * The body of the page a shared link opens (card R2): the run, its key figures, the link's files and the audit package.
+ * The public page and the signed-in preview both show it, with their own addresses for the files.
+ */
+export function SharedBody({ s, at }: { s: SharedReport; at: Addresses }) {
   const i = useI18n();
-  const { t, f, L, err, lang } = i;
+  const { t, f, L, lang } = i;
+  const kindName = (k: string) => k === "ic_memo" ? t("reports.memo") : k === "lender_package" ? t("reports.lender") : k === "build_decision" ? t("reports.buildDecision") : k === "partner_memo" ? t("reports.partnerMemo") : t("reports.modelExport");
+  const formatName = (x: string) => (x === "pdf" ? "PDF" : x === "docx" ? t("reports.word") : t("reports.excel"));
+  const kind = kindName(s.kind);
+  const failures = s.standardFailures?.[lang] ?? [];
+  const currency = CURRENCY_NAMES[s.currency as Currency]?.[lang === "fr" ? 1 : 0];
+  // A page from before card R2 names one file by its kind and format, served at the link's one-file address.
+  const files: (SharedFile & { one?: true })[] = s.files ?? [{ id: "", kind: s.kind, format: s.format, lang: "en", traced: null, one: true }];
+  return (
+    <div className="stack">
+      <div>
+        {s.workspace && <p className="muted auth-from">{t("auth.share.from", { ws: s.workspace })}</p>}
+        <h1 className="deal-name">{s.deal}</h1>
+        {/* The place, the units and exit, and the currency in words; a link whose run cannot be read keeps the report and run instead. */}
+        <p className="meta">{s.location ? [L.place(s.location, s.province ?? null), dealFacts(i, s.units, s.exit), currency ? t("deals.amountsIn", { c: currency }) : ""].filter(Boolean).join(" · ")
+          : `${kind} · ${t("common.run", { n: s.runNumber })}`}</p>
+      </div>
+      <SharedRun s={s} i={i} />
+      {failures.length > 0 && (
+        <section className="card" aria-labelledby="share-failures">
+          <div className="card-head"><h2 className="h2" id="share-failures">{t("threshold.citedFailures")}</h2></div>
+          <ul className="card-pad">{failures.map((failure, index) => <li key={index}>{failure}</li>)}</ul>
+        </section>
+      )}
+      <section className="card" aria-labelledby="share-files">
+        <div className="card-head"><h2 className="h2" id="share-files">{t("auth.share.files")}</h2><span className="small muted">{t("auth.share.count", { n: files.length })}</span></div>
+        <ul className="auth-files">
+          {files.map((file) => {
+            // The traced count is shown only when the file recorded one: never a 0 in its place.
+            const sub = [formatName(file.format), file.lang === "fr" ? t("reports.frDraft") : "", file.traced ? t("reports.tracedN", { n: file.traced }) : ""].filter(Boolean).join(" · ");
+            const ref = file.one ? null : file;
+            return (
+              <li key={file.id || "one"} className="card-pad auth-file">
+                <div>{kindName(file.kind)}<span className="sub">{sub}</span></div>
+                <div className="acts">
+                  {file.format === "pdf" && <a className="btn quiet sm" href={at.file(ref, true)} target="_blank" rel="noreferrer">{t("common.open")}</a>}
+                  <a className="btn quiet sm" href={at.file(ref, false)}><I.Download />{t("common.download")}</a>
+                </div>
+              </li>
+            );
+          })}
+        </ul>
+        <div className="card-foot row between">
+          {at.auditPackage && <a href={at.auditPackage}>{t("share.package")}</a>}
+          <span className="small muted">{t("auth.share.packageHint")}</span>
+        </div>
+      </section>
+      <p className="small muted">{s.expiresAt ? t("share.expiry", { date: f.date(s.expiresAt) }) : t("share.noExpiry")} {t("auth.share.recorded")}</p>
+    </div>
+  );
+}
+
+/** The page a shared link opens: no session, read-only, the link's files and its run's audit package (cards 86, R2). */
+export function Share({ secret }: { secret: string }) {
+  const { t, err } = useI18n();
   const shared = useQuery({ queryKey: ["share", secret], queryFn: () => api.get<SharedReport>(`/share/${secret}`) });
   const base = `/api/share/${secret}`;
   // Only the API's sentence, as the page's heading: a link that does not open says nothing more.
   if (shared.error) return <SignedOutPage><h1 className="h2">{err(shared.error)}</h1></SignedOutPage>;
   if (!shared.data) return <SignedOutPage><p className="muted">{t("common.loading")}</p></SignedOutPage>;
-  const s = shared.data;
-  const kind = s.kind === "ic_memo" ? t("reports.memo") : s.kind === "lender_package" ? t("reports.lender") : s.kind === "build_decision" ? t("reports.buildDecision") : s.kind === "partner_memo" ? t("reports.partnerMemo") : t("reports.modelExport");
-  const format = s.format === "pdf" ? "PDF" : s.format === "docx" ? t("reports.word") : t("reports.excel");
-  const failures = s.standardFailures?.[lang] ?? [];
-  const currency = CURRENCY_NAMES[s.currency as Currency]?.[lang === "fr" ? 1 : 0];
+  const at: Addresses = {
+    file: (f, inline) => (f ? `${base}/file?artifact=${f.id}${inline ? "&inline=1" : ""}` : `${base}/file${inline ? "?inline=1" : ""}`),
+    auditPackage: `${base}/audit-package`,
+  };
   return (
     <SignedOutPage tag={<Tag tone="plain">{t("share.readOnly")}</Tag>}>
-      <div className="stack">
-        <div>
-          {s.workspace && <p className="muted auth-from">{t("auth.share.from", { ws: s.workspace })}</p>}
-          <h1 className="deal-name">{s.deal}</h1>
-          {/* The place, the units and exit, and the currency in words; a link whose run cannot be read keeps the report and run instead. */}
-          <p className="meta">{s.location ? [L.place(s.location, s.province ?? null), dealFacts(i, s.units, s.exit), currency ? t("deals.amountsIn", { c: currency }) : ""].filter(Boolean).join(" · ")
-            : `${kind} · ${t("common.run", { n: s.runNumber })}`}</p>
-        </div>
-        <SharedRun s={s} i={i} />
-        {failures.length > 0 && (
-          <section className="card" aria-labelledby="share-failures">
-            <div className="card-head"><h2 className="h2" id="share-failures">{t("threshold.citedFailures")}</h2></div>
-            <ul className="card-pad">{failures.map((failure, index) => <li key={index}>{failure}</li>)}</ul>
-          </section>
-        )}
-        <section className="card" aria-labelledby="share-files">
-          <div className="card-head"><h2 className="h2" id="share-files">{t("auth.share.files")}</h2></div>
-          <div className="card-pad auth-file">
-            <div>{kind}<span className="sub">{format} · {t("common.run", { n: s.runNumber })}</span></div>
-            <div className="acts">
-              {s.format === "pdf" && <a className="btn quiet sm" href={`${base}/file?inline=1`} target="_blank" rel="noreferrer">{t("common.open")}</a>}
-              <a className="btn quiet sm" href={`${base}/file`}><I.Download />{t("common.download")}</a>
-            </div>
-          </div>
-          <div className="card-foot row between">
-            <a href={`${base}/audit-package`}>{t("share.package")}</a>
-            <span className="small muted">{t("auth.share.packageHint")}</span>
-          </div>
-        </section>
-        <p className="small muted">{s.expiresAt ? t("share.expiry", { date: f.date(s.expiresAt) }) : t("share.noExpiry")} {t("auth.share.recorded")}</p>
-      </div>
+      <SharedBody s={shared.data} at={at} />
     </SignedOutPage>
+  );
+}
+
+/**
+ * A signed-in preview of the page an active link opens (card R2). The API builds the same body and records no
+ * opening; files and the package come from the signed-in addresses, so nothing here is counted either.
+ */
+export function SharePreview({ dealId, linkId }: { dealId: string; linkId: string }) {
+  const { t } = useI18n();
+  const preview = useQuery({ queryKey: ["share-preview", linkId], queryFn: () => api.get<SharedReport>(`/share-links/${linkId}/preview`) });
+  const links = useQuery({ queryKey: ["share-links", dealId], queryFn: () => api.get<ShareLink[]>(`/deals/${dealId}/share-links`) });
+  const runId = links.data?.find((l) => l.id === linkId)?.run_id;
+  const at: Addresses = {
+    file: (f, inline) => `/api/artifacts/${f?.id ?? ""}/file${inline ? "?inline=1" : ""}`,
+    ...(runId ? { auditPackage: `/api/runs/${runId}/audit-package` } : {}),
+  };
+  return (
+    <div className="stack">
+      <Link to="/deals/$dealId/reports" params={{ dealId }} className="back"><I.Back />{t("reports.previewBack")}</Link>
+      <Banner tone="neutral" title={t("reports.previewNotice")} />
+      {preview.error ? <ErrorText error={preview.error} /> : !preview.data ? <p className="muted">{t("common.loading")}</p> : <SharedBody s={preview.data} at={at} />}
+    </div>
   );
 }

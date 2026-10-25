@@ -5,6 +5,7 @@ import { join } from "node:path";
 import { randomUUID } from "node:crypto";
 import { fileStore, migrate, migrationFiles, openPglite, splitSql, type Db } from "@agir/db";
 import { drain } from "@agir/worker";
+import { FIELDS } from "@agir/contracts";
 import { createApp } from "../src/app.ts";
 import { sha256 } from "../src/services.ts";
 
@@ -273,6 +274,11 @@ describe("the migration", () => {
           await tx.query(`insert into schema_migrations (name, sha256) values ($1, $2)`, [m.name, m.sha256]);
         });
       }
+      // The field catalog that migrate() seeds, so the app can take values.
+      for (const f of FIELDS) {
+        await old.query(`insert into field_catalog (key, label, unit, itemized, material, min_value, max_value, is_integer, default_value) values ($1,$2,$3,$4,$5,$6,$7,$8,$9)`,
+          [f.key, f.label, f.unit, Boolean(f.itemized), f.material, f.min ?? null, f.max ?? null, Boolean(f.integer), f.default ?? null]);
+      }
       // A link made through the app, with 0017's function, before 0033 exists.
       const current = app;
       app = createApp({ db: old, store, secureCookies: false });
@@ -280,9 +286,9 @@ describe("the migration", () => {
       try {
         const maker = await signup("old.maker@example.com", "Old Maker");
         const w = (await call(maker, "POST", "/api/workspaces", { name: "Old", reviewMode: "solo" })).json.id;
-        const d = (await call(maker, "POST", `/api/workspaces/${w}/deals`, { name: "Old deal", assetType: "Multifamily" })).json.id;
+        const d = (await call(maker, "POST", `/api/workspaces/${w}/deals`, { name: "Old deal", assetType: "Multifamily", location: "Burnaby", province: "BC" })).json.id;
         for (const [fieldKey, value, itemKey] of BASE) {
-          expect((await call(maker, "POST", `/api/deals/${d}/values`, { fieldKey, value, reason: "Old link", ...(itemKey ? { itemKey } : {}) })).status).toBe(200);
+          const r = await call(maker, "POST", `/api/deals/${d}/values`, { fieldKey, value, reason: "Old link fixture", ...(itemKey ? { itemKey } : {}) }); expect(r.status, JSON.stringify(r.json)).toBe(200);
         }
         oldRun = (await call(maker, "POST", `/api/deals/${d}/runs`)).json.id;
         file = (await call(maker, "POST", `/api/runs/${oldRun}/artifacts`, { kind: "ic_memo", format: "pdf" })).json.id;

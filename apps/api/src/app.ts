@@ -163,29 +163,14 @@ export function createApp({ db, store, secureCookies, demoSignIn = false, trustP
 
   for (const [suffix, what] of [["", "page"], ["/file", "file"], ["/audit-package", "audit_package"]] as const) {
     app.get(`/api/share/:secret${suffix}`, async (c) => {
-      const [link] = await db.query<{ link_id: string; artifact_id: string; run_id: string; created_by: string; kind: string; format: string;
-        storage_key: string | null; run_number: number; deal_name: string; expires_at: string | null }>(
-        `select * from fn_open_share_link($1, $2)`, [sha256(c.req.param("secret")!), what]);
-      if (!link) return c.json({ error: "This link is not available. It may have expired or been revoked." }, 404);
-      if (what === "page") {
-        const [run] = await db.query<{ result: import("@agir/contracts").RunResult; input_snapshot: { input: EngineInput; policy?: Policy; standardPolicy?: Policy; policyChanges?: import("@agir/contracts").PolicyChange[] };
-          policy_version: string; created_at: string; location: string; province: string | null; currency: string | null; workspace: string }>(
-          `select r.result, r.input_snapshot, r.policy_version, r.created_at, d.location, d.province, d.currency, w.name as workspace
-           from runs r join deals d on d.id = r.deal_id join workspaces w on w.id = d.workspace_id where r.id = $1`, [link.run_id]);
-        let standardFailures: { en: string[]; fr: string[] } | undefined;
-        if (run?.input_snapshot.policy?.custom) {
-          const { Formatter, customThresholdBlocks } = await import("@agir/artifacts");
-          const x = { ...run.input_snapshot, policy: run.input_snapshot.policy, result: run.result };
-          const failures = (lang: "en" | "fr") => customThresholdBlocks(new Formatter(run.result,lang,x.policy.maxLtcPct),x).flatMap((block) => block.type === "checks" ? block.items.filter((item) => item.lenderCited).map((item) => item.text) : []);
-          standardFailures = { en: failures("en"), fr: failures("fr") };
-        }
-        return c.json({ deal: link.deal_name, kind: link.kind, format: link.format, runNumber: link.run_number, expiresAt: link.expires_at,
-          ...(run ? sharedRunFacts(run) : {}), ...(standardFailures ? { standardFailures } : {}) });
-      }
-      if (what === "file") {
-        const [artifact] = await db.query<{ lang: "en" | "fr" }>(`select lang from artifacts where id = $1`, [link.artifact_id]);
-        return fileResponse({ ...link, deal: link.deal_name, lang: artifact?.lang }, c.req.query("inline") === "1");
-      }
+      // A file is named by ?artifact=; one that is not a uuid is not one of the link's files.
+      const artifact = what === "file" ? c.req.query("artifact") : undefined;
+      if (artifact !== undefined && !UUID.test(artifact)) return c.json({ error: SHARE_GONE }, 404);
+      const rows = await db.query<SharedFileRow>(`select * from fn_open_share_link($1, $2, $3)`, [sha256(c.req.param("secret")!), what, artifact ?? null]);
+      const link = rows[0];
+      if (!link) return c.json({ error: SHARE_GONE }, 404);
+      if (what === "page") return c.json(await sharedPage(db, rows));
+      if (what === "file") return fileResponse({ ...link, deal: link.deal_name }, c.req.query("inline") === "1");
       const pkg = await asUser(db, link.created_by, (tx) => auditPackage(tx, link.run_id));
       return new Response(JSON.stringify(pkg, null, 2), {
         headers: { "content-type": "application/json", "content-disposition": `attachment; filename="agir-audit-package-run-${pkg.manifest.run.number}.json"` },
@@ -796,13 +781,48 @@ export function createApp({ db, store, secureCookies, demoSignIn = false, trustP
     return c.json({ id: link.id, url: `/s/${secret}`, expiresAt: link.expires_at });
   });
 
+  // A run's files shared together (card R2). The secret is shown once and never stored.
+  app.post("/api/runs/:id/share-links", async (c) => {
+    const { term, artifacts } = z.object({ term: z.enum(["24h", "7d", "30d", "none"]), artifacts: z.array(z.string().uuid()).min(1).max(20) }).parse(await c.req.json());
+    const secret = randomBytes(32).toString("base64url");
+    const link = await as(c, async (tx) => {
+      const [made] = await tx.query<{ id: string }>(`select fn_create_run_share_link($1, $2::uuid[], $3, $4) as id`, [c.req.param("id"), artifacts, term, sha256(secret)]);
+      const [row] = await tx.query<{ id: string; expires_at: string | null }>(`select id, expires_at from share_links where id = $1`, [made!.id]);
+      return row!;
+    });
+    return c.json({ id: link.id, url: `/s/${secret}`, expiresAt: link.expires_at });
+  });
+
+  // `kind` and `format` are the first file's, in the shared page's order; `files` lists them all.
   app.get("/api/deals/:id/share-links", async (c) => c.json(await as(c, (tx) => tx.query(
-    `select l.id, l.artifact_id, a.kind, a.format, r.run_number, l.term, l.expires_at, l.created_at, maker.name as created_by,
-      l.revoked_at, revoker.name as revoked_by, count(e.seq)::int as openings, max(e.created_at) as last_opened_at
-      from share_links l join artifacts a on a.id = l.artifact_id join runs r on r.id = a.run_id
+    `select l.id, l.artifact_id, l.run_id, x.files->0->>'kind' as kind, x.files->0->>'format' as format, r.run_number, x.files,
+      l.term, l.expires_at, l.created_at, maker.name as created_by, l.revoked_at, revoker.name as revoked_by, o.openings, o.last_opened_at
+      from share_links l join runs r on r.id = l.run_id
       left join users maker on maker.id = l.created_by left join users revoker on revoker.id = l.revoked_by
-      left join audit_events e on e.entity = 'share_link' and e.entity_id = l.id::text and e.action = 'share.opened'
-      where l.deal_id = $1 group by l.id, a.kind, a.format, r.run_number, maker.name, revoker.name order by l.created_at desc`, [c.req.param("id")]))));
+      cross join lateral (select coalesce(jsonb_agg(jsonb_build_object('kind', a.kind, 'format', a.format, 'lang', a.lang) order by ${FILE_ORDER_SQL}), '[]'::jsonb) as files
+        from share_link_files f join artifacts a on a.id = f.artifact_id where f.link_id = l.id) x
+      cross join lateral (select count(e.seq)::int as openings, max(e.created_at) as last_opened_at from audit_events e
+        where e.entity = 'share_link' and e.entity_id = l.id::text and e.action = 'share.opened') o
+      where l.deal_id = $1 order by l.created_at desc`, [c.req.param("id")]))));
+
+  // What the person given an active link sees, for the deal's staff (card R2). Built by the page's own code;
+  // it writes no share.opened event, so it is not counted. A client cannot read share_links, so gets a 404.
+  app.get("/api/share-links/:id/preview", async (c) => {
+    const body = await as(c, async (tx) => {
+      const rows = await tx.query<SharedFileRow>(
+        `select l.id as link_id, l.run_id, l.created_by, r.run_number, d.name as deal_name, l.expires_at,
+           a.id as artifact_id, a.kind, a.format, a.lang, a.storage_key, (a.provenance->>'entries')::int as provenance_entries
+         from share_links l join runs r on r.id = l.run_id join deals d on d.id = l.deal_id
+           join share_link_files f on f.link_id = l.id join artifacts a on a.id = f.artifact_id
+         where l.id = $1 and l.revoked_at is null and (l.expires_at is null or l.expires_at > now())
+           and exists (select 1 from workspace_members m where m.workspace_id = l.workspace_id and m.user_id = l.created_by
+             and (m.expires_at is null or m.expires_at > now()))
+           and not exists (select 1 from share_link_files g join artifacts b on b.id = g.artifact_id where g.link_id = l.id and b.status <> 'ready')`,
+        [c.req.param("id")]);
+      return rows.length ? sharedPage(tx, rows) : null;
+    });
+    return body ? c.json(body) : c.json({ error: "This link is not active, so there is nothing to preview." }, 404);
+  });
 
   app.post("/api/share-links/:id/revoke", async (c) => {
     await as(c, (tx) => tx.query(`select fn_revoke_share_link($1)`, [c.req.param("id")]));
@@ -880,6 +900,42 @@ function sharedRunFacts(run: { result: import("@agir/contracts").RunResult; inpu
     figures: SHARED_FIGURES.flatMap((key) => metrics.filter((m) => m.key === key).map((m) => ({ key: m.key, unit: m.unit, value: m.value, status: m.status, reason: m.reason }))),
     ...(input.forSale ? {} : { exitCapPct: input.exitCapPct }),
   };
+}
+
+const SHARE_GONE = "This link is not available. It may have expired or been revoked.";
+const UUID = /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i;
+/** One file of a shared link, as fn_open_share_link and the preview read it. */
+type SharedFileRow = { link_id: string; run_id: string; created_by: string; run_number: number; deal_name: string; expires_at: string | null;
+  artifact_id: string; kind: string; format: string; lang: "en" | "fr"; storage_key: string | null; provenance_entries: number | null };
+/** The order a link's files are listed in: by report, then PDF before Word, then English before French. */
+const FILE_KINDS = ["build_decision", "lender_package", "partner_memo", "ic_memo", "model_export"];
+const FILE_FORMATS = ["pdf", "docx", "xlsx"];
+const FILE_ORDER_SQL = `array_position(array['${FILE_KINDS.join("','")}'], a.kind), array_position(array['${FILE_FORMATS.join("','")}'], a.format), a.lang = 'fr', a.id`;
+const fileOrder = (a: SharedFileRow, b: SharedFileRow) =>
+  FILE_KINDS.indexOf(a.kind) - FILE_KINDS.indexOf(b.kind) || FILE_FORMATS.indexOf(a.format) - FILE_FORMATS.indexOf(b.format)
+  || Number(a.lang === "fr") - Number(b.lang === "fr") || (a.artifact_id < b.artifact_id ? -1 : a.artifact_id > b.artifact_id ? 1 : 0);
+
+/**
+ * The body of a shared link's page, for the public page and the preview alike (card R2), so the two cannot differ.
+ * `kind` and `format` are the first file's, as a one-file link always had them.
+ */
+async function sharedPage(q: Db, rows: SharedFileRow[]) {
+  const files = [...rows].sort(fileOrder);
+  const link = files[0]!;
+  const [run] = await q.query<{ result: import("@agir/contracts").RunResult; input_snapshot: { input: EngineInput; policy?: Policy; standardPolicy?: Policy; policyChanges?: import("@agir/contracts").PolicyChange[] };
+    policy_version: string; created_at: string; location: string; province: string | null; currency: string | null; workspace: string }>(
+    `select r.result, r.input_snapshot, r.policy_version, r.created_at, d.location, d.province, d.currency, w.name as workspace
+     from runs r join deals d on d.id = r.deal_id join workspaces w on w.id = d.workspace_id where r.id = $1`, [link.run_id]);
+  let standardFailures: { en: string[]; fr: string[] } | undefined;
+  if (run?.input_snapshot.policy?.custom) {
+    const { Formatter, customThresholdBlocks } = await import("@agir/artifacts");
+    const x = { ...run.input_snapshot, policy: run.input_snapshot.policy, result: run.result };
+    const failures = (lang: "en" | "fr") => customThresholdBlocks(new Formatter(run.result,lang,x.policy.maxLtcPct),x).flatMap((block) => block.type === "checks" ? block.items.filter((item) => item.lenderCited).map((item) => item.text) : []);
+    standardFailures = { en: failures("en"), fr: failures("fr") };
+  }
+  return { deal: link.deal_name, kind: link.kind, format: link.format, runNumber: link.run_number, expiresAt: link.expires_at,
+    files: files.map((f) => ({ id: f.artifact_id, kind: f.kind, format: f.format, lang: f.lang, traced: f.provenance_entries ?? null })),
+    ...(run ? sharedRunFacts(run) : {}), ...(standardFailures ? { standardFailures } : {}) };
 }
 
 const LOGO_MAX_BYTES = 500 * 1024;
