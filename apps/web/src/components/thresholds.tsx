@@ -85,7 +85,7 @@ export function ThresholdList({ dealId, children }: { dealId: string; children?:
         ? <label className="row small" htmlFor={selectId}><span className="muted">{t("threshold.strategy")}</span>
           <select id={selectId} className="select" value={policy.version} onChange={(event) => setChosen(event.target.value)}>{policies.map((p) => <option key={p.version} value={p.version}>{p.version}</option>)}</select></label>
         : <span className="small muted">{policy.version}</span>}
-      <dl className="kv">{policy.thresholds.map((row) => {
+      <dl className="kv th-list">{policy.thresholds.map((row) => {
         const value = f.value(row.value, row.unit);
         const changed = row.value !== row.standard;
         const notes = [
@@ -93,8 +93,8 @@ export function ThresholdList({ dealId, children }: { dealId: string; children?:
           row.looser && t("threshold.looser"), row.stressRemoved && t("threshold.removed"), row.lenderCited && t("thresholds.cited"),
         ].filter(Boolean).join(" · ");
         return <Fragment key={row.path}><dt>{row.label[lang]}</dt>
-          <dd className="num">{row.looserDirection === "lower" ? t("thresholds.atLeast", { value }) : row.looserDirection === "higher" ? t("thresholds.atMost", { value }) : value}
-            {notes && <span className="small muted"> · {notes}</span>}</dd></Fragment>;
+          <dd className="num">{row.looserDirection === "lower" ? t("thresholds.atLeast", { value }) : row.looserDirection === "higher" ? t("thresholds.atMost", { value }) : value}</dd>
+          {notes && <dd className="small muted th-note">{notes}</dd>}</Fragment>;
       })}</dl>
     </>}
     {invalid.length > 0 && <p className="hint">{t("threshold.invalid")}</p>}
