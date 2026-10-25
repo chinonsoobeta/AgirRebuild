@@ -390,7 +390,8 @@ export function buildLedger(input: EngineInput): Ledger {
         };
         if (senior) live.splice(live.indexOf(senior), 1, replacement);
         else live.push(replacement);
-        refinanceNet = newAmount - payoff;
+        const premiumTax = premium * (r.premiumTaxPct ?? 0) / 100;
+        refinanceNet = newAmount - payoff - premiumTax;
         refinance = { value, month: m, newAmount, payoff, net: refinanceNet, premium };
       }
       for (const l of live) {

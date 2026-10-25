@@ -1,3 +1,4 @@
+import { PREMIUM_TAX_HELP_FR } from "@agir/contracts";
 // English and French (Canada). Interface strings and translated API messages live here.
 // Shared field, metric, stress and gate labels live in @agir/contracts, together
 // with number formats and structured report messages. Numbers follow the language:
@@ -1264,6 +1265,7 @@ const FR: Record<Key, Entry> = {
 // ---- Catalog labels in French ------------------------------------------------------------
 
 const FR_HELP: Record<string, string> = {
+  refinance_premium_tax_pct: PREMIUM_TAX_HELP_FR,
   unit_sale_price: "Net de TPS/TVH et de tout remboursement conservé par le constructeur.",
   contingency: "Saisissez 0 si le budget n'en prévoit pas.",
   other_cost: "Saisissez un vrai crédit (remise, remboursement) sous forme de montant négatif, avec le motif.",
@@ -1313,6 +1315,7 @@ const ASK: Record<string, [[string, string?], [string, string?]]> = {
   refinance_term_years: [["What is the refinance loan term in years?"], ["Quelle est la durée du prêt de refinancement en années ?"]],
   refinance_amort_years: [["Over how many years is the refinance loan paid down?"], ["Sur combien d'années le prêt de refinancement est-il amorti ?"]],
   refinance_io_months: [["For how many months is the refinance loan interest-only?", "Leave blank if there is no interest-only period."], ["Pendant combien de mois le prêt de refinancement est-il à intérêts seulement ?", "Laissez vide s'il n'y a pas de période à intérêts seulement."]],
+  refinance_premium_tax_pct: [["What is the provincial tax on the insurance premium?", "It is paid in cash at the refinance. Leaving this blank means no provincial tax on the premium."], ["Quelle est la taxe provinciale sur la prime d’assurance hypothécaire ?", "Elle est payée comptant au refinancement. Laisser ce champ vide signifie aucune taxe provinciale sur la prime."]],
   refinance_insurance_premium_pct: [["What is the refinance mortgage insurance premium?", "For an insured (CMHC) loan. Leaving this blank means no mortgage insurance."], ["Quelle est la prime d'assurance hypothécaire du refinancement ?", "Pour un prêt assuré (SCHL). Laisser ce champ vide signifie aucune assurance hypothécaire."]],
   development_charges: [["What will development charges (DCs or DCCs) cost?", "Enter 0 if there are none, or if your soft or other costs already include them."], ["Combien coûteront les redevances de développement ?", "Saisissez 0 s'il n'y en a pas, ou si vos coûts indirects ou autres coûts les incluent déjà."]],
   property_tax_annual: [["What will property tax cost per year?", "Enter 0 if there is none, or if your expense ratio or fixed operating costs already include it."], ["Combien coûtera la taxe foncière par année ?", "Saisissez 0 s'il n'y en a pas, ou si votre ratio des charges ou vos charges d'exploitation fixes l'incluent déjà."]],
@@ -1389,6 +1392,19 @@ const FR_REASONS: [RegExp, string | ((m: RegExpMatchArray) => string)][] = [
   [/^Published table$/, "Tableau publié"],
   [/^This table option is not available\. Review the current proposals\.$/, "Cette option du tableau n’est pas disponible. Consultez les propositions actuelles."],
   [/^approve the unit counts first$/, "Approuvez d’abord les nombres de logements"],
+  [/^Alberta transfer of land fee \(no land transfer tax\)$/, "Frais de transfert de terrain en Alberta (aucun droit de mutation)"],
+  [/^Saskatchewan title transfer fee \(no land transfer tax\)$/, "Frais de transfert de titre en Saskatchewan (aucun droit de mutation)"],
+  [/^Newfoundland and Labrador deed registration fee \(no land transfer tax\)$/, "Frais d’enregistrement d’acte à Terre-Neuve-et-Labrador (aucun droit de mutation)"],
+  [/^Mortgage registration fees belong in soft costs\.$/, "Les frais d’enregistrement hypothécaire font partie des coûts indirects."],
+  [/^Ontario retail sales tax on insurance premiums$/, "Taxe de vente au détail de l’Ontario sur les primes d’assurance"],
+  [/^Saskatchewan PST on mortgage default insurance$/, "TVP de la Saskatchewan sur l’assurance prêt hypothécaire"],
+  [/^Quebec tax on insurance premiums, premium paid by 2026-12-31$/, "Taxe du Québec sur les primes d’assurance, prime payée au plus tard le 2026-12-31"],
+  [/^Quebec tax on insurance premiums, premium paid after 2026-12-31$/, "Taxe du Québec sur les primes d’assurance, prime payée après le 2026-12-31"],
+  [/^no verified public table; enter the rate \(0 if none\)$/, "Aucun tableau public vérifié ; saisissez le taux (0 s’il n’y en a pas)"],
+  [/^MLI Select at 50 points lends up to 85% loan-to-value; enter the premium yourself\.$/, "MLI Select à 50 points permet un ratio prêt-valeur maximal de 85 % ; saisissez la prime vous-même."],
+  [/^Published table past its re-check date \(([^)]+)\); check the source before relying on this value\.$/, (m) => `Tableau publié dont la date de revérification (${m[1]}) est passée ; vérifiez la source avant de vous fier à cette valeur.`],
+  [/^Why GST\/HST net is \$0$/, "Pourquoi la TPS/TVH nette est de 0 $"],
+  [/^refinance premium tax must be a number from (\d+) to (\d+)$/, (m) => `La taxe provinciale sur la prime du refinancement doit se situer entre ${frPct(m[1]!)} et ${frPct(m[2]!)}`],
   [/^British Columbia$/, "Colombie-Britannique"],
   [/^Ontario, outside Toronto$/, "Ontario, hors de Toronto"],
   [/^Ontario, outside Toronto, land with one or two single\-family homes$/, "Ontario, hors de Toronto, terrain avec une ou deux maisons unifamiliales"],
@@ -1397,16 +1413,14 @@ const FR_REASONS: [RegExp, string | ((m: RegExpMatchArray) => string)][] = [
   [/^New Brunswick$/, "Nouveau-Brunswick"],
   [/^Prince Edward Island$/, "Île-du-Prince-Édouard"],
   [/^CMHC MLI Standard$/, "SCHL MLI Standard"],
-  [/^Qualifying purpose\-built rental rebate$/, "Remboursement admissible pour immeubles locatifs construits à cette fin"],
+  [/^Appears to qualify for the purpose\-built rental rebate$/, "Semble admissible au remboursement pour immeubles locatifs construits à cette fin"],
   [/^Tax is on fair market value; the land cost stands in for it\. The source page gives no date\.$/, "La taxe porte sur la juste valeur marchande ; le coût du terrain est utilisé à sa place. La page source ne donne aucune date."],
   [/^Toronto's administration fee \(\$102\.56 \+ HST\) belongs in soft costs\.$/, "Les frais administratifs de Toronto (102,56 $ + TVH) font partie des coûts indirects."],
   [/^A municipality may charge up to 3% above \$500,000\.$/, "Une municipalité peut imposer jusqu’à 3 % sur la tranche supérieure à 500 000 $."],
   [/^1% of the greater of the price and the assessed value; the land cost stands in for both\. Use the assessed value if it is higher\.$/, "1 % du plus élevé du prix et de la valeur imposable ; le coût du terrain est utilisé pour les deux. Utilisez la valeur imposable si elle est supérieure."],
-  [/^No land transfer tax; land titles \/ registry fees belong in soft costs\.$/, "Aucun droit de mutation ; les frais de titres fonciers ou d’enregistrement font partie des coûts indirects."],
-  [/^At least 4 units each with its own kitchen, bathroom and living area; at least 90% held for long\-term rental; construction begins after 2023\-09\-13 and before 2031; substantial completion before 2036\.$/, "Au moins 4 logements ayant chacun une cuisine, une salle de bains et un espace de séjour ; au moins 90 % sont conservés pour la location à long terme ; les travaux commencent après le 2023-09-13 et avant 2031 ; l’achèvement substantiel a lieu avant 2036."],
-  [/^At least 4 units each with its own kitchen, bathroom and living area; at least 90% held for long\-term rental; construction begins after 2023\-09\-13 and before 2031; substantial completion before 2036\. Provincial part only if construction begins after 2024\-11\-14 and before 2028 and completes before 2030\.$/, "Au moins 4 logements ayant chacun une cuisine, une salle de bains et un espace de séjour ; au moins 90 % sont conservés pour la location à long terme ; les travaux commencent après le 2023-09-13 et avant 2031 ; l’achèvement substantiel a lieu avant 2036. La part provinciale s’applique seulement si les travaux commencent après le 2024-11-14 et avant 2028, et s’achèvent avant 2030."],
-  [/^At least 4 units each with its own kitchen, bathroom and living area; at least 90% held for long\-term rental; construction begins after 2023\-09\-13 and before 2031; substantial completion before 2036\. Provincial part is rebated up to \$35,000 per unit only for completion before 2029\.$/, "Au moins 4 logements ayant chacun une cuisine, une salle de bains et un espace de séjour ; au moins 90 % sont conservés pour la location à long terme ; les travaux commencent après le 2023-09-13 et avant 2031 ; l’achèvement substantiel a lieu avant 2036. La part provinciale est remboursée jusqu’à 35 000 $ par logement seulement si l’achèvement a lieu avant 2029."],
-  [/^No land transfer tax; land titles \/ registry fees belong in soft costs\. \(Saskatchewan title transfer fee: 0\.4% of the whole value once it exceeds \$6,300, Land Titles Fees effective 2026\-04\-15, https:\/\/www\.saskregistries\.ca\/hubfs\/Land\-Title\-Fees\-Table\-04\-2026\.pdf\)$/, "Aucun droit de mutation ; les frais de titres fonciers ou d’enregistrement font partie des coûts indirects. (Frais de transfert de titre en Saskatchewan : 0,4 % de la valeur entière dès qu’elle dépasse 6 300 $, frais de titres fonciers en vigueur le 2026-04-15, https://www.saskregistries.ca/hubfs/Land-Title-Fees-Table-04-2026.pdf)"],
+  [/^At least 4 units each with its own kitchen, bathroom and living area or at least 10 private rooms or suites; at least 90% held for long\-term rental; construction begins after 2023\-09\-13 and before 2031; substantial completion before 2036\.$/, "Au moins 4 logements ayant chacun une cuisine, une salle de bains et un espace de séjour ou au moins 10 chambres ou suites privées ; au moins 90 % sont conservés pour la location à long terme ; les travaux commencent après le 2023-09-13 et avant 2031 ; l’achèvement substantiel a lieu avant 2036."],
+  [/^At least 4 units each with its own kitchen, bathroom and living area or at least 10 private rooms or suites; at least 90% held for long\-term rental; construction begins after 2023\-09\-13 and before 2031; substantial completion before 2036\. Provincial part only if construction begins after 2024\-11\-14 and before 2028 and completes before 2030\.$/, "Au moins 4 logements ayant chacun une cuisine, une salle de bains et un espace de séjour ou au moins 10 chambres ou suites privées ; au moins 90 % sont conservés pour la location à long terme ; les travaux commencent après le 2023-09-13 et avant 2031 ; l’achèvement substantiel a lieu avant 2036. La part provinciale s’applique seulement si les travaux commencent après le 2024-11-14 et avant 2028, et s’achèvent avant 2030."],
+  [/^At least 4 units each with its own kitchen, bathroom and living area or at least 10 private rooms or suites; at least 90% held for long\-term rental; construction begins after 2023\-09\-13 and before 2031; substantial completion before 2036\. Provincial part is rebated up to \$35,000 per unit only for completion before 2029\.$/, "Au moins 4 logements ayant chacun une cuisine, une salle de bains et un espace de séjour ou au moins 10 chambres ou suites privées ; au moins 90 % sont conservés pour la location à long terme ; les travaux commencent après le 2023-09-13 et avant 2031 ; l’achèvement substantiel a lieu avant 2036. La part provinciale est remboursée jusqu’à 35 000 $ par logement seulement si l’achèvement a lieu avant 2029."],
   [/^CMHC MLI Select, (\d+) points$/, (m) => `SCHL MLI Select, ${m[1]} points`],
   [/^MLI Select points must be a whole number from (\d+) to (\d+)$/, (m) => `Le nombre de points MLI Select doit être un entier de ${frNum(m[1]!)} à ${frNum(m[2]!)}`],
   [/^refinance term must be a whole number from (\d+) to (\d+)$/, (m) => `La durée du prêt de refinancement doit être un nombre entier de ${frNum(m[1]!)} à ${frNum(m[2]!)} ans`],

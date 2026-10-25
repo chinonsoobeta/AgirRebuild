@@ -5,7 +5,7 @@
 import { createHash, createHmac } from "node:crypto";
 import {
   tableSourceLabel, type TableSource, effectivePolicy, THRESHOLDS, type PolicyOverrides, type PolicyChange,
-  CMHC_PREMIUM, GST_HST, cmhcPremium, landTable, landTransferTaxOptions, gstHstNetOptions, ENGINE_READABLE_STATUSES, type Proposal, type Table, type TableOption,
+  PREMIUM_TAX_TABLES, premiumTaxOptions, CMHC_PREMIUM, GST_HST, cmhcPremium, landTable, landTransferTaxOptions, gstHstNetOptions, ENGINE_READABLE_STATUSES, type Proposal, type Table, type TableOption,
   FIELD_BY_KEY,
   FIELD_GROUP_LABELS,
   POLICIES,
@@ -383,7 +383,7 @@ export async function reviewView(tx: Db, dealId: string, asOf: string) {
   for (const a of savedTables) offered.add(a.field_key);
   const proposals: Proposal[] = [];
   const propose = (fieldKey: string, t: Table | undefined, result: {options: TableOption[]} | {unavailable: string}) => {
-    const meta = {fieldKey,tableId:t?.id ?? fieldKey,title:t?.title ?? FIELD_BY_KEY.get(fieldKey)!.label,publisher:t?.publisher ?? "",url:t?.url ?? "",effective:t?.effective ?? ""};
+    const meta = {fieldKey,tableId:t?.id ?? fieldKey,title:t?.title ?? FIELD_BY_KEY.get(fieldKey)!.label,publisher:t?.publisher ?? "",url:t?.url ?? "",effective:t?.effective ?? "",recheckBy:t?.recheckBy ?? "",readOn:t?.readOn ?? "",signedOn:t?.signedOn ?? ""};
     const options = "options" in result ? result.options.map(o => {
       // Keep the conditions visible before acceptance and in the recorded reason.
       const label = o.label + (o.note ? ` — ${o.note}` : "");
@@ -404,6 +404,7 @@ export async function reviewView(tx: Db, dealId: string, asOf: string) {
       : cmhcPremium({ltvPct,amortYears,points:value("refinance_mli_select_points"),asOf});
     propose("refinance_insurance_premium_pct",CMHC_PREMIUM,"value" in premium ? {options:[{key:"cmhc",label:premium.label,value:premium.value}]} : premium);
   }
+  if (offered.has("refinance_premium_tax_pct")) propose("refinance_premium_tax_pct",province ? PREMIUM_TAX_TABLES[province as keyof typeof PREMIUM_TAX_TABLES] : undefined,!province ? {unavailable:"the deal has no province"} : premiumTaxOptions({province,asOf}));
   const tableNotices: Proposal[] = [];
   for (let index=proposals.length-1; index>=0; index--) {
     const proposal=proposals[index]!;
@@ -531,7 +532,7 @@ export function flattenMetrics(result: RunResult) {
   );
 }
 
-export async function createRun(tx: Db, dealId: string) {
+export async function createRun(tx: Db, dealId: string, asOf: string) {
   const assumptions = await loadAssumptions(tx, dealId);
   const { readiness, input } = readinessFor(assumptions);
   if (!input) throw new HttpError(409, "Underwriting is blocked until review is clear.", { readiness });
@@ -553,6 +554,7 @@ export async function createRun(tx: Db, dealId: string) {
       sourceKind: a.source_kind,
       source: sourceLabel(a),
       ...(tableSource(a) ? {tableSource:tableSource(a)} : {}),
+      ...(tableSource(a)?.recheckBy && tableSource(a)!.recheckBy! <= asOf ? {tableStale:true} : {}),
       sponsorStated: a.sponsor_stated,
       confirmedBy: a.second_approver_name,
       confirmedByReview: a.confirmed_by_review,

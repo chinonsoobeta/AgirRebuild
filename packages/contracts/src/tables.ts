@@ -1,40 +1,46 @@
 import { FIELD_BY_KEY } from "./fields.ts";
 import { FR_FIELDS } from "./fr.ts";
 
-/** Official schedules read on 2026-10-19. Proposals only: a person accepts or enters a value. */
-export type Table = { id: string; title: string; publisher: string; url: string; effective: string; readOn: string; recheckBy: string; status: "official" };
-const table = (id: string, title: string, publisher: string, url: string, effective: string, recheckBy = "2027-01-01"): Table =>
-  ({ id, title, publisher, url, effective, readOn: "2026-10-19", recheckBy, status: "official" });
-export const CMHC_PREMIUM = table("cmhc-premium", "Multi-unit Fees and Premiums", "CMHC", "https://assets.cmhc-schl.gc.ca/sites/cmhc/media-newsroom/notices/2025/cmhc-to-update-multi-unit-mortgage-loan-insurance-premiums/fees-and-premiums.pdf", "2025-07-14");
+/** Official schedules read and signed by the owner on 2026-10-24. Proposals only: a person accepts or enters a value. */
+export type Table = { id: string; title: string; publisher: string; url: string; effective: string; readOn: string; signedOn: string; recheckBy: string; status: "official" };
+const table = (id: string, title: string, publisher: string, url: string, effective: string, recheckBy: string): Table =>
+  ({ id, title, publisher, url, effective, readOn: "2026-10-24", signedOn: "2026-10-24", recheckBy, status: "official" });
+export const CMHC_PREMIUM = table("cmhc-premium", "Multi-unit Fees and Premiums", "CMHC", "https://assets.cmhc-schl.gc.ca/sites/cmhc/media-newsroom/notices/2025/cmhc-to-update-multi-unit-mortgage-loan-insurance-premiums/fees-and-premiums.pdf", "2025-07-14", "2027-01-31");
 export const LAND_TABLES = {
   // the page gives no effective date; this is the date read
-  BC: table("bc-land", "Property transfer tax", "Government of British Columbia", "https://www2.gov.bc.ca/gov/content/taxes/property-taxes/property-transfer-tax", "2026-10-19"),
+  BC: table("bc-land", "Property transfer tax", "Government of British Columbia", "https://www2.gov.bc.ca/gov/content/taxes/property-taxes/property-transfer-tax", "2026-10-19", "2027-04-30"),
   // the page gives no effective date; this is the date read
-  MB: table("mb-land", "Land transfer tax", "Government of Manitoba", "https://gov.mb.ca/finance/other/landtransfertax.html", "2026-10-19"),
-  ON: table("on-land", "Calculating land transfer tax", "Government of Ontario", "https://www.ontario.ca/document/land-transfer-tax/calculating-land-transfer-tax", "2026-04-22"),
-  Toronto: table("toronto-land", "Municipal Land Transfer Tax rates and fees", "City of Toronto", "https://www.toronto.ca/services-payments/property-taxes-utilities/municipal-land-transfer-tax-mltt/municipal-land-transfer-tax-mltt-rates-and-fees/", "2026-04-01"),
-  QC: table("qc-land-2026", "Droits de mutation immobilière — 2026", "Ville de Québec", "https://www.ville.quebec.qc.ca/citoyens/taxes_evaluation/droits_mutation_immobiliere.aspx", "2026-01-01"),
+  MB: table("mb-land", "Land transfer tax", "Government of Manitoba", "https://gov.mb.ca/finance/other/landtransfertax.html", "2026-10-19", "2027-04-30"),
+  ON: table("on-land", "Calculating land transfer tax", "Government of Ontario", "https://www.ontario.ca/document/land-transfer-tax/calculating-land-transfer-tax", "2026-04-22", "2027-04-30"),
+  Toronto: table("toronto-land", "Municipal Land Transfer Tax rates and fees", "City of Toronto", "https://www.toronto.ca/services-payments/property-taxes-utilities/municipal-land-transfer-tax-mltt/municipal-land-transfer-tax-mltt-rates-and-fees/", "2026-04-01", "2027-04-01"),
+  QC: table("qc-land-2026", "Droits de mutation immobilière — 2026", "Ville de Québec", "https://www.ville.quebec.qc.ca/citoyens/taxes_evaluation/droits_mutation_immobiliere.aspx", "2026-01-01", "2027-01-15"),
   // Rates remain 0.5%, 1%, 1.5%: https://www.ville.quebec.qc.ca/citoyens/taxes_evaluation/droits_mutation_immobiliere.aspx
-  QC2027: table("qc-land-2027", "Montants permettant d’établir les tranches de la base d’imposition des droits sur les mutations immobilières – Exercice 2027", "Gouvernement du Québec, Affaires municipales et Habitation", "https://www.quebec.ca/nouvelles/actualites/details/montants-permettant-detablir-les-tranches-de-la-base-dimposition-des-droits-sur-les-mutations-immobilieres-exercice-2027-72131", "2027-01-01", "2028-01-01"),
-  Montreal: table("montreal-land", "Droits sur les mutations immobilières", "Ville de Montréal", "https://montreal.ca/articles/comment-sont-calcules-les-droits-sur-les-mutations-immobilieres-9279", "2026-01-12"),
-  NS: table("ns-land", "Deed Transfer Tax Rates — July 2026", "Service Nova Scotia", "https://novascotia.ca/sns/pdf/ans-property-dtt-rates.pdf", "2026-07-01"),
-  NB: table("nb-land", "Real Property Transfer Tax Act", "Government of New Brunswick", "https://laws.gnb.ca/en/document/cs/R-2.1", "2016-04-01"),
-  PE: table("pe-land", "Real Property Transfer Tax Act", "Government of Prince Edward Island", "https://www.princeedwardisland.ca/sites/default/files/legislation/r-05-1-real_property_transfer_tax_act.pdf", "2026-05-29"),
-  AB: table("ab-land", "Land Titles fee schedule", "Government of Alberta", "https://www.alberta.ca/system/files/sartr-land-titles-and-surveys-common-documents-fee-schedule.pdf", "2026-10-01"),
-  NL: table("nl-land", "Registry of Deeds fees", "Government of Newfoundland and Labrador", "https://www.gov.nl.ca/gs/files/forms-files-fees-deed.pdf", "2007-05-01"),
-  SK: table("sk-land", "Land Titles Fees", "Saskatchewan Registry Services", "https://www.saskregistries.ca/hubfs/Land-Title-Fees-Table-04-2026.pdf", "2026-04-15"),
+  QC2027: table("qc-land-2027", "Montants permettant d’établir les tranches de la base d’imposition des droits sur les mutations immobilières – Exercice 2027", "Gouvernement du Québec, Affaires municipales et Habitation", "https://www.quebec.ca/nouvelles/actualites/details/montants-permettant-detablir-les-tranches-de-la-base-dimposition-des-droits-sur-les-mutations-immobilieres-exercice-2027-72131", "2027-01-01", "2027-01-15"),
+  Montreal: table("montreal-land", "Droits sur les mutations immobilières", "Ville de Montréal", "https://montreal.ca/articles/comment-sont-calcules-les-droits-sur-les-mutations-immobilieres-9279", "2026-01-12", "2027-01-15"),
+  NS: table("ns-land", "Deed Transfer Tax Rates — July 2026", "Service Nova Scotia", "https://novascotia.ca/sns/pdf/ans-property-dtt-rates.pdf", "2026-07-01", "2027-07-31"),
+  NB: table("nb-land", "Real Property Transfer Tax Act", "Government of New Brunswick", "https://laws.gnb.ca/en/document/cs/R-2.1", "2016-04-01", "2027-04-30"),
+  PE: table("pe-land", "Real Property Transfer Tax Act", "Government of Prince Edward Island", "https://www.princeedwardisland.ca/sites/default/files/legislation/r-05-1-real_property_transfer_tax_act.pdf", "2026-05-29", "2027-04-30"),
+  AB: table("ab-land", "Land Titles fee schedule", "Government of Alberta", "https://www.alberta.ca/system/files/sartr-land-titles-and-surveys-common-documents-fee-schedule.pdf", "2026-10-01", "2027-04-30"),
+  NL: table("nl-land", "Registry of Deeds fees", "Government of Newfoundland and Labrador", "https://www.gov.nl.ca/gs/files/forms-files-fees-deed.pdf", "2007-05-01", "2027-04-30"),
+  SK: table("sk-land", "Land Titles Fees", "Saskatchewan Registry Services", "https://www.saskregistries.ca/hubfs/Land-Title-Fees-Table-04-2026.pdf", "2026-04-15", "2027-04-30"),
 } as const;
-export const GST_HST = table("gst-hst-pbrh", "Purpose-built rental housing rebate", "Canada Revenue Agency", "https://www.canada.ca/en/revenue-agency/services/tax/businesses/topics/gst-hst-businesses/gst-hst-rebates/purpose-built-rental-housing.html", "2026-06-21");
-export const TABLES: readonly Table[] = [CMHC_PREMIUM, ...Object.values(LAND_TABLES), GST_HST];
+export const GST_HST = table("gst-hst-pbrh", "Purpose-built rental housing rebate", "Canada Revenue Agency", "https://www.canada.ca/en/revenue-agency/services/tax/businesses/topics/gst-hst-businesses/gst-hst-rebates/purpose-built-rental-housing.html", "2026-06-21", "2027-04-30");
+export const PREMIUM_TAX_TABLES = {
+  ON: table("on-premium-tax", "Retail Sales Tax: insurance and benefits plans", "Government of Ontario", "https://www.ontario.ca/document/retail-sales-tax/insurance-and-benefits-plans", "2026-09-18", "2027-04-30"),
+  SK: table("sk-premium-tax", "PST-73 Insurance Contracts", "Government of Saskatchewan", "https://publications.saskatchewan.ca/api/v1/products/085582/formats/99083/download", "2017-08-01", "2027-04-30"),
+  QC: table("qc-premium-tax", "Harmonization of the insurance premiums tax rate with the QST rate", "Revenu Québec", "https://www.revenuquebec.ca/en/press-room/tax-news/details/2026-04-09/harmonization-of-the-insurance-premiums-tax-rate-with-the-qst-rate/", "2026-04-09", "2027-01-15"),
+} as const;
+export const TABLES: readonly Table[] = [CMHC_PREMIUM, ...Object.values(LAND_TABLES), GST_HST, ...Object.values(PREMIUM_TAX_TABLES)];
 export const tableCurrent = (t: Table, asOf: string): boolean => asOf >= t.effective && asOf < t.recheckBy;
 const expired = { unavailable: "The table is not effective yet or is past its re-check date; enter the value yourself." };
-export type Proposal = { fieldKey: string; tableId: string; title: string; publisher: string; url: string; effective: string; options: { key: string; label: string; value: number; reason: string }[]; unavailable?: string };
+export type Proposal = { fieldKey: string; tableId: string; title: string; publisher: string; url: string; effective: string; recheckBy: string; readOn: string; signedOn: string; options: { key: string; label: string; value: number; reason: string }[]; unavailable?: string };
 export type TableOption = { key: string; label: string; value: number; note?: string };
 type Options = { options: TableOption[] } | { unavailable: string };
 
 export function cmhcPremium({ ltvPct, amortYears, points, asOf }: { ltvPct: number; amortYears: number; points?: number; asOf: string }): { value: number; label: string } | { unavailable: string } {
   if (!tableCurrent(CMHC_PREMIUM, asOf)) return expired;
   const select = (points ?? 0) >= 50;
+  if (select && points! < 70 && ltvPct > 85) return { unavailable: "MLI Select at 50 points lends up to 85% loan-to-value; enter the premium yourself." };
   if (ltvPct > 95 || (!select && ltvPct > 85)) return { unavailable: "The loan-to-value is outside this product's premium table; enter the premium yourself." };
   if (amortYears > 25 && (amortYears - 25) % 5 !== 0) return { unavailable: "the table charges per five-year period; enter the premium yourself" };
   const base = ltvPct <= 65 ? 260 : ltvPct <= 70 ? 285 : ltvPct <= 75 ? 335 : ltvPct <= 80 ? 435 : ltvPct <= 85 ? 535 : ltvPct <= 90 ? 590 : 615;
@@ -76,10 +82,10 @@ export function landTransferTaxOptions({ province, value, asOf }: { province: st
       options = [tax("bc","British Columbia",[[200000,100],[2000000,200],[Infinity,300]],"Tax is on fair market value; the land cost stands in for it. The source page gives no date.")]; break;
     case "MB": options = [tax("mb","Manitoba",[[30000,0],[90000,50],[150000,100],[200000,150],[Infinity,200]])]; break;
     case "ON": {
-      if (!tableCurrent(LAND_TABLES.Toronto,asOf)) return expired;
       const note = "Toronto's administration fee ($102.56 + HST) belongs in soft costs.";
-      options = [tax("on","Ontario, outside Toronto",ON),tax("on-homes","Ontario, outside Toronto, land with one or two single-family homes",ON_HOMES),
-        option("toronto","Toronto",marginal(cents,ON)*2,note),option("toronto-homes","Toronto, land with one or two single-family homes",marginal(cents,ON_HOMES)+marginal(cents,TORONTO_HOMES),note)]; break;
+      options = [tax("on","Ontario, outside Toronto",ON),tax("on-homes","Ontario, outside Toronto, land with one or two single-family homes",ON_HOMES)];
+      if (tableCurrent(LAND_TABLES.Toronto,asOf)) options.push(
+        option("toronto","Toronto",marginal(cents,ON)*2,note),option("toronto-homes","Toronto, land with one or two single-family homes",marginal(cents,ON_HOMES)+marginal(cents,TORONTO_HOMES),note)); break;
     }
     case "QC": {
       const future = t === LAND_TABLES.QC2027;
@@ -97,7 +103,10 @@ export function landTransferTaxOptions({ province, value, asOf }: { province: st
       if (province === "NB") options[0]!.value = Math.floor((cents*100 + 500000) / 1000000);
       break;
     }
-    default: options = [option(province.toLowerCase(),province,0,"No land transfer tax; land titles / registry fees belong in soft costs." + (province === "SK" ? " (Saskatchewan title transfer fee: 0.4% of the whole value once it exceeds $6,300, Land Titles Fees effective 2026-04-15, https://www.saskregistries.ca/hubfs/Land-Title-Fees-Table-04-2026.pdf)" : ""))];
+    case "AB": options = [{key:"ab",label:"Alberta transfer of land fee (no land transfer tax)",value:(5000 + 500 * Math.floor((cents + 499999) / 500000)) / 100,note:"Mortgage registration fees belong in soft costs."}]; break;
+    case "SK": options = [{key:"sk",label:"Saskatchewan title transfer fee (no land transfer tax)",value:(cents <= 50000 ? 0 : cents <= 630000 ? 2500 : Math.round(cents * 4 / 1000)) / 100,note:"Mortgage registration fees belong in soft costs."}]; break;
+    case "NL": options = [{key:"nl",label:"Newfoundland and Labrador deed registration fee (no land transfer tax)",value:(10000 + 40 * Math.floor((Math.max(0,cents - 50000) + 9999) / 10000)) / 100,note:"Mortgage registration fees belong in soft costs."}]; break;
+    default: options = [option(province.toLowerCase(),province,0,"No land transfer tax; land titles / registry fees belong in soft costs.")];
   }
   return { options };
 }
@@ -110,16 +119,37 @@ export function gstHstNetOptions({ province, units, selling, asOf }: { province:
   // https://www.revenuquebec.ca/en/businesses/consumption-taxes/gsthst-and-qst/special-cases-gsthst-and-qst/purchase-sale-construction-renovation-and-operation-of-real-property/refunds-of-taxes-paid/gst-rebate-for-purpose-built-multiple-unit-residential-rental-complexes/
   if (province === "QC") return { unavailable: "Quebec has no full QST rebate for purpose-built rentals (the full rebate covers GST only). QST of 9.975% on the fair market value at completion is payable, less a rebate of up to $7,182 per unit that is nil at $225,000 or more per unit. Enter the net amount." };
   if (!["AB","BC","MB","SK","ON","NS","NL","NT","NU","YT","NB","PE"].includes(province)) return { unavailable: "no verified public table; enter the amount" };
-  const note = "At least 4 units each with its own kitchen, bathroom and living area; at least 90% held for long-term rental; construction begins after 2023-09-13 and before 2031; substantial completion before 2036."
+  const note = "At least 4 units each with its own kitchen, bathroom and living area or at least 10 private rooms or suites; at least 90% held for long-term rental; construction begins after 2023-09-13 and before 2031; substantial completion before 2036."
     + (province === "NB" ? " Provincial part only if construction begins after 2024-11-14 and before 2028 and completes before 2030." : "")
     + (province === "PE" ? " Provincial part is rebated up to $35,000 per unit only for completion before 2029." : "");
-  return { options: [{key:"pbrh",label:"Qualifying purpose-built rental rebate",value:0,note}] };
+  return { options: [{key:"pbrh",label:"Appears to qualify for the purpose-built rental rebate",value:0,note}] };
 }
 
 /** The source snapshot belongs to the accepted value, even when a later table is re-dated. */
-export type TableSource = { tableId: string; optionKey: string; publisher: string; title: string; effective: string; fields: string[]; acceptedBy: string };
+export type TableSource = { tableId: string; optionKey: string; publisher: string; title: string; effective: string; recheckBy?: string; readOn?: string; signedOn?: string; fields: string[]; acceptedBy: string };
 export function tableSourceLabel(s: TableSource, lang: "en" | "fr" = "en"): string {
   const fields=s.fields.map(key=>lang === "fr" ? FR_FIELDS[key] ?? FIELD_BY_KEY.get(key)?.label ?? key : FIELD_BY_KEY.get(key)?.label ?? key).join(", ");
   const label=lang === "fr" ? `Tableau publié : ${s.publisher}, en vigueur le ${s.effective} · accepté par ${s.acceptedBy}` : `Published table: ${s.publisher}, effective ${s.effective} · accepted by ${s.acceptedBy}`;
   return label + (fields ? lang === "fr" ? ` · selon les valeurs déclarées : ${fields}` : ` · uses stated: ${fields}` : "");
+}
+
+export function premiumTaxOptions({ province, asOf }: { province: string; asOf: string }): Options {
+  const t = PREMIUM_TAX_TABLES[province as keyof typeof PREMIUM_TAX_TABLES];
+  if (!t) return { unavailable: "no verified public table; enter the rate (0 if none)" };
+  if (!tableCurrent(t,asOf)) return expired;
+  return { options: province === "ON" ? [{key:"on",label:"Ontario retail sales tax on insurance premiums",value:8}]
+    : province === "SK" ? [{key:"sk",label:"Saskatchewan PST on mortgage default insurance",value:6}]
+    : [{key:"qc-2026",label:"Quebec tax on insurance premiums, premium paid by 2026-12-31",value:9}, {key:"qc-2027",label:"Quebec tax on insurance premiums, premium paid after 2026-12-31",value:9.975}] };
+}
+
+export function pbrhExplanation(readOn: string | undefined, lang: "en" | "fr"): string {
+  return lang === "fr"
+    ? "TPS/TVH nette de 0 $ : le remboursement fédéral, et la part provinciale là où elle s'applique, couvrent la taxe sur un immeuble locatif neuf admissible. Admissible si l'immeuble compte au moins 4 logements ayant chacun une cuisine, une salle de bain et une aire de séjour privées (ou au moins 10 chambres ou suites privées), si au moins 90 % des logements sont détenus pour la location à long terme, et si la construction a commencé après le 2023-09-13 et avant 2031, avec un achèvement substantiel avant 2036. Source : ARC" + (readOn ? `, consulté le ${readOn}.` : ".")
+    : "GST/HST net is $0: the federal rebate, and the provincial part where it applies, cover the tax on a qualifying new rental. Qualifies when the building has at least 4 units each with its own kitchen, bathroom and living area (or at least 10 private rooms or suites), at least 90% of units are held for long-term rental, and construction began after 2023-09-13 and before 2031 with substantial completion before 2036. Source: CRA" + (readOn ? `, read ${readOn}.` : ".");
+}
+
+export function tableStaleWarning(recheckBy: string, lang: "en" | "fr"): string {
+  return lang === "fr"
+    ? `Tableau publié dont la date de revérification (${recheckBy}) est passée ; vérifiez la source avant de vous fier à cette valeur.`
+    : `Published table past its re-check date (${recheckBy}); check the source before relying on this value.`;
 }

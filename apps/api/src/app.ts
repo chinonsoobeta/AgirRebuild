@@ -550,8 +550,8 @@ export function createApp({ db, store, secureCookies, demoSignIn = false, trustP
       const proposal=[...view.proposals,...view.tableNotices].find(p=>p.fieldKey === body.fieldKey && p.tableId === body.tableId);
       const option=proposal?.options.find(o=>o.key === body.optionKey);
       if (!proposal || proposal.unavailable || !option) throw new HttpError(422,"This table option is not available. Review the current proposals.");
-      const fields=body.fieldKey === "land_transfer_tax" ? ["land_cost"] : body.fieldKey === "refinance_insurance_premium_pct" ? ["refinance_ltv_pct","refinance_amort_years",...(view.assumptions.some(a=>a.fieldKey === "refinance_mli_select_points" && a.status === "approved") ? ["refinance_mli_select_points"] : [])] : ["unit_count"];
-      const source=JSON.stringify({tableId:proposal.tableId,optionKey:option.key,publisher:proposal.publisher,title:proposal.title,effective:proposal.effective,fields});
+      const fields=body.fieldKey === "land_transfer_tax" ? ["land_cost"] : body.fieldKey === "refinance_insurance_premium_pct" ? ["refinance_ltv_pct","refinance_amort_years",...(view.assumptions.some(a=>a.fieldKey === "refinance_mli_select_points" && a.status === "approved") ? ["refinance_mli_select_points"] : [])] : body.fieldKey === "refinance_premium_tax_pct" ? [] : ["unit_count"];
+      const source=JSON.stringify({tableId:proposal.tableId,optionKey:option.key,publisher:proposal.publisher,title:proposal.title,effective:proposal.effective,recheckBy:proposal.recheckBy,readOn:proposal.readOn,signedOn:proposal.signedOn,fields});
       const [row]=await tx.query(`select (a).status from (select fn_enter_table_value($1,$2,null,$3,$4,$5) a) x`,[c.req.param("id"),body.fieldKey,option.value,option.reason,source]);
       return row;
     });
@@ -608,7 +608,7 @@ export function createApp({ db, store, secureCookies, demoSignIn = false, trustP
 
   // ---- Runs --------------------------------------------------------------------------
   app.post("/api/deals/:id/runs", async (c) => {
-    const id = await as(c, (tx) => createRun(tx, c.req.param("id")));
+    const id = await as(c, (tx) => createRun(tx, c.req.param("id"), now().toISOString().slice(0,10)));
     return c.json({ id });
   });
 

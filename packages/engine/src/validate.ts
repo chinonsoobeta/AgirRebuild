@@ -85,6 +85,7 @@ export function validateInput(input: EngineInput): void {
     loan("refinance loan", { amount: r.amount ?? 1, ratePct: r.ratePct, amortYears: r.amortYears, ioMonths: r.ioMonths });
     if (r.mliSelectPoints !== undefined && !intIn(r.mliSelectPoints, 0, 150)) p.push("MLI Select points must be a whole number from 0 to 150");
     if (r.termYears !== undefined && !intIn(r.termYears, 1, 40)) p.push("refinance term must be a whole number from 1 to 40");
+    if (r.premiumTaxPct !== undefined && (!finite(r.premiumTaxPct) || r.premiumTaxPct < 0 || r.premiumTaxPct > 15)) p.push("refinance premium tax must be a number from 0 to 15");
     if (r.insurancePremiumPct !== undefined && (!finite(r.insurancePremiumPct) || r.insurancePremiumPct < 0 || r.insurancePremiumPct > 10)) {
       p.push("refinance insurance premium must be a number from 0 to 10");
     }

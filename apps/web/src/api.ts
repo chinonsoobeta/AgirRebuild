@@ -96,7 +96,7 @@ export type RunView = {
     annual: { year: number; gpr: number; egi: number; opex: number; noi: number; debtService: number; sizingDebtService: number; cashFlow: number }[];
     warnings: { key: string; message: string }[];
   };
-  inputs: { fieldKey: string; itemKey: string | null; label: string; value: number; sourceKind: string; source: string; tableSource?: import("@agir/contracts").TableSource; sponsorStated: boolean; confirmedBy: string | null; confirmedByReview: boolean; confirmedAt: string | null }[];
+  inputs: { fieldKey: string; itemKey: string | null; label: string; value: number; sourceKind: string; source: string; tableSource?: import("@agir/contracts").TableSource; tableStale?: true; sponsorStated: boolean; confirmedBy: string | null; confirmedByReview: boolean; confirmedAt: string | null }[];
   decisions: { id: string; decision: string; rationale: string; conditions: string | null; override_reason: string | null; created_at: string; decided_by: string }[];
   heldPartners?: { lpIrr: number | null; gpIrr: number | null; promote: number; paidLp: number; paidGp: number; paidPromote: number };
 };

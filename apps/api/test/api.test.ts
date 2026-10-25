@@ -3190,8 +3190,8 @@ describe("card 94c table proposals", () => {
       const d=await make("ON");
       for (const [fieldKey,value] of [["hard_cost",1000000],["soft_cost",100000],["contingency",50000],["construction_months",12],["lease_up_months",6],["hold_years",5],["stabilized_occupancy_pct",95],["expense_ratio_pct",30],["exit_cap_rate_pct",5],["selling_costs_pct",0],["senior_loan_amount",0],["refinance_rate_pct",4],["development_charges",0],["refinance_insurance_premium_pct",4]] as [string,number][]) expect((await call(owner,"POST",`/api/deals/${d}/values`,{fieldKey,value,reason:"Invented card 152 rental"})).status).toBe(200);
       await call(owner,"POST",`/api/deals/${d}/values`,{fieldKey:"unit_rent_monthly",itemKey:"Residential",value:2000,reason:"Invented rent"});
-      const runDeal=async()=>{
-        const made=await call(owner,"POST",`/api/deals/${d}/runs`);expect(made.status).toBe(200);
+      const runDeal=async(id=d)=>{
+        const made=await call(owner,"POST",`/api/deals/${id}/runs`);expect(made.status).toBe(200);
         return (await call(owner,"GET",`/api/runs/${made.json.id}`)).json;
       };
       const baseline=await runDeal();
@@ -3208,14 +3208,17 @@ describe("card 94c table proposals", () => {
       expect(taxed.inputs.find((a:any)=>a.fieldKey === proposal.fieldKey).tableSource).toMatchObject({fields:[],readOn:"2026-10-24",signedOn:"2026-10-24",recheckBy:"2027-04-30"});
       for (const day of ["2027-04-29","2027-04-30","2027-05-01"]) {
         date=day;
-        const flagged=await runDeal(), a=flagged.inputs.find((a:any)=>a.fieldKey === proposal.fieldKey);
+        // A fresh copy creates a run on this date; unchanged deals reuse their historical run.
+        const copy=(await call(owner,"POST",`/api/deals/${d}/copy`,{name:`Invented signed table rental ${day}`})).json.id;
+        const flagged=await runDeal(copy), a=flagged.inputs.find((a:any)=>a.fieldKey === proposal.fieldKey);
         if (day === "2027-04-29") expect(a).not.toHaveProperty("tableStale");
         else expect(a.tableStale).toBe(true);
         expect(flagged.result).toEqual(taxed.result);
         expect(flagged.inputHash).toBe(taxed.inputHash);expect(flagged.resultHash).toBe(taxed.resultHash);
       }
       await db.query(`update assumptions set source_table=(source_table::jsonb - 'recheckBy' - 'readOn' - 'signedOn')::text where deal_id=$1 and field_key=$2`,[d,proposal.fieldKey]);
-      const legacy=await runDeal();
+      const legacyCopy=(await call(owner,"POST",`/api/deals/${d}/copy`,{name:"Invented legacy signed table rental"})).json.id;
+      const legacy=await runDeal(legacyCopy);
       expect(legacy.inputs.find((a:any)=>a.fieldKey === proposal.fieldKey)).not.toHaveProperty("tableStale");
       expect(legacy.result).toEqual(taxed.result);
     } finally {date="2026-10-20";}

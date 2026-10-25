@@ -24,6 +24,7 @@ export const FR_FIELDS: Record<string, string> = {
   stated_ltc_pct: "Ratio prêt-coût déclaré", stated_interest_reserve: "Réserve d'intérêts déclarée",
   development_charges: "Redevances de développement", land_transfer_tax: "Droits de mutation immobilière", gst_hst_net: "TPS/TVH nette des remboursements",
   refinance_mli_select_points: "Points MLI Select", refinance_term_years: "Durée du prêt de refinancement",
+  refinance_premium_tax_pct: "Taxe provinciale sur la prime d'assurance hypothécaire",
   property_tax_annual: "Taxe foncière (par année)", refinance_insurance_premium_pct: "Prime d'assurance hypothécaire du refinancement",
 };
 
@@ -335,6 +336,7 @@ export const FR_ABSENT: Record<string, string> = {
   land_transfer_tax: "aucun droit déclaré",
   gst_hst_net: "aucune déclarée",
   property_tax_annual: "comprise dans les charges d'exploitation, ou aucune",
+  refinance_premium_tax_pct: "aucune taxe provinciale sur la prime",
   refinance_insurance_premium_pct: "aucune assurance hypothécaire",
   refinance_mli_select_points: "MLI Standard (sans points MLI Select)",
   refinance_term_years: "non précisée",
@@ -349,3 +351,5 @@ export const FR_VERIFY: Record<string, string> = {
   gst_hst_net: "À vérifier : la TPS/TVH nette dépend des remboursements auxquels ce projet a droit.",
   property_tax_annual: "Vérifiez qu'elle n'est pas déjà comprise dans vos charges d'exploitation ou votre ratio des charges.",
 };
+
+export const PREMIUM_TAX_HELP_FR = "L'Ontario, le Québec et la Saskatchewan taxent la prime. Elle est payée comptant au refinancement, sans être ajoutée au prêt.";

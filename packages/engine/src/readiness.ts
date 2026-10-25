@@ -224,6 +224,7 @@ export function assemble(rows: readonly AssumptionRow[]): { readiness: Readiness
   // ---- Not found: an optional line no document gave. Shown, never counted as a value ----
   const positive = (key: string) => (values.get(key) ?? 0) > 0;
   const parentAbsent: Record<string, boolean> = {
+    refinance_premium_tax_pct: !positive("refinance_insurance_premium_pct"),
     refinance_mli_select_points: !positive("refinance_insurance_premium_pct"),
     refinance_term_years: !positive("refinance_insurance_premium_pct") || (values.get("refinance_mli_select_points") ?? 0) >= 50 || insuredStandardTermRequired,
     refinance_amount: !has("refinance_month"),
@@ -334,6 +335,7 @@ export function assemble(rows: readonly AssumptionRow[]): { readiness: Readiness
             ioMonths: n("refinance_io_months"),
             ...(has("refinance_mli_select_points") ? { mliSelectPoints: n("refinance_mli_select_points") } : {}),
             ...(has("refinance_term_years") ? { termYears: n("refinance_term_years") } : {}),
+            ...(has("refinance_premium_tax_pct") ? { premiumTaxPct: n("refinance_premium_tax_pct") } : {}),
             ...(has("refinance_insurance_premium_pct") ? { insurancePremiumPct: n("refinance_insurance_premium_pct") } : {}),
           },
         }

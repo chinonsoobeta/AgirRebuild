@@ -138,7 +138,7 @@ it was before this section.
 
 | Key | Definition |
 |---|---|
-| `refinance_cash_returned` | New loan less the senior payoff at the refinance. Negative means cash was put in. |
+| `refinance_cash_returned` | New loan less the senior payoff and provincial tax on the insurance premium at the refinance. Negative means cash was put in. |
 | `cash_left_in_deal` | Equity contributed to fund the deal (required equity) less cash returned at the refinance. 0 or below means all of the equity came back. Operating cash before the refinance is not counted as returned (open for the owner). |
 | `dcr_after_refinance` | NOI over the 12 months from the refinance month / the amortizing (sizing) debt service on all debt in force in those months. |
 | `cash_on_cash_after_refinance` | (NOI less the debt service actually due) over the 12 months from the refinance month / cash left in the deal. Not meaningful, with that reason, when cash left in the deal is 0 or below. |
@@ -269,10 +269,12 @@ or the loan-to-value share of forward value; the loan-to-value sizes the loan be
 added is that amount times the premium percent, and the balance at the refinance is the amount times
 `(1 + premium %)`. Debt service, sizing debt service, `dcr_after_refinance` (card 60) and the debt outstanding at
 `T` all use the balance with the premium. The cash returned at the refinance, and `refinance_net_proceeds`, is the
-loan amount less the payoff of the senior balance: the premium is not cash. With a premium stated and a refinance
+loan amount less the payoff of the senior balance and any stated provincial tax on the premium: the premium is not cash. With a premium stated and a refinance
 made, the metric `refinance_premium_added` (the premium added to the loan, in dollars) is reported beside
 `refinance_net_proceeds`; with no premium stated it is not added to the result at all, so every other result is
 byte for byte what it was.
+
+A provincial tax on a mortgage insurance premium (Ontario, Quebec, Saskatchewan) cannot be added to the insured loan. It is the premium dollars × the stated rate, paid in cash in the refinance month. It lowers cash returned at the refinance; it is not added to the loan or to total development cost.
 
 **Checks.** An agreement check that compares a stated total cost already uses total development cost, so it
 includes the new lines. No check is added.

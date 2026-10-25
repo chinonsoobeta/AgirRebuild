@@ -1,6 +1,6 @@
 import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
-import { Fragment, useEffect, useRef, useState, type FormEvent, type ReactNode } from "react";
-import { FIELD_BY_KEY, FIELDS, tableSourceLabel } from "@agir/contracts";
+import { Fragment, useEffect, useRef, useState, useId, type FormEvent, type ReactNode } from "react";
+import { FIELD_BY_KEY, FIELDS, tableSourceLabel, pbrhExplanation } from "@agir/contracts";
 import { SF_PER_M2 } from "@agir/numbers";
 import { api, type Assumption, type Review as ReviewData, type Source } from "../api";
 import { Banner, WindowConfirmation, canEdit, DealHeader, ErrorText, Glossary, StatusTag, useDeal, useSession } from "../components/ui";
@@ -141,6 +141,8 @@ export function TableProposal({ proposal, unit, onUse, busy }: { proposal: impor
   const { t, f, msg, lang } = useI18n();
   const { role } = useSession();
   const [selected,setSelected] = useState(proposal.options.length === 1 ? "0" : "");
+  const [infoOpen,setInfoOpen] = useState(false);
+  const infoId = useId();
   if (proposal.unavailable) return <p className="small muted">{msg(proposal.unavailable)}</p>;
   const option = selected === "" ? undefined : proposal.options[Number(selected)];
   const amount = (n: number) => unit === "$" ? new Intl.NumberFormat(lang === "fr" ? "fr-CA" : "en-CA",{style:"currency",currency:"CAD",currencyDisplay:"narrowSymbol",minimumFractionDigits:2,maximumFractionDigits:2}).format(n) : f.value(n,unit);
@@ -150,6 +152,12 @@ export function TableProposal({ proposal, unit, onUse, busy }: { proposal: impor
       <option value="">{t("review.proposalPlaceholder")}</option>
       {proposal.options.map((o,index)=><option key={index} value={index}>{o.label.split(" — ").map(msg).join(" — ")} — {amount(o.value)}</option>)}
     </select> : <span>{option?.label.split(" — ").map(msg).join(" — ")}</span>}
+    {proposal.tableId === "gst-hst-pbrh" && option?.key === "pbrh" && <span>
+      <button type="button" className="btn quiet small" aria-label={msg("Why GST/HST net is $0")} aria-expanded={infoOpen} aria-controls={infoId}
+        onMouseEnter={()=>setInfoOpen(true)} onMouseLeave={()=>setInfoOpen(false)} onFocus={()=>setInfoOpen(true)} onBlur={()=>setInfoOpen(false)}
+        onClick={()=>setInfoOpen(true)} onKeyDown={e=>{if (e.key === "Escape") setInfoOpen(false);}}>ⓘ</button>
+      <span id={infoId} hidden={!infoOpen}>{pbrhExplanation(proposal.readOn,lang)}</span>
+    </span>}
     {canEdit(role) && <div><button className="btn quiet small" type="button" disabled={busy || !option} onClick={()=>option && onUse({fieldKey:proposal.fieldKey,tableId:proposal.tableId,optionKey:option.key})}>{t("review.useProposal")}</button></div>}
   </div>;
 }

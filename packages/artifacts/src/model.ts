@@ -2,7 +2,7 @@
 // and the inputs that run used, and from nothing else: it never recomputes a
 // verdict, a gate or a metric.
 
-import { changeMeta, checkText, numberFormat, plainTerm, type PolicyChange, tableSourceLabel, type TableSource, FR_ABSENT, CURRENCY_NAMES, FIELD_BY_KEY, placeLabel, type Currency, type EngineInput, type FieldUnit, type Policy, type RunResult, type VerdictCode } from "@agir/contracts";
+import { changeMeta, checkText, numberFormat, plainTerm, type PolicyChange, tableSourceLabel, tableStaleWarning, pbrhExplanation, type TableSource, FR_ABSENT, CURRENCY_NAMES, FIELD_BY_KEY, placeLabel, type Currency, type EngineInput, type FieldUnit, type Policy, type RunResult, type VerdictCode } from "@agir/contracts";
 import { createHash } from "node:crypto";
 import { runWaterfall, heldPartnerReturns, breakeven, canonicalJson, ENGINE_VERSION, type BreakevenEcho, type BreakevenRow } from "@agir/engine";
 import { Formatter, formatValue } from "./format.ts";
@@ -41,6 +41,7 @@ export type ArtifactInput = {
     value: number;
     sourceKind: "document" | "analyst" | "default" | "table";
     tableSource?: TableSource;
+    tableStale?: true;
     source: string;
     /** Absent on runs made before solo review: read as false and null. */
     sponsorStated?: boolean;
@@ -343,7 +344,11 @@ export function confirmationLabel(a: Assumption, id: (text: string, ref: string)
 }
 
 function inputRow(f: Formatter, a: Assumption): string[] {
-  const note = confirmationLabel(a, (t, ref) => f.ident(t, ref), f.lang);
+  const note = [
+    confirmationLabel(a, (t, ref) => f.ident(t, ref), f.lang),
+    a.tableStale && a.tableSource?.recheckBy ? f.ident(tableStaleWarning(a.tableSource.recheckBy,f.lang),`tableStale.${a.fieldKey}`) : "",
+    a.tableSource?.tableId === "gst-hst-pbrh" && a.tableSource.optionKey === "pbrh" ? f.ident(pbrhExplanation(a.tableSource.readOn,f.lang),`pbrh.${a.fieldKey}`) : "",
+  ].filter(Boolean).join(" · ");
   return [f.ident(a.itemKey ? `${f.field(a.fieldKey, a.label)} (${a.itemKey === "All units" ? reportText(f.lang, "allUnits") : a.itemKey})` : f.field(a.fieldKey, a.label), `field.${a.fieldKey}`), inputValue(f, a), f.ident(a.tableSource ? tableSourceLabel(a.tableSource,f.lang) : reportSource(f.lang, a.source), `source.${a.fieldKey}`) + (note ? ` · ${note}` : "")];
 }
 

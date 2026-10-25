@@ -145,6 +145,7 @@ export const FIELDS: readonly FieldDef[] = [
   { key: "refinance_amort_years", window: { min: 5, max: 50 }, label: "Refinance amortization", group: "refinance", unit: "years", required: "refinance_month", material: true, conservative: "min", min: 1, max: 50, integer: true, extractable: true, aliases: ["take-out amortization", "take out amortization", "refinance amortization", "permanent loan amortization", "amortissement du refinancement", "amortissement du pret de refinancement", "amortissement de reprise"] },
   { key: "refinance_io_months", window: { min: 0, max: 60 }, label: "Refinance interest-only period", group: "refinance", unit: "months", required: false, absentMeans: "amortizing from the refinance", material: true, conservative: "min", min: 0, max: 600, integer: true, extractable: true, aliases: ["refinance interest-only", "permanent loan io", "periode d interet seulement du refinancement", "periode d interets seulement du refinancement", "interet seulement du refinancement", "interets seulement du refinancement", "periode d interet seulement de refinancement", "periode d interets seulement de refinancement", "interet seulement de refinancement", "interets seulement de refinancement", "periode d interet seulement du pret de refinancement", "periode d interets seulement du pret de refinancement", "interet seulement du pret de refinancement", "interets seulement du pret de refinancement", "refinancement interets seulement", "interet seulement de reprise", "interets seulement de reprise"] },
   { key: "refinance_insurance_premium_pct", window: { min: 0, max: 7 }, label: "Refinance mortgage insurance premium", group: "refinance", unit: "%", required: false, absentMeans: "no mortgage insurance", material: true, conservative: "max", min: 0, max: 10, extractable: false, help: "The premium is added to the refinance loan. Leave this out if there is no mortgage insurance.", aliases: ["refinance cmhc insurance", "cmhc insurance on refinance", "assurance hypothecaire du refinancement", "assurance hypothecaire de reprise"] },
+  { key: "refinance_premium_tax_pct", label: "Provincial tax on the insurance premium", group: "refinance", unit: "%", required: false, absentMeans: "no provincial tax on the premium", material: false, conservative: "max", min: 0, max: 15, window: { min: 0, max: 10 }, extractable: false, aliases: [], help: "Ontario, Quebec and Saskatchewan tax the premium. It is paid in cash at the refinance, not added to the loan." },
   { key: "refinance_mli_select_points", label: "MLI Select points", group: "refinance", unit: "points", required: false, absentMeans: "MLI Standard (no Select points)", material: true, conservative: null, min: 0, max: 150, integer: true, extractable: false, aliases: [] },
   { key: "refinance_term_years", label: "Refinance term", group: "refinance", unit: "years", required: false, absentMeans: "not stated", material: true, conservative: null, min: 1, max: 40, integer: true, extractable: false, aliases: [] },
   { key: "refinance_and_hold", label: "Keep and refinance (no sale)", group: "refinance", unit: "flag", required: false, absentMeans: "the deal is sold at the end of the hold", material: true, conservative: null, min: 0, max: 1, integer: true, extractable: false, aliases: ["refinance and hold", "keep and refinance", "refinance and keep", "hold after refinance", "conserver et refinancer", "refinancer et conserver", "conserver apres refinancement"] },
@@ -166,7 +167,7 @@ export const RENTAL_ONLY_FIELDS: readonly string[] = [
   "stabilized_occupancy_pct", "expense_ratio_pct", "fixed_opex_annual", "property_tax_annual", "variable_expense_pct",
   "other_income_annual", "rent_growth_pct", "expense_growth_pct", "lease_up_ramp", "exit_cap_rate_pct", "selling_costs_pct",
   "min_dscr_covenant", "refinance_month", "refinance_amount", "refinance_ltv_pct", "refinance_rate_pct", "refinance_amort_years",
-  "refinance_io_months", "refinance_insurance_premium_pct", "refinance_mli_select_points", "refinance_term_years", "refinance_and_hold",
+  "refinance_io_months", "refinance_insurance_premium_pct", "refinance_premium_tax_pct", "refinance_mli_select_points", "refinance_term_years", "refinance_and_hold",
   "senior_amort_years", "senior_io_months", "mezz_amort_years", "mezz_io_months",
 ];
 
@@ -271,6 +272,7 @@ const held = [
   q("refinance_amort_years", { heldOnly: true }),
   q("refinance_io_months", { heldOnly: true, optional: true }),
   q("refinance_insurance_premium_pct", { heldOnly: true, optional: true }),
+  q("refinance_premium_tax_pct", { heldOnly: true, optional: true }),
   q("refinance_mli_select_points", { heldOnly: true, optional: true }),
   q("refinance_term_years", { heldOnly: true, optional: true }),
 ];

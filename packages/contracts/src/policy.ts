@@ -100,7 +100,10 @@ export const RENTAL_HOLD_DRAFT: Policy = {
   gateKeys: ["development_spread", "dcr_after_refinance", "stressed_sizing_dscr", "stressed_unrealized_equity_multiple"],
 };
 
-// CMHC, read 2026-10-19:
+// CMHC sources signed by the owner on 2026-10-24:
+// Multi-unit Fees and Premiums 66798 20250513-002A:
+// https://assets.cmhc-schl.gc.ca/sites/cmhc/media-newsroom/notices/2025/cmhc-to-update-multi-unit-mortgage-loan-insurance-premiums/fees-and-premiums.pdf
+// MLI Select page and Standard Rental Housing fact sheet 69107 20251110-005A:
 // https://www.cmhc-schl.gc.ca/professionals/project-funding-and-mortgage-financing/mortgage-loan-insurance/multi-unit-insurance/mliselect
 // https://assets.cmhc-schl.gc.ca/sf/project/cmhc/pdfs/content/en/standard-rental-housing.pdf
 // Owner decision 7 (2026-10-23): the stricter of CMHC's two columns. The loan before premium fits both the

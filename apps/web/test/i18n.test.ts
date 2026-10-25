@@ -281,6 +281,7 @@ describe("every sentence the engine's checks can produce has a French rendering"
     ["property tax", (d) => { d.propertyTaxAnnual = -1; }],
     ["MLI Select points", (d) => { d.refinance = { month: 24, amount: 1_000, ratePct: 5, amortYears: 25, ioMonths: 0, mliSelectPoints: 151 }; }],
     ["refinance term", (d) => { d.refinance = { month: 24, amount: 1_000, ratePct: 5, amortYears: 25, ioMonths: 0, termYears: 41 }; }],
+    ["refinance premium tax", (d) => { d.refinance = { month: 24, amount: 1_000, ratePct: 5, amortYears: 25, ioMonths: 0, premiumTaxPct: 16 }; }],
     ["refinance insurance premium", (d) => { d.refinance = { month: 24, amount: 1_000, ratePct: 5, amortYears: 25, ioMonths: 0, insurancePremiumPct: 11 }; }],
     ["a sale deal with rents", sells((d) => { d.revenue = allEquityDeal().revenue; })],
     ["a sale deal with a refinance", sells((d) => { d.refinance = { month: 24, amount: 1_000, ratePct: 5, amortYears: 25, ioMonths: 0 }; })],
@@ -907,7 +908,7 @@ describe("card 97a proposal translations", () => {
       if (!("options" in result)) throw new Error(result.unavailable);
       for (const o of result.options) expect(translateMessage(o.label)).not.toBe(o.label);
     }
-    for (const text of ["no verified public table; enter the rate (0 if none)", "MLI Select at 50 points lends up to 85% loan-to-value; enter the premium yourself.", "Published table past its re-check date (2027-04-30); check the source before relying on this value.", "refinance premium tax must be a number from 0 to 15"]) expect(translateMessage(text)).not.toBe(text);
+    for (const text of ["no verified public table; enter the rate (0 if none)", "MLI Select at 50 points lends up to 85% loan-to-value; enter the premium yourself.", "Published table past its re-check date (2027-04-30); check the source before relying on this value.", "refinance premium tax must be a number from 0 to 15", "Why GST/HST net is $0"]) expect(translateMessage(text)).not.toBe(text);
     expect(translateMessage("Published table past its re-check date (2027-04-30); check the source before relying on this value.")).toBe("Tableau publié dont la date de revérification (2027-04-30) est passée ; vérifiez la source avant de vous fier à cette valeur.");
     const en=build("en",()=>{}),fr=build("fr",()=>{});
     for (const value of [fr.L.field("refinance_premium_tax_pct"),fr.L.absent("refinance_premium_tax_pct")]) expect(value).not.toContain("refinance_premium_tax_pct");

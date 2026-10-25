@@ -366,7 +366,7 @@ describe("quick-start templates", () => {
   });
 
   describe("kept and refinanced (task 75)", () => {
-    const heldFields = ["senior_io_months", "refinance_month", "refinance_amount", "refinance_ltv_pct", "refinance_rate_pct", "refinance_amort_years", "refinance_io_months", "refinance_insurance_premium_pct", "refinance_mli_select_points", "refinance_term_years"];
+    const heldFields = ["senior_io_months", "refinance_month", "refinance_amount", "refinance_ltv_pct", "refinance_rate_pct", "refinance_amort_years", "refinance_io_months", "refinance_insurance_premium_pct", "refinance_premium_tax_pct", "refinance_mli_select_points", "refinance_term_years"];
     const heldRowsFor = (key: "multiplex" | "apartment", changes: Record<string, number | undefined> = {}) => {
       const values: Record<string, number | undefined> = {
         refinance_and_hold: 1, senior_io_months: 18, refinance_month: 18, refinance_amount: 1_600_000,
@@ -438,7 +438,7 @@ describe("quick-start templates", () => {
         expect(def, q.field).toBeDefined();
         expect(def.required === false || def.required === "refinance_month", q.field).toBe(true);
       }
-      for (const field of ["refinance_amount", "refinance_ltv_pct", "refinance_io_months", "refinance_insurance_premium_pct"]) {
+      for (const field of ["refinance_amount", "refinance_ltv_pct", "refinance_io_months", "refinance_insurance_premium_pct", "refinance_premium_tax_pct"]) {
         expect(held.find((q) => q.field === field)).toMatchObject({ optional: true });
       }
       expect(held[0]).toMatchObject({ zeroAllowed: true });

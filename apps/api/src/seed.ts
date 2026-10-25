@@ -64,7 +64,7 @@ export async function seedDemo(db: Db, store: BlobStore, log = (m: string) => co
       const rows = await tx.query<{ id: string; version: number }>(`select id, version from assumptions where deal_id = $1 and status = 'needs_review'`, [dealId]);
       for (const r of rows) await tx.query(`select fn_review($1, 'approve', null, null, $2)`, [r.id, r.version]);
     });
-    await asUser(db, analyst, (tx) => createRun(tx, dealId));
+    await asUser(db, analyst, (tx) => createRun(tx, dealId, new Date().toISOString().slice(0,10)));
     log(`Reviewed and ran ${slug}`);
   }
   const [{ id: runId }] = (await db.query<{ id: string }>(`select id from latest_runs where deal_id = $1`, [deals.get("maple-heights")])) as [{ id: string }];
