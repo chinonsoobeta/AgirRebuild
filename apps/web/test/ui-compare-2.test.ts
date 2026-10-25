@@ -83,6 +83,7 @@ const overview = (id: string, name: string, run: number | null, copiedFrom: { id
   documents: { total: 3, processing: 0, failed: 0 }, updating: false,
   review: { approved: 9, needsReview: 0, conflicting: 0, awaitingSecond: 0, missing: 0, impossible: 0, status: "ready" },
   run: run === null ? null : { id: `${id}-r${run}`, number: run, verdict: "APPROVE", fresh: true, createdAt: "2026-10-22" }, decision: null, reports: 0,
+  units: null, exit: null,
 });
 
 const mine = runView("r1", "d1", 1, false, 7200);

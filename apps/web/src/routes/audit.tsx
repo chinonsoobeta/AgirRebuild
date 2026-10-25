@@ -92,6 +92,10 @@ export function describeEvent(i: I18n, e: AuditEvent): string {
     case "client.assigned": return fr ? "A ajouté un client à ce projet" : "Added a client to this deal";
     case "client.unassigned": return fr ? "A retiré un client de ce projet" : "Removed a client from this deal";
     case "member.added": return fr ? `A ajouté une personne (${i.L.role(p.role)})` : `Added a person (${p.role})`;
+    case "member.removed": return fr ? `A retiré une personne (${i.L.role(p.role)})` : `Removed a person (${p.role})`;
+    case "workspace.renamed": return fr ? `A renommé l'espace de travail «\u00a0${p.from}\u00a0» en «\u00a0${p.to}\u00a0»` : `Renamed the workspace from "${p.from}" to "${p.to}"`;
+    case "review.ended": return fr ? "A mis fin à l'accès d'un réviseur" : "Ended a reviewer's access";
+    case "user.renamed": return fr ? "A changé son nom" : "Changed their name";
     default:
       if (e.action.startsWith("assumption.")) {
         const action = e.action.slice(11);

@@ -52,6 +52,10 @@ export type DealOverview = {
   run: { id: string; number: number; verdict: string; fresh: boolean; createdAt: string } | null;
   decision: { decision: string; created_at: string } | null;
   reports: number;
+  /** The approved unit-type counts added up; null while one waits, none is approved, or a type is written two ways. Never 0 for unknown. */
+  units: number | null;
+  /** How the deal ends, from its approved flags; null while a flag waits or both are set. */
+  exit: "sale" | "refinance_hold" | "for_sale" | null;
 };
 export type DocumentRow = {
   id: string; name: string; kind: string; role_set: "deal_source" | "evidence" | "context" | null; read_role: string | null; size_bytes: number; stage: string; stage_detail: string | null; page_count: number | null;
@@ -104,10 +108,21 @@ export type Artifact = { lang: "en" | "fr"; id: string; kind: string; format: st
 export type ShareTerm = "24h" | "7d" | "30d" | "none";
 export type ShareLink = { id: string; artifact_id: string; kind: string; format: string; run_number: number; term: ShareTerm; expires_at: string | null; created_at: string;
   created_by: string | null; revoked_at: string | null; revoked_by: string | null; openings: number; last_opened_at: string | null };
-export type SharedReport = { standardFailures?: { en: string[]; fr: string[] }; deal: string; kind: string; format: string; runNumber: number; expiresAt: string | null };
-export type DealClient = { id: string; name: string; email: string; assigned_at: string };
+export type SharedReport = {
+  standardFailures?: { en: string[]; fr: string[] }; deal: string; kind: string; format: string; runNumber: number; expiresAt: string | null;
+  /** What the shared run stored, never recomputed (card Y2). A link whose run cannot be read has none of these. */
+  workspace?: string; location?: string; province?: string | null; currency?: string | null; runAt?: string;
+  units?: number; exit?: "sale" | "refinance_hold" | "for_sale"; policyDraft?: boolean;
+  verdict?: RunView["result"]["verdict"]; errorChecks?: number;
+  /** Stored base-case metrics in a fixed order; only the ones the run has. */
+  figures?: Pick<Metric, "key" | "unit" | "value" | "status" | "reason">[];
+  /** The stored exit cap rate; absent for a run that sells its units. */
+  exitCapPct?: number;
+};
+/** `confirmed` counts the client's confirmations that still stand; a changed value clears its confirmation. */
+export type DealClient = { id: string; name: string; email: string; assigned_at: string; confirmed: number; last_confirmed_at: string | null };
 export type ClientInvite = { id: string; created_at: string; expires_at: string; created_by: string | null; used_at: string | null; used_by: string | null; revoked_at: string | null; revoked_by: string | null };
-export type InvitePeek = { workspace: string; deal: string };
+export type InvitePeek = { workspace: string; deal: string; expiresAt: string };
 export type AuditEvent = { seq: number; action: string; entity: string; entity_id: string | null; payload: any; hash: string; created_at: string; actor: string | null };
 
 export type ThresholdNote = import("@agir/contracts").PolicyValue & { setByName: string };

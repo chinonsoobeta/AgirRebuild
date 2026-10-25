@@ -39,7 +39,7 @@ function deal(id: string, name: string, over: Partial<DealOverview>): DealOvervi
   return {
     deal: { id, workspace_id: "w1", name, asset_type: "Multifamily", location: "Halifax", currency: "CAD", country: "CA", province: "NS", created_at: "2026-10-01T00:00:00Z" },
     copiedFrom: null, step: "documents", status: { tone: "neutral", text: "" }, next: "", documents: { total: 3, processing: 0, failed: 0 }, updating: false,
-    review, run: null, decision: null, reports: 0, ...over,
+    review, run: null, decision: null, reports: 0, units: null, exit: null, ...over,
   };
 }
 const MIXED = [

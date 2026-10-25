@@ -53,7 +53,7 @@ const base: DealOverview = {
   copiedFrom: null, step: "documents", status: { tone: "neutral", text: "" }, next: "",
   documents: { total: 0, processing: 0, failed: 0 }, updating: false,
   review: { approved: 0, needsReview: 0, conflicting: 0, awaitingSecond: 0, missing: 0, impossible: 0, status: "blocked" },
-  run: null, decision: null, reports: 0,
+  run: null, decision: null, reports: 0, units: null, exit: null,
 };
 const nothingYet = base;
 const reviewBlocked: DealOverview = { ...base, step: "review", documents: { total: 3, processing: 0, failed: 0 }, review: { ...base.review, approved: 5, conflicting: 2, missing: 1 } };

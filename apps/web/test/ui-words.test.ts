@@ -95,7 +95,7 @@ function deal(id: string, over: Partial<DealOverview>): DealOverview {
   return {
     deal: { id, workspace_id: "w1", name: `Deal ${id}`, asset_type: "Multifamily", location: "Halifax", currency: "CAD", country: "CA", province: "NS", created_at: "2026-10-01T00:00:00Z" },
     copiedFrom: null, step: "documents", status: { tone: "neutral", text: "" }, next: "", documents: { total: 3, processing: 0, failed: 0 }, updating: false,
-    review, run: null, decision: null, reports: 0, ...over,
+    review, run: null, decision: null, reports: 0, units: null, exit: null, ...over,
   };
 }
 const decided = deal("d5", { step: "reports", run: { id: "r5", number: 3, verdict: "APPROVE", fresh: true, createdAt: "2026-10-19T12:00:00Z" }, decision: { decision: "approve_with_conditions", created_at: "2026-10-19T12:00:00Z" }, reports: 2 });
