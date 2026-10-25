@@ -23,8 +23,8 @@ work it describes.
 
 The first walk ran on `ui/redesign`, where migrations go to `0029` as on `main`. The second ran on `ui/y-screens`,
 which adds `0031` and `0032`. `0030` is on `ui/w12-email` only. The three touch different objects (`0030` a new table
-and a column on `users`; `0031` and `0032` functions of their own names), so a database that already has `0031` and
-`0032` can take `0030` after them.
+and a column on `users`; `0031` and `0032` add or replace functions that `0030` does not touch), so a database that
+already has `0031` and `0032` can take `0030` after them.
 
 `npm start` without `AGIR_DATA_DIR` migrates `.data/` in place, and a migration cannot be undone there.
 Point it at an empty folder to try a branch.
