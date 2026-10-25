@@ -1,5 +1,5 @@
 import { THRESHOLDS, FIELD_BY_KEY } from "@agir/contracts";
-import { useQuery } from "@tanstack/react-query";
+import { useInfiniteQuery, useQuery } from "@tanstack/react-query";
 import { useState } from "react";
 import { api, type AuditEvent } from "../api";
 import { DealFrame, useDeal, useSession } from "../components/ui";
@@ -134,8 +134,8 @@ export function categoryOf(action: string): AuditCategory | null {
 }
 
 const PAGE = 50;
-/** The API returns at most this many events, newest first. */
-const LOADED_MAX = 500;
+/** The API returns at most this many events a page, newest first; a shorter page reached the deal's first event. */
+const SERVER_PAGE = 500;
 const shortHash = (h: string) => `${h.slice(0, 4)} ${h.slice(4, 8)} ${h.slice(8, 12)}…`;
 
 export function Audit({ dealId }: { dealId: string }) {
@@ -146,7 +146,13 @@ export function Audit({ dealId }: { dealId: string }) {
   const [category, setCategory] = useState<AuditCategory | "all">("all");
   const [q, setQ] = useState("");
   const [limit, setLimit] = useState(PAGE);
-  const events = useQuery({ queryKey: ["audit", dealId], queryFn: () => api.get<AuditEvent[]>(`/deals/${dealId}/audit`) });
+  // Pages of 500, newest first; each next page asks for the events older than the oldest one loaded.
+  const events = useInfiniteQuery({
+    queryKey: ["audit", dealId],
+    initialPageParam: null as number | null,
+    queryFn: ({ pageParam }) => api.get<AuditEvent[]>(pageParam === null ? `/deals/${dealId}/audit` : `/deals/${dealId}/audit?before=${pageParam}`),
+    getNextPageParam: (last) => (last.length >= SERVER_PAGE ? last[last.length - 1]!.seq : undefined),
+  });
   // fn_verify_audit_chain walks every event in the installation, in order: ok, how many it read, and where it stopped.
   const verify = useQuery({
     queryKey: ["audit-verify", workspaceId],
@@ -155,11 +161,18 @@ export function Audit({ dealId }: { dealId: string }) {
   if (!deal.data) return <p className="muted">{t("common.loading")}</p>;
   const o = deal.data;
   const who = (e: AuditEvent) => e.actor ?? (e.action === "share.opened" ? t("audit.someone") : t("audit.worker"));
-  const all = (events.data ?? []).map((e) => ({ e, text: describeEvent(i, e) }));
+  const loaded = events.data?.pages.flat();
+  const all = (loaded ?? []).map((e) => ({ e, text: describeEvent(i, e) }));
   const needle = q.trim().toLowerCase();
   const matching = all.filter(({ e, text }) => (category === "all" || categoryOf(e.action) === category)
     && (!needle || `${text} ${who(e)} ${e.hash}`.toLowerCase().includes(needle)));
   const shown = matching.slice(0, limit);
+  const more = matching.length > shown.length || events.hasNextPage;
+  // Show what is loaded first; past it, fetch the next older page and show it as it comes.
+  const showOlder = () => {
+    setLimit(limit + PAGE);
+    return matching.length > shown.length ? undefined : events.fetchNextPage();
+  };
   const filtered = category !== "all" || Boolean(needle);
   const v = verify.data;
   return (
@@ -206,16 +219,16 @@ export function Audit({ dealId }: { dealId: string }) {
                   <td className="hash" title={e.hash}>{shortHash(e.hash)}</td>
                 </tr>
               ))}
-              {shown.length === 0 && events.data && <tr><td colSpan={4} className="muted">{t(filtered ? "audit.noMatch" : "audit.empty")}</td></tr>}
+              {shown.length === 0 && loaded && <tr><td colSpan={4} className="muted">{t(filtered ? "audit.noMatch" : "audit.empty")}</td></tr>}
             </tbody>
           </table>
           <div className="card-foot row between">
             <span className="small muted">
               {t("audit.shown", { n: shown.length, m: matching.length, filtered })}
-              {all.length >= LOADED_MAX && ` ${t("audit.capped", { n: LOADED_MAX })}`}
+              {events.hasNextPage && ` ${t("audit.capped")}`}
             </span>
             <div className="row">
-              {matching.length > shown.length && <button className="btn quiet sm" type="button" onClick={() => setLimit(limit + PAGE)}>{t("audit.older")}</button>}
+              {more && <button className="btn quiet sm" type="button" disabled={events.isFetchingNextPage} onClick={showOlder}>{t("audit.older")}</button>}
               {o.run && <a className="btn ghost sm" href={`/api/runs/${o.run.id}/audit-package`}>{t("audit.package")}</a>}
             </div>
           </div>

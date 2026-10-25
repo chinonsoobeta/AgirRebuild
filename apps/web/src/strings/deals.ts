@@ -47,7 +47,27 @@ function frLead(p: Counts): string {
   return sentences(present.map(([n, what], i) => `${w(n)}${i === 0 ? pl(n, " projet", " projets") : ""} ${pl(n, "est", "sont")} ${what(n)}`), " et ");
 }
 
+type Facts = { n: string; one: boolean; known: boolean; exit: "sale" | "refinance_hold" | "for_sale" | null };
+
+/** The units and how the deal ends, as the deal heading says them; "" when neither is known. */
+function enFacts({ n, one, known, exit }: Facts): string {
+  const units = (kind: string) => `${n} ${kind}${one ? "unit" : "units"}`;
+  if (!known) return exit === "refinance_hold" ? "kept and refinanced" : exit === "sale" ? "sold at the end of the hold" : exit === "for_sale" ? "for sale" : "";
+  return exit === "refinance_hold" ? `${units("rental ")}, kept and refinanced` : exit === "sale" ? `${units("rental ")}, sold at the end of the hold`
+    : exit === "for_sale" ? `${units("")} for sale` : units("");
+}
+
+function frFacts({ n, one, known, exit }: Facts): string {
+  const pl = (single: string, many: string) => (one ? single : many);
+  if (!known) return exit === "refinance_hold" ? "conservé et refinancé" : exit === "sale" ? "vendu à la fin de la détention" : exit === "for_sale" ? "à vendre" : "";
+  const rental = `${n} ${pl("logement locatif", "logements locatifs")}`;
+  return exit === "refinance_hold" ? `${rental}, ${pl("conservé et refinancé", "conservés et refinancés")}` : exit === "sale" ? `${rental}, ${pl("vendu", "vendus")} à la fin de la détention`
+    : exit === "for_sale" ? `${n} ${pl("logement", "logements")} à vendre` : `${n} ${pl("logement", "logements")}`;
+}
+
 export const en = {
+  "deals.facts": (p) => enFacts(p as Facts),
+  "deals.amountsIn": (p) => `amounts in ${p.c}`,
   "deals.lead": (p) => enLead(p as Counts),
   "deals.f.stale": "Out of date",
   "deals.tag.blocked": "Blocked",
@@ -70,6 +90,8 @@ export const en = {
 } satisfies Record<string, Entry>;
 
 export const fr: FrenchOf<typeof en> = {
+  "deals.facts": (p) => frFacts(p as Facts),
+  "deals.amountsIn": (p) => `montants en ${p.c}`,
   "deals.lead": (p) => frLead(p as Counts),
   "deals.f.stale": "Périmés",
   "deals.tag.blocked": "Bloqué",

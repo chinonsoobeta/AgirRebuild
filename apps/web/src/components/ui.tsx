@@ -242,9 +242,17 @@ export function DealPath({ o, active }: { o: DealOverview; active: string }) {
   );
 }
 
+/** The deal's units and how it ends, as the deal heading and the shared page say them: "6 rental units, kept and refinanced".
+ * Each part shows only when the API knows it (null means not approved yet), so it is never a 0 or a guess; "" when neither is known. */
+export function dealFacts(i: Pick<I18n, "t" | "f">, units: number | null | undefined, exit: DealOverview["exit"] | undefined): string {
+  const known = typeof units === "number";
+  return i.t("deals.facts", { n: known ? i.f.value(units, "count") : "", one: units === 1, known, exit: exit ?? null }) as string;
+}
+
 /** The head of every deal page: back to the deals, the name and its facts, the actions, and the path. */
 export function DealFrame({ o, active }: { o: DealOverview; active: string }) {
-  const { t, L } = useI18n();
+  const i = useI18n();
+  const { t, L } = i;
   const { role } = useSession();
   const navigate = useNavigate();
   const qc = useQueryClient();
@@ -271,7 +279,7 @@ export function DealFrame({ o, active }: { o: DealOverview; active: string }) {
             {t("shell.allDeals")}
           </Link>
           <h1 className="deal-name">{o.deal.name}</h1>
-          <p className="meta">{[L.asset(o.deal.asset_type), L.place(o.deal.location, o.deal.province), L.currency(o.deal.currency)].filter(Boolean).join(" · ")}</p>
+          <p className="meta">{[L.asset(o.deal.asset_type), L.place(o.deal.location, o.deal.province), dealFacts(i, o.units, o.exit), L.currency(o.deal.currency)].filter(Boolean).join(" · ")}</p>
           {o.copiedFrom && (
             <p className="small muted variant-of">{t("copy.variantOf")} <Link to="/deals/$dealId/review" params={{ dealId: o.copiedFrom.id }}>{o.copiedFrom.name}</Link></p>
           )}

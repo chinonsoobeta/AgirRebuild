@@ -22,6 +22,8 @@ vi.mock("@tanstack/react-query", () => ({
     if (key === "run") return { data: state.byId[id] };
     return {};
   },
+  // Card Z2: the audit trail loads its events as pages; one page of fewer than 500 has reached the start.
+  useInfiniteQuery: () => ({ data: { pages: [state.events] }, hasNextPage: false, isFetchingNextPage: false, fetchNextPage: async () => {} }),
   useQueries: (options: { queries: unknown[] }) => options.queries.map(() => ({})),
   useMutation: () => ({ mutate: () => {}, isPending: false, reset: () => {}, error: null }),
   useQueryClient: () => ({ invalidateQueries: async () => {} }),
