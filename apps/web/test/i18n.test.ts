@@ -209,7 +209,7 @@ describe("the quick start's gaps", () => {
     expect(a.reason).toBe("from the plans (entered as 870 m²)");
     const r = enteredInUnit("$/sf/yr", true, 107.64, "broker letter", "fr");
     expect(r.value).toBeCloseTo(107.64 / SF_PER_M2, 9);
-    expect(r.reason).toBe("broker letter (saisi en 107,64 $/m²/an)");
+    expect(r.reason).toBe("broker letter (saisi en 107,64\u00a0$/m²/an)");
     expect(enteredInUnit("sf", false, 870, "from the plans", "en")).toEqual({ value: 870, reason: "from the plans" });
     expect(enteredInUnit("$", true, 5, "x".repeat(10), "en")).toEqual({ value: 5, reason: "x".repeat(10) });
   });
@@ -598,9 +598,9 @@ describe("card 58c: every audit action has a sentence in both languages", () => 
   });
   it("says a label the workspace remembers, and forgets (card 113)", () => {
     expect(say("label.remembered", { phrase: "marketing window", unit: "none", field: "lease_up_months", item: "" }))
-      .toEqual(["Remembered the label \"marketing window\" as Lease-up period for this workspace's deals", "A retenu le libellé « marketing window » comme Période de location pour les projets de cet espace"]);
+      .toEqual(["Remembered the label \"marketing window\" as Lease-up period for this workspace's deals", "A retenu le libellé «\u00a0marketing window\u00a0» comme Période de location pour les projets de cet espace"]);
     expect(say("label.forgotten", { phrase: "marketing window", unit: "none", field: "lease_up_months", item: "" }))
-      .toEqual(["Forgot the label \"marketing window\" as Lease-up period", "A oublié le libellé « marketing window » comme Période de location"]);
+      .toEqual(["Forgot the label \"marketing window\" as Lease-up period", "A oublié le libellé «\u00a0marketing window\u00a0» comme Période de location"]);
     expect(build("fr", () => {}).msg("Labelled the same way before in this workspace; confirm it")).toBe("Étiqueté de la même façon auparavant dans cet espace ; à confirmer");
     expect(build("fr", () => {}).msg("The label it was remembered from was removed")).not.toBe("The label it was remembered from was removed");
   });
@@ -629,7 +629,7 @@ describe("card 58c: every audit action has a sentence in both languages", () => 
     for (const [a, [e, f]] of Object.entries(words)) {
       const [english, french] = say(`assumption.${a}`, p);
       expect(english, a).toMatch(new RegExp(`^${e}: Exit cap rate = `));
-      expect(french, a).toMatch(new RegExp(`^${f} : Taux de capitalisation à la sortie = `));
+      expect(french, a).toMatch(new RegExp(`^${f}\u00a0: Taux de capitalisation à la sortie = `));
     }
   });
   it("still prints the key of an action it has no sentence for", () => {
@@ -852,11 +852,11 @@ describe("partner memo wording (task 84d)", () => {
 
 describe("share-link wording (task 86b)", () => {
   it.each([
-    ["share.created", { kind: "ic_memo", format: "pdf", term: "7d" }, "Shared a link to the IC memo (pdf), 7 days", "A partagé un lien : Mémo du comité (pdf), 7 jours"],
+    ["share.created", { kind: "ic_memo", format: "pdf", term: "7d" }, "Shared a link to the IC memo (pdf), 7 days", "A partagé un lien\u00a0: Mémo du comité (pdf), 7 jours"],
     ["share.revoked", {}, "Revoked a shared link", "A révoqué un lien partagé"],
-    ["share.opened", { what: "page" }, "Opened a shared link: the page", "A ouvert un lien partagé : la page"],
-    ["share.opened", { what: "file" }, "Opened a shared link: the report", "A ouvert un lien partagé : le rapport"],
-    ["share.opened", { what: "audit_package" }, "Opened a shared link: the audit package", "A ouvert un lien partagé : le dossier d'audit"],
+    ["share.opened", { what: "page" }, "Opened a shared link: the page", "A ouvert un lien partagé\u00a0: la page"],
+    ["share.opened", { what: "file" }, "Opened a shared link: the report", "A ouvert un lien partagé\u00a0: le rapport"],
+    ["share.opened", { what: "audit_package" }, "Opened a shared link: the audit package", "A ouvert un lien partagé\u00a0: le dossier d'audit"],
   ] as const)("%s %j has the specified audit sentences", (action, payload, en, fr) => {
     const event = { seq: 1, action, payload, actor: null, entity: "share_link", entity_id: "link-id", hash: "hash", created_at: "2026-10-19T12:00:00Z" };
     expect(describeEvent(build("en", () => {}), event)).toBe(en);
@@ -933,7 +933,7 @@ describe("card 112: suggested fields and likely figures on review", () => {
     expect(en.t("review.useAsSuggested", { field: "lease-up period" })).toBe("Use as lease-up period");
     expect(fr.t("review.useAsSuggested", { field: "période de location" })).toBe("Utiliser comme période de location");
     expect(en.t("review.likely")).toBe("Possibly in your documents:");
-    expect(fr.t("review.likely")).toBe("Peut-être dans vos documents :");
+    expect(fr.t("review.likely")).toBe("Peut-être dans vos documents\u00a0:");
     expect(en.t("review.useFigure")).toBe("Use this figure");
     expect(fr.t("review.useFigure")).toBe("Utiliser ce chiffre");
   });
@@ -1069,7 +1069,7 @@ it.each(["en", "fr"] as const)("card 135 offers confirmation only for an outside
 describe("Card 137 region text", () => {
   it("names the table and exclusions in French", () => {
     const fr = build("fr", () => {});
-    expect(fr.t("review.regionIntro", { kind: fr.t("review.regionRent"), fields: "type, nombre, loyer mensuel" })).toBe("Ce tableau ressemble à votre état locatif : type, nombre, loyer mensuel.");
+    expect(fr.t("review.regionIntro", { kind: fr.t("review.regionRent"), fields: "type, nombre, loyer mensuel" })).toBe("Ce tableau ressemble à votre état locatif\u00a0: type, nombre, loyer mensuel.");
     expect(fr.t("review.regionConfirm", { n: 12 })).toBe("Confirmer les 12 valeurs");
     expect(fr.msg("read by OCR")).toBe("lu par ROC");
     expect(fr.msg("please check")).toBe("à vérifier");
