@@ -145,7 +145,7 @@ describe("comparing against a variant", () => {
 });
 
 describe("the Compare button", () => {
-  const me: Me = { user: { id: "u1", email: "ada@example.com", name: "Ada Lovelace" }, workspaces: [{ id: "w1", name: "First", review_mode: "team", label_suggestions: false, has_logo: false, role: "owner" }] };
+  const me: Me = { user: { id: "u1", email: "ada@example.com", name: "Ada Lovelace", email_verified: true }, workspaces: [{ id: "w1", name: "First", review_mode: "team", label_suggestions: false, has_logo: false, role: "owner" }] };
   const frame = (o: DealOverview) => {
     state.me = me;
     state.realFrame = true;

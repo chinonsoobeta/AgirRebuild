@@ -13,6 +13,7 @@ import type { Lang } from "../src/i18n.tsx";
 const state = vi.hoisted(() => ({ lang: "en" as Lang, me: undefined as unknown, meError: null as unknown,
   hooks: [] as unknown[], index: 0, nodes: [] as { tag: string; props: Record<string, any> }[], invalidate: vi.fn(async () => {}), navigate: vi.fn(), setLang: vi.fn() }));
 vi.mock("@tanstack/react-query", () => ({
+  useQueries: () => [],
   useQuery: (options: { queryKey: unknown[] }) => {
     const key = options.queryKey[0];
     return key === "me" ? { data: state.me, error: state.meError } : key === "members" || key === "deals" ? { data: [] } : key === "demo" ? { data: { available: false } } : {};
