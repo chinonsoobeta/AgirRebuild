@@ -189,3 +189,13 @@ describe("Card 167: whole-building AI unit counts", () => {
     expect(verifyReading({ ...count(null), ...change }, sources)).toEqual({ outcome });
   });
 });
+
+describe("Card 168: fallback reader word ranges", () => {
+  test.each([
+    ["Lease-up: seven to nine months", []],
+    ["Lease-up: nine months", [9]],
+  ] as const)("%s", (quote, expected) => {
+    const document = { ...doc("txt"), fullText: quote, lines: [{ location: "line 1", text: quote }] };
+    expect(extractCandidates(document).candidates.filter(c => c.fieldKey === "lease_up_months").map(c => c.value)).toEqual(expected);
+  });
+});

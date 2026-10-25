@@ -482,3 +482,41 @@ describe("Card 166: bare scales still depend on cell context", () => {
     expect(tokenize(text, US, cell)).toEqual([expect.objectContaining({ value, unit })]);
   });
 });
+
+
+describe("Card 168: a range written in words is not a value", () => {
+  test.each([
+    ["Lease-up: seven to nine months", []],
+    ["Lease-up: between seven and nine months", []],
+    ["Lease-up: seven or eight months", []],
+    ["Période de location : sept à neuf mois", []],
+    ["Hold: five to seven years", []],
+    ["Construction: eighteen to twenty-four months", []],
+    ["Units: seven to nine units", []],
+    ["Lease-up: seven-to-nine months", []],
+    ["Lease-up: 7 to 9 months", [[7, null], [9, "months"]]],
+    ["Lease-up: 7 to nine months", [[7, null], [9, "months"]]],
+    ["Lease-up: nine months", [[9, "months"]]],
+    ["Lease-up: twelve (12) months", [[12, "months"]]],
+    ["Hold: one and a half years", [[1.5, "years"]]],
+    ["Term: two years and lease-up nine months", [[2, "years"], [9, "months"]]],
+    ["Lease-up: seven months, then nine months of stabilization", [[7, "months"], [9, "months"]]],
+    ["entre sept et neuf mois", []],
+    ["vingt et un mois", [[21, "months"]]],
+    ["Term: two years and nine months", [[2, "years"], [9, "months"]]],
+    ["Durée : deux ans et six mois", [[2, "years"], [6, "months"]]],
+    ["Lease-up: seven months to nine months", [[7, "months"], [9, "months"]]],
+    ["one hundred and five units", []],
+    ["a year and a half", [[1.5, "years"]]],
+    ["from twenty-four to thirty months", []],
+    ["de vingt et un à trente mois", []],
+    ["seven - nine months", []],
+    ["seven – nine months", []],
+    ["seven — nine months", []],
+    ["sept ou neuf mois", []],
+    ["Durée : un an et six mois", [[1, "years"], [6, "months"]]],
+    ["un an ou deux ans", [[1, "years"], [2, "years"]]],
+  ] as const)("%s keeps only definite values", (text, expected) => {
+    expect(tokenize(text, UNKNOWN).map(t => [t.value, t.unit])).toEqual(expected);
+  });
+});
