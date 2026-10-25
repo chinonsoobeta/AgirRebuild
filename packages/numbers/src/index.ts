@@ -434,7 +434,7 @@ export function tokenize(line: string, format: DocumentFormat, cell = false): Nu
     let unit: TokenUnit = currency ? "$" : null;
     const upcoming = UNIT_RULES.find((r) => r.re.test(scale && currency ? rest.slice(scale[0].length) : rest))?.unit ?? null;
     const grouping = currency || upcoming === "units" || upcoming === "sf" || upcoming === "m2";
-    const parsed = parseCore(core!, format, grouping, Boolean(suffix?.[1]?.startsWith("$")), Boolean(scale && currency), !currency && /^(?:\s?%|\s?(?:[x×](?![a-z])|(?:times|fois)\b))/i.test(rest));
+    const parsed = parseCore(core!, format, grouping, Boolean(suffix?.[1]?.startsWith("$")), Boolean(scale && currency), !currency && /^(?:\s?%|\s?(?:[x×](?![a-z])(?!\s*[$€£]?\d)|(?:times|fois)\b))/i.test(rest));
     let value = parsed.value;
     let refusal = parsed.refusal;
     // A scale word counts only in a money context: "18 M" alone is not $18,000,000.

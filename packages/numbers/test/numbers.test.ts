@@ -388,4 +388,12 @@ describe("three-decimal rates and slashes after labels (Card 164)", () => {
       else expect(t.refusal).toBeUndefined();
     });
   });
+
+  test("an x before another figure is a multiplication, not a multiple", () => {
+    expect(tokenize("Rent 1,250 x 12", US).map((t) => t.value)).toEqual([1250, 12]);
+    expect(tokenize("Rent 1,250 × $12", US).map((t) => t.value)).toEqual([1250, 12]);
+    const unknown = tokenize("Rent 1,250 x 12", UNKNOWN);
+    expect(unknown.map((t) => t.value)).toEqual([null, 12]);
+    expect(unknown[0]!.refusal).toMatch(/does not say which/);
+  });
 });
