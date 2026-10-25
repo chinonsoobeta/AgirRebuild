@@ -44,7 +44,7 @@ describe("quick start in the design's layout (card W6)", () => {
       ? ["Multiplex rental", "Small apartment", "Townhomes for sale", "Small condo for sale"]
       : ["Multiplex locatif", "Petit immeuble d'appartements", "Maisons en rangée à vendre", "Petit immeuble en copropriété à vendre"];
     TEMPLATES.forEach((x, n) => {
-      const card = new RegExp(`<label class="choice( on)?"><input type="radio" name="template" value="${x.key}"[^>]*/><span><span class="t">([^<]*)</span><span class="d">([^<]*)</span>`);
+      const card = new RegExp(`<label class="choice( on)?"><input type="radio" name="template"[^>]* value="${x.key}"/><span><span class="t">([^<]*)</span><span class="d">([^<]*)</span>`);
       const m = html.match(card);
       expect(m, x.key).not.toBeNull();
       const title = m![2]!.replace(/&#x27;/g, "'");
@@ -53,17 +53,17 @@ describe("quick start in the design's layout (card W6)", () => {
       expect(m![3]).toBe(tr(lang).t("quickstart.range", { min: x.minUnits, max: x.maxUnits }));
       expect(Boolean(m![1])).toBe(x.key === "apartment");
     });
-    expect(html).toMatch(/value="apartment" checked=""/);
+    expect(html).toMatch(/<input type="radio" name="template" checked="" value="apartment"\/>/);
     expect(html).toContain(lang === "en" ? "5 to 30 units" : "5 à 30 logements");
   });
 
   it("asks keep or sell as two radio choice cards with today's values, the current one on", () => {
     const html = render();
     expect(html).toContain(tr("en").t("quickstart.andThen"));
-    expect(html).toMatch(/<label class="choice on"><input type="radio" name="refinance_and_hold" value="" checked=""\/><span><span class="t">Sell it<\/span>/);
+    expect(html).toMatch(/<label class="choice on"><input type="radio" name="refinance_and_hold" checked="" value=""\/><span><span class="t">Sell it<\/span>/);
     expect(html).toMatch(/<label class="choice"><input type="radio" name="refinance_and_hold" value="1"\/><span><span class="t">Keep it and refinance<\/span>/);
     state.held = true;
-    expect(render()).toMatch(/<label class="choice on"><input type="radio" name="refinance_and_hold" value="1" checked=""\/>/);
+    expect(render()).toMatch(/<label class="choice on"><input type="radio" name="refinance_and_hold" checked="" value="1"\/>/);
   });
 
   it("does not ask keep or sell for a template that sells", () => {
@@ -102,7 +102,7 @@ describe("quick start in the design's layout (card W6)", () => {
     state.template = "apartment";
     state.types = [0, 3];
     const html = render();
-    const table = html.match(/<table class="table">(.*?)<\/table>/)?.[1] ?? "";
+    const table = html.match(/<table class="table[^"]*">(.*?)<\/table>/)?.[1] ?? "";
     expect(table).toContain("<th scope=\"col\">Unit type</th>");
     const rows = table.match(/<tbody>(.*?)<\/tbody>/)![1]!.split("</tr>").filter(Boolean);
     expect(rows).toHaveLength(2);
