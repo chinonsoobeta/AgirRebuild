@@ -1,14 +1,36 @@
 import { Fragment, useId, useState, type FormEvent, type ReactNode } from "react";
 import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
-import type { RunResult } from "@agir/contracts";
+import { THRESHOLDS, type RunResult } from "@agir/contracts";
 import { api, ApiError, type ThresholdView } from "../api";
-import { checkText, useI18n } from "../i18n";
+import { checkText, useI18n, type I18n, type Key } from "../i18n";
 import { ErrorText, useSession } from "./ui";
+
+/** The policies this build knows (`POLICIES` in packages/contracts/src/policy.ts), each named in words. */
+const POLICY_NAMES: Readonly<Record<string, Key>> = {
+  "policy-v1": "thresholds.policy.policy-v1",
+  "rental-hold-draft": "thresholds.policy.rental-hold-draft",
+  "rental-hold-insured-draft": "thresholds.policy.rental-hold-insured-draft",
+  "rental-hold-insured-standard-draft": "thresholds.policy.rental-hold-insured-standard-draft",
+  "rental-hold-insured-standard-short-draft": "thresholds.policy.rental-hold-insured-standard-short-draft",
+  "for-sale-draft": "thresholds.policy.for-sale-draft",
+};
+
+/** A policy as a person reads it: its name in words, or its version id when this build does not know it. */
+export function policyName(i: Pick<I18n, "t">, version: string): string {
+  return Object.hasOwn(POLICY_NAMES, version) ? i.t(POLICY_NAMES[version]!) : version;
+}
+
+/** A saved value that no longer fits: the policy's name and the threshold's label, else the raw version and path. */
+function invalidLine(i: Pick<I18n, "t" | "lang">, v: NonNullable<ThresholdView["invalid"]>[number]): string {
+  const label = THRESHOLDS[v.version]?.find((threshold) => threshold.path === v.path)?.label[i.lang] ?? v.path;
+  return `${policyName(i, v.version)} · ${label} = ${v.value}`;
+}
 
 /** The same governed editor for workspace defaults and deal-specific values. A screen that already
     titles the section passes `summary` so the disclosure does not repeat its heading. */
 export function Thresholds({ scope, id, initialVersion = "", summary, open }: { scope: "workspaces" | "deals"; id: string; initialVersion?: string; summary?: string; open?: boolean }) {
-  const { t, lang, f } = useI18n();
+  const i = useI18n();
+  const { t, lang, f } = i;
   const { role } = useSession();
   const qc = useQueryClient();
   const [chosen, setChosen] = useState(initialVersion);
@@ -30,7 +52,7 @@ export function Thresholds({ scope, id, initialVersion = "", summary, open }: { 
           event.preventDefault();
           save.mutate({ policyVersion: v.version, path: v.path, value: null, reason: String(new FormData(event.currentTarget).get("reason")) });
         };
-        return <li key={`${v.layer}-${v.version}-${v.path}`}>{v.version} · {v.path} = {v.value} ({t(v.layer === "deal" ? "threshold.layerDeal" : "threshold.layerWorkspace")}) · {v.error[lang]}
+        return <li key={`${v.layer}-${v.version}-${v.path}`}>{invalidLine(i, v)} ({t(v.layer === "deal" ? "threshold.layerDeal" : "threshold.layerWorkspace")}) · {v.error[lang]}
           <p className="muted">{v.setByName} · {f.date(v.setAt)} · {v.reason}</p>
           {role === "owner" && own && <form className="row" onSubmit={clear}>
             <input aria-label={t("threshold.reason")} className="input" name="reason" required placeholder={t("threshold.reason")} />
@@ -39,7 +61,7 @@ export function Thresholds({ scope, id, initialVersion = "", summary, open }: { 
       })}</ul>
     </div>}
     {policy && <>
-      <label className="field"><span className="label">{t("threshold.strategy")}</span><select className="select" value={policy.version} onChange={(event) => setChosen(event.target.value)}>{policies.map((policy) => <option key={policy.version} value={policy.version}>{policy.version}</option>)}</select></label>
+      <label className="field"><span className="label">{t("threshold.strategy")}</span><select className="select" value={policy.version} onChange={(event) => setChosen(event.target.value)}>{policies.map((policy) => <option key={policy.version} value={policy.version}>{policyName(i, policy.version)}</option>)}</select></label>
       <div className="scroll"><table className="table"><thead><tr><th>{t("threshold.name")}</th><th>{t("threshold.standard")}</th>{scope === "deals" && <th>{t("threshold.workspace")}</th>}<th>{t("threshold.yours")}</th></tr></thead>
         <tbody>{policy.thresholds.map((row) => {
           const own = scope === "deals" ? row.deal : row.workspace;
@@ -68,7 +90,8 @@ export function Thresholds({ scope, id, initialVersion = "", summary, open }: { 
 /** A deal's thresholds in force, read-only: each one's bound and, when it is not the standard, where it was set.
     It shows the policy of the deal's latest run, otherwise the first, with a select for the others. */
 export function ThresholdList({ dealId, children }: { dealId: string; children?: (version: string, invalid: boolean) => ReactNode }) {
-  const { t, lang, f } = useI18n();
+  const i = useI18n();
+  const { t, lang, f } = i;
   const { role } = useSession();
   const query = useQuery({ queryKey: ["thresholds", "deals", dealId], queryFn: () => api.get<ThresholdView>(`/deals/${dealId}/thresholds`) });
   const runs = useQuery({ queryKey: ["runs", dealId], queryFn: () => api.get<{ policy_version?: string }[]>(`/deals/${dealId}/runs`) });
@@ -83,8 +106,8 @@ export function ThresholdList({ dealId, children }: { dealId: string; children?:
     {policy && <>
       {policies.length > 1
         ? <label className="row small" htmlFor={selectId}><span className="muted">{t("threshold.strategy")}</span>
-          <select id={selectId} className="select" value={policy.version} onChange={(event) => setChosen(event.target.value)}>{policies.map((p) => <option key={p.version} value={p.version}>{p.version}</option>)}</select></label>
-        : <span className="small muted">{policy.version}</span>}
+          <select id={selectId} className="select" value={policy.version} onChange={(event) => setChosen(event.target.value)}>{policies.map((p) => <option key={p.version} value={p.version}>{policyName(i, p.version)}</option>)}</select></label>
+        : <span className="small muted">{policyName(i, policy.version)}</span>}
       <dl className="kv th-list">{policy.thresholds.map((row) => {
         const value = f.value(row.value, row.unit);
         const changed = row.value !== row.standard;
@@ -99,7 +122,7 @@ export function ThresholdList({ dealId, children }: { dealId: string; children?:
     </>}
     {invalid.length > 0 && <p className="hint">{t("threshold.invalid")}</p>}
     {/* The owner clears these in the editor; anyone else still sees which values they are. */}
-    {invalid.length > 0 && role !== "owner" && <ul className="small">{invalid.map((v) => <li key={`${v.layer}-${v.version}-${v.path}`}>{v.version} · {v.path} = {v.value} ({t(v.layer === "deal" ? "threshold.layerDeal" : "threshold.layerWorkspace")}) · {v.error[lang]}</li>)}</ul>}
+    {invalid.length > 0 && role !== "owner" && <ul className="small">{invalid.map((v) => <li key={`${v.layer}-${v.version}-${v.path}`}>{invalidLine(i, v)} ({t(v.layer === "deal" ? "threshold.layerDeal" : "threshold.layerWorkspace")}) · {v.error[lang]}</li>)}</ul>}
     {policy && children?.(policy.version, invalid.length > 0)}
   </>;
 }

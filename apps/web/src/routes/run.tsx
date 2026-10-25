@@ -6,7 +6,7 @@ import { Figure, Figures } from "../components/kit";
 import { FIELD_BY_KEY } from "@agir/contracts";
 import { api, type Metric, type Review, type RunView } from "../api";
 import { Banner, canEdit, DealFrame, ErrorText, Glossary, MetricValue, StatusTag, useDeal, useSession, VerdictBadge } from "../components/ui";
-import { StandardVerdict } from "../components/thresholds";
+import { policyName, StandardVerdict } from "../components/thresholds";
 import * as I from "../components/icons";
 import { checkText, dealStatus, useI18n, verdictText } from "../i18n";
 
@@ -256,7 +256,7 @@ export function Run({ dealId, run: fromAddress }: { dealId: string; run?: string
               <div className="row">
                 <VerdictBadge code={v.result.verdict.code} />
                 {v.policyCustom && <span>{t("threshold.withYours")}</span>}
-                <span className="muted">{t("run.verdictLine", { n: v.number, policy: v.policyVersion, draft: v.policyDraft })}</span>
+                <span className="muted">{t("run.verdictLine", { n: v.number, policy: policyName(i, v.policyVersion), draft: v.policyDraft })}</span>
               </div>
               <p className="run-headline">{vt.headline}</p>
               <p className="muted">{vt.explanation}</p>
@@ -398,7 +398,7 @@ export function Run({ dealId, run: fromAddress }: { dealId: string; run?: string
             <dl className="kv">
               <dt>{t("run.kv.run")}</dt><dd>{t("run.kv.runValue", { n: v.number, date: f.date(v.createdAt), by: v.createdBy })}</dd>
               <dt>{t("run.kv.engine")}</dt><dd>{v.engineVersion}</dd>
-              <dt>{t("run.kv.policy")}</dt><dd>{v.policyVersion}{v.policyDraft && <> · {t("run.draftPolicy")}</>}</dd>
+              <dt>{t("run.kv.policy")}</dt><dd>{v.policyDraft ? t("run.kv.policyDraft", { p: policyName(i, v.policyVersion) }) : policyName(i, v.policyVersion)}</dd>
               <dt>{t("run.kv.inputs")}</dt><dd className="hash">{v.inputHash.slice(0, 16)}</dd>
               <dt>{t("run.kv.result")}</dt><dd className="hash">{v.resultHash.slice(0, 16)}</dd>
               <dt>{t("run.kv.signed")}</dt><dd>{t("run.kv.signedValue", { key: v.signed === "development key" ? t("run.devKey") : t("run.prodKey") })}</dd>
