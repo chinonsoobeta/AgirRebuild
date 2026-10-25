@@ -273,6 +273,15 @@ describe("ending a reviewer's access", () => {
     expect(String(vi.mocked(window.confirm).mock.calls[1]![0])).toContain("révision Agir");
   });
 
+  it("lists each reviewer as a stacked item that fits the side column, with the day access ends", () => {
+    const html = render(ReviewAccess);
+    const aside = html.slice(html.indexOf("<aside"), html.indexOf("</aside>"));
+    expect(aside).toContain('<ul class="ra-reviewers">');
+    expect(aside).not.toContain("<table");
+    expect(text(aside)).toContain("Ended June 15, 2001");
+    expect(text(aside)).not.toMatch(/a\.m\.|p\.m\./);
+  });
+
   it("offers neither on an ended reviewer's row", () => {
     render(ReviewAccess);
     expect(of("Extend", "r2")).toHaveLength(0);
