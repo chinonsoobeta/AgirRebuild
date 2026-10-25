@@ -144,4 +144,16 @@ describe("card X4 choices already made", () => {
   it("leaves a value read from documents out of the made choices", () => {
     expect(text(choices(render()))).not.toContain("Land cost");
   });
+  it("lists only the values readiness offers as choices, not the inputs a for-sale deal needs", () => {
+    const r = payload();
+    r.assumptions.push(
+      row({ id: "s1", fieldKey: "presold_units_pct", group: "sale", groupLabel: "Sale", unit: "%", sourceKind: "analyst", value: 40 }),
+      row({ id: "s2", fieldKey: "unit_sale_price", itemKey: "TH", group: "sale", groupLabel: "Sale", unit: "$", sourceKind: "analyst", value: 650000 }),
+    );
+    state.review = r;
+    const words = text(choices(render()));
+    expect(words).toContain("Refinance term: 10 yr");
+    expect(words).not.toContain("Presold units");
+    expect(words).not.toContain("Sale price per unit");
+  });
 });
