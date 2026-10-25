@@ -16,6 +16,7 @@ import { Audit } from "./routes/audit";
 import { Settings } from "./routes/settings";
 import { ReviewAccess } from "./routes/review-access";
 import { Explore } from "./routes/explore";
+import { Compare } from "./routes/compare";
 import { Share } from "./routes/share";
 import { Invite } from "./routes/invite";
 import { Home } from "./routes/landing";
@@ -52,6 +53,21 @@ const reviewAccess = createRoute({ getParentRoute: () => app, path: "/settings/r
 const deal = createRoute({ getParentRoute: () => app, path: "/deals/$dealId", component: () => <Outlet /> });
 const step = <P extends string>(path: P, C: (p: { dealId: string }) => React.JSX.Element) =>
   createRoute({ getParentRoute: () => deal, path, component: function Step() { const { dealId } = deal.useParams(); return <C key={dealId} dealId={dealId} />; } });
+// Two runs side by side (card W11): `a` is this run, `b` the one it is compared against; both optional.
+const compare = createRoute({
+  getParentRoute: () => deal,
+  path: "compare",
+  validateSearch: (s: Record<string, unknown>): { a?: string; b?: string } => ({
+    ...(typeof s.a === "string" ? { a: s.a } : {}),
+    ...(typeof s.b === "string" ? { b: s.b } : {}),
+  }),
+  component: function CompareStep() {
+    const { dealId } = deal.useParams();
+    const { a, b } = compare.useSearch();
+    const navigate = compare.useNavigate();
+    return <Compare key={dealId} dealId={dealId} a={a} b={b} onPick={(next) => void navigate({ search: next, replace: true })} />;
+  },
+});
 const dealIndex = createRoute({ getParentRoute: () => deal, path: "/", component: function DealIndex() { const { dealId } = deal.useParams(); return <Navigate to="/deals/$dealId/documents" params={{ dealId }} />; } });
 
 const routeTree = root.addChildren([
@@ -66,7 +82,7 @@ const routeTree = root.addChildren([
     newDeal,
     settings,
     reviewAccess,
-    deal.addChildren([dealIndex, step("documents", Documents), step("review", Review), step("run", Run), step("decision", DecisionStep), step("reports", Reports), step("audit", Audit), step("explore", Explore)]),
+    deal.addChildren([dealIndex, step("documents", Documents), step("review", Review), step("run", Run), step("decision", DecisionStep), step("reports", Reports), step("audit", Audit), step("explore", Explore), compare]),
   ]),
 ]);
 const router = createRouter({ routeTree, defaultPreload: "intent" });

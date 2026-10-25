@@ -1,1 +1,5 @@
 /* Styles for the compare area: design tokens only (var(--…)), no literal colours. */
+.compare-head{margin-bottom:0}
+.compare-head .lead{margin-top:8px}
+.compare-against{padding-bottom:10px}
+.compare-group th{background:var(--surface-2);color:var(--ink-3);font-size:13px;font-weight:400;text-align:left}
