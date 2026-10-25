@@ -170,6 +170,20 @@ describe("clients across every deal", () => {
     expect(vi.mocked(window.confirm)).toHaveBeenCalledTimes(2);
   });
 
+  it("names the person and the deal on each row's buttons", () => {
+    state.deals = [deal("d1", "Larch Court", 2, 1, 5), deal("d2", "Harbour Lane", null, 0, 3)];
+    state.clients = { d1: [{ id: "u-priya", name: "Priya Nair", email: "priya@example.test", assigned_at: "2026-10-18T12:00:00Z" }] };
+    state.invites = { d2: [invite("open")] };
+    render();
+    expect(buttons("Remove")[0]!.props["aria-label"]).toBe("Remove Priya Nair from Larch Court");
+    expect(buttons("Withdraw")[0]!.props["aria-label"]).toBe("Withdraw the invitation to Harbour Lane");
+  });
+
+  it("says plainly where reviewers and clients are added", () => {
+    state.members = [member("me", "Morgan Owner", "owner"), member("n", "Ana Analyst", "analyst")];
+    expect(text(render())).toContain("Reviewers get their access on the reviewer access page. Clients are added to one deal at a time, under Clients.");
+  });
+
   it("invites a client to a chosen deal by email or by a link shown once", async () => {
     state.deals = [deal("d1", "Larch Court", 2, 1, 5), deal("d2", "Harbour Lane", null, 0, 3)];
     let html = render();
