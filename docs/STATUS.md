@@ -19,8 +19,11 @@ work it describes.
 | The same gate | 6185 tests in 49 files, the fallback test, web build; web alone 694 tests in 31 files | 2026-10-25, `ui/w12-email` `9c4a1a7` |
 | The same gate | 6253 tests in 57 files, the fallback test, web build | 2026-10-25, `ui/y-screens` `3de8e3f` (wave 4) |
 | The same gate | 6284 tests in 60 files, the fallback test, web build | 2026-10-25, `ui/w12-email` `04951fb` (wave 4 and R1e) |
+| The same gate | 6255 tests in 57 files, the fallback test, web build | 2026-10-25, `ui/y-screens` `fa4da18` (with the third walk's fixes) |
+| The same gate | 6318 tests in 62 files, the fallback test, web build | 2026-10-25, `ui/w12-email` `e286f55` (R6) |
 | The same gate | 5833 tests in 19 files, the fallback test, web build | 2026-10-25, `fix/threshold-labels` `1d6a234` |
 | The same gate on `ui/w12-email` `9c4a1a7` with `fix/threshold-labels` merged in a throwaway worktree | 6192 tests in 49 files, the fallback test, web build; no conflicts | 2026-10-25 (the worktree was then removed) |
+| The same gate on `ui/w12-email` `e286f55` with `fix/threshold-labels` merged in a throwaway worktree | 6325 tests in 62 files, the fallback test, web build; no conflicts | 2026-10-25 (the worktree was then removed) |
 | `env -u ANTHROPIC_API_KEY AGIR_DATA_DIR=<empty folder> PORT=8792 npm start` | Builds the web app, applies the migrations, seeds six deals, serves on that port. An empty data folder leaves `.data/` untouched | 2026-10-25, `ui/redesign` (first browser walk) and `ui/y-screens` (second walk) |
 
 The first walk ran on `ui/redesign`, where migrations go to `0029` as on `main`. The second ran on `ui/y-screens`,
@@ -28,7 +31,8 @@ which adds `0031` and `0032`. `0030` is on `ui/w12-email` only. The three touch 
 and a column on `users`; `0031` and `0032` add or replace functions that `0030` does not touch), so a database that
 already has `0031` and `0032` can take `0030` after them. Wave 4 adds `0033` (the files of a share link) and `0034`
 (the kind of device of each session) on `ui/y-screens`; neither touches `email_tokens` or the column `0030` adds to
-`users`, so the same holds for them.
+`users`, so the same holds for them. R6 adds `0035` on `ui/w12-email`: it widens `email_tokens` from `0030` (two new
+kinds of link and the address each carries) and touches nothing else.
 
 `npm start` without `AGIR_DATA_DIR` migrates `.data/` in place, and a migration cannot be undone there.
 Point it at an empty folder to try a branch.
@@ -54,7 +58,9 @@ Which branch holds what today (2026-10-25):
   refinance loan, device names, the counts' second lines and a new invitation link; migrations `0033` and `0034`).
   Local only, held for the owner's review.
 - `ui/w12-email`: `ui/y-screens` plus email verification and password reset (U17 and W12, migration `0030`) and an
-  email to the person who started a run when it finishes after they left its page (R1e). Held
+  email to the person who started a run when it finishes after they left its page (R1e), and changing the email
+  address with a 7-day undo from the old one, a Password row in Settings and "Use a different email" on the verify
+  page (R6, migration `0035`). Held
   for the owner's review and a mail provider. The three branches stack in this order and merge in this order.
 - `fix/threshold-labels`: from `main`, card P2 in `packages/contracts` and `packages/artifacts`. Held for the
   owner's review; it merges on its own.
@@ -343,6 +349,7 @@ own `ui/*` branch off `ui/redesign` and was merged back after the audit. Web onl
 | R4 | `ui/r4-devices-counts` | Migration `0034`: each session keeps the kind of device it signed in from (one of eight labels, never the user agent), listed in Settings; the owner's counts gain their second lines |
 | R5 | `ui/r5-new-invite-link` | "Make a new link" for an open client invitation in place of "Copy link" (only a hash of an invitation is kept): one transaction withdraws the old one and makes a new one, shown once |
 | R1e | on `ui/w12-email` | The person who started a run gets an email when it is recorded after their browser left the page, with a link and no figures |
+| R6 | `ui/r6-change-email`, merged into `ui/w12-email` | Migration `0035`. Changing the email address needs the current password. An unconfirmed address switches at once; a confirmed one switches only when the new address confirms by link. The old address then gets a link that undoes the change for 7 days: it puts the address back, signs every device out, turns the password off and sends a reset link. Until then nobody else can take the old address. Also a Password row in Settings and "Use a different email" on the verify page |
 
 State of the branches: F1, F2, W1 to W11, U20 (the old styles removed, an accessibility pass), U21-words (a
 wording and French pass) and X1 to X6 are merged into `ui/redesign`, with the fixes from a browser walk of every
@@ -350,8 +357,8 @@ screen on 2026-10-25 (listed in `INTERFACE-BUILD-LOG.md`). Y1, Y2, Z1, Z2 and P1
 with the fixes from a second walk of that branch (as the demo owner, with a throwaway client and reviewer, at
 1360, 900 and 390 px), and so is wave 4 (R1 to R5), which built the server work the first morning report had
 listed as left. Y1 and Y2 change `apps/api` and add migrations, so `ui/y-screens` needs the owner's review.
-None of it is on `main` or pushed. U17 and W12 are merged only into `ui/w12-email`, on top of `ui/y-screens`.
-They touch sign-in and add a migration, so they need the owner's
+None of it is on `main` or pushed. U17, W12, R1e and R6 are merged only into `ui/w12-email`, on top of `ui/y-screens`.
+They touch sign-in and add migrations `0030` and `0035`, so they need the owner's
 review (plan rule 7), and they must not reach production before there is a mail provider: on the U17 branch,
 development writes each email to the data folder's `mail/` directory and production sends nothing
 (`apps/api/src/main.ts` and `apps/api/src/mailer.ts` on that branch). Nothing in the app is gated on a verified email.
@@ -384,7 +391,7 @@ Left out on purpose, because a person must decide first (the plan's "Decisions t
   verdict may show on a public page, are the owner's calls) and deleting an account (it needs a retention decision:
   the audit trail is hash-chained and holds names). Device names, run progress by stage, Stop, a downloadable
   comparison, one link for several files, removing a member, renaming the workspace and signing out other devices
-  are built on `ui/y-screens`.
+  are built on `ui/y-screens`; changing the email address and the Password row on `ui/w12-email` (R6).
 - Compare and Explore show each change by subtracting two stored values in the browser (Explore did so on `main`
   already). A screen is not meant to derive a figure; the owner decides whether this display arithmetic stays or the
   API returns the changes. Compare treats a change under one part in a billion as no change.
@@ -468,7 +475,7 @@ Where the code showed a better route than [the plan](plan-small-developers.md), 
 ## Needs a person
 
 - Whether `chinonsoobeta/AgirRebuild` should be public, as it is today.
-- Review of U17 and W12 (sign-in, a migration) before they are merged, and a mail provider before they reach production.
+- Review of U17, W12 and R6 (sign-in, migrations `0030` and `0035`) before they are merged, and a mail provider before they reach production.
 - The interface redesign on `ui/redesign`: the owner's review before it is merged into `main`. Then `ui/y-screens`
   (migrations `0031` to `0034`, server code for people, accounts, deal details, run progress and share links) and `fix/threshold-labels`
   (`packages/contracts`).
