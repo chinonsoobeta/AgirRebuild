@@ -29,6 +29,12 @@ export const en = {
   "agirreview.ended": (p) => `Ended ${p.date}`,
   "agirreview.notOwner": "Only the workspace owner can give a reviewer access.",
   "agirreview.toSettings": "Back to settings",
+  "agirreview.extend": "Extend",
+  "agirreview.extendWho": (p) => `Extend ${p.name}'s access`,
+  "agirreview.extendBy": "Extend for how long",
+  "agirreview.extendGo": (p) => `Extend to ${p.n} days from today`,
+  "agirreview.extendCancel": "Cancel",
+  "agirreview.extended": (p) => `${p.name}'s access now ends on ${p.date}.`,
 } satisfies Record<string, Entry>;
 
 export const fr: FrenchOf<typeof en> = {
@@ -59,4 +65,10 @@ export const fr: FrenchOf<typeof en> = {
   "agirreview.ended": (p) => `Terminé le ${p.date}`,
   "agirreview.notOwner": "Seul le propriétaire de l'espace peut donner accès à un réviseur.",
   "agirreview.toSettings": "Retour aux paramètres",
+  "agirreview.extend": "Prolonger",
+  "agirreview.extendWho": (p) => `Prolonger l'accès de ${p.name}`,
+  "agirreview.extendBy": "Prolonger pour combien de temps",
+  "agirreview.extendGo": (p) => `Prolonger à ${p.n} jours à partir d'aujourd'hui`,
+  "agirreview.extendCancel": "Annuler",
+  "agirreview.extended": (p) => `L'accès de ${p.name} prend maintenant fin le ${p.date}.`,
 };

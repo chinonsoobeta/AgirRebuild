@@ -32,6 +32,18 @@ export function ReviewAccess() {
       return qc.invalidateQueries({ queryKey: ["members"] });
     },
   });
+  // Extending posts the grant again: the server sets the end to now plus the days chosen (fn_grant_review).
+  const [extending, setExtending] = useState<string | null>(null);
+  const [extendDays, setExtendDays] = useState<(typeof DAYS)[number]>("14");
+  const [extended, setExtended] = useState<{ id: string; until: string } | null>(null);
+  const extend = useMutation({
+    mutationFn: (b: { id: string; email: string; days: number }) => api.post(`/workspaces/${workspaceId}/review-grant`, { email: b.email, days: b.days }),
+    onSuccess: (_r: unknown, b: { id: string; email: string; days: number }) => {
+      setExtended({ id: b.id, until: endsOn(b.days) });
+      setExtending(null);
+      return qc.invalidateQueries({ queryKey: ["members"] });
+    },
+  });
   const back = <Link className="back" to="/settings"><I.Back />{t("agirreview.back")}</Link>;
 
   if (role !== "owner") {
@@ -109,12 +121,32 @@ export function ReviewAccess() {
                 <tbody>{reviewers.map((m) => (
                   <tr key={m.id}>
                     <td>{m.name}<span className="sub">{m.email}</span></td>
-                    <td>{m.expires_at ? t(new Date(m.expires_at) > now ? "agirreview.until" : "agirreview.ended", { date: f.date(m.expires_at) }) : null}</td>
+                    <td>
+                      <div className="stack tight">
+                        <span>{m.expires_at ? t(new Date(m.expires_at) > now ? "agirreview.until" : "agirreview.ended", { date: f.date(m.expires_at) }) : null}</span>
+                        {extended?.id === m.id && <span className="small" role="status">{t("agirreview.extended", { name: m.name, date: day(extended.until, lang) })}</span>}
+                        {m.expires_at && new Date(m.expires_at) > now && (extending === m.id ? (
+                          <div className="stack tight">
+                            <Seg label={t("agirreview.extendBy")} value={extendDays} onChange={setExtendDays} options={DAYS.map((d) => ({ value: d, label: t("agirreview.dayN", { n: d }) }))} />
+                            <span className="hint">{t("agirreview.daysHint", { date: day(endsOn(Number(extendDays)), lang) })}</span>
+                            <div className="row">
+                              <button name="extend-confirm" value={m.id} className="btn primary sm" type="button" disabled={extend.isPending}
+                                onClick={() => extend.mutate({ id: m.id, email: m.email, days: Number(extendDays) })}>{t("agirreview.extendGo", { n: extendDays })}</button>
+                              <button className="btn ghost sm" type="button" onClick={() => setExtending(null)}>{t("agirreview.extendCancel")}</button>
+                            </div>
+                          </div>
+                        ) : (
+                          <div><button name="extend" value={m.id} className="btn quiet sm" type="button" aria-label={t("agirreview.extendWho", { name: m.name })}
+                            onClick={() => { setExtending(m.id); setExtended(null); extend.reset(); }}>{t("agirreview.extend")}</button></div>
+                        ))}
+                      </div>
+                    </td>
                   </tr>
                 ))}</tbody>
               </table>
             </div>
           )}
+          <ErrorText error={extend.error} />
           <ErrorText error={members.error} />
         </aside>
       </div>

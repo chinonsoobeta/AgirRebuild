@@ -145,8 +145,7 @@ describe("sharing in the open (card X5)", () => {
 describe("the first visit (card X5)", () => {
   it("links to how data is handled", () => {
     const html = render(createElement(Deals));
-    expect(s.nodes.some((n) => n.tag === "a" && n.props.href === "/legal#privacy")).toBe(true);
-    expect(html).toContain("How your data is handled");
+    expect(html).toMatch(/<a href="\/legal#privacy">How your data is handled<\/a>/);
   });
 });
 
@@ -162,7 +161,8 @@ describe("extending reviewer access (card X5)", () => {
     expect(ext.map((b) => b.props.value)).toEqual(["r1"]);
     await ext[0]!.props.onClick();
     render(createElement(ReviewAccess));
-    s.nodes.find((n) => n.tag === "button" && n.props.children === "30 days")!.props.onClick();
+    // The grant form has its own day choice; the reviewer's row comes after it.
+    s.nodes.filter((n) => n.tag === "button" && n.props.children === "30 days").at(-1)!.props.onClick();
     render(createElement(ReviewAccess));
     await s.nodes.find((n) => n.tag === "button" && n.props.name === "extend-confirm")!.props.onClick();
     expect(vi.mocked(api.post).mock.calls).toContainEqual(["/workspaces/ws/review-grant", { email: "riley@example.test", days: 30 }]);

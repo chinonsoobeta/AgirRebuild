@@ -37,6 +37,11 @@ export function Reports({ dealId }: { dealId: string }) {
   // Sharing is open to every staff role (card 86): a link is read-only and shows no more than its maker can see.
   // A client (card 89) may not share.
   const [sharing, setSharing] = useState<string | null>(null);
+  const toPicker = () => {
+    const el = typeof document === "undefined" ? null : document.getElementById("rep-share-file");
+    el?.scrollIntoView({ block: "center" });
+    el?.focus();
+  };
   const [term, setTerm] = useState<ShareTerm>("7d");
   const [made, setMade] = useState<string | null>(null);
   const share = useMutation({
@@ -48,7 +53,8 @@ export function Reports({ dealId }: { dealId: string }) {
     onSuccess: () => qc.invalidateQueries({ queryKey: ["share-links", dealId] }),
   });
   const make = useMutation({
-    mutationFn: (b: { kind: string; format: string }) => api.post(`/runs/${deal.data!.run!.id}/artifacts`, { ...b, lang: b.kind === "model_export" ? "en" : lang }),
+    mutationFn: (b: { kind: string; format: string; lang?: "en" | "fr" }) =>
+      api.post(`/runs/${deal.data!.run!.id}/artifacts`, { kind: b.kind, format: b.format, lang: b.kind === "model_export" ? "en" : b.lang ?? lang }),
     onSuccess: () => Promise.all([qc.invalidateQueries({ queryKey: ["artifacts", dealId] }), qc.invalidateQueries({ queryKey: ["deal", dealId] })]),
   });
   if (!deal.data) return <p className="muted">{t("common.loading")}</p>;
@@ -59,21 +65,32 @@ export function Reports({ dealId }: { dealId: string }) {
   const langName = (a: Pick<Artifact, "lang" | "kind">) => (a.lang === "fr" ? t("reports.frDraft") : t("reports.english"));
   /** A file from an older run, or from a current run whose inputs have since changed. */
   const outOfDate = (a: Artifact) => !o.run || a.run_id !== o.run.id || !o.run.fresh;
-  const sharedArt = all.find((a) => a.id === sharing);
   const linkRows = links.data ?? [];
+  const staff = role !== "client";
+  // Every ready file of this deal can be shared, newest first; the picker starts on the newest.
+  const shareable = all.filter((a) => a.status === "ready").sort(newest);
+  const sharedArt = shareable.find((a) => a.id === sharing) ?? shareable[0];
+  /** The language a card does not make by default: French on an English screen, English on a French one. */
+  const otherLang = lang === "fr" ? "en" : "fr";
+  const otherName = otherLang === "fr" ? t("reports.frDraft") : t("reports.englishVersion");
 
   const kindCard = (k: (typeof KINDS)[number]) => {
     const r = o.run!;
     const want = k.kind === "model_export" ? "en" : lang;
-    const mine = all.filter((a) => a.kind === k.kind && a.run_id === r.id && a.lang === want).sort(newest);
+    const ofRun = all.filter((a) => a.kind === k.kind && a.run_id === r.id).sort(newest);
+    const mine = ofRun.filter((a) => a.lang === want);
     const of = (fmt: string) => mine.find((a) => a.format === fmt);
     const ready = mine.filter((a) => a.status === "ready");
     const tag = ready.length ? <Tag tone="pass">{t("reports.ready")}</Tag>
       : mine.some((a) => a.status === "queued") ? <Tag>{t("reports.rendering")}</Tag>
       : <Tag tone="plain">{t("reports.notMade")}</Tag>;
     const traced = ready.find((a) => a.provenance_entries)?.provenance_entries;
-    const facts = [k.formats.map(fmtName).join(" · "), k.kind === "model_export" ? t("reports.englishOnly") : want === "fr" ? t("reports.frDraft") : t("reports.english"),
-      traced ? t("reports.tracedN", { n: traced }) : t("reports.fromRun", { n: r.number })];
+    // The languages this run has a ready file in; before any, the language the main action makes.
+    const made = (["en", "fr"] as const).filter((l) => ofRun.some((a) => a.lang === l && a.status === "ready"));
+    const langs = k.kind === "model_export" ? t("reports.englishOnly")
+      : (made.length ? made : [want]).map((l) => (l === "fr" ? t("reports.frDraft") : t("reports.english"))).join(" · ");
+    const facts = [k.formats.map(fmtName).join(" · "), langs, traced ? t("reports.tracedN", { n: traced }) : t("reports.fromRun", { n: r.number })];
+    const other = (fmt: string) => ofRun.find((a) => a.lang === otherLang && a.format === fmt);
     return (
       <div key={k.kind} className="card card-pad stack tight">
         <div className="rep-head"><h3 className="h3">{kind(k.kind)}</h3>{tag}</div>
@@ -99,6 +116,29 @@ export function Reports({ dealId }: { dealId: string }) {
             );
           })}
         </div>
+        {k.kind !== "model_export" && (
+          // The other language, quieter: the model export is English only (the API refuses French).
+          <div className="row rep-acts rep-other">
+            {k.formats.map((fmt) => {
+              const a = other(fmt);
+              const what = t("reports.otherFmt", { l: otherName, f: fmtName(fmt) });
+              if (a?.status === "ready") return (
+                <Fragment key={fmt}>
+                  <a className="btn ghost sm" href={`/api/artifacts/${a.id}/file`}><I.Download />{what}</a>
+                  {canEdit(role) && (
+                    <button name="regenerate-other" value={`${k.kind}:${fmt}:${otherLang}`} className="btn ghost sm" type="button" disabled={make.isPending}
+                      aria-label={t("reports.makeAgainOther", { l: otherName, f: fmtName(fmt) })} onClick={() => make.mutate({ kind: k.kind, format: fmt, lang: otherLang })}>{t("reports.makeAgain")}</button>
+                  )}
+                </Fragment>
+              );
+              if (a?.status === "queued") return <span key={fmt} className="small muted">{what} · {t("reports.rendering")}</span>;
+              return (
+                <button key={fmt} name="generate-other" value={`${k.kind}:${fmt}:${otherLang}`} className="btn ghost sm" type="button" disabled={!canEdit(role) || make.isPending}
+                  onClick={() => make.mutate({ kind: k.kind, format: fmt, lang: otherLang })}>{what}</button>
+              );
+            })}
+          </div>
+        )}
       </div>
     );
   };
@@ -107,9 +147,12 @@ export function Reports({ dealId }: { dealId: string }) {
     <>
       <DealFrame o={o} active="reports" />
       <div className="stack">
-        <div>
-          <h2 className="h1">{t("reports.title")}</h2>
-          {o.run && <p className="lead rep-lead">{t("reports.lead", { n: o.run.number })}</p>}
+        <div className="page-head rep-page-head">
+          <div>
+            <h2 className="h1">{t("reports.title")}</h2>
+            {o.run && <p className="lead rep-lead">{t("reports.lead", { n: o.run.number })}</p>}
+          </div>
+          {o.run && staff && <button className="btn primary" type="button" onClick={toPicker}>{t("reports.shareTop")}</button>}
         </div>
         {!o.run ? (
           <Banner tone="neutral" title={t("reports.needRun")}>{t("reports.needRunBody")}</Banner>
@@ -153,7 +196,7 @@ export function Reports({ dealId }: { dealId: string }) {
                       <div className="acts">
                         {a.status === "ready" && <a className="btn quiet sm" href={`/api/artifacts/${a.id}/file`}><I.Download />{t("common.download")}</a>}
                         {a.status === "ready" && a.format === "pdf" && <a className="btn ghost sm" href={`/api/artifacts/${a.id}/file?inline=1`} target="_blank" rel="noreferrer">{t("common.open")}</a>}
-                        {a.status === "ready" && role !== "client" && <button className="btn ghost sm" type="button" onClick={() => { setSharing(a.id); setMade(null); share.reset(); }}>{t("share.button")}</button>}
+                        {a.status === "ready" && staff && <button className="btn ghost sm" type="button" onClick={() => { setSharing(a.id); setMade(null); share.reset(); toPicker(); }}>{t("share.button")}</button>}
                       </div>
                     </td>
                   </tr>
@@ -164,34 +207,40 @@ export function Reports({ dealId }: { dealId: string }) {
           </div>
         </section>
 
-        {(linkRows.length > 0 || sharedArt) && (
-          <section className="section">
+        {staff && (o.run || linkRows.length > 0) && (
+          <section className="section" id="rep-share">
             <div><h2 className="h2">{t("share.title")}</h2><p className="muted rep-share-lead">{t("reports.shareLead")}</p></div>
             <div className="card">
-              {sharedArt && (
-                <div className="card-pad stack tight">
-                  <p>{t("reports.sharing", { what: `${kind(sharedArt.kind)} · ${fmtName(sharedArt.format)}`, n: sharedArt.run_number })}</p>
-                  {made ? (
-                    <>
-                      <div className="row">
-                        <input className="input rep-secret" aria-label={t("share.link")} readOnly value={made} />
-                        <button className="btn quiet" type="button" onClick={() => navigator.clipboard.writeText(made)}>{t("share.copy")}</button>
-                      </div>
-                      <p className="small muted">{t("share.once")}</p>
-                    </>
-                  ) : (
-                    <>
-                      <span className="label" aria-hidden="true">{t("reports.term")}</span>
-                      <div className="row">
-                        <Seg label={t("reports.term")} value={term} onChange={setTerm} options={TERMS.map((x) => ({ value: x, label: t(`share.term.${x}`) }))} />
-                        <button className="btn primary" type="button" disabled={share.isPending} onClick={() => share.mutate({ artifact: sharedArt.id, term })}>{t("share.make")}</button>
-                      </div>
-                      <p className="small muted">{t("reports.onceNote")}</p>
-                      <ErrorText error={share.error} />
-                    </>
-                  )}
-                </div>
-              )}
+              <div className="card-pad stack tight">
+                {!sharedArt ? <p className="muted">{t("reports.shareNeedsFile")}</p> : (
+                  <>
+                    <div className="field">
+                      <label htmlFor="rep-share-file">{t("reports.shareFile")}</label>
+                      <select id="rep-share-file" className="input rep-pick" value={sharedArt.id}
+                        onChange={(e) => { setSharing(e.target.value); setMade(null); share.reset(); }}>
+                        {shareable.map((a) => (
+                          <option key={a.id} value={a.id}>{t("reports.shareOption", { what: kind(a.kind), f: fmtName(a.format), l: langName(a), n: a.run_number })}</option>
+                        ))}
+                      </select>
+                    </div>
+                    <span className="label" aria-hidden="true">{t("reports.term")}</span>
+                    <div className="row">
+                      <Seg label={t("reports.term")} value={term} onChange={setTerm} options={TERMS.map((x) => ({ value: x, label: t(`share.term.${x}`) }))} />
+                      <button className="btn primary" type="button" disabled={share.isPending} onClick={() => share.mutate({ artifact: sharedArt.id, term })}>{t("share.make")}</button>
+                    </div>
+                    {made ? (
+                      <>
+                        <div className="row">
+                          <input className="input rep-secret" aria-label={t("share.link")} readOnly value={made} />
+                          <button className="btn quiet" type="button" onClick={() => navigator.clipboard.writeText(made)}>{t("share.copy")}</button>
+                        </div>
+                        <p className="small muted">{t("share.once")}</p>
+                      </>
+                    ) : <p className="small muted">{t("reports.onceNote")}</p>}
+                    <ErrorText error={share.error} />
+                  </>
+                )}
+              </div>
               {linkRows.length > 0 && (
                 <div className="scroll">
                   <table className="table">

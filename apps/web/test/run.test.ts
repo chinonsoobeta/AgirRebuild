@@ -357,7 +357,8 @@ describe("share links on the web (task 86b)", () => {
     queryState.shared = { ...queryState.shared as object, standardFailures: { en: ["Fails CMHC's 1.10x coverage rule"], fr: ["Ne respecte pas la règle de la SCHL de 1,10x"] } };
     expect(await sharePage()).toContain("Fails CMHC&#x27;s 1.10x coverage rule");
   });
-  it("hides the Shared links table when there are no links", () => { expect(render()).not.toContain("Shared links"); });
+  // Card X5: the Shared links section is always shown to staff; its table of links appears only once a link exists.
+  it("hides the Shared links table when there are no links", () => { const html = render(); expect(html).toContain("Shared links"); expect(html).not.toContain("Made by"); });
   it.each(["pdf", "docx"])("the public %s page has its metadata, downloads and appropriate Open button, without requesting me", async (format) => {
     queryState.shared = { ...queryState.shared as object, format };
     const html = await sharePage();
