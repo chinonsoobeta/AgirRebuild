@@ -81,7 +81,7 @@ describe("the run screen with figures in context, history status and a run in th
     expect(words).toContain(`from ${en.f.value(metric("effective_gross_income").value, "$")} of income`);
     expect(words).toContain(`against a ${en.f.value(5.5, "%")} cap rate`);
     expect(words).toContain(`${en.f.value(metric("cash_left_in_deal").value, "$")} stays in the deal`);
-    expect(words).toContain(`${en.f.value(metric("cash_on_cash_year1").value, "%")} in year 1 before it`);
+    expect(words).toContain(`${en.f.value(metric("cash_on_cash_year1").value, "%")} in year 1, before the refinance`);
     expect(words).toContain(`underwritten at ${en.f.value(97, "%")}`);
     expect(words).toContain("Not a sale: the value is stated, not realized");
     expect(words).toContain("a year, over the 10-year hold");
@@ -151,6 +151,11 @@ describe("the run screen with figures in context, history status and a run in th
     expect(words).toContain(en.t("run.outOfDate", { n: 1 }));
     expect(words).toContain(en.t("run.changed.value", { label: en.L.field("property_tax_annual", null), now: "$8,000", was: "$7,200" }));
     expect(en.t("run.changed.value", { label: "Property tax", now: "$8,000", was: "$7,200" })).toBe("Property tax was approved at $8,000 after this run, replacing $7,200.");
+    // French avoids agreeing a participle with a label of either gender.
+    const frT = build("fr", () => {}).t;
+    expect(frT("run.changed.value", { label: "Durée de détention", now: "7 ans", was: "5 ans" })).toBe("Durée de détention a reçu la valeur 7 ans après cette analyse, au lieu de 5 ans.");
+    expect(frT("run.changed.added", { label: "Taxe foncière", now: "8 000 $" })).toBe("Taxe foncière a reçu la valeur 8 000 $ après cette analyse, qui ne l'utilisait pas.");
+    expect(frT("run.changed.removed", { label: "Taxe foncière", was: "8 000 $" })).toBe("Taxe foncière n'a plus de valeur approuvée\u00a0; cette analyse utilisait 8 000 $.");
     expect(words).not.toContain(en.L.field("land_transfer_tax", null));
   });
 
