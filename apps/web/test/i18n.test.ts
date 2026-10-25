@@ -1015,7 +1015,7 @@ it.each(["en", "fr"] as const)("card 133 renders arithmetic source notes in %s",
       const s = { context: "Hard cost: $9,000,000", raw: "$9,000,000", document_name: "cedar.txt", location: "line 1", check_outcome, check_note } as any;
       const html = renderToStaticMarkup(h(I18nProvider, { children: h(Quote, {s, currency: "CAD"}) }));
       expect(html).toContain(build(lang, () => {}).msg(check_note));
-      expect(html.includes("var(--review-text)")).toBe(check_outcome === "questions");
+      expect(html.includes("rv-question")).toBe(check_outcome === "questions");
     }
   } finally { vi.unstubAllGlobals(); }
 });
@@ -1094,6 +1094,6 @@ describe("card 150 French action sentences", () => {
       expect(fr.t(key, params)).not.toBe(en.t(key, params));
       expect(fr.t(key, params)).not.toBe(key);
     }
-    expect(fr.t("review.todoCount", { n: 2 })).toBe("2 actions avant de pouvoir lancer ce projet");
+    expect(fr.t("review.todoCount", { n: 2 })).toBe("2 points à régler avant de pouvoir lancer ce projet");
   });
 });

@@ -422,7 +422,7 @@ describe("card 150 one review list", () => {
       todo: { blocking: 2, items: [{ kind: "missing", fieldKey: "vacancy_pct", itemKey: null, assumptionId: null, blocking: true }, { kind: "please_check", fieldKey: a.fieldKey, itemKey: a.itemKey, assumptionId: a.id, blocking: true }] } };
     const element = createElement(Review, { dealId: "deal-1" });
     const html = text(render(element));
-    expect(html).toContain("2 actions before this deal can run");
+    expect(html).toContain("2 things before this deal can run");
     expect(html).toContain("Check this value");
     expect(html).toContain("parts that add up to it");
     expect(html).not.toContain("Approve all");
