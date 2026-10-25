@@ -14,3 +14,7 @@
 .counts td:first-child,.counts td:nth-child(2){white-space:nowrap}
 /* The total row reads like the rows above it, in bold, under a line. */
 .counts tfoot>tr>*{border-top:1px solid var(--line);border-bottom:0;vertical-align:top;font-size:15px;font-weight:700;color:var(--ink)}
+/* The per-deal counts sit in a disclosure under the four totals. */
+.set-each>summary{cursor:pointer;color:var(--ink-2);padding:4px 0}
+.set-each>summary:focus-visible{outline:2px solid var(--accent);outline-offset:2px}
+.set-each[open]>summary{margin-bottom:12px}

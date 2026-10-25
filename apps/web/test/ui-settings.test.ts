@@ -14,6 +14,7 @@ const state = vi.hoisted(() => ({
   members: [] as unknown[], hooks: [] as unknown[], index: 0, nodes: [] as { tag: string; props: Record<string, any> }[],
 }));
 vi.mock("@tanstack/react-query", () => ({
+  useQueries: () => [],
   useQuery: (options: { queryKey: unknown[] }) => {
     const key = options.queryKey[0];
     return key === "members" ? { data: state.members } : key === "deals" ? { data: [] } : {};
