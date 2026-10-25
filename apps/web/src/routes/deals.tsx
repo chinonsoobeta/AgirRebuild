@@ -135,6 +135,7 @@ function FirstVisit({ name, editor }: { name: string; editor: boolean }) {
           <span className="go">{t("deals.way.qsGo")} <Arrow /></span>
         </Link>
       </div>
+      <p className="small muted empty-lead"><Link to="/legal" hash="privacy">{t("deals.privacy")}</Link></p>
     </div>
   );
 }

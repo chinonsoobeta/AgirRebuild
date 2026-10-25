@@ -66,6 +66,7 @@ export const en = {
   "deals.way.qsBody": "A few plain questions for a small rental or a for-sale project, each answer recorded with where it came from. You name the deal first, and the questions wait on its Documents step.",
   "deals.way.qsGo": "Quick start",
   "deals.emptyViewer": "There are no deals you can see yet.",
+  "deals.privacy": "How your data is handled",
 } satisfies Record<string, Entry>;
 
 export const fr: FrenchOf<typeof en> = {
@@ -87,4 +88,5 @@ export const fr: FrenchOf<typeof en> = {
   "deals.way.qsBody": "Quelques questions simples pour un petit immeuble locatif ou un projet à vendre, chaque réponse étant consignée avec sa provenance. Vous nommez d'abord le projet, puis les questions vous attendent à son étape Documents.",
   "deals.way.qsGo": "Démarrage rapide",
   "deals.emptyViewer": "Il n'y a encore aucun projet que vous pouvez voir.",
+  "deals.privacy": "Comment vos données sont traitées",
 };
