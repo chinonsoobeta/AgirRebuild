@@ -17,7 +17,7 @@ import { Settings } from "./routes/settings";
 import { ReviewAccess } from "./routes/review-access";
 import { Explore } from "./routes/explore";
 import { Compare } from "./routes/compare";
-import { Share } from "./routes/share";
+import { Share, SharePreview } from "./routes/share";
 import { Invite } from "./routes/invite";
 import { Verify } from "./routes/verify";
 import { Reset } from "./routes/reset";
@@ -84,6 +84,16 @@ const runStep = createRoute({
     return <Run key={`${dealId}:${run ?? ""}`} dealId={dealId} run={run} />;
   },
 });
+// What a shared link's recipient sees, previewed by the deal's staff (card R2); opening it here is not counted.
+const sharePreview = createRoute({
+  getParentRoute: () => deal,
+  path: "reports/preview/$linkId",
+  component: function SharePreviewStep() {
+    const { dealId } = deal.useParams();
+    const { linkId } = sharePreview.useParams();
+    return <SharePreview key={`${dealId}:${linkId}`} dealId={dealId} linkId={linkId} />;
+  },
+});
 const dealIndex = createRoute({ getParentRoute: () => deal, path: "/", component: function DealIndex() { const { dealId } = deal.useParams(); return <Navigate to="/deals/$dealId/documents" params={{ dealId }} />; } });
 
 const routeTree = root.addChildren([
@@ -100,7 +110,7 @@ const routeTree = root.addChildren([
     newDeal,
     settings,
     reviewAccess,
-    deal.addChildren([dealIndex, step("documents", Documents), step("review", Review), runStep, step("decision", DecisionStep), step("reports", Reports), step("audit", Audit), step("explore", Explore), compare]),
+    deal.addChildren([dealIndex, step("documents", Documents), step("review", Review), runStep, step("decision", DecisionStep), step("reports", Reports), sharePreview, step("audit", Audit), step("explore", Explore), compare]),
   ]),
 ]);
 const router = createRouter({ routeTree, defaultPreload: "intent" });

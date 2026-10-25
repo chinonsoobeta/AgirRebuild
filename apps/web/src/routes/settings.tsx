@@ -198,6 +198,8 @@ function Clients() {
   const invites = useQueries({ queries: list.map((d) => ({ queryKey: ["invites", d.deal.id], queryFn: () => api.get<ClientInvite[]>(`/deals/${d.deal.id}/invites`) })) });
   const [dealId, setDealId] = useState<string | null>(null);
   const [made, setMade] = useState<string | null>(null);
+  // Focus moves to the link box only after "Make a new link", whose button sits far from the box.
+  const [focusMade, setFocusMade] = useState(false);
   const chosen = list.find((d) => d.deal.id === dealId)?.deal.id ?? list[0]?.deal.id;
   const refresh = (id: string) => Promise.all([qc.invalidateQueries({ queryKey: ["deal-clients", id] }), qc.invalidateQueries({ queryKey: ["invites", id] })]);
   const add = useMutation({ mutationFn: (b: { dealId: string; email: string }) => api.post(`/deals/${b.dealId}/clients`, { email: b.email }), onSuccess: (_r, b) => refresh(b.dealId) });
@@ -207,8 +209,14 @@ function Clients() {
     mutationFn: (id: string) => api.post<{ id: string; url: string }>(`/deals/${id}/invites`),
     onSuccess: (r, id) => { setMade(window.location.origin + r.url); return refresh(id); },
   });
+  // Card R5: a link is shown only once, so the server withdraws the old invitation and makes a new one for the same deal.
+  const replace = useMutation({
+    mutationFn: (b: { dealId: string; id: string }) => api.post<{ id: string; url: string }>(`/invites/${b.id}/replace`),
+    onSuccess: (r, b) => { setDealId(b.dealId); setMade(window.location.origin + r.url); setFocusMade(true); return refresh(b.dealId); },
+  });
   const now = new Date();
   // Used, revoked and expired invitations stay out: only a link that can still be used is listed.
+  const openInvites = list.map((_d, i) => (invites[i]?.data ?? []).filter((v) => !v.used_at && !v.revoked_at && new Date(v.expires_at) > now));
   const rows = list.flatMap((d, i) => [
     ...(clients[i]?.data ?? []).map((c) => (
       <tr key={`c-${d.deal.id}-${c.id}`}>
@@ -220,11 +228,12 @@ function Clients() {
           <button className="btn ghost sm" type="button" aria-label={t("settings.cl.removeOf", { name: c.name, deal: d.deal.name })} onClick={() => window.confirm(t("clients.removeConfirm")) && remove.mutate({ dealId: d.deal.id, id: c.id })}>{t("clients.remove")}</button></td>
       </tr>
     )),
-    ...(invites[i]?.data ?? []).filter((v) => !v.used_at && !v.revoked_at && new Date(v.expires_at) > now).map((v) => (
+    ...openInvites[i]!.map((v) => (
       <tr key={`i-${v.id}`}>
         <td>{d.deal.name}</td>
         <td className="muted">{t("clients.link")}</td>
         <td>{t("settings.cl.invited", { date: day(v.created_at, lang), expires: day(v.expires_at, lang) })}{" "}
+          <button className="btn ghost sm" type="button" aria-label={t("settings.cl.newLinkOf", { deal: d.deal.name })} onClick={() => { if (!window.confirm(t("settings.cl.newLinkConfirm"))) return; setMade(null); return replace.mutate({ dealId: d.deal.id, id: v.id }); }}>{t("settings.cl.newLink")}</button>{" "}
           <button className="btn ghost sm" type="button" aria-label={t("settings.cl.withdrawOf", { deal: d.deal.name })} onClick={() => window.confirm(t("settings.cl.withdrawConfirm")) && withdraw.mutate({ dealId: d.deal.id, id: v.id })}>{t("settings.cl.withdraw")}</button></td>
       </tr>
     )),
@@ -243,7 +252,8 @@ function Clients() {
           </table>
         </div>
       ) : <p className="small muted">{waiting ? t("common.loading") : t("settings.cl.none")}</p>}
-      <ErrorText error={failed ?? remove.error ?? withdraw.error} />
+      {openInvites.some((v) => v.length > 0) && <p className="small muted">{t("settings.cl.onceNote")}</p>}
+      <ErrorText error={failed ?? remove.error ?? withdraw.error ?? replace.error} />
       <form
         className="stack tight set-sub"
         aria-labelledby="c-invite-h"
@@ -263,11 +273,11 @@ function Clients() {
           <button className="btn primary" type="submit">{t("settings.addBtn")}</button>
         </div>
         <ErrorText error={add.error} />
-        <div><button className="btn quiet" type="button" disabled={invite.isPending} onClick={() => { setMade(null); return chosen && invite.mutate(chosen); }}>{t("clients.invite")}</button></div>
+        <div><button className="btn quiet" type="button" disabled={invite.isPending} onClick={() => { setMade(null); setFocusMade(false); return chosen && invite.mutate(chosen); }}>{t("clients.invite")}</button></div>
         {made && (
           <div className="stack" style={{ gap: 6 }}>
             <div className="row">
-              <input className="input" aria-label={t("clients.link")} readOnly value={made} style={{ flex: 1 }} />
+              <input key={made} className="input" aria-label={t("clients.link")} readOnly value={made} autoFocus={focusMade} style={{ flex: 1 }} />
               <button className="btn quiet sm" type="button" onClick={() => navigator.clipboard.writeText(made)}>{t("share.copy")}</button>
             </div>
             <span className="small muted">{t("share.once")}</span>
