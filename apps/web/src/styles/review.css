@@ -14,6 +14,7 @@
 .rv-flag{gap:16px;min-height:42px}
 .rv-entry{gap:16px;align-items:end}
 .rv-line{padding-top:12px;border-top:1px solid var(--line)}
+.rv-line>.between>span:first-child{flex:1 1 18rem;min-width:0}
 .rv-affix{display:flex;align-items:center;max-width:320px;min-height:42px;border:1px solid var(--line-2);border-radius:9px;background:var(--surface);color:var(--ink)}
 .rv-affix:focus-within{border-color:var(--accent);outline:2px solid var(--accent);outline-offset:0}
 .rv-affix input{flex-grow:1;min-width:0;min-height:40px;border:0;background:transparent;color:var(--ink);padding:0 12px;font:inherit;font-variant-numeric:tabular-nums lining-nums}

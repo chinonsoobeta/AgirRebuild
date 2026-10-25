@@ -172,7 +172,9 @@ legend{padding:0}
 .step-state{font-size:13px;color:var(--ink-3)}
 .figs{display:grid;grid-template-columns:repeat(auto-fit,minmax(min(200px,100%),1fr));gap:16px}
 .fig{display:flex;flex-direction:column;gap:4px;padding:16px 18px;background:var(--surface);border:1px solid var(--line);border-radius:10px}
+.figs{margin:0}
 .fig .k{font-size:13px;color:var(--ink-3)}
+.fig dd{margin:0}
 .fig .v{font-size:24px;line-height:1.2;font-variant-numeric:tabular-nums lining-nums;letter-spacing:-.01em}
 .fig .s{font-size:13px;color:var(--ink-3)}
 .deals{display:flex;flex-direction:column;gap:12px}
@@ -208,6 +210,9 @@ legend{padding:0}
 .kv{display:grid;grid-template-columns:auto minmax(0,1fr);gap:8px 20px;font-size:14px}
 .kv dt{color:var(--ink-3);margin:0}
 .kv dd{margin:0;color:var(--ink)}
+.gloss{margin:12px 0 0;gap:10px}
+.gloss dt{font-weight:700}
+.gloss dd{margin:2px 0 0}
 .hash{font-family:var(--mono);font-size:13px;color:var(--ink-3)}
 .pitch{padding:64px 56px;display:flex;flex-direction:column;justify-content:space-between;gap:48px;background:var(--surface-2)}
 .pitch-h{font-size:34px;line-height:1.2;font-weight:300;letter-spacing:-.012em;max-width:22ch}

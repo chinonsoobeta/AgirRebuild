@@ -162,10 +162,10 @@ export function Glossary() {
   return (
     <details>
       <summary>{t("glossary.title")}</summary>
-      <dl className="stack" style={{ gap: 10, marginTop: 12 }}>
+      <dl className="stack gloss">
         {GLOSSARY.map((k) => {
           const [term, meaning] = t(`glossary.${k}`);
-          return <div key={k}><dt style={{ fontWeight: 600 }}>{term}</dt><dd className="muted">{meaning}</dd></div>;
+          return <div key={k}><dt>{term}</dt><dd className="muted">{meaning}</dd></div>;
         })}
       </dl>
     </details>
