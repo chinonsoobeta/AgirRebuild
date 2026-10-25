@@ -8,10 +8,14 @@ import { asUser, type BlobStore, type Db } from "@agir/db";
 import { breakeven, DRIVERS, driversFor, SALE_DRIVERS, EngineInputError, explore, grid, tornado, type DriverKey, type Shock } from "@agir/engine";
 import { canonicalItem, itemFold, kindOf } from "@agir/extraction";
 import { MAX_UPLOAD_BYTES } from "@agir/worker";
-import { checkPassword, createSession, endSession, hashPassword, rateLimiter, SESSION_DAYS, userForSession } from "./auth.ts";
+import { checkPassword, createSession, endSession, hashPassword, PASSWORD_RULE, rateLimiter, SESSION_DAYS, userForSession } from "./auth.ts";
+import { emailAuth } from "./email-auth.ts";
+import type { Mailer } from "./mailer.ts";
 import { thresholdsView, auditPackage, clientViewer, createRun, dealOverview, hideClientEvents, HttpError, labelRefusal, regionGroups, reviewView, runView, sha256 } from "./services.ts";
 
-export type AppDeps = { db: Db; store: BlobStore; secureCookies: boolean; demoSignIn?: boolean; trustProxy?: boolean; now?: () => Date };
+export type AppDeps = { db: Db; store: BlobStore; secureCookies: boolean; demoSignIn?: boolean; trustProxy?: boolean; now?: () => Date;
+  /** Sends verification and reset emails. Without one, nothing is sent. */ mailer?: Mailer;
+  /** The web app's origin, for links in emails. Configured, never read from a request. */ publicOrigin?: string };
 type Env = { Variables: { user: { id: string; email: string; name: string } } };
 
 const COOKIE = "agir_session";
@@ -36,7 +40,8 @@ function windowReason(fieldKey: string, value: number, reason: string | null | u
   return `${reason ?? ""} (confirmed outside the usual range ${field.window!.min}–${field.window!.max})`;
 }
 
-export function createApp({ db, store, secureCookies, demoSignIn = false, trustProxy = false, now = () => new Date() }: AppDeps) {
+export function createApp({ db, store, secureCookies, demoSignIn = false, trustProxy = false, now = () => new Date(),
+  mailer = { send: async () => {} }, publicOrigin = "http://127.0.0.1:8787" }: AppDeps) {
   const app = new Hono<Env>();
   const clientKey = (c: Context<Env>): string => {
     if (trustProxy) {
@@ -96,11 +101,12 @@ export function createApp({ db, store, secureCookies, demoSignIn = false, trustP
 
   // ---- Auth -----------------------------------------------------------------------
   const cookieOpts = { httpOnly: true, sameSite: "Lax" as const, secure: secureCookies, path: "/", maxAge: SESSION_DAYS * 86400 };
+  const emailFlows = emailAuth({ db, mailer, publicOrigin, cookie: COOKIE, cookieOpts, clientKey });
 
   app.post("/api/auth/signup", async (c) => {
     if (!authLimit(clientKey(c))) return c.json({ error: "Too many attempts. Wait a minute." }, 429);
     const body = z
-      .object({ email: z.string().email(), name: z.string().min(1).max(120), password: z.string().min(10, "Use at least 10 characters").max(200), reviewMode: z.enum(REVIEW_MODES).optional(),
+      .object({ email: z.string().email(), name: z.string().min(1).max(120), password: PASSWORD_RULE, reviewMode: z.enum(REVIEW_MODES).optional(),
         invite: z.string().min(1).max(200).optional() })
       .parse(await c.req.json());
     const email = body.email.toLowerCase();
@@ -118,6 +124,7 @@ export function createApp({ db, store, secureCookies, demoSignIn = false, trustP
         if (!used?.deal) throw new HttpError(404, INVITE_GONE);
         return u!.id;
       });
+      await emailFlows.sendVerification({ id: userId, email });
       setCookie(c, COOKIE, await createSession(db, userId), cookieOpts);
       return c.json({ ok: true });
     }
@@ -127,6 +134,7 @@ export function createApp({ db, store, secureCookies, demoSignIn = false, trustP
       await hashPassword(body.password),
     ]);
     await asUser(db, u!.id, (tx) => createWorkspace(tx, `${body.name.split(" ")[0]}'s workspace`, body.reviewMode));
+    await emailFlows.sendVerification({ id: u!.id, email });
     setCookie(c, COOKIE, await createSession(db, u!.id), cookieOpts);
     return c.json({ ok: true });
   });
@@ -154,6 +162,8 @@ export function createApp({ db, store, secureCookies, demoSignIn = false, trustP
       return c.json({ ok: true });
     });
   }
+
+  emailFlows.register(app);
 
   app.post("/api/auth/logout", async (c) => {
     await endSession(db, getCookie(c, COOKIE));
@@ -211,7 +221,8 @@ export function createApp({ db, store, secureCookies, demoSignIn = false, trustP
         `select w.id, w.name, w.review_mode, w.label_suggestions, w.logo_key is not null as has_logo, m.role from workspaces w join workspace_members m on m.workspace_id = w.id and m.user_id = agir_uid() order by w.created_at`,
       ),
     );
-    return c.json({ user: c.get("user"), workspaces });
+    const [v] = await db.query<{ verified: boolean }>(`select email_verified_at is not null as verified from users where id = $1`, [c.get("user").id]);
+    return c.json({ user: { ...c.get("user"), email_verified: v?.verified ?? false }, workspaces });
   });
 
   app.get("/api/catalog", (c) =>

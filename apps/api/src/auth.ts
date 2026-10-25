@@ -1,6 +1,7 @@
 import { randomBytes, scrypt as scryptCb, timingSafeEqual, createHash } from "node:crypto";
 import { promisify } from "node:util";
 import type { Db } from "@agir/db";
+import { z } from "zod";
 
 const scrypt = promisify(scryptCb) as (pw: string, salt: Buffer, len: number, opts: { N: number; r: number; p: number }) => Promise<Buffer>;
 const PARAMS = { N: 16384, r: 8, p: 1 };
@@ -18,6 +19,9 @@ export async function checkPassword(password: string, stored: string): Promise<b
   const want = Buffer.from(key, "base64");
   return got.length === want.length && timingSafeEqual(got, want);
 }
+
+/** The one password rule, for signup and for a reset. */
+export const PASSWORD_RULE = z.string().min(10, "Use at least 10 characters").max(200);
 
 const tokenHash = (t: string) => createHash("sha256").update(t).digest("hex");
 export const SESSION_DAYS = 14;
