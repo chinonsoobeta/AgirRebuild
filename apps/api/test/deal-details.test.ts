@@ -193,6 +193,16 @@ describe("units and exit on the deal", () => {
     await put(alice, kept, "unit_count", 4, "Residential");
     expect(await overview(kept)).toEqual({ units: 4, exit: "sale" });
   });
+  test("counts the unit types the run uses: a stated total is not added to them, and one type written two ways is no count", async () => {
+    const d = await newDeal(alice, solo, "Total and types");
+    await put(alice, d, "unit_count", 12);
+    expect((await overview(d)).units).toBeNull();
+    await put(alice, d, "unit_count", 8, "1BR");
+    await put(alice, d, "unit_count", 4, "2BR");
+    expect((await overview(d)).units).toBe(12);
+    await put(alice, d, "unit_count", 8, "1 BR");
+    expect((await overview(d)).units).toBeNull();
+  });
 });
 
 describe("a fuller share page", () => {
