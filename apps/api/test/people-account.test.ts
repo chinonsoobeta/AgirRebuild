@@ -52,7 +52,7 @@ const events = (action: string, workspace?: string) =>
   );
 
 let alice: Session, bob: Session, dan: Session, eve: Session, rowan: Session, cleo: Session, zed: Session;
-let ids: Record<string, string>;
+let ids: Record<"alice" | "bob" | "dan" | "eve" | "rowan" | "cleo" | "zed", string>;
 let ws: string, deal: string;
 
 beforeAll(async () => {
@@ -66,8 +66,9 @@ beforeAll(async () => {
   rowan = await signup("rowan@example.com", "Rowan Reviewer");
   cleo = await signup("cleo@example.com", "Cleo Client");
   zed = await signup("zed@example.com", "Zed Outsider");
-  ids = {};
-  for (const [k, s] of Object.entries({ alice, bob, dan, eve, rowan, cleo, zed })) ids[k] = await idOf(s);
+  const people = { alice, bob, dan, eve, rowan, cleo, zed };
+  ids = {} as typeof ids;
+  for (const k of Object.keys(people) as (keyof typeof people)[]) ids[k] = await idOf(people[k]);
   ws = (await call(alice, "GET", "/api/me")).json.workspaces[0].id;
   for (const [email, role] of [["bob@example.com", "admin"], ["dan@example.com", "analyst"], ["eve@example.com", "viewer"]]) {
     expect((await call(alice, "POST", `/api/workspaces/${ws}/members`, { email, role })).status).toBe(200);
