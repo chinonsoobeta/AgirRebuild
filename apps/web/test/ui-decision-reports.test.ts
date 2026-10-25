@@ -158,8 +158,7 @@ describe("the reports screen (card W9)", () => {
     s.interactive = true;
     vi.stubGlobal("window", { location: { origin: "https://agir.test" }, confirm: vi.fn(() => true) });
     s.artifacts = [{ id: "a1", kind: "lender_package", format: "pdf", lang: "en", status: "ready", error: null, sha256: null, created_at: "2026-10-24T16:12:00Z", run_id: "run-2", run_number: 2, provenance_entries: null }];
-    render(createElement(Reports, { dealId: "d" }));
-    await s.nodes.find((n) => n.tag === "button" && n.props.children === "Share")!.props.onClick();
+    // Card R2: the terms show without first pressing a row's Share button, which is gone.
     const html = render(createElement(Reports, { dealId: "d" }));
     expect(html).toContain('class="seg"');
     for (const term of ["24 hours", "7 days", "30 days", "No expiry"]) expect(s.nodes.some((n) => n.tag === "button" && n.props.children === term)).toBe(true);

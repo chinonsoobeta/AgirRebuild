@@ -105,32 +105,31 @@ describe("reports in the other language (card X5)", () => {
 });
 
 describe("sharing in the open (card X5)", () => {
+  // Card R2: the file picker is a checkbox for each ready file of the current run, in report order.
   it("shows the Shared links section and its file picker before any link exists", () => {
     s.artifacts = [art({}), art({ id: "a0", kind: "build_decision", format: "docx", created_at: "2026-10-24T15:00:00Z", provenance_entries: 23 })];
     const html = render(createElement(Reports, { dealId: "d" }));
     expect(html).toContain("Shared links");
-    expect(s.nodes.some((n) => n.tag === "select")).toBe(true);
-    const opts = s.nodes.filter((n) => n.tag === "option");
-    expect(opts.map((o) => o.props.value)).toEqual(["a1", "a0"]);
+    const boxes = (html.match(/<input[^>]*type="checkbox"[^>]*>/g) ?? []).map((b) => b.match(/value="([^"]+)"/)![1]);
+    expect(boxes).toEqual(["a0", "a1"]);
     expect(html).toContain("Make link");
     expect(s.nodes.some((n) => n.tag === "button" && label(n) === "Make a shareable link")).toBe(true);
   });
-  it("Share on a row preselects that file", async () => {
+  // Card R2: the rows' Share buttons are gone; Make link shares every ticked file of the current run.
+  it("Make link shares the ticked files", async () => {
     s.interactive = true;
     vi.stubGlobal("window", { location: { origin: "https://agir.test" } });
     vi.stubGlobal("document", { getElementById: () => null });
     s.artifacts = [art({}), art({ id: "a0", kind: "build_decision", format: "docx", created_at: "2026-10-24T15:00:00Z" })];
     render(createElement(Reports, { dealId: "d" }));
-    await s.nodes.filter((n) => n.tag === "button" && n.props.children === "Share")[1]!.props.onClick();
-    render(createElement(Reports, { dealId: "d" }));
-    expect(s.nodes.find((n) => n.tag === "select")!.props.value).toBe("a0");
+    expect(s.nodes.some((n) => n.tag === "button" && n.props.children === "Share")).toBe(false);
     await s.nodes.find((n) => n.tag === "button" && n.props.children === "Make link")!.props.onClick();
-    expect(vi.mocked(api.post).mock.calls).toContainEqual(["/artifacts/a0/share-links", { term: "7d" }]);
+    expect(vi.mocked(api.post).mock.calls).toContainEqual(["/runs/run-2/share-links", { term: "7d", artifacts: ["a0", "a1"] }]);
   });
   it("says a link needs a report first when no file is ready", () => {
     const html = render(createElement(Reports, { dealId: "d" }));
     expect(html).toContain("Shared links");
-    expect(text(html)).toContain("A link needs a report first.");
+    expect(text(html)).toContain("Make a report first, then share it.");
     expect(s.nodes.some((n) => n.tag === "select")).toBe(false);
   });
   it("a client sees neither the button nor the section", () => {
