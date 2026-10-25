@@ -127,6 +127,10 @@ details.stack:not([open]){gap:0}
 .table .num,.table .r{font-variant-numeric:tabular-nums lining-nums}
 .table .sub{display:block;font-size:13px;color:var(--ink-3);margin-top:2px}
 .table .acts{display:flex;gap:6px;justify-content:flex-end;white-space:nowrap}
+/* A cell that holds only actions stays a table cell, so it keeps the row's line and alignment. */
+.table td.acts{display:table-cell;text-align:right}
+/* A small button in a row lines up with the row's text instead of sitting below it. */
+.table td .btn.sm{margin-block:-6px}
 
 /* Forms */
 .field{display:flex;flex-direction:column;gap:6px}
