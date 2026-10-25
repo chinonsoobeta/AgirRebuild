@@ -233,6 +233,36 @@ export function createApp({ db, store, secureCookies, demoSignIn = false, trustP
 
   const as = <T>(c: Context<Env>, fn: (tx: Db) => Promise<T>) => asUser(db, c.get("user").id, fn);
 
+  /**
+   * Card R1e: the email to a person who left a streamed run's page before it ended, once the run is recorded. It names the
+   * deal and the run's number and links to the run; it carries no figure. A failure to send is logged without detail and
+   * never undoes the run.
+   */
+  const mailRunDone = async (c: Context<Env>, dealId: string, runId: string) => {
+    try {
+      const [r] = await as(c, (tx) => tx.query<{ run_number: number; name: string }>(
+        `select r.run_number, d.name from runs r join deals d on d.id = r.deal_id where r.id = $1`, [runId]));
+      if (!r) return;
+      const deal = r.name.replace(/\s+/g, " ").trim();
+      const link = `${publicOrigin.replace(/\/+$/, "")}/deals/${dealId}/run?run=${runId}`;
+      await mailer.send({
+        to: c.get("user").email,
+        subject: `Run ${r.run_number} of ${deal} is done / L’analyse ${r.run_number} de ${deal} est terminée`,
+        text: [
+          `Run ${r.run_number} of ${deal} is done. To see it, open this link:`,
+          link,
+          "You are getting this email because you started the run and left its page before it finished.",
+          "",
+          `L’analyse ${r.run_number} de ${deal} est terminée. Pour la voir, ouvrez ce lien\u00a0:`,
+          link,
+          "Vous recevez ce courriel parce que vous avez lancé l’analyse et quitté sa page avant la fin.",
+        ].join("\n"),
+      });
+    } catch {
+      console.error(JSON.stringify({ at: new Date().toISOString(), event: "mail.failed", kind: "run_done" }));
+    }
+  };
+
   app.get("/api/me", async (c) => {
     const workspaces = await as(c, (tx) =>
       tx.query(
@@ -717,6 +747,8 @@ export function createApp({ db, store, secureCookies, demoSignIn = false, trustP
           stage: async (key, at, facts) => { send({ stage: key, at: at.toISOString(), ...(facts ? { facts } : {}) }); await progressHook?.(key); },
           check: () => { if (run.stopRequested) throw new RunStopped(); },
         }));
+        // The browser went away before the end (card R1e): the person who started the run hears that it is done by email.
+        if (s.aborted) await mailRunDone(c, dealId, id);
         send({ stage: "record", at: new Date().toISOString() });
         await progressHook?.("record");
         send({ done: { id } });
