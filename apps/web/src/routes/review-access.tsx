@@ -10,6 +10,8 @@ import * as I from "../components/icons";
 type Member = { id: string; name: string; email: string; role: string; expires_at: string | null };
 const DAYS = ["7", "14", "30"] as const;
 const endsOn = (days: number) => new Date(Date.now() + days * 86_400_000).toISOString();
+/** The lengths that would end access later than it ends now: posting the grant again sets the end, so a shorter one would cut it. */
+const longer = (end: string) => DAYS.filter((d) => Date.now() + Number(d) * 86_400_000 > new Date(end).getTime());
 // The server sets the exact end; before it answers, the day is what can be promised.
 const day = (iso: string, lang: string) => new Date(iso).toLocaleDateString(lang === "fr" ? "fr-CA" : "en-CA", { year: "numeric", month: "long", day: "numeric" });
 
@@ -125,19 +127,18 @@ export function ReviewAccess() {
                       <div className="stack tight">
                         <span>{m.expires_at ? t(new Date(m.expires_at) > now ? "agirreview.until" : "agirreview.ended", { date: f.date(m.expires_at) }) : null}</span>
                         {extended?.id === m.id && <span className="small" role="status">{t("agirreview.extended", { name: m.name, date: day(extended.until, lang) })}</span>}
-                        {m.expires_at && new Date(m.expires_at) > now && (extending === m.id ? (
+                        {m.expires_at && new Date(m.expires_at) > now && longer(m.expires_at).length > 0 && (extending === m.id ? (
                           <div className="stack tight">
-                            <Seg label={t("agirreview.extendBy")} value={extendDays} onChange={setExtendDays} options={DAYS.map((d) => ({ value: d, label: t("agirreview.dayN", { n: d }) }))} />
-                            <span className="hint">{t("agirreview.daysHint", { date: day(endsOn(Number(extendDays)), lang) })}</span>
+                            <Seg label={t("agirreview.extendBy")} value={extendDays} onChange={setExtendDays} options={longer(m.expires_at).map((d) => ({ value: d, label: t("agirreview.dayN", { n: d }) }))} />
                             <div className="row">
                               <button name="extend-confirm" value={m.id} className="btn primary sm" type="button" disabled={extend.isPending}
-                                onClick={() => extend.mutate({ id: m.id, email: m.email, days: Number(extendDays) })}>{t("agirreview.extendGo", { n: extendDays })}</button>
+                                onClick={() => extend.mutate({ id: m.id, email: m.email, days: Number(extendDays) })}>{t("agirreview.extendGo", { date: day(endsOn(Number(extendDays)), lang) })}</button>
                               <button className="btn ghost sm" type="button" onClick={() => setExtending(null)}>{t("agirreview.extendCancel")}</button>
                             </div>
                           </div>
                         ) : (
                           <div><button name="extend" value={m.id} className="btn quiet sm" type="button" aria-label={t("agirreview.extendWho", { name: m.name })}
-                            onClick={() => { setExtending(m.id); setExtended(null); extend.reset(); }}>{t("agirreview.extend")}</button></div>
+                            onClick={() => { setExtending(m.id); setExtendDays(longer(m.expires_at!)[0]!); setExtended(null); extend.reset(); }}>{t("agirreview.extend")}</button></div>
                         ))}
                       </div>
                     </td>

@@ -32,7 +32,7 @@ export const en = {
   "agirreview.extend": "Extend",
   "agirreview.extendWho": (p) => `Extend ${p.name}'s access`,
   "agirreview.extendBy": "Extend for how long",
-  "agirreview.extendGo": (p) => `Extend to ${p.n} days from today`,
+  "agirreview.extendGo": (p) => `Extend to ${p.date}`,
   "agirreview.extendCancel": "Cancel",
   "agirreview.extended": (p) => `${p.name}'s access now ends on ${p.date}.`,
 } satisfies Record<string, Entry>;
@@ -68,7 +68,7 @@ export const fr: FrenchOf<typeof en> = {
   "agirreview.extend": "Prolonger",
   "agirreview.extendWho": (p) => `Prolonger l'accès de ${p.name}`,
   "agirreview.extendBy": "Prolonger pour combien de temps",
-  "agirreview.extendGo": (p) => `Prolonger à ${p.n} jours à partir d'aujourd'hui`,
+  "agirreview.extendGo": (p) => `Prolonger jusqu'au ${p.date}`,
   "agirreview.extendCancel": "Annuler",
   "agirreview.extended": (p) => `L'accès de ${p.name} prend maintenant fin le ${p.date}.`,
 };
