@@ -63,11 +63,15 @@ export function verifyReading(reading: Reading, documents: readonly ReadingDocum
     const decimal = Number(digits[1]!.replace(",", "."));
     const grouped = Number(digits[1]!.replace(/[.,]/, ""));
     if (!scale) {
-      if (format.decimal !== null || field.min === undefined || field.max === undefined) return false;
+      if (format.decimal !== null || field.min === undefined) return false;
+      const range = field.max !== undefined ? { min: field.min, max: field.max } : field.window;
+      if (!range) return false;
       const values = [sign * decimal, sign * grouped];
-      const inRange = (v: number) => v >= field.min! && v <= field.max!;
-      return values.filter(v => v === reading.value).length === 1 && inRange(reading.value)
+      const inRange = (v: number) => v >= range.min && v <= range.max;
+      const matches = values.filter(v => v === reading.value).length === 1 && inRange(reading.value)
         && values.some(v => v !== reading.value && !inRange(v));
+      if (matches && field.max === undefined) ambiguous = true;
+      return matches;
     }
     const values = format.decimal ? [format.decimal === digits[2] ? decimal : grouped] : [decimal, grouped];
     const matches = values.some(v => Math.abs(sign * v * scaleOf(scale[1]!) - reading.value) < 0.005);
