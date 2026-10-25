@@ -2,7 +2,7 @@ import { Link } from "@tanstack/react-router";
 import { useQuery } from "@tanstack/react-query";
 import { useState } from "react";
 import { api, type DealOverview } from "../api";
-import { canEdit, useSession } from "../components/ui";
+import { canEdit, dealFacts, useSession } from "../components/ui";
 import { Tag } from "../components/kit";
 import { dealStatus, useI18n } from "../i18n";
 
@@ -82,7 +82,9 @@ export function Deals() {
               <div>
                 <Link to={`/deals/$dealId/${d.step}`} params={{ dealId: d.deal.id }} className="deal-name sm">{d.deal.name}</Link>
                 <p className="small muted deal-meta">
-                  {[L.place(d.deal.location, d.deal.province), L.asset(d.deal.asset_type), d.documents.total ? t("deals.docs", { n: d.documents.total }) : ""].filter(Boolean).join(" · ")}
+                  {/* The board drops the asset type once the units and the exit say what the deal is. */}
+                  {[L.place(d.deal.location, d.deal.province), d.units != null && d.exit != null ? "" : L.asset(d.deal.asset_type), dealFacts(i, d.units, d.exit),
+                    d.documents.total ? t("deals.docs", { n: d.documents.total }) : ""].filter(Boolean).join(" · ")}
                 </p>
               </div>
               <div className="where">

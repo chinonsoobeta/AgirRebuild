@@ -8,7 +8,7 @@ import { FormError, SignedOutPage } from "./auth";
 /** The page an invitation link opens (card 89): outside the session gate. Signed out, it signs the person up as a client
  * of one deal; signed in, it joins them. A used, revoked or expired link shows the API's one sentence. */
 export function Invite({ secret }: { secret: string }) {
-  const { t, err } = useI18n();
+  const { t, f, err } = useI18n();
   const navigate = useNavigate();
   const qc = useQueryClient();
   const invite = useQuery({ queryKey: ["invite", secret], queryFn: () => api.get<InvitePeek>(`/invite/${secret}`), retry: false });
@@ -81,7 +81,8 @@ export function Invite({ secret }: { secret: string }) {
             </div>
           </form>
         )}
-        <p className="small muted">{t("auth.invite.once", { ws })}</p>
+        {/* A peek from before the API said when the link ends has no date, so it keeps the sentence without one. */}
+        <p className="small muted">{invite.data.expiresAt ? t("auth.invite.expires", { ws, date: f.date(invite.data.expiresAt) }) : t("auth.invite.once", { ws })}</p>
       </div>
     </SignedOutPage>
   );
