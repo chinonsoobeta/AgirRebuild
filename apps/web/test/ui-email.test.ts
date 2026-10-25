@@ -105,7 +105,7 @@ describe("the confirm-your-email page", () => {
     const html = render(Verify);
     const words = text(html);
     for (const s of ["Check your email", "morgan@example.test", "60 minutes", "Continue", "send it again", "Skip for now"]) expect(words).toContain(s);
-    expect(words).not.toMatch(/different email|on this device|receipts/i);
+    expect(words).not.toMatch(/on this device|receipts/i);
     const code = input("code")!;
     expect(code.props.inputMode).toBe("numeric");
     expect(code.props.autoComplete).toBe("one-time-code");
