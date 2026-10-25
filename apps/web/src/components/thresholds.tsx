@@ -73,5 +73,5 @@ export function StandardVerdict({ custom, standard }: { custom: boolean; standar
     ...standard.verdict.gates.filter((gate) => !["passed","not_applicable"].includes(gate.status)).map((gate) => ({ text: `${i.L.gate(gate.key,gate.label)} ≥ ${i.f.value(gate.threshold,gate.unit)}`, cited: insured && gate.key === "dcr_after_refinance" })),
     ...standard.checks.filter((check) => check.severity === "error").map((check) => ({ text: checkText(i,check), cited: ["insured_min_units","refinance_ltv_limit","refinance_ltc_limit","refinance_amort_limit"].includes(check.key) })),
   ].sort((a,b) => Number(b.cited)-Number(a.cited));
-  return <div className="stack"><strong>{i.t("threshold.standardVerdict", { verdict: i.L.verdict(standard.verdict.code) })}</strong>{failures.length > 0 && <ul>{failures.map((failure,index) => <li key={index}>{failure.text}</li>)}</ul>}</div>;
+  return <div className="stack tight"><strong>{i.t("threshold.standardVerdict", { verdict: i.L.verdict(standard.verdict.code) })}</strong>{failures.length > 0 && <ul>{failures.map((failure,index) => <li key={index}>{failure.text}</li>)}</ul>}</div>;
 }

@@ -169,11 +169,13 @@ export function Run({ dealId }: { dealId: string }) {
               <StandardVerdict custom={v.policyCustom ?? false} standard={v.result.standard} />
             </div>
             <div className="stack tight run-verdict-actions">
+              {/* An out-of-date run cannot be decided on, so running again comes first. */}
               <div className="actions">
-                <Link to="/deals/$dealId/decision" params={{ dealId }} className="btn primary">{t("run.decide")}</Link>
+                {!v.fresh && runBtn(t("run.again"))}
+                <Link to="/deals/$dealId/decision" params={{ dealId }} className={v.fresh ? "btn primary" : "btn quiet"}>{t("run.decide")}</Link>
                 <Link to="/deals/$dealId/reports" params={{ dealId }} className="btn quiet">{t("run.memoAction")}</Link>
                 <Link to="/deals/$dealId/explore" params={{ dealId }} className="btn quiet">{t("run.explore")}</Link>
-                {runBtn(t("run.again"), "ghost")}
+                {v.fresh && runBtn(t("run.again"), "ghost")}
               </div>
               {reasons}
             </div>
