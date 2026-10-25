@@ -34,7 +34,7 @@ describe("the run in progress (card R1)", () => {
     const words = text(html);
     expect(words).toContain("Run 2 is in progress");
     expect(words).toMatch(/Started \d{1,2}:\d{2}.* · usually a few seconds/);
-    expect(words).not.toMatch(/under a minute|email you/i);
+    expect(words).not.toMatch(/under a minute/i);
     expect(words).toContain(en.t("run.inProgressLead"));
     const list = items(html);
     expect(list).toHaveLength(6);
@@ -43,7 +43,8 @@ describe("the run in progress (card R1)", () => {
     expect(list.some((l) => TIME.test(l))).toBe(false);
     expect(itemClasses(html)).toEqual(["on", "", "", "", "", ""]);
     expect(html).toMatch(/<ol[^>]*aria-live="polite"/);
-    expect(words).toContain("You can leave this page. The run carries on without you, and it will be here when you come back.");
+    // Card R1e, on the email branch: a person who leaves gets an email once the run is recorded.
+    expect(words).toContain("You can leave this page. The run carries on without you, and we will email you when it is done.");
     expect(html).toMatch(/<button[^>]*class="btn quiet[^"]*"[^>]*>Stop this run<\/button>/);
     expect(words).toContain("Started by Invented starter");
     expect(words).toContain("Run 1 stays available, as it is, until this one finishes.");
@@ -106,6 +107,7 @@ describe("the run in progress (card R1)", () => {
     expect(list[1]).toContain("18 mois de construction, puis 10 ans de détention");
     expect(list[2]).toMatch(/en cours$/);
     expect(words).toContain(fr.t("run.stop"));
+    expect(words).toContain("Vous pouvez quitter cette page. L'analyse continue sans vous, et nous vous enverrons un courriel quand elle sera terminée.");
     expect(text(renderToStaticMarkup(createElement(runScreen.RunStopped, { n: 2 })))).toContain("L'analyse 2 a été arrêtée. Rien n'a été enregistré.");
     for (const key of ["run.stop", "run.stopping", "run.leave", "run.inRun", "run.stopped", "run.now"] as const) expect(fr.t(key)).not.toBe(en.t(key));
   });
