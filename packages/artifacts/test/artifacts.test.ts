@@ -1588,10 +1588,8 @@ describe("card 96d custom thresholds", () => {
     const changes = effective.changes.map((change) => ({ ...change, setBy: "Dana Analyst" }));
     const line = (lang: "en" | "fr") => new Formatter(x.result, lang, 85, { policy: effective.policy, standardPolicy: base, changes }).stress("combined", "Combined");
     expect(line("fr")).toContain("Retiré par Dana Analyst le 2026-10-19");
-    // Only the removed field, after " · ": the stress name before it comes from stressLabel in contracts.
-    const field = line("fr").split(" · ")[1]!;
-    expect(field).toContain("Choc du taux d'intérêt");
-    expect(field).not.toMatch(/[^\u00a0]:/);
+    expect(line("fr")).toContain("Choc du taux d'intérêt");
+    expect(line("fr")).not.toMatch(/[^\u00a0]:/);
     expect(line("en")).toContain("Combined: Interest rate shock: Removed by Dana Analyst on 2026-10-19");
   });
   test.each(["ic_memo","build_decision","lender_package","model_export"] as const)("%s places the disclosure immediately after the draft line", (kind) => {

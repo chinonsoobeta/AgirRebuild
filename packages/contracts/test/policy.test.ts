@@ -18,7 +18,7 @@ describe("card 96a stress labels", () => {
     expect(stressLabel({ ...rate, rateBps: 100 }, "fr", rate)).toBe("Taux d'intérêt +100 pb");
     const combined = policy.stresses.find((s) => s.key === "combined")!;
     expect(stressLabel({ ...combined, rateBps: 100 }, "en", combined)).toBe("Combined: exit cap +75 bps, costs +10%, rate +100 bps, rent -10%, occupancy -5 pts, operating costs +5 pts");
-    expect(stressLabel({ ...combined, rateBps: 100 }, "fr", combined)).toBe("Combiné : taux de sortie +75 pb, coûts +10 %, taux +100 pb, loyers -10 %, occupation -5 pts, charges d'exploitation +5 pts");
+    expect(stressLabel({ ...combined, rateBps: 100 }, "fr", combined)).toBe("Combiné\u00a0: taux de sortie +75 pb, coûts +10 %, taux +100 pb, loyers -10 %, occupation -5 pts, charges d'exploitation +5 pts");
   });
 });
 
@@ -112,6 +112,15 @@ describe("card P2 threshold labels", () => {
     const threshold = THRESHOLDS["policy-v1"]!.find((t) => t.path === "stresses.exit_cap.exitCapBps")!;
     expect(threshold.label.en).toBe("Exit cap: Exit cap shock");
     expect(threshold.label.fr).toBe("Taux de sortie : Choc du taux de sortie");
+  });
+  it("puts a no-break space before the colon of a changed combined stress's French label", () => {
+    for (const policy of Object.values(POLICIES)) {
+      const combined = policy.stresses.find((s) => s.key === "combined")!;
+      const field = Object.keys(combined).find((key) => typeof combined[key as keyof typeof combined] === "number")!;
+      const label = stressLabel({ ...combined, [field]: 0 }, "fr", combined);
+      expect(label.startsWith("Combiné\u00a0: "), label).toBe(true);
+      expect(label).not.toMatch(/[^\u00a0]:/);
+    }
   });
   it("puts a no-break space before every colon in a French label", () => {
     for (const threshold of all) expect(threshold.label.fr, threshold.path).not.toMatch(/[^ ]:/);
