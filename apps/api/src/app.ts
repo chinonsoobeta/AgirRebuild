@@ -925,6 +925,22 @@ export function createApp({ db, store, secureCookies, demoSignIn = false, trustP
     return c.json({ ok: true });
   });
 
+  // Card R5: a link is shown once, so sending it again means a new one. In one transaction the old invitation is
+  // withdrawn (refused with 422 if it was used or withdrawn already) and a new one is made for the same deal.
+  app.post("/api/invites/:id/replace", async (c) => {
+    const id = z.string().uuid().safeParse(c.req.param("id"));
+    const secret = randomBytes(32).toString("base64url");
+    const made = await as(c, async (tx) => {
+      // RLS shows the row only to the workspace's owners and admins; everyone else gets the same 404.
+      const [old] = id.success ? await tx.query<{ deal_id: string }>(`select deal_id from client_invites where id = $1`, [id.data]) : [];
+      if (!old) throw new HttpError(404, "This invitation is not there any more.");
+      await tx.query(`select fn_revoke_client_invite($1)`, [id.data]);
+      const [row] = await tx.query<{ id: string }>(`select fn_create_client_invite($1, $2) as id`, [old.deal_id, sha256(secret)]);
+      return row!;
+    });
+    return c.json({ id: made.id, url: `/i/${secret}` });
+  });
+
   // A signed-in person joins through an invitation; staff of that workspace are refused (409).
   app.post("/api/invite/:secret/accept", async (c) => {
     const [used] = await db.transaction((tx) =>

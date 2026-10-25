@@ -1479,6 +1479,10 @@ const FR_REASONS: [RegExp, string | ((m: RegExpMatchArray) => string)][] = [
   [/^This person is an Agir reviewer; their access is changed by requesting Agir review$/, "Cette personne fait partie de la révision Agir ; son accès se modifie en demandant une révision Agir"],
   [/^Review access lasts between 1 and 90 days$/, "L'accès de révision dure de 1 à 90 jours"],
   [/^Ownership is not granted by invitation$/, "La propriété d'un espace ne se donne pas par invitation"],
+  [/^This invitation is not there any more\.$/, "Cette invitation n'existe plus."],
+  // From fn_revoke_client_invite (migration 0019), which Withdraw and "Make a new link" both call.
+  [/^This invitation is already used or revoked\.$/, "Cette invitation a déjà été utilisée ou annulée."],
+  [/^Invitation not found$/, "Cette invitation n'existe plus."],
   [/^A client is added to a deal, not to the workspace$/, "Un client s'ajoute à un projet, pas à l'espace"],
   [/^No user with that email has an account$/, "Aucun compte n'existe avec ce courriel"],
   [/^The owner's role cannot be changed$/, "Le rôle du propriétaire ne peut pas être changé"],
