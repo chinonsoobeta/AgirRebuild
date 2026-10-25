@@ -26,7 +26,7 @@ const Arrow = () => (
 
 export function Deals() {
   const i = useI18n();
-  const { t, L } = i;
+  const { t, L, f } = i;
   const { me, workspaceId, role, solo } = useSession();
   const [filter, setFilter] = useState<(typeof FILTERS)[number]["key"]>("all");
   const [q, setQ] = useState("");
@@ -69,6 +69,12 @@ export function Deals() {
           const st = dealStatus(i, d, solo);
           const n = STEPS.indexOf(d.step) + 1;
           const waiting = d.documents.processing > 0 && !d.documents.failed;
+          // The tag says the state once; the sentence beside it adds what the tag does not.
+          const key = tagKey(d);
+          const tag = key === "decided" && d.decision ? L.decision(d.decision.decision) : t(`deals.tag.${key}`);
+          const said = key === "decided" && d.decision && d.run ? t("deals.decidedOn", { date: f.date(d.decision.created_at), n: d.run.number })
+            : key === "stale" && d.run ? t("deals.changedAfter", { n: d.run.number })
+            : st.blockedParts.length ? st.blockedParts.join(", ") : st.text;
           return (
             <article className="deal" key={d.deal.id}>
               <div>
@@ -78,7 +84,7 @@ export function Deals() {
                 </p>
               </div>
               <div className="where">
-                <div className="row deal-state"><Tag tone={st.tone}>{t(`deals.tag.${tagKey(d)}`)}</Tag><span>{st.blockedParts.length ? st.blockedParts.join(", ") : st.text}</span></div>
+                <div className="row deal-state"><Tag tone={st.tone}>{tag}</Tag><span>{said}</span></div>
                 <div className="dots" role="img" aria-label={t("deals.atStep", { n, step: t(`step.${d.step}`) })}>
                   {STEPS.map((s, k) => <i key={s} className={k + 1 < n ? "done" : k + 1 === n ? "now" : undefined} />)}
                   <span aria-hidden="true">{t(`step.${d.step}`)}</span>

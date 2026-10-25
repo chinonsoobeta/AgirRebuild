@@ -20,10 +20,10 @@ export function describeEvent(i: I18n, e: AuditEvent): string {
     }
     case "deal.created": return fr ? "A créé le projet" : "Created the deal";
     case "document.uploaded": return fr ? `A téléversé ${p.name}` : `Uploaded ${p.name}`;
-    case "document.duplicate_ignored": return fr ? `A téléversé ${p.name} de nouveau ; la copie n'a pas été ajoutée` : `Uploaded ${p.name} again; the copy was not added`;
-    case "document.verified": return fr ? "A vérifié un document : type, taille et empreinte" : "Checked a document: type, size and fingerprint";
-    case "document.rejected": return fr ? `A refusé un document : ${i.msg(p.reason)}` : `Rejected a document: ${p.reason}`;
-    case "document.extracted": return fr ? `A lu un document : ${p.candidates} valeurs trouvées` : `Read a document: ${p.candidates} values found`;
+    case "document.duplicate_ignored": return fr ? `A téléversé ${p.name} de nouveau\u00a0; la copie n'a pas été ajoutée` : `Uploaded ${p.name} again; the copy was not added`;
+    case "document.verified": return fr ? "A vérifié un document\u00a0: type, taille et empreinte" : "Checked a document: type, size and fingerprint";
+    case "document.rejected": return fr ? `A refusé un document\u00a0: ${i.msg(p.reason)}` : `Rejected a document: ${p.reason}`;
+    case "document.extracted": return fr ? `A lu un document\u00a0: ${p.candidates} valeurs trouvées` : `Read a document: ${p.candidates} values found`;
     case "document.role_set": {
       const role = (value: unknown) => i.t(value === "deal_source" ? "docs.role.deal_source" : value === "evidence" ? "docs.role.evidence" : value === "context" ? "docs.role.context" : "docs.role.auto");
       return i.t("docs.role.changed", { old: role(p.old), new: role(p.new) });
@@ -44,44 +44,44 @@ export function describeEvent(i: I18n, e: AuditEvent): string {
       };
       return [done, sentence("label"), sentence("document")].filter(Boolean).join(". ");
     }
-    case "run.completed": return fr ? `A lancé l'analyse ${p.run_number} : ${i.L.verdict(p.verdict).toLowerCase()}` : `Ran underwriting: run ${p.run_number}, ${String(p.verdict).replace(/_/g, " ").toLowerCase()}`;
+    case "run.completed": return fr ? `A lancé l'analyse ${p.run_number}\u00a0: ${i.L.verdict(p.verdict).toLowerCase()}` : `Ran underwriting: run ${p.run_number}, ${String(p.verdict).replace(/_/g, " ").toLowerCase()}`;
     case "decision.recorded":
       return fr
-        ? `A consigné la décision « ${i.L.decision(p.decision).toLowerCase()} » pour l'analyse ${p.run_number}${p.against_verdict ? ", contraire au verdict" : ""}`
+        ? `A consigné la décision «\u00a0${i.L.decision(p.decision).toLowerCase()}\u00a0» pour l'analyse ${p.run_number}${p.against_verdict ? ", contraire au verdict" : ""}`
         : `Recorded the decision "${String(p.decision).replace(/_/g, " ")}" on run ${p.run_number}${p.against_verdict ? ", against the verdict" : ""}`;
-    case "artifact.requested": return fr ? `A demandé : ${kind(p.kind)} (${p.format})` : `Requested a ${String(p.kind).replace(/_/g, " ")} (${p.format})`;
-    case "artifact.ready": return fr ? `A diffusé : ${kind(p.kind)} (${p.format})` : `Released a ${String(p.kind).replace(/_/g, " ")} (${p.format})`;
-    case "artifact.blocked": return fr ? "A bloqué un rapport : chiffres sans source" : "Blocked a report: figures without a source";
+    case "artifact.requested": return fr ? `A demandé\u00a0: ${kind(p.kind)} (${p.format})` : `Requested a ${String(p.kind).replace(/_/g, " ")} (${p.format})`;
+    case "artifact.ready": return fr ? `A diffusé\u00a0: ${kind(p.kind)} (${p.format})` : `Released a ${String(p.kind).replace(/_/g, " ")} (${p.format})`;
+    case "artifact.blocked": return fr ? "A bloqué un rapport\u00a0: chiffres sans source" : "Blocked a report: figures without a source";
     case "share.created": {
       const terms: Record<string, string> = fr ? { "24h": "24 heures", "7d": "7 jours", "30d": "30 jours", none: "Sans expiration" }
         : { "24h": "24 hours", "7d": "7 days", "30d": "30 days", none: "No expiry" };
-      return fr ? `A partagé un lien : ${kind(p.kind)} (${p.format}), ${terms[p.term] ?? ""}` : `Shared a link to the ${kind(p.kind)} (${p.format}), ${terms[p.term] ?? ""}`;
+      return fr ? `A partagé un lien\u00a0: ${kind(p.kind)} (${p.format}), ${terms[p.term] ?? ""}` : `Shared a link to the ${kind(p.kind)} (${p.format}), ${terms[p.term] ?? ""}`;
     }
     case "share.revoked": return fr ? "A révoqué un lien partagé" : "Revoked a shared link";
     case "share.opened": {
       const what: Record<string, string> = fr ? { page: "la page", file: "le rapport", audit_package: "le dossier d'audit" }
         : { page: "the page", file: "the report", audit_package: "the audit package" };
-      return fr ? `A ouvert un lien partagé : ${what[p.what] ?? what.page}` : `Opened a shared link: ${what[p.what] ?? what.page}`;
+      return fr ? `A ouvert un lien partagé\u00a0: ${what[p.what] ?? what.page}` : `Opened a shared link: ${what[p.what] ?? what.page}`;
     }
     case "workspace.created": return fr ? "A créé l'espace de travail" : "Created the workspace";
     case "figure.labelled": return fr ? `A étiqueté un chiffre comme ${field()}` : `Labelled a figure as ${field()}`;
     case "figure.unlabelled": return fr ? "A retiré l'étiquette d'un chiffre" : "Removed a figure's label";
-    case "label.remembered": return fr ? `A retenu le libellé « ${p.phrase} » comme ${field()} pour les projets de cet espace` : `Remembered the label "${p.phrase}" as ${field()} for this workspace's deals`;
-    case "label.forgotten": return fr ? `A oublié le libellé « ${p.phrase} » comme ${field()}` : `Forgot the label "${p.phrase}" as ${field()}`;
+    case "label.remembered": return fr ? `A retenu le libellé «\u00a0${p.phrase}\u00a0» comme ${field()} pour les projets de cet espace` : `Remembered the label "${p.phrase}" as ${field()} for this workspace's deals`;
+    case "label.forgotten": return fr ? `A oublié le libellé «\u00a0${p.phrase}\u00a0» comme ${field()}` : `Forgot the label "${p.phrase}" as ${field()}`;
     case "deal.copied": return fr ? `A copié comme ${p.name}` : `Copied as ${p.name}`;
     case "deal.created_as_copy": return fr ? `A créé comme copie de ${p.name}` : `Created as a copy of ${p.name}`;
     case "workspace.review_mode_changed": {
       const mode = (m: string) => i.t(m === "team" ? "settings.mode.team" : "settings.mode.solo");
-      return fr ? `A changé le mode d'examen : ${mode(p.from)} → ${mode(p.to)}` : `Changed the review mode: ${mode(p.from)} to ${mode(p.to)}`;
+      return fr ? `A changé le mode d'examen\u00a0: ${mode(p.from)} → ${mode(p.to)}` : `Changed the review mode: ${mode(p.from)} to ${mode(p.to)}`;
     }
     case "workspace.label_suggestions_changed": {
       const on = (b: boolean) => (fr ? (b ? "activées" : "désactivées") : b ? "on" : "off");
-      return fr ? `A changé les suggestions de libellés : ${on(p.from)} → ${on(p.to)}` : `Changed label suggestions: ${on(p.from)} to ${on(p.to)}`;
+      return fr ? `A changé les suggestions de libellés\u00a0: ${on(p.from)} → ${on(p.to)}` : `Changed label suggestions: ${on(p.from)} to ${on(p.to)}`;
     }
     case "review.granted":
       return fr ? `A donné accès à un réviseur${p.expires_at ? ` jusqu'au ${i.f.date(p.expires_at)}` : ""}` : `Gave a reviewer access${p.expires_at ? ` until ${i.f.date(p.expires_at)}` : ""}`;
     case "document.suggestions_failed":
-      return fr ? "Les suggestions de libellés d'un modèle ont échoué pour un document ; les valeurs lues restent" : "A model's label suggestions failed for a document; the values read stand";
+      return fr ? "Les suggestions de libellés d'un modèle ont échoué pour un document\u00a0; les valeurs lues restent" : "A model's label suggestions failed for a document; the values read stand";
     case "logo.set": return fr ? "A mis le logo du dossier pour le prêteur" : "Set the lender package logo";
     case "logo.cleared": return fr ? "A retiré le logo du dossier pour le prêteur" : "Removed the lender package logo";
     case "invite.created": return fr ? "A créé un lien d'invitation pour un client" : "Made an invitation link for a client";
@@ -107,7 +107,7 @@ export function describeEvent(i: I18n, e: AuditEvent): string {
         const n = Number(p.to_value);
         const shown = p.to_value === null || p.to_value === undefined ? null : Number.isFinite(n) ? i.f.value(n, FIELD_BY_KEY.get(p.field)?.unit ?? "count") : String(p.to_value);
         const val = shown === null ? "" : ` = ${shown}`;
-        return `${verb}${fr ? " :" : ":"} ${field()}${val}${p.reason ? ` (${i.msg(p.reason)})` : ""}`;
+        return `${verb}${fr ? "\u00a0:" : ":"} ${field()}${val}${p.reason ? ` (${i.msg(p.reason)})` : ""}`;
       }
       return e.action;
   }

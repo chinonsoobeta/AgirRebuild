@@ -198,7 +198,7 @@ describe("the deal frame", () => {
     store.set("agir.lang", "fr");
     const out = render(createElement(DealFrame, { o: decided, active: "run" }));
     expect(out).toContain("Tous les projets");
-    expect(out).toContain("Explorer des variantes");
+    expect(out).toContain("Explorer des changements");
   });
 });
 

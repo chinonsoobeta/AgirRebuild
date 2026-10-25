@@ -271,7 +271,7 @@ export function DealFrame({ o, active }: { o: DealOverview; active: string }) {
           )}
         </div>
         <div className="actions">
-          {o.run && <Link to="/deals/$dealId/explore" params={{ dealId: o.deal.id }} className="btn quiet sm">{t("explore.title")}</Link>}
+          {o.run && <Link to="/deals/$dealId/explore" params={{ dealId: o.deal.id }} className="btn quiet sm">{t("explore.action")}</Link>}
           {o.run && o.run.number >= 2 && <Link to="/deals/$dealId/compare" params={{ dealId: o.deal.id }} className="btn quiet sm">{t("compare.action")}</Link>}
           <Link to="/deals/$dealId/audit" params={{ dealId: o.deal.id }} className="btn quiet sm">{t("step.audit")}</Link>
           {canEdit(role) && (

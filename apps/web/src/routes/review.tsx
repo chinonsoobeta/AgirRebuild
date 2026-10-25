@@ -70,7 +70,7 @@ export function enteredInUnit(unit: string, metric: boolean, value: number, reas
   if (!metric || !metricUnit(unit)) return { value, reason };
   const typed = lang === "fr" ? String(value).replace(".", ",") : String(value);
   const label = unit === "sf" ? "m²" : lang === "fr" ? "$/m²/an" : "$/m²/yr";
-  return { value: unit === "sf" ? value * SF_PER_M2 : value / SF_PER_M2, reason: `${reason} (${lang === "fr" ? "saisi en" : "entered as"} ${typed} ${label})` };
+  return { value: unit === "sf" ? value * SF_PER_M2 : value / SF_PER_M2, reason: `${reason} (${lang === "fr" ? "saisi en" : "entered as"} ${typed}${lang === "fr" ? "\u00a0" : " "}${label})` };
 }
 
 function ValueInput({ unit, id, defaultValue, label, prefix = "" }: { unit: string; id: string; defaultValue?: number | null; label: string; prefix?: string }) {

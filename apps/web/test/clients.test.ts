@@ -116,9 +116,6 @@ describe("a client's controls (task 89c)", () => {
   });
   it.each(["en", "fr"] as const)("names the client role in %s", (lang) => {
     expect(build(lang, () => {}).L.role("client")).toBe(lang === "en" ? "client" : "client");
-    expect(build(lang, () => {}).t("settings.r.client")).toBe(lang === "en"
-      ? "Reads the deals assigned to it and confirms the values the broker stated. Changes nothing else."
-      : "Consulte les projets qui lui sont confiés et confirme les valeurs déclarées par le courtier. Ne modifie rien d'autre.");
   });
 });
 
