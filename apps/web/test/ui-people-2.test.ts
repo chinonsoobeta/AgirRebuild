@@ -261,9 +261,48 @@ describe("ending a reviewer's access", () => {
     expect(state.invalidate).toHaveBeenCalledWith({ queryKey: ["members"] });
   });
 
+  it("says what stays: the confirmations, still marked as Agir review", async () => {
+    render(ReviewAccess);
+    await of("End access now", "r1")[0]!.props.onClick();
+    const asked = String(vi.mocked(window.confirm).mock.calls[0]![0]);
+    expect(asked).toContain("confirmed by Agir review");
+    expect(asked).not.toMatch(/with their name/);
+    state.lang = "fr";
+    render(ReviewAccess);
+    await of("Mettre fin à l'accès", "r1")[0]!.props.onClick();
+    expect(String(vi.mocked(window.confirm).mock.calls[1]![0])).toContain("révision Agir");
+  });
+
   it("offers neither on an ended reviewer's row", () => {
     render(ReviewAccess);
     expect(of("Extend", "r2")).toHaveLength(0);
     expect(of("End access now", "r2")).toHaveLength(0);
+  });
+});
+
+describe("saving a name", () => {
+  const nameInput = (id: string) => state.nodes.find((n) => n.tag === "input" && n.props.id === id)!;
+
+  it("says Saved. beside the workspace name once it is saved, and nowhere else", async () => {
+    render();
+    await submit(form("Workspace name")!, "Harbour Capital");
+    const html = render();
+    expect(text(section(html, "workspace"))).toContain("Saved.");
+    expect(text(section(html, "account"))).not.toContain("Saved.");
+  });
+
+  it("says Saved. beside your name once it is saved, until you edit it again", async () => {
+    render();
+    await submit(form("Your name")!, "Morgan Lee");
+    expect(text(section(render(), "account"))).toContain("Saved.");
+    nameInput("ac-name").props.onChange({ target: { value: "Morgan L" } });
+    expect(text(section(render(), "account"))).not.toContain("Saved.");
+  });
+
+  it("says it in French", async () => {
+    state.lang = "fr";
+    render();
+    await submit(form("Votre nom")!, "Morgan Lee");
+    expect(text(section(render(), "account"))).toContain("Enregistré.");
   });
 });
