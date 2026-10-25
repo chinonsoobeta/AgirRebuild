@@ -139,7 +139,7 @@ describe("the plain-language layer", () => {
   it("calls the decision the owner's own when the review is solo", () => {
     expect(en.t("next.decideSolo")).toBe("Record your decision");
     expect(en.t("decision.titleSolo")).toBe("Your decision");
-    expect(en.t("next.decide")).toBe("Record the committee decision");
+    expect(en.t("next.decide")).toBe("Record the decision");
     expect(fr.t("decision.titleSolo")).toBe("Votre décision");
     const gates = [{ key: "g", label: "G", status: "failed" }];
     expect(verdictText(en, { code: "APPROVE_WITH_CONDITIONS", hardFailReasons: [], gates }, [], true).headline).toBe("1 gate fails. You set the conditions.");
@@ -1069,7 +1069,7 @@ it.each(["en", "fr"] as const)("card 135 offers confirmation only for an outside
 describe("Card 137 region text", () => {
   it("names the table and exclusions in French", () => {
     const fr = build("fr", () => {});
-    expect(fr.t("review.regionIntro", { kind: fr.t("review.regionRent"), fields: "type, nombre, loyer mensuel" })).toBe("Ce tableau ressemble à votre état locatif\u00a0: type, nombre, loyer mensuel.");
+    expect(fr.t("review.regionIntro", { kind: fr.t("review.regionRent"), fields: "type, nombre, loyer mensuel" })).toBe("Ce tableau ressemble à votre état des loyers\u00a0: type, nombre, loyer mensuel.");
     expect(fr.t("review.regionConfirm", { n: 12 })).toBe("Confirmer les 12 valeurs");
     expect(fr.msg("read by OCR")).toBe("lu par ROC");
     expect(fr.msg("please check")).toBe("à vérifier");

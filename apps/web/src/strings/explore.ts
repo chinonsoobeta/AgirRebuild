@@ -2,6 +2,7 @@
 import type { Entry, FrenchOf } from "./entry";
 
 export const en = {
+  "explore.action": "Explore changes",
   "explore.back": (p) => `Back to run ${p.n}`,
   "explore.helper": "Drag a slider and the figures re-run. The run itself does not change.",
   "explore.runShock": "from the run",
@@ -18,6 +19,7 @@ export const en = {
 } satisfies Record<string, Entry>;
 
 export const fr: FrenchOf<typeof en> = {
+  "explore.action": "Explorer des changements",
   "explore.back": (p) => `Retour à l'analyse ${p.n}`,
   "explore.helper": "Déplacez un curseur et les chiffres sont recalculés. L'analyse elle-même ne change pas.",
   "explore.runShock": "par rapport à l'analyse",

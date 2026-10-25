@@ -30,7 +30,7 @@ export const en = {
 export const fr: FrenchOf<typeof en> = {
   "documents.quickStart": "Pas de documents ? Utilisez le démarrage rapide",
   "documents.role.autoD": "Agir lit chaque fichier et lui attribue un rôle que vous pouvez modifier.",
-  "documents.role.deal_sourceD": "Les chiffres propres au projet : budget, rôle des loyers, lettre d'engagement.",
+  "documents.role.deal_sourceD": "Les chiffres propres au projet : budget, état des loyers, lettre d'offre.",
   "documents.role.evidenceD": "Évaluations, notices d'offre, brochures de courtier. Agir les lit, mais saute leurs sections sur le marché et les comparables.",
   "documents.role.contextD": "Conservé avec le projet, jamais lu pour en tirer des valeurs.",
   "documents.title": "Documents de ce projet",

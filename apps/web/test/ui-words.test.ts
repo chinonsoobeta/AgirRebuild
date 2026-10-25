@@ -31,7 +31,7 @@ const { Deals } = await import("../src/routes/deals.tsx");
 const { DealFrame, SessionGate } = await import("../src/components/ui.tsx");
 
 const text = (html: string) =>
-  html.replace(/<[^>]+>/g, " ").replace(/&#x27;/g, "'").replace(/&quot;/g, '"').replace(/&amp;/g, "&").replace(/&nbsp;/g, " ").replace(/[ \t\n]+/g, " ").trim();
+  html.replace(/<[^>]+>/g, " ").replace(/&#x27;/g, "'").replace(/&quot;/g, '"').replace(/&amp;/g, "&").replace(/&nbsp;/g, "\u00a0").replace(/[ \t\n]+/g, " ").trim();
 
 const me: Me = { user: { id: "u1", email: "ada@example.com", name: "Ada Lovelace" }, workspaces: [{ id: "w1", name: "First", review_mode: "solo", label_suggestions: false, has_logo: false, role: "owner" }] };
 const render = (node: ReturnType<typeof createElement>) => renderToStaticMarkup(createElement(SessionGate, null, node));
@@ -66,7 +66,7 @@ describe("French typography", () => {
   });
   it("catches a plain space where a no-break space belongs", () => {
     for (const bad of ["Verdict : x", "Pourquoi ?", "« oui »", "5 %", "100 $", "a ; b", "Non !"]) expect(PLAIN_SPACING.test(bad)).toBe(true);
-    for (const good of ["Verdict : x", "Pourquoi ?", "« oui »", "5 %", "100 $", "Pourquoi?"]) expect(PLAIN_SPACING.test(good)).toBe(false);
+    for (const good of ["Verdict\u00a0: x", "Pourquoi\u00a0?", "«\u00a0oui\u00a0»", "5\u00a0%", "100\u00a0$", "Pourquoi?"]) expect(PLAIN_SPACING.test(good)).toBe(false);
   });
 });
 
@@ -116,7 +116,7 @@ describe("the deals home says each thing once", () => {
     const [row] = rows();
     expect(row).toContain("Approuver sous conditions");
     expect(row!.match(/décidé/gi)?.length).toBe(1);
-    expect(row).toMatch(/Décidé le .*2026.*analyse ?3/);
+    expect(row).toMatch(/Décidé le .*2026.*analyse[ \u00a0]3\./);
   });
   it("gives an out-of-date deal a sentence that does not repeat its tag and names the run", () => {
     for (const lang of ["en", "fr"] as const) {

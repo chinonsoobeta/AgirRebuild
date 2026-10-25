@@ -162,10 +162,11 @@ export const EN = {
   "next.enter": (p) => `Enter ${p.n} missing ${s(p.n, "input", "inputs")}`,
   "next.review": "Review the extracted values",
   "next.run": "Run underwriting",
-  "next.decide": "Record the committee decision",
+  "next.runAgain": "Run underwriting again",
+  "next.decide": "Record the decision",
   "next.decideSolo": "Record your decision",
   "next.share": "Share the reports",
-  "next.memo": "Generate the IC memo",
+  "next.memo": "Generate the reports",
 
   "docs.role.changed": (p) => `Changed the document role from ${p.old} to ${p.new}`,
   "docs.role.question": "What are the files you add?",
@@ -800,10 +801,11 @@ export const FR: Record<Key, Entry> = {
   "next.enter": (p) => `Saisir ${p.n} ${s(p.n, "donnée manquante", "données manquantes")}`,
   "next.review": "Examiner les valeurs extraites",
   "next.run": "Lancer l'analyse",
-  "next.decide": "Consigner la décision du comité",
+  "next.runAgain": "Relancer l'analyse",
+  "next.decide": "Consigner la décision",
   "next.decideSolo": "Consigner votre décision",
   "next.share": "Partager les rapports",
-  "next.memo": "Générer le mémo du comité",
+  "next.memo": "Générer les rapports",
 
   "docs.role.changed": (p) => `A changé le rôle du document\u00a0: ${p.old} → ${p.new}`,
   "docs.role.question": "Que sont les fichiers que vous ajoutez\u00a0?",
@@ -836,7 +838,7 @@ export const FR: Record<Key, Entry> = {
   "docs.retry": "Relancer",
   "docs.remove": "Retirer",
   "docs.removeConfirm": (p) => `Retirer ${p.name} de ce projet\u00a0? Les valeurs trouvées uniquement dans ce document retournent à l'examen.`,
-  "docs.empty": "Aucun document. Téléversez le sommaire du promoteur, le budget, le rôle des loyers, la lettre d'engagement et l'évaluation.",
+  "docs.empty": "Aucun document. Téléversez le sommaire du promoteur, le budget, l'état des loyers, la lettre d'offre et l'évaluation.",
   "docs.what": "Ce qui arrive à un fichier",
   "docs.what1": "Vérifié.",
   "docs.what1b": "Type, taille et empreinte. Un fichier qui n'est pas ce que son nom indique est refusé.",
@@ -982,7 +984,7 @@ export const FR: Record<Key, Entry> = {
   "auth.mode.team": "En équipe (une seconde personne confirme les valeurs déterminantes que je saisis)",
   "review.regionIntro": (p) => `Ce tableau ressemble à votre ${p.kind}\u00a0: ${p.fields}.`,
   "review.regionConfirm": (p) => `Confirmer les ${p.n} valeurs`,
-  "review.regionRent": "état locatif",
+  "review.regionRent": "état des loyers",
   "review.regionBudget": "budget",
   "review.regionLoan": "offre de prêt",
   "review.regionOther": (p) => `Ce tableau contient\u00a0: ${p.fields}.`,
@@ -1038,7 +1040,7 @@ export const FR: Record<Key, Entry> = {
   "run.draftPolicy": "Politique provisoire, non approuvée par le crédit",
   "run.memo": "Générer le mémo du comité",
   "run.decide": "Consigner la décision",
-  "run.explore": "Explorer des variantes",
+  "run.explore": "Explorer des changements",
   "run.gates": "Seuils",
   "run.col.gate": "Seuil",
   "run.col.needs": "Exigé",
@@ -1088,7 +1090,7 @@ export const FR: Record<Key, Entry> = {
   "run.stale.policy": "Les seuils de la politique ont changé après cette analyse.",
   "run.stale.engine": "Le moteur a été mis à jour après cette analyse.",
 
-  "explore.title": "Explorer des variantes",
+  "explore.title": "Explorer des changements",
   "explore.banner": "Exploration, pas une analyse.",
   "explore.bannerBody": (p) => `Chaque chiffre ici est un nouveau calcul de l'analyse ${p.n} avec vos changements. Rien n'est enregistré, et rien ne peut être exporté ni servir à une décision.`,
   "explore.noRun": "L'exploration part d'une analyse existante.",
@@ -1883,7 +1885,7 @@ export function dealStatus(i: I18n, o: OverviewLike, solo = false): { tone: "pas
     };
   }
   if (!o.run || !o.run.fresh) {
-    return { tone: o.run ? "review" : "neutral", text: o.run ? t("status.outOfDate") : t("status.readyToRun"), next: t("next.run"), blockedParts: [] };
+    return { tone: o.run ? "review" : "neutral", text: o.run ? t("status.outOfDate") : t("status.readyToRun"), next: o.run ? t("next.runAgain") : t("next.run"), blockedParts: [] };
   }
   if (!o.decision) {
     const v = o.run.verdict;
