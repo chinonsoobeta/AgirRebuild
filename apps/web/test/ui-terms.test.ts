@@ -204,7 +204,7 @@ describe("the settings row", () => {
     const { Settings } = await import("../src/routes/settings");
     const en = text(renderToStaticMarkup(createElement(Settings)));
     expect(en).toContain("Finance terms");
-    expect(en).toContain("Show the plain words first, with the finance term one click away.");
+    expect(en).toContain("Show plain words first, with the finance terms in the glossary on Run and Review.");
     expect(en).toContain("Plain words first");
     expect(en).toContain("Finance terms first");
     state.lang = "fr";
