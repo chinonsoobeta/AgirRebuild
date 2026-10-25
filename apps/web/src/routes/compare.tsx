@@ -242,9 +242,15 @@ export function Compare({ dealId, a, b, onPick }: { dealId: string; a?: string |
           <div className="card-foot row between">
             <span className="small muted">{t("compare.foot")}</span>
             <div className="row">
-              {[vb, va].filter((r) => r.isLatest && r.dealId === dealId).map((r) => (
-                <Link key={r.id} to="/deals/$dealId/run" params={{ dealId }} className="btn quiet sm">{t("compare.open", { n: r.number })}</Link>
-              ))}
+              {/* Each run opens at its own address on its own deal's Run page; another deal's run is named after that deal. */}
+              {[vb, va].map((r) => {
+                const other = r.dealId !== dealId ? nameOf(r) : undefined;
+                return (
+                  <Link key={r.id} to="/deals/$dealId/run" params={{ dealId: r.dealId }} search={{ run: r.id }} className="btn quiet sm">
+                    {other === undefined ? t("compare.open", { n: r.number }) : t("compare.openOf", { n: r.number, name: other })}
+                  </Link>
+                );
+              })}
             </div>
           </div>
         </div>

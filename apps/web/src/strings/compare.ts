@@ -55,6 +55,7 @@ export const en = {
   "compare.verdictMoved": (p) => `The verdict went from ${p.from} to ${p.to}.`,
   "compare.foot": "Figures are as each run recorded them. Nothing here is recomputed.",
   "compare.open": (p) => `Open run ${p.n}`,
+  "compare.openOf": (p) => `Open run ${p.n} of ${p.name}`,
 } satisfies Record<string, Entry>;
 
 export const fr: FrenchOf<typeof en> = {
@@ -111,4 +112,5 @@ export const fr: FrenchOf<typeof en> = {
   "compare.verdictMoved": (p) => `Le verdict est passé de « ${p.from} » à « ${p.to} ».`,
   "compare.foot": "Les chiffres sont ceux que chaque analyse a consignés. Rien ici n'est recalculé.",
   "compare.open": (p) => `Ouvrir l'analyse ${p.n}`,
+  "compare.openOf": (p) => `Ouvrir l'analyse ${p.n} de ${p.name}`,
 };
