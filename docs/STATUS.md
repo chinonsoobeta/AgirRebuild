@@ -36,9 +36,15 @@ pushed, and nothing is merged into `main` until the owner says so.
 Which branch holds what today (2026-10-25):
 
 - `main`: every reading and engine card through 153b, and the interface as it was before the redesign.
-- `ui/redesign`: the interface redesign (cards F1, F2, W1 to W11), based on `main` at `3ca9877`. Local only.
-  See "Interface redesign" below.
-- `ui/u17-email-and-reset` and `ui/w12-email`: email verification and password reset, held for the owner's review.
+- `ui/redesign`: the interface redesign (cards F1, F2, W1 to W11, U20, U21, X1 to X6), based on `main` at
+  `3ca9877`. Local only. See "Interface redesign" below.
+- `ui/y-screens`: `ui/redesign` plus people, account and deal details in the API (Y1 and Y2, migrations `0031` and
+  `0032`), their screens (Z1 and Z2), the policy names (P1) and the fixes from a second browser walk. Local only,
+  held for the owner's review.
+- `ui/w12-email`: `ui/y-screens` plus email verification and password reset (U17 and W12, migration `0030`). Held
+  for the owner's review and a mail provider. The three branches stack in this order and merge in this order.
+- `fix/threshold-labels`: from `main`, card P2 in `packages/contracts` and `packages/artifacts`. Held for the
+  owner's review; it merges on its own.
 - Not merged into `main` (`git branch --no-merged main`): the `ui/*` branches, and `task/144b-claude`, `task/154-claude`,
   `task/155-claude`, `task/161-reader-gate`, `task/163-scaled-decimals`, `task/71-reimbursement-and-plans`,
   `task/85a-hard-fail-in-reports`, `task/85a2-hard-fail-in-reports`, `task/85b-partners-sheet`, `task/85b2-partners-sheet`
@@ -306,11 +312,26 @@ own `ui/*` branch off `ui/redesign` and was merged back after the audit. Web onl
 | W11 | `ui/w11-audit-compare` | The audit trail with the chain check, search and filters, and a new screen at `/deals/$dealId/compare` that compares two stored runs without recomputing anything |
 | U17 | `ui/u17-email-and-reset` | API only: email verification and password reset, single-use tokens stored as hashes in migration `0030`, a `Mailer` with a development file mailer. Branched from `main` at `3ca9877` |
 | W12 | `ui/w12-email` | The confirm-your-email and reset-password screens on top of U17, with the finished `ui/redesign` merged in. Release gate passed on 2026-10-25 at `51a6bbd` (6018 tests in 37 files) |
+| X1 | `ui/x1-terms` | A "Finance terms" preference in Settings (plain words first, or finance terms first), used by the glossary on Run and Review |
+| X2 | `ui/x2-settings` | Settings: a new workspace, what each role can do, every deal's clients in one table, the workspace's counts |
+| X3 | `ui/x3-run` | Run: key figures with a second line of context, a fuller stress table, each past run's status, a run's own address |
+| X4 | `ui/x4-review` | Review: the deal's thresholds beside the values, and the choices already made |
+| X5 | `ui/x5-reports` | Reports in the other language, sharing from the top of the page, a privacy link on the first visit, extending a reviewer's access |
+| X6 | `ui/x6-compare` | Compare across a deal and its variants (direct copies only) |
+| Y1 | `api/y1-people-account` | API and migration `0031`: remove a member, rename the workspace, end review access early, change your name, count and end your other sessions, the archived-deal count. `fn_add_member` no longer lets an admin change the owner's role (on `main` it does) |
+| Y2 | `api/y2-deal-details` | API and migration `0032`: a deal's units and exit, older audit events past 500, an invitation's end date, a fuller shared page |
+| Z1 | `ui/z1-people` | The screens for Y1 |
+| Z2 | `ui/z2-deal-details` | The screens for Y2 |
+| P1 | `ui/p1-names` | Each policy named in words, as the Run and Decision boards do, where the screens printed its version id; short English messages under a table proposal start with a capital |
+| P2 | `fix/threshold-labels` | From `main`: stress thresholds named in words in English ("Exit cap: Exit cap shock", not "exit_cap: …"), and no-break spaces in their French labels and in the reports' removed-stress line |
 
-State of the branches: F1, F2, W1 to W11, U20 (the old styles removed, an accessibility pass) and U21-words (a
-wording and French pass) are merged into `ui/redesign`, followed by the fixes from a browser walk of every screen
-on 2026-10-25 (listed in `INTERFACE-BUILD-LOG.md`). None of it is on `main` or pushed. U17 and W12 are not merged
-anywhere. They touch sign-in and add a migration, so they need the owner's
+State of the branches: F1, F2, W1 to W11, U20 (the old styles removed, an accessibility pass), U21-words (a
+wording and French pass) and X1 to X6 are merged into `ui/redesign`, with the fixes from a browser walk of every
+screen on 2026-10-25 (listed in `INTERFACE-BUILD-LOG.md`). Y1, Y2, Z1, Z2 and P1 are merged into `ui/y-screens`,
+with the fixes from a second walk of that branch (as the demo owner, with a throwaway client and reviewer, at
+1360, 900 and 390 px). Y1 and Y2 change `apps/api` and add migrations, so `ui/y-screens` needs the owner's review.
+None of it is on `main` or pushed. U17 and W12 are merged only into `ui/w12-email`, on top of `ui/y-screens`.
+They touch sign-in and add a migration, so they need the owner's
 review (plan rule 7), and they must not reach production before there is a mail provider: on the U17 branch,
 development writes each email to the data folder's `mail/` directory and production sends nothing
 (`apps/api/src/main.ts` and `apps/api/src/mailer.ts` on that branch). Nothing in the app is gated on a verified email.
@@ -339,8 +360,12 @@ Left out on purpose, because a person must decide first (the plan's "Decisions t
 - The French interface is not a translator's work. Two terms need the translator's choice: "état des loyers" for
   rent roll and "lettre d'offre" for term sheet.
 - Deal names in BC Sans Light at 34 px, as the canvas shows, unless the owner wants Regular or Bold.
-- Also not built, because there is no API for them: a sample deal, removing a member, renaming, devices, deleting an
-  account, and a "stop this run" button.
+- Also not built, because there is no API for them: a sample deal, device names, deleting an account, run progress
+  by stage, a downloadable comparison, one link for a whole deal, and a "stop this run" button. Removing a member,
+  renaming the workspace and signing out other devices are built on `ui/y-screens`.
+- Compare and Explore show each change by subtracting two stored values in the browser (Explore did so on `main`
+  already). A screen is not meant to derive a figure; the owner decides whether this display arithmetic stays or the
+  API returns the changes. Compare treats a change under one part in a billion as no change.
 
 ## Model suggestions
 
@@ -422,7 +447,9 @@ Where the code showed a better route than [the plan](plan-small-developers.md), 
 
 - Whether `chinonsoobeta/AgirRebuild` should be public, as it is today.
 - Review of U17 and W12 (sign-in, a migration) before they are merged, and a mail provider before they reach production.
-- The interface redesign on `ui/redesign`: the owner's review before it is merged into `main`.
+- The interface redesign on `ui/redesign`: the owner's review before it is merged into `main`. Then `ui/y-screens`
+  (migrations `0031` and `0032`, server code for people, accounts and deal details) and `fix/threshold-labels`
+  (`packages/contracts`).
 - The open decisions listed under "Interface redesign": price, Stripe and GST/HST, Agir reviewers and their price, the
   thresholds editor's place, the deal-name weight, and the two French terms.
 - Whether open sign-up stays, and malware scanning, file storage and hosting before any real customer.

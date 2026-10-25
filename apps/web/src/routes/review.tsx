@@ -145,7 +145,11 @@ export function TableProposal({ proposal, unit, onUse, busy }: { proposal: impor
   const [selected,setSelected] = useState(proposal.options.length === 1 ? "0" : "");
   const [infoOpen,setInfoOpen] = useState(false);
   const infoId = useId();
-  if (proposal.unavailable) return <p className="small muted">{msg(proposal.unavailable)}</p>;
+  if (proposal.unavailable) {
+    // Some of these come from the API in lower case; French already gives each as a sentence.
+    const sentence = msg(proposal.unavailable);
+    return <p className="small muted">{sentence.charAt(0).toUpperCase() + sentence.slice(1)}</p>;
+  }
   const option = selected === "" ? undefined : proposal.options[Number(selected)];
   const amount = (n: number) => unit === "$" ? new Intl.NumberFormat(lang === "fr" ? "fr-CA" : "en-CA",{style:"currency",currency:"CAD",currencyDisplay:"narrowSymbol",minimumFractionDigits:2,maximumFractionDigits:2}).format(n) : f.value(n,unit);
   return <div className="stack tight small">

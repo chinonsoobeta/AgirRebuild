@@ -114,8 +114,8 @@ describe("the plain-language layer", () => {
     expect(fr.L.metric("stated_value")).toMatch(/non réalisée/);
     expect(fr.L.field("refinance_and_hold")).not.toBe(en.L.field("refinance_and_hold"));
     expect(fr.L.absent("refinance_and_hold")).not.toBe(en.L.absent("refinance_and_hold"));
-    expect(en.t("run.draftPolicy")).toBe("Draft policy, not signed by credit");
-    expect(fr.t("run.draftPolicy")).toMatch(/provisoire/);
+    expect(en.t("run.kv.policyDraft", { p: "Rental hold" })).toBe("Rental hold, draft, not signed by credit");
+    expect(fr.t("run.kv.policyDraft", { p: "Location conservée et refinancée" })).toMatch(/provisoire/);
     for (const g of ["dcr_after_refinance", "stressed_unrealized_equity_multiple"]) expect(fr.L.gate(g, "x"), g).not.toBe("x");
     expect(fr.msg("The deal is kept and refinanced, not sold.")).not.toBe("The deal is kept and refinanced, not sold.");
     const wipe = { key: "equity_wipeout", kind: "bound", severity: "error", message: "The stated value of $200,000 does not cover the $720,000 of debt outstanding. Equity has no value at the end of the hold.", expected: 720_000, actual: 200_000 };

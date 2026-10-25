@@ -7,6 +7,7 @@ import { DealFrame, MetricValue, useDeal, useSession } from "../components/ui";
 import { Notice } from "../components/kit";
 import { useI18n, type I18n } from "../i18n";
 import { layoutFor, useRun } from "./run";
+import { policyName } from "../components/thresholds";
 
 type Input = RunView["inputs"][number];
 export type InputChange = { key: string; from: Input; to: Input };
@@ -75,7 +76,7 @@ export function compareSummary(i: I18n, d: RunDiff, to: RunView, from: RunView):
   if (same > 0) parts.push(t("compare.othersSame", { n: same, all: n === 0 }));
   const policySame = policyKey(from) === policyKey(to);
   if (policySame && from.engineVersion === to.engineVersion) parts.push(t("compare.bothSame"));
-  if (!policySame) parts.push(t("compare.policyDiffers", { from: from.policyVersion, to: to.policyVersion }));
+  if (!policySame) parts.push(t("compare.policyDiffers", { from: policyName(i, from.policyVersion), to: policyName(i, to.policyVersion) }));
   if (from.engineVersion !== to.engineVersion) parts.push(t("compare.engineDiffers", { from: from.engineVersion, to: to.engineVersion }));
   const va = from.result.verdict.code;
   const vb = to.result.verdict.code;
