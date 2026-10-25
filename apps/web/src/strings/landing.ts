@@ -159,7 +159,7 @@ export const fr: FrenchOf<typeof en> = {
   "landing.source": "Chaque chiffre garde sa source",
   "landing.sourceBody": "Un nombre dans un rapport renvoie à la page d'où il vient, ou à la personne qui l'a saisi et à sa raison. Les valeurs que vous avez déclarées vous-même sont signalées.",
   "landing.replay": "Chaque analyse peut être rejouée",
-  "landing.replayBody": "Les analyses sont hachées, signées et conservées, et en rejouer une donne le même résultat. Le journal d'audit est une chaîne de hachage qui ne peut pas être modifiée, et le dossier d'audit de chaque analyse consigne la vérification des deux.",
+  "landing.replayBody": "Les analyses sont hachées, signées et conservées, et en rejouer une donne le même résultat. La piste d'audit est une chaîne de hachage qui ne peut pas être modifiée, et le dossier d'audit de chaque analyse consigne la vérification des deux.",
 
   "landing.questionsTitle": "Les questions qu'on pose d'abord",
   "landing.qAdvice": "Est-ce une évaluation ou un conseil financier ?",
@@ -199,7 +199,7 @@ export const fr: FrenchOf<typeof en> = {
   "landing.legal.law": "Le droit applicable",
   "landing.legal.law1": "À régler : le droit qui régit ces conditions, et la façon dont vous êtes prévenu avant qu'elles changent.",
   "landing.legal.data": "Vos données",
-  "landing.legal.data1": "Agir conserve votre nom, votre courriel, les espaces de travail dont vous faites partie et ce que vous y faites. Le journal d'audit consigne qui a fait quoi et quand, parce que c'est ce qui rend une analyse vérifiable.",
+  "landing.legal.data1": "Agir conserve votre nom, votre courriel, les espaces de travail dont vous faites partie et ce que vous y faites. La piste d'audit consigne qui a fait quoi et quand, parce que c'est ce qui rend une analyse vérifiable.",
   "landing.legal.data2": "Agir s'en sert pour faire fonctionner le service. Il n'affiche aucune publicité et ne fait aucun suivi sur d'autres sites.",
   "landing.legal.data3": "À régler : où vos documents et vos données sont stockés, combien de temps ils sont gardés après la fin d'un compte, comment ils sont supprimés, et comment demander ce qu'Agir détient à votre sujet pour le faire corriger ou supprimer.",
   "landing.legal.ai": "Lecture par Claude",
