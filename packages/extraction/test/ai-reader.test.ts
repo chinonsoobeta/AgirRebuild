@@ -5,17 +5,44 @@ import { SF_PER_M2 } from "@agir/numbers";
 describe("Card 173: financing costs in the reader prompt", () => {
   const otherCostNote = "- `other_cost`: a development cost that is not land, hard costs, soft costs, contingency or one of the other cost fields. Financing costs are never `other_cost`: interest, a construction interest reserve, capitalized interest, and lender, loan, commitment, broker or insurer fees on a loan. Name an interest reserve as `stated_interest_reserve`; list the others under `not_used`.";
 
-  test("uses reader-v3", () => {
-    expect(READER_PROMPT_VERSION).toBe("reader-v3");
-  });
   test("contains the exact other_cost field note", () => {
     expect(READER_PROMPT.split("\n")).toContain(otherCostNote);
   });
   test("places other_cost after development_charges and before expense_ratio_pct", () => {
     const fieldNotes = READER_PROMPT.split("**Field notes.**\n")[1]!.split("\n\n")[0]!.split("\n");
     expect(fieldNotes.map(line => line.split(":")[0])).toEqual([
-      "- `development_charges`", "- `other_cost`", "- `expense_ratio_pct`",
+      "- `development_charges`", "- `other_cost`", "- `expense_ratio_pct`", "- `fixed_opex_annual`",
     ]);
+  });
+});
+
+describe("Card K: operating-expense totals, scenarios, rounding and final figures in the reader prompt", () => {
+  const lines = READER_PROMPT.split("\n");
+  const fixedOpexNote = "- `fixed_opex_annual`: the deal's total annual operating expenses in dollars for the whole property, however they are named (operating expenses, total expenses, \"dépenses totales\"). \"Fixed\" only means a dollar amount rather than a share of revenue: the documents need not split fixed from variable expenses, and an expense ratio stated beside the total is named too. A total that includes mortgage payments or debt service is not this field. When the total you name includes property tax, list the tax under `not_used`, not as `property_tax_annual`.";
+  const replacesRule = "- When the documents give two different values for one field and neither clearly replaces the other, list it under `conflicts`, not `readings`. When one value visibly replaces another (a revision or correction, or a figure the document calls final, updated or revised), read that one and mention the old one in `note`.";
+  const scenarioRule = "- When the documents give a base case and a downside, upside, sensitivity or stress case for one field, read the base case and list the other cases under `not_used` with the reason; they are not conflicts. When alternatives with no base case all give the same value for a field, read that value.";
+  const roundingRule = "- When the same figure is written exactly in one place and rounded in another (for example $79,441,000 in a budget and \"$79 million\" in a summary), read the exact one and mention the rounded one in `note`; this is not a conflict.";
+
+  test("uses reader-v4", () => {
+    expect(READER_PROMPT_VERSION).toBe("reader-v4");
+  });
+  test.each([
+    ["the fixed_opex_annual field note", fixedOpexNote],
+    ["the final, updated or revised figure rule", replacesRule],
+    ["the base-case scenario rule", scenarioRule],
+    ["the rounded restatement rule", roundingRule],
+  ])("contains %s", (_name, line) => {
+    expect(lines).toContain(line);
+  });
+  test("keeps the new rules in the Rules section, after the conflict rule", () => {
+    const rules = READER_PROMPT.split("**Rules.**")[1]!.split("**Output.**")[0]!.split("\n");
+    const at = (line: string) => rules.indexOf(line);
+    expect(at(replacesRule)).toBeGreaterThan(-1);
+    expect(at(scenarioRule)).toBe(at(replacesRule) + 1);
+    expect(at(roundingRule)).toBe(at(replacesRule) + 2);
+  });
+  test("no longer asks for a replaced value in quote", () => {
+    expect(READER_PROMPT).not.toContain("mention the old one in `quote`");
   });
 });
 
