@@ -25,7 +25,7 @@ work it describes.
 | The same gate on `ui/w12-email` `9c4a1a7` with `fix/threshold-labels` merged in a throwaway worktree | 6192 tests in 49 files, the fallback test, web build; no conflicts | 2026-10-25 (the worktree was then removed) |
 | The same gate on `ui/w12-email` `e286f55` with `fix/threshold-labels` merged in a throwaway worktree | 6325 tests in 62 files, the fallback test, web build; no conflicts | 2026-10-25 (the worktree was then removed) |
 | `env -u ANTHROPIC_API_KEY AGIR_DATA_DIR=<empty folder> PORT=8792 npm start` | Builds the web app, applies the migrations, seeds six deals, serves on that port. An empty data folder leaves `.data/` untouched | 2026-10-25, `ui/redesign` (first browser walk) and `ui/y-screens` (second walk) |
-| `env -u ANTHROPIC_API_KEY NODE_OPTIONS=--max-old-space-size=3072 node --import tsx scripts/a11y.mjs` (after `npm run build -w @agir/web`) | 92 scans (23 screens, light and dark, English and French), 0 violations of any impact; about a minute with the seed. The release gate runs it as `accessibility scan` | 2026-10-25, `card/G-a11y-perf` |
+| `env -u ANTHROPIC_API_KEY NODE_OPTIONS=--max-old-space-size=3072 node --import tsx scripts/a11y.mjs` (after `npm run build -w @agir/web`) | 92 scans (23 screens, light and dark, English and French), 0 violations of any impact. It runs in the release gate as `accessibility scan`; that whole gate took 176 s on this machine | 2026-10-25, `card/G-a11y-perf` |
 
 The first walk ran on `ui/redesign`, where migrations go to `0029` as on `main`. The second ran on `ui/y-screens`,
 which adds `0031` and `0032`. `0030` is on `ui/w12-email` only. The three touch different objects (`0030` a new table
