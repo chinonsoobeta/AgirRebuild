@@ -25,6 +25,8 @@ admin, for trying dual control and decisions.
 For development with hot reload: `npm run dev` (API on :8787, Vite on :5173).
 To start empty: `AGIR_SEED=0 npm start`. To reset: delete `.data/`.
 
+To deploy with Docker (Postgres, the API and a separate worker): [docs/deploy.md](docs/deploy.md).
+
 ## Check it
 
 ```bash
@@ -45,6 +47,7 @@ npm run gate -- --tier=release   # typecheck, every test, web build
 | `apps/api` | Hono API: sessions, governed use cases, audit package |
 | `apps/worker` | Job runner: verify, read, extract, reconcile, render |
 | `apps/web` | React app: BC Sans, light and dark themes, English and French |
+| `deploy` | Container image, compose stack, backup and restore scripts |
 | `oracles/deals` | Six reference deals with their expected outcomes |
 
 ## Rules the code enforces
