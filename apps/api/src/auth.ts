@@ -23,7 +23,7 @@ export async function checkPassword(password: string, stored: string): Promise<b
 /** The one password rule, for signup and for a reset. */
 export const PASSWORD_RULE = z.string().min(10, "Use at least 10 characters").max(200);
 
-const tokenHash = (t: string) => createHash("sha256").update(t).digest("hex");
+export const tokenHash = (t: string) => createHash("sha256").update(t).digest("hex");
 export const SESSION_DAYS = 14;
 
 export type DeviceLabel = "Mac" | "iPhone" | "iPad" | "Android phone" | "Android tablet" | "Windows PC" | "Linux computer" | "Chromebook";

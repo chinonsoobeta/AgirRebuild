@@ -5,6 +5,7 @@ import { serveStatic } from "@hono/node-server/serve-static";
 import { fileStore, migrate, openPglite, openPostgres } from "@agir/db";
 import { startWorker } from "@agir/worker";
 import { createApp } from "./app.ts";
+import { dbState, memoryState } from "./shared-state.ts";
 import { fileMailer, unsentMailer } from "./mailer.ts";
 import { DEMO, seedDemo } from "./seed.ts";
 
@@ -38,6 +39,9 @@ const app = createApp({ db, store, secureCookies: env === "production", demoSign
   // No mail provider yet: development writes each email to the data folder's mail/ directory; production sends nothing.
   mailer: env === "production" ? unsentMailer() : fileMailer(join(dataDir, "mail")),
   publicOrigin: process.env.AGIR_PUBLIC_ORIGIN ?? `http://127.0.0.1:${port}`,
+  // Postgres may run several API processes, so rate limits and run stops live in the database. Embedded PGlite is one
+  // process and one connection: a stop written to it would wait for the run's open transaction, so they stay in memory.
+  state: process.env.DATABASE_URL ? dbState(db) : memoryState(),
 });
 const webDist = join(root, "apps/web/dist");
 if (existsSync(webDist)) {
