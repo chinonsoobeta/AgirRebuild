@@ -2704,13 +2704,17 @@ const rulingOf = (stated: Stated[]): Ruling | null => {
 /** A heading or title line: it states a scale and holds no figure of its own. */
 const isScaleHeading = (text: string, stated: Stated[]) => stated.length > 0 && text.trim().split(/\s+/).length <= 14 && !/\d/.test(fold(text).replace(SCALE_PHRASE_RE, " ").replace(/\b(?:19|20)\d\d\b/g, " "));
 
-/** For every line location and cell reference: the scale that governs it (a heading line; a sheet name, caption row or column header, the column's header winning), and whether the cell's own text carries a scale. */
-function scalings(doc: NormalizedDocument, format: DocumentFormat): Map<string, Scaling> {
+/** For every line location and cell reference: the scale that governs it (a heading line; a sheet name, caption row or column header, the column's header winning), and whether the cell's own text carries a scale.
+ * `byPage`: a heading line governs only the rest of its page. The verifier asks for this; the rule reader, frozen as the fallback, keeps a heading to the end of the document. */
+function scalings(doc: NormalizedDocument, format: DocumentFormat, byPage = false): Map<string, Scaling> {
   const out = new Map<string, Scaling>();
   let heading: Stated[] = [];
   const headingAt: Stated[][] = [];
   let before = "";
+  let page = "";
   for (const l of doc.lines) {
+    const at = /^page (\d+),/.exec(l.location)?.[1] ?? "";
+    if (byPage && at !== page) [page, heading] = [at, []];
     const stated = statedScales(l.text, before);
     before = l.text;
     if (isScaleHeading(l.text, stated)) heading = stated;
@@ -2744,7 +2748,7 @@ function scalings(doc: NormalizedDocument, format: DocumentFormat): Map<string, 
 const DECLARED = new WeakMap<NormalizedDocument, Map<string, Scaling>>();
 export function declaredScale(doc: NormalizedDocument, format: DocumentFormat, location: string): Scaling {
   let map = DECLARED.get(doc);
-  if (!map) DECLARED.set(doc, map = scalings(doc, format));
+  if (!map) DECLARED.set(doc, map = scalings(doc, format, true));
   return map.get(location) ?? { rule: null, own: false };
 }
 
