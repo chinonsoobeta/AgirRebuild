@@ -25,6 +25,9 @@ work it describes.
 | The same gate on `ui/w12-email` `9c4a1a7` with `fix/threshold-labels` merged in a throwaway worktree | 6192 tests in 49 files, the fallback test, web build; no conflicts | 2026-10-25 (the worktree was then removed) |
 | The same gate on `ui/w12-email` `e286f55` with `fix/threshold-labels` merged in a throwaway worktree | 6325 tests in 62 files, the fallback test, web build; no conflicts | 2026-10-25 (the worktree was then removed) |
 | `env -u ANTHROPIC_API_KEY AGIR_DATA_DIR=<empty folder> PORT=8792 npm start` | Builds the web app, applies the migrations, seeds six deals, serves on that port. An empty data folder leaves `.data/` untouched | 2026-10-25, `ui/redesign` (first browser walk) and `ui/y-screens` (second walk) |
+| The same gate, and `--tier=pr` | 6560 tests in 64 files, the fallback test, web build; PR tier 6560 in 64 | 2026-10-25, `card/A-deploy` |
+| `docker build -f deploy/Dockerfile -t agir .` then `docker compose -f deploy/compose.yml up -d --wait` (Docker 29, Compose 5.6, colima arm64) | Image 1.87 GB; Postgres 16, the API (all migrations applied) and the standalone worker healthy; an upload through the API was read, run and rendered to a memo PDF | 2026-10-25, `card/A-deploy` |
+| `deploy/backup.sh`, `docker compose down -v`, `deploy/restore.sh <dump> <tar>` | The deal, 6 documents, 1 run, 1 memo, 53 audit events (chain verifies) and 7 blobs came back; no migration re-applied | 2026-10-25, `card/A-deploy` |
 
 The first walk ran on `ui/redesign`, where migrations go to `0029` as on `main`. The second ran on `ui/y-screens`,
 which adds `0031` and `0032`. `0030` is on `ui/w12-email` only. The three touch different objects (`0030` a new table
