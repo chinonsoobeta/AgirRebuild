@@ -4,6 +4,7 @@ import { useState, type FormEvent } from "react";
 import { api, ApiError } from "../api";
 import { Notice } from "../components/kit";
 import { useI18n } from "../i18n";
+import "../strings/auth";
 import { AuthFrame, FormError } from "./auth";
 import { takeToken } from "./verify";
 

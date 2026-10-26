@@ -1,6 +1,7 @@
 // The terms and privacy page (card W4), from the Legal board. It is a draft: the notice at the
 // top says so in both languages, and anything not decided yet is written as to be settled.
 import { EN, FR, useI18n } from "../i18n";
+import "../strings/landing";
 import { Notice, Seg } from "../components/kit";
 import * as I from "../components/icons";
 import { LandingBar, LandingFooter } from "./landing";

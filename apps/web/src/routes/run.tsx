@@ -9,6 +9,7 @@ import { Banner, canEdit, DealFrame, ErrorText, Glossary, MetricValue, StatusTag
 import { policyName, StandardVerdict } from "../components/thresholds";
 import * as I from "../components/icons";
 import { checkText, dealStatus, useI18n, verdictText } from "../i18n";
+import "../strings/run";
 
 export const HEADLINE = [
   "total_development_cost", "capitalized_interest", "stabilized_noi", "yield_on_cost", "development_spread", "exit_value", "development_profit",

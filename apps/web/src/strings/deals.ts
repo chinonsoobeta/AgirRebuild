@@ -1,5 +1,7 @@
 // Strings for the deals area. Keys start with "deals.".
-import type { Entry, FrenchOf } from "./entry";
+import { register, type Entry, type FrenchOf } from "./entry";
+
+const s = (n: number, one: string, many: string) => (n === 1 ? one : many);
 
 type Counts = { blocked: number; ready: number; progress: number; decided: number; solo: boolean };
 
@@ -47,27 +49,7 @@ function frLead(p: Counts): string {
   return sentences(present.map(([n, what], i) => `${w(n)}${i === 0 ? pl(n, " projet", " projets") : ""} ${pl(n, "est", "sont")} ${what(n)}`), " et ");
 }
 
-type Facts = { n: string; one: boolean; known: boolean; exit: "sale" | "refinance_hold" | "for_sale" | null };
-
-/** The units and how the deal ends, as the deal heading says them; "" when neither is known. */
-function enFacts({ n, one, known, exit }: Facts): string {
-  const units = (kind: string) => `${n} ${kind}${one ? "unit" : "units"}`;
-  if (!known) return exit === "refinance_hold" ? "kept and refinanced" : exit === "sale" ? "sold at the end of the hold" : exit === "for_sale" ? "for sale" : "";
-  return exit === "refinance_hold" ? `${units("rental ")}, kept and refinanced` : exit === "sale" ? `${units("rental ")}, sold at the end of the hold`
-    : exit === "for_sale" ? `${units("")} for sale` : units("");
-}
-
-function frFacts({ n, one, known, exit }: Facts): string {
-  const pl = (single: string, many: string) => (one ? single : many);
-  if (!known) return exit === "refinance_hold" ? "conservé et refinancé" : exit === "sale" ? "vendu à la fin de la détention" : exit === "for_sale" ? "à vendre" : "";
-  const rental = `${n} ${pl("logement locatif", "logements locatifs")}`;
-  return exit === "refinance_hold" ? `${rental}, ${pl("conservé et refinancé", "conservés et refinancés")}` : exit === "sale" ? `${rental}, ${pl("vendu", "vendus")} à la fin de la détention`
-    : exit === "for_sale" ? `${n} ${pl("logement", "logements")} à vendre` : `${n} ${pl("logement", "logements")}`;
-}
-
 export const en = {
-  "deals.facts": (p) => enFacts(p as Facts),
-  "deals.amountsIn": (p) => `amounts in ${p.c}`,
   "deals.lead": (p) => enLead(p as Counts),
   "deals.f.stale": "Out of date",
   "deals.tag.blocked": "Blocked",
@@ -88,11 +70,31 @@ export const en = {
   "deals.way.qsGo": "Quick start",
   "deals.emptyViewer": "There are no deals you can see yet.",
   "deals.privacy": "How your data is handled",
+  "deals.title": "Deals",
+  "deals.search": "Search deals",
+  "deals.new": "New deal",
+  "deals.filter": "Filter deals",
+  "deals.f.all": "All",
+  "deals.f.blocked": "Blocked",
+  "deals.f.decide": "Ready to decide",
+  "deals.f.progress": "In progress",
+  "deals.f.decided": "Decided",
+  "deals.docs": (p) => `${p.n} ${s(p.n, "document", "documents")}`,
+  "deals.noMatch": "No deals match.",
+  "deals.evidence": "Where a deal stands comes from its evidence: the documents, the approved inputs, a current run, a recorded decision. Nobody sets it by hand.",
+  "deals.name": "Name",
+  "deals.location": "Location",
+  "deals.country": "Country",
+  "deals.country.CA": "Canada",
+  "deals.country.US": "United States",
+  "deals.province": "Province or territory",
+  "deals.provinceChoose": "Choose one",
+  "deals.currency": "Currency",
+  "deals.currencyHint": "Every amount in this deal is in this currency. It is set now and cannot be changed later.",
+  "deals.create": "Create deal",
 } satisfies Record<string, Entry>;
 
 export const fr: FrenchOf<typeof en> = {
-  "deals.facts": (p) => frFacts(p as Facts),
-  "deals.amountsIn": (p) => `montants en ${p.c}`,
   "deals.lead": (p) => frLead(p as Counts),
   "deals.f.stale": "Périmés",
   "deals.tag.blocked": "Bloqué",
@@ -113,4 +115,28 @@ export const fr: FrenchOf<typeof en> = {
   "deals.way.qsGo": "Démarrage rapide",
   "deals.emptyViewer": "Il n'y a encore aucun projet que vous pouvez voir.",
   "deals.privacy": "Comment vos données sont traitées",
+  "deals.title": "Projets",
+  "deals.search": "Rechercher un projet",
+  "deals.new": "Nouveau projet",
+  "deals.filter": "Filtrer les projets",
+  "deals.f.all": "Tous",
+  "deals.f.blocked": "Bloqués",
+  "deals.f.decide": "Prêts pour décision",
+  "deals.f.progress": "En cours",
+  "deals.f.decided": "Décidés",
+  "deals.docs": (p) => `${p.n} ${s(p.n, "document", "documents")}`,
+  "deals.noMatch": "Aucun projet ne correspond.",
+  "deals.evidence": "L'état d'un projet découle de ses preuves\u00a0: les documents, les données approuvées, une analyse à jour, une décision consignée. Personne ne le fixe à la main.",
+  "deals.name": "Nom",
+  "deals.location": "Emplacement",
+  "deals.country": "Pays",
+  "deals.country.CA": "Canada",
+  "deals.country.US": "États-Unis",
+  "deals.province": "Province ou territoire",
+  "deals.provinceChoose": "Choisissez-en une",
+  "deals.currency": "Devise",
+  "deals.currencyHint": "Tous les montants de ce projet sont dans cette devise. Elle est fixée maintenant et ne peut plus être modifiée.",
+  "deals.create": "Créer le projet",
 };
+
+register(en, fr);

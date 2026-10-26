@@ -5,6 +5,10 @@ import { api, type AuditEvent } from "../api";
 import { DealFrame, useDeal, useSession } from "../components/ui";
 import { Tag } from "../components/kit";
 import { useI18n, type I18n } from "../i18n";
+import "../strings/audit";
+import "../strings/decision";
+import "../strings/documents";
+import "../strings/reports";
 
 export function describeEvent(i: I18n, e: AuditEvent): string {
   const p = e.payload ?? {};

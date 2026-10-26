@@ -5,6 +5,8 @@ import { COUNTRIES, CURRENCIES, PROVINCES, type Country, type Currency } from "@
 import { api } from "../api";
 import { canEdit, ErrorText, useSession } from "../components/ui";
 import { useI18n } from "../i18n";
+import "../strings/deals";
+import "../strings/newdeal";
 import * as I from "../components/icons";
 
 // The kinds the API stores and displays through L.asset.

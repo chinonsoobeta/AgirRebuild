@@ -2,6 +2,7 @@ import { Link } from "@tanstack/react-router";
 import { useEffect, useRef, useState } from "react";
 import { api } from "../api";
 import { useI18n } from "../i18n";
+import "../strings/auth";
 import { AuthFrame, FormError } from "./auth";
 import { takeToken } from "./verify";
 

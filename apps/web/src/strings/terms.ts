@@ -3,7 +3,7 @@
 // show when the preference is "plain"; "finance" shows the catalog's names, as before.
 // "terms.gloss.<entry>" is a glossary entry in plain mode: the plain name, then the meaning,
 // which ends with the finance name when the two differ.
-import type { Entry, FrenchOf } from "./entry";
+import { register, type Entry, type FrenchOf } from "./entry";
 
 export const en = {
   "terms.title": "Finance terms",
@@ -193,3 +193,5 @@ export const fr: FrenchOf<typeof en> = {
   "terms.financeGloss.developmentSpread": () => ["Écart de développement", "Le rendement sur coût moins le taux de capitalisation de sortie, en points de base. C'est la récompense de construire plutôt que d'acheter."],
   "terms.financeGloss.unrealizedMultiple": () => ["Multiple des fonds propres (non réalisé, pas une vente)", "Les distributions d'exploitation et de refinancement plus la part des fonds propres de la valeur déclarée, divisées par les fonds propres apportés. Non réalisé, parce que rien n'est vendu."],
 };
+
+register(en, fr);

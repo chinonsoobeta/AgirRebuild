@@ -7,6 +7,7 @@ import { ChoiceCards, Tag } from "../components/kit";
 import * as I from "../components/icons";
 import { QuickStart } from "../components/QuickStart";
 import { useI18n, type I18n } from "../i18n";
+import "../strings/documents";
 
 const ROLE_CHOICES = ["", "deal_source", "evidence", "context"] as const;
 const ROLE_KEYS = { "": "docs.role.auto", deal_source: "docs.role.deal_source", evidence: "docs.role.evidence", context: "docs.role.context" } as const;

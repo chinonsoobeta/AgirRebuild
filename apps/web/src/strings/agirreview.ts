@@ -1,5 +1,5 @@
 // Strings for the agirreview area. Keys start with "agirreview.".
-import type { Entry, FrenchOf } from "./entry";
+import { register, type Entry, type FrenchOf } from "./entry";
 
 export const en = {
   "agirreview.back": "Settings",
@@ -74,3 +74,5 @@ export const fr: FrenchOf<typeof en> = {
   "agirreview.endWho": (p) => `Mettre fin maintenant à l'accès de ${p.name}`,
   "agirreview.endConfirm": (p) => `Mettre fin maintenant à l'accès de ${p.name}\u00a0? Cette personne ne pourra plus ouvrir cet espace. Ce qu'elle a confirmé reste, marqué comme confirmé par la révision Agir.`,
 };
+
+register(en, fr);

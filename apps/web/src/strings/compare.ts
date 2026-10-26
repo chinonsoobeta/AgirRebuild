@@ -1,8 +1,7 @@
 // Strings for the compare area. Keys start with "compare.".
-import type { Entry, FrenchOf } from "./entry";
+import { register, type Entry, type FrenchOf } from "./entry";
 
 export const en = {
-  "compare.action": "Compare runs",
   "compare.title": "Compare two runs",
   "compare.lead": "Any two runs of this deal or of its variants, side by side, with what changed between them. Both runs are kept as they were.",
   "compare.this": "This run",
@@ -67,7 +66,6 @@ export const en = {
 } satisfies Record<string, Entry>;
 
 export const fr: FrenchOf<typeof en> = {
-  "compare.action": "Comparer des analyses",
   "compare.title": "Comparer deux analyses",
   "compare.lead": "Deux analyses de ce projet ou de ses variantes, côte à côte, avec ce qui a changé entre elles. Les deux analyses sont conservées telles quelles.",
   "compare.this": "Cette analyse",
@@ -130,3 +128,5 @@ export const fr: FrenchOf<typeof en> = {
   "compare.csv.recorded": (p) => `Analyses ${p.a} et ${p.b}, consignées`,
   "compare.csv.refinance": (p) => `Calculé par le moteur ${p.engine} à partir des données consignées de chaque analyse\u00a0; non conservé avec les analyses`,
 };
+
+register(en, fr);
