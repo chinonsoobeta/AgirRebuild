@@ -3645,6 +3645,69 @@ describe("card 160a: the deal AI reader", () => {
     return id;
   };
   const r = (field: string, value: number, location: string, quote: string, confidence: "high" | "medium" | "low" = "high") => ({ field, value, location, quote, confidence, item: null, unit_seen: "$" as const, file: "fiction.txt", note: null });
+  const market = [
+    "Market report: invented city rental apartments",
+    ...Array.from({ length: 12 }, (_, i) => `Paragraph ${i + 1} describes regional rental demand, new supply, and the vacancy rate across invented neighbourhoods.`),
+    "Average land cost: $2,750,000",
+  ].join("\n");
+  test("card 172: excludes fingerprint context, honours a source override and clearing it", async () => {
+    const id = await setup();
+    expect((await call(alice, "PUT", `/api/deals/${id}/documents?name=market.txt`, undefined, new TextEncoder().encode(market))).status).toBe(200);
+    const read = vi.fn(async (_request: ReaderRequest) => ({ readings: [], conflicts: [], not_used: [] }));
+    await drain({ db, store, read });
+    expect(read).toHaveBeenCalledTimes(1);
+    expect(read.mock.calls[0]![0].messages[0]!.content).toContain("=== FILE fiction.txt ===");
+    expect(read.mock.calls[0]![0].messages[0]!.content).not.toContain("=== FILE market.txt ===");
+    const [document] = await db.query<any>(`select id from documents where deal_id=$1 and name='market.txt'`, [id]);
+    expect((await call(alice, "POST", `/api/documents/${document.id}/role`, { role: "deal_source" })).status).toBe(200);
+    expect((await call(alice, "GET", `/api/deals/${id}/review`)).json.aiReading).toBeNull();
+    await drain({ db, store, read });
+    expect(read).toHaveBeenCalledTimes(2);
+    expect(read.mock.calls[1]![0].messages[0]!.content).toContain("=== FILE fiction.txt ===");
+    expect(read.mock.calls[1]![0].messages[0]!.content).toContain("=== FILE market.txt ===");
+    expect((await call(alice, "POST", `/api/documents/${document.id}/role`, { role: null })).status).toBe(200);
+    await drain({ db, store, read });
+    // Clearing restores the original hash and reuses its reading without the market report.
+    expect(read).toHaveBeenCalledTimes(2);
+    const rows = await db.query<any>(`select verification from ai_readings where deal_id=$1`, [id]);
+    expect(rows).toHaveLength(2);
+    expect((await call(alice, "GET", `/api/deals/${id}/review`)).json.aiReading).not.toBeNull();
+  });
+  test("card 172: all context skips the provider and reading row but reconciles rules", async () => {
+    const id = await setup();
+    const [document] = await db.query<any>(`select id from documents where deal_id=$1`, [id]);
+    expect((await call(alice, "POST", `/api/documents/${document.id}/role`, { role: "context" })).status).toBe(200);
+    const read = vi.fn(async () => ({ readings: [], conflicts: [], not_used: [] }));
+    await drain({ db, store, read });
+    expect(read).not.toHaveBeenCalled();
+    expect(await db.query(`select id from ai_readings where deal_id=$1`, [id])).toEqual([]);
+    expect(await db.query(`select id from assumptions where deal_id=$1`, [id])).toEqual([]);
+    const review = (await call(alice, "GET", `/api/deals/${id}/review`)).json;
+    expect(review.other.some((figure: any) => figure.value === 400000)).toBe(true);
+  });
+  test("card 172: changing a second document to context invalidates its AI sources", async () => {
+    const id = await setup();
+    expect((await call(alice, "PUT", `/api/deals/${id}/documents?name=second.txt`, undefined, new TextEncoder().encode("Land cost: $2,750,000"))).status).toBe(200);
+    const read = vi.fn(async (_request: ReaderRequest) => ({ readings: [{ ...r("land_cost", 2750000, "line 1", "$2,750,000"), file: "second.txt" }], conflicts: [], not_used: [] }));
+    await drain({ db, store, read });
+    expect(read).toHaveBeenCalledTimes(1);
+    expect(read.mock.calls[0]![0].messages[0]!.content).toContain("=== FILE second.txt ===");
+    expect((await db.query<any>(`select sources from assumptions where deal_id=$1`, [id])).some(a => a.sources.some((s: any) => s.rule === "ai"))).toBe(true);
+    const [document] = await db.query<any>(`select id from documents where deal_id=$1 and name='second.txt'`, [id]);
+    expect((await call(alice, "POST", `/api/documents/${document.id}/role`, { role: "context" })).status).toBe(200);
+    expect((await call(alice, "GET", `/api/deals/${id}/review`)).json.aiReading).toBeNull();
+    await drain({ db, store, read });
+    expect(read).toHaveBeenCalledTimes(2);
+    expect(read.mock.calls[1]![0].messages[0]!.content).toContain("=== FILE fiction.txt ===");
+    expect(read.mock.calls[1]![0].messages[0]!.content).not.toContain("=== FILE second.txt ===");
+    const rows = await db.query<any>(`select sources from assumptions where deal_id=$1`, [id]);
+    expect(rows.every(a => a.sources.every((s: any) => s.rule !== "ai"))).toBe(true);
+    const review = (await call(alice, "GET", `/api/deals/${id}/review`)).json;
+    expect(review.aiReading.pleaseCheck[0]).toMatchObject({ file: "second.txt", reason: extraction.READING_FAILURE.address });
+    const stored = await db.query<any>(`select verification from ai_readings where deal_id=$1`, [id]);
+    expect(stored).toHaveLength(2);
+    expect(stored.some(row => row.verification.documents.map((d: any) => d.name).join() === "fiction.txt")).toBe(true);
+  });
   test.each([[false, "Loan: $1.216M", "$1.216M", 1216000], [true, "Loan: $1.216M", "$1.216M", 1216000]] as const)("reviews an ambiguous AI scale unless rules agree: %s / %s", async (agrees, text, quote, value) => {
     const id = (await call(alice, "POST", `/api/workspaces/${ws}/deals`, { name: "Invented scaled loan", assetType: "Multifamily", location: "Vancouver" })).json.id;
     await call(alice, "PUT", `/api/deals/${id}/documents?name=fiction.txt`, undefined, new TextEncoder().encode(text));
