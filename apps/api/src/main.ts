@@ -3,7 +3,7 @@ import { join, relative, resolve } from "node:path";
 import { serve } from "@hono/node-server";
 import { serveStatic } from "@hono/node-server/serve-static";
 import { checkStartup, migrate, openPglite, openPostgres, openStore, type Startup } from "@agir/db";
-import { startWorker } from "@agir/worker";
+import { retentionDays, startPurge, startWorker } from "@agir/worker";
 import { createApp } from "./app.ts";
 import { alerter, log, type LogFields } from "./log.ts";
 import { dbState, memoryState } from "./shared-state.ts";
@@ -35,8 +35,16 @@ mkdirSync(dataDir, { recursive: true });
 // Card B: "invite" lets only a client invitation create an account.
 const signup = process.env.AGIR_SIGNUP ?? "open";
 if (signup !== "open" && signup !== "invite") await refuse("api.refused_start", { reason: "AGIR_SIGNUP must be open or invite." });
+// Card F: unset, closed workspaces are kept; a value that is not a whole number of days refuses the start.
+let retention: number | null = null;
+try {
+  retention = retentionDays(process.env.AGIR_RETENTION_DAYS);
+} catch (e) {
+  await refuse("api.refused_start", { reason: (e as Error).message });
+}
 // 127.0.0.1 behind a proxy on the same host; 0.0.0.0 in a container.
 const bind = process.env.AGIR_BIND || "127.0.0.1";
+
 
 const db = process.env.DATABASE_URL ? await openPostgres(process.env.DATABASE_URL) : await openPglite(join(dataDir, "pg"));
 let applied: string[] = [];
@@ -64,6 +72,8 @@ const app = createApp({ db, store, secureCookies: env === "production", demoSign
   // Postgres may run several API processes, so rate limits and run stops live in the database. Embedded PGlite is one
   // process and one connection: a stop written to it would wait for the run's open transaction, so they stay in memory.
   state: process.env.DATABASE_URL ? dbState(db) : memoryState(),
+  // Closing a workspace and deleting an account stay off until the retention period is settled (card F).
+  closure: process.env.AGIR_ACCOUNT_CLOSURE === "1",
 });
 const webDist = join(root, "apps/web/dist");
 if (existsSync(webDist)) {
@@ -75,13 +85,15 @@ if (existsSync(webDist)) {
 }
 
 if (embeddedWorker) {
-  startWorker({ db, store, log: ({ event, ...fields }) => {
+  const workerLog = ({ event, ...fields }: Record<string, unknown>) => {
     if (event === "job.done") return;
     log(String(event), fields as LogFields);
     // A job that will not be retried, or the worker's loop failing: alerted with ids only.
     if (event === "job.dead") void alert("job.dead", { id: String(fields.id), kind: String(fields.kind) });
     if (event === "worker.error") void alert("worker.error");
-  } });
+  };
+  startWorker({ db, store, log: workerLog });
+  if (retention !== null) startPurge({ db, store, log: workerLog }, retention);
 }
 
 serve({ fetch: app.fetch, port, hostname: bind }, () => {

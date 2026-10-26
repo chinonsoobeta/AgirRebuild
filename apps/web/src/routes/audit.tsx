@@ -104,6 +104,9 @@ export function describeEvent(i: I18n, e: AuditEvent): string {
     case "workspace.renamed": return fr ? `A renommé l'espace de travail «\u00a0${p.from}\u00a0» en «\u00a0${p.to}\u00a0»` : `Renamed the workspace from "${p.from}" to "${p.to}"`;
     case "review.ended": return fr ? "A mis fin à l'accès d'un réviseur" : "Ended a reviewer's access";
     case "user.renamed": return fr ? "A changé son nom" : "Changed their name";
+    case "user.deleted": return fr ? "A supprimé son compte" : "Deleted their account";
+    case "workspace.closed": return fr ? `A fermé l'espace de travail\u00a0: ${p.reason}` : `Closed the workspace: ${p.reason}`;
+    case "workspace.purged": return fr ? "L'espace de travail fermé a été supprimé après la période de conservation" : "The closed workspace was deleted after the retention period";
     default:
       if (e.action.startsWith("assumption.")) {
         const action = e.action.slice(11);

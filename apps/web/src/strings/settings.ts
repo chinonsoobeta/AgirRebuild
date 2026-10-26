@@ -132,6 +132,20 @@ export const en = {
   "settings.ac.signOutOthers": "Sign out everywhere else",
   "settings.ac.signOutConfirm": "Sign out on every other browser and device? Each one will have to sign in again. This one stays signed in.",
   "settings.ac.ended": (p) => p.n === 0 ? "No other browser or device was signed in." : p.n === 1 ? "Signed out on 1 other browser or device." : `Signed out on ${p.n} other browsers or devices.`,
+  // Card F: closing a workspace and deleting an account (shown only when the server offers them).
+  "settings.close.title": "Close this workspace",
+  "settings.close.body": "Only the owner can close it. Closing cannot be undone.",
+  "settings.close.what": "Closing makes the workspace read-only at once: nobody can change anything in it, every share link stops working, and everyone but you loses access. You can still read it. It is deleted once the retention period has passed; until a retention period is set, it is kept. The audit trail is kept either way.",
+  "settings.close.reason": "Why are you closing it?",
+  "settings.close.reasonHint": "At least 10 characters. It is recorded in the audit trail.",
+  "settings.close.confirm": "Close the workspace",
+  "settings.closed.since": (p) => `Closed on ${p.date}. This workspace is read-only.`,
+  "settings.delete.title": "Delete my account",
+  "settings.delete.body": "Your name, email and password are removed and you are signed out everywhere. This cannot be undone.",
+  "settings.delete.audit": "The audit trail is never edited: events recorded before keep what they recorded, which can include your name. Elsewhere you appear as \"Deleted account\".",
+  "settings.delete.ownsOpen": (p) => `First close the workspaces you own: ${p.names}.`,
+  "settings.delete.password": "Your password",
+  "settings.delete.confirm": "Delete my account",
 } satisfies Record<string, Entry>;
 
 export const fr: FrenchOf<typeof en> = {
@@ -265,4 +279,17 @@ export const fr: FrenchOf<typeof en> = {
   "settings.ac.signOutOthers": "Vous déconnecter partout ailleurs",
   "settings.ac.signOutConfirm": "Vous déconnecter de tous les autres navigateurs et appareils\u00a0? Chacun devra se reconnecter. Celui-ci reste connecté.",
   "settings.ac.ended": (p) => p.n === 0 ? "Aucun autre navigateur ni appareil n'était connecté." : p.n === 1 ? "Déconnecté de 1 autre navigateur ou appareil." : `Déconnecté de ${p.n} autres navigateurs ou appareils.`,
+  "settings.close.title": "Fermer cet espace de travail",
+  "settings.close.body": "Seul le propriétaire peut le fermer. La fermeture est définitive.",
+  "settings.close.what": "La fermeture rend l'espace accessible en lecture seule dès maintenant\u00a0: personne ne peut plus rien y modifier, chaque lien de partage cesse de fonctionner et tout le monde, sauf vous, en perd l'accès. Vous pouvez encore le consulter. Il est supprimé une fois la période de conservation écoulée\u00a0; tant qu'aucune période n'est fixée, il est conservé. La piste d'audit est conservée dans tous les cas.",
+  "settings.close.reason": "Pourquoi le fermez-vous\u00a0?",
+  "settings.close.reasonHint": "Au moins 10 caractères. Le motif est consigné dans la piste d'audit.",
+  "settings.close.confirm": "Fermer l'espace",
+  "settings.closed.since": (p) => `Fermé le ${p.date}. Cet espace est en lecture seule.`,
+  "settings.delete.title": "Supprimer mon compte",
+  "settings.delete.body": "Votre nom, votre courriel et votre mot de passe sont retirés, et vous êtes déconnecté partout. Cette action est définitive.",
+  "settings.delete.audit": "La piste d'audit n'est jamais modifiée\u00a0: les événements déjà consignés gardent ce qu'ils ont consigné, ce qui peut inclure votre nom. Ailleurs, vous apparaissez comme «\u00a0Compte supprimé\u00a0».",
+  "settings.delete.ownsOpen": (p) => `Fermez d'abord les espaces dont vous êtes propriétaire\u00a0: ${p.names}.`,
+  "settings.delete.password": "Votre mot de passe",
+  "settings.delete.confirm": "Supprimer mon compte",
 };

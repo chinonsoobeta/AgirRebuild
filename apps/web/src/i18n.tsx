@@ -1475,6 +1475,10 @@ const FR_REASONS: [RegExp, string | ((m: RegExpMatchArray) => string)][] = [
   [/^Agir could not read this file: (.+)$/, (m) => `Agir n'a pas pu lire ce fichier : ${m[1]}`],
   // API errors.
   [/^Your role in this workspace does not allow this action$/, "Votre rôle dans cet espace ne permet pas cette action"],
+  // Card F: closing a workspace and deleting an account.
+  [/^This workspace is closed\.$/, "Cet espace de travail est fermé."],
+  [/^Say why the workspace is closing \(10 to 500 characters\)$/, "Indiquez pourquoi l’espace de travail ferme (de 10 à 500 caractères)"],
+  [/^Close the workspaces you own before deleting your account\.$/, "Fermez les espaces de travail dont vous êtes propriétaire avant de supprimer votre compte."],
   [/^The figure's unit \((.+)\) does not fit (.+)$/, (m) => `L'unité du chiffre (${m[1]}) ne convient pas à ${m[2]}`],
   [/^The figure is outside what (.+) can hold$/, (m) => `Le chiffre est hors des limites de ${m[1]}`],
   [/^The figure is no longer in the document$/, "Le chiffre n'est plus dans le document"],

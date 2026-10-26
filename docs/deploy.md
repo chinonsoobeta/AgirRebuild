@@ -73,6 +73,8 @@ Both processes run `checkStartup` (`packages/db/src/startup.ts`) before opening 
 | `AGIR_EMBEDDED_WORKER` | API | `1` runs the worker inside the API on Postgres too |
 | `AGIR_SIGNUP` | API | `open` (default) or `invite`: during the pilot only a client invitation creates an account (card B) |
 | `AGIR_ALERT_URL` | API | Where an alert is POSTed as JSON (a refused start, a failed migration, an unhandled error, a failed email, a dead job). Unset: no alerts (card B) |
+| `AGIR_ACCOUNT_CLOSURE` | API | `1` offers closing a workspace and deleting an account (card F). Unset: neither route exists |
+| `AGIR_RETENTION_DAYS` | both | Whole days after which a closed workspace is purged. Unset: closed workspaces are kept. The lawyer gives the period |
 | `AGIR_BLOB_STORE` | both | `file` (default) or `s3` |
 | `AGIR_S3_BUCKET`, `AGIR_S3_REGION` | both | Required with `s3` |
 | `AGIR_S3_ENDPOINT` | both | Another S3-compatible service; path-style addressing is used with it |

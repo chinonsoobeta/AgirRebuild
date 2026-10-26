@@ -704,3 +704,40 @@ export function startWorker(deps: WorkerDeps, intervalMs = 400): () => void {
     stopped = true;
   };
 }
+
+// ---- Card F: purging closed workspaces after the retention period ------------------------------
+
+/**
+ * The retention period in days from AGIR_RETENTION_DAYS: null when it is unset (the default: never purge). Anything
+ * other than a whole number of days from 1 throws, so a mistyped setting stops the start rather than deleting data.
+ */
+export function retentionDays(value: string | undefined): number | null {
+  if (value === undefined || value.trim() === "") return null;
+  if (!/^[1-9][0-9]{0,4}$/.test(value.trim())) throw new Error("AGIR_RETENTION_DAYS must be a whole number of days, 1 or more.");
+  return Number(value.trim());
+}
+
+/**
+ * Deletes every workspace closed more than `days` days ago (fn_purge_closed_workspaces), then the files no remaining
+ * row uses. The files go after the database commits, so a failure leaves a file without a row, never a row without
+ * its file. Logs counts only.
+ */
+export async function purgeClosedWorkspaces(deps: Pick<WorkerDeps, "db" | "store" | "log">, days: number): Promise<{ workspaces: number; files: number }> {
+  const { workspaces, keys } = await deps.db.transaction(async (tx) => {
+    const [n] = await tx.query<{ n: number }>(`select count(*)::int as n from workspaces where closed_at is not null and closed_at < now() - make_interval(days => $1)`, [days]);
+    const rows = await tx.query<{ storage_key: string }>(`select storage_key from fn_purge_closed_workspaces(make_interval(days => $1))`, [days]);
+    return { workspaces: n?.n ?? 0, keys: rows.map((r) => r.storage_key) };
+  });
+  for (const key of keys) await deps.store.delete(key);
+  deps.log?.({ event: "purge.done", workspaces, files: keys.length });
+  return { workspaces, files: keys.length };
+}
+
+/** Purges once now and then once a day, in this process; returns a stop function. A failure is logged and retried the next day. */
+export function startPurge(deps: Pick<WorkerDeps, "db" | "store" | "log">, days: number): () => void {
+  const once = () => purgeClosedWorkspaces(deps, days).catch((e) => deps.log?.({ event: "purge.error", error: (e as Error).message }));
+  void once();
+  const timer = setInterval(once, 24 * 60 * 60 * 1000);
+  timer.unref();
+  return () => clearInterval(timer);
+}

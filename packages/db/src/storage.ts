@@ -1,13 +1,15 @@
 // Content-addressed file storage. Local development keeps bytes on disk; a
-// deployment can use any S3-compatible object store with the same two methods.
+// production deployment supplies an object store with the same three methods.
 
 import { createHash } from "node:crypto";
-import { mkdir, readFile, writeFile, stat } from "node:fs/promises";
+import { mkdir, readFile, writeFile, stat, unlink } from "node:fs/promises";
 import { join } from "node:path";
 
 export interface BlobStore {
   put(bytes: Uint8Array): Promise<{ key: string; sha256: string; size: number }>;
   get(key: string): Promise<Uint8Array>;
+  /** Removes the bytes under a key. A key with no file is not an error: the bytes are gone either way. */
+  delete(key: string): Promise<void>;
 }
 
 export function sha256Hex(bytes: Uint8Array | string): string {
@@ -31,6 +33,14 @@ export function fileStore(root: string): BlobStore {
     async get(key) {
       checkKey(key);
       return new Uint8Array(await readFile(join(root, key)));
+    },
+    async delete(key) {
+      checkKey(key);
+      try {
+        await unlink(join(root, key));
+      } catch (e) {
+        if ((e as NodeJS.ErrnoException).code !== "ENOENT") throw e;
+      }
     },
   };
 }
@@ -92,6 +102,12 @@ export function s3Store(opts: S3StoreOptions): BlobStore {
       const { client, sdk } = await s3();
       const out = await client.send(new sdk.GetObjectCommand({ Bucket: opts.bucket, Key: prefix + key }));
       return new Uint8Array(await out.Body.transformToByteArray());
+    },
+    async delete(key) {
+      checkKey(key);
+      const { client, sdk } = await s3();
+      // S3 answers a delete of a missing object as success, which is what the interface asks.
+      await client.send(new sdk.DeleteObjectCommand({ Bucket: opts.bucket, Key: prefix + key }));
     },
   };
 }

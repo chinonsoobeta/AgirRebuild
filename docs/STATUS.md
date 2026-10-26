@@ -28,6 +28,7 @@ work it describes.
 | The same gate, and `--tier=pr` | 6560 tests in 64 files, the fallback test, web build; PR tier 6560 in 64 | 2026-10-25, `card/A-deploy` |
 | `docker build -f deploy/Dockerfile -t agir .` then `docker compose -f deploy/compose.yml up -d --wait` (Docker 29, Compose 5.6, colima arm64) | Image 1.87 GB; Postgres 16, the API (all migrations applied) and the standalone worker healthy; an upload through the API was read, run and rendered to a memo PDF | 2026-10-25, `card/A-deploy` |
 | `deploy/backup.sh`, `docker compose down -v`, `deploy/restore.sh <dump> <tar>` | The deal, 6 documents, 1 run, 1 memo, 53 audit events (chain verifies) and 7 blobs came back; no migration re-applied | 2026-10-25, `card/A-deploy` |
+| `env -u ANTHROPIC_API_KEY AGIR_DATA_DIR=<empty folder> PORT=8798 AGIR_ACCOUNT_CLOSURE=1 npm start` | The same, with closing a workspace and deleting an account offered; without `AGIR_ACCOUNT_CLOSURE` both routes answer 404 and Settings shows neither | 2026-10-25, `card/F-close-account` (migration `0039` applied to a fresh database) |
 
 The first walk ran on `ui/redesign`, where migrations go to `0029` as on `main`. The second ran on `ui/y-screens`,
 which adds `0031` and `0032`. `0030` is on `ui/w12-email` only. The three touch different objects (`0030` a new table
@@ -312,6 +313,7 @@ build on earlier migrations.
 | `card/E-draft-line` | done | Card E (readiness item 9): every report and screen says when credit has not signed the run's policy. `packages/contracts/src/policy.ts` gains `SIGNED_POLICIES` (empty: credit has signed none; credit adds a version there when it signs) and `isSigned`. A draft keeps "Draft policy, not signed by credit"; any other unsigned policy, `policy-v1` included, prints "Policy not yet signed by credit" / "Politique non encore approuvée par le crédit" once beside the verdict in the memo, lender package and build decision (PDF and Word, English and French), and in the Excel summary, which stays English only (`apps/api/src/app.ts` refuses a French model export). The Run screen's verdict line and policy row, and the shared-link page's verdict card (new `policySigned` in the share payload), say the same in both languages. `POLICY_V1` and every pinned policy hash are unchanged (`9f957801…`). The Maple Heights text pins hold with the new line removed; the card P1 test that called `policy-v1` signed now expects the new words. The decision screen still marks drafts only. PR and release gates pass; fresh-database walk on port 8797: Maple Heights (`policy-v1`) shows the line on the Run screen, in the English memo and lender package PDFs, the French Word memo, the Excel export and the shared page | Needs human review: report wording (credit and the lawyer) |
 | `card/A-deploy` (card A) | done | The deployment recipe, engineering half of plan card 158: `deploy/Dockerfile` (one image, headless Chromium, non-root), `deploy/compose.yml` (Postgres 16, the API and the standalone worker on one environment block and one blob volume), `deploy/backup.sh` and `deploy/restore.sh`, `docs/deploy.md`. A startup check both processes share (`checkStartup`, `packages/db/src/startup.ts`): a database with no `AGIR_ENV`, an unknown `AGIR_ENV`, production without `AGIR_PUBLIC_ORIGIN` or with `AGIR_SEED=1` refuse to start. `AGIR_BIND`. An S3-compatible blob store (`s3Store`, `@aws-sdk/client-s3`) selected by `AGIR_BLOB_STORE=s3`. The stack ran on Postgres with the standalone worker (upload, run, memo PDF) and one backup and restore drill. No encryption, KMS, ClamAV or TLS (ADR 0002). | Yes: upload handling (the blob store) and deployment |
 | `card/B-hardening` | Release 1 step 6 (readiness 3, 4, 7) | Card B. The chain check (`GET /api/workspaces/:ws/audit/verify`) still walks every row but answers members only (403 otherwise, a missing workspace alike), with this workspace's event count and whether the first broken row is this workspace's, never a seq (migration `0036_audit_verify_scope.sql`, `fn_verify_audit_chain_for`; `fn_verify_audit_chain` kept for the audit package). New variable `AGIR_SIGNUP=open\|invite` (default `open`; any other value refuses to start): under `invite`, sign-up without a client invitation is refused 403 "Agir is by invitation during the pilot."; `GET /api/auth/signup` says `{ open }`; the sign-up page shows the sentence and no form, the sign-in link stays with a note. `apps/api/src/log.ts`: one JSON line per event on stdout; one `api.request` line per request (method, route pattern, status, ms, request id, user id; secret paths by pattern; no query, body or email). New variable `AGIR_ALERT_URL`: fire-and-forget POST, 5 s timeout, for `api.error`, `mail.failed`, `job.dead`, `worker.error`, `migrations.failed` and `api.refused_start`; failures log `alert.failed`. `/api/health` adds `worker` and `migrations`. `Mailer.configured`: with no mail provider, send routes answer `sent: false`, `/api/me` gives `mail: false`, and no screen says "We sent". | Yes: migration and auth (plan rule 7) |
+| `card/F-close-account` | Interface redesign: deleting an account | Card F, migration `0039`. The owner closes a workspace (`POST /api/workspaces/:ws/close`, with a reason): it is read-only at once, because `agir_require`, the check every governed change calls, refuses a closed workspace with "This workspace is closed." (409); its share links and open client invitations end and everyone but the owner leaves it. `fn_purge_closed_workspaces` deletes a workspace closed longer than the retention period with everything that cascades from it, keeps its audit events, and returns the storage keys no remaining row uses; the worker deletes those files (`BlobStore.delete`) once a day when `AGIR_RETENTION_DAYS` is set (unset: never). A person deletes their own account with their password (`POST /api/auth/delete-account`) once they own no open workspace: sessions, memberships, client assignments, open invitations and email links end, and the users row stays as a tombstone ("Deleted account", an `@invalid` address, no password). All of it is off unless `AGIR_ACCOUNT_CLOSURE=1`: the routes answer 404 and Settings shows neither action. This is row deletion, not ADR 0002's crypto-shredding (S5). | Yes: a migration, authorization (`agir_require`) and deletion of data. Not merged |
 
 The plan for small Canadian developers is [plan-small-developers.md](plan-small-developers.md).
 Release 1 steps 0 to 3 are built. Steps 4 and 5 are built on draft, unsigned policy and tables that
@@ -401,8 +403,10 @@ Left out on purpose, because a person must decide first (the plan's "Decisions t
   rent roll and "lettre d'offre" for term sheet.
 - Deal names in BC Sans Light at 34 px, as the canvas shows, unless the owner wants Regular or Bold.
 - Also not built: a sample deal (who its values are attributed to in the audit trail, and whether a draft policy's
-  verdict may show on a public page, are the owner's calls) and deleting an account (it needs a retention decision:
-  the audit trail is hash-chained and holds names). Device names, run progress by stage, Stop, a downloadable
+  verdict may show on a public page, are the owner's calls). Closing a workspace and deleting an account are built
+  on `card/F-close-account`, off by default (`AGIR_ACCOUNT_CLOSURE=1`), with the retention period as a setting
+  (`AGIR_RETENTION_DAYS`) until the lawyer gives one; the audit trail is hash-chained, is never edited, and keeps the
+  names its events recorded. Device names, run progress by stage, Stop, a downloadable
   comparison, one link for several files, removing a member, renaming the workspace and signing out other devices
   are built on `ui/y-screens`; changing the email address and the Password row on `ui/w12-email` (R6).
 - Compare and Explore show each change by subtracting two stored values in the browser (Explore did so on `main`
@@ -472,6 +476,13 @@ A model may suggest a label for a figure the reader could not label; a person co
   single space group is accepted only before a trailing "$"; "2 100 pi²" in a document with no other
   space-grouped figure is still refused. There is no vacancy field.
 
+- **Closing and deleting is row deletion, not crypto-shredding** (`card/F-close-account`). A purged workspace's rows
+  and unshared files go, but backups keep them, and the audit trail keeps its events (with their payloads) for good.
+  The files are deleted after the database commits; a file whose bytes are uploaded again into another workspace in
+  the moment between the purge and the delete would lose its file. Jobs already queued for a closed workspace
+  (reading a document, rendering a report) still run until it is purged. With `AGIR_RETENTION_DAYS` unset, a closed
+  workspace is kept for good.
+
 ## Deviations from the plan
 
 Where the code showed a better route than [the plan](plan-small-developers.md), the route taken and why.
@@ -519,6 +530,9 @@ Where the code showed a better route than [the plan](plan-small-developers.md), 
   terms and privacy text is at `/legal` on `ui/redesign`, marked as a draft until a lawyer has reviewed it.
 - Accounts: Stripe, Canadian hosting, and GST/HST registration for Agir's own sales.
 - Pricing: $99 to $299 per deal is a hypothesis to test with the first customers.
+- The retention period for a closed workspace (`AGIR_RETENTION_DAYS`, in days; unset keeps it for good), from the
+  lawyer, and the go-ahead to turn on closing workspaces and deleting accounts (`AGIR_ACCOUNT_CLOSURE=1`), on
+  `card/F-close-account`.
 
 ## Card 94b — cited insured product floors (2026-10-19)
 
