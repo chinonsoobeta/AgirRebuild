@@ -1104,3 +1104,10 @@ it.each([
 ])("Card 171 translates the separator note: %s", (en, fr) => {
   expect(translateMessage(en)).toBe(fr);
 });
+
+it.each([
+  ["The document states a scale for this amount that Agir cannot read safely", "Le document indique pour ce montant une échelle qu’Agir ne peut pas lire avec certitude"],
+  ["The AI amount is under $1,000; check whether the document states it in thousands or millions", "Le montant IA est inférieur à 1 000 $; vérifiez si le document l’exprime en milliers ou en millions"],
+])("Card 170 translates %s", (en, fr) => {
+  expect(translateMessage(en)).toBe(fr);
+});

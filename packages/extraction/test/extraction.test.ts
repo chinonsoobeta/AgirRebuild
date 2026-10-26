@@ -9656,10 +9656,25 @@ test("a lone scaled hard-cost figure never becomes a billion-dollar candidate (C
   expect(result.candidates.filter((c) => c.fieldKey === "hard_cost" && c.value === 1_216_000_000)).toEqual([]);
 });
 
-
 test("a lone senior rate after a label slash keeps three decimals (Card 164)", async () => {
   const document = await parseDocument(Buffer.from("Senior rate / 5.375%"), "rate.txt");
   expect(extractCandidates(document).candidates).toEqual([
     expect.objectContaining({ fieldKey: "senior_rate_pct", value: 5.375 }),
   ]);
+});
+
+describe("Card 170: declared money scale spellings", () => {
+  test.each([
+    ["j.csv", "Item,Cost ($M)\nLand,9.44\nTotal,69.78", "land_cost", 9440000],
+    ["a.txt", "Project budget\nEstimated development costs ($M)\nLand 9.44\nDevelopment costs 60.34\nTotal $69.78\nRequired mortgage ($M) $43.63", "senior_loan_amount", 43630000],
+    ...["$K", "($K)", "k$"].map(scale => ["budget.txt", `Budget ${scale}\nLand cost: $8,500`, "land_cost", 8500000] as const),
+    ...["$M", "($M)", "$ M", "M$"].map(scale => ["budget.txt", `Budget ${scale}\nLand cost: $9.44`, "land_cost", 9440000] as const),
+    ...["$Main", "km$"].map(scale => ["budget.txt", `Budget ${scale}\nLand cost: $8,500`, "land_cost", 8500] as const),
+    // A scale right after a figure belongs to that figure, not to the rows below it.
+    ["value.csv", "Sommaire,\nValeur 4.2 M$,\nFixed operating costs,68000", "fixed_opex_annual", 68000],
+    ["note.csv", "Notes,\nBudget 850 k$,\nFixed operating costs,68000", "fixed_opex_annual", 68000],
+  ] as const)("%s %s", async (file, text, field, value) => {
+    const document = await parseDocument(new TextEncoder().encode(text), file);
+    expect(extractCandidates(document).candidates.filter(c => c.fieldKey === field).map(c => c.value)).toEqual([value]);
+  });
 });
