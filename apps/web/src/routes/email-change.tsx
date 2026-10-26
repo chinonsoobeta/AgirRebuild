@@ -12,14 +12,14 @@ import { takeToken } from "./verify";
 function EmailLink({ kind }: { kind: "confirm" | "undo" }) {
   const { t } = useI18n();
   const [token] = useState(takeToken);
-  const [result, setResult] = useState<{ email: string } | { error: unknown } | null>(null);
+  const [result, setResult] = useState<{ email: string; sent?: false } | { error: unknown } | null>(null);
   const posted = useRef(false);
   useEffect(() => {
     // The link works once: post it exactly once, even when the effect runs twice.
     if (!token || posted.current) return;
     posted.current = true;
-    api.post<{ email: string }>(`/auth/email/${kind}`, { token }).then(
-      (r) => setResult({ email: r.email }),
+    api.post<{ email: string; sent?: false }>(`/auth/email/${kind}`, { token }).then(
+      (r) => setResult({ email: r.email, ...(r.sent === false ? { sent: false as const } : {}) }),
       (e: unknown) => setResult({ error: e }),
     );
   }, [token, kind]);
@@ -37,7 +37,8 @@ function EmailLink({ kind }: { kind: "confirm" | "undo" }) {
     ) : (
       <>
         <h1 className="h1">{t("auth.email.undone", { email: result.email })}</h1>
-        <p className="muted">{t("auth.email.undoneBody", { email: result.email })}</p>
+        {/* sent: false: this server has no mail provider (card B), so the reset link was made but not delivered. */}
+        <p className="muted">{result.sent === false ? <>{t("auth.email.undoneNoMail")} {t("auth.noMail")}</> : t("auth.email.undoneBody", { email: result.email })}</p>
         {backToSignIn}
       </>
     );
