@@ -3911,7 +3911,7 @@ describe("card C: the AI reading switch, the region and less stored text", () =>
     expect((await setReading(alice, false)).status).toBe(200);
     expect((await me()).ai_reading).toBe(false);
     expect((await setReading(alice, true)).status).toBe(200);
-    const ev = await db.query<any>(`select payload from audit_events where action = 'workspace.ai_reading' and workspace_id = $1 order by id`, [cw]);
+    const ev = await db.query<any>(`select payload from audit_events where action = 'workspace.ai_reading' and workspace_id = $1 order by seq`, [cw]);
     expect(ev.map(e => e.payload)).toEqual([{ on: false }, { on: true }]);
     await work();
   });
@@ -3971,6 +3971,8 @@ describe("card C: the AI reading switch, the region and less stored text", () =>
     const [document] = await db.query<any>(`select id, name, sha256 from documents where deal_id=$1`, [id]);
     expect(row.verification.documents).toEqual([{ id: document.id, name: document.name, sha256: document.sha256 }]);
     expect(JSON.stringify(row.verification)).not.toContain("Unlabelled reserve");
+    // A second reconcile settles the sources' regions (as before card C), so compare from there.
+    await reconcileDeal(db, store, id);
     const before = await sources(id);
     await reconcileDeal(db, store, id);
     const [after] = await db.query<any>(`select verification from ai_readings where deal_id=$1`, [id]);
@@ -3981,6 +3983,7 @@ describe("card C: the AI reading switch, the region and less stored text", () =>
   test("a reading stored with its parsed documents, before this change, still replays the same", async () => {
     const id = await newDeal();
     await drain({ db, store, read: answer });
+    await reconcileDeal(db, store, id);
     const before = await sources(id);
     const [row] = await db.query<any>(`select id, verification from ai_readings where deal_id=$1`, [id]);
     const [d] = await db.query<any>(`select id, name, storage_key from documents where deal_id=$1`, [id]);

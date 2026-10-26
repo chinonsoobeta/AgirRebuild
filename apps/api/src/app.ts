@@ -266,7 +266,7 @@ export function createApp({ db, store, secureCookies, demoSignIn = false, trustP
   app.get("/api/me", async (c) => {
     const workspaces = await as(c, (tx) =>
       tx.query(
-        `select w.id, w.name, w.review_mode, w.label_suggestions, w.logo_key is not null as has_logo, m.role from workspaces w join workspace_members m on m.workspace_id = w.id and m.user_id = agir_uid() order by w.created_at`,
+        `select w.id, w.name, w.review_mode, w.label_suggestions, w.ai_reading, w.logo_key is not null as has_logo, m.role from workspaces w join workspace_members m on m.workspace_id = w.id and m.user_id = agir_uid() order by w.created_at`,
       ),
     );
     const [v] = await db.query<{ verified: boolean }>(`select email_verified_at is not null as verified from users where id = $1`, [c.get("user").id]);
@@ -357,6 +357,13 @@ export function createApp({ db, store, secureCookies, demoSignIn = false, trustP
   app.post("/api/workspaces/:ws/label-suggestions", async (c) => {
     const { on } = z.object({ on: z.boolean() }).parse(await c.req.json());
     await as(c, (tx) => tx.query(`select fn_set_label_suggestions($1, $2)`, [c.req.param("ws"), on]));
+    return c.json({ ok: true });
+  });
+
+  // Card C: the owner may stop Agir sending deal text to the model for this workspace.
+  app.put("/api/workspaces/:ws/ai-reading", async (c) => {
+    const { on } = z.object({ on: z.boolean() }).parse(await c.req.json());
+    await as(c, (tx) => tx.query(`select fn_set_ai_reading($1, $2)`, [c.req.param("ws"), on]));
     return c.json({ ok: true });
   });
 
