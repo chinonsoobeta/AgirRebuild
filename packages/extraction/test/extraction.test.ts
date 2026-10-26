@@ -9673,6 +9673,8 @@ describe("Card 170: declared money scale spellings", () => {
     // A scale right after a figure belongs to that figure, not to the rows below it.
     ["value.csv", "Sommaire,\nValeur 4.2 M$,\nFixed operating costs,68000", "fixed_opex_annual", 68000],
     ["note.csv", "Notes,\nBudget 850 k$,\nFixed operating costs,68000", "fixed_opex_annual", 68000],
+    // A figure written in words is not a scale statement, even where it wraps onto the next line.
+    ["words.txt", "Purchase agreement\n(e) Purchase Price: Twenty One Million Seven Hundred Fifty\nThousand Dollars\nAncillary income $71,000", "other_income_annual", 71000],
   ] as const)("%s %s", async (file, text, field, value) => {
     const document = await parseDocument(new TextEncoder().encode(text), file);
     expect(extractCandidates(document).candidates.filter(c => c.fieldKey === field).map(c => c.value)).toEqual([value]);

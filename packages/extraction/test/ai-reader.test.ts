@@ -266,6 +266,9 @@ describe("Card 170: money scales and accounting brackets", () => {
     "plain.txt": "Land $8,500,000\nTerrain 8 500 000 $\nContingency $0",
     "mixed.txt": "Budget ($K; $M)\nLand $8,500",
     "own.txt": "Budget ($K)\nLand $1.2M",
+    "words.txt": "Purchase agreement\n(e) Purchase Price: Twenty One Million Seven Hundred Fifty\nThousand Dollars\nAncillary income $71,000",
+    "mots.txt": "Convention d'achat\nPrix : vingt et un millions sept cent cinquante\nmille dollars\nAutres revenus 71 000 $",
+    "over.txt": "Proceeds\nOver a million\nAncillary income $71,000",
   };
   const millions = "$ (stated in millions; × 1,000,000)";
   const thousands = "$ (stated in thousands; × 1,000)";
@@ -292,6 +295,9 @@ describe("Card 170: money scales and accounting brackets", () => {
     ["plain.txt", "line 3", "Contingency $0", "contingency", 0, 0, "$"],
     ["mixed.txt", "line 2", "Land $8,500", "land_cost", 8500, "scale", "$"],
     ["own.txt", "line 2", "Land $1.2M", "land_cost", 1.2, 1200000, "$"],
+    ["words.txt", "line 4", "Ancillary income $71,000", "other_income_annual", 71000, 71000, "$"],
+    ["mots.txt", "line 4", "Autres revenus 71 000 $", "other_income_annual", 71000, 71000, "$"],
+    ["over.txt", "line 3", "Ancillary income $71,000", "other_income_annual", 71000, 71000, "$"],
   ] as const)("%s %s %s = %s", async (file, location, quote, field, value, expected, unitSeen) => {
     const document = await parseDocument(new TextEncoder().encode(texts[file]), file);
     const got = verifyReading({ ...reading, file, location, quote, field, value }, [{ id: file, name: file, document }]);
