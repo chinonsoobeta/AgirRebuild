@@ -15,6 +15,14 @@ The gate fails if any of these happens:
 
 99% of unseen items is the goal. The gate reports it but does not fail on it.
 
+## The package set
+
+The gate also has a package set: five realistic deal packages with keys, each a folder of the documents a developer would send. It is kept with the gate deals. It tests what the 32 deals do not: documents that are context rather than inputs, money stated in thousands or millions, and figures that only a whole package explains.
+
+It fails on any wrong value, trap or one-sided pick of a conflict, or when fewer keys are right than its floor. The floor is the recorded baseline: 126 at reader-v2 (main 20445c2). Raise it when a merged change reads more.
+
+It runs the same two ways as the deals: offline for free, or live through the batch API at half price (about $0.30 for the five packages).
+
 ## Which run a change needs
 
 - **Code after the model call** (`verifyReadings`, unit conversion, how readings become proposals). An offline run is enough. It re-verifies the saved model responses with the new code and is free.
