@@ -304,6 +304,7 @@ build on earlier migrations.
 | `task/167-whole-unit-count` | done | Card 167: an AI unit count with no item, a blank item or a total name ("Total units", "Nombre total de logements") is the whole building's count (item null), checked against the unit types; it no longer becomes a phantom unit type or is refused. Reader gate (offline): the second v14 run's wrong values 2 to 0, v13 failed verification 1 to 0, no other key item changed. |
 | `task/168-word-ranges` | done | Card 168: the rule reader no longer reads the end of a range written in words ("seven to nine months", "entre sept et neuf mois") as a value; durations such as "two years and nine months" and "un an et six mois" keep both parts, and digit ranges are unchanged. Bank and scores identical; nine real-document figures shown no longer, all ranges. |
 | `task/169-window-settles-psf` | done | Card 169: for a field with a minimum but no maximum (rent per square foot, monthly unit rent), the verifier settles an unscaled three-decimal figure by the field's window and flags it for review ("$29.009/sf/year" is 29.009). Reader gate (offline): v14 +3 right, failed verification 6 to 3, no new wrong value. Release gate for 167+168+169: 5992 passed. |
+| `card/A-deploy` (card A) | done | The deployment recipe, engineering half of plan card 158: `deploy/Dockerfile` (one image, headless Chromium, non-root), `deploy/compose.yml` (Postgres 16, the API and the standalone worker on one environment block and one blob volume), `deploy/backup.sh` and `deploy/restore.sh`, `docs/deploy.md`. A startup check both processes share (`checkStartup`, `packages/db/src/startup.ts`): a database with no `AGIR_ENV`, an unknown `AGIR_ENV`, production without `AGIR_PUBLIC_ORIGIN` or with `AGIR_SEED=1` refuse to start. `AGIR_BIND`. An S3-compatible blob store (`s3Store`, `@aws-sdk/client-s3`) selected by `AGIR_BLOB_STORE=s3`. The stack ran on Postgres with the standalone worker (upload, run, memo PDF) and one backup and restore drill. No encryption, KMS, ClamAV or TLS (ADR 0002). | Yes: upload handling (the blob store) and deployment |
 
 The plan for small Canadian developers is [plan-small-developers.md](plan-small-developers.md).
 Release 1 steps 0 to 3 are built. Steps 4 and 5 are built on draft, unsigned policy and tables that
@@ -439,10 +440,13 @@ A model may suggest a label for a figure the reader could not label; a person co
 - **Anyone can create an account.** `POST /api/auth/signup` (`apps/api/src/app.ts` line 100) is open and gives each new
   person a workspace of their own.
 - **Uploads are not scanned for malware.** The worker makes structural checks only (`apps/worker/src/index.ts` line 144).
-- **Files are stored on the local disk**, under the data folder's `blobs/` (`apps/api/src/main.ts`, `fileStore` in
-  `packages/db/src/storage.ts`).
-- **There is no deployment configuration** in the repository: no container, host or platform file. `AGIR_ENV=production`
-  only requires `DATABASE_URL` and `AGIR_RUN_SIGNING_SECRET` (`apps/api/src/main.ts`).
+- **Files are stored on the local disk by default**, under the data folder's `blobs/` (`fileStore` in
+  `packages/db/src/storage.ts`); production logs a warning at start. `AGIR_BLOB_STORE=s3` uses an S3-compatible bucket
+  (`s3Store`, card A), tested only against a fake client: no S3-compatible server was reachable here. Blobs are not
+  encrypted in either store (ADR 0002 S1).
+- **The deployment recipe is one host with Docker** (`deploy/`, `docs/deploy.md`, card A): no TLS, no mail provider,
+  no worker jail or egress limits, and backups stay on the host unless someone copies them off. No hosting provider
+  is chosen.
 - **AI reading cannot be turned off per workspace.** See "Model suggestions": the AI reader runs for every workspace
   whenever the key is set (the owner made AI reading the default on 2026-10-24); only removing the key stops it.
 - **French documents are read only where a label matches an alias.** Aliases and table headers are fixed
