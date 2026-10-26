@@ -3,7 +3,7 @@ import { join, relative, resolve } from "node:path";
 import { serve } from "@hono/node-server";
 import { serveStatic } from "@hono/node-server/serve-static";
 import { fileStore, migrate, openPglite, openPostgres } from "@agir/db";
-import { startWorker } from "@agir/worker";
+import { retentionDays, startPurge, startWorker } from "@agir/worker";
 import { createApp } from "./app.ts";
 import { fileMailer, unsentMailer } from "./mailer.ts";
 import { DEMO, seedDemo } from "./seed.ts";
@@ -23,6 +23,9 @@ if (env === "production") {
   }
 }
 
+// Card F: unset, closed workspaces are kept; a value that is not a whole number of days stops the start.
+const retention = retentionDays(process.env.AGIR_RETENTION_DAYS);
+
 const db = process.env.DATABASE_URL ? await openPostgres(process.env.DATABASE_URL) : await openPglite(join(dataDir, "pg"));
 const { applied } = await migrate(db);
 if (applied.length) console.log(`Applied migrations: ${applied.join(", ")}`);
@@ -38,6 +41,8 @@ const app = createApp({ db, store, secureCookies: env === "production", demoSign
   // No mail provider yet: development writes each email to the data folder's mail/ directory; production sends nothing.
   mailer: env === "production" ? unsentMailer() : fileMailer(join(dataDir, "mail")),
   publicOrigin: process.env.AGIR_PUBLIC_ORIGIN ?? `http://127.0.0.1:${port}`,
+  // Closing a workspace and deleting an account stay off until the retention period is settled (card F).
+  closure: process.env.AGIR_ACCOUNT_CLOSURE === "1",
 });
 const webDist = join(root, "apps/web/dist");
 if (existsSync(webDist)) {
@@ -50,7 +55,11 @@ if (existsSync(webDist)) {
 
 // The worker runs in-process when the database is embedded; in production it is its own service.
 const embeddedWorker = !process.env.DATABASE_URL || process.env.AGIR_EMBEDDED_WORKER === "1";
-if (embeddedWorker) startWorker({ db, store, log: (e) => (e.event === "job.done" ? undefined : console.log(JSON.stringify(e))) });
+if (embeddedWorker) {
+  const log = (e: Record<string, unknown>) => (e.event === "job.done" ? undefined : console.log(JSON.stringify(e)));
+  startWorker({ db, store, log });
+  if (retention !== null) startPurge({ db, store, log }, retention);
+}
 
 serve({ fetch: app.fetch, port, hostname: "127.0.0.1" }, () => {
   console.log(`Agir API listening on http://127.0.0.1:${port}`);

@@ -18,7 +18,9 @@ export type AppDeps = { db: Db; store: BlobStore; secureCookies: boolean; demoSi
   /** Sends verification and reset emails. Without one, nothing is sent. */ mailer?: Mailer;
   /** The web app's origin, for links in emails. Configured, never read from a request. */ publicOrigin?: string;
   /** Tests only: awaited after each progress line of a streamed run, so a test can hold a run at a stage. */
-  progressHook?: (stage: string) => Promise<void> | void };
+  progressHook?: (stage: string) => Promise<void> | void;
+  /** Card F: closing a workspace and deleting an account (AGIR_ACCOUNT_CLOSURE=1). Off, the routes do not exist. */
+  closure?: boolean };
 type Env = { Variables: { user: { id: string; email: string; name: string } } };
 
 const COOKIE = "agir_session";
@@ -31,7 +33,7 @@ async function createWorkspace(tx: Db, name: string, reviewMode?: string): Promi
 
 const INVITE_GONE = "This invitation is not available. It may have been used, revoked or expired.";
 
-const PG_STATUS: Record<string, number> = { "42501": 403, "28000": 401, P0002: 404, "22023": 422, "23505": 409, "40001": 409, "23514": 422, "22P02": 404 };
+const PG_STATUS: Record<string, number> = { "55000": 409, "42501": 403, "28000": 401, P0002: 404, "22023": 422, "23505": 409, "40001": 409, "23514": 422, "22P02": 404 };
 
 /** The status and body an error is answered with; shared by the error handler and a streamed run's error line. */
 function errorAnswer(err: unknown, path: string): { status: number; body: { error: string; [k: string]: unknown } } {
@@ -62,7 +64,7 @@ function windowReason(fieldKey: string, value: number, reason: string | null | u
 }
 
 export function createApp({ db, store, secureCookies, demoSignIn = false, trustProxy = false, now = () => new Date(),
-  mailer = { send: async () => {} }, publicOrigin = "http://127.0.0.1:8787", progressHook }: AppDeps) {
+  mailer = { send: async () => {} }, publicOrigin = "http://127.0.0.1:8787", progressHook, closure = false }: AppDeps) {
   const app = new Hono<Env>();
   const clientKey = (c: Context<Env>): string => {
     if (trustProxy) {
@@ -183,6 +185,22 @@ export function createApp({ db, store, secureCookies, demoSignIn = false, trustP
 
   emailFlows.register(app);
 
+  // Card F: deleting your own account. Under /api/auth/ like sign-in, so it checks the session itself; the password is
+  // asked again so an unattended browser cannot do it. The function refuses while the person owns an open workspace.
+  if (closure) {
+    app.post("/api/auth/delete-account", async (c) => {
+      if (!authLimit(clientKey(c))) return c.json({ error: "Too many attempts. Wait a minute." }, 429);
+      const user = await userForSession(db, getCookie(c, COOKIE));
+      if (!user) return c.json({ error: "Sign in to continue." }, 401);
+      const { password } = z.object({ password: z.string().min(1).max(200) }).parse(await c.req.json());
+      const [u] = await db.query<{ password_hash: string }>(`select password_hash from users where id = $1`, [user.id]);
+      if (!u || !(await checkPassword(password, u.password_hash))) return c.json({ error: "That password is not right." }, 403);
+      await asUser(db, user.id, (tx) => tx.query(`select fn_delete_my_account()`));
+      deleteCookie(c, COOKIE, { path: "/" });
+      return c.json({ ok: true });
+    });
+  }
+
   app.post("/api/auth/logout", async (c) => {
     await endSession(db, getCookie(c, COOKIE));
     deleteCookie(c, COOKIE, { path: "/" });
@@ -266,11 +284,11 @@ export function createApp({ db, store, secureCookies, demoSignIn = false, trustP
   app.get("/api/me", async (c) => {
     const workspaces = await as(c, (tx) =>
       tx.query(
-        `select w.id, w.name, w.review_mode, w.label_suggestions, w.logo_key is not null as has_logo, m.role from workspaces w join workspace_members m on m.workspace_id = w.id and m.user_id = agir_uid() order by w.created_at`,
+        `select w.id, w.name, w.review_mode, w.label_suggestions, w.logo_key is not null as has_logo, w.closed_at, m.role from workspaces w join workspace_members m on m.workspace_id = w.id and m.user_id = agir_uid() order by w.created_at`,
       ),
     );
     const [v] = await db.query<{ verified: boolean }>(`select email_verified_at is not null as verified from users where id = $1`, [c.get("user").id]);
-    return c.json({ user: { ...c.get("user"), email_verified: v?.verified ?? false }, workspaces });
+    return c.json({ user: { ...c.get("user"), email_verified: v?.verified ?? false }, workspaces, closure });
   });
 
   app.post("/api/me/name", async (c) => {
@@ -372,6 +390,16 @@ export function createApp({ db, store, secureCookies, demoSignIn = false, trustP
     await as(c, (tx) => tx.query(`select fn_rename_workspace($1, $2)`, [ws, name]));
     return c.json({ ok: true });
   });
+
+  // Card F: the owner closes the workspace; it is read-only at once (agir_require refuses every change).
+  if (closure) {
+    app.post("/api/workspaces/:ws/close", async (c) => {
+      const ws = z.string().uuid().parse(c.req.param("ws"));
+      const { reason } = z.object({ reason: z.string().max(500) }).parse(await c.req.json());
+      await as(c, (tx) => tx.query(`select fn_close_workspace($1, $2)`, [ws, reason]));
+      return c.json({ ok: true });
+    });
+  }
 
   app.post("/api/workspaces/:ws/review-grant/:userId/end", async (c) => {
     const ws = z.string().uuid().parse(c.req.param("ws"));
