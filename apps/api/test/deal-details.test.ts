@@ -239,7 +239,7 @@ describe("a fuller share page", () => {
     expect(rest).toEqual({
       deal: "Held details", kind: "ic_memo", format: "pdf", runNumber: 1, expiresAt: link.expiresAt,
       workspace: "Details", location: deal!.location, province: "BC", currency: deal!.currency, units: 10, exit: "refinance_hold",
-      policyDraft: view.policyDraft, errorChecks: stored!.result.checks.filter((c: any) => c.severity === "error").length,
+      policyDraft: view.policyDraft, policySigned: false, errorChecks: stored!.result.checks.filter((c: any) => c.severity === "error").length,
       exitCapPct: stored!.input_snapshot.input.exitCapPct,
     });
     expect(rest.exitCapPct).toBe(10);

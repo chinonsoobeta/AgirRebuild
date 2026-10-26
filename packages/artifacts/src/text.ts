@@ -58,6 +58,7 @@ export const TEXT = {
   "propertyTax": ["Property tax (fixed, within operating expenses)", "Impôt foncier fixe, inclus dans les charges"],
   "noi": ["Net operating income", "Revenu net d'exploitation"],
   "draftPolicy": ["Draft policy, not signed by credit", "Politique provisoire, non approuvée par le crédit"],
+  "unsignedPolicy": ["Policy not yet signed by credit", "Politique non encore approuvée par le crédit"],
   "totalCost": ["Total cost", "Coût total"],
   "unitSales": ["Unit sales", "Ventes de logements"],
   "unitOrField": ["Unit type or field", "Type ou donnée"],

@@ -73,15 +73,17 @@ describe("the run page names its policy (card P1)", () => {
     expect(detail(words, "Politique")).toBe("Location conservée et refinancée, provisoire, non approuvée par le crédit");
   });
 
-  it("names policy-v1, which is signed, without the draft words", () => {
+  // Card E: policy-v1 is not a draft, but credit has not signed it either, so it says so without the draft words.
+  it("names policy-v1, which credit has not signed, without the draft words", () => {
     s.run = run({ policyVersion: "policy-v1", policyDraft: false });
     const words = render(createElement(Run, { dealId: "deal" }));
-    expect(words).toContain("Run 2 · Sale at the end of the hold");
-    expect(detail(words, "Policy")).toBe("Sale at the end of the hold");
+    expect(words).toContain("Run 2 · Sale at the end of the hold, not yet signed by credit");
+    expect(detail(words, "Policy")).toBe("Sale at the end of the hold, not yet signed by credit");
+    expect(words).not.toContain("draft");
     s.lang = "fr";
     const fr = render(createElement(Run, { dealId: "deal" }));
-    expect(fr).toContain("Analyse 2 · Vente à la fin de la détention");
-    expect(detail(fr, "Politique")).toBe("Vente à la fin de la détention");
+    expect(fr).toContain("Analyse 2 · Vente à la fin de la détention, non encore approuvée par le crédit");
+    expect(detail(fr, "Politique")).toBe("Vente à la fin de la détention, non encore approuvée par le crédit");
   });
 
   it("shows a version this build does not know as its id", () => {

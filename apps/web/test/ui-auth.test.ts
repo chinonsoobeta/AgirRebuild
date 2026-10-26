@@ -178,6 +178,19 @@ describe("the shared-link page", () => {
     for (const s of ["Shared reference", "Lender package", "Word", "Run 3", "Shared from Agir. Read-only.", "This link expires on", "Download the audit package"]) expect(words).toContain(s);
     expect(buttons("Français").length).toBe(1);
   });
+  it("says on the verdict card when the shared run's policy is not signed by credit (card E)", () => {
+    const verdict = { code: "APPROVE", gates: [], hardFailReasons: [], headline: "Invented headline", explanation: "" };
+    const shared = { deal: "Shared reference", kind: "lender_package", format: "docx", runNumber: 3, expiresAt: null, verdict, errorChecks: 0, figures: [] };
+    state.shared = { ...shared, policyDraft: false, policySigned: false };
+    expect(page()).toContain("The policy is not yet signed by credit.");
+    state.shared = { ...shared, policyDraft: true, policySigned: false };
+    expect(page()).toContain("The policy is a draft, not yet signed by credit.");
+    expect(page()).not.toContain("The policy is not yet signed by credit.");
+    state.shared = { ...shared, policyDraft: false, policySigned: true };
+    expect(page()).not.toContain("signed by credit");
+    state.lang = "fr"; state.shared = { ...shared, policyDraft: false, policySigned: false };
+    expect(page()).toContain("La politique n'est pas encore approuvée par le crédit.");
+  });
   it("says when the link does not expire", () => {
     state.shared = { deal: "Shared reference", kind: "model_export", format: "xlsx", runNumber: 1, expiresAt: null };
     expect(page()).toContain("This link does not expire.");
