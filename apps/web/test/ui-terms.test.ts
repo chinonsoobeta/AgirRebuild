@@ -21,7 +21,7 @@ vi.mock("../src/components/ui", async (original) => {
     useSession: () => ({
       solo: true, role: "owner", workspaceId: "ws", setWorkspace: () => {},
       me: { user: { id: "me", name: "Morgan Owner", email: "morgan@example.test" }, workspaces: [
-        { id: "ws", name: "Elm Street", review_mode: "solo", label_suggestions: true, has_logo: false, role: "owner" },
+        { id: "ws", name: "Elm Street", review_mode: "solo", label_suggestions: true, ai_reading: true, has_logo: false, role: "owner" },
       ] },
     }),
   };

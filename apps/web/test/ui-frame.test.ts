@@ -40,7 +40,7 @@ beforeEach(() => {
 afterEach(() => { vi.unstubAllGlobals(); });
 
 type Role = Me["workspaces"][number]["role"];
-const workspace = (id: string, name: string, role: Role = "owner"): Me["workspaces"][number] => ({ id, name, review_mode: "team", label_suggestions: false, has_logo: false, role });
+const workspace = (id: string, name: string, role: Role = "owner"): Me["workspaces"][number] => ({ id, name, review_mode: "team", label_suggestions: false, ai_reading: true, has_logo: false, role });
 const me = (workspaces: Me["workspaces"]): Me => ({ user: { id: "u1", email: "ada@example.com", name: "Ada Lovelace", email_verified: true }, workspaces });
 const render = (node: ReactNode, who: Me = me([workspace("w1", "First workspace")])) => {
   state.me = who;

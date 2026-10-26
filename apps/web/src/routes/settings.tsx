@@ -371,6 +371,7 @@ export function Settings() {
   const members = useQuery({ queryKey: ["members", workspaceId], queryFn: () => api.get<{ id: string; name: string; email: string; role: string; expires_at: string | null }[]>(`/workspaces/${workspaceId}/members`) });
   const add = useMutation({ mutationFn: (b: { email: string; role: string }) => api.post(`/workspaces/${workspaceId}/members`, b), onSuccess: () => qc.invalidateQueries({ queryKey: ["members"] }) });
   const mode = useMutation({ mutationFn: (m: "team" | "solo") => api.post(`/workspaces/${workspaceId}/review-mode`, { mode: m }), onSuccess: () => qc.invalidateQueries({ queryKey: ["me"] }) });
+  const aiReading = useMutation({ mutationFn: (on: boolean) => api.put(`/workspaces/${workspaceId}/ai-reading`, { on }), onSuccess: () => qc.invalidateQueries({ queryKey: ["me"] }) });
   const suggest = useMutation({ mutationFn: (on: boolean) => api.post(`/workspaces/${workspaceId}/label-suggestions`, { on }), onSuccess: () => qc.invalidateQueries({ queryKey: ["me"] }) });
   const setRole = useMutation({ mutationFn: (b: { email: string; role: string }) => api.post(`/workspaces/${workspaceId}/members`, b), onSuccess: () => qc.invalidateQueries({ queryKey: ["members"] }) });
   // The new workspace becomes the current one once the session knows it.
@@ -561,12 +562,15 @@ export function Settings() {
     { id: "reading", nav: t("settings.nav.reading"), show: member, node: (
       <Section id="reading" title={t("settings.nav.reading")} body={t("settings.rd.body")}>
         <div>
+          <Row title={t("settings.aiOn")} body={t("settings.aiNotice")}>
+            <Switch label={t("settings.aiOn")} checked={ws?.ai_reading ?? false} disabled={!owner} onChange={(on) => aiReading.mutate(on)} />
+          </Row>
           <Row title={t("settings.suggestOn")} body={t("settings.suggestNotice")}>
             <Switch label={t("settings.suggestOn")} checked={ws?.label_suggestions ?? false} disabled={!owner} onChange={(on) => suggest.mutate(on)} />
           </Row>
         </div>
         {!owner && <p className="hint">{t("settings.rd.locked")}</p>}
-        <ErrorText error={suggest.error} />
+        <ErrorText error={aiReading.error ?? suggest.error} />
       </Section>
     ) },
     { id: "logo", nav: t("logo.title"), show: owner, node: <LogoPanel workspaceId={workspaceId} hasLogo={ws?.has_logo ?? false} /> },

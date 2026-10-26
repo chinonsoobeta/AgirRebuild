@@ -74,7 +74,7 @@ const submit = async (values: Record<string, string>) => {
 const replaceState = vi.fn();
 const at = (path: string, search = "") => vi.stubGlobal("window", { location: { pathname: path, search }, history: { state: { key: "k" }, replaceState } });
 const person = (verified: boolean) => ({ user: { id: "me", name: "Morgan Owner", email: "morgan@example.test", email_verified: verified }, workspaces: [
-  { id: "ws", name: "Elm Street", review_mode: "solo", label_suggestions: true, has_logo: false, role: "owner" },
+  { id: "ws", name: "Elm Street", review_mode: "solo", label_suggestions: true, ai_reading: true, has_logo: false, role: "owner" },
 ] });
 
 beforeEach(() => {
