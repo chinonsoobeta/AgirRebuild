@@ -9,3 +9,4 @@ export { checkArithmetic, chooseByArithmetic } from "./arithmetic.ts";
 export { addressedText, addressedEntries } from "./addressed.ts";
 export * from "./verify-reading.ts";
 export * from "./reader-prompt.ts";
+export { documentKind } from "./document-kind.ts";

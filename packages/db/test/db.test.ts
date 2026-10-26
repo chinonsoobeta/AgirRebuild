@@ -1,5 +1,5 @@
 import { beforeAll, describe, expect, test } from "vitest";
-import { asUser, migrate, openPglite, type Db } from "../src/index.ts";
+import { asUser, documentsHash, migrate, openPglite, type Db } from "../src/index.ts";
 
 let db: Db;
 const ids = {} as Record<"alice" | "bob" | "mallory" | "ws" | "deal" | "malloryWs" | "run", string>;
@@ -221,4 +221,10 @@ test("card 93c: artifact language uses one fixed-search-path function with a def
   expect(r).toMatchObject({ proconfig: ["search_path=public"], pronargdefaults: 1 });
   const [old] = await db.query(`select to_regprocedure('fn_request_artifact(uuid,text,text)') as old`);
   expect(old!.old).toBeNull();
+});
+
+test("card 172: documentsHash preserves unset roles and changes for a set role", () => {
+  const document = { id: "a", sha256: "b", role_set: null };
+  expect(documentsHash([document])).toBe("db8992cf941b185a1c5bbcfbdc3f43204fe09d42b1a57ff584f6ad2e5e6dfdbd");
+  expect(documentsHash([{ ...document, role_set: "context" }])).not.toBe(documentsHash([document]));
 });

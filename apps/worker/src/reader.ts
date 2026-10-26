@@ -2,7 +2,7 @@ import Anthropic from "@anthropic-ai/sdk";
 import { zodOutputFormat } from "@anthropic-ai/sdk/helpers/zod";
 import * as z from "zod/v4";
 import { currentDocuments, documentsHash, type Db, type BlobStore } from "@agir/db";
-import { addressedText, parseDocument, verifyReadings, READER_PROMPT, READER_PROMPT_VERSION, type ReaderResponse, type ReadingDocument } from "@agir/extraction";
+import { addressedText, documentKind, parseDocument, verifyReadings, READER_PROMPT, READER_PROMPT_VERSION, type ReaderResponse, type ReadingDocument } from "@agir/extraction";
 
 const unit = z.enum(["$", "%", "sf", "m2", "$/sf", "$/m2", "months", "years", "units", "x", "vacancy_%"]);
 const value = { value: z.number(), unit_seen: unit, file: z.string(), location: z.string(), quote: z.string() };
@@ -37,7 +37,12 @@ export async function readDeal(db: Db, store: BlobStore, dealId: string, workspa
   let error: { class: string; status: number | null } | null = null;
   // Parsing failures also leave a safe failure row and allow the rules to reconcile.
   try {
-    for (const d of extracted) documents.push({ id: d.id, name: d.name, document: await parseDocument(await store.get(d.storage_key), d.name) });
+    for (const d of extracted) {
+      const document = await parseDocument(await store.get(d.storage_key), d.name);
+      if ((d.role_set ?? documentKind(document).role) === "context") continue;
+      documents.push({ id: d.id, name: d.name, document });
+    }
+    if (!documents.length) return;
     request.messages[0]!.content = documents.map(d => addressedText(d.document, d.name)).join("\n\n");
     for (let attempt = 0; attempt < 2; attempt++) {
       try { response = schema.parse(await read(request)); error = null; break; }

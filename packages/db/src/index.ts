@@ -171,7 +171,7 @@ export { fileStore, sha256Hex, type BlobStore } from "./storage.ts";
 
 /** A deal's unretired documents, as the AI reader keys its stored reading on them (card 160a). */
 export const currentDocuments = (db: Db, dealId: string) =>
-  db.query<{ id: string; name: string; sha256: string; storage_key: string; stage: string }>(`select id, name, sha256, storage_key, stage from documents where deal_id=$1 and retired_at is null order by id`, [dealId]);
-/** sha-256 over the sorted pairs of document id and content hash. */
-export const documentsHash = (docs: readonly { id: string; sha256: string }[]) =>
-  sha256Hex(new TextEncoder().encode(JSON.stringify(docs.map(d => [d.id, d.sha256]).sort((a, b) => a[0]! < b[0]! ? -1 : a[0]! > b[0]! ? 1 : 0))));
+  db.query<{ id: string; name: string; sha256: string; storage_key: string; stage: string; role_set: "deal_source" | "evidence" | "context" | null }>(`select id, name, sha256, storage_key, stage, role_set from documents where deal_id=$1 and retired_at is null order by id`, [dealId]);
+/** sha-256 over sorted document ids, content hashes, and any explicitly set roles. */
+export const documentsHash = (docs: readonly { id: string; sha256: string; role_set?: "deal_source" | "evidence" | "context" | null }[]) =>
+  sha256Hex(new TextEncoder().encode(JSON.stringify(docs.map(d => d.role_set == null ? [d.id, d.sha256] : [d.id, d.sha256, d.role_set]).sort((a, b) => a[0]! < b[0]! ? -1 : a[0]! > b[0]! ? 1 : 0))));
