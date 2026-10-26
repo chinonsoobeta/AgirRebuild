@@ -6,5 +6,7 @@ import { startWorker } from "./index.ts";
 const db = await openDb();
 await migrate(db);
 const store = fileStore(join(process.env.AGIR_DATA_DIR ?? ".data", "blobs"));
-startWorker({ db, store, log: (e) => console.log(JSON.stringify({ at: new Date().toISOString(), ...e })) });
-console.log("Agir worker started");
+// One JSON line per event, in the API's shape (apps/api/src/log.ts): at, event, then ids, counts and statuses.
+const log = (e: Record<string, unknown>) => console.log(JSON.stringify({ at: new Date().toISOString(), ...e }));
+startWorker({ db, store, log });
+log({ event: "worker.started" });

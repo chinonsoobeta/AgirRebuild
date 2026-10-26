@@ -79,7 +79,7 @@ beforeAll(async () => {
   await migrate(db);
   app = createApp({
     db, store, secureCookies: false, publicOrigin: "https://agir.example/", progressHook: (stage) => pause?.(stage),
-    mailer: { send: async (m) => { if (failSend) throw new Error("smtp down"); sent.push({ ...m }); } },
+    mailer: { configured: true, send: async (m) => { if (failSend) throw new Error("smtp down"); sent.push({ ...m }); } },
   });
   bea = await signup("bea@example.com", "Bea Builder");
   ws = (await call(bea, "POST", "/api/workspaces", { name: "Mail", reviewMode: "solo" })).json.id;
@@ -149,7 +149,7 @@ describe("the email when a run finishes after its browser went away", () => {
     const d = await newDeal("Douglas Yard");
     sent.length = 0;
     failSend = true;
-    const logged = vi.spyOn(console, "error").mockImplementation(() => {});
+    const logged = vi.spyOn(console, "log").mockImplementation(() => {});
     const { release, ended } = hold();
     const res = await streamed(d, token());
     await res.body!.cancel();

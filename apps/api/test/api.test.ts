@@ -2506,13 +2506,13 @@ describe("share links (task 86a)", () => {
       expect(found!.leaked).toBe(false);
     }
     const broken = createApp({ db, secureCookies: false, store: { ...store, get: async () => { throw new Error(link.secret); } } });
-    const log = vi.spyOn(console, "error").mockImplementation(() => {});
+    const log = vi.spyOn(console, "log").mockImplementation(() => {});
     try {
       const response = await broken.request(`/api/share/${link.secret}/file`);
       expect(response.status).toBe(500); privacy(response.headers);
       expect(log).toHaveBeenCalledOnce();
       expect(JSON.stringify(log.mock.calls).includes(link.secret)).toBe(false);
-      expect(JSON.parse(String(log.mock.calls[0]![0])).path).toBe("/api/share/…");
+      expect(JSON.parse(String(log.mock.calls[0]![0])).route).toBe("/api/share/:secret/file");
     } finally { log.mockRestore(); }
   });
   test("the 61st public request is limited and retains privacy headers", async () => {
@@ -2577,7 +2577,7 @@ describe("connection rate limits (task 90b)", () => {
 
 describe("malformed path ids (task 90a)", () => {
   test("Postgres uuid errors answer a safe 404 without logging; parsed ids still answer 422", async () => {
-    const log = vi.spyOn(console, "error").mockImplementation(() => {});
+    const log = vi.spyOn(console, "log").mockImplementation(() => {});
     try {
       for (const [method, path, body] of [
         ["GET", "/api/deals/none/share-links"],
@@ -2759,7 +2759,9 @@ describe("clients see and confirm only their own deals (task 89a)", () => {
 describe("invite links for clients (task 89b)", () => {
   let iw: string, dealX: string, hana: Session;
   const secrets: string[] = [];
+  // Event lines go to console.log (apps/api/src/log.ts); both are read for a leaked secret.
   const errors = vi.spyOn(console, "error");
+  const lines = vi.spyOn(console, "log");
   const invite = async (s: Session = alice) => {
     const made = await call(s, "POST", `/api/deals/${dealX}/invites`);
     expect(made.status).toBe(200);
@@ -2853,7 +2855,7 @@ describe("invite links for clients (task 89b)", () => {
     const actions = (await call(alice, "GET", `/api/deals/${dealX}/audit`)).json.map((e: any) => e.action);
     expect(actions).toEqual(expect.arrayContaining(["invite.created", "invite.revoked", "invite.used"]));
     const payloads = (await db.query<{ p: string }>(`select payload::text as p from audit_events`)).map((r) => r.p).join("\n");
-    const logs = errors.mock.calls.map((c) => c.join(" ")).join("\n");
+    const logs = [...errors.mock.calls, ...lines.mock.calls].map((c) => c.join(" ")).join("\n");
     expect(secrets.length).toBeGreaterThan(5);
     for (const s of secrets) {
       expect(payloads).not.toContain(s);

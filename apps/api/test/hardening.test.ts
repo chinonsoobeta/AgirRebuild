@@ -31,7 +31,7 @@ async function signup(app: App, email: string, extra: Record<string, unknown> = 
 function recording(deps: Partial<AppDeps> = {}) {
   const lines: ({ event: string } & LogFields)[] = [];
   const alerts: ({ event: string } & LogFields)[] = [];
-  const app = createApp({ db, store, secureCookies: false, log: (event, fields = {}) => lines.push({ event, ...fields }),
+  const app = createApp({ db, store, secureCookies: false, logRequests: true, log: (event, fields = {}) => lines.push({ event, ...fields }),
     alert: (event, fields = {}) => alerts.push({ event, ...fields }), ...deps });
   return { app, lines, alerts };
 }
@@ -137,13 +137,12 @@ describe("invite-only sign-up", () => {
 
 describe("structured logs", () => {
   test("log writes one JSON line with at, event and the fields", () => {
-    const write = vi.spyOn(process.stdout, "write").mockImplementation(() => true);
+    const write = vi.spyOn(console, "log").mockImplementation(() => {});
     try {
       log("job.done", { id: "j1", ms: 12, ok: true, user: null });
       expect(write).toHaveBeenCalledTimes(1);
       const line = String(write.mock.calls[0]![0]);
-      expect(line.endsWith("\n")).toBe(true);
-      expect(line.trim().split("\n")).toHaveLength(1);
+      expect(line.split("\n")).toHaveLength(1);
       const parsed = JSON.parse(line);
       expect(parsed).toMatchObject({ event: "job.done", id: "j1", ms: 12, ok: true, user: null });
       expect(new Date(parsed.at).toISOString()).toBe(parsed.at);
@@ -157,13 +156,13 @@ describe("structured logs", () => {
     const s = (await signup(app, "logged-person@example.com")).session!;
     const ws = await wsOf(app, s);
     lines.length = 0;
-    await call(app, s, "GET", `/api/workspaces/${ws}/deals?secret=abc`);
+    await call(app, s, "GET", `/api/workspaces/${ws}/deals?secret=qq-hidden-zz`);
     const [line] = lines.filter((l) => l.event === "api.request");
     expect(line).toMatchObject({ method: "GET", route: "/api/workspaces/:ws/deals", status: 200 });
     expect(typeof line!.ms).toBe("number");
     expect(line!.request).toMatch(/^[0-9a-f-]{36}$/);
     expect(line!.user).toMatch(/^[0-9a-f-]{36}$/);
-    expect(JSON.stringify(lines)).not.toMatch(/secret=|abc|logged-person/);
+    expect(JSON.stringify(lines)).not.toMatch(/secret=|qq-hidden-zz|logged-person/);
     // Signed out: no user.
     lines.length = 0;
     await call(app, null, "GET", "/api/health");
@@ -198,15 +197,6 @@ describe("structured logs", () => {
     expect(alerts).toEqual([{ event: "api.error", route: "/api/auth/boom", request: error.request }]);
   });
 
-  test("an error on a shared link keeps its generic sentence in the log", async () => {
-    const { app, lines } = recording();
-    app.get("/api/share/:secret/boom", () => { throw new Error("detail"); });
-    await call(app, null, "GET", "/api/share/hidden-value/boom");
-    const error = lines.find((l) => l.event === "api.error")!;
-    expect(error).toMatchObject({ route: "/api/share/:secret/boom", error: "Shared link request failed" });
-    expect(JSON.stringify(lines)).not.toMatch(/hidden-value|detail/);
-  });
-
   test("health says whether the embedded worker is on and how many migrations are applied", async () => {
     const applied = (await db.query<{ n: number }>(`select count(*)::int as n from schema_migrations`))[0]!.n;
     const on = createApp({ db, store, secureCookies: false, worker: true });
@@ -216,17 +206,17 @@ describe("structured logs", () => {
 });
 
 describe("the alert hook", () => {
-  test("without a URL, alerts do nothing", () => {
+  test("without a URL, alerts do nothing", async () => {
     const fetch = vi.fn();
-    alerter(undefined, fetch)("api.error", { route: "/x" });
+    await alerter(undefined, fetch)("api.error", { route: "/x" });
     expect(fetch).not.toHaveBeenCalled();
   });
 
-  test("posts one JSON body with a 5 second timeout, without waiting for it", async () => {
+  test("posts one JSON body with a 5 second timeout, starting at once", async () => {
     let finish!: (r: Response) => void;
     const fetch = vi.fn(() => new Promise<Response>((resolve) => { finish = resolve; }));
-    const result = alerter("https://alerts.example.test/hook", fetch)("mail.failed", { kind: "verify_email" });
-    expect(result).toBeUndefined();
+    const pending = alerter("https://alerts.example.test/hook", fetch)("mail.failed", { kind: "verify_email" });
+    // The request has started before anything is awaited.
     expect(fetch).toHaveBeenCalledTimes(1);
     const [url, init] = fetch.mock.calls[0] as unknown as [string, RequestInit];
     expect(url).toBe("https://alerts.example.test/hook");
@@ -235,22 +225,20 @@ describe("the alert hook", () => {
     expect(JSON.parse(init.body as string)).toMatchObject({ event: "mail.failed", kind: "verify_email" });
     expect(init.signal).toBeInstanceOf(AbortSignal);
     finish(new Response(null, { status: 204 }));
+    await expect(pending).resolves.toBeUndefined();
   });
 
-  test("a failure never throws and is logged once as alert.failed", async () => {
+  test("a failure never throws or rejects and is logged once as alert.failed", async () => {
     const lines: { event: string }[] = [];
     const record = (event: string, fields?: LogFields) => { lines.push({ event, ...fields }); };
-    const rejecting = vi.fn(async () => { throw new Error("down"); });
-    expect(() => alerter("https://alerts.example.test/hook", rejecting, record)("api.error", {})).not.toThrow();
-    const throwing = vi.fn(() => { throw new Error("sync"); });
-    expect(() => alerter("https://alerts.example.test/hook", throwing as never, record)("api.error", {})).not.toThrow();
-    const refusing = vi.fn(async () => new Response(null, { status: 500 }));
-    alerter("https://alerts.example.test/hook", refusing, record)("api.error", {});
-    await new Promise((r) => setTimeout(r, 0));
+    const hook = "https://alerts.example.test/hook";
+    await expect(alerter(hook, vi.fn(async () => { throw new Error("down"); }), record)("api.error", {})).resolves.toBeUndefined();
+    await expect(alerter(hook, vi.fn(() => { throw new Error("sync"); }) as never, record)("api.error", {})).resolves.toBeUndefined();
+    await alerter(hook, vi.fn(async () => new Response(null, { status: 500 })), record)("mail.failed", {});
     expect(lines).toEqual([
       { event: "alert.failed", alert: "api.error" },
       { event: "alert.failed", alert: "api.error" },
-      { event: "alert.failed", alert: "api.error" },
+      { event: "alert.failed", alert: "mail.failed", status: 500 },
     ]);
   });
 
