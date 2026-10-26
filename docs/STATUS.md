@@ -25,6 +25,7 @@ work it describes.
 | The same gate on `ui/w12-email` `9c4a1a7` with `fix/threshold-labels` merged in a throwaway worktree | 6192 tests in 49 files, the fallback test, web build; no conflicts | 2026-10-25 (the worktree was then removed) |
 | The same gate on `ui/w12-email` `e286f55` with `fix/threshold-labels` merged in a throwaway worktree | 6325 tests in 62 files, the fallback test, web build; no conflicts | 2026-10-25 (the worktree was then removed) |
 | `env -u ANTHROPIC_API_KEY AGIR_DATA_DIR=<empty folder> PORT=8792 npm start` | Builds the web app, applies the migrations, seeds six deals, serves on that port. An empty data folder leaves `.data/` untouched | 2026-10-25, `ui/redesign` (first browser walk) and `ui/y-screens` (second walk) |
+| `env -u ANTHROPIC_API_KEY AGIR_DATA_DIR=<empty folder> PORT=8798 AGIR_ACCOUNT_CLOSURE=1 npm start` | The same, with closing a workspace and deleting an account offered; without `AGIR_ACCOUNT_CLOSURE` both routes answer 404 and Settings shows neither | 2026-10-25, `card/F-close-account` (migration `0039` applied to a fresh database) |
 
 The first walk ran on `ui/redesign`, where migrations go to `0029` as on `main`. The second ran on `ui/y-screens`,
 which adds `0031` and `0032`. `0030` is on `ui/w12-email` only. The three touch different objects (`0030` a new table
@@ -304,6 +305,7 @@ build on earlier migrations.
 | `task/167-whole-unit-count` | done | Card 167: an AI unit count with no item, a blank item or a total name ("Total units", "Nombre total de logements") is the whole building's count (item null), checked against the unit types; it no longer becomes a phantom unit type or is refused. Reader gate (offline): the second v14 run's wrong values 2 to 0, v13 failed verification 1 to 0, no other key item changed. |
 | `task/168-word-ranges` | done | Card 168: the rule reader no longer reads the end of a range written in words ("seven to nine months", "entre sept et neuf mois") as a value; durations such as "two years and nine months" and "un an et six mois" keep both parts, and digit ranges are unchanged. Bank and scores identical; nine real-document figures shown no longer, all ranges. |
 | `task/169-window-settles-psf` | done | Card 169: for a field with a minimum but no maximum (rent per square foot, monthly unit rent), the verifier settles an unscaled three-decimal figure by the field's window and flags it for review ("$29.009/sf/year" is 29.009). Reader gate (offline): v14 +3 right, failed verification 6 to 3, no new wrong value. Release gate for 167+168+169: 5992 passed. |
+| `card/F-close-account` | Interface redesign: deleting an account | Card F, migration `0039`. The owner closes a workspace (`POST /api/workspaces/:ws/close`, with a reason): it is read-only at once, because `agir_require`, the check every governed change calls, refuses a closed workspace with "This workspace is closed." (409); its share links and open client invitations end and everyone but the owner leaves it. `fn_purge_closed_workspaces` deletes a workspace closed longer than the retention period with everything that cascades from it, keeps its audit events, and returns the storage keys no remaining row uses; the worker deletes those files (`BlobStore.delete`) once a day when `AGIR_RETENTION_DAYS` is set (unset: never). A person deletes their own account with their password (`POST /api/auth/delete-account`) once they own no open workspace: sessions, memberships, client assignments, open invitations and email links end, and the users row stays as a tombstone ("Deleted account", an `@invalid` address, no password). All of it is off unless `AGIR_ACCOUNT_CLOSURE=1`: the routes answer 404 and Settings shows neither action. This is row deletion, not ADR 0002's crypto-shredding (S5). | Yes: a migration, authorization (`agir_require`) and deletion of data. Not merged |
 
 The plan for small Canadian developers is [plan-small-developers.md](plan-small-developers.md).
 Release 1 steps 0 to 3 are built. Steps 4 and 5 are built on draft, unsigned policy and tables that
@@ -392,8 +394,10 @@ Left out on purpose, because a person must decide first (the plan's "Decisions t
   rent roll and "lettre d'offre" for term sheet.
 - Deal names in BC Sans Light at 34 px, as the canvas shows, unless the owner wants Regular or Bold.
 - Also not built: a sample deal (who its values are attributed to in the audit trail, and whether a draft policy's
-  verdict may show on a public page, are the owner's calls) and deleting an account (it needs a retention decision:
-  the audit trail is hash-chained and holds names). Device names, run progress by stage, Stop, a downloadable
+  verdict may show on a public page, are the owner's calls). Closing a workspace and deleting an account are built
+  on `card/F-close-account`, off by default (`AGIR_ACCOUNT_CLOSURE=1`), with the retention period as a setting
+  (`AGIR_RETENTION_DAYS`) until the lawyer gives one; the audit trail is hash-chained, is never edited, and keeps the
+  names its events recorded. Device names, run progress by stage, Stop, a downloadable
   comparison, one link for several files, removing a member, renaming the workspace and signing out other devices
   are built on `ui/y-screens`; changing the email address and the Password row on `ui/w12-email` (R6).
 - Compare and Explore show each change by subtracting two stored values in the browser (Explore did so on `main`
@@ -453,6 +457,13 @@ A model may suggest a label for a figure the reader could not label; a person co
   single space group is accepted only before a trailing "$"; "2 100 pi²" in a document with no other
   space-grouped figure is still refused. There is no vacancy field.
 
+- **Closing and deleting is row deletion, not crypto-shredding** (`card/F-close-account`). A purged workspace's rows
+  and unshared files go, but backups keep them, and the audit trail keeps its events (with their payloads) for good.
+  The files are deleted after the database commits; a file whose bytes are uploaded again into another workspace in
+  the moment between the purge and the delete would lose its file. Jobs already queued for a closed workspace
+  (reading a document, rendering a report) still run until it is purged. With `AGIR_RETENTION_DAYS` unset, a closed
+  workspace is kept for good.
+
 ## Deviations from the plan
 
 Where the code showed a better route than [the plan](plan-small-developers.md), the route taken and why.
@@ -500,6 +511,9 @@ Where the code showed a better route than [the plan](plan-small-developers.md), 
   terms and privacy text is at `/legal` on `ui/redesign`, marked as a draft until a lawyer has reviewed it.
 - Accounts: Stripe, Canadian hosting, and GST/HST registration for Agir's own sales.
 - Pricing: $99 to $299 per deal is a hypothesis to test with the first customers.
+- The retention period for a closed workspace (`AGIR_RETENTION_DAYS`, in days; unset keeps it for good), from the
+  lawyer, and the go-ahead to turn on closing workspaces and deleting accounts (`AGIR_ACCOUNT_CLOSURE=1`), on
+  `card/F-close-account`.
 
 ## Card 94b — cited insured product floors (2026-10-19)
 
