@@ -8,7 +8,7 @@ import { consolidate, extractCandidates, type SourcedCandidate } from "@agir/ext
 import { loadOracle } from "@agir/testkit";
 import { allEquityDeal, developmentDeal } from "../../engine/test/fixtures.ts";
 import { roundToward } from "../src/model.ts";
-import { buildModel, htmlToPdf, RendererUnavailableError, renderArtifact, renderHtml, verifyProvenance, visibleText, formatValue, type ArtifactInput } from "../src/index.ts";
+import { buildModel, Formatter, htmlToPdf, RendererUnavailableError, renderArtifact, renderHtml, verifyProvenance, visibleText, formatValue, type ArtifactInput } from "../src/index.ts";
 
 function mapleInput(kind: ArtifactInput["kind"]): ArtifactInput {
   const deal = loadOracle("maple-heights");
@@ -1580,6 +1580,17 @@ describe("card 96d custom thresholds", () => {
     expect(text).toContain("Plus souple que la règle citée de la SCHL");
     expect(text).not.toMatch(/Custom thresholds|Your value|Agir standard|Under Agir|Looser than|Workspace|Removed by|Fails CMHC/);
     expect(verifyProvenance(visibleText(renderHtml(model)),model.formatter.manifest).orphans).toEqual([]);
+  });
+  test("card P2: a removed combined-stress field reads with a no-break space before every French colon", () => {
+    const x = customInput("fr"), base = x.standardPolicy!;
+    const note = { value: 0, setBy: "owner-id", setAt: "2026-10-19T12:00:00Z", reason: "Owner credit decision" };
+    const effective = effectivePolicy(base, { [base.version]: { "stresses.combined.rateBps": note } }, {});
+    const changes = effective.changes.map((change) => ({ ...change, setBy: "Dana Analyst" }));
+    const line = (lang: "en" | "fr") => new Formatter(x.result, lang, 85, { policy: effective.policy, standardPolicy: base, changes }).stress("combined", "Combined");
+    expect(line("fr")).toContain("Retiré par Dana Analyst le 2026-10-19");
+    expect(line("fr")).toContain("Choc du taux d'intérêt");
+    expect(line("fr")).not.toMatch(/[^\u00a0]:/);
+    expect(line("en")).toContain("Combined: Interest rate shock: Removed by Dana Analyst on 2026-10-19");
   });
   test.each(["ic_memo","build_decision","lender_package","model_export"] as const)("%s places the disclosure immediately after the draft line", (kind) => {
     const model = buildModel({ ...customInput(), kind });

@@ -15,10 +15,10 @@ describe("card 96a stress labels", () => {
     const policy = POLICIES["rental-hold-draft"]!;
     const rate = policy.stresses.find((s) => s.key === "rate")!;
     expect(stressLabel({ ...rate, rateBps: 100 }, "en", rate)).toBe("Interest rate +100 bps");
-    expect(stressLabel({ ...rate, rateBps: 100 }, "fr", rate)).toBe("Taux d'intérêt +100 pb");
+    expect(stressLabel({ ...rate, rateBps: 100 }, "fr", rate)).toBe("Taux d'intérêt +100\u00a0pb");
     const combined = policy.stresses.find((s) => s.key === "combined")!;
     expect(stressLabel({ ...combined, rateBps: 100 }, "en", combined)).toBe("Combined: exit cap +75 bps, costs +10%, rate +100 bps, rent -10%, occupancy -5 pts, operating costs +5 pts");
-    expect(stressLabel({ ...combined, rateBps: 100 }, "fr", combined)).toBe("Combiné : taux de sortie +75 pb, coûts +10 %, taux +100 pb, loyers -10 %, occupation -5 pts, charges d'exploitation +5 pts");
+    expect(stressLabel({ ...combined, rateBps: 100 }, "fr", combined)).toBe("Combiné\u00a0: taux de sortie +75\u00a0pb, coûts +10\u00a0%, taux +100\u00a0pb, loyers -10\u00a0%, occupation -5\u00a0pts, charges d'exploitation +5\u00a0pts");
   });
 });
 
@@ -100,5 +100,42 @@ describe("card 96a owner thresholds", () => {
     expect(result.changes[0]).toMatchObject({ stressRemoved: true, looser: true });
     expect(result.policy.stresses.find((s) => s.key === "rate")!.label).toBe("Interest rate 0 bps");
     expect(result.policy.stresses.find((s) => s.key === "combined")!.label).toContain("rate +100 bps");
+  });
+});
+
+describe("card P2 threshold labels", () => {
+  const all = Object.values(THRESHOLDS).flat();
+  it("names every English threshold in words, never by a raw key", () => {
+    for (const threshold of all) expect(threshold.label.en, threshold.path).not.toContain("_");
+  });
+  it("names a stress threshold by the stress's name in both languages", () => {
+    const threshold = THRESHOLDS["policy-v1"]!.find((t) => t.path === "stresses.exit_cap.exitCapBps")!;
+    expect(threshold.label.en).toBe("Exit cap: Exit cap shock");
+    expect(threshold.label.fr).toBe("Taux de sortie : Choc du taux de sortie");
+  });
+  it("puts a no-break space before the colon of a changed combined stress's French label", () => {
+    for (const policy of Object.values(POLICIES)) {
+      const combined = policy.stresses.find((s) => s.key === "combined")!;
+      const field = Object.keys(combined).find((key) => typeof combined[key as keyof typeof combined] === "number")!;
+      const label = stressLabel({ ...combined, [field]: 0 }, "fr", combined);
+      expect(label.startsWith("Combiné\u00a0: "), label).toBe(true);
+      expect(label).not.toMatch(/[^\u00a0]:/);
+      expect(label, "a size never breaks from its unit").not.toMatch(/\d (?:%|pb|mois|pts)/);
+    }
+    const combined = POLICIES["rental-hold-draft"]!.stresses.find((s) => s.key === "combined")!;
+    expect(stressLabel({ ...combined, costPct: 12 }, "fr", combined)).toContain("coûts +12\u00a0%");
+  });
+  it("puts a no-break space before every colon in a French label", () => {
+    for (const threshold of all) expect(threshold.label.fr, threshold.path).not.toMatch(/[^ ]:/);
+  });
+});
+
+describe("card P2 French stress names keep a size with its unit", () => {
+  it("every French STRESS name has a no-break space between a digit and its unit", () => {
+    for (const [key, [, fr]] of Object.entries(STRESS)) expect(fr, key).not.toMatch(/\d (?:%|pb|mois|pts)/);
+  });
+  it("a changed single stress keeps the no-break space", () => {
+    const cost = POLICIES["rental-hold-draft"]!.stresses.find((s) => s.key === "cost")!;
+    expect(stressLabel({ ...cost, costPct: 12 }, "fr", cost)).toBe("Coûts +12\u00a0%");
   });
 });

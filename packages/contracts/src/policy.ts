@@ -194,10 +194,11 @@ export function stressLabel(preset: StressPreset, lang: "en" | "fr" = "en", stan
     if (sizes.every(([field, value]) => standard[field as keyof StressPreset] === value)) return lang === "fr" ? "Combiné" : "Combined";
     const pieces = sizes.map(([field, value]) => {
       const [en, fr, unit] = labels[field]!;
-      const suffix = unit === "%" ? (lang === "fr" ? " %" : "%") : ` ${lang === "fr" ? (unit === "bps" ? "pb" : unit === "months" ? "mois" : unit) : unit}`;
+      // French keeps a size with its unit: a no-break space before %, pb, mois and pts.
+      const suffix = lang === "fr" ? `\u00a0${unit === "bps" ? "pb" : unit === "months" ? "mois" : unit}` : unit === "%" ? "%" : ` ${unit}`;
       return `${idx ? fr : en} ${signed(value)}${suffix}`;
     });
-    return `${lang === "fr" ? "Combiné : " : "Combined: "}${pieces.join(", ")}`;
+    return `${lang === "fr" ? "Combiné\u00a0: " : "Combined: "}${pieces.join(", ")}`;
   }
   const template = STRESS[preset.key]?.[idx] ?? preset.label;
   return sizes.length ? template.replace(/[+-]\d+(?:[.,]\d+)?/, signed(sizes[0]![1])) : template;
@@ -264,9 +265,12 @@ export const THRESHOLDS: Readonly<Record<string, readonly Threshold[]>> = Object
   const location = thresholdLocation(policy, path);
   const standard = location.object[location.field] as number;
   const stress = path.startsWith("stresses.");
-  const prefix = stress ? `${path.split(".")[1]}: ` : path.includes(".select.") ? `MLI Select ${path.split(".")[2]}: ` : path.includes(".standard.") ? "MLI Standard: " : "";
+  // A stress is named by its STRESS name with the size taken off; French puts a no-break space before the colon.
+  const stressName = (lang: 0 | 1) => STRESS[path.split(".")[1]!]?.[lang].replace(/\s*[+-]\d.*$/, "") ?? path.split(".")[1]!;
+  const mli = path.includes(".select.") ? `MLI Select ${path.split(".")[2]}` : path.includes(".standard.") ? "MLI Standard" : undefined;
+  const name: [string, string] | undefined = stress ? [stressName(0), stressName(1)] : mli ? [mli, mli] : undefined;
   const lenderCited = path.startsWith("refinanceLimits.") || (policy.version.startsWith("rental-hold-insured") && ["gates.dcrAfterRefinanceMin", "baseSizingDscrFloor"].includes(path));
-  return { path, label: { en: prefix + en, fr: (stress ? `${STRESS[path.split(".")[1]!]?.[1].replace(/\s*[+-]\d.*$/, "")}: ` : prefix) + fr }, unit, standard, min,
+  return { path, label: { en: name ? `${name[0]}: ${en}` : en, fr: name ? `${name[1]}\u00a0: ${fr}` : fr }, unit, standard, min,
     max: field === "maxFailedGatesForConditions" ? Object.keys(policy.gates).length : field === "agreementTolerancePct" ? standard : max,
     integer, lenderCited, looserDirection: stress ? "magnitude" : field === "agreementTolerancePct" || field.startsWith("max") ? "higher" : "lower" };
 })]));

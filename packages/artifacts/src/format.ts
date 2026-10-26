@@ -64,7 +64,7 @@ export class Formatter {
     const label = preset ? stressLabel(preset,this.lang,this.custom?.standardPolicy?.stresses.find((stress) => stress.key === key)) : this.lang === "fr" ? STRESS[key]?.[1] ?? en : en;
     const removed = this.custom?.changes?.filter((change) => change.stressRemoved && change.path.startsWith(`stresses.${key}.`)) ?? [];
     return plainTerm(this.lang,label) + removed.map((change) => {
-      const field = key === "combined" ? `${changeMeta(this.custom!.policy.version, change).label[this.lang]}: ` : "";
+      const field = key === "combined" ? `${changeMeta(this.custom!.policy.version, change).label[this.lang]}${this.lang === "fr" ? "\u00a0: " : ": "}` : "";
       return ` · ${field}${reportText(this.lang,"stressRemovedBy",change.setBy ?? change.setById,change.setAt.slice(0,10))}`;
     }).join("");
   }
