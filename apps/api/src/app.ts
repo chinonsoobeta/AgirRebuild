@@ -4,15 +4,16 @@ import { randomBytes, randomUUID } from "node:crypto";
 import { getCookie, setCookie, deleteCookie } from "hono/cookie";
 import { stream } from "hono/streaming";
 import { z } from "zod";
-import { FIELD_BY_KEY, outsideWindow, windowMessage, validateThreshold, COUNTRIES, CURRENCIES, FIELDS, FIELD_GROUP_LABELS, METRICS, POLICIES, POLICY_V1, PROVINCE_CODES, REVIEW_MODES, runPolicy, type EngineInput, type Policy } from "@agir/contracts";
+import { FIELD_BY_KEY, outsideWindow, windowMessage, validateThreshold, COUNTRIES, CURRENCIES, FIELDS, FIELD_GROUP_LABELS, METRICS, isSigned, POLICIES, POLICY_V1, PROVINCE_CODES, REVIEW_MODES, runPolicy, type EngineInput, type Policy } from "@agir/contracts";
 import { asUser, type BlobStore, type Db } from "@agir/db";
 import { breakeven, DRIVERS, driversFor, SALE_DRIVERS, EngineInputError, explore, grid, tornado, type DriverKey, type Shock } from "@agir/engine";
 import { canonicalItem, itemFold, kindOf } from "@agir/extraction";
 import { MAX_UPLOAD_BYTES } from "@agir/worker";
-import { checkPassword, countSessions, createSession, deviceLabel, endOtherSessions, endSession, hashPassword, listSessions, PASSWORD_RULE, rateLimiter, SESSION_DAYS, userForSession } from "./auth.ts";
+import { checkPassword, countSessions, createSession, deviceLabel, endOtherSessions, endSession, hashPassword, listSessions, PASSWORD_RULE, SESSION_DAYS, userForSession } from "./auth.ts";
 import { addressTaken, emailAuth } from "./email-auth.ts";
 import { log as defaultLog, type LogFields, type Logger } from "./log.ts";
 import type { Mailer } from "./mailer.ts";
+import { limiter, memoryState, type SharedState } from "./shared-state.ts";
 import { thresholdsView, auditPackage, clientViewer, createRun, dealOverview, hideClientEvents, HttpError, labelRefusal, regionGroups, reviewView, runView, sha256 } from "./services.ts";
 
 export type AppDeps = { db: Db; store: BlobStore; secureCookies: boolean; demoSignIn?: boolean; trustProxy?: boolean; now?: () => Date;
@@ -24,7 +25,8 @@ export type AppDeps = { db: Db; store: BlobStore; secureCookies: boolean; demoSi
   /** Whether the worker runs in this process; reported by /api/health. */ worker?: boolean;
   /** Event lines (card B). */ log?: Logger;
   /** One line per request. main.ts turns it on; tests leave it off so their output stays readable. */ logRequests?: boolean;
-  /** Alerts for an unhandled error and a failed email. Never awaited. */ alert?: Logger };
+  /** Alerts for an unhandled error and a failed email. Never awaited. */ alert?: Logger;
+  /** Rate limits and run stops (card D). Without one, they live in this process's memory. */ state?: SharedState };
 type Env = { Variables: { user: { id: string; email: string; name: string }; requestId: string } };
 
 const COOKIE = "agir_session";
@@ -83,7 +85,7 @@ function windowReason(fieldKey: string, value: number, reason: string | null | u
 
 export function createApp({ db, store, secureCookies, demoSignIn = false, trustProxy = false, now = () => new Date(),
   mailer = { configured: false, send: async () => {} }, publicOrigin = "http://127.0.0.1:8787", progressHook, signup = "open", worker = false,
-  log = defaultLog, logRequests = false, alert = () => {} }: AppDeps) {
+  log = defaultLog, logRequests = false, alert = () => {}, state = memoryState() }: AppDeps) {
   const app = new Hono<Env>();
   /** An unexpected error: logged with its sentence (generic for shared links), alerted without it. */
   const reportError = (c: Context<Env>) => (fields: LogFields) => {
@@ -101,13 +103,10 @@ export function createApp({ db, store, secureCookies, demoSignIn = false, trustP
     try { return getConnInfo(c).remote.address || "local"; }
     catch { return "local"; }
   };
-  const authLimit = rateLimiter(20, 60_000);
-  const shareLimit = rateLimiter(60, 60_000);
-  const inviteLimit = rateLimiter(60, 60_000);
-  const stopLimit = rateLimiter(60, 60_000);
-  // Streamed runs in progress, by run token (card R1). This map lives in this one API process: with several
-  // API processes, a stop could reach a process that is not running the run, so the map would need to be in the database.
-  const runsInProgress = new Map<string, { userId: string; dealId: string; stopRequested: boolean }>();
+  const authLimit = limiter(state, "auth", 20, 60_000);
+  const shareLimit = limiter(state, "share", 60, 60_000);
+  const inviteLimit = limiter(state, "invite", 60, 60_000);
+  const stopLimit = limiter(state, "stop", 60, 60_000);
   const fileResponse = async (a: { kind: string; format: string; storage_key: string | null; run_number: number; deal: string; lang?: "en" | "fr" }, inline: boolean) => {
     const bytes = await store.get(a.storage_key!);
     const mime = { pdf: "application/pdf", docx: "application/vnd.openxmlformats-officedocument.wordprocessingml.document", xlsx: "application/vnd.openxmlformats-officedocument.spreadsheetml.sheet" }[a.format] ?? "application/octet-stream";
@@ -136,7 +135,7 @@ export function createApp({ db, store, secureCookies, demoSignIn = false, trustP
   // Shared links and invitations carry a secret in the path: rate-limited, never cached, never sent on as a referrer.
   for (const [prefix, limit] of [["/api/share/*", shareLimit], ["/api/invite/*", inviteLimit], ["/api/runs/stop", stopLimit]] as const) {
     app.use(prefix, async (c, next) => {
-      if (limit(clientKey(c))) await next();
+      if (await limit(clientKey(c))) await next();
       else c.res = c.json({ error: "Too many requests. Wait a minute." }, 429);
       c.header("cache-control", "no-store");
       c.header("referrer-policy", "no-referrer");
@@ -159,13 +158,13 @@ export function createApp({ db, store, secureCookies, demoSignIn = false, trustP
 
   // ---- Auth -----------------------------------------------------------------------
   const cookieOpts = { httpOnly: true, sameSite: "Lax" as const, secure: secureCookies, path: "/", maxAge: SESSION_DAYS * 86400 };
-  const emailFlows = emailAuth({ db, mailer, publicOrigin, cookie: COOKIE, cookieOpts, clientKey, log, alert });
+  const emailFlows = emailAuth({ db, mailer, publicOrigin, cookie: COOKIE, cookieOpts, clientKey, state, log, alert });
 
   // Whether a person can create an account without an invitation; the sign-up page reads it signed out.
   app.get("/api/auth/signup", (c) => c.json({ open: signup === "open" }));
 
   app.post("/api/auth/signup", async (c) => {
-    if (!authLimit(clientKey(c))) return c.json({ error: "Too many attempts. Wait a minute." }, 429);
+    if (!(await authLimit(clientKey(c)))) return c.json({ error: "Too many attempts. Wait a minute." }, 429);
     const body = z
       .object({ email: z.string().email(), name: z.string().min(1).max(120), password: PASSWORD_RULE, reviewMode: z.enum(REVIEW_MODES).optional(),
         invite: z.string().min(1).max(200).optional() })
@@ -203,7 +202,7 @@ export function createApp({ db, store, secureCookies, demoSignIn = false, trustP
   });
 
   app.post("/api/auth/login", async (c) => {
-    if (!authLimit(clientKey(c))) return c.json({ error: "Too many attempts. Wait a minute." }, 429);
+    if (!(await authLimit(clientKey(c)))) return c.json({ error: "Too many attempts. Wait a minute." }, 429);
     const body = z.object({ email: z.string(), password: z.string() }).parse(await c.req.json());
     const [u] = await db.query<{ id: string; password_hash: string }>(`select id, password_hash from users where email = $1`, [body.email.toLowerCase()]);
     if (!u || !(await checkPassword(body.password, u.password_hash))) return c.json({ error: "That email and password do not match." }, 401);
@@ -257,13 +256,12 @@ export function createApp({ db, store, secureCookies, demoSignIn = false, trustP
   });
 
   // Stopping a streamed run (card R1). The run token is the authority: only the browser that started the run holds it.
-  // No session check and no database: in local development the run's open transaction would make either wait until the run ends.
+  // No session check. In local development (PGlite, memory state) no database either: the run's open transaction would
+  // make either wait until the run ends. With Postgres the stop is kept in the database, on another connection.
   app.post("/api/runs/stop", async (c) => {
     const body: unknown = await c.req.json().catch(() => null);
     const token = body && typeof body === "object" && "token" in body && typeof body.token === "string" ? body.token : "";
-    const run = runsInProgress.get(token);
-    if (!run) return c.json({ error: "This run is not in progress. It may have finished." }, 404);
-    run.stopRequested = true;
+    if (!RUN_TOKEN.test(token) || (await state.runs.requestStop(token)) === "unknown") return c.json({ error: "This run is not in progress. It may have finished." }, 404);
     return c.json({ stopping: true });
   });
 
@@ -312,7 +310,7 @@ export function createApp({ db, store, secureCookies, demoSignIn = false, trustP
   app.get("/api/me", async (c) => {
     const workspaces = await as(c, (tx) =>
       tx.query(
-        `select w.id, w.name, w.review_mode, w.label_suggestions, w.logo_key is not null as has_logo, m.role from workspaces w join workspace_members m on m.workspace_id = w.id and m.user_id = agir_uid() order by w.created_at`,
+        `select w.id, w.name, w.review_mode, w.label_suggestions, w.ai_reading, w.logo_key is not null as has_logo, m.role from workspaces w join workspace_members m on m.workspace_id = w.id and m.user_id = agir_uid() order by w.created_at`,
       ),
     );
     const [v] = await db.query<{ verified: boolean }>(`select email_verified_at is not null as verified from users where id = $1`, [c.get("user").id]);
@@ -404,6 +402,13 @@ export function createApp({ db, store, secureCookies, demoSignIn = false, trustP
   app.post("/api/workspaces/:ws/label-suggestions", async (c) => {
     const { on } = z.object({ on: z.boolean() }).parse(await c.req.json());
     await as(c, (tx) => tx.query(`select fn_set_label_suggestions($1, $2)`, [c.req.param("ws"), on]));
+    return c.json({ ok: true });
+  });
+
+  // Card C: the owner may stop Agir sending deal text to the model for this workspace.
+  app.put("/api/workspaces/:ws/ai-reading", async (c) => {
+    const { on } = z.object({ on: z.boolean() }).parse(await c.req.json());
+    await as(c, (tx) => tx.query(`select fn_set_ai_reading($1, $2)`, [c.req.param("ws"), on]));
     return c.json({ ok: true });
   });
 
@@ -783,9 +788,7 @@ export function createApp({ db, store, secureCookies, demoSignIn = false, trustP
     const dealId = c.req.param("id"), asOf = now().toISOString().slice(0,10);
     const token = c.req.header("x-run-token") ?? "";
     if (!RUN_TOKEN.test(token)) return c.json({ error: "This run needs a valid run token." }, 422);
-    if (runsInProgress.has(token)) return c.json({ error: "A run with this token is already in progress." }, 409);
-    const run = { userId: c.get("user").id, dealId, stopRequested: false };
-    runsInProgress.set(token, run);
+    if (!(await state.runs.start(token, { userId: c.get("user").id, dealId }))) return c.json({ error: "A run with this token is already in progress." }, 409);
     c.header("content-type", "application/x-ndjson");
     c.header("cache-control", "no-store");
     return stream(c, async (s) => {
@@ -794,7 +797,7 @@ export function createApp({ db, store, secureCookies, demoSignIn = false, trustP
       try {
         const id = await as(c, (tx) => createRun(tx, dealId, asOf, {
           stage: async (key, at, facts) => { send({ stage: key, at: at.toISOString(), ...(facts ? { facts } : {}) }); await progressHook?.(key); },
-          check: () => { if (run.stopRequested) throw new RunStopped(); },
+          check: async () => { if (await state.runs.stopRequested(token)) throw new RunStopped(); },
         }));
         // The browser went away before the end (card R1e): the person who started the run hears that it is done by email.
         if (s.aborted) await mailRunDone(c, dealId, id);
@@ -808,7 +811,7 @@ export function createApp({ db, store, secureCookies, demoSignIn = false, trustP
           send({ error: { status, message: error, ...rest } });
         }
       } finally {
-        runsInProgress.delete(token);
+        await state.runs.end(token).catch(() => {});
       }
     });
   });
@@ -1082,6 +1085,7 @@ function sharedRunFacts(run: { result: import("@agir/contracts").RunResult; inpu
     units: items.reduce((n, item) => n + item.units, 0),
     exit: input.exit ?? "sale",
     policyDraft: runPolicy(run.input_snapshot, run.policy_version)?.draft === true,
+    policySigned: isSigned(run.policy_version),
     verdict: { code, gates, hardFailReasons, headline, explanation },
     errorChecks: run.result.checks.filter((check) => check.severity === "error").length,
     figures: SHARED_FIGURES.flatMap((key) => metrics.filter((m) => m.key === key).map((m) => ({ key: m.key, unit: m.unit, value: m.value, status: m.status, reason: m.reason }))),

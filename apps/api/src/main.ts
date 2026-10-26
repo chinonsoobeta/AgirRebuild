@@ -2,17 +2,15 @@ import { existsSync, mkdirSync, readFileSync } from "node:fs";
 import { join, relative, resolve } from "node:path";
 import { serve } from "@hono/node-server";
 import { serveStatic } from "@hono/node-server/serve-static";
-import { fileStore, migrate, openPglite, openPostgres } from "@agir/db";
+import { checkStartup, migrate, openPglite, openPostgres, openStore, type Startup } from "@agir/db";
 import { startWorker } from "@agir/worker";
 import { createApp } from "./app.ts";
 import { alerter, log, type LogFields } from "./log.ts";
+import { dbState, memoryState } from "./shared-state.ts";
 import { fileMailer, unsentMailer } from "./mailer.ts";
 import { DEMO, seedDemo } from "./seed.ts";
 
 const root = resolve(import.meta.dirname, "../../..");
-const env = process.env.AGIR_ENV ?? "development";
-const dataDir = resolve(process.env.AGIR_DATA_DIR ?? join(root, ".data"));
-mkdirSync(dataDir, { recursive: true });
 const port = Number(process.env.PORT ?? 8787);
 const alert = alerter(process.env.AGIR_ALERT_URL);
 /** A refused start is logged and alerted (the alert is awaited, so it leaves before the process exits). */
@@ -22,14 +20,23 @@ const refuse = async (event: string, fields: LogFields) => {
   process.exit(1);
 };
 
-if (env === "production") {
-  for (const k of ["DATABASE_URL", "AGIR_RUN_SIGNING_SECRET"]) {
-    if (!process.env[k]) await refuse("api.refused_start", { reason: `${k} is required in production.` });
-  }
+// The startup check (card A): a refused start is one api.refused_start line, then exit 1.
+let startup!: Startup;
+try {
+  startup = checkStartup(process.env);
+} catch (e) {
+  await refuse("api.refused_start", { reason: (e as Error).message });
 }
+const env = startup.env;
+for (const w of startup.warnings) log("api.warning", { warning: w });
+// Nothing is created before the check passes.
+const dataDir = resolve(process.env.AGIR_DATA_DIR ?? join(root, ".data"));
+mkdirSync(dataDir, { recursive: true });
 // Card B: "invite" lets only a client invitation create an account.
 const signup = process.env.AGIR_SIGNUP ?? "open";
 if (signup !== "open" && signup !== "invite") await refuse("api.refused_start", { reason: "AGIR_SIGNUP must be open or invite." });
+// 127.0.0.1 behind a proxy on the same host; 0.0.0.0 in a container.
+const bind = process.env.AGIR_BIND || "127.0.0.1";
 
 const db = process.env.DATABASE_URL ? await openPostgres(process.env.DATABASE_URL) : await openPglite(join(dataDir, "pg"));
 let applied: string[] = [];
@@ -39,7 +46,7 @@ try {
   await refuse("migrations.failed", { error: (e as Error).message });
 }
 if (applied.length) log("migrations.applied", { count: applied.length, names: applied.join(", ") });
-const store = fileStore(join(dataDir, "blobs"));
+const store = openStore(startup.store, dataDir);
 // The worker runs in-process when the database is embedded; in production it is its own service.
 const embeddedWorker = !process.env.DATABASE_URL || process.env.AGIR_EMBEDDED_WORKER === "1";
 
@@ -54,6 +61,9 @@ const app = createApp({ db, store, secureCookies: env === "production", demoSign
   mailer: env === "production" ? unsentMailer() : fileMailer(join(dataDir, "mail")),
   publicOrigin: process.env.AGIR_PUBLIC_ORIGIN ?? `http://127.0.0.1:${port}`,
   signup: signup as "open" | "invite", worker: embeddedWorker, log, logRequests: true, alert,
+  // Postgres may run several API processes, so rate limits and run stops live in the database. Embedded PGlite is one
+  // process and one connection: a stop written to it would wait for the run's open transaction, so they stay in memory.
+  state: process.env.DATABASE_URL ? dbState(db) : memoryState(),
 });
 const webDist = join(root, "apps/web/dist");
 if (existsSync(webDist)) {
@@ -74,8 +84,8 @@ if (embeddedWorker) {
   } });
 }
 
-serve({ fetch: app.fetch, port, hostname: "127.0.0.1" }, () => {
-  log("api.listening", { url: `http://127.0.0.1:${port}` });
+serve({ fetch: app.fetch, port, hostname: bind }, () => {
+  log("api.listening", { url: `http://${bind}:${port}` });
   // The seeded demo accounts, which exist only outside production.
   if (env !== "production") log("api.demo_sign_in", { email: DEMO.analyst.email, password: DEMO.analyst.password, approver: DEMO.approver.email });
 });

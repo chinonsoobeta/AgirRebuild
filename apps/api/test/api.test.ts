@@ -538,8 +538,8 @@ describe("model label suggestions", () => {
     const snap = async () => (await assumptions()).map((a) => [a.fieldKey, a.status, a.value, a.version, a.sources.map((s: any) => s.rule)]);
     const before = await snap();
     const n = calls.length;
-    await reconcileDeal(db, sd);
-    await reconcileDeal(db, sd);
+    await reconcileDeal(db, store, sd);
+    await reconcileDeal(db, store, sd);
     expect(await snap()).toEqual(before);
     expect(calls).toHaveLength(n);
   });
@@ -640,7 +640,7 @@ describe("a person labels a figure Agir did not use (task 58)", () => {
   test("a label whose figure is gone is dropped at reconcile, and the audit says so", async () => {
     const r = await row("$3,000");
     await db.query(`insert into figure_labels (deal_id, workspace_id, document_id, figure_id, field_key, created_by) select $1, $2, $3, 'nowhere|line 9|$1', 'land_cost', id from users where email = 'alice@example.com'`, [ld, lw, r.documentId]);
-    await reconcileDeal(db, ld);
+    await reconcileDeal(db, store, ld);
     const [ev] = await db.query<any>(`select payload from audit_events where action = 'assumptions.reconciled' and deal_id = $1 order by seq desc limit 1`, [ld]);
     expect(ev.payload.labelDropped).toEqual([expect.objectContaining({ id: "nowhere|line 9|$1" })]);
   });
@@ -820,10 +820,10 @@ describe("card 113: a workspace remembers a person's label for the same unnamed 
       `insert into label_suggestions (document_id, deal_id, workspace_id, model, prompt_hash, request, response, stop_reason, outcome) values ($1, $2, $3, 'claude-fake', 'h', '{}', $4, 'end_turn', 'ok')`,
       [target.documentId, b, mw, JSON.stringify([{ id: target.figureId, fieldKey: "construction_months" }])],
     );
-    await reconcileDeal(db, b);
+    await reconcileDeal(db, store, b);
     expect((await leaseUp(b)).sources.map((s: any) => s.rule)).toEqual(["remembered"]);
     await db.query(`update workspaces set label_suggestions = true where id = $1`, [mw]);
-    await reconcileDeal(db, b);
+    await reconcileDeal(db, store, b);
     // Dropped before the boundary, as a person's label drops one: neither kept nor refused for its unit.
     const [rec] = await db.query<any>(`select payload from audit_events where action = 'assumptions.reconciled' and deal_id = $1 order by seq desc limit 1`, [b]);
     expect(rec.payload).toMatchObject({ suggested: 0, dropped: [], remembered: [{ id: target.figureId, field: "lease_up_months", item: "" }] });
@@ -1523,7 +1523,7 @@ describe("card 62: a deal is copied as a variant, in exactly the state of its so
       [d],
     );
   const reconciled = async (d: string) => {
-    await reconcileDeal(db, d);
+    await reconcileDeal(db, store, d);
     const [ev] = await db.query<any>(`select payload from audit_events where action = 'assumptions.reconciled' and deal_id = $1 order by seq desc limit 1`, [d]);
     return ev.payload;
   };
@@ -1805,7 +1805,7 @@ describe("card 58b: undoing a label puts back the value the label reopened, when
     expect(restored.reason).toBe("The label that disagreed was removed; the value is back as it was approved");
     expect(await reconciled(d)).toMatchObject({ restored: 1 });
     // A reconcile with nothing to restore has no `restored` key, and writes no second event.
-    await reconcileDeal(db, d);
+    await reconcileDeal(db, store, d);
     expect(Object.keys(await reconciled(d))).not.toContain("restored");
     expect(await events(d, "exit_cap_rate_pct", "restored")).toHaveLength(1);
   });
@@ -1933,7 +1933,7 @@ describe("card 58b: undoing a label puts back the value the label reopened, when
     expect(Object.keys(await reconciled(d))).not.toContain("restored_values");
     await undo(d, "5.25%");
     expect(await reconciled(d)).toMatchObject({ restored: 1, restored_values: [{ field: "exit_cap_rate_pct", item: "" }] });
-    await reconcileDeal(db, d);
+    await reconcileDeal(db, store, d);
     expect(Object.keys(await reconciled(d))).not.toContain("restored_values");
   });
 });
@@ -3567,7 +3567,7 @@ describe("Card 137: confirming a region", () => {
     expect(before.assumptions.every((a: any) => a.sources[0].region?.source === "sheet")).toBe(true);
     // Existing assumptions gain provenance without a new review version.
     for (const a of before.assumptions) await db.query(`update assumptions set sources = $2 where id = $1`, [a.id, JSON.stringify(a.sources.map(({ region, ...s }: any) => s))]);
-    await reconcileDeal(db, d);
+    await reconcileDeal(db, store, d);
     expect((await read()).assumptions.map((a: any) => [a.id, a.version])).toEqual(before.assumptions.map((a: any) => [a.id, a.version]));
     expect((await read()).assumptions.every((a: any) => a.sources[0].region?.source === "sheet")).toBe(true);
     const questioned = before.assumptions[0];
@@ -3802,7 +3802,7 @@ describe("card 160a: the deal AI reader", () => {
     expect(land.sources.some((s: any) => s.rule !== "ai")).toBe(true);
     // A retired document changes the hash; its stored reading no longer participates.
     await db.query(`update documents set retired_at=now() where deal_id=$1 and name='second.txt'`, [id]);
-    await reconcileDeal(db, id);
+    await reconcileDeal(db, store, id);
     const [after] = await db.query<any>(`select * from assumptions where deal_id=$1 and field_key='land_cost'`, [id]);
     expect(after.sources.some((s: any) => s.rule === "ai")).toBe(false);
   });
@@ -3885,6 +3885,128 @@ describe("card 150 todoList", () => {
     expect(result.items.every(x => x.itemKey === null)).toBe(true);
     expect(result.items.at(-1)).toMatchObject({ fieldKey: "land_cost", blocking: false });
     expect(todoList(ready(), [], ai)).toMatchObject({ blocking: 0, items: [{ kind: "ai_check", blocking: false }] });
+  });
+});
+
+describe("card C: the AI reading switch, the region and less stored text", () => {
+  let cw: string;
+  const r = (field: string, value: number, location: string, quote: string, file = "fiction.txt") => ({ field, value, location, quote, confidence: "high" as const, item: null, unit_seen: "$" as const, file, note: null });
+  const answer = async (_request: ReaderRequest) => ({ readings: [r("land_cost", 400000, "line 1", "$400,000"), r("other_cost", 7000, "line 2", "7000")], conflicts: [], not_used: [] });
+  const newDeal = async (text = "Land cost: $400,000\nUnlabelled reserve 7000") => {
+    const id = (await call(alice, "POST", `/api/workspaces/${cw}/deals`, { name: "Invented switch deal", assetType: "Multifamily", location: "Vancouver" })).json.id;
+    await call(alice, "PUT", `/api/deals/${id}/documents?name=fiction.txt`, undefined, new TextEncoder().encode(text));
+    return id;
+  };
+  const sources = async (id: string) => (await db.query<any>(`select field_key, value, status, sources from assumptions where deal_id=$1 order by field_key, item_key`, [id]));
+  const aiUsed = async (id: string) => (await sources(id)).some(a => a.sources.some((s: any) => s.rule === "ai"));
+  const setReading = (s: Session, on: boolean) => call(s, "PUT", `/api/workspaces/${cw}/ai-reading`, { on });
+  beforeAll(async () => {
+    cw = (await call(alice, "POST", "/api/workspaces", { name: "Switching" })).json.id;
+    expect((await call(alice, "POST", `/api/workspaces/${cw}/members`, { email: "bob@example.com", role: "admin" })).status).toBe(200);
+  });
+
+  test("is on by default; only the owner turns it off, and the change is audited", async () => {
+    const me = async () => (await call(alice, "GET", "/api/me")).json.workspaces.find((w: any) => w.id === cw);
+    expect((await me()).ai_reading).toBe(true);
+    expect((await setReading(bob, false)).status).toBe(403);
+    expect((await me()).ai_reading).toBe(true);
+    expect((await setReading(alice, false)).status).toBe(200);
+    expect((await me()).ai_reading).toBe(false);
+    expect((await setReading(alice, true)).status).toBe(200);
+    const ev = await db.query<any>(`select payload from audit_events where action = 'workspace.ai_reading' and workspace_id = $1 order by seq`, [cw]);
+    expect(ev.map(e => e.payload)).toEqual([{ on: false }, { on: true }]);
+    await work();
+  });
+
+  test("off: the provider is never called and no reading is stored; on again: it reads", async () => {
+    const id = await newDeal();
+    expect((await setReading(alice, false)).status).toBe(200);
+    const read = vi.fn(answer);
+    await drain({ db, store, read });
+    expect(read).not.toHaveBeenCalled();
+    expect(await db.query(`select id from ai_readings where deal_id=$1`, [id])).toEqual([]);
+    expect((await sources(id)).find(a => a.field_key === "land_cost")?.value).toBe(400000);
+    expect(await aiUsed(id)).toBe(false);
+    expect((await setReading(alice, true)).status).toBe(200);
+    const [document] = await db.query<any>(`select id from documents where deal_id=$1`, [id]);
+    await db.query(`insert into jobs (kind,payload) values ('extract_document',$1)`, [JSON.stringify({ document_id: document.id })]);
+    await drain({ db, store, read });
+    expect(read).toHaveBeenCalledTimes(1);
+    expect(await db.query(`select id from ai_readings where deal_id=$1`, [id])).toHaveLength(1);
+    expect(await aiUsed(id)).toBe(true);
+  });
+
+  test("turning it off drops a stored reading on the next reconcile; turning it on replays it without a call", async () => {
+    const id = await newDeal();
+    const read = vi.fn(answer);
+    await drain({ db, store, read });
+    expect(await aiUsed(id)).toBe(true);
+    expect((await setReading(alice, false)).status).toBe(200);
+    await drain({ db, store, read });
+    expect(await aiUsed(id)).toBe(false);
+    expect((await setReading(alice, true)).status).toBe(200);
+    await drain({ db, store, read });
+    expect(await aiUsed(id)).toBe(true);
+    expect(read).toHaveBeenCalledTimes(1);
+  });
+
+  test("both model requests ask for inference in the United States", async () => {
+    await db.query(`update workspaces set label_suggestions = true where id = $1`, [cw]);
+    try {
+      await newDeal("Land cost: $400,000\nBanner allowance: $7,000");
+      const read = vi.fn(answer);
+      const suggest = vi.fn(async (_request: SuggestRequest): Promise<SuggestReply> => ({ model: "claude-fake", stop_reason: "end_turn", text: JSON.stringify({ suggestions: [] }) }));
+      await drain({ db, store, read, suggest });
+      expect(suggest).toHaveBeenCalled();
+      expect(read).toHaveBeenCalledTimes(1);
+      for (const [request] of [...suggest.mock.calls, ...read.mock.calls]) expect(request.inference_geo).toBe("us");
+    } finally {
+      await db.query(`update workspaces set label_suggestions = false where id = $1`, [cw]);
+    }
+  });
+
+  test("a stored reading keeps no request and only names its documents; a reconcile replays it identically", async () => {
+    const id = await newDeal();
+    await drain({ db, store, read: answer });
+    const [row] = await db.query<any>(`select * from ai_readings where deal_id=$1`, [id]);
+    expect(Object.keys(row)).not.toContain("request");
+    const [document] = await db.query<any>(`select id, name, sha256 from documents where deal_id=$1`, [id]);
+    expect(row.verification.documents).toEqual([{ id: document.id, name: document.name, sha256: document.sha256 }]);
+    expect(JSON.stringify(row.verification)).not.toContain("Unlabelled reserve");
+    // A second reconcile settles the sources' regions (as before card C), so compare from there.
+    await reconcileDeal(db, store, id);
+    const before = await sources(id);
+    await reconcileDeal(db, store, id);
+    const [after] = await db.query<any>(`select verification from ai_readings where deal_id=$1`, [id]);
+    expect(after.verification).toEqual(row.verification);
+    expect(await sources(id)).toEqual(before);
+  });
+
+  test("a reading stored with its parsed documents, before this change, still replays the same", async () => {
+    const id = await newDeal();
+    await drain({ db, store, read: answer });
+    await reconcileDeal(db, store, id);
+    const before = await sources(id);
+    const [row] = await db.query<any>(`select id, verification from ai_readings where deal_id=$1`, [id]);
+    const [d] = await db.query<any>(`select id, name, storage_key from documents where deal_id=$1`, [id]);
+    const old = { ...row.verification, documents: [{ id: d.id, name: d.name, document: await extraction.parseDocument(await store.get(d.storage_key), d.name) }] };
+    await db.query(`update ai_readings set verification=$2 where id=$1`, [row.id, JSON.stringify(old)]);
+    await reconcileDeal(db, store, id);
+    expect(await sources(id)).toEqual(before);
+  });
+
+  test("a document no longer extracted since the reading is left out of the replay", async () => {
+    const id = await newDeal("Land cost: $400,000");
+    await call(alice, "PUT", `/api/deals/${id}/documents?name=second.txt`, undefined, new TextEncoder().encode("Other amount 7000"));
+    await drain({ db, store, read: async () => ({ readings: [r("land_cost", 400000, "line 1", "$400,000"), r("other_cost", 7000, "line 1", "7000", "second.txt")], conflicts: [], not_used: [] }) });
+    const other = async () => (await sources(id)).find(a => a.field_key === "other_cost");
+    expect((await other())?.sources.some((s: any) => s.rule === "ai")).toBe(true);
+    await db.query(`update documents set stage='read_failed' where deal_id=$1 and name='second.txt'`, [id]);
+    await reconcileDeal(db, store, id);
+    expect((await other())?.sources.some((s: any) => s.rule === "ai") ?? false).toBe(false);
+    expect((await sources(id)).find(a => a.field_key === "land_cost")?.sources.some((s: any) => s.rule === "ai")).toBe(true);
+    const [row] = await db.query<any>(`select verification from ai_readings where deal_id=$1`, [id]);
+    expect(row.verification.documents.map((d: any) => d.name)).toEqual(["fiction.txt"]);
   });
 });
 

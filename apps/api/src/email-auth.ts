@@ -8,9 +8,10 @@ import type { Context, Hono } from "hono";
 import { getCookie, setCookie } from "hono/cookie";
 import { z } from "zod";
 import type { Db } from "@agir/db";
-import { checkPassword, createSession, deviceLabel, hashPassword, PASSWORD_RULE, rateLimiter, userForSession } from "./auth.ts";
+import { checkPassword, createSession, deviceLabel, hashPassword, PASSWORD_RULE, userForSession } from "./auth.ts";
 import type { Logger } from "./log.ts";
 import type { Mailer } from "./mailer.ts";
+import { limiter, type SharedState } from "./shared-state.ts";
 
 type Kind = "verify_email" | "reset_password" | "change_email" | "undo_email_change";
 const TOKEN_MINUTES = 60;
@@ -55,6 +56,8 @@ export type EmailAuthDeps = {
   clientKey: (c: Context<any>) => string;
   log: Logger;
   alert: Logger;
+  /** Where the rate limits are counted (card D). */
+  state: SharedState;
 };
 
 /**
@@ -167,14 +170,14 @@ function changedMail(origin: string, token: string, newEmail: string) {
   };
 }
 
-export function emailAuth({ db, mailer, publicOrigin, cookie, cookieOpts, clientKey, log, alert }: EmailAuthDeps) {
+export function emailAuth({ db, mailer, publicOrigin, cookie, cookieOpts, clientKey, state, log, alert }: EmailAuthDeps) {
   const origin = publicOrigin.replace(/\/+$/, "");
-  const verifySendLimit = rateLimiter(5, 60 * 60_000); // per person
-  const codeLimit = rateLimiter(10, 15 * 60_000); // per person
-  const tokenLimit = rateLimiter(20, 60_000); // per address, for verify and reset
-  const resetSendIpLimit = rateLimiter(10, 15 * 60_000); // per address
-  const resetSendEmailLimit = rateLimiter(3, 60 * 60_000); // per email, whether or not it has an account
-  const changeLimit = rateLimiter(5, 60 * 60_000); // per person, counted before the password check, so it also limits guessing
+  const verifySendLimit = limiter(state, "verify-send", 5, 60 * 60_000); // per person
+  const codeLimit = limiter(state, "code", 10, 15 * 60_000); // per person
+  const tokenLimit = limiter(state, "email-token", 20, 60_000); // per address, for verify and reset
+  const resetSendIpLimit = limiter(state, "reset-send-ip", 10, 15 * 60_000); // per address
+  const resetSendEmailLimit = limiter(state, "reset-send-email", 3, 60 * 60_000); // per email, whether or not it has an account
+  const changeLimit = limiter(state, "email-change", 5, 60 * 60_000); // per person, counted before the password check, so it also limits guessing
   const tooMany = (c: Context<any>) => c.json({ error: "Too many attempts. Wait a while and try again." }, 429);
   const taken = (c: Context<any>) => c.json({ error: TAKEN }, 409);
   /** Added to an answer when no mail provider is configured (card B): the token is made, and simply not delivered. */
@@ -195,7 +198,7 @@ export function emailAuth({ db, mailer, publicOrigin, cookie, cookieOpts, client
     app.post("/api/auth/verify/send", async (c) => {
       const user = await userForSession(db, getCookie(c, cookie));
       if (!user) return c.json({ error: "Sign in to continue." }, 401);
-      if (!verifySendLimit(user.id)) return tooMany(c);
+      if (!(await verifySendLimit(user.id))) return tooMany(c);
       await sendVerification(user);
       return c.json({ ok: true, ...unsent });
     });
@@ -204,13 +207,13 @@ export function emailAuth({ db, mailer, publicOrigin, cookie, cookieOpts, client
       const body = z.union([z.object({ token: z.string().min(1).max(200) }).strict(), z.object({ code: z.string().regex(/^\d{6}$/) }).strict()]).parse(await c.req.json());
       let userId: string | null;
       if ("token" in body) {
-        if (!tokenLimit(clientKey(c))) return tooMany(c);
+        if (!(await tokenLimit(clientKey(c)))) return tooMany(c);
         userId = await spend(db, body.token, "verify_email");
         if (!userId) return c.json({ error: "This link does not work any more. It may have been used or expired. Ask for a new one." }, 400);
       } else {
         const user = await userForSession(db, getCookie(c, cookie));
         if (!user) return c.json({ error: "Sign in to continue." }, 401);
-        if (!codeLimit(user.id)) return tooMany(c);
+        if (!(await codeLimit(user.id))) return tooMany(c);
         // Only the person's own live code counts; compare hashes in constant time, then spend that token once.
         const live = await db.query<{ token_hash: string; code_hash: string }>(
           `select token_hash, code_hash from email_tokens where user_id = $1 and kind = 'verify_email' and code_hash is not null and used_at is null and expires_at > now()`,
@@ -232,7 +235,7 @@ export function emailAuth({ db, mailer, publicOrigin, cookie, cookieOpts, client
     app.post("/api/auth/reset/send", async (c) => {
       const { email } = z.object({ email: z.string().email().max(320) }).parse(await c.req.json());
       const normalized = email.toLowerCase();
-      if (!resetSendIpLimit(clientKey(c)) || !resetSendEmailLimit(normalized)) return tooMany(c);
+      if (!(await resetSendIpLimit(clientKey(c))) || !(await resetSendEmailLimit(normalized))) return tooMany(c);
       const [u] = await db.query<{ id: string; email: string }>(`select id, email from users where email = $1`, [normalized]);
       if (u) {
         const { token } = await issue(db, u.id, "reset_password");
@@ -243,7 +246,7 @@ export function emailAuth({ db, mailer, publicOrigin, cookie, cookieOpts, client
     });
 
     app.post("/api/auth/reset", async (c) => {
-      if (!tokenLimit(clientKey(c))) return tooMany(c);
+      if (!(await tokenLimit(clientKey(c)))) return tooMany(c);
       const body = z.object({ token: z.string().min(1).max(200), password: PASSWORD_RULE, signOutOthers: z.boolean() }).parse(await c.req.json());
       const passwordHash = await hashPassword(body.password);
       const userId = await db.transaction(async (tx) => {
@@ -265,7 +268,7 @@ export function emailAuth({ db, mailer, publicOrigin, cookie, cookieOpts, client
     app.post("/api/me/email", async (c) => {
       const user = await userForSession(db, getCookie(c, cookie));
       if (!user) return c.json({ error: "Sign in to continue." }, 401);
-      if (!changeLimit(user.id)) return tooMany(c);
+      if (!(await changeLimit(user.id))) return tooMany(c);
       const body = z.object({ email: z.string().email().max(320), password: z.string().max(1000) }).parse(await c.req.json());
       const email = body.email.toLowerCase();
       const [u] = await db.query<{ password_hash: string; verified: boolean }>(
@@ -302,7 +305,7 @@ export function emailAuth({ db, mailer, publicOrigin, cookie, cookieOpts, client
 
     // Opening the link sent to the new address: no session needed, it may be opened on any device.
     app.post("/api/auth/email/confirm", async (c) => {
-      if (!tokenLimit(clientKey(c))) return tooMany(c);
+      if (!(await tokenLimit(clientKey(c)))) return tooMany(c);
       const { token } = z.object({ token: z.string().min(1).max(200) }).parse(await c.req.json());
       let done: { newEmail: string; oldEmail: string; undo: string | null } | null;
       try {
@@ -335,7 +338,7 @@ export function emailAuth({ db, mailer, publicOrigin, cookie, cookieOpts, client
 
     // Opening the undo link sent to the old address: no session needed.
     app.post("/api/auth/email/undo", async (c) => {
-      if (!tokenLimit(clientKey(c))) return tooMany(c);
+      if (!(await tokenLimit(clientKey(c)))) return tooMany(c);
       const { token } = z.object({ token: z.string().min(1).max(200) }).parse(await c.req.json());
       let restored: { user_id: string; email: string } | null;
       try {

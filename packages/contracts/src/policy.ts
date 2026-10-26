@@ -161,6 +161,13 @@ export const POLICIES: Readonly<Record<string, Policy>> = {
   [FOR_SALE_DRAFT.version]: FOR_SALE_DRAFT,
 };
 
+/** The policy versions credit has signed. Empty: credit has signed none yet. Credit adds a version here when it signs. */
+export const SIGNED_POLICIES: ReadonlySet<string> = new Set<string>();
+/** Whether credit has signed this policy version; every report and run screen says so when it has not. */
+export function isSigned(version: string): boolean {
+  return SIGNED_POLICIES.has(version);
+}
+
 /** The policy a stored run was made under: the copy it stored, else (a run made before runs stored it) this build's policy of that version. */
 export function runPolicy(snapshot: { policy?: Policy }, version: string): Policy | undefined {
   return snapshot.policy ?? POLICIES[version];

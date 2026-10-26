@@ -1,7 +1,8 @@
 import { plainTerm, FIELD_BY_KEY, placeLabel } from "@agir/contracts";
 import { heldPartnerReturns, runWaterfall } from "@agir/engine";
 import { Formatter } from "./format.ts";
-import { customThresholdBlocks, confirmationLabel, DRAFT_POLICY_LINE, notFoundSentence, type ArtifactInput } from "./model.ts";
+import { customThresholdBlocks, confirmationLabel, notFoundSentence, policyLineKey, type ArtifactInput } from "./model.ts";
+import { reportText } from "./text.ts";
 
 /**
  * The model export: every number of the run as a number, never as text, so an
@@ -30,7 +31,9 @@ export async function renderXlsx(x: ArtifactInput): Promise<Uint8Array> {
   summary.addRow(["Currency", x.deal.currency ?? "Not stated"]);
   summary.addRow([`Run ${x.run.runNumber}`, x.run.createdAt]);
   summary.addRow(["Engine", x.run.engineVersion, "Policy", x.run.policyVersion]);
-  if (x.policy.draft) summary.addRow([DRAFT_POLICY_LINE]);
+  // The export is English only: the API refuses a French one.
+  const policyLine = policyLineKey(x);
+  if (policyLine) summary.addRow([reportText("en", policyLine)]);
   summary.addRow(["Input hash", x.run.inputHash]);
   summary.addRow(["Result hash", x.run.resultHash]);
   summary.addRow([]);

@@ -86,6 +86,8 @@ export function describeEvent(i: I18n, e: AuditEvent): string {
       const on = (b: boolean) => (fr ? (b ? "activées" : "désactivées") : b ? "on" : "off");
       return fr ? `A changé les suggestions de libellés\u00a0: ${on(p.from)} → ${on(p.to)}` : `Changed label suggestions: ${on(p.from)} to ${on(p.to)}`;
     }
+    case "workspace.ai_reading":
+      return fr ? (p.on ? "A activé la lecture des documents par l'IA" : "A désactivé la lecture des documents par l'IA") : p.on ? "Turned AI reading of documents on" : "Turned AI reading of documents off";
     case "review.granted":
       return fr ? `A donné accès à un réviseur${p.expires_at ? ` jusqu'au ${i.f.date(p.expires_at)}` : ""}` : `Gave a reviewer access${p.expires_at ? ` until ${i.f.date(p.expires_at)}` : ""}`;
     case "document.suggestions_failed":

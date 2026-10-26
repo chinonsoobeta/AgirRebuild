@@ -139,3 +139,12 @@ describe("card P2 French stress names keep a size with its unit", () => {
     expect(stressLabel({ ...cost, costPct: 12 }, "fr", cost)).toBe("Coûts +12\u00a0%");
   });
 });
+
+import { isSigned, SIGNED_POLICIES } from "../src/policy.ts";
+describe("card E: no policy is signed by credit yet", () => {
+  it("lists no signed policy, so signing one is a visible code change", () => {
+    expect(SIGNED_POLICIES.size).toBe(0);
+    expect(isSigned("policy-v1")).toBe(false);
+    for (const version of Object.keys(POLICIES)) expect(isSigned(version), version).toBe(false);
+  });
+});

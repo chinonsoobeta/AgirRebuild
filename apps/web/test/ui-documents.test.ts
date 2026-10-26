@@ -5,7 +5,7 @@ import type { DocumentRow } from "../src/api";
 import { Documents } from "../src/routes/documents.tsx";
 
 // Card W5: the Documents screen. Mocks follow apps/web/test/run.test.ts.
-const state = vi.hoisted(() => ({ docs: undefined as unknown, role: "owner" }));
+const state = vi.hoisted(() => ({ docs: undefined as unknown, role: "owner", ai: true, lang: "en" as "en" | "fr" }));
 vi.mock("@tanstack/react-query", () => ({
   useQuery: (options: { queryKey: unknown[] }) => (options.queryKey[0] === "documents" ? { data: state.docs } : {}),
   useMutation: () => ({ mutate: () => {}, isPending: false, reset: () => {}, error: null }),
@@ -24,13 +24,13 @@ vi.mock("../src/components/ui", async (original) => {
   return {
     ...ui,
     DealFrame: () => createElement("header", null, "Deal header"),
-    useDeal: () => ({ data: { deal: { id: "d1", name: "Test deal" }, documents: { total: 0, processing: 0, failed: 0 } } }),
-    useSession: () => ({ solo: true, role: state.role }),
+    useDeal: () => ({ data: { deal: { id: "d1", name: "Test deal", workspace_id: "ws" }, documents: { total: 0, processing: 0, failed: 0 } } }),
+    useSession: () => ({ solo: true, role: state.role, me: { workspaces: [{ id: "other", ai_reading: !state.ai }, { id: "ws", ai_reading: state.ai }] } }),
   };
 });
 vi.mock("../src/i18n", async (original) => {
   const i18n = await original<typeof import("../src/i18n")>();
-  return { ...i18n, useI18n: () => i18n.build("en", () => {}) };
+  return { ...i18n, useI18n: () => i18n.build(state.lang, () => {}) };
 });
 vi.mock("../src/components/QuickStart", async () => {
   const { createElement } = await import("react");
@@ -56,6 +56,8 @@ const count = (html: string, s: string) => html.split(s).length - 1;
 beforeEach(() => {
   state.docs = everyStage();
   state.role = "owner";
+  state.ai = true;
+  state.lang = "en";
 });
 
 describe("Documents screen", () => {
@@ -99,6 +101,20 @@ describe("Documents screen", () => {
     expect(html).not.toContain("Drop deal documents here");
     expect(html).not.toContain(">Remove<");
     expect(html).not.toContain(">Retry<");
+  });
+
+  it("says under the drop zone whether the deal's workspace reads documents with AI (card C)", () => {
+    const on = render();
+    expect(on).toContain("AI reading is on for this workspace");
+    expect(on.indexOf("AI reading is on")).toBeGreaterThan(on.indexOf("doc-upload"));
+    state.ai = false;
+    expect(render()).toContain("AI reading is off for this workspace: only Agir&#x27;s own rules read these documents.");
+    state.lang = "fr";
+    expect(render()).toContain("La lecture par IA est désactivée pour cet espace de travail\u00a0:");
+    state.ai = true;
+    expect(render()).toContain("La lecture par IA est activée pour cet espace de travail\u00a0:");
+    state.role = "viewer";
+    expect(render()).not.toContain("La lecture par IA");
   });
 
   it("offers Retry only for a file that could not be read", () => {

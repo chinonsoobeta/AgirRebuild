@@ -70,7 +70,7 @@ function Result({ d, i }: { d: DocumentRow; i: I18n }) {
 export function Documents({ dealId }: { dealId: string }) {
   const i = useI18n();
   const { t, f } = i;
-  const { role } = useSession();
+  const { role, me } = useSession();
   const qc = useQueryClient();
   const deal = useDeal(dealId);
   const docs = useQuery({
@@ -110,6 +110,8 @@ export function Documents({ dealId }: { dealId: string }) {
   const pick = (list: FileList | null) => list && list.length && upload.mutate([...list]);
   if (!deal.data) return <p className="muted">{t("common.loading")}</p>;
   const editable = canEdit(role);
+  // Card C: which way the owner set AI reading for the deal's workspace.
+  const aiReading = me.workspaces.find((w) => w.id === deal.data!.deal.workspace_id)?.ai_reading;
   const list = docs.data ?? [];
   const empty = docs.data?.length === 0;
   const counts = [
@@ -156,6 +158,7 @@ export function Documents({ dealId }: { dealId: string }) {
             </div>
           </div>
         )}
+        {editable && aiReading !== undefined && <p className="small muted">{t(aiReading ? "documents.ai.on" : "documents.ai.off")}</p>}
         <ErrorText error={upload.error ?? act.error ?? setRole.error} />
         {notes.map((n) => <p key={n} className="small muted">{n}</p>)}
 
