@@ -408,6 +408,9 @@ describe("Card J: verifier refusals of figures that are written", () => {
     build("chip.txt", ["Anticipated sources of funding ($M)", "Applicant land equity 9.44", "Initiative grant", "Required mortgage ($M) $43.63", "Land (in thousands) 8,500"]),
     build("label.txt", ["Summary", "Required mortgage ($M) $43.63", "Land costs ($K) $1,250 then Loan $12,000,000"]),
     build("clash.txt", ["Budget ($K)", "Required mortgage ($M) $43.63"]),
+    // A scale word inside a figure written in words is not the label's scale.
+    build("words.txt", ["Purchase agreement", "Seven Million Four Hundred Twenty Thousand (CAD $7,420,000.00) Dollars being the price", "Thousand (CAD $7,420,000.00) Dollars", "Prix : sept millions quatre cent vingt mille (7 420 000 $) dollars", "mille (7 420 000 $) dollars"]),
+    build("markers.txt", ["Land in thousands 8,500", "Hard costs $ millions 29.15", "Terrain en milliers 8 500 $"]),
   ];
   const millions = "$ (stated in millions; × 1,000,000)";
   const thousands = "$ (stated in thousands; × 1,000)";
@@ -427,6 +430,13 @@ describe("Card J: verifier refusals of figures that are written", () => {
     // The label of the second figure is "then Loan", not the "($K)" of the first.
     ["label.txt", "line 3", "Loan $12,000,000", "senior_loan_amount", 12000000, 12000000, "$"],
     ["clash.txt", "line 2", "Required mortgage ($M) $43.63", "senior_loan_amount", 43.63, "scale", "$"],
+    ["words.txt", "line 2", "Thousand (CAD $7,420,000.00) Dollars", "land_cost", 7420000, 7420000, "$"],
+    ["words.txt", "line 3", "Thousand (CAD $7,420,000.00) Dollars", "land_cost", 7420000, 7420000, "$"],
+    ["words.txt", "line 4", "mille (7 420 000 $) dollars", "land_cost", 7420000, 7420000, "$"],
+    ["words.txt", "line 5", "mille (7 420 000 $) dollars", "land_cost", 7420000, 7420000, "$"],
+    ["markers.txt", "line 1", "Land in thousands 8,500", "land_cost", 8500, 8500000, thousands],
+    ["markers.txt", "line 2", "Hard costs $ millions 29.15", "hard_cost", 29.15, 29150000, millions],
+    ["markers.txt", "line 3", "Terrain en milliers 8 500 $", "land_cost", 8500, 8500000, thousands],
   ] as const)("%s %s %s = %s", (file, location, quote, field, value, expected, unitSeen) => {
     const got = verifyReading({ ...reading, file, location, quote, field, value }, sources);
     expect(got.outcome).toBe(typeof expected === "number" ? "verified" : READING_FAILURE[expected]);
