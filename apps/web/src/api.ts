@@ -166,6 +166,8 @@ export type SharedReport = {
   /** What the shared run stored, never recomputed (card Y2). A link whose run cannot be read has none of these. */
   workspace?: string; location?: string; province?: string | null; currency?: string | null; runAt?: string;
   units?: number; exit?: "sale" | "refinance_hold" | "for_sale"; policyDraft?: boolean;
+  /** False when credit has not signed the run's policy (card E); the page then says so. */
+  policySigned?: boolean;
   verdict?: RunView["result"]["verdict"]; errorChecks?: number;
   /** Stored base-case metrics in a fixed order; only the ones the run has. */
   figures?: Pick<Metric, "key" | "unit" | "value" | "status" | "reason">[];

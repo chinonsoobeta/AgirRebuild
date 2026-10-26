@@ -4,7 +4,7 @@ import { randomBytes } from "node:crypto";
 import { getCookie, setCookie, deleteCookie } from "hono/cookie";
 import { stream } from "hono/streaming";
 import { z } from "zod";
-import { FIELD_BY_KEY, outsideWindow, windowMessage, validateThreshold, COUNTRIES, CURRENCIES, FIELDS, FIELD_GROUP_LABELS, METRICS, POLICIES, POLICY_V1, PROVINCE_CODES, REVIEW_MODES, runPolicy, type EngineInput, type Policy } from "@agir/contracts";
+import { FIELD_BY_KEY, outsideWindow, windowMessage, validateThreshold, COUNTRIES, CURRENCIES, FIELDS, FIELD_GROUP_LABELS, METRICS, isSigned, POLICIES, POLICY_V1, PROVINCE_CODES, REVIEW_MODES, runPolicy, type EngineInput, type Policy } from "@agir/contracts";
 import { asUser, type BlobStore, type Db } from "@agir/db";
 import { breakeven, DRIVERS, driversFor, SALE_DRIVERS, EngineInputError, explore, grid, tornado, type DriverKey, type Shock } from "@agir/engine";
 import { canonicalItem, itemFold, kindOf } from "@agir/extraction";
@@ -1033,6 +1033,7 @@ function sharedRunFacts(run: { result: import("@agir/contracts").RunResult; inpu
     units: items.reduce((n, item) => n + item.units, 0),
     exit: input.exit ?? "sale",
     policyDraft: runPolicy(run.input_snapshot, run.policy_version)?.draft === true,
+    policySigned: isSigned(run.policy_version),
     verdict: { code, gates, hardFailReasons, headline, explanation },
     errorChecks: run.result.checks.filter((check) => check.severity === "error").length,
     figures: SHARED_FIGURES.flatMap((key) => metrics.filter((m) => m.key === key).map((m) => ({ key: m.key, unit: m.unit, value: m.value, status: m.status, reason: m.reason }))),
