@@ -2752,9 +2752,12 @@ export function declaredScale(doc: NormalizedDocument, format: DocumentFormat, l
   return map.get(location) ?? { rule: null, own: false };
 }
 
+// A label states a scale only as a marker: in brackets, after "in" or "en", or with a dollar sign. A bare "Thousand" or "mille" is a word of a figure written in words.
+const LABEL_MARKER_RE = /\([^()]*\)|(?:\b(?:in|en)\s+|\$\s?)(?:thousands?|millions?|milliers?)\b|\$\s?['’]?000s?\b|\b000s?\s?\$|['’]000s?\b|\$\s?mm\b|(?<!\d\s?)(?:\$\s?[mk]\b|\b[mk]\$)/g;
+
 /** The money scale a figure's own label states ("Required mortgage ($M)", "Land (in thousands)"), when it states exactly one. */
 export function labelScale(label: string): { factor: number } | null {
-  const rule = rulingOf(statedScales(label));
+  const rule = rulingOf([...fold(label).matchAll(LABEL_MARKER_RE)].flatMap((m) => statedScales(m[0])));
   return rule && "factor" in rule ? rule : null;
 }
 
