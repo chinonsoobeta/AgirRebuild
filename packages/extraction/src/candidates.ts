@@ -2752,6 +2752,12 @@ export function declaredScale(doc: NormalizedDocument, format: DocumentFormat, l
   return map.get(location) ?? { rule: null, own: false };
 }
 
+/** The money scale a figure's own label states ("Required mortgage ($M)", "Land (in thousands)"), when it states exactly one. */
+export function labelScale(label: string): { factor: number } | null {
+  const rule = rulingOf(statedScales(label));
+  return rule && "factor" in rule ? rule : null;
+}
+
 export function statedScaleUnit(factor: number): string {
   return `$ (stated in ${factor === 1e3 ? "thousands" : "millions"}; × ${factor.toLocaleString("en-US")})`;
 }
