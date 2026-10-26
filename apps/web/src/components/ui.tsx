@@ -81,6 +81,7 @@ export function Shell({ children }: { children: ReactNode }) {
   };
   const onDeals = path.startsWith("/deals") || path === "/";
   const onSettings = path.startsWith("/settings");
+  const closed = Boolean(me.workspaces.find((w) => w.id === workspaceId)?.closed_at);
   return (
     <>
       <a className="skip" href="#main-content" onClick={(e) => { e.preventDefault(); document.getElementById("main-content")?.focus(); }}>{t("shell.skip")}</a>
@@ -113,7 +114,11 @@ export function Shell({ children }: { children: ReactNode }) {
           <button type="button" className="toplink" onClick={signOut}>{t("nav.signOut")}</button>
         </div>
       </header>
-      <main className="page" id="main-content" tabIndex={-1}>{children}</main>
+      <main className="page" id="main-content" tabIndex={-1}>
+        {/* Card F: on every screen of a closed workspace, before anything that would offer a change. */}
+        {closed && <div className="closed-banner"><Notice tone="review" title={t("shell.closed")} role="status">{t("shell.closedBody")}</Notice></div>}
+        {children}
+      </main>
     </>
   );
 }
