@@ -1,5 +1,5 @@
 // Strings for the decision area. Keys start with "decision.".
-import type { Entry, FrenchOf } from "./entry";
+import { register, type Entry, type FrenchOf } from "./entry";
 
 export const en = {
   "decision.lead": (p) => `Recorded against run ${p.n}, which says ${p.v}. You can agree with it, add conditions, or decide against it with your reasons.`,
@@ -22,6 +22,29 @@ export const en = {
   "decision.kv.draft": (p) => `${p.p}, draft, not signed by credit`,
   "decision.overrideNotice": "If you approve against a reject verdict, Agir asks why. The reason is recorded with the decision and shown in every report.",
   "decision.whoDecides": (p) => `Only a workspace admin or owner records a decision. Your role: ${p.role}.`,
+  "decision.noRun": "There is no run to decide on yet.",
+  "decision.noRunBody": "A committee decision is always recorded against a specific run.",
+  "decision.noRunBodySolo": "Your decision is always recorded against a specific run.",
+  "decision.goRun": "Go to Run",
+  "decision.recorded": "Recorded decisions",
+  "decision.conditions": (p) => `Conditions: ${p.c}`,
+  "decision.against": (p) => `Decided against the ${p.v} verdict because: ${p.r}`,
+  "decision.cannot": "A decision cannot be recorded right now.",
+  "decision.stale": "The inputs changed after this run. Run underwriting again first.",
+  "decision.role": "Only a workspace admin or owner records committee decisions.",
+  "decision.roleSolo": "Only a workspace admin or owner records a decision.",
+  "decision.further": "Record a further decision",
+  "decision.title": "Committee decision",
+  "decision.titleSolo": "Your decision",
+  "decision.reasoning": "The committee's reasoning",
+  "decision.reasoningSolo": "Your reasoning",
+  "decision.conditionsLabel": "Conditions",
+  "decision.overrideLabel": (p) => `Why approve against a ${p.v} verdict`,
+  "decision.overrideHelp": "Required. It is recorded with the decision and shown in every report.",
+  "decision.record": "Record decision",
+  "decision.permanentNote": "Decisions are permanent. A later decision is added, never edited.",
+  "decision.binds": "What a decision binds to",
+  "decision.bindsBody": (p) => `This decision names run ${p.n}: its exact inputs, engine version and policy. If an input changes afterwards, the run goes out of date and a new decision needs a new run.`,
 } satisfies Record<string, Entry>;
 
 export const fr: FrenchOf<typeof en> = {
@@ -45,4 +68,29 @@ export const fr: FrenchOf<typeof en> = {
   "decision.kv.draft": (p) => `${p.p}, provisoire, non approuvée par le crédit`,
   "decision.overrideNotice": "Si vous approuvez malgré un verdict de rejet, Agir vous demande pourquoi. Le motif est consigné avec la décision et affiché dans chaque rapport.",
   "decision.whoDecides": (p) => `Seul un administrateur ou le propriétaire de l'espace consigne une décision. Votre rôle\u00a0: ${p.role}.`,
+  "decision.noRun": "Il n'y a pas encore d'analyse sur laquelle décider.",
+  "decision.noRunBody": "Une décision du comité est toujours consignée pour une analyse précise.",
+  "decision.noRunBodySolo": "Votre décision est toujours consignée pour une analyse précise.",
+  "decision.goRun": "Aller à l'analyse",
+  "decision.recorded": "Décisions consignées",
+  "decision.conditions": (p) => `Conditions\u00a0: ${p.c}`,
+  "decision.against": (p) => `Décision contraire au verdict «\u00a0${p.v}\u00a0», parce que\u00a0: ${p.r}`,
+  "decision.cannot": "Aucune décision ne peut être consignée pour l'instant.",
+  "decision.stale": "Les données ont changé après cette analyse. Relancez d'abord l'analyse.",
+  "decision.role": "Seul un administrateur ou le propriétaire de l'espace consigne les décisions du comité.",
+  "decision.roleSolo": "Seul un administrateur ou le propriétaire de l'espace consigne une décision.",
+  "decision.further": "Consigner une autre décision",
+  "decision.title": "Décision du comité",
+  "decision.titleSolo": "Votre décision",
+  "decision.reasoning": "Motifs du comité",
+  "decision.reasoningSolo": "Vos motifs",
+  "decision.conditionsLabel": "Conditions",
+  "decision.overrideLabel": (p) => `Pourquoi approuver malgré un verdict «\u00a0${p.v}\u00a0»`,
+  "decision.overrideHelp": "Obligatoire. Consigné avec la décision et affiché dans chaque rapport.",
+  "decision.record": "Consigner la décision",
+  "decision.permanentNote": "Les décisions sont permanentes. Une décision ultérieure s'ajoute\u00a0; elle ne remplace rien.",
+  "decision.binds": "Ce à quoi la décision est liée",
+  "decision.bindsBody": (p) => `Cette décision vise l'analyse ${p.n}\u00a0: ses données exactes, la version du moteur et la politique. Si une donnée change ensuite, l'analyse devient périmée et une nouvelle décision exige une nouvelle analyse.`,
 };
+
+register(en, fr);

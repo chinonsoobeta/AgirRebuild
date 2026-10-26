@@ -9,6 +9,9 @@ import { Notice, Tag } from "../components/kit";
 import { ThresholdList, Thresholds } from "../components/thresholds";
 import * as I from "../components/icons";
 import { useI18n, type Lang } from "../i18n";
+import "../strings/documents";
+import "../strings/quickstart";
+import "../strings/review";
 
 /** A client's confirmation of a value the broker stated (card 89): its button for the client, then who confirmed it and when.
  * It is not an independent confirmation, so the value stays stated by the sponsor. */

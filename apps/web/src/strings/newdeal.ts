@@ -1,5 +1,5 @@
 // Strings for the newdeal area. Keys start with "newdeal.".
-import type { Entry, FrenchOf } from "./entry";
+import { register, type Entry, type FrenchOf } from "./entry";
 
 export const en = {
   "newdeal.back": "All deals",
@@ -20,3 +20,5 @@ export const fr: FrenchOf<typeof en> = {
   "newdeal.landing": "Vous arriverez à l'étape Documents. Le démarrage rapide s'y trouve aussi tant que le projet n'a aucun document.",
   "newdeal.cannot": "Votre rôle ne permet pas de créer des projets. Un propriétaire, un administrateur ou un analyste le peut.",
 };
+
+register(en, fr);

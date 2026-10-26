@@ -3,6 +3,7 @@ import { useQuery, useQueryClient } from "@tanstack/react-query";
 import { useRef, useState, type FormEvent } from "react";
 import { api, type DealOverview, type InvitePeek, type Me } from "../api";
 import { useI18n } from "../i18n";
+import "../strings/auth";
 import { FormError, SignedOutPage } from "./auth";
 
 /** The page an invitation link opens (card 89): outside the session gate. Signed out, it signs the person up as a client

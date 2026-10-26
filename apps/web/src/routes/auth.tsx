@@ -4,6 +4,7 @@ import { useState, type FormEvent, type ReactNode } from "react";
 import { api } from "../api";
 import { ChoiceCards, Notice, ThemeToggle } from "../components/kit";
 import { useI18n } from "../i18n";
+import "../strings/auth";
 
 /** The product's mark and name, as on the boards. Not a link: every signed-out screen is its own destination. */
 export function Brand({ large }: { large?: boolean }) {

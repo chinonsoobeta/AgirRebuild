@@ -1,5 +1,5 @@
 // Strings for the shell: the top bar, navigation and theme. Keys start with "shell.".
-import type { Entry, FrenchOf } from "./entry";
+import { register, type Entry, type FrenchOf } from "./entry";
 
 export const en = {
   "shell.toDark": "Switch to dark mode",
@@ -22,3 +22,5 @@ export const fr: FrenchOf<typeof en> = {
   "shell.closed": "Cet espace de travail est fermé.",
   "shell.closedBody": "Il est en lecture seule\u00a0: vous pouvez ouvrir ses projets, ses analyses et ses rapports, sans rien modifier.",
 };
+
+register(en, fr);

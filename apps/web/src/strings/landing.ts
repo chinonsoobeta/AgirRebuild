@@ -1,7 +1,7 @@
 // Strings for the landing area: the signed-out home page and the draft terms and privacy page.
 // Keys start with "landing.". Every claim here must be true of the code today; what is not
 // decided yet (price, hosting, retention, governing law) is left out or written as to be settled.
-import type { Entry, FrenchOf } from "./entry";
+import { register, type Entry, type FrenchOf } from "./entry";
 
 export const en = {
   "landing.brandHome": "Agir, home",
@@ -207,3 +207,5 @@ export const fr: FrenchOf<typeof en> = {
   "landing.legal.ai2": "Chaque proposition vous est montrée, et rien n'est utilisé dans une analyse avant qu'une personne l'approuve. Une lecture est conservée avec le projet, pour que les mêmes documents ne soient pas envoyés deux fois. Les pages numérisées sont lues par reconnaissance de caractères sur le serveur d'Agir.",
   "landing.legal.ai3": "À régler : les conditions qui s'appliquent au texte envoyé à Anthropic, et la façon dont un espace de travail peut désactiver la lecture des documents.",
 };
+
+register(en, fr);

@@ -6,6 +6,7 @@ import { ErrorText, useSession } from "../components/ui";
 import { ChangeEmail } from "./verify";
 import { Thresholds } from "../components/thresholds";
 import { useI18n } from "../i18n";
+import "../strings/settings";
 import { useTheme, type ThemePref } from "../theme";
 import { TermsSeg } from "../components/terms-seg";
 import { Figure, Figures, Notice, Seg, Switch, Tag } from "../components/kit";

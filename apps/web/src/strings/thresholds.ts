@@ -1,5 +1,5 @@
 // Strings for the shared thresholds editor. Keys start with "thresholds.".
-import type { Entry, FrenchOf } from "./entry";
+import { register, type Entry, type FrenchOf } from "./entry";
 
 export const en = {
   "thresholds.show": "Show the thresholds",
@@ -34,3 +34,5 @@ export const fr: FrenchOf<typeof en> = {
   "thresholds.policy.rental-hold-insured-standard-short-draft": "Location conservée et refinancée, assurance standard de la SCHL, durée de moins de 10 ans",
   "thresholds.policy.for-sale-draft": "Logements à vendre",
 };
+
+register(en, fr);

@@ -6,6 +6,8 @@ import { Banner, DealFrame, ErrorText, MetricValue, useDeal, useSession } from "
 import { Tag, type TagTone } from "../components/kit";
 import * as I from "../components/icons";
 import { checkText, useI18n, verdictText } from "../i18n";
+import "../strings/decision";
+import "../strings/explore";
 import { GateOutcome, layoutFor, useRun } from "./run";
 
 type Driver = { key: string; label: string; unit: "bps" | "%" | "pts" | "months"; min: number; max: number; step: number; swing: number; direction: 1 | -1 };

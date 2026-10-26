@@ -33,6 +33,9 @@ function lintTests() {
 // Plan L5 and E18: the built web app's size. Measured 2026-10-25 after the route split (card G): largest chunk
 // 365 kB (budget 500 kB, Vite's warning limit; 27% margin), all JavaScript 926 kB (budget 1.2 MB; 23% margin),
 // CSS 37 kB (budget 60 kB; 38% margin). Before the split the app was one 916 kB chunk.
+// Measured 2026-10-25 after each screen's strings moved to its route group (card I), from `npm run build -w @agir/web`:
+// first visit (the scripts dist/index.html loads: index and vendor) 547.4 kB, down from 711.2 kB (budget 690 kB; 21%
+// margin); largest chunk 339.9 kB, vendor (32% margin); all JavaScript 939.8 kB (22% margin); CSS 37.6 kB (37% margin).
 function webBudget() {
   const dir = "apps/web/dist/assets";
   const files = readdirSync(dir).map((f) => ({ f, kb: statSync(join(dir, f)).size / 1000 }));
@@ -40,7 +43,11 @@ function webBudget() {
   const largest = Math.max(...js.map((x) => x.kb));
   const totalJs = js.reduce((a, x) => a + x.kb, 0);
   const css = files.filter((x) => x.f.endsWith(".css")).reduce((a, x) => a + x.kb, 0);
-  const checks = [["largest JavaScript chunk", largest, 500], ["all JavaScript", totalJs, 1200], ["CSS", css, 60]];
+  // The first visit: the entry script and the modules it preloads, as named in the built page.
+  const page = readFileSync("apps/web/dist/index.html", "utf8");
+  const first = [...page.matchAll(/(?:src|href)="\/assets\/([^"]+\.js)"/g)].map((m) => m[1]);
+  const firstJs = js.filter((x) => first.includes(x.f)).reduce((a, x) => a + x.kb, 0);
+  const checks = [["first-visit JavaScript", firstJs, 690], ["largest JavaScript chunk", largest, 500], ["all JavaScript", totalJs, 1200], ["CSS", css, 60]];
   for (const [what, kb, max] of checks) console.log(`${what}: ${kb.toFixed(1)} kB (budget ${max} kB)`);
   return checks.every(([, kb, max]) => kb <= max) ? 0 : 1;
 }

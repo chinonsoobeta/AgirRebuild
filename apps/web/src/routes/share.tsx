@@ -6,6 +6,7 @@ import * as I from "../components/icons";
 import { Figure, Figures, Tag } from "../components/kit";
 import { Banner, dealFacts, ErrorText, MetricValue, VerdictBadge } from "../components/ui";
 import { useI18n, verdictText, type I18n } from "../i18n";
+import "../strings/share";
 import { SignedOutPage } from "./auth";
 
 /** The four key figures the shared page shows, by how the deal ends, as the run's reports print them. */

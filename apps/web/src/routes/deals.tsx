@@ -5,6 +5,7 @@ import { api, type DealOverview } from "../api";
 import { canDecide, canEdit, dealFacts, useSession } from "../components/ui";
 import { Tag } from "../components/kit";
 import { dealStatus, useI18n } from "../i18n";
+import "../strings/deals";
 
 const STEPS = ["documents", "review", "run", "decision", "reports"] as const;
 const stale = (d: DealOverview) => !!d.run && !d.run.fresh;

@@ -1,5 +1,5 @@
-// Strings for the audit area. Keys start with "audit.".
-import type { Entry, FrenchOf } from "./entry";
+// Strings for the audit area. Keys start with "audit.", and a "threshold." key only this screen uses.
+import { register, type Entry, type FrenchOf } from "./entry";
 
 export const en = {
   "audit.lead": "Every event is chained to the one before it by a hash, and nothing in this list can be edited or deleted. The audit package carries this deal's events with their hashes and the result of the chain check.",
@@ -34,6 +34,17 @@ export const en = {
   "audit.package": "Download the audit package",
   "audit.noMatch": "No loaded event matches. Try another word or Everything.",
   "audit.empty": "No events yet.",
+  "threshold.inherited": "Inherited value",
+  "audit.thresholdChanged": (p: any) => `Changed a policy threshold: ${p.name} = ${p.value}. ${p.reason}`,
+  "audit.title": "Audit trail",
+  "audit.intact": (p) => `Chain intact · ${p.n} events`,
+  "audit.broken": "Chain broken",
+  "audit.col.event": "Event",
+  "audit.col.who": "Who",
+  "audit.col.when": "When",
+  "audit.col.hash": "Hash",
+  "audit.worker": "Agir worker",
+  "audit.someone": "Someone with the link",
 } satisfies Record<string, Entry>;
 
 export const fr: FrenchOf<typeof en> = {
@@ -67,4 +78,17 @@ export const fr: FrenchOf<typeof en> = {
   "audit.package": "Télécharger le dossier d'audit",
   "audit.noMatch": "Aucun événement chargé ne correspond. Essayez un autre mot ou « Tout ».",
   "audit.empty": "Aucun événement pour l'instant.",
+  "threshold.inherited": "Valeur héritée",
+  "audit.thresholdChanged": (p: any) => `A modifié un seuil de politique\u00a0: ${p.name} = ${p.value}. ${p.reason}`,
+  "audit.title": "Piste d'audit",
+  "audit.intact": (p) => `Chaîne intacte · ${p.n} événements`,
+  "audit.broken": "Chaîne rompue",
+  "audit.col.event": "Événement",
+  "audit.col.who": "Qui",
+  "audit.col.when": "Quand",
+  "audit.col.hash": "Empreinte",
+  "audit.worker": "Processus Agir",
+  "audit.someone": "Une personne ayant le lien",
 };
+
+register(en, fr);
