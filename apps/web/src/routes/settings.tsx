@@ -316,10 +316,12 @@ function Row({ title, body, children }: { title: ReactNode; body?: ReactNode; ch
   );
 }
 
-/** The address is not confirmed yet (card W12): send a new link, or enter the code on /verify. */
-function ConfirmEmail() {
+/** The address is not confirmed yet (card W12): send a new link, or enter the code on /verify. Without a mail provider
+ * (card B), it says so instead. */
+function ConfirmEmail({ mail }: { mail: boolean }) {
   const { t } = useI18n();
   const send = useMutation({ mutationFn: () => api.post("/auth/verify/send", {}) });
+  if (!mail) return <div className="stack tight"><Notice tone="review">{t("auth.verify.notYet")}</Notice><p className="small">{t("auth.noMail")}</p></div>;
   return (
     <div className="stack tight">
       <Notice tone="review">{t("auth.verify.notYet")}</Notice>
@@ -336,16 +338,16 @@ function ConfirmEmail() {
 /** Card R6: a reset link to the person's own address, so a signed-in person can set a new password. */
 function PasswordRow({ email }: { email: string }) {
   const { t } = useI18n();
-  const [sent, setSent] = useState(false);
+  const [sent, setSent] = useState<boolean | null>(null);
   const [error, setError] = useState<unknown>(null);
   const [busy, setBusy] = useState(false);
   const send = async () => {
-    setSent(false);
+    setSent(null);
     setError(null);
     setBusy(true);
     try {
-      await api.post("/auth/reset/send", { email });
-      setSent(true);
+      const r = await api.post<{ sent?: false }>("/auth/reset/send", { email });
+      setSent(r.sent !== false);
     } catch (e) {
       setError(e);
     } finally {
@@ -357,7 +359,8 @@ function PasswordRow({ email }: { email: string }) {
       <Row title={t("settings.ac.password")} body={t("settings.ac.passwordBody")}>
         <button className="btn quiet sm" type="button" disabled={busy} onClick={send}>{t("auth.reset.send")}</button>
       </Row>
-      {sent && <p className="small" role="status">{t("settings.ac.passwordSent", { email })}</p>}
+      {sent === true && <p className="small" role="status">{t("settings.ac.passwordSent", { email })}</p>}
+      {sent === false && <p className="small" role="status">{t("auth.noMail")}</p>}
       <ErrorText error={error} />
     </div>
   );
@@ -585,7 +588,7 @@ export function Settings() {
           </Row>
         </div>
         {changingEmail && <ChangeEmail current={me.user.email} verified={me.user.email_verified} onCancel={() => setChangingEmail(false)} />}
-        {me.user.email_verified === false && <ConfirmEmail />}
+        {me.user.email_verified === false && <ConfirmEmail mail={me.mail !== false} />}
         <PasswordRow email={me.user.email} />
         {/* Each live session by the kind of device it signed in from, this one first (card R4). */}
         <div>

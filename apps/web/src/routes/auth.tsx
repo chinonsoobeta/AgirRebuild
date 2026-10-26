@@ -93,10 +93,17 @@ function DemoSignIn() {
 
 const value = (e: FormEvent<HTMLFormElement>, k: string) => (e.currentTarget.elements.namedItem(k) as HTMLInputElement).value;
 
+/** Whether anyone can create an account (card B: AGIR_SIGNUP). Open until the server says otherwise. */
+function useSignupOpen(): boolean {
+  const signup = useQuery({ queryKey: ["signup"], queryFn: () => api.get<{ open: boolean }>("/auth/signup") });
+  return signup.data?.open !== false;
+}
+
 export function Login() {
   const { t } = useI18n();
   const navigate = useNavigate();
   const qc = useQueryClient();
+  const signupOpen = useSignupOpen();
   const [error, setError] = useState<unknown>(null);
   const [busy, setBusy] = useState(false);
   const submit = async (e: FormEvent<HTMLFormElement>) => {
@@ -126,7 +133,8 @@ export function Login() {
           <div className="field"><label htmlFor="password">{t("auth.password")}</label><input className="input" id="password" name="password" type="password" autoComplete="current-password" required /><p className="small auth-forgot"><Link to="/reset">{t("auth.reset.title")}</Link></p></div>
           <FormError error={error} />
           <button className="btn primary auth-wide" type="submit" disabled={busy}>{busy ? t("auth.signingIn") : t("auth.signIn")}</button>
-          <p className="small auth-alt"><Link to="/signup">{t("auth.createAccount")}</Link></p>
+          {/* Kept when sign-up is closed, because people look for it; it says why it leads nowhere. */}
+          <p className="small auth-alt"><Link to="/signup">{t("auth.createAccount")}</Link>{!signupOpen && <> <span className="muted">{t("auth.signupClosedShort")}</span></>}</p>
         </form>
         <DemoSignIn />
       </div>
@@ -140,6 +148,7 @@ export function Signup() {
   const qc = useQueryClient();
   const [error, setError] = useState<unknown>(null);
   const [mode, setMode] = useState<string>("solo");
+  const signupOpen = useSignupOpen();
   const submit = async (e: FormEvent<HTMLFormElement>) => {
     e.preventDefault();
     const body = { name: value(e, "name"), email: value(e, "email"), password: value(e, "password"), reviewMode: mode };
@@ -153,6 +162,17 @@ export function Signup() {
       setError(err);
     }
   };
+  if (!signupOpen) {
+    return (
+      <AuthFrame pitch={t("auth.pitchBody")}>
+        <div className="card card-pad auth-card">
+          <h1 className="h1">{t("auth.createAccount")}</h1>
+          <Notice tone="review">{t("auth.signupClosed")}</Notice>
+          <p className="small auth-alt"><Link to="/login">{t("auth.haveAccount")}</Link></p>
+        </div>
+      </AuthFrame>
+    );
+  }
   return (
     <AuthFrame pitch={t("auth.signupPitch")}>
       <form className="card card-pad auth-card auth-card-wide" onSubmit={submit} noValidate>

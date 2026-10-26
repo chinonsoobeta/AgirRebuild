@@ -14,5 +14,7 @@ const db = await openDb();
 await migrate(db);
 // The same settings as the API's: both must read and write the same store.
 const store = openStore(startup.store, process.env.AGIR_DATA_DIR ?? ".data");
-startWorker({ db, store, log: (e) => console.log(JSON.stringify({ at: new Date().toISOString(), ...e })) });
-console.log("Agir worker started");
+// One JSON line per event, in the API's shape (apps/api/src/log.ts): at, event, then ids, counts and statuses.
+const log = (e: Record<string, unknown>) => console.log(JSON.stringify({ at: new Date().toISOString(), ...e }));
+startWorker({ db, store, log });
+log({ event: "worker.started" });

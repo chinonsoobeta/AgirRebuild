@@ -9,6 +9,7 @@ import { getCookie, setCookie } from "hono/cookie";
 import { z } from "zod";
 import type { Db } from "@agir/db";
 import { checkPassword, createSession, deviceLabel, hashPassword, PASSWORD_RULE, userForSession } from "./auth.ts";
+import type { Logger } from "./log.ts";
 import type { Mailer } from "./mailer.ts";
 import { limiter, type SharedState } from "./shared-state.ts";
 
@@ -53,6 +54,8 @@ export type EmailAuthDeps = {
   cookie: string;
   cookieOpts: Parameters<typeof setCookie>[3];
   clientKey: (c: Context<any>) => string;
+  log: Logger;
+  alert: Logger;
   /** Where the rate limits are counted (card D). */
   state: SharedState;
 };
@@ -167,7 +170,7 @@ function changedMail(origin: string, token: string, newEmail: string) {
   };
 }
 
-export function emailAuth({ db, mailer, publicOrigin, cookie, cookieOpts, clientKey, state }: EmailAuthDeps) {
+export function emailAuth({ db, mailer, publicOrigin, cookie, cookieOpts, clientKey, state, log, alert }: EmailAuthDeps) {
   const origin = publicOrigin.replace(/\/+$/, "");
   const verifySendLimit = limiter(state, "verify-send", 5, 60 * 60_000); // per person
   const codeLimit = limiter(state, "code", 10, 15 * 60_000); // per person
@@ -177,17 +180,18 @@ export function emailAuth({ db, mailer, publicOrigin, cookie, cookieOpts, client
   const changeLimit = limiter(state, "email-change", 5, 60 * 60_000); // per person, counted before the password check, so it also limits guessing
   const tooMany = (c: Context<any>) => c.json({ error: "Too many attempts. Wait a while and try again." }, 429);
   const taken = (c: Context<any>) => c.json({ error: TAKEN }, 409);
-  /** Sends a mail; a failure is logged with the kind only (no address, no link) and never undoes the caller's work. */
+  /** Added to an answer when no mail provider is configured (card B): the token is made, and simply not delivered. */
+  const unsent = mailer.configured ? {} : { sent: false as const };
+  /** Sends a mail; a failure is logged and alerted with the kind only (no address, no link) and never undoes the caller's work. */
   async function mail(kind: Kind, m: { to: string; subject: string; text: string }) {
     try { await mailer.send(m); }
-    catch { console.error(JSON.stringify({ at: new Date().toISOString(), event: "mail.failed", kind })); }
+    catch { log("mail.failed", { kind }); alert("mail.failed", { kind }); }
   }
 
   /** Sends a new verification email. A failure to send is logged without detail and never undoes the caller's work. */
   async function sendVerification(user: { id: string; email: string }) {
     const { token, code } = await issue(db, user.id, "verify_email");
-    try { await mailer.send({ to: user.email, ...verifyMail(origin, token, code!) }); }
-    catch { console.error(JSON.stringify({ at: new Date().toISOString(), event: "mail.failed", kind: "verify_email" })); }
+    await mail("verify_email", { to: user.email, ...verifyMail(origin, token, code!) });
   }
 
   function register(app: Hono<any>) {
@@ -196,7 +200,7 @@ export function emailAuth({ db, mailer, publicOrigin, cookie, cookieOpts, client
       if (!user) return c.json({ error: "Sign in to continue." }, 401);
       if (!(await verifySendLimit(user.id))) return tooMany(c);
       await sendVerification(user);
-      return c.json({ ok: true });
+      return c.json({ ok: true, ...unsent });
     });
 
     app.post("/api/auth/verify", async (c) => {
@@ -235,10 +239,10 @@ export function emailAuth({ db, mailer, publicOrigin, cookie, cookieOpts, client
       const [u] = await db.query<{ id: string; email: string }>(`select id, email from users where email = $1`, [normalized]);
       if (u) {
         const { token } = await issue(db, u.id, "reset_password");
-        try { await mailer.send({ to: u.email, ...resetMail(origin, token) }); }
-        catch { console.error(JSON.stringify({ at: new Date().toISOString(), event: "mail.failed", kind: "reset_password" })); }
+        await mail("reset_password", { to: u.email, ...resetMail(origin, token) });
       }
-      return c.json({ ok: true });
+      // sent depends on the server only, so the answer still says nothing about whether the account exists.
+      return c.json({ ok: true, ...unsent });
     });
 
     app.post("/api/auth/reset", async (c) => {
@@ -289,14 +293,14 @@ export function emailAuth({ db, mailer, publicOrigin, cookie, cookieOpts, client
           throw e;
         }
         await sendVerification({ id: user.id, email });
-        return c.json({ changed: true });
+        return c.json({ changed: true, ...unsent });
       }
 
       // A confirmed address changes only when the new one is confirmed: until the link is opened, nothing changes.
       // Asking again replaces the earlier link (issue deletes it).
       const { token } = await issue(db, user.id, "change_email", { email });
       await mail("change_email", { to: email, ...changeMail(origin, token) });
-      return c.json({ pending: true });
+      return c.json({ pending: true, ...unsent });
     });
 
     // Opening the link sent to the new address: no session needed, it may be opened on any device.
@@ -360,7 +364,7 @@ export function emailAuth({ db, mailer, publicOrigin, cookie, cookieOpts, client
       if (!restored) return c.json({ error: UNDO_DEAD }, 400);
       const reset = await issue(db, restored.user_id, "reset_password");
       await mail("reset_password", { to: restored.email, ...resetMail(origin, reset.token) });
-      return c.json({ email: restored.email });
+      return c.json({ email: restored.email, ...unsent });
     });
   }
 

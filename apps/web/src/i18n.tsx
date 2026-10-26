@@ -525,7 +525,7 @@ export const EN = {
 
   "audit.title": "Audit trail",
   "audit.intact": (p) => `Chain intact · ${p.n} events`,
-  "audit.broken": (p) => `Chain broken at event ${p.n}`,
+  "audit.broken": "Chain broken",
   "audit.col.event": "Event",
   "audit.col.who": "Who",
   "audit.col.when": "When",
@@ -1108,7 +1108,7 @@ export const FR: Record<Key, Entry> = {
 
   "audit.title": "Piste d'audit",
   "audit.intact": (p) => `Chaîne intacte · ${p.n} événements`,
-  "audit.broken": (p) => `Chaîne rompue à l'événement ${p.n}`,
+  "audit.broken": "Chaîne rompue",
   "audit.col.event": "Événement",
   "audit.col.who": "Qui",
   "audit.col.when": "Quand",
@@ -1507,6 +1507,7 @@ const FR_REASONS: [RegExp, string | ((m: RegExpMatchArray) => string)][] = [
   [/^Too many attempts\. Wait a while and try again\.$/, "Trop de tentatives. Patientez un moment, puis réessayez."],
   [/^That code is not right, or it has expired\. Check the latest email or ask for a new code\.$/, "Ce code n'est pas le bon, ou il a expiré. Vérifiez le dernier courriel ou demandez un nouveau code."],
   [/^An account with that email already exists\.$/, "Un compte existe déjà avec ce courriel."],
+  [/^Agir is by invitation during the pilot\.$/, "Agir est sur invitation pendant le projet pilote."],
   [/^Too many attempts\. Wait a minute\.$/, "Trop de tentatives. Patientez une minute."],
   [/^Some fields are missing or not valid\.$/, "Des champs manquent ou ne sont pas valides."],
   [/^Underwriting is blocked until review is clear\.$/, "L'analyse est bloquée jusqu'à la fin de l'examen."],

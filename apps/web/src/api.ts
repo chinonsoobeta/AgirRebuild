@@ -72,7 +72,7 @@ export type RunFacts = { approved: number; defaults: number; policyVersion: stri
 export type RunLine = { stage: RunStage; at: string; facts?: RunFacts } | { done: { id: string } } | { stopped: true };
 /** What the screen holds while a run streams: the time each stage finished, and the facts from the inputs stage. */
 export type RunProgress = { stages: Partial<Record<RunStage, string>>; facts?: RunFacts | undefined };
-export type Me = { user: { id: string; email: string; name: string; email_verified: boolean }; workspaces: { id: string; name: string; review_mode: "team" | "solo"; label_suggestions: boolean; ai_reading: boolean; has_logo: boolean; role: "owner" | "admin" | "analyst" | "viewer" | "reviewer" | "client" }[] };
+export type Me = { user: { id: string; email: string; name: string; email_verified: boolean }; /** False when the server cannot send email (card B). */ mail?: boolean; workspaces: { id: string; name: string; review_mode: "team" | "solo"; label_suggestions: boolean; ai_reading: boolean; has_logo: boolean; role: "owner" | "admin" | "analyst" | "viewer" | "reviewer" | "client" }[] };
 export type Tone = "pass" | "review" | "stop" | "neutral";
 export type DealOverview = {
   deal: {

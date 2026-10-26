@@ -5,30 +5,50 @@ import { serveStatic } from "@hono/node-server/serve-static";
 import { checkStartup, migrate, openPglite, openPostgres, openStore, type Startup } from "@agir/db";
 import { startWorker } from "@agir/worker";
 import { createApp } from "./app.ts";
+import { alerter, log, type LogFields } from "./log.ts";
 import { dbState, memoryState } from "./shared-state.ts";
 import { fileMailer, unsentMailer } from "./mailer.ts";
 import { DEMO, seedDemo } from "./seed.ts";
 
 const root = resolve(import.meta.dirname, "../../..");
-let startup: Startup;
+const port = Number(process.env.PORT ?? 8787);
+const alert = alerter(process.env.AGIR_ALERT_URL);
+/** A refused start is logged and alerted (the alert is awaited, so it leaves before the process exits). */
+const refuse = async (event: string, fields: LogFields) => {
+  log(event, fields);
+  await alert(event, fields);
+  process.exit(1);
+};
+
+// The startup check (card A): a refused start is one api.refused_start line, then exit 1.
+let startup!: Startup;
 try {
   startup = checkStartup(process.env);
 } catch (e) {
-  console.error((e as Error).message);
-  process.exit(1);
+  await refuse("api.refused_start", { reason: (e as Error).message });
 }
 const env = startup.env;
-for (const w of startup.warnings) console.warn(w);
+for (const w of startup.warnings) log("api.warning", { warning: w });
+// Nothing is created before the check passes.
 const dataDir = resolve(process.env.AGIR_DATA_DIR ?? join(root, ".data"));
 mkdirSync(dataDir, { recursive: true });
-const port = Number(process.env.PORT ?? 8787);
+// Card B: "invite" lets only a client invitation create an account.
+const signup = process.env.AGIR_SIGNUP ?? "open";
+if (signup !== "open" && signup !== "invite") await refuse("api.refused_start", { reason: "AGIR_SIGNUP must be open or invite." });
 // 127.0.0.1 behind a proxy on the same host; 0.0.0.0 in a container.
 const bind = process.env.AGIR_BIND || "127.0.0.1";
 
 const db = process.env.DATABASE_URL ? await openPostgres(process.env.DATABASE_URL) : await openPglite(join(dataDir, "pg"));
-const { applied } = await migrate(db);
-if (applied.length) console.log(`Applied migrations: ${applied.join(", ")}`);
+let applied: string[] = [];
+try {
+  ({ applied } = await migrate(db));
+} catch (e) {
+  await refuse("migrations.failed", { error: (e as Error).message });
+}
+if (applied.length) log("migrations.applied", { count: applied.length, names: applied.join(", ") });
 const store = openStore(startup.store, dataDir);
+// The worker runs in-process when the database is embedded; in production it is its own service.
+const embeddedWorker = !process.env.DATABASE_URL || process.env.AGIR_EMBEDDED_WORKER === "1";
 
 if (env !== "production" && process.env.AGIR_SEED !== "0") {
   await seedDemo(db, store);
@@ -40,6 +60,7 @@ const app = createApp({ db, store, secureCookies: env === "production", demoSign
   // No mail provider yet: development writes each email to the data folder's mail/ directory; production sends nothing.
   mailer: env === "production" ? unsentMailer() : fileMailer(join(dataDir, "mail")),
   publicOrigin: process.env.AGIR_PUBLIC_ORIGIN ?? `http://127.0.0.1:${port}`,
+  signup: signup as "open" | "invite", worker: embeddedWorker, log, logRequests: true, alert,
   // Postgres may run several API processes, so rate limits and run stops live in the database. Embedded PGlite is one
   // process and one connection: a stop written to it would wait for the run's open transaction, so they stay in memory.
   state: process.env.DATABASE_URL ? dbState(db) : memoryState(),
@@ -53,11 +74,18 @@ if (existsSync(webDist)) {
   app.get("*", (c) => (c.req.path.startsWith("/api/") ? c.json({ error: "Not found" }, 404) : c.html(index())));
 }
 
-// The worker runs in-process when the database is embedded; in production it is its own service.
-const embeddedWorker = !process.env.DATABASE_URL || process.env.AGIR_EMBEDDED_WORKER === "1";
-if (embeddedWorker) startWorker({ db, store, log: (e) => (e.event === "job.done" ? undefined : console.log(JSON.stringify(e))) });
+if (embeddedWorker) {
+  startWorker({ db, store, log: ({ event, ...fields }) => {
+    if (event === "job.done") return;
+    log(String(event), fields as LogFields);
+    // A job that will not be retried, or the worker's loop failing: alerted with ids only.
+    if (event === "job.dead") void alert("job.dead", { id: String(fields.id), kind: String(fields.kind) });
+    if (event === "worker.error") void alert("worker.error");
+  } });
+}
 
 serve({ fetch: app.fetch, port, hostname: bind }, () => {
-  console.log(`Agir API listening on http://${bind}:${port}`);
-  if (env !== "production") console.log(`Demo sign-in: ${DEMO.analyst.email} / ${DEMO.analyst.password} (second approver: ${DEMO.approver.email})`);
+  log("api.listening", { url: `http://${bind}:${port}` });
+  // The seeded demo accounts, which exist only outside production.
+  if (env !== "production") log("api.demo_sign_in", { email: DEMO.analyst.email, password: DEMO.analyst.password, approver: DEMO.approver.email });
 });

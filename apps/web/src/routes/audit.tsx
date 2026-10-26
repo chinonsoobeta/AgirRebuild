@@ -161,10 +161,11 @@ export function Audit({ dealId }: { dealId: string }) {
     queryFn: ({ pageParam }) => api.get<AuditEvent[]>(pageParam === null ? `/deals/${dealId}/audit` : `/deals/${dealId}/audit?before=${pageParam}`),
     getNextPageParam: (last) => (last.length >= SERVER_PAGE ? last[last.length - 1]!.seq : undefined),
   });
-  // fn_verify_audit_chain walks every event in the installation, in order: ok, how many it read, and where it stopped.
+  // fn_verify_audit_chain_for walks every event in the installation, in order, and answers for this workspace only: ok,
+  // how many of its events there are, and whether the event where the chain broke is one of them.
   const verify = useQuery({
     queryKey: ["audit-verify", workspaceId],
-    queryFn: () => api.get<{ ok: boolean; events: number; broken_at: number | null }>(`/workspaces/${workspaceId}/audit/verify`),
+    queryFn: () => api.get<{ ok: boolean; events: number; broken: boolean }>(`/workspaces/${workspaceId}/audit/verify`),
   });
   if (!deal.data) return <p className="muted">{t("common.loading")}</p>;
   const o = deal.data;
@@ -191,11 +192,11 @@ export function Audit({ dealId }: { dealId: string }) {
           <div>
             <h2 className="h1">{t("audit.title")}</h2>
             <p className="lead">{t("audit.lead")}</p>
-            {v && <p className="small muted audit-checked">{t("audit.checked", { ok: v.ok, n: v.events, at: v.broken_at })}</p>}
+            {v && <p className="small muted audit-checked">{t("audit.checked", { ok: v.ok, n: v.events, mine: v.broken })}</p>}
             {verify.error && <p className="small muted audit-checked" role="alert">{t("audit.verifyFailed")}</p>}
           </div>
           <div className="row">
-            {v ? <Tag tone={v.ok ? "pass" : "stop"}>{v.ok ? t("audit.intact", { n: v.events }) : t("audit.broken", { n: v.broken_at })}</Tag>
+            {v ? <Tag tone={v.ok ? "pass" : "stop"}>{v.ok ? t("audit.intact", { n: v.events }) : t("audit.broken")}</Tag>
               : verify.isFetching ? <Tag>{t("audit.checking")}</Tag> : null}
             <button className="btn quiet" type="button" disabled={verify.isFetching} onClick={() => void verify.refetch()}>{t("audit.verifyAgain")}</button>
           </div>

@@ -85,21 +85,30 @@ beforeEach(() => {
 
 describe("the audit trail", () => {
   it("tags the chain from the verify result and says exactly what was checked", () => {
-    state.verify = { ok: true, events: 212, broken_at: null };
+    state.verify = { ok: true, events: 212, broken: false };
     const html = render(createElement(Audit, { dealId: "d1" }));
     expect(html).toContain('class="tag pass"');
     expect(text(html)).toContain("Chain intact · 212 events");
     expect(text(html)).toMatch(/every workspace/);
+    // Card B: the count is this workspace's.
+    expect(text(html)).toContain("212 of those events are this workspace");
     button("Verify the chain again")!.props.onClick();
     expect(state.refetch).toHaveBeenCalled();
   });
 
-  it("tags a broken chain with the event where it broke, in both languages", () => {
-    state.verify = { ok: false, events: 40, broken_at: 40 };
-    expect(text(render(createElement(Audit, { dealId: "d1" })))).toContain("Chain broken at event 40");
+  it("tags a broken chain and says whether the broken event is this workspace's, never its number, in both languages", () => {
+    state.verify = { ok: false, events: 40, broken: true };
+    const mine = text(render(createElement(Audit, { dealId: "d1" })));
+    expect(mine).toContain("Chain broken");
+    expect(mine).toContain("stopped at an event of this workspace");
+    state.hooks = [];
+    state.verify = { ok: false, events: 40, broken: false };
+    expect(text(render(createElement(Audit, { dealId: "d1" })))).toContain("stopped at an event of another workspace");
     state.lang = "fr";
     state.hooks = [];
-    expect(text(render(createElement(Audit, { dealId: "d1" })))).toContain("Chaîne rompue à l'événement 40");
+    const fr = text(render(createElement(Audit, { dealId: "d1" })));
+    expect(fr).toContain("Chaîne rompue");
+    expect(fr).toContain("un autre espace de travail");
   });
 
   it("maps actions to categories, leaving unknown ones under Everything only", () => {

@@ -71,6 +71,8 @@ Both processes run `checkStartup` (`packages/db/src/startup.ts`) before opening 
 | `AGIR_TRUST_PROXY` | API | `1` when exactly one proxy in front sets `x-forwarded-for` |
 | `AGIR_SEED` | API | `0` starts development empty. Production never seeds, and refuses `1` |
 | `AGIR_EMBEDDED_WORKER` | API | `1` runs the worker inside the API on Postgres too |
+| `AGIR_SIGNUP` | API | `open` (default) or `invite`: during the pilot only a client invitation creates an account (card B) |
+| `AGIR_ALERT_URL` | API | Where an alert is POSTed as JSON (a refused start, a failed migration, an unhandled error, a failed email, a dead job). Unset: no alerts (card B) |
 | `AGIR_BLOB_STORE` | both | `file` (default) or `s3` |
 | `AGIR_S3_BUCKET`, `AGIR_S3_REGION` | both | Required with `s3` |
 | `AGIR_S3_ENDPOINT` | both | Another S3-compatible service; path-style addressing is used with it |
