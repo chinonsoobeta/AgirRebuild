@@ -22,7 +22,7 @@ export const READING_FAILURE = {
   unit: "The AI unit does not match this field",
 } as const;
 export const AI_LOW_CONFIDENCE_NOTE = "Please check: every source is a low-confidence AI reading";
-export const AI_AMBIGUOUS_NOTE = "Please check: the separator in this figure could be a decimal point or a thousands group; the AI read it as shown";
+export const AI_AMBIGUOUS_NOTE = "Please check: the separator in this figure can be read more than one way; the AI read it as shown";
 export type ReadingVerification = { outcome: string; candidate?: SourcedCandidate & { confidence: Reading["confidence"]; ambiguous?: true } };
 
 const UNIT_COUNT_TOTAL_NAMES = new Set([
@@ -53,6 +53,14 @@ export function verifyReading(reading: Reading, documents: readonly ReadingDocum
     ? ["senior_rate_pct", "mezz_rate_pct", "refinance_rate_pct"].includes(field.key) && t.value !== null && t.value / 100 === reading.value
     : t.value === reading.value) ?? tokens.find(t => {
     if (t.unit === "bps") return false;
+    if (t.value === null && !format.spaceGroups) {
+      const digits = /\d[\d.,\s]*/.exec(t.raw)?.[0].trim();
+      // Each side is a figure of its own; "050" is not.
+      if (digits && /^\d{1,3} [1-9]\d{2}$/.test(digits) && digits.split(" ").some(v => Number(v) === reading.value)) {
+        ambiguous = true;
+        return true;
+      }
+    }
     if (t.value !== null && format.decimal !== null) return false;
     // Locate the scale after the digits, including when tokenize already consumed it.
     const text = normalizeText(reading.quote).slice(t.start);
