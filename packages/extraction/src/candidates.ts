@@ -2671,11 +2671,16 @@ const SCALE_MEASURE_RE = /\b(?:areas?|superficies?|surfaces?|sf|sq\.? ?ft|square
 const SCALE_NOTE = "The document states a scale for these amounts that Agir cannot read safely; enter the figure";
 const OWN_SCALE_RE = /\d\s?(?:billions?|bn|millions?|mm|mn|m|thousands?|k)\b/i;
 
-/** The money scales a text states, one entry per scale phrase; a phrase that measures something else (areas, units, people) is left out. */
-function statedScales(text: string): Stated[] {
+// A number word just before "million" or "thousand" makes it part of a figure written in words ("Twenty One Million Seven Hundred Fifty / Thousand Dollars").
+const NUMBER_WORD_END = /\b(?:an?|one|two|three|four|five|six|seven|eight|nine|ten|eleven|twelve|thirteen|fourteen|fifteen|sixteen|seventeen|eighteen|nineteen|twenty|thirty|forty|fifty|sixty|seventy|eighty|ninety|hundred|un|une|deux|trois|quatre|cinq|sept|huit|neuf|dix|onze|douze|treize|quatorze|quinze|seize|vingt|trente|quarante|cinquante|soixante|cents?)\s*$/;
+
+/** The money scales a text states, one entry per scale phrase; a phrase that measures something else (areas, units, people) is left out. `before` is the preceding line, for a figure in words that wraps. */
+function statedScales(text: string, before = ""): Stated[] {
   const f = fold(text).replace(/²/g, "2");
   const out: Stated[] = [];
   for (const m of f.matchAll(SCALE_PHRASE_RE)) {
+    const lead = f.slice(0, m.index);
+    if (NUMBER_WORD_END.test(lead.trim() ? lead : fold(before))) continue;
     const factor = /million|mm|\$\s?m\b|\bm\$/.test(m[0]) ? 1e6 : 1e3;
     // The words between the nearest delimiters; inside parentheses the words just before them count too ("Units (thousands)").
     const left = Math.max(...[";", ",", "|", "(", ")"].map((d) => f.lastIndexOf(d, m.index! - 1)));
@@ -2704,8 +2709,10 @@ function scalings(doc: NormalizedDocument, format: DocumentFormat): Map<string, 
   const out = new Map<string, Scaling>();
   let heading: Stated[] = [];
   const headingAt: Stated[][] = [];
+  let before = "";
   for (const l of doc.lines) {
-    const stated = statedScales(l.text);
+    const stated = statedScales(l.text, before);
+    before = l.text;
     if (isScaleHeading(l.text, stated)) heading = stated;
     // Another heading under a scale heading may start a section the scale does not cover ("Financing"): its figures are neither scaled nor read as written.
     else if (heading.length > 0 && stated.length === 0 && l.text.trim() !== "" && !/\d/.test(l.text) && l.text.trim().split(/\s+/).length <= 6) heading = ["unclear"];
