@@ -6,6 +6,8 @@ import { api, type DealOverview, type Metric, type RunView } from "../api";
 import { DealFrame, MetricValue, useDeal, useSession } from "../components/ui";
 import { Notice } from "../components/kit";
 import { useI18n, type I18n } from "../i18n";
+import "../strings/compare";
+import "../strings/run";
 import { layoutFor, useRun } from "./run";
 import { policyName } from "../components/thresholds";
 

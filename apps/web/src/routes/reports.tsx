@@ -7,6 +7,7 @@ import { Seg, Tag } from "../components/kit";
 import * as I from "../components/icons";
 import { useRun } from "./run";
 import { useI18n } from "../i18n";
+import "../strings/reports";
 
 const KINDS = [
   { kind: "ic_memo", formats: ["pdf", "docx"] },

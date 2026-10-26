@@ -1,5 +1,5 @@
 import { describe, expect, test } from "vitest";
-import { detectFormat, tokenize, type DocumentFormat } from "../src/index.ts";
+import { canonicalItem, detectFormat, itemFold, tokenize, type DocumentFormat } from "../src/index.ts";
 
 const US: DocumentFormat = { decimal: ".", mixed: false, evidence: { dot: 1, comma: 0 }, spaceGroups: false };
 const EU: DocumentFormat = { decimal: ",", mixed: false, evidence: { dot: 0, comma: 1 }, spaceGroups: false };
@@ -518,5 +518,50 @@ describe("Card 168: a range written in words is not a value", () => {
     ["un an ou deux ans", [[1, "years"], [2, "years"]]],
   ] as const)("%s keeps only definite values", (text, expected) => {
     expect(tokenize(text, UNKNOWN).map(t => [t.value, t.unit])).toEqual(expected);
+  });
+});
+
+describe("Card J: format evidence, scaled money and den types", () => {
+  test.each([
+    ["Tel 415.701.5500  415.701.5501 fax\nRate 5.25%\nTransfer Tax 102,000", "."],
+    ["IP address: 99.229.253.21\nRate 5.25%", "."],
+    ["Signed 10.12.2019\nRate 5.25%", "."],
+  ])("a phone number, address or date is no evidence of a decimal comma: %s", (text, decimal) => {
+    expect(detectFormat(text)).toMatchObject({ decimal, mixed: false, evidence: { comma: 0 } });
+  });
+  test("well-formed grouping is still evidence", () => {
+    expect(detectFormat("Rente: 5,85 % und 12.400.000 EUR").decimal).toBe(",");
+    expect(detectFormat("Loan 12.400.000\nRate 5.25%").mixed).toBe(true);
+    expect(detectFormat("Loan 1.234,50\nRate 5.25%").mixed).toBe(true);
+  });
+  test.each([
+    ["$16.4 million", 16_400_000],
+    ["$1.1 billion", 1_100_000_000],
+    ["$0.3M", 300_000],
+    ["4,2 M$", 4_200_000],
+  ] as const)("a scaled amount is the written figure times its scale, exactly: %s", (text, value) => {
+    expect(first(text, text.includes(",") ? EU : US).value).toBe(value);
+  });
+  test.each([
+    ["1 bedroom + den", "1BR + Den"],
+    ["one-bed plus den", "1BR + Den"],
+    ["1BR with den", "1BR + Den"],
+    ["2 bedroom + den", "2BR + Den"],
+    ["2-bed + den", "Two-bedroom and den"],
+    ["1 chambre + bureau", "1 chambre avec bureau"],
+  ])("a bedroom type with a den is one name: %s / %s", (a, b) => {
+    expect(itemFold(a)).toBe(itemFold(b));
+  });
+  test("the canonical name of a den type", () => {
+    expect(canonicalItem("1 bedroom + den")).toBe("1BR + den");
+    expect(canonicalItem("1 chambre + bureau")).toBe("1BR + bureau");
+  });
+  test.each([
+    ["2-bed + den", "2-bed"],
+    ["1BR + Den", "2BR + Den"],
+    ["1BR + den", "1BR + bureau"],
+    ["Penthouse + den", "1BR + den"],
+  ])("a den type stays distinct: %s / %s", (a, b) => {
+    expect(itemFold(a)).not.toBe(itemFold(b));
   });
 });

@@ -25,6 +25,8 @@ It runs the same two ways as the deals: offline for free, or live through the ba
 
 Card 174 adds a verifier rule (code after the model call): a financing figure read as other costs is refused. Its offline measurement on the deals and the package set is pending.
 
+Card J changes code after the model call too: the number format ignores malformed groupings (phone numbers, addresses), scaled amounts are exact, a scale on the figure's own label is applied, and a bedroom type with a den is one item name. `detectFormat` and `canonicalItem` are shared with the rule reader, so both readers see these changes. Its offline measurement on the deals and the package set is pending.
+
 ## Which run a change needs
 
 - **Code after the model call** (`verifyReadings`, unit conversion, how readings become proposals). An offline run is enough. It re-verifies the saved model responses with the new code and is free.

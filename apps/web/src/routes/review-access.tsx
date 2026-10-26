@@ -5,6 +5,7 @@ import { api } from "../api";
 import { ErrorText, useSession } from "../components/ui";
 import { Notice, Seg } from "../components/kit";
 import { useI18n } from "../i18n";
+import "../strings/agirreview";
 import * as I from "../components/icons";
 
 type Member = { id: string; name: string; email: string; role: string; expires_at: string | null };

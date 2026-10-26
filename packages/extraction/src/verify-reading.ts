@@ -1,6 +1,6 @@
 import { FIELD_BY_KEY } from "@agir/contracts";
 import { detectFormat, normalizeText, SCALE_RE, scaleOf, SF_PER_M2, tokenize } from "@agir/numbers";
-import { declaredScale, statedScaleUnit } from "./candidates.ts";
+import { declaredScale, labelScale, statedScaleUnit } from "./candidates.ts";
 import { addressedEntries } from "./addressed.ts";
 import { foldText } from "./mapping.ts";
 import type { NormalizedDocument } from "./document.ts";
@@ -47,15 +47,19 @@ const EXCLUDING = /\b(?:excluding|excl|exclusive of|not including|without|net of
 // The figure's own label ends at the previous figure or separator: "Lender fee $25,000; Other $40,000".
 const LABEL_START = /^.*(?:[;|\t•]|\$\s?\d[\d.,]*|\d[\d.,\s]*\$)/s;
 
+/** The text before a quote: its line up to the quote, or the cells with words before it in its row. */
+function textBefore(document: NormalizedDocument, location: string, line: string, quote: string): string {
+  const row = document.tables.flatMap(t => t.rows).find(r => r.some(c => c.ref === location));
+  return row
+    ? row.slice(0, row.findIndex(c => c.ref === location)).map(c => c.text).filter(t => /\p{L}/u.test(t)).join(" ") + " "
+    : line.slice(0, line.indexOf(quote));
+}
+
 /** The words a figure is written under: its line up to the quote, or the cells before it in its row. */
 function figureLabel(document: NormalizedDocument, location: string, line: string, quote: string): string {
   const at = quote.search(/[\d$]/);
   const own = at < 0 ? quote : quote.slice(0, at);
-  const row = document.tables.flatMap(t => t.rows).find(r => r.some(c => c.ref === location));
-  const before = row
-    ? row.slice(0, row.findIndex(c => c.ref === location)).map(c => c.text).filter(t => /\p{L}/u.test(t)).join(" ")
-    : line.slice(0, line.indexOf(quote));
-  return foldText(before + own).replace(LABEL_START, "");
+  return foldText(textBefore(document, location, line, quote) + own).replace(LABEL_START, "");
 }
 
 /** First failure wins. No model interpretation can bypass an address or number check. */
@@ -82,9 +86,24 @@ export function verifyReading(reading: Reading, documents: readonly ReadingDocum
   const cell = doc.document.tables.some(table => table.rows.some(row => row.some(c => c.ref === location)));
   const money = field.unit === "$" && reading.unit_seen === "$";
   const scaling = money ? declaredScale(doc.document, format, location) : { rule: null, own: false };
+  // A scale the figure's own label states ("Required mortgage ($M) $43.63") is that figure's scale: the words since the figure before it.
+  const before = textBefore(doc.document, location, entries[0]!.text, reading.quote);
+  const labelled = (t: { start: number }) => {
+    if (!money) return null;
+    const text = normalizeText(before + reading.quote.slice(0, t.start));
+    // "$000" in "($000s)" is part of a scale, not a figure.
+    const previous = tokenize(text, format).filter(x => /[1-9]/.test(x.raw)).at(-1);
+    return labelScale(previous ? text.slice(previous.end) : text);
+  };
+  // A label's scale over a declared one that differs cannot be read safely.
+  const ruleFor = (t: { start: number }) => {
+    const own = labelled(t);
+    if (!own) return scaling.rule;
+    return scaling.rule && "factor" in scaling.rule && scaling.rule.factor !== own.factor ? { refuse: true as const } : own;
+  };
   const tokens = tokenize(reading.quote, format, cell).map(t => {
     // A declared money scale supplies the currency context for an unmarked figure.
-    if (!money || !scaling.rule || t.currency || t.value !== null || t.unit !== null) return t;
+    if (!money || !ruleFor(t) || t.currency || t.value !== null || t.unit !== null) return t;
     const amount = tokenize(`${t.raw} $`, format, cell)[0];
     return amount ? { ...t, value: amount.value } : t;
   });
@@ -100,8 +119,9 @@ export function verifyReading(reading: Reading, documents: readonly ReadingDocum
     if (!money || t.value === null) return false;
     if (t.scaled && Math.abs(t.value / ownFactor(t.raw) - reading.value) < 1e-9) return true;
     if (t.paren && field.min !== undefined && field.min >= 0 && Math.abs(t.value) === reading.value) return true;
-    return !t.scaled && scaling.rule && "factor" in scaling.rule
-      && Math.abs(t.value) < 1e6 && roundedScale(t.value, scaling.rule.factor) === reading.value;
+    const rule = ruleFor(t);
+    return !t.scaled && rule && "factor" in rule
+      && Math.abs(t.value) < 1e6 && roundedScale(t.value, rule.factor) === reading.value;
   }) ?? tokens.find(t => {
     if (t.unit === "bps") return false;
     if (t.value === null && !format.spaceGroups) {
@@ -145,10 +165,11 @@ export function verifyReading(reading: Reading, documents: readonly ReadingDocum
   if (money) {
     if (token.scaled && token.value !== null) value = token.value;
     if (token.paren && field.min !== undefined && field.min >= 0 && reading.value >= 0) value = Math.abs(value);
-    if (!token.scaled && !scaling.own && scaling.rule) {
-      if ("refuse" in scaling.rule || token.value === null || Math.abs(token.value) >= 1e6) return { outcome: READING_FAILURE.scale };
-      value = roundedScale(token.paren && reading.value >= 0 ? Math.abs(token.value) : token.value, scaling.rule.factor);
-      unitSeen = statedScaleUnit(scaling.rule.factor);
+    const rule = ruleFor(token);
+    if (!token.scaled && (labelled(token) || !scaling.own) && rule) {
+      if ("refuse" in rule || token.value === null || Math.abs(token.value) >= 1e6) return { outcome: READING_FAILURE.scale };
+      value = roundedScale(token.paren && reading.value >= 0 ? Math.abs(token.value) : token.value, rule.factor);
+      unitSeen = statedScaleUnit(rule.factor);
     }
     if (value !== 0 && Math.abs(value) < 1000) return { outcome: READING_FAILURE.small };
   }

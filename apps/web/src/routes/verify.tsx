@@ -4,6 +4,7 @@ import { useEffect, useRef, useState, type FormEvent } from "react";
 import { api, ApiError, type Me } from "../api";
 import { Notice } from "../components/kit";
 import { useI18n } from "../i18n";
+import "../strings/auth";
 import { AuthFrame, FormError } from "./auth";
 
 /** Takes the `token` from the address once and removes the query from the address bar, keeping the path, so the link's

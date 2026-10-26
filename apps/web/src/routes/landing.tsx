@@ -5,6 +5,7 @@ import { useRef } from "react";
 import { Link, Navigate } from "@tanstack/react-router";
 import { api, ApiError, type Me } from "../api";
 import { useI18n } from "../i18n";
+import "../strings/landing";
 import { ThemeToggle } from "../components/kit";
 import * as I from "../components/icons";
 

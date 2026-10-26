@@ -5,6 +5,7 @@ import { api } from "../api";
 import { Banner, canDecide, DealFrame, ErrorText, useDeal, useSession, VerdictBadge } from "../components/ui";
 import { ChoiceCards, Notice, Tag, type TagTone } from "../components/kit";
 import { useI18n, verdictText } from "../i18n";
+import "../strings/decision";
 import { useRun } from "./run";
 import { policyName } from "../components/thresholds";
 

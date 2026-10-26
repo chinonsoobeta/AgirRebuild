@@ -6,6 +6,7 @@ import { api, ApiError, type Review } from "../api";
 import { ErrorText, WindowConfirmation } from "./ui";
 import { ChoiceCards, Notice } from "./kit";
 import { useI18n } from "../i18n";
+import "../strings/quickstart";
 
 type Entry = { fieldKey: string; itemKey: string | null; value: number };
 const KEPT = ["approved", "default_accepted", "awaiting_second_approval"];

@@ -119,13 +119,20 @@ function classify(core: string): { dotDecimal: boolean; commaDecimal: boolean } 
   const c = core.replace(new RegExp(`[${SPACE_CLASS}]`, "g"), "");
   const hasDot = c.includes(".");
   const hasComma = c.includes(",");
+  // Only a well-formed grouping is evidence: "415.701.5500" (a phone number) and "99.229.253.21" (an address) are no figure.
+  const grouped = (whole: string, sep: string) => whole.split(sep).every((g, i) => (i === 0 ? /^\d{1,3}$/ : /^\d{3}$/).test(g));
   if (hasDot && hasComma) {
-    return c.lastIndexOf(".") > c.lastIndexOf(",") ? { dotDecimal: true, commaDecimal: false } : { dotDecimal: false, commaDecimal: true };
+    const dotLast = c.lastIndexOf(".") > c.lastIndexOf(",");
+    if (!grouped(c.slice(0, c.lastIndexOf(dotLast ? "." : ",")), dotLast ? "," : ".")) return { dotDecimal: false, commaDecimal: false };
+    return dotLast ? { dotDecimal: true, commaDecimal: false } : { dotDecimal: false, commaDecimal: true };
   }
   const sep = hasDot ? "." : hasComma ? "," : null;
   if (!sep) return { dotDecimal: false, commaDecimal: false };
   const parts = c.split(sep);
-  if (parts.length > 2) return sep === "." ? { dotDecimal: false, commaDecimal: true } : { dotDecimal: true, commaDecimal: false };
+  if (parts.length > 2) {
+    if (!grouped(c, sep)) return { dotDecimal: false, commaDecimal: false };
+    return sep === "." ? { dotDecimal: false, commaDecimal: true } : { dotDecimal: true, commaDecimal: false };
+  }
   const after = parts[1]!.length;
   if (after === 3) return { dotDecimal: false, commaDecimal: false }; // ambiguous alone
   return sep === "." ? { dotDecimal: true, commaDecimal: false } : { dotDecimal: false, commaDecimal: true };
@@ -254,10 +261,17 @@ export function parenType(raw: string): string | null {
   return null;
 }
 
-/** A unit type written in any of its ways is one name ("One-bed", "1BR", "1 chambre" are "1BR"); a name with more to it ("2-bed + den") is kept as written. */
+// "1 bedroom + den", "1BR with Den", "one-bed plus den", "1 chambre avec bureau": a bedroom type and a den.
+const DEN_RE = /^(.+?)\s*(?:\+|&|\b(?:with|plus|and|avec)\b)\s*(den|bureau)$/iu;
+
+/** A unit type written in any of its ways is one name ("One-bed", "1BR", "1 chambre" are "1BR"); with a den it is that name and the den ("1BR + den"),
+ * still a type of its own; a name with more to it is kept as written. */
 export function canonicalItem(name: string): string {
   const whole = wholeUnitType(name);
   if (whole) return whole;
+  const den = DEN_RE.exec(name.trim());
+  const type = den ? wholeUnitType(den[1]!) : null;
+  if (type) return `${type} + ${den![2]!.toLowerCase()}`;
   // A bracketed bedroom count describes a named layout; it does not replace its name.
   return name.replace(/\s*[([]([^()[\]]*)[)\]]\s*$/u, (all, inside: string) => wholeUnitType(inside) ? "" : all).trim();
 }
@@ -447,7 +461,8 @@ export function tokenize(line: string, format: DocumentFormat, cell = false): Nu
     let refusal = parsed.refusal;
     // A scale word counts only in a money context: "18 M" alone is not $18,000,000.
     if (scale && currency && value !== null) {
-      value *= scaleOf(scale[1]!);
+      // Rounded to the written precision: $16.4 million is 16,400,000, not 16,399,999.999999998.
+      value = Number((value * scaleOf(scale[1]!)).toPrecision(12));
       scaled = true;
       end += scale[0].length;
     }
