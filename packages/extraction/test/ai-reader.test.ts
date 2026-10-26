@@ -1,6 +1,24 @@
 import { describe, expect, test } from "vitest";
-import { addressedText, extractCandidates, consolidate, checkArithmetic, verifyReadings, verifyReading, READING_FAILURE, type NormalizedDocument, type Reading } from "../src/index.ts";
+import { addressedText, extractCandidates, consolidate, checkArithmetic, verifyReadings, verifyReading, READING_FAILURE, READER_PROMPT, READER_PROMPT_VERSION, type NormalizedDocument, type Reading } from "../src/index.ts";
 import { SF_PER_M2 } from "@agir/numbers";
+
+describe("Card 173: financing costs in the reader prompt", () => {
+  const otherCostNote = "- `other_cost`: a development cost that is not land, hard costs, soft costs, contingency or one of the other cost fields. Financing costs are never `other_cost`: interest, a construction interest reserve, capitalized interest, and lender, loan, commitment, broker or insurer fees on a loan. Name an interest reserve as `stated_interest_reserve`; list the others under `not_used`.";
+
+  test("uses reader-v3", () => {
+    expect(READER_PROMPT_VERSION).toBe("reader-v3");
+  });
+  test("contains the exact other_cost field note", () => {
+    expect(READER_PROMPT.split("\n")).toContain(otherCostNote);
+  });
+  test("places other_cost after development_charges and before expense_ratio_pct", () => {
+    const fieldNotes = READER_PROMPT.split("**Field notes.**\n")[1]!.split("\n\n")[0]!.split("\n");
+    expect(fieldNotes.map(line => line.split(":")[0])).toEqual([
+      "- `development_charges`", "- `other_cost`", "- `expense_ratio_pct`",
+    ]);
+  });
+});
+
 const doc = (kind: NormalizedDocument["kind"]): NormalizedDocument => ({ kind, lines: [], tables: [], pageCount: null, needsOcr: false, fullText: "" });
 describe("addressed text", () => {
   test.each(["docx", "xlsx", "pdf"] as const)("%s addresses and strike ranges", kind => {
