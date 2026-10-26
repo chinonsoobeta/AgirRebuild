@@ -19,7 +19,7 @@ beforeAll(async () => {
   db = await openPglite();
   await migrate(db);
   await seedDemo(db, fileStore(mkdtempSync(join(tmpdir(), "agir-blobs-"))), () => {});
-  const [d] = await db.query<{ userId: string; dealId: string }>(`select created_by as "userId", id as "dealId" from deals limit 1`);
+  const [d] = await db.query<{ userId: string; dealId: string }>(`select created_by as "userId", id as "dealId" from deals where created_by is not null limit 1`);
   info = d!;
 });
 afterAll(async () => db.close());

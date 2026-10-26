@@ -570,7 +570,7 @@ export function flattenMetrics(result: RunResult) {
 export type RunFacts = { approved: number; defaults: number; policyVersion: string; policyDraft: boolean; exit: "sale" | "refinance_hold" | "for_sale";
   constructionMonths: number; holdYears?: number; stresses: number; inputHash: string; engineVersion: string };
 /** A run's progress (card R1): each stage as it finishes, and `check`, which throws when a stop was asked for. */
-export type RunProgress = { stage(key: "inputs" | "ledger" | "loans" | "stresses" | "gates", at: Date, facts?: RunFacts): Promise<void> | void; check(): void };
+export type RunProgress = { stage(key: "inputs" | "ledger" | "loans" | "stresses" | "gates", at: Date, facts?: RunFacts): Promise<void> | void; check(): Promise<void> | void };
 
 export async function createRun(tx: Db, dealId: string, asOf: string, progress?: RunProgress) {
   const assumptions = await loadAssumptions(tx, dealId);
@@ -588,14 +588,14 @@ export async function createRun(tx: Db, dealId: string, asOf: string, progress?:
       policyVersion: policy.version, policyDraft: policy.draft === true, exit: input.exit ?? "sale", constructionMonths: input.constructionMonths,
       ...(input.exit === "for_sale" ? {} : { holdYears: input.holdYears }), stresses: policy.stresses.length, inputHash, engineVersion: ENGINE_VERSION,
     });
-    progress.check();
+    await progress.check();
   }
   const result = runResult(ENGINE_VERSION,input,policy,policy.custom ? base : undefined);
   // The engine is one synchronous call: its four stages finish together, when it returns.
   if (progress) {
     const at = new Date();
     for (const key of ["ledger", "loans", "stresses", "gates"] as const) await progress.stage(key, at);
-    progress.check();
+    await progress.check();
   }
   const setters = changes.length ? await tx.query<{ id: string; name: string }>(`select id,name from users where id=any($1::uuid[])`, [[...new Set(changes.map((change) => change.setById))]]) : [];
   const policyChanges = changes.map((change) => ({ ...change, setBy: setters.find((user) => user.id === change.setById)?.name ?? "—" }));
@@ -637,7 +637,7 @@ export async function createRun(tx: Db, dealId: string, asOf: string, progress?:
   };
   const [{ id }] = (await tx.query<{ id: string }>(`select fn_persist_run($1, $2) as id`, [dealId, JSON.stringify(payload)])) as [{ id: string }];
   // A stop asked for before the commit rolls the run back: no run row, no audit event, no run number used.
-  progress?.check();
+  await progress?.check();
   return id;
 }
 

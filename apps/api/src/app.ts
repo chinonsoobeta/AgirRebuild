@@ -9,16 +9,18 @@ import { asUser, type BlobStore, type Db } from "@agir/db";
 import { breakeven, DRIVERS, driversFor, SALE_DRIVERS, EngineInputError, explore, grid, tornado, type DriverKey, type Shock } from "@agir/engine";
 import { canonicalItem, itemFold, kindOf } from "@agir/extraction";
 import { MAX_UPLOAD_BYTES } from "@agir/worker";
-import { checkPassword, countSessions, createSession, deviceLabel, endOtherSessions, endSession, hashPassword, listSessions, PASSWORD_RULE, rateLimiter, SESSION_DAYS, userForSession } from "./auth.ts";
+import { checkPassword, countSessions, createSession, deviceLabel, endOtherSessions, endSession, hashPassword, listSessions, PASSWORD_RULE, SESSION_DAYS, userForSession } from "./auth.ts";
 import { addressTaken, emailAuth } from "./email-auth.ts";
 import type { Mailer } from "./mailer.ts";
+import { limiter, memoryState, type SharedState } from "./shared-state.ts";
 import { thresholdsView, auditPackage, clientViewer, createRun, dealOverview, hideClientEvents, HttpError, labelRefusal, regionGroups, reviewView, runView, sha256 } from "./services.ts";
 
 export type AppDeps = { db: Db; store: BlobStore; secureCookies: boolean; demoSignIn?: boolean; trustProxy?: boolean; now?: () => Date;
   /** Sends verification and reset emails. Without one, nothing is sent. */ mailer?: Mailer;
   /** The web app's origin, for links in emails. Configured, never read from a request. */ publicOrigin?: string;
   /** Tests only: awaited after each progress line of a streamed run, so a test can hold a run at a stage. */
-  progressHook?: (stage: string) => Promise<void> | void };
+  progressHook?: (stage: string) => Promise<void> | void;
+  /** Rate limits and run stops (card D). Without one, they live in this process's memory. */ state?: SharedState };
 type Env = { Variables: { user: { id: string; email: string; name: string } } };
 
 const COOKIE = "agir_session";
@@ -62,7 +64,7 @@ function windowReason(fieldKey: string, value: number, reason: string | null | u
 }
 
 export function createApp({ db, store, secureCookies, demoSignIn = false, trustProxy = false, now = () => new Date(),
-  mailer = { send: async () => {} }, publicOrigin = "http://127.0.0.1:8787", progressHook }: AppDeps) {
+  mailer = { send: async () => {} }, publicOrigin = "http://127.0.0.1:8787", progressHook, state = memoryState() }: AppDeps) {
   const app = new Hono<Env>();
   const clientKey = (c: Context<Env>): string => {
     if (trustProxy) {
@@ -72,13 +74,10 @@ export function createApp({ db, store, secureCookies, demoSignIn = false, trustP
     try { return getConnInfo(c).remote.address || "local"; }
     catch { return "local"; }
   };
-  const authLimit = rateLimiter(20, 60_000);
-  const shareLimit = rateLimiter(60, 60_000);
-  const inviteLimit = rateLimiter(60, 60_000);
-  const stopLimit = rateLimiter(60, 60_000);
-  // Streamed runs in progress, by run token (card R1). This map lives in this one API process: with several
-  // API processes, a stop could reach a process that is not running the run, so the map would need to be in the database.
-  const runsInProgress = new Map<string, { userId: string; dealId: string; stopRequested: boolean }>();
+  const authLimit = limiter(state, "auth", 20, 60_000);
+  const shareLimit = limiter(state, "share", 60, 60_000);
+  const inviteLimit = limiter(state, "invite", 60, 60_000);
+  const stopLimit = limiter(state, "stop", 60, 60_000);
   const fileResponse = async (a: { kind: string; format: string; storage_key: string | null; run_number: number; deal: string; lang?: "en" | "fr" }, inline: boolean) => {
     const bytes = await store.get(a.storage_key!);
     const mime = { pdf: "application/pdf", docx: "application/vnd.openxmlformats-officedocument.wordprocessingml.document", xlsx: "application/vnd.openxmlformats-officedocument.spreadsheetml.sheet" }[a.format] ?? "application/octet-stream";
@@ -96,7 +95,7 @@ export function createApp({ db, store, secureCookies, demoSignIn = false, trustP
   // Shared links and invitations carry a secret in the path: rate-limited, never cached, never sent on as a referrer.
   for (const [prefix, limit] of [["/api/share/*", shareLimit], ["/api/invite/*", inviteLimit], ["/api/runs/stop", stopLimit]] as const) {
     app.use(prefix, async (c, next) => {
-      if (limit(clientKey(c))) await next();
+      if (await limit(clientKey(c))) await next();
       else c.res = c.json({ error: "Too many requests. Wait a minute." }, 429);
       c.header("cache-control", "no-store");
       c.header("referrer-policy", "no-referrer");
@@ -119,10 +118,10 @@ export function createApp({ db, store, secureCookies, demoSignIn = false, trustP
 
   // ---- Auth -----------------------------------------------------------------------
   const cookieOpts = { httpOnly: true, sameSite: "Lax" as const, secure: secureCookies, path: "/", maxAge: SESSION_DAYS * 86400 };
-  const emailFlows = emailAuth({ db, mailer, publicOrigin, cookie: COOKIE, cookieOpts, clientKey });
+  const emailFlows = emailAuth({ db, mailer, publicOrigin, cookie: COOKIE, cookieOpts, clientKey, state });
 
   app.post("/api/auth/signup", async (c) => {
-    if (!authLimit(clientKey(c))) return c.json({ error: "Too many attempts. Wait a minute." }, 429);
+    if (!(await authLimit(clientKey(c)))) return c.json({ error: "Too many attempts. Wait a minute." }, 429);
     const body = z
       .object({ email: z.string().email(), name: z.string().min(1).max(120), password: PASSWORD_RULE, reviewMode: z.enum(REVIEW_MODES).optional(),
         invite: z.string().min(1).max(200).optional() })
@@ -158,7 +157,7 @@ export function createApp({ db, store, secureCookies, demoSignIn = false, trustP
   });
 
   app.post("/api/auth/login", async (c) => {
-    if (!authLimit(clientKey(c))) return c.json({ error: "Too many attempts. Wait a minute." }, 429);
+    if (!(await authLimit(clientKey(c)))) return c.json({ error: "Too many attempts. Wait a minute." }, 429);
     const body = z.object({ email: z.string(), password: z.string() }).parse(await c.req.json());
     const [u] = await db.query<{ id: string; password_hash: string }>(`select id, password_hash from users where email = $1`, [body.email.toLowerCase()]);
     if (!u || !(await checkPassword(body.password, u.password_hash))) return c.json({ error: "That email and password do not match." }, 401);
@@ -212,13 +211,12 @@ export function createApp({ db, store, secureCookies, demoSignIn = false, trustP
   });
 
   // Stopping a streamed run (card R1). The run token is the authority: only the browser that started the run holds it.
-  // No session check and no database: in local development the run's open transaction would make either wait until the run ends.
+  // No session check. In local development (PGlite, memory state) no database either: the run's open transaction would
+  // make either wait until the run ends. With Postgres the stop is kept in the database, on another connection.
   app.post("/api/runs/stop", async (c) => {
     const body: unknown = await c.req.json().catch(() => null);
     const token = body && typeof body === "object" && "token" in body && typeof body.token === "string" ? body.token : "";
-    const run = runsInProgress.get(token);
-    if (!run) return c.json({ error: "This run is not in progress. It may have finished." }, 404);
-    run.stopRequested = true;
+    if (!RUN_TOKEN.test(token) || (await state.runs.requestStop(token)) === "unknown") return c.json({ error: "This run is not in progress. It may have finished." }, 404);
     return c.json({ stopping: true });
   });
 
@@ -734,9 +732,7 @@ export function createApp({ db, store, secureCookies, demoSignIn = false, trustP
     const dealId = c.req.param("id"), asOf = now().toISOString().slice(0,10);
     const token = c.req.header("x-run-token") ?? "";
     if (!RUN_TOKEN.test(token)) return c.json({ error: "This run needs a valid run token." }, 422);
-    if (runsInProgress.has(token)) return c.json({ error: "A run with this token is already in progress." }, 409);
-    const run = { userId: c.get("user").id, dealId, stopRequested: false };
-    runsInProgress.set(token, run);
+    if (!(await state.runs.start(token, { userId: c.get("user").id, dealId }))) return c.json({ error: "A run with this token is already in progress." }, 409);
     c.header("content-type", "application/x-ndjson");
     c.header("cache-control", "no-store");
     return stream(c, async (s) => {
@@ -745,7 +741,7 @@ export function createApp({ db, store, secureCookies, demoSignIn = false, trustP
       try {
         const id = await as(c, (tx) => createRun(tx, dealId, asOf, {
           stage: async (key, at, facts) => { send({ stage: key, at: at.toISOString(), ...(facts ? { facts } : {}) }); await progressHook?.(key); },
-          check: () => { if (run.stopRequested) throw new RunStopped(); },
+          check: async () => { if (await state.runs.stopRequested(token)) throw new RunStopped(); },
         }));
         // The browser went away before the end (card R1e): the person who started the run hears that it is done by email.
         if (s.aborted) await mailRunDone(c, dealId, id);
@@ -759,7 +755,7 @@ export function createApp({ db, store, secureCookies, demoSignIn = false, trustP
           send({ error: { status, message: error, ...rest } });
         }
       } finally {
-        runsInProgress.delete(token);
+        await state.runs.end(token).catch(() => {});
       }
     });
   });

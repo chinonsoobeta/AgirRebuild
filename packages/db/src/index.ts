@@ -63,6 +63,8 @@ export async function openPostgres(url: string): Promise<Db> {
       await pool.end();
     },
   });
+  // The returned Db queries through the pool, so its query runs on its own connection even while a transaction()
+  // holds another: a run's stop check (card D) uses this.
   return client(pool);
 }
 
