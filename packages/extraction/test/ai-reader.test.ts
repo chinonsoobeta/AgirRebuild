@@ -392,3 +392,51 @@ describe("Card 174: a financing figure is not an other cost", () => {
     expect(result.conflicts[0]).toMatchObject([{ outcome: READING_FAILURE.financing }, { outcome: "verified", candidate: { fieldKey: "other_cost", value: 300000 } }]);
   });
 });
+
+describe("Card J: verifier refusals of figures that are written", () => {
+  const build = (name: string, texts: string[]) => {
+    const lines = texts.map((text, i) => ({ text, location: `line ${i + 1}` }));
+    return { id: name, name, document: { ...doc("txt"), lines, fullText: texts.join("\n") } };
+  };
+  const sources = [
+    // A letterhead phone number and an IP address are not decimal commas.
+    build("memo.txt", ["415.701.5500  415.701.5501 fax", "IP address: 99.229.253.21", "Rate 5.25%", "Transfer Tax 102,000 102,000", "Real Estate Taxes 40,120 Assumes 25% exempt"]),
+    // Real evidence of both separators still leaves a lone group ambiguous.
+    build("both.txt", ["Loan 12.400.000", "Rate 5.25%", "Transfer Tax 102,000"]),
+    build("prose.txt", ["The final costs show a total project budget of $16.4 million including land"]),
+    // A short line under a scale heading ends what it covers; the figure's own label still states its scale.
+    build("chip.txt", ["Anticipated sources of funding ($M)", "Applicant land equity 9.44", "Initiative grant", "Required mortgage ($M) $43.63", "Land (in thousands) 8,500"]),
+    build("label.txt", ["Summary", "Required mortgage ($M) $43.63", "Land costs ($K) $1,250 then Loan $12,000,000"]),
+    build("clash.txt", ["Budget ($K)", "Required mortgage ($M) $43.63"]),
+  ];
+  const millions = "$ (stated in millions; × 1,000,000)";
+  const thousands = "$ (stated in thousands; × 1,000)";
+  test.each([
+    ["memo.txt", "line 4", "Transfer Tax 102,000 102,000", "land_transfer_tax", 102000, 102000, "$"],
+    ["memo.txt", "line 5", "Real Estate Taxes 40,120 Assumes 25% exempt", "property_tax_annual", 40120, 40120, "$"],
+    ["memo.txt", "line 5", "Real Estate Taxes 40,120 Assumes 25% exempt", "property_tax_annual", 40.12, "value", "$"],
+    ["prose.txt", "line 1", "total project budget of $16.4 million including land", "stated_total_cost", 16400000, 16400000, "$"],
+    ["prose.txt", "line 1", "total project budget of $16.4 million including land", "stated_total_cost", 16.4, 16400000, "$"],
+    ["prose.txt", "line 1", "total project budget of $16.4 million including land", "stated_total_cost", 1640000, "value", "$"],
+    ["chip.txt", "line 4", "Required mortgage ($M) $43.63", "senior_loan_amount", 43.63, 43630000, millions],
+    ["chip.txt", "line 4", "Required mortgage ($M) $43.63", "senior_loan_amount", 43630000, 43630000, millions],
+    ["chip.txt", "line 4", "$43.63", "senior_loan_amount", 43.63, 43630000, millions],
+    ["chip.txt", "line 5", "Land (in thousands) 8,500", "land_cost", 8500, 8500000, thousands],
+    ["label.txt", "line 2", "Required mortgage ($M) $43.63", "senior_loan_amount", 43.63, 43630000, millions],
+    ["label.txt", "line 3", "Land costs ($K) $1,250", "land_cost", 1250, 1250000, thousands],
+    // The label of the second figure is "then Loan", not the "($K)" of the first.
+    ["label.txt", "line 3", "Loan $12,000,000", "senior_loan_amount", 12000000, 12000000, "$"],
+    ["clash.txt", "line 2", "Required mortgage ($M) $43.63", "senior_loan_amount", 43.63, "scale", "$"],
+  ] as const)("%s %s %s = %s", (file, location, quote, field, value, expected, unitSeen) => {
+    const got = verifyReading({ ...reading, file, location, quote, field, value }, sources);
+    expect(got.outcome).toBe(typeof expected === "number" ? "verified" : READING_FAILURE[expected]);
+    if (typeof expected === "number") {
+      expect(got.candidate).toMatchObject({ value: expected, unitSeen });
+      expect(got.candidate).not.toHaveProperty("ambiguous");
+    }
+  });
+  test("a lone group under real evidence of both separators is still refused", () => {
+    const got = verifyReading({ ...reading, file: "both.txt", location: "line 3", quote: "Transfer Tax 102,000", field: "land_transfer_tax", value: 102000 }, sources);
+    expect(got.outcome).toBe(READING_FAILURE.value);
+  });
+});
