@@ -339,3 +339,56 @@ describe("Card 170: money scales and accounting brackets", () => {
     expect(extractCandidates(document).candidates.filter(c => c.fieldKey === "land_cost")).toEqual([]);
   });
 });
+describe("Card 174: a financing figure is not an other cost", () => {
+  const build = (name: string, rows: [string, string][]) => {
+    const lines = rows.map(([text, location]) => ({ text, location }));
+    return { id: name, name, document: { ...doc("txt"), lines, fullText: lines.map(l => l.text).join("\n") } };
+  };
+  const english = build("budget.txt", [
+    ["Financing costs $1,250,000", "line 1"],
+    ["Other costs (excluding financing) $400,000", "line 2"],
+    ["Developer fee $300,000", "line 3"],
+    ["Lender fee $25,000; Other $40,000", "line 4"],
+    ["Capitalized interest: $610,000", "line 5"],
+    ["Permit levies $55,000", "line 6"],
+  ]);
+  const french = build("budget-fr.txt", [
+    ["Frais de financement : 850 000 $", "line 1"],
+    ["Autres coûts hors financement : 120 000 $", "line 2"],
+    ["Intérêts capitalisés : 410 000 $", "line 3"],
+  ]);
+  const sheet = { id: "b.xlsx", name: "b.xlsx", document: { ...doc("xlsx"), tables: [{ name: "Budget", rows: [
+    [{ ref: "Budget!A1", text: "Interest during construction" }, { ref: "Budget!B1", text: "1,100,000" }],
+    [{ ref: "Budget!A2", text: "Other" }, { ref: "Budget!B2", text: "75,000" }],
+  ] }], fullText: "Interest during construction 1,100,000\nOther 75,000" } };
+  const sources = [english, french, sheet];
+  const read = (file: string, location: string, quote: string, value: number, field = "other_cost") =>
+    verifyReading({ ...reading, file, location, quote, value, field }, sources).outcome;
+  test.each([
+    ["budget.txt", "line 1", "Financing costs $1,250,000", 1250000, READING_FAILURE.financing],
+    ["budget.txt", "line 1", "$1,250,000", 1250000, READING_FAILURE.financing],
+    ["budget.txt", "line 2", "$400,000", 400000, "verified"],
+    ["budget.txt", "line 3", "Developer fee $300,000", 300000, "verified"],
+    ["budget.txt", "line 4", "$25,000", 25000, READING_FAILURE.financing],
+    ["budget.txt", "line 4", "Other $40,000", 40000, "verified"],
+    ["budget.txt", "line 5", "$610,000", 610000, READING_FAILURE.financing],
+    ["budget.txt", "line 6", "Permit levies $55,000", 55000, "verified"],
+    ["budget-fr.txt", "line 1", "850 000 $", 850000, READING_FAILURE.financing],
+    ["budget-fr.txt", "line 2", "120 000 $", 120000, "verified"],
+    ["budget-fr.txt", "line 3", "Intérêts capitalisés : 410 000 $", 410000, READING_FAILURE.financing],
+    ["b.xlsx", "Budget!B1", "1,100,000", 1100000, READING_FAILURE.financing],
+    ["b.xlsx", "Budget!B2", "75,000", 75000, "verified"],
+  ] as const)("%s %s %s as other_cost: %s", (file, location, quote, value, expected) => {
+    expect(read(file, location, quote, value)).toBe(expected);
+  });
+  test("the same financing line is verified as the stated interest reserve", () => {
+    expect(read("budget.txt", "line 1", "Financing costs $1,250,000", 1250000, "stated_interest_reserve")).toBe("verified");
+    expect(read("budget-fr.txt", "line 1", "850 000 $", 850000, "stated_interest_reserve")).toBe("verified");
+  });
+  test("a conflict loses only its financing value", () => {
+    const value = (location: string, quote: string, v: number) => ({ value: v, unit_seen: "$" as const, file: "budget.txt", location, quote });
+    const result = verifyReadings({ readings: [], not_used: [], conflicts: [{ field: "other_cost", item: null, why: "Invented disagreement",
+      values: [value("line 1", "$1,250,000", 1250000), value("line 3", "Developer fee $300,000", 300000)] }] }, sources);
+    expect(result.conflicts[0]).toMatchObject([{ outcome: READING_FAILURE.financing }, { outcome: "verified", candidate: { fieldKey: "other_cost", value: 300000 } }]);
+  });
+});

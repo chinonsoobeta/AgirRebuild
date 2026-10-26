@@ -23,6 +23,8 @@ It fails on any wrong value, trap or one-sided pick of a conflict, or when fewer
 
 It runs the same two ways as the deals: offline for free, or live through the batch API at half price (about $0.30 for the five packages).
 
+Card 174 adds a verifier rule (code after the model call): a financing figure read as other costs is refused. Its offline measurement on the deals and the package set is pending.
+
 ## Which run a change needs
 
 - **Code after the model call** (`verifyReadings`, unit conversion, how readings become proposals). An offline run is enough. It re-verifies the saved model responses with the new code and is free.
