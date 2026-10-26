@@ -1,34 +1,43 @@
 import "./styles.css";
-import { StrictMode } from "react";
+import { lazy, StrictMode, Suspense, type ComponentType } from "react";
 import { createRoot } from "react-dom/client";
 import { QueryClient, QueryClientProvider } from "@tanstack/react-query";
 import { createRootRoute, createRoute, createRouter, Navigate, Outlet, RouterProvider } from "@tanstack/react-router";
 import { SessionGate, Shell } from "./components/ui";
-import { Login, Signup } from "./routes/auth";
-import { Deals } from "./routes/deals";
-import { NewDeal } from "./routes/newdeal";
-import { Documents } from "./routes/documents";
-import { Review } from "./routes/review";
-import { Run } from "./routes/run";
-import { DecisionStep } from "./routes/decision";
-import { Reports } from "./routes/reports";
-import { Audit } from "./routes/audit";
-import { Settings } from "./routes/settings";
-import { ReviewAccess } from "./routes/review-access";
-import { Explore } from "./routes/explore";
-import { Compare } from "./routes/compare";
-import { Share, SharePreview } from "./routes/share";
-import { Invite } from "./routes/invite";
-import { Verify } from "./routes/verify";
-import { Reset } from "./routes/reset";
-import { EmailConfirm, EmailUndo } from "./routes/email-change";
-import { Home } from "./routes/landing";
-import { Legal } from "./routes/legal";
 import { I18nProvider } from "./i18n";
+
+// Each screen loads when it is first opened, so the first visit downloads only the shell (plan L5).
+// `vite.config.ts` gathers the screens into one file per group: deal, settings, auth, share, landing.
+const screen = <K extends string, M extends Record<K, ComponentType<any>>>(load: () => Promise<M>, name: K) =>
+  lazy(() => load().then((m) => ({ default: m[name] })));
+const Login = screen(() => import("./routes/auth"), "Login");
+const Signup = screen(() => import("./routes/auth"), "Signup");
+const Deals = screen(() => import("./routes/deals"), "Deals");
+const NewDeal = screen(() => import("./routes/newdeal"), "NewDeal");
+const Documents = screen(() => import("./routes/documents"), "Documents");
+const Review = screen(() => import("./routes/review"), "Review");
+const Run = screen(() => import("./routes/run"), "Run");
+const DecisionStep = screen(() => import("./routes/decision"), "DecisionStep");
+const Reports = screen(() => import("./routes/reports"), "Reports");
+const Audit = screen(() => import("./routes/audit"), "Audit");
+const Settings = screen(() => import("./routes/settings"), "Settings");
+const ReviewAccess = screen(() => import("./routes/review-access"), "ReviewAccess");
+const Explore = screen(() => import("./routes/explore"), "Explore");
+const Compare = screen(() => import("./routes/compare"), "Compare");
+const Share = screen(() => import("./routes/share"), "Share");
+const SharePreview = screen(() => import("./routes/share"), "SharePreview");
+const Invite = screen(() => import("./routes/invite"), "Invite");
+const Verify = screen(() => import("./routes/verify"), "Verify");
+const Reset = screen(() => import("./routes/reset"), "Reset");
+const EmailConfirm = screen(() => import("./routes/email-change"), "EmailConfirm");
+const EmailUndo = screen(() => import("./routes/email-change"), "EmailUndo");
+const Home = screen(() => import("./routes/landing"), "Home");
+const Legal = screen(() => import("./routes/legal"), "Legal");
 
 const queryClient = new QueryClient({ defaultOptions: { queries: { staleTime: 5_000, retry: (n, e: any) => e?.status !== 401 && e?.status !== 403 && e?.status !== 404 && n < 2 } } });
 
-const root = createRootRoute({ component: () => <Outlet /> });
+// While a screen's file loads, nothing is drawn in its place; inside the app the shell stays.
+const root = createRootRoute({ component: () => <Suspense fallback={null}><Outlet /></Suspense> });
 const login = createRoute({ getParentRoute: () => root, path: "/login", component: Login });
 const signup = createRoute({ getParentRoute: () => root, path: "/signup", component: Signup });
 // A shared link: outside the session gate, so it opens without an account (card 86).
@@ -50,7 +59,9 @@ const app = createRoute({
   component: () => (
     <SessionGate>
       <Shell>
-        <Outlet />
+        <Suspense fallback={null}>
+          <Outlet />
+        </Suspense>
       </Shell>
     </SessionGate>
   ),
@@ -60,7 +71,7 @@ const newDeal = createRoute({ getParentRoute: () => app, path: "/deals/new", com
 const settings = createRoute({ getParentRoute: () => app, path: "/settings", component: Settings });
 const reviewAccess = createRoute({ getParentRoute: () => app, path: "/settings/review-access", component: ReviewAccess });
 const deal = createRoute({ getParentRoute: () => app, path: "/deals/$dealId", component: () => <Outlet /> });
-const step = <P extends string>(path: P, C: (p: { dealId: string }) => React.JSX.Element) =>
+const step = <P extends string>(path: P, C: ComponentType<{ dealId: string }>) =>
   createRoute({ getParentRoute: () => deal, path, component: function Step() { const { dealId } = deal.useParams(); return <C key={dealId} dealId={dealId} />; } });
 // Two runs side by side (card W11): `a` is this run, `b` the one it is compared against; both optional.
 const compare = createRoute({

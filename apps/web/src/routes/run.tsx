@@ -449,8 +449,9 @@ export function Run({ dealId, run: fromAddress }: { dealId: string; run?: string
         </section>
 
         <section className="section">
-          <div><h2 className="h2">{t("run.underStress")}</h2><p className="muted">{t("run.underStressLead")}</p></div>
-          <div className="card scroll run-stress">
+          <div><h2 className="h2" id="run-stress-h">{t("run.underStress")}</h2><p className="muted">{t("run.underStressLead")}</p></div>
+          {/* The table is wider than the page: the box takes focus so the keyboard can scroll it. */}
+          <div className="card scroll run-stress" tabIndex={0} role="region" aria-labelledby="run-stress-h">
             <table className="table">
               <thead><tr><th scope="col">{t("run.col.scenario")}</th>{columns.map((k) => <th scope="col" key={k} className="r">{L.metric(k)}</th>)}</tr></thead>
               <tbody>

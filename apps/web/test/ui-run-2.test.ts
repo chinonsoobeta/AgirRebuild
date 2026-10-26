@@ -115,6 +115,16 @@ describe("the run screen with figures in context, history status and a run in th
     expect(html).toContain('class="card scroll run-stress"');
   });
 
+  // Card G (axe scrollable-region-focusable): a keyboard user can reach the wide stress table to scroll it.
+  it("lets the keyboard reach and scroll the stress table, named by its heading", () => {
+    const html = render();
+    const box = html.match(/<div[^>]*class="card scroll run-stress"[^>]*>/)![0];
+    expect(box).toContain('tabindex="0"');
+    expect(box).toContain('role="region"');
+    const label = /aria-labelledby="([^"]+)"/.exec(box)![1];
+    expect(html).toMatch(new RegExp(`<h2[^>]*id="${label}"[^>]*>${en.t("run.underStress")}</h2>`));
+  });
+
   it("keeps the rental stress columns after income, cost and spread", () => {
     state.byId["run-2"] = view("run-2", 2, rental);
     const html = render();
