@@ -304,6 +304,7 @@ build on earlier migrations.
 | `task/167-whole-unit-count` | done | Card 167: an AI unit count with no item, a blank item or a total name ("Total units", "Nombre total de logements") is the whole building's count (item null), checked against the unit types; it no longer becomes a phantom unit type or is refused. Reader gate (offline): the second v14 run's wrong values 2 to 0, v13 failed verification 1 to 0, no other key item changed. |
 | `task/168-word-ranges` | done | Card 168: the rule reader no longer reads the end of a range written in words ("seven to nine months", "entre sept et neuf mois") as a value; durations such as "two years and nine months" and "un an et six mois" keep both parts, and digit ranges are unchanged. Bank and scores identical; nine real-document figures shown no longer, all ranges. |
 | `task/169-window-settles-psf` | done | Card 169: for a field with a minimum but no maximum (rent per square foot, monthly unit rent), the verifier settles an unscaled three-decimal figure by the field's window and flags it for review ("$29.009/sf/year" is 29.009). Reader gate (offline): v14 +3 right, failed verification 6 to 3, no new wrong value. Release gate for 167+168+169: 5992 passed. |
+| `card/B-hardening` | Release 1 step 6 (readiness 3, 4, 7) | Card B. The chain check (`GET /api/workspaces/:ws/audit/verify`) still walks every row but answers members only (403 otherwise, a missing workspace alike), with this workspace's event count and whether the first broken row is this workspace's, never a seq (migration `0036_audit_verify_scope.sql`, `fn_verify_audit_chain_for`; `fn_verify_audit_chain` kept for the audit package). New variable `AGIR_SIGNUP=open\|invite` (default `open`; any other value refuses to start): under `invite`, sign-up without a client invitation is refused 403 "Agir is by invitation during the pilot."; `GET /api/auth/signup` says `{ open }`; the sign-up page shows the sentence and no form, the sign-in link stays with a note. `apps/api/src/log.ts`: one JSON line per event on stdout; one `api.request` line per request (method, route pattern, status, ms, request id, user id; secret paths by pattern; no query, body or email). New variable `AGIR_ALERT_URL`: fire-and-forget POST, 5 s timeout, for `api.error`, `mail.failed`, `job.dead`, `worker.error`, `migrations.failed` and `api.refused_start`; failures log `alert.failed`. `/api/health` adds `worker` and `migrations`. `Mailer.configured`: with no mail provider, send routes answer `sent: false`, `/api/me` gives `mail: false`, and no screen says "We sent". | Yes: migration and auth (plan rule 7) |
 
 The plan for small Canadian developers is [plan-small-developers.md](plan-small-developers.md).
 Release 1 steps 0 to 3 are built. Steps 4 and 5 are built on draft, unsigned policy and tables that
@@ -428,16 +429,21 @@ A model may suggest a label for a figure the reader could not label; a person co
   number ("in 2025 US dollars") is not read. Other currencies than CAD, USD and AUD are not recognised.
 - **CI runs on GitHub.** `.github/workflows/gate.yml` runs on every push of `main` (last checked 2026-10-25 with
   `gh run list`: the run for card 153b, `3ca9877`, succeeded). The `ui/*` branches are not pushed, so CI has not run on them.
-- **The chain check covers every workspace.** `GET /api/workspaces/:ws/audit/verify` (`apps/api/src/app.ts` line 306)
-  calls `fn_verify_audit_chain()` (`packages/db/migrations/0002_functions.sql` line 86, security definer), which walks
-  every row of `audit_events`. The route does not check that the caller is a member of `:ws`, and the count it returns
-  is the number of events in the whole system, so any signed-in person learns it. The audit package's `audit_chain`
-  check uses the same function (`apps/api/src/services.ts` line 648).
+- **The chain is one chain across every workspace.** Since card B, `GET /api/workspaces/:ws/audit/verify` answers
+  members only, with their workspace's count (migration `0036`), but the walk still reads every workspace's rows, and the
+  audit package's `audit_chain` check still uses `fn_verify_audit_chain()` with the installation's count
+  (`apps/api/src/services.ts`). A per-workspace chain is ADR 0002 item S8.
 - **The audit package cannot be checked on its own.** It holds the deal's events with `prev_hash` and `hash`
   (`apps/api/src/services.ts` line 647) but not the actor or the deal, which each hash covers, and the chain runs
   through every deal and workspace, so someone holding only the package cannot recompute it.
-- **Anyone can create an account.** `POST /api/auth/signup` (`apps/api/src/app.ts` line 100) is open and gives each new
-  person a workspace of their own.
+- **Sign-up is open unless `AGIR_SIGNUP=invite`.** The default (`open`) lets anyone create an account with a workspace of
+  its own; a deployment for the pilot must set `invite` (card B). There is no way yet to invite a workspace member who
+  has no account: under `invite`, only client invitations create accounts.
+- **No mail provider.** Production uses `unsentMailer()`: verification, reset and change-of-address links are made but
+  never delivered, and the screens say so (card B). A person who undoes an address change in production is left with
+  no password and no reset link.
+- **The standalone worker does not alert.** `apps/worker/src/main.ts` writes JSON lines in the same shape but has no
+  `AGIR_ALERT_URL` hook; only the embedded worker's `job.dead` and `worker.error` are alerted.
 - **Uploads are not scanned for malware.** The worker makes structural checks only (`apps/worker/src/index.ts` line 144).
 - **Files are stored on the local disk**, under the data folder's `blobs/` (`apps/api/src/main.ts`, `fileStore` in
   `packages/db/src/storage.ts`).
