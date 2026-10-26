@@ -304,4 +304,20 @@ describe("Card 170: money scales and accounting brackets", () => {
     expect(got.outcome).toBe(typeof expected === "number" ? "verified" : READING_FAILURE[expected]);
     if (typeof expected === "number") expect(got.candidate).toMatchObject({ value: expected, unitSeen });
   });
+  test("a scale heading in running text ends at its page", () => {
+    const lines = ([
+      ["Building permit values ($ 000)", "page 1, line 1"],
+      ["Permit values reached", "page 1, line 2"],
+      ["Land $8,500", "page 1, line 3"],
+      ["Property taxes $120,000", "page 2, line 1"],
+      ["Land cost: $9,440,000", "page 2, line 2"],
+    ] as [string, string][]).map(([text, location]) => ({ text, location }));
+    const document = { ...doc("pdf"), lines, pageCount: 2, fullText: lines.map(l => l.text).join("\n") };
+    const read = (location: string, quote: string, field: string, value: number) =>
+      verifyReading({ ...reading, file: "p.pdf", location, quote, field, value }, [{ id: "p.pdf", name: "p.pdf", document }]).outcome;
+    expect(read("page 1, line 3", "Land $8,500", "land_cost", 8500)).toBe(READING_FAILURE.scale);
+    expect(read("page 2, line 1", "Property taxes $120,000", "property_tax_annual", 120000)).toBe("verified");
+    // The rule reader, frozen as the fallback, still keeps the heading to the end of the document.
+    expect(extractCandidates(document).candidates.filter(c => c.fieldKey === "land_cost")).toEqual([]);
+  });
 });
