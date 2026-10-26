@@ -316,10 +316,12 @@ function Row({ title, body, children }: { title: ReactNode; body?: ReactNode; ch
   );
 }
 
-/** The address is not confirmed yet (card W12): send a new link, or enter the code on /verify. */
-function ConfirmEmail() {
+/** The address is not confirmed yet (card W12): send a new link, or enter the code on /verify. Without a mail provider
+ * (card B), it says so instead. */
+function ConfirmEmail({ mail }: { mail: boolean }) {
   const { t } = useI18n();
   const send = useMutation({ mutationFn: () => api.post("/auth/verify/send", {}) });
+  if (!mail) return <div className="stack tight"><Notice tone="review">{t("auth.verify.notYet")}</Notice><p className="small">{t("auth.noMail")}</p></div>;
   return (
     <div className="stack tight">
       <Notice tone="review">{t("auth.verify.notYet")}</Notice>
@@ -336,16 +338,16 @@ function ConfirmEmail() {
 /** Card R6: a reset link to the person's own address, so a signed-in person can set a new password. */
 function PasswordRow({ email }: { email: string }) {
   const { t } = useI18n();
-  const [sent, setSent] = useState(false);
+  const [sent, setSent] = useState<boolean | null>(null);
   const [error, setError] = useState<unknown>(null);
   const [busy, setBusy] = useState(false);
   const send = async () => {
-    setSent(false);
+    setSent(null);
     setError(null);
     setBusy(true);
     try {
-      await api.post("/auth/reset/send", { email });
-      setSent(true);
+      const r = await api.post<{ sent?: false }>("/auth/reset/send", { email });
+      setSent(r.sent !== false);
     } catch (e) {
       setError(e);
     } finally {
@@ -357,7 +359,8 @@ function PasswordRow({ email }: { email: string }) {
       <Row title={t("settings.ac.password")} body={t("settings.ac.passwordBody")}>
         <button className="btn quiet sm" type="button" disabled={busy} onClick={send}>{t("auth.reset.send")}</button>
       </Row>
-      {sent && <p className="small" role="status">{t("settings.ac.passwordSent", { email })}</p>}
+      {sent === true && <p className="small" role="status">{t("settings.ac.passwordSent", { email })}</p>}
+      {sent === false && <p className="small" role="status">{t("auth.noMail")}</p>}
       <ErrorText error={error} />
     </div>
   );
@@ -453,6 +456,7 @@ export function Settings() {
   const members = useQuery({ queryKey: ["members", workspaceId], queryFn: () => api.get<{ id: string; name: string; email: string; role: string; expires_at: string | null }[]>(`/workspaces/${workspaceId}/members`) });
   const add = useMutation({ mutationFn: (b: { email: string; role: string }) => api.post(`/workspaces/${workspaceId}/members`, b), onSuccess: () => qc.invalidateQueries({ queryKey: ["members"] }) });
   const mode = useMutation({ mutationFn: (m: "team" | "solo") => api.post(`/workspaces/${workspaceId}/review-mode`, { mode: m }), onSuccess: () => qc.invalidateQueries({ queryKey: ["me"] }) });
+  const aiReading = useMutation({ mutationFn: (on: boolean) => api.put(`/workspaces/${workspaceId}/ai-reading`, { on }), onSuccess: () => qc.invalidateQueries({ queryKey: ["me"] }) });
   const suggest = useMutation({ mutationFn: (on: boolean) => api.post(`/workspaces/${workspaceId}/label-suggestions`, { on }), onSuccess: () => qc.invalidateQueries({ queryKey: ["me"] }) });
   const setRole = useMutation({ mutationFn: (b: { email: string; role: string }) => api.post(`/workspaces/${workspaceId}/members`, b), onSuccess: () => qc.invalidateQueries({ queryKey: ["members"] }) });
   // The new workspace becomes the current one once the session knows it.
@@ -645,12 +649,15 @@ export function Settings() {
     { id: "reading", nav: t("settings.nav.reading"), show: member, node: (
       <Section id="reading" title={t("settings.nav.reading")} body={t("settings.rd.body")}>
         <div>
+          <Row title={t("settings.aiOn")} body={t("settings.aiNotice")}>
+            <Switch label={t("settings.aiOn")} checked={ws?.ai_reading ?? false} disabled={!owner} onChange={(on) => aiReading.mutate(on)} />
+          </Row>
           <Row title={t("settings.suggestOn")} body={t("settings.suggestNotice")}>
             <Switch label={t("settings.suggestOn")} checked={ws?.label_suggestions ?? false} disabled={!owner} onChange={(on) => suggest.mutate(on)} />
           </Row>
         </div>
         {!owner && <p className="hint">{t("settings.rd.locked")}</p>}
-        <ErrorText error={suggest.error} />
+        <ErrorText error={aiReading.error ?? suggest.error} />
       </Section>
     ) },
     { id: "logo", nav: t("logo.title"), show: owner, node: <LogoPanel workspaceId={workspaceId} hasLogo={ws?.has_logo ?? false} /> },
@@ -665,7 +672,7 @@ export function Settings() {
           </Row>
         </div>
         {changingEmail && <ChangeEmail current={me.user.email} verified={me.user.email_verified} onCancel={() => setChangingEmail(false)} />}
-        {me.user.email_verified === false && <ConfirmEmail />}
+        {me.user.email_verified === false && <ConfirmEmail mail={me.mail !== false} />}
         <PasswordRow email={me.user.email} />
         {/* Each live session by the kind of device it signed in from, this one first (card R4). */}
         <div>

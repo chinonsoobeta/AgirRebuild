@@ -28,7 +28,7 @@ const logged: string[] = [];
 // Every test gets its own app, so the in-memory rate limiters never leak between tests.
 function fresh(mailer?: Mailer) {
   const mail = memoryMailer();
-  const recording: Mailer = { async send(m) { allMail.push({ ...m }); await mail.send(m); } };
+  const recording: Mailer = { configured: true, async send(m) { allMail.push({ ...m }); await mail.send(m); } };
   const app = createApp({ db, store, secureCookies: false, mailer: mailer ?? recording, publicOrigin: ORIGIN });
   return { app, mail };
 }
@@ -330,7 +330,7 @@ describe("secrets", () => {
   });
 
   test("a mail failure leaves the change made and logs mail.failed with the kind only", async () => {
-    const { app } = fresh({ async send() { throw new Error("smtp down for fail-new@example.com"); } });
+    const { app } = fresh({ configured: true, async send() { throw new Error("smtp down for fail-new@example.com"); } });
     const s = await signup(app, "fail-old@example.com");
     const from = logged.length;
     const r = await change(app, s, "fail-new@example.com");

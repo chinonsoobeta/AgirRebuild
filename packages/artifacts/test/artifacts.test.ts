@@ -10,6 +10,10 @@ import { allEquityDeal, developmentDeal } from "../../engine/test/fixtures.ts";
 import { roundToward } from "../src/model.ts";
 import { buildModel, Formatter, htmlToPdf, RendererUnavailableError, renderArtifact, renderHtml, verifyProvenance, visibleText, formatValue, type ArtifactInput } from "../src/index.ts";
 
+/** Card E: the line every report under a policy credit has not signed carries; pins made before it are checked without it. */
+const isUnsignedLine = (b: ReturnType<typeof buildModel>["blocks"][number]) => b.type === "paragraph" && b.text === "Policy not yet signed by credit";
+const withoutUnsignedLine = <M extends ReturnType<typeof buildModel>>(model: M): M => ({ ...model, blocks: model.blocks.filter((b) => !isUnsignedLine(b)) });
+
 function mapleInput(kind: ArtifactInput["kind"]): ArtifactInput {
   const deal = loadOracle("maple-heights");
   const all: SourcedCandidate[] = [];
@@ -743,7 +747,10 @@ describe("the reports for a deal that sells its units (task 80)", () => {
     ["build_decision", "161df3ae41c30a1322c47bf6b2cb6d4b4b7c18b34de0dbc177b2e819aca70fd9"],
     // card 97c: DSCR→DCR rename only; text otherwise identical to `5f81e68b930e8735a4036eba356bad6242bc1e05cdaa3ca89a84a69f47dd208c`
     ["lender_package", "be3357a81416eb58bb60c7147850071e584947e517fa7b5e77e3f44bd5cf9641"]] as const)("the existing Maple Heights %s text is byte-identical", (kind, hash) => {
-    expect(createHash("sha256").update(visibleText(renderHtml(buildModel(mapleInput(kind))))).digest("hex")).toBe(hash);
+    // card E: the unsigned-policy line is the only change; without it, the text is this pin.
+    const model = buildModel(mapleInput(kind));
+    expect(model.blocks.filter(isUnsignedLine)).toHaveLength(1);
+    expect(createHash("sha256").update(visibleText(renderHtml(withoutUnsignedLine(model)))).digest("hex")).toBe(hash);
   });
   test.each(SALE_SLUGS.flatMap((slug) => SALE_KINDS.map((kind) => [slug, kind] as const)))("%s %s has provenance, sale stats and stresses without rental sections", (slug, kind) => {
     const x = saleInput(slug, kind);
@@ -1351,7 +1358,8 @@ describe("a report says when a check decides the verdict (task 85a)", () => {
     const text = visibleText(renderHtml(model));
     expect(text.split(message)).toHaveLength(2);
     // The warning is the only change: without it, the text is the card 80 pin.
-    const restored = { ...model, blocks: model.blocks.filter((_, n) => n !== at + 2) };
+    // card E: so is the unsigned-policy line, which this run's policy-v1 carries.
+    const restored = withoutUnsignedLine({ ...model, blocks: model.blocks.filter((_, n) => n !== at + 2) });
     // card 97c: DSCR→DCR rename only; text otherwise identical to `c49c28c5eafee7e5d6eb89704d4b04584c7887ecbf5d51bd33160417cf83d17e`
     expect(createHash("sha256").update(visibleText(renderHtml(restored))).digest("hex"))
       .toBe("3377dc48bc5130ccc4b8941ac7ccb38f612e8c939d1ac8a431cb7476c8ef29ae");
@@ -1645,5 +1653,47 @@ describe("card 152 signed table notes in HTML reports", () => {
     const legacy=visibleText(renderHtml(buildModel(x)));
     expect(legacy).not.toContain(lang === "en" ? "past its re-check date" : "date de revérification");
     expect(legacy).toContain(lang === "en" ? "Source: CRA." : "Source : ARC.");
+  });
+});
+
+describe("card E: a report under a policy credit has not signed says so", () => {
+  const UNSIGNED = { en: "Policy not yet signed by credit", fr: "Politique non encore approuvée par le crédit" } as const;
+  const DRAFT = { en: "Draft policy, not signed by credit", fr: "Politique provisoire, non approuvée par le crédit" } as const;
+  test.each((["ic_memo", "lender_package", "build_decision"] as const).flatMap((kind) => (["en", "fr"] as const).flatMap((lang) => (["docx", "pdf"] as const).map((format) => ({ kind, lang, format })))))(
+    "a policy-v1 $kind $format in $lang carries the line once, with no figure in it", async ({ kind, lang, format }) => {
+      const x = { ...mapleInput(kind), lang } as ArtifactInput;
+      expect(x.run.policyVersion).toBe("policy-v1");
+      const model = buildModel(x);
+      const text = visibleText(renderHtml(model)).replace(/\s+/g, " ");
+      expect(text.split(UNSIGNED[lang]).length - 1).toBe(1);
+      expect(text).not.toContain(DRAFT[lang]);
+      expect(verifyProvenance(visibleText(renderHtml(model)), model.formatter.manifest)).toMatchObject({ pass: true, orphans: [] });
+      let artifact;
+      try { artifact = await renderArtifact(x, format); }
+      catch (e) { if (format === "pdf" && e instanceof RendererUnavailableError) return; throw e; }
+      expect(artifact.provenance).toMatchObject({ pass: true, orphans: [] });
+      if (format === "docx") {
+        const mammoth = await import("mammoth");
+        expect((await mammoth.extractRawText({ buffer: Buffer.from(artifact.bytes) })).value.replace(/\s+/g, " ")).toContain(UNSIGNED[lang]);
+      } else {
+        const pdfjs = await import("pdfjs-dist/legacy/build/pdf.mjs");
+        const task = pdfjs.getDocument({ data: new Uint8Array(artifact.bytes), useSystemFonts: true });
+        try {
+          const doc = await task.promise;
+          let all = "";
+          for (let p = 1; p <= doc.numPages; p++) all += " " + (await (await doc.getPage(p)).getTextContent()).items.map((i) => "str" in i ? i.str : "").join(" ");
+          expect(all.replace(/\s+/g, " ")).toContain(UNSIGNED[lang]);
+        } finally { await task.destroy(); }
+      }
+    });
+  test("a policy-v1 model export names the unsigned policy in its English summary", async () => {
+    const out = await renderArtifact(mapleInput("model_export"), "xlsx");
+    const ExcelJS = (await import("exceljs")).default;
+    const wb = new ExcelJS.Workbook();
+    await wb.xlsx.load(Buffer.from(out.bytes) as never);
+    const cells: string[] = [];
+    wb.getWorksheet("Summary")!.eachRow((row) => row.eachCell((cell) => cells.push(String(cell.value))));
+    expect(cells).toContain(UNSIGNED.en);
+    expect(cells).not.toContain(DRAFT.en);
   });
 });

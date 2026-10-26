@@ -1,17 +1,19 @@
 import { Hono, type Context } from "hono";
 import { getConnInfo } from "@hono/node-server/conninfo";
-import { randomBytes } from "node:crypto";
+import { randomBytes, randomUUID } from "node:crypto";
 import { getCookie, setCookie, deleteCookie } from "hono/cookie";
 import { stream } from "hono/streaming";
 import { z } from "zod";
-import { FIELD_BY_KEY, outsideWindow, windowMessage, validateThreshold, COUNTRIES, CURRENCIES, FIELDS, FIELD_GROUP_LABELS, METRICS, POLICIES, POLICY_V1, PROVINCE_CODES, REVIEW_MODES, runPolicy, type EngineInput, type Policy } from "@agir/contracts";
+import { FIELD_BY_KEY, outsideWindow, windowMessage, validateThreshold, COUNTRIES, CURRENCIES, FIELDS, FIELD_GROUP_LABELS, METRICS, isSigned, POLICIES, POLICY_V1, PROVINCE_CODES, REVIEW_MODES, runPolicy, type EngineInput, type Policy } from "@agir/contracts";
 import { asUser, type BlobStore, type Db } from "@agir/db";
 import { breakeven, DRIVERS, driversFor, SALE_DRIVERS, EngineInputError, explore, grid, tornado, type DriverKey, type Shock } from "@agir/engine";
 import { canonicalItem, itemFold, kindOf } from "@agir/extraction";
 import { MAX_UPLOAD_BYTES } from "@agir/worker";
-import { checkPassword, countSessions, createSession, deviceLabel, endOtherSessions, endSession, hashPassword, listSessions, PASSWORD_RULE, rateLimiter, SESSION_DAYS, userForSession } from "./auth.ts";
+import { checkPassword, countSessions, createSession, deviceLabel, endOtherSessions, endSession, hashPassword, listSessions, PASSWORD_RULE, SESSION_DAYS, userForSession } from "./auth.ts";
 import { addressTaken, emailAuth } from "./email-auth.ts";
+import { log as defaultLog, type LogFields, type Logger } from "./log.ts";
 import type { Mailer } from "./mailer.ts";
+import { limiter, memoryState, type SharedState } from "./shared-state.ts";
 import { thresholdsView, auditPackage, clientViewer, createRun, dealOverview, hideClientEvents, HttpError, labelRefusal, regionGroups, reviewView, runView, sha256 } from "./services.ts";
 
 export type AppDeps = { db: Db; store: BlobStore; secureCookies: boolean; demoSignIn?: boolean; trustProxy?: boolean; now?: () => Date;
@@ -19,9 +21,15 @@ export type AppDeps = { db: Db; store: BlobStore; secureCookies: boolean; demoSi
   /** The web app's origin, for links in emails. Configured, never read from a request. */ publicOrigin?: string;
   /** Tests only: awaited after each progress line of a streamed run, so a test can hold a run at a stage. */
   progressHook?: (stage: string) => Promise<void> | void;
+  /** "invite": sign-up only through a client invitation (AGIR_SIGNUP, card B). */ signup?: "open" | "invite";
+  /** Whether the worker runs in this process; reported by /api/health. */ worker?: boolean;
+  /** Event lines (card B). */ log?: Logger;
+  /** One line per request. main.ts turns it on; tests leave it off so their output stays readable. */ logRequests?: boolean;
+  /** Alerts for an unhandled error and a failed email. Never awaited. */ alert?: Logger;
+  /** Rate limits and run stops (card D). Without one, they live in this process's memory. */ state?: SharedState;
   /** Card F: closing a workspace and deleting an account (AGIR_ACCOUNT_CLOSURE=1). Off, the routes do not exist. */
   closure?: boolean };
-type Env = { Variables: { user: { id: string; email: string; name: string } } };
+type Env = { Variables: { user: { id: string; email: string; name: string }; requestId: string } };
 
 const COOKIE = "agir_session";
 // A new workspace starts in team review; asking for solo goes through fn_set_review_mode, so the change is audited.
@@ -32,11 +40,25 @@ async function createWorkspace(tx: Db, name: string, reviewMode?: string): Promi
 }
 
 const INVITE_GONE = "This invitation is not available. It may have been used, revoked or expired.";
+const SIGNUP_CLOSED = "Agir is by invitation during the pilot.";
+
+/** Paths that may carry a secret, and the pattern each is logged by when no route of the API matched it. */
+const SECRET_PATHS: [RegExp, string][] = [[/^\/api\/share(\/|$)/, "/api/share/*"], [/^\/api\/invite(\/|$)/, "/api/invite/*"],
+  [/^\/verify(\/|$)/, "/verify"], [/^\/reset(\/|$)/, "/reset"], [/^\/email(\/|$)/, "/email/*"]];
+/** The route a request is logged by: the API's pattern when one matched, never the raw path where a secret may be. */
+function routeOf(c: Context<any>): string {
+  const pattern = c.req.routePath;
+  if (pattern && pattern !== "*" && pattern !== "/*" && pattern !== "/api/*") return pattern;
+  return SECRET_PATHS.find(([re]) => re.test(c.req.path))?.[1] ?? c.req.path;
+}
 
 const PG_STATUS: Record<string, number> = { "55000": 409, "42501": 403, "28000": 401, P0002: 404, "22023": 422, "23505": 409, "40001": 409, "23514": 422, "22P02": 404 };
 
-/** The status and body an error is answered with; shared by the error handler and a streamed run's error line. */
-function errorAnswer(err: unknown, path: string): { status: number; body: { error: string; [k: string]: unknown } } {
+/**
+ * The status and body an error is answered with; shared by the error handler and a streamed run's error line. An
+ * unexpected error is passed to `report` with the fields to log.
+ */
+function errorAnswer(err: unknown, path: string, report: (fields: LogFields) => void): { status: number; body: { error: string; [k: string]: unknown } } {
   if (err instanceof HttpError && err.body && typeof err.body === "object" && "code" in err.body && err.body.code === "outside_window") return { status: 422, body: { error: err.message, ...err.body } };
   if (err instanceof HttpError) return { status: err.status, body: { error: err.message, ...(err.body ? { detail: err.body } : {}) } };
   if (err instanceof EngineInputError) return { status: 422, body: { error: err.message, problems: err.problems } };
@@ -44,7 +66,7 @@ function errorAnswer(err: unknown, path: string): { status: number; body: { erro
   const code = (err as { code?: string }).code;
   if (code && PG_STATUS[code]) return { status: PG_STATUS[code]!, body: { error: code === "22P02" ? "Not found." : (err as Error).message } };
   const shared = path.startsWith("/api/share/") || path.startsWith("/api/invite/");
-  console.error(JSON.stringify({ at: new Date().toISOString(), event: "api.error", path: shared ? "/api/share/…" : path, error: shared ? "Shared link request failed" : (err as Error).message }));
+  report({ error: shared ? "Shared link request failed" : (err as Error).message });
   return { status: 500, body: { error: "Something went wrong on our side. It has been logged." } };
 }
 
@@ -64,8 +86,17 @@ function windowReason(fieldKey: string, value: number, reason: string | null | u
 }
 
 export function createApp({ db, store, secureCookies, demoSignIn = false, trustProxy = false, now = () => new Date(),
-  mailer = { send: async () => {} }, publicOrigin = "http://127.0.0.1:8787", progressHook, closure = false }: AppDeps) {
+  mailer = { configured: false, send: async () => {} }, publicOrigin = "http://127.0.0.1:8787", progressHook, signup = "open", worker = false,
+  log = defaultLog, logRequests = false, alert = () => {}, state = memoryState(), closure = false }: AppDeps) {
   const app = new Hono<Env>();
+  /** An unexpected error: logged with its sentence (generic for shared links), alerted without it. */
+  const reportError = (c: Context<Env>) => (fields: LogFields) => {
+    const where = { route: routeOf(c), request: c.get("requestId") ?? null };
+    log("api.error", { ...where, ...fields });
+    alert("api.error", where);
+  };
+  /** Added to a send route's answer when no mail provider is configured: the screens then never claim a send. */
+  const unsent = mailer.configured ? {} : { sent: false as const };
   const clientKey = (c: Context<Env>): string => {
     if (trustProxy) {
       const forwarded = c.req.header("x-forwarded-for")?.split(",").at(-1)?.trim();
@@ -74,13 +105,10 @@ export function createApp({ db, store, secureCookies, demoSignIn = false, trustP
     try { return getConnInfo(c).remote.address || "local"; }
     catch { return "local"; }
   };
-  const authLimit = rateLimiter(20, 60_000);
-  const shareLimit = rateLimiter(60, 60_000);
-  const inviteLimit = rateLimiter(60, 60_000);
-  const stopLimit = rateLimiter(60, 60_000);
-  // Streamed runs in progress, by run token (card R1). This map lives in this one API process: with several
-  // API processes, a stop could reach a process that is not running the run, so the map would need to be in the database.
-  const runsInProgress = new Map<string, { userId: string; dealId: string; stopRequested: boolean }>();
+  const authLimit = limiter(state, "auth", 20, 60_000);
+  const shareLimit = limiter(state, "share", 60, 60_000);
+  const inviteLimit = limiter(state, "invite", 60, 60_000);
+  const stopLimit = limiter(state, "stop", 60, 60_000);
   const fileResponse = async (a: { kind: string; format: string; storage_key: string | null; run_number: number; deal: string; lang?: "en" | "fr" }, inline: boolean) => {
     const bytes = await store.get(a.storage_key!);
     const mime = { pdf: "application/pdf", docx: "application/vnd.openxmlformats-officedocument.wordprocessingml.document", xlsx: "application/vnd.openxmlformats-officedocument.spreadsheetml.sheet" }[a.format] ?? "application/octet-stream";
@@ -90,15 +118,26 @@ export function createApp({ db, store, secureCookies, demoSignIn = false, trustP
     });
   };
 
+  // Every request gets an id; with logRequests on, one line says how it went. No query string, body or email.
+  app.use("*", async (c, next) => {
+    const started = Date.now();
+    c.set("requestId", randomUUID());
+    await next();
+    if (logRequests) {
+      log("api.request", { request: c.get("requestId"), method: c.req.method, route: routeOf(c), status: c.res.status,
+        ms: Date.now() - started, user: c.get("user")?.id ?? null });
+    }
+  });
+
   app.onError((err, c) => {
-    const { status, body } = errorAnswer(err, c.req.path);
+    const { status, body } = errorAnswer(err, c.req.path, reportError(c));
     return c.json(body, status as 400);
   });
 
   // Shared links and invitations carry a secret in the path: rate-limited, never cached, never sent on as a referrer.
   for (const [prefix, limit] of [["/api/share/*", shareLimit], ["/api/invite/*", inviteLimit], ["/api/runs/stop", stopLimit]] as const) {
     app.use(prefix, async (c, next) => {
-      if (limit(clientKey(c))) await next();
+      if (await limit(clientKey(c))) await next();
       else c.res = c.json({ error: "Too many requests. Wait a minute." }, 429);
       c.header("cache-control", "no-store");
       c.header("referrer-policy", "no-referrer");
@@ -115,20 +154,25 @@ export function createApp({ db, store, secureCookies, demoSignIn = false, trustP
   });
 
   app.get("/api/health", async (c) => {
-    const [r] = await db.query<{ ok: number }>(`select 1 as ok`);
-    return c.json({ ok: r?.ok === 1, policy: POLICY_V1.version });
+    const [r] = await db.query<{ ok: number; migrations: number }>(`select 1 as ok, (select count(*)::int from schema_migrations) as migrations`);
+    return c.json({ ok: r?.ok === 1, policy: POLICY_V1.version, worker, migrations: r?.migrations ?? 0 });
   });
 
   // ---- Auth -----------------------------------------------------------------------
   const cookieOpts = { httpOnly: true, sameSite: "Lax" as const, secure: secureCookies, path: "/", maxAge: SESSION_DAYS * 86400 };
-  const emailFlows = emailAuth({ db, mailer, publicOrigin, cookie: COOKIE, cookieOpts, clientKey });
+  const emailFlows = emailAuth({ db, mailer, publicOrigin, cookie: COOKIE, cookieOpts, clientKey, state, log, alert });
+
+  // Whether a person can create an account without an invitation; the sign-up page reads it signed out.
+  app.get("/api/auth/signup", (c) => c.json({ open: signup === "open" }));
 
   app.post("/api/auth/signup", async (c) => {
-    if (!authLimit(clientKey(c))) return c.json({ error: "Too many attempts. Wait a minute." }, 429);
+    if (!(await authLimit(clientKey(c)))) return c.json({ error: "Too many attempts. Wait a minute." }, 429);
     const body = z
       .object({ email: z.string().email(), name: z.string().min(1).max(120), password: PASSWORD_RULE, reviewMode: z.enum(REVIEW_MODES).optional(),
         invite: z.string().min(1).max(200).optional() })
       .parse(await c.req.json());
+    // During the pilot, only a client invitation creates an account (card B); an invitation is checked below as before.
+    if (signup === "invite" && !body.invite) return c.json({ error: SIGNUP_CLOSED }, 403);
     const email = body.email.toLowerCase();
     // Also refused while another account's undo link holds the address (card R6).
     if (await addressTaken(db, email)) return c.json({ error: "An account with that email already exists." }, 409);
@@ -146,7 +190,7 @@ export function createApp({ db, store, secureCookies, demoSignIn = false, trustP
       });
       await emailFlows.sendVerification({ id: userId, email });
       setCookie(c, COOKIE, await createSession(db, userId, deviceLabel(c.req.header("user-agent"))), cookieOpts);
-      return c.json({ ok: true });
+      return c.json({ ok: true, ...unsent });
     }
     const [u] = await db.query<{ id: string }>(`insert into users (email, name, password_hash) values ($1, $2, $3) returning id`, [
       email,
@@ -156,11 +200,11 @@ export function createApp({ db, store, secureCookies, demoSignIn = false, trustP
     await asUser(db, u!.id, (tx) => createWorkspace(tx, `${body.name.split(" ")[0]}'s workspace`, body.reviewMode));
     await emailFlows.sendVerification({ id: u!.id, email });
     setCookie(c, COOKIE, await createSession(db, u!.id, deviceLabel(c.req.header("user-agent"))), cookieOpts);
-    return c.json({ ok: true });
+    return c.json({ ok: true, ...unsent });
   });
 
   app.post("/api/auth/login", async (c) => {
-    if (!authLimit(clientKey(c))) return c.json({ error: "Too many attempts. Wait a minute." }, 429);
+    if (!(await authLimit(clientKey(c)))) return c.json({ error: "Too many attempts. Wait a minute." }, 429);
     const body = z.object({ email: z.string(), password: z.string() }).parse(await c.req.json());
     const [u] = await db.query<{ id: string; password_hash: string }>(`select id, password_hash from users where email = $1`, [body.email.toLowerCase()]);
     if (!u || !(await checkPassword(body.password, u.password_hash))) return c.json({ error: "That email and password do not match." }, 401);
@@ -189,7 +233,7 @@ export function createApp({ db, store, secureCookies, demoSignIn = false, trustP
   // asked again so an unattended browser cannot do it. The function refuses while the person owns an open workspace.
   if (closure) {
     app.post("/api/auth/delete-account", async (c) => {
-      if (!authLimit(clientKey(c))) return c.json({ error: "Too many attempts. Wait a minute." }, 429);
+      if (!(await authLimit(clientKey(c)))) return c.json({ error: "Too many attempts. Wait a minute." }, 429);
       const user = await userForSession(db, getCookie(c, COOKIE));
       if (!user) return c.json({ error: "Sign in to continue." }, 401);
       const { password } = z.object({ password: z.string().min(1).max(200) }).parse(await c.req.json());
@@ -230,13 +274,12 @@ export function createApp({ db, store, secureCookies, demoSignIn = false, trustP
   });
 
   // Stopping a streamed run (card R1). The run token is the authority: only the browser that started the run holds it.
-  // No session check and no database: in local development the run's open transaction would make either wait until the run ends.
+  // No session check. In local development (PGlite, memory state) no database either: the run's open transaction would
+  // make either wait until the run ends. With Postgres the stop is kept in the database, on another connection.
   app.post("/api/runs/stop", async (c) => {
     const body: unknown = await c.req.json().catch(() => null);
     const token = body && typeof body === "object" && "token" in body && typeof body.token === "string" ? body.token : "";
-    const run = runsInProgress.get(token);
-    if (!run) return c.json({ error: "This run is not in progress. It may have finished." }, 404);
-    run.stopRequested = true;
+    if (!RUN_TOKEN.test(token) || (await state.runs.requestStop(token)) === "unknown") return c.json({ error: "This run is not in progress. It may have finished." }, 404);
     return c.json({ stopping: true });
   });
 
@@ -277,18 +320,20 @@ export function createApp({ db, store, secureCookies, demoSignIn = false, trustP
         ].join("\n"),
       });
     } catch {
-      console.error(JSON.stringify({ at: new Date().toISOString(), event: "mail.failed", kind: "run_done" }));
+      log("mail.failed", { kind: "run_done" });
+      alert("mail.failed", { kind: "run_done" });
     }
   };
 
   app.get("/api/me", async (c) => {
     const workspaces = await as(c, (tx) =>
       tx.query(
-        `select w.id, w.name, w.review_mode, w.label_suggestions, w.logo_key is not null as has_logo, w.closed_at, m.role from workspaces w join workspace_members m on m.workspace_id = w.id and m.user_id = agir_uid() order by w.created_at`,
+        `select w.id, w.name, w.review_mode, w.label_suggestions, w.ai_reading, w.logo_key is not null as has_logo, w.closed_at, m.role from workspaces w join workspace_members m on m.workspace_id = w.id and m.user_id = agir_uid() order by w.created_at`,
       ),
     );
     const [v] = await db.query<{ verified: boolean }>(`select email_verified_at is not null as verified from users where id = $1`, [c.get("user").id]);
-    return c.json({ user: { ...c.get("user"), email_verified: v?.verified ?? false }, workspaces, closure });
+    // mail: whether this server can send email at all (card B); without it, the screens say so instead of offering a send.
+    return c.json({ user: { ...c.get("user"), email_verified: v?.verified ?? false }, workspaces, mail: mailer.configured, closure });
   });
 
   app.post("/api/me/name", async (c) => {
@@ -378,6 +423,13 @@ export function createApp({ db, store, secureCookies, demoSignIn = false, trustP
     return c.json({ ok: true });
   });
 
+  // Card C: the owner may stop Agir sending deal text to the model for this workspace.
+  app.put("/api/workspaces/:ws/ai-reading", async (c) => {
+    const { on } = z.object({ on: z.boolean() }).parse(await c.req.json());
+    await as(c, (tx) => tx.query(`select fn_set_ai_reading($1, $2)`, [c.req.param("ws"), on]));
+    return c.json({ ok: true });
+  });
+
   app.post("/api/workspaces/:ws/review-grant", async (c) => {
     const body = z.object({ email: z.string().email(), days: z.number().int().min(1).max(90) }).parse(await c.req.json());
     await as(c, (tx) => tx.query(`select fn_grant_review($1, $2, $3)`, [c.req.param("ws"), body.email, body.days]));
@@ -429,8 +481,10 @@ export function createApp({ db, store, secureCookies, demoSignIn = false, trustP
   });
 
   app.get("/api/workspaces/:ws/audit/verify", async (c) => {
-    const [r] = await as(c, (tx) => tx.query(`select * from fn_verify_audit_chain()`));
-    return c.json(r);
+    // The whole chain is walked; the answer covers this workspace only, and a non-member gets 403 (migration 0036).
+    const ws = z.string().uuid().parse(c.req.param("ws"));
+    const [r] = await as(c, (tx) => tx.query<{ ok: boolean; events: number | string; broken: boolean }>(`select * from fn_verify_audit_chain_for($1)`, [ws]));
+    return c.json({ ok: r!.ok, events: Number(r!.events), broken: r!.broken });
   });
 
   // ---- Production counts (card 155): counts and durations per deal, never content; the owner only. ----------
@@ -762,9 +816,7 @@ export function createApp({ db, store, secureCookies, demoSignIn = false, trustP
     const dealId = c.req.param("id"), asOf = now().toISOString().slice(0,10);
     const token = c.req.header("x-run-token") ?? "";
     if (!RUN_TOKEN.test(token)) return c.json({ error: "This run needs a valid run token." }, 422);
-    if (runsInProgress.has(token)) return c.json({ error: "A run with this token is already in progress." }, 409);
-    const run = { userId: c.get("user").id, dealId, stopRequested: false };
-    runsInProgress.set(token, run);
+    if (!(await state.runs.start(token, { userId: c.get("user").id, dealId }))) return c.json({ error: "A run with this token is already in progress." }, 409);
     c.header("content-type", "application/x-ndjson");
     c.header("cache-control", "no-store");
     return stream(c, async (s) => {
@@ -773,7 +825,7 @@ export function createApp({ db, store, secureCookies, demoSignIn = false, trustP
       try {
         const id = await as(c, (tx) => createRun(tx, dealId, asOf, {
           stage: async (key, at, facts) => { send({ stage: key, at: at.toISOString(), ...(facts ? { facts } : {}) }); await progressHook?.(key); },
-          check: () => { if (run.stopRequested) throw new RunStopped(); },
+          check: async () => { if (await state.runs.stopRequested(token)) throw new RunStopped(); },
         }));
         // The browser went away before the end (card R1e): the person who started the run hears that it is done by email.
         if (s.aborted) await mailRunDone(c, dealId, id);
@@ -783,11 +835,11 @@ export function createApp({ db, store, secureCookies, demoSignIn = false, trustP
       } catch (err) {
         if (err instanceof RunStopped) send({ stopped: true });
         else {
-          const { status, body: { error, ...rest } } = errorAnswer(err, c.req.path);
+          const { status, body: { error, ...rest } } = errorAnswer(err, c.req.path, reportError(c));
           send({ error: { status, message: error, ...rest } });
         }
       } finally {
-        runsInProgress.delete(token);
+        await state.runs.end(token).catch(() => {});
       }
     });
   });
@@ -1061,6 +1113,7 @@ function sharedRunFacts(run: { result: import("@agir/contracts").RunResult; inpu
     units: items.reduce((n, item) => n + item.units, 0),
     exit: input.exit ?? "sale",
     policyDraft: runPolicy(run.input_snapshot, run.policy_version)?.draft === true,
+    policySigned: isSigned(run.policy_version),
     verdict: { code, gates, hardFailReasons, headline, explanation },
     errorChecks: run.result.checks.filter((check) => check.severity === "error").length,
     figures: SHARED_FIGURES.flatMap((key) => metrics.filter((m) => m.key === key).map((m) => ({ key: m.key, unit: m.unit, value: m.value, status: m.status, reason: m.reason }))),

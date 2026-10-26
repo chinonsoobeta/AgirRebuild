@@ -2,7 +2,7 @@
 // and the inputs that run used, and from nothing else: it never recomputes a
 // verdict, a gate or a metric.
 
-import { changeMeta, checkText, numberFormat, plainTerm, type PolicyChange, tableSourceLabel, tableStaleWarning, pbrhExplanation, type TableSource, FR_ABSENT, CURRENCY_NAMES, FIELD_BY_KEY, placeLabel, type Currency, type EngineInput, type FieldUnit, type Policy, type RunResult, type VerdictCode } from "@agir/contracts";
+import { changeMeta, checkText, isSigned, numberFormat, plainTerm, type PolicyChange, tableSourceLabel, tableStaleWarning, pbrhExplanation, type TableSource, FR_ABSENT, CURRENCY_NAMES, FIELD_BY_KEY, placeLabel, type Currency, type EngineInput, type FieldUnit, type Policy, type RunResult, type VerdictCode } from "@agir/contracts";
 import { createHash } from "node:crypto";
 import { runWaterfall, heldPartnerReturns, breakeven, canonicalJson, ENGINE_VERSION, type BreakevenEcho, type BreakevenRow } from "@agir/engine";
 import { Formatter, formatValue } from "./format.ts";
@@ -174,16 +174,21 @@ function operations(f: Formatter, x: ArtifactInput): Block {
   };
 }
 
-export const DRAFT_POLICY_LINE = "Draft policy, not signed by credit";
 
 /** A deal that sells its units has no rental operations: its reports show the unit sales and the sale results instead. */
 const isSale = (x: ArtifactInput) => x.input.exit === "for_sale";
 /** A deal kept and refinanced has no sale: its reports lead with the hold measures and show the unrealized ones under their label. */
 const isHeld = (x: ArtifactInput) => x.input.exit === "refinance_hold";
 
-/** Under a draft policy, said once beside the verdict. */
+/** Which line a run's policy needs: a draft says so; any other policy credit has not signed says that. None once signed. */
+export function policyLineKey(x: Pick<ArtifactInput, "policy" | "run">): "draftPolicy" | "unsignedPolicy" | undefined {
+  return x.policy.draft ? "draftPolicy" : isSigned(x.run.policyVersion) ? undefined : "unsignedPolicy";
+}
+
+/** Under a policy credit has not signed, said once beside the verdict. */
 function draftLine(x: ArtifactInput): Block[] {
-  return x.policy.draft ? [{ type: "paragraph", text: reportText(x.lang ?? "en", "draftPolicy") }] : [];
+  const key = policyLineKey(x);
+  return key ? [{ type: "paragraph", text: reportText(x.lang ?? "en", key) }] : [];
 }
 
 /** The stored comparison and who changed each boundary; absent means byte-identical legacy output. */

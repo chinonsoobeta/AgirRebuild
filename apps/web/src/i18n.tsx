@@ -525,7 +525,7 @@ export const EN = {
 
   "audit.title": "Audit trail",
   "audit.intact": (p) => `Chain intact · ${p.n} events`,
-  "audit.broken": (p) => `Chain broken at event ${p.n}`,
+  "audit.broken": "Chain broken",
   "audit.col.event": "Event",
   "audit.col.who": "Who",
   "audit.col.when": "When",
@@ -1108,7 +1108,7 @@ export const FR: Record<Key, Entry> = {
 
   "audit.title": "Piste d'audit",
   "audit.intact": (p) => `Chaîne intacte · ${p.n} événements`,
-  "audit.broken": (p) => `Chaîne rompue à l'événement ${p.n}`,
+  "audit.broken": "Chaîne rompue",
   "audit.col.event": "Événement",
   "audit.col.who": "Qui",
   "audit.col.when": "Quand",
@@ -1447,6 +1447,7 @@ const FR_REASONS: [RegExp, string | ((m: RegExpMatchArray) => string)][] = [
   [/^The AI quote is not at this address$/, "La citation IA ne se trouve pas à cette adresse"],
   [/^The AI value is not written in its quote$/, "La valeur IA n’est pas écrite dans sa citation"],
   [/^The AI unit does not match this field$/, "L’unité IA ne correspond pas à ce champ"],
+  [/^The AI read a financing figure as other costs; interest and lender fees are computed by Agir or belong to the stated interest reserve$/, "L’IA a lu un montant de financement comme autres coûts\u00a0; les intérêts et les frais du prêteur sont calculés par Agir ou relèvent de la réserve d’intérêts déclarée"],
   [/^Please check: the separator in this figure can be read more than one way; the AI read it as shown$/, "À vérifier : le séparateur de ce chiffre peut se lire de plus d’une façon; l’IA l’a lu comme indiqué"],
   [/^Please check: the separator in this figure could be a decimal point or a thousands group; the AI read it as shown$/, "À vérifier : le séparateur de ce chiffre pourrait être une virgule décimale ou un séparateur de milliers; l’IA l’a lu comme indiqué"],
   [/^Please check: every source is a low-confidence AI reading$/, "À vérifier : chaque source est une lecture IA de faible confiance"],
@@ -1510,6 +1511,7 @@ const FR_REASONS: [RegExp, string | ((m: RegExpMatchArray) => string)][] = [
   [/^Too many attempts\. Wait a while and try again\.$/, "Trop de tentatives. Patientez un moment, puis réessayez."],
   [/^That code is not right, or it has expired\. Check the latest email or ask for a new code\.$/, "Ce code n'est pas le bon, ou il a expiré. Vérifiez le dernier courriel ou demandez un nouveau code."],
   [/^An account with that email already exists\.$/, "Un compte existe déjà avec ce courriel."],
+  [/^Agir is by invitation during the pilot\.$/, "Agir est sur invitation pendant le projet pilote."],
   [/^Too many attempts\. Wait a minute\.$/, "Trop de tentatives. Patientez une minute."],
   [/^Some fields are missing or not valid\.$/, "Des champs manquent ou ne sont pas valides."],
   [/^Underwriting is blocked until review is clear\.$/, "L'analyse est bloquée jusqu'à la fin de l'examen."],

@@ -23,6 +23,7 @@ export const en = {
   "auth.share.figures": "Key figures from the run",
   "auth.share.yield": (p) => (p.cap ? `${p.name} ${p.v} over a ${p.cap} cap` : `${p.name} ${p.v}`),
   "auth.share.draft": "The policy is a draft, not yet signed by credit.",
+  "auth.share.unsigned": "The policy is not yet signed by credit.",
   "auth.share.printed": (p) => `Every figure is printed from run ${p.n} with its source recorded; nothing on this page is recomputed.`,
   "auth.share.files": "Files",
   "auth.share.count": (p) => (p.n === 1 ? "1 file" : `${p.n} files`),
@@ -79,6 +80,10 @@ export const en = {
   "auth.email.undone": (p) => `Your email address is back to ${p.email}.`,
   "auth.email.undoneBody": (p) => `We signed every device out and turned off the old password. We sent a link to ${p.email} to choose a new one. It works for 60 minutes.`,
   "auth.email.failed": "This link did not work",
+  "auth.email.undoneNoMail": "We signed every device out and turned off the old password.",
+  "auth.signupClosed": "Agir is by invitation during the pilot.",
+  "auth.signupClosedShort": "By invitation during the pilot.",
+  "auth.noMail": "No email could be sent: this server has no mail provider yet. Ask the person who runs it.",
 } satisfies Record<string, Entry>;
 
 export const fr: FrenchOf<typeof en> = {
@@ -103,6 +108,7 @@ export const fr: FrenchOf<typeof en> = {
   "auth.share.figures": "Chiffres clés de l'analyse",
   "auth.share.yield": (p) => (p.cap ? `${p.name} de ${p.v} pour un taux de capitalisation de ${p.cap}` : `${p.name} de ${p.v}`),
   "auth.share.draft": "La politique est provisoire, pas encore approuvée par le crédit.",
+  "auth.share.unsigned": "La politique n'est pas encore approuvée par le crédit.",
   "auth.share.printed": (p) => `Chaque chiffre est imprimé à partir de l'analyse ${p.n}, avec sa source consignée\u00a0; rien sur cette page n'est recalculé.`,
   "auth.share.files": "Fichiers",
   "auth.share.count": (p) => (p.n === 1 ? "1 fichier" : `${p.n} fichiers`),
@@ -159,4 +165,8 @@ export const fr: FrenchOf<typeof en> = {
   "auth.email.undone": (p) => `Votre adresse courriel est de nouveau ${p.email}.`,
   "auth.email.undoneBody": (p) => `Nous avons déconnecté tous les appareils et désactivé l'ancien mot de passe. Nous avons envoyé un lien à ${p.email} pour en choisir un nouveau. Il fonctionne pendant 60 minutes.`,
   "auth.email.failed": "Ce lien n'a pas fonctionné",
+  "auth.email.undoneNoMail": "Nous avons déconnecté tous les appareils et désactivé l'ancien mot de passe.",
+  "auth.signupClosed": "Agir est sur invitation pendant le projet pilote.",
+  "auth.signupClosedShort": "Sur invitation pendant le projet pilote.",
+  "auth.noMail": "Aucun courriel n'a pu être envoyé\u00a0: ce serveur n'a pas encore de fournisseur de courriel. Demandez à la personne qui l'administre.",
 };

@@ -7,6 +7,7 @@ import { underwrite } from "../../../packages/engine/src/index.ts";
 import { developmentDeal } from "../../../packages/engine/test/fixtures.ts";
 import * as runScreen from "../src/routes/run.tsx";
 import { build } from "../src/i18n.tsx";
+import { policyName } from "../src/components/thresholds";
 
 const state = vi.hoisted(() => ({ run: undefined as unknown, pending: false, hasRun: true,
   runs: [] as { id: string; run_number: number; verdict_code: string; created_at: string; created_by: string }[] }));
@@ -87,6 +88,18 @@ describe("the run screen in the new design (card W8)", () => {
     expect(words).toContain(en.t("run.memoAction"));
     expect(words).toContain(en.t("run.again"));
     expect(words).toContain(en.t("run.currentLine"));
+  });
+
+  it("says a policy-v1 run's policy is not yet signed by credit, beside the verdict and in the record (card E)", () => {
+    state.run = { ...view, policyVersion: "policy-v1", policyDraft: false };
+    const words = text(render());
+    const name = policyName(en, "policy-v1");
+    expect(words).toContain(`Run 2 · ${name}, not yet signed by credit`);
+    expect(words).toContain(`Policy ${name}, not yet signed by credit`);
+    expect(words).not.toContain("draft, not signed by credit");
+    const fr = build("fr", () => {});
+    expect(fr.t("run.verdictLine", { n: 2, policy: "p", unsigned: true })).toBe("Analyse 2 · p, non encore approuvée par le crédit");
+    expect(fr.t("run.kv.policyUnsigned", { p: "p" })).toBe("p, non encore approuvée par le crédit");
   });
 
   it("lays out the key figures as a description list", () => {
