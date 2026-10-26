@@ -2665,7 +2665,8 @@ function withoutStruck(text: string, struck: [number, number][] | undefined, loc
 type Stated = { factor: number } | "unclear";
 type Ruling = { factor: number } | { refuse: true };
 type Scaling = { rule: Ruling | null; own: boolean };
-const SCALE_PHRASE_RE = /\$\s?['’]?000s?\b|\b000s?\s?\$|['’]000s?\b|\(\s*000s?\s*\)|\$\s?mm\b|\bthousands?\b|\bmilliers?\b|\bmillions?\b/g;
+// "$M", "M$", "$K" and "k$" right after a figure scale that figure ("Valeur 4.2 M$"), not the figures below it.
+const SCALE_PHRASE_RE = /\$\s?['’]?000s?\b|\b000s?\s?\$|['’]000s?\b|\(\s*000s?\s*\)|\$\s?mm\b|(?<!\d\s?)(?:\$\s?[mk]\b|\b[mk]\$)|\bthousands?\b|\bmilliers?\b|\bmillions?\b/g;
 const SCALE_MEASURE_RE = /\b(?:areas?|superficies?|surfaces?|sf|sq\.? ?ft|square|pi2|m2|units?|unites?|logements?|doors?|suites?|homes?|population|people|persons?|habitants?|stalls?|employees?)\b/;
 const SCALE_NOTE = "The document states a scale for these amounts that Agir cannot read safely; enter the figure";
 const OWN_SCALE_RE = /\d\s?(?:billions?|bn|millions?|mm|mn|m|thousands?|k)\b/i;
@@ -2675,7 +2676,7 @@ function statedScales(text: string): Stated[] {
   const f = fold(text).replace(/²/g, "2");
   const out: Stated[] = [];
   for (const m of f.matchAll(SCALE_PHRASE_RE)) {
-    const factor = /million|mm/.test(m[0]) ? 1e6 : 1e3;
+    const factor = /million|mm|\$\s?m\b|\bm\$/.test(m[0]) ? 1e6 : 1e3;
     // The words between the nearest delimiters; inside parentheses the words just before them count too ("Units (thousands)").
     const left = Math.max(...[";", ",", "|", "(", ")"].map((d) => f.lastIndexOf(d, m.index! - 1)));
     const right = Math.min(...[";", ",", "|", ")"].map((d) => (f.indexOf(d, m.index! + m[0].length) + 1 || f.length + 1) - 1));
@@ -2732,6 +2733,18 @@ function scalings(doc: NormalizedDocument, format: DocumentFormat): Map<string, 
   return out;
 }
 
+/** The declared money scale governing a single verification address. The verifier asks once per reading, so each document's map is kept. */
+const DECLARED = new WeakMap<NormalizedDocument, Map<string, Scaling>>();
+export function declaredScale(doc: NormalizedDocument, format: DocumentFormat, location: string): Scaling {
+  let map = DECLARED.get(doc);
+  if (!map) DECLARED.set(doc, map = scalings(doc, format));
+  return map.get(location) ?? { rule: null, own: false };
+}
+
+export function statedScaleUnit(factor: number): string {
+  return `$ (stated in ${factor === 1e3 ? "thousands" : "millions"}; × ${factor.toLocaleString("en-US")})`;
+}
+
 /** Money candidates under a declared scale are multiplied by it; ones under a scale that is unclear, or differs, are shown with a note instead. */
 function applyScales(doc: NormalizedDocument, result: ExtractionResult) {
   const map = scalings(doc, result.format);
@@ -2753,7 +2766,7 @@ function applyScales(doc: NormalizedDocument, result: ExtractionResult) {
     }
     const factor = [...factors][0]!;
     c.value = Number((c.value * factor).toPrecision(12));
-    c.unitSeen = withCurrency(`$ (stated in ${factor === 1e3 ? "thousands" : "millions"}; × ${factor.toLocaleString("en-US")})`, currencyOf(c.unitSeen));
+    c.unitSeen = withCurrency(statedScaleUnit(factor), currencyOf(c.unitSeen));
     return true;
   });
 }

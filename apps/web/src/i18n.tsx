@@ -1380,6 +1380,8 @@ const SALE_SHARES: Record<string, string> = {
 };
 
 const FR_REASONS: [RegExp, string | ((m: RegExpMatchArray) => string)][] = [
+  [/^The document states a scale for this amount that Agir cannot read safely$/, "Le document indique pour ce montant une échelle qu’Agir ne peut pas lire avec certitude"],
+  [/^The AI amount is under \$1,000; check whether the document states it in thousands or millions$/, "Le montant IA est inférieur à 1 000 $; vérifiez si le document l’exprime en milliers ou en millions"],
   [/^One soft-cost item \(a permit\), not the total soft cost; enter the total$/, "Un poste des coûts indirects (un permis), pas le total des coûts indirects ; entrez le total"],
   [/^(.+\.) The documents state (.+) units in all; the types read so far have (.+)\.$/, m => `${translateMessage(m[1])} Les documents indiquent ${m[2]} logements au total ; les types lus jusqu’ici en comptent ${m[3]}.`],
   [/^The 1 unit of type (.+) has no rent in the documents\.$/, m => `Les documents ne donnent aucun loyer pour le logement de type ${m[1]}.`],

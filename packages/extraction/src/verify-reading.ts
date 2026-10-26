@@ -1,5 +1,6 @@
 import { FIELD_BY_KEY } from "@agir/contracts";
 import { detectFormat, normalizeText, SCALE_RE, scaleOf, SF_PER_M2, tokenize } from "@agir/numbers";
+import { declaredScale, statedScaleUnit } from "./candidates.ts";
 import { addressedEntries } from "./addressed.ts";
 import type { NormalizedDocument } from "./document.ts";
 import type { SourcedCandidate } from "./consolidate.ts";
@@ -20,6 +21,8 @@ export const READING_FAILURE = {
   quote: "The AI quote is not at this address",
   value: "The AI value is not written in its quote",
   unit: "The AI unit does not match this field",
+  scale: "The document states a scale for this amount that Agir cannot read safely",
+  small: "The AI amount is under $1,000; check whether the document states it in thousands or millions",
 } as const;
 export const AI_LOW_CONFIDENCE_NOTE = "Please check: every source is a low-confidence AI reading";
 export const AI_AMBIGUOUS_NOTE = "Please check: the separator in this figure can be read more than one way; the AI read it as shown";
@@ -48,10 +51,29 @@ export function verifyReading(reading: Reading, documents: readonly ReadingDocum
   const format = detectFormat(doc.document.fullText);
   let ambiguous = false;
   const cell = doc.document.tables.some(table => table.rows.some(row => row.some(c => c.ref === location)));
-  const tokens = tokenize(reading.quote, format, cell);
+  const money = field.unit === "$" && reading.unit_seen === "$";
+  const scaling = money ? declaredScale(doc.document, format, location) : { rule: null, own: false };
+  const tokens = tokenize(reading.quote, format, cell).map(t => {
+    // A declared money scale supplies the currency context for an unmarked figure.
+    if (!money || !scaling.rule || t.currency || t.value !== null || t.unit !== null) return t;
+    const amount = tokenize(`${t.raw} $`, format, cell)[0];
+    return amount ? { ...t, value: amount.value } : t;
+  });
+  const roundedScale = (value: number, factor: number) => Number((value * factor).toPrecision(12));
+  const ownFactor = (raw: string) => {
+    const afterDigits = normalizeText(raw).replace(/^.*?\d[\d., ]*/, "");
+    const scale = SCALE_RE.exec(afterDigits);
+    return scale ? scaleOf(scale[1]!) : 1;
+  };
   const token = tokens.find(t => t.unit === "bps"
     ? ["senior_rate_pct", "mezz_rate_pct", "refinance_rate_pct"].includes(field.key) && t.value !== null && t.value / 100 === reading.value
     : t.value === reading.value) ?? tokens.find(t => {
+    if (!money || t.value === null) return false;
+    if (t.scaled && Math.abs(t.value / ownFactor(t.raw) - reading.value) < 1e-9) return true;
+    if (t.paren && field.min !== undefined && field.min >= 0 && Math.abs(t.value) === reading.value) return true;
+    return !t.scaled && scaling.rule && "factor" in scaling.rule
+      && Math.abs(t.value) < 1e6 && roundedScale(t.value, scaling.rule.factor) === reading.value;
+  }) ?? tokens.find(t => {
     if (t.unit === "bps") return false;
     if (t.value === null && !format.spaceGroups) {
       const digits = /\d[\d.,\s]*/.exec(t.raw)?.[0].trim();
@@ -90,6 +112,17 @@ export function verifyReading(reading: Reading, documents: readonly ReadingDocum
   if (token.currencyCode !== null && token.currencyCode !== "CAD") return { outcome: READING_FAILURE.unit };
   let value = reading.value;
   const seen = reading.unit_seen;
+  let unitSeen: string = token.unit === "bps" ? "bps (÷ 100)" : seen;
+  if (money) {
+    if (token.scaled && token.value !== null) value = token.value;
+    if (token.paren && field.min !== undefined && field.min >= 0 && reading.value >= 0) value = Math.abs(value);
+    if (!token.scaled && !scaling.own && scaling.rule) {
+      if ("refuse" in scaling.rule || token.value === null || Math.abs(token.value) >= 1e6) return { outcome: READING_FAILURE.scale };
+      value = roundedScale(token.paren && reading.value >= 0 ? Math.abs(token.value) : token.value, scaling.rule.factor);
+      unitSeen = statedScaleUnit(scaling.rule.factor);
+    }
+    if (value !== 0 && Math.abs(value) < 1000) return { outcome: READING_FAILURE.small };
+  }
   // The reader schema names money per unit and annual rent by their printed money/area unit.
   const unit = field.unit === "$/unit/mo" ? "$" : field.unit === "$/sf/yr" ? "$/sf" : field.unit;
   if (seen === "m2" && unit === "sf") value *= SF_PER_M2;
@@ -99,7 +132,7 @@ export function verifyReading(reading: Reading, documents: readonly ReadingDocum
   else if (seen === "vacancy_%" && ["stabilized_occupancy_pct", "item_occupancy_pct"].includes(field.key)) value = 100 - value;
   else if (seen !== unit) return { outcome: READING_FAILURE.unit };
   return { outcome: "verified", candidate: {
-    fieldKey: field.key, itemKey, value, unitSeen: token.unit === "bps" ? "bps (÷ 100)" : seen, raw: token.raw,
+    fieldKey: field.key, itemKey, value, unitSeen, raw: token.raw,
     documentId: doc.id, documentName: doc.name, location: reading.location, context: reading.quote,
     rule: "ai", ...(ambiguous ? { ambiguous: true as const } : {}), confidence: reading.confidence, ...(reading.note ? { note: reading.note } : {}),
   } };
