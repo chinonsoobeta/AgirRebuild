@@ -1,5 +1,5 @@
 import { describe, expect, test } from "vitest";
-import { addressedText, extractCandidates, consolidate, checkArithmetic, verifyReadings, verifyReading, READING_FAILURE, type NormalizedDocument, type Reading } from "../src/index.ts";
+import { parseDocument, addressedText, extractCandidates, consolidate, checkArithmetic, verifyReadings, verifyReading, READING_FAILURE, type NormalizedDocument, type Reading } from "../src/index.ts";
 import { SF_PER_M2 } from "@agir/numbers";
 const doc = (kind: NormalizedDocument["kind"]): NormalizedDocument => ({ kind, lines: [], tables: [], pageCount: null, needsOcr: false, fullText: "" });
 describe("addressed text", () => {
@@ -216,6 +216,34 @@ describe("Card 169: a field's usual range settles three digits with review", () 
   ] as const)("%s for %s = %s %s %s %s %s", (quote, field, item, unit_seen, value, outcome, ambiguous) => {
     const document = { ...doc("txt"), fullText: quote, lines: [{ location: "line 1", text: quote }] };
     const got = verifyReading({ ...reading, quote, field, item, unit_seen, value }, [{ ...documents[0]!, document }]);
+    expect(got.outcome).toBe(outcome);
+    if (outcome === "verified") {
+      expect(got.candidate).toMatchObject({ value });
+      if (ambiguous) expect(got.candidate).toHaveProperty("ambiguous", true);
+      else expect(got.candidate).not.toHaveProperty("ambiguous");
+    }
+  });
+});
+
+describe("Card 171: two figures separated by a plain space", () => {
+  test.each([
+    ["d.txt", 2, "unit_count", "one-bedroom", 60, "units", "verified", true],
+    ["d.txt", 2, "unit_count", "one-bedroom", 60590, "units", READING_FAILURE.value, false],
+    ["d.txt", 2, "rentable_area_sf", "one-bedroom", 590, "sf", "verified", true],
+    ["d.txt", 3, "unit_count", "two-bedroom", 50, "units", "verified", true],
+    ["d.txt", 4, "land_cost", null, 8500000, "$", "verified", false],
+    ["e.txt", 3, "unit_count", null, 1200, "units", "verified", false],
+    ["e.txt", 3, "unit_count", null, 1, "units", READING_FAILURE.value, false],
+    ["f.txt", 2, "unit_count", "studio", 50, "units", READING_FAILURE.value, false],
+  ] as const)("%s line %s: %s %s = %s", async (file, line, field, item, value, unit_seen, outcome, ambiguous) => {
+    const text = {
+      "d.txt": "Suite mix\nOne-bedroom 60 590 $2,200\nTwo-bedroom 50 820 $2,600\nLand $8,500,000",
+      "e.txt": "Sommaire\nTerrain 8 500 000 $\nLogements 1 200",
+      "f.txt": "Suite mix\nStudio 1 050 $1,900",
+    }[file];
+    const document = await parseDocument(new TextEncoder().encode(text), file);
+    const quote = text.split("\n")[line - 1]!;
+    const got = verifyReading({ ...reading, file, location: `line ${line}`, quote, field, item, value, unit_seen }, [{ id: file, name: file, document }]);
     expect(got.outcome).toBe(outcome);
     if (outcome === "verified") {
       expect(got.candidate).toMatchObject({ value });

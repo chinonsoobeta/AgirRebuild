@@ -3656,7 +3656,7 @@ describe("card 160a: the deal AI reader", () => {
     const ai = loan.sources.find((s: any) => s.rule === "ai");
     expect(ai).toBeDefined();
     if (agrees) expect(loan.sources.every((s: any) => !s.check_outcome)).toBe(true);
-    else expect(ai).toMatchObject({ check_outcome: "questions", check_note: "Please check: the separator in this figure could be a decimal point or a thousands group; the AI read it as shown" });
+    else expect(ai).toMatchObject({ check_outcome: "questions", check_note: "Please check: the separator in this figure can be read more than one way; the AI read it as shown" });
   });
   test("a leading zero is a decimal, so the AI reading of 0,614 M$ needs no separator check", async () => {
     const id = (await call(alice, "POST", `/api/workspaces/${ws}/deals`, { name: "Invented scaled loan", assetType: "Multifamily", location: "Vancouver" })).json.id;

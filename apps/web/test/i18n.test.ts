@@ -1097,3 +1097,10 @@ describe("card 150 French action sentences", () => {
     expect(fr.t("review.todoCount", { n: 2 })).toBe("2 actions avant de pouvoir lancer ce projet");
   });
 });
+
+it.each([
+  ["Please check: the separator in this figure can be read more than one way; the AI read it as shown", "À vérifier : le séparateur de ce chiffre peut se lire de plus d’une façon; l’IA l’a lu comme indiqué"],
+  ["Please check: the separator in this figure could be a decimal point or a thousands group; the AI read it as shown", "À vérifier : le séparateur de ce chiffre pourrait être une virgule décimale ou un séparateur de milliers; l’IA l’a lu comme indiqué"],
+])("Card 171 translates the separator note: %s", (en, fr) => {
+  expect(translateMessage(en)).toBe(fr);
+});
