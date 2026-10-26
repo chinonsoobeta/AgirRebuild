@@ -25,6 +25,7 @@ work it describes.
 | The same gate on `ui/w12-email` `9c4a1a7` with `fix/threshold-labels` merged in a throwaway worktree | 6192 tests in 49 files, the fallback test, web build; no conflicts | 2026-10-25 (the worktree was then removed) |
 | The same gate on `ui/w12-email` `e286f55` with `fix/threshold-labels` merged in a throwaway worktree | 6325 tests in 62 files, the fallback test, web build; no conflicts | 2026-10-25 (the worktree was then removed) |
 | `env -u ANTHROPIC_API_KEY AGIR_DATA_DIR=<empty folder> PORT=8792 npm start` | Builds the web app, applies the migrations, seeds six deals, serves on that port. An empty data folder leaves `.data/` untouched | 2026-10-25, `ui/redesign` (first browser walk) and `ui/y-screens` (second walk) |
+| `env -u ANTHROPIC_API_KEY NODE_OPTIONS=--max-old-space-size=3072 node --import tsx scripts/a11y.mjs` (after `npm run build -w @agir/web`) | 92 scans (23 screens, light and dark, English and French), 0 violations of any impact; about a minute with the seed. The release gate runs it as `accessibility scan` | 2026-10-25, `card/G-a11y-perf` |
 
 The first walk ran on `ui/redesign`, where migrations go to `0029` as on `main`. The second ran on `ui/y-screens`,
 which adds `0031` and `0032`. `0030` is on `ui/w12-email` only. The three touch different objects (`0030` a new table
@@ -304,6 +305,7 @@ build on earlier migrations.
 | `task/167-whole-unit-count` | done | Card 167: an AI unit count with no item, a blank item or a total name ("Total units", "Nombre total de logements") is the whole building's count (item null), checked against the unit types; it no longer becomes a phantom unit type or is refused. Reader gate (offline): the second v14 run's wrong values 2 to 0, v13 failed verification 1 to 0, no other key item changed. |
 | `task/168-word-ranges` | done | Card 168: the rule reader no longer reads the end of a range written in words ("seven to nine months", "entre sept et neuf mois") as a value; durations such as "two years and nine months" and "un an et six mois" keep both parts, and digit ranges are unchanged. Bank and scores identical; nine real-document figures shown no longer, all ranges. |
 | `task/169-window-settles-psf` | done | Card 169: for a field with a minimum but no maximum (rent per square foot, monthly unit rent), the verifier settles an unscaled three-decimal figure by the field's window and flags it for review ("$29.009/sf/year" is 29.009). Reader gate (offline): v14 +3 right, failed verification 6 to 3, no new wrong value. Release gate for 167+168+169: 5992 passed. |
+| `card/G-a11y-perf` | L5, E18 | Card G: accessibility scan and performance budgets in the release gate. `scripts/a11y.mjs` starts the API with the demo seed on a scratch folder and a free port, signs in as the demo analyst, and with `playwright-core` and the PDF renderer's Chromium runs `axe-core` (WCAG 2.1 A and AA rules) on 23 screens (landing, sign-in, sign-up, legal, a shared link, verify, reset asking and choosing, deals, new deal, quick start on an empty deal, documents, review of Dominion Exchange (blocked) and of Maple Heights, run, decision, reports, compare, explore, audit, settings with every section, review access, verify signed in), each in light and dark, English and French: 92 scans, one page at a time. A screen that draws no heading, or shows the wrong theme or language, fails. First scan: 34 serious violations (`link-in-text-block` on 8 screens, `scrollable-region-focusable` on the run's stress table), no critical, moderate or minor; both fixed (links inside sentences are underlined, the stress table's box takes focus and is named by its heading); now 0. The web app is split by route group with `React.lazy` (deal, settings, auth, share, landing, plus `vendor` and the shared `app` code): one 916.35 kB chunk before; after, the largest is 364.56 kB, all JavaScript 926.52 kB, CSS 37.52 kB, and the first page loads 704.50 kB (vendor and app). Vite's default 500 kB warning limit is back and the build prints no warning. The release tier adds `performance budget` (largest chunk 500 kB, all JavaScript 1.2 MB, CSS 60 kB) and `accessibility scan`; the PR tier runs neither. `apps/api/test/budgets.test.ts` holds the demo seed's deals list, deals, reviews and runs to byte budgets and the review to 1 s on PGlite. New dev dependency `axe-core` 4.13.0. | Not required (web, gate and a test) |
 
 The plan for small Canadian developers is [plan-small-developers.md](plan-small-developers.md).
 Release 1 steps 0 to 3 are built. Steps 4 and 5 are built on draft, unsigned policy and tables that
@@ -421,6 +423,12 @@ A model may suggest a label for a figure the reader could not label; a person co
 
 ## Known gaps
 
+- **The first page still loads every screen's strings.** After the route split (card G) the first visit downloads
+  704.50 kB of JavaScript (the libraries, 339.94 kB, and the shared app code, 364.56 kB), most of the latter the English
+  and French strings of every screen in `apps/web/src/i18n.tsx` and `apps/web/src/strings/`. Splitting the strings by
+  screen would shrink it further.
+- **The accessibility scan is automatic only.** axe-core finds about a third of WCAG problems; the scan does not open
+  dialogs, menus, error states or the run while it is in progress, and no person has tested with a screen reader.
 - **A bare "$" with no stated currency is read as the deal's.** A currency is read from the figure's own mark,
   its label, the cell's number format, the column header above it, the table or sheet name, a whole-table
   statement, or a number-free document statement (card 99). A figure with none of these, including a "$" in an

@@ -28,7 +28,7 @@ To start empty: `AGIR_SEED=0 npm start`. To reset: delete `.data/`.
 ## Check it
 
 ```bash
-npm run gate -- --tier=release   # typecheck, every test, web build
+npm run gate -- --tier=release   # typecheck, every test, web build, size budgets, accessibility scan (needs a headless Chromium)
 ```
 
 ## What is where
