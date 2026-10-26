@@ -2,6 +2,7 @@ import { FIELD_BY_KEY } from "@agir/contracts";
 import { detectFormat, normalizeText, SCALE_RE, scaleOf, SF_PER_M2, tokenize } from "@agir/numbers";
 import { declaredScale, statedScaleUnit } from "./candidates.ts";
 import { addressedEntries } from "./addressed.ts";
+import { foldText } from "./mapping.ts";
 import type { NormalizedDocument } from "./document.ts";
 import type { SourcedCandidate } from "./consolidate.ts";
 
@@ -23,6 +24,7 @@ export const READING_FAILURE = {
   unit: "The AI unit does not match this field",
   scale: "The document states a scale for this amount that Agir cannot read safely",
   small: "The AI amount is under $1,000; check whether the document states it in thousands or millions",
+  financing: "The AI read a financing figure as other costs; interest and lender fees are computed by Agir or belong to the stated interest reserve",
 } as const;
 export const AI_LOW_CONFIDENCE_NOTE = "Please check: every source is a low-confidence AI reading";
 export const AI_AMBIGUOUS_NOTE = "Please check: the separator in this figure can be read more than one way; the AI read it as shown";
@@ -32,6 +34,29 @@ const UNIT_COUNT_TOTAL_NAMES = new Set([
   "total", "grand total", "total units", "total unit", "units total", "total unit count", "total number of units",
   "building total", "total logements", "total des logements", "nombre total de logements", "logements au total",
 ]);
+
+// Card 174: financing words, from the stated interest reserve's aliases and the lender's fees.
+const FINANCING_WORDS = [
+  ...FIELD_BY_KEY.get("stated_interest_reserve")!.aliases,
+  "interests?", "interets?", "financing", "financement", "lenders?(?: s)? fees?", "commitment fees?", "origination", "loan fees?",
+  "capitali[sz]ed interest", "frais de financement", "frais du preteur", "commission d engagement",
+];
+const FINANCING = new RegExp(`\\b(?:${FINANCING_WORDS.join("|")})\\b`);
+// "Other costs (excluding financing)": financing named only to leave it out.
+const EXCLUDING = /\b(?:excluding|excl|exclusive of|not including|without|net of|hors|sans|excluant|a l exclusion)\b[^)]*/g;
+// The figure's own label ends at the previous figure or separator: "Lender fee $25,000; Other $40,000".
+const LABEL_START = /^.*(?:[;|\t•]|\$\s?\d[\d.,]*|\d[\d.,\s]*\$)/s;
+
+/** The words a figure is written under: its line up to the quote, or the cells before it in its row. */
+function figureLabel(document: NormalizedDocument, location: string, line: string, quote: string): string {
+  const at = quote.search(/[\d$]/);
+  const own = at < 0 ? quote : quote.slice(0, at);
+  const row = document.tables.flatMap(t => t.rows).find(r => r.some(c => c.ref === location));
+  const before = row
+    ? row.slice(0, row.findIndex(c => c.ref === location)).map(c => c.text).filter(t => /\p{L}/u.test(t)).join(" ")
+    : line.slice(0, line.indexOf(quote));
+  return foldText(before + own).replace(LABEL_START, "");
+}
 
 /** First failure wins. No model interpretation can bypass an address or number check. */
 export function verifyReading(reading: Reading, documents: readonly ReadingDocument[]): ReadingVerification {
@@ -48,6 +73,10 @@ export function verifyReading(reading: Reading, documents: readonly ReadingDocum
   const entries = doc ? addressedEntries(doc.document).filter(e => e.location === location) : [];
   if (!doc || entries.length !== 1) return { outcome: READING_FAILURE.address };
   if (!entries[0]!.text.includes(reading.quote)) return { outcome: READING_FAILURE.quote };
+  // Interest and lender fees are computed by the engine; as other costs they would count twice.
+  if (field.key === "other_cost" && FINANCING.test(figureLabel(doc.document, location, entries[0]!.text, reading.quote).replace(EXCLUDING, " "))) {
+    return { outcome: READING_FAILURE.financing };
+  }
   const format = detectFormat(doc.document.fullText);
   let ambiguous = false;
   const cell = doc.document.tables.some(table => table.rows.some(row => row.some(c => c.ref === location)));

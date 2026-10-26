@@ -1447,6 +1447,7 @@ const FR_REASONS: [RegExp, string | ((m: RegExpMatchArray) => string)][] = [
   [/^The AI quote is not at this address$/, "La citation IA ne se trouve pas à cette adresse"],
   [/^The AI value is not written in its quote$/, "La valeur IA n’est pas écrite dans sa citation"],
   [/^The AI unit does not match this field$/, "L’unité IA ne correspond pas à ce champ"],
+  [/^The AI read a financing figure as other costs; interest and lender fees are computed by Agir or belong to the stated interest reserve$/, "L’IA a lu un montant de financement comme autres coûts\u00a0; les intérêts et les frais du prêteur sont calculés par Agir ou relèvent de la réserve d’intérêts déclarée"],
   [/^Please check: the separator in this figure can be read more than one way; the AI read it as shown$/, "À vérifier : le séparateur de ce chiffre peut se lire de plus d’une façon; l’IA l’a lu comme indiqué"],
   [/^Please check: the separator in this figure could be a decimal point or a thousands group; the AI read it as shown$/, "À vérifier : le séparateur de ce chiffre pourrait être une virgule décimale ou un séparateur de milliers; l’IA l’a lu comme indiqué"],
   [/^Please check: every source is a low-confidence AI reading$/, "À vérifier : chaque source est une lecture IA de faible confiance"],
