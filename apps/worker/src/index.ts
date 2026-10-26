@@ -3,7 +3,7 @@
 // It drains the jobs table with leases, retries with backoff, and a dead
 // letter. It runs as the trusted service principal.
 
-import { currentDocuments, readDeal, storedReadings, type ReaderProvider } from "./reader.ts";
+import { aiReadingOn, currentDocuments, readDeal, storedReadings, type ReaderProvider } from "./reader.ts";
 export type { ReaderProvider, ReaderRequest } from "./reader.ts";
 import Anthropic from "@anthropic-ai/sdk";
 import { FIELDS, FIELD_BY_KEY, runPolicy, type Currency, type Policy, type EngineInput, type FieldUnit, type RunResult } from "@agir/contracts";
@@ -16,7 +16,7 @@ export const MAX_UPLOAD_BYTES = 75 * 1024 * 1024;
 
 /** What a model is asked: the exact body of the call. The figures and the catalog are in the one user turn, as JSON. */
 export type SuggestRequest = {
-  model: string; max_tokens: number; fallbacks: "default"; system: string;
+  model: string; max_tokens: number; fallbacks: "default"; inference_geo: "us"; system: string;
   thinking: { type: "adaptive" };
   output_config: { effort: "low" | "medium" | "high" | "xhigh" | "max"; format: { type: "json_schema"; schema: Record<string, unknown> } };
   messages: { role: "user"; content: string }[];
@@ -67,6 +67,8 @@ async function suggestLabels(deps: WorkerDeps, workspaceId: string, offered: Sou
       model: process.env.AGIR_SUGGEST_MODEL || "claude-opus-5-5",
       max_tokens: 16000,
       fallbacks: "default",
+      // The owner's decision of 2026-10-24: inference stays in the United States.
+      inference_geo: "us",
       thinking: { type: "adaptive" },
       output_config: { effort: (process.env.AGIR_SUGGEST_EFFORT || "medium") as SuggestRequest["output_config"]["effort"], format: { type: "json_schema", schema: SUGGEST_SCHEMA } },
       system: SUGGEST_SYSTEM,
@@ -206,7 +208,8 @@ async function extractDocument(deps: WorkerDeps, documentId: string) {
       `update documents set stage = 'extracted', stage_detail = $4, read_role = $5, candidate_count = $2, number_format = $3, updated_at = now() where id = $1`,
       [d.id, result.candidates.length, format, parsed.needsOcr ? `Read by OCR from ${parsed.pageCount} scanned ${parsed.pageCount === 1 ? "page" : "pages"}. Check every value against the page before approving it.` : null, result.notes.find(n => n.startsWith("Document kind: "))?.slice("Document kind: ".length) ?? null],
     );
-    aiRead = Boolean(deps.read || process.env.ANTHROPIC_API_KEY) && !(await currentDocuments(tx, d.deal_id)).some(doc => ["uploaded", "checking", "reading", "extracting"].includes(doc.stage));
+    // Read once per job: with AI reading off for the workspace, the rules reconcile alone, as with no key.
+    aiRead = Boolean(deps.read || process.env.ANTHROPIC_API_KEY) && (await aiReadingOn(tx, d.workspace_id)) && !(await currentDocuments(tx, d.deal_id)).some(doc => ["uploaded", "checking", "reading", "extracting"].includes(doc.stage));
     if (!aiRead) await tx.query(`insert into jobs (kind, payload) values ('reconcile_deal', $1)`, [JSON.stringify({ deal_id: d.deal_id })]);
   });
   if (aiRead) {
@@ -257,7 +260,7 @@ const sameValues = (a: { value: number }[] | null, b: { value: number }[] | null
 const settledLabel = (e: { source_kind: string }) => (e.source_kind === "default" ? "Default accepted" : e.source_kind === "analyst" ? "Entered by an analyst" : e.source_kind === "table" ? "Published table" : "Approved earlier");
 
 /** Fold every live document's values into the review queue. Never approves anything. */
-export async function reconcileDeal(db: Db, dealId: string) {
+export async function reconcileDeal(db: Db, store: BlobStore, dealId: string) {
   await db.transaction(async (tx) => {
     const [deal] = await tx.query<{ workspace_id: string; currency: string | null }>(`select workspace_id, currency from deals where id = $1`, [dealId]);
     if (!deal) return;
@@ -332,7 +335,7 @@ export async function reconcileDeal(db: Db, dealId: string) {
         .filter((x) => !rememberedIds.includes(String(x.id)));
       ({ kept, dropped } = applySuggestions(sourced, offered, suggestions));
     }
-    const ai = await storedReadings(tx, dealId);
+    const ai = await storedReadings(tx, store, dealId);
     const base = [...sourced, ...kept, ...remembered, ...labelled, ...ai];
     const assigned = new Set([...kept, ...remembered, ...labelled].map(c => `${c.documentId}|${c.location}|${c.raw}`));
     const chosen = chooseByArithmetic(consolidate(base, deal.currency), unlabelled.filter(f => !personLabelled.has(f) && !assigned.has(`${f.documentId}|${f.location}|${f.raw}`)));
@@ -656,7 +659,7 @@ export async function runOnce(deps: WorkerDeps): Promise<boolean> {
   try {
     if (job.kind === "verify_document") await verifyDocument(deps, job.payload.document_id!);
     else if (job.kind === "extract_document") await extractDocument(deps, job.payload.document_id!);
-    else if (job.kind === "reconcile_deal") await reconcileDeal(deps.db, job.payload.deal_id!);
+    else if (job.kind === "reconcile_deal") await reconcileDeal(deps.db, deps.store, job.payload.deal_id!);
     else if (job.kind === "render_artifact") await renderJob(deps, job.payload.artifact_id!);
     await deps.db.query(`update jobs set status = 'done', lease_until = null, updated_at = now() where id = $1`, [job.id]);
     deps.log?.({ event: "job.done", id: job.id, kind: job.kind, ms: Date.now() - started });
@@ -700,4 +703,41 @@ export function startWorker(deps: WorkerDeps, intervalMs = 400): () => void {
   return () => {
     stopped = true;
   };
+}
+
+// ---- Card F: purging closed workspaces after the retention period ------------------------------
+
+/**
+ * The retention period in days from AGIR_RETENTION_DAYS: null when it is unset (the default: never purge). Anything
+ * other than a whole number of days from 1 throws, so a mistyped setting stops the start rather than deleting data.
+ */
+export function retentionDays(value: string | undefined): number | null {
+  if (value === undefined || value.trim() === "") return null;
+  if (!/^[1-9][0-9]{0,4}$/.test(value.trim())) throw new Error("AGIR_RETENTION_DAYS must be a whole number of days, 1 or more.");
+  return Number(value.trim());
+}
+
+/**
+ * Deletes every workspace closed more than `days` days ago (fn_purge_closed_workspaces), then the files no remaining
+ * row uses. The files go after the database commits, so a failure leaves a file without a row, never a row without
+ * its file. Logs counts only.
+ */
+export async function purgeClosedWorkspaces(deps: Pick<WorkerDeps, "db" | "store" | "log">, days: number): Promise<{ workspaces: number; files: number }> {
+  const { workspaces, keys } = await deps.db.transaction(async (tx) => {
+    const [n] = await tx.query<{ n: number }>(`select count(*)::int as n from workspaces where closed_at is not null and closed_at < now() - make_interval(days => $1)`, [days]);
+    const rows = await tx.query<{ storage_key: string }>(`select storage_key from fn_purge_closed_workspaces(make_interval(days => $1))`, [days]);
+    return { workspaces: n?.n ?? 0, keys: rows.map((r) => r.storage_key) };
+  });
+  for (const key of keys) await deps.store.delete(key);
+  deps.log?.({ event: "purge.done", workspaces, files: keys.length });
+  return { workspaces, files: keys.length };
+}
+
+/** Purges once now and then once a day, in this process; returns a stop function. A failure is logged and retried the next day. */
+export function startPurge(deps: Pick<WorkerDeps, "db" | "store" | "log">, days: number): () => void {
+  const once = () => purgeClosedWorkspaces(deps, days).catch((e) => deps.log?.({ event: "purge.error", error: (e as Error).message }));
+  void once();
+  const timer = setInterval(once, 24 * 60 * 60 * 1000);
+  timer.unref();
+  return () => clearInterval(timer);
 }

@@ -32,8 +32,8 @@ vi.mock("../src/components/ui", async (original) => {
     useSession: () => ({
       solo: true, role: state.role, workspaceId: "ws", setWorkspace: state.setWorkspace,
       me: { user: { id: "me", name: "Morgan Owner", email: "morgan@example.test" }, workspaces: [
-        { id: "ws", name: "Elm Street", review_mode: "solo", label_suggestions: true, has_logo: false, role: state.role },
-        { id: "ws2", name: "Harbour Partners", review_mode: "team", label_suggestions: false, has_logo: false, role: "viewer" },
+        { id: "ws", name: "Elm Street", review_mode: "solo", label_suggestions: true, ai_reading: true, has_logo: false, role: state.role },
+        { id: "ws2", name: "Harbour Partners", review_mode: "team", label_suggestions: false, ai_reading: true, has_logo: false, role: "viewer" },
       ] },
     }),
   };
@@ -52,7 +52,7 @@ vi.mock("@tanstack/react-router", async () => {
 });
 vi.mock("../src/api", async (original) => {
   const real = await original<typeof import("../src/api")>();
-  return { ...real, api: { ...real.api, get: vi.fn(async () => []), post: vi.fn(async () => ({ ok: true })), del: vi.fn(async () => ({ ok: true })), upload: vi.fn(async () => ({})) } };
+  return { ...real, api: { ...real.api, get: vi.fn(async () => []), post: vi.fn(async () => ({ ok: true })), put: vi.fn(async () => ({ ok: true })), del: vi.fn(async () => ({ ok: true })), upload: vi.fn(async () => ({})) } };
 });
 vi.mock("react", async (original) => {
   const react = await original<typeof import("react")>();
@@ -151,6 +151,30 @@ describe("the settings screen", () => {
     const words = text(render(Settings));
     expect(words).toContain("Riley Reviewer");
     expect(words).toMatch(/until .*2099/);
+  });
+
+  it("shows the owner the AI reading switch with what is sent where, and saves a change (card C)", async () => {
+    const words = text(render(Settings));
+    expect(words).toContain("Read documents with AI");
+    expect(words).toContain("On: Agir sends the text of deal documents, never the files, to Anthropic's Claude in the United States to find figures; every figure it finds is checked against the document before it is used. Off: only Agir's own rules read the documents, and more values will need to be entered by hand.");
+    const sw = state.nodes.find((n) => n.tag === "button" && n.props["aria-label"] === "Read documents with AI")!;
+    expect(sw.props["aria-checked"]).toBe(true);
+    expect(sw.props.disabled).toBe(false);
+    await sw.props.onClick();
+    expect(vi.mocked(api.put)).toHaveBeenCalledWith("/workspaces/ws/ai-reading", { on: false });
+    expect(state.invalidate).toHaveBeenCalledWith({ queryKey: ["me"] });
+  });
+
+  it("shows others the AI reading state without letting them change it, in French too (card C)", () => {
+    state.role = "viewer";
+    state.lang = "fr";
+    const words = text(render(Settings));
+    expect(words).toContain("Lire les documents avec l'IA");
+    // text() folds the non-breaking space into a plain one.
+    expect(words).toContain("Activée : Agir envoie le texte des documents du projet, jamais les fichiers, à Claude d'Anthropic, aux États-Unis");
+    const sw = state.nodes.find((n) => n.tag === "button" && n.props["aria-label"] === "Lire les documents avec l'IA")!;
+    expect(sw.props["aria-checked"]).toBe(true);
+    expect(sw.props.disabled).toBe(true);
   });
 
   it("is in French with the French table", () => {

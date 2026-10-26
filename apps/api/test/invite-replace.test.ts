@@ -10,7 +10,9 @@ import { sha256 } from "../src/services.ts";
 let db: Db;
 let app: ReturnType<typeof createApp>;
 const store = fileStore(mkdtempSync(join(tmpdir(), "agir-blobs-")));
+// Event lines go to console.log (apps/api/src/log.ts); both are read for a leaked secret.
 const errors = vi.spyOn(console, "error");
+const lines = vi.spyOn(console, "log");
 
 type Session = { cookie: string };
 async function call(s: Session | null, method: string, path: string, body?: unknown) {
@@ -140,7 +142,7 @@ describe("making a new link for an open invitation", () => {
 
   test("no secret or its hash reaches an audit payload or a log line", async () => {
     const payloads = (await db.query<{ p: string }>(`select payload::text as p from audit_events`)).map((r) => r.p).join("\n");
-    const logs = errors.mock.calls.map((c) => c.join(" ")).join("\n");
+    const logs = [...errors.mock.calls, ...lines.mock.calls].map((c) => c.join(" ")).join("\n");
     expect(secrets.length).toBeGreaterThan(5);
     for (const s of secrets) {
       expect(payloads).not.toContain(s);

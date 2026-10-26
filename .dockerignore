@@ -1,0 +1,14 @@
+# Keep data, other worktrees, installed modules and secrets out of the image's build context.
+.git
+.data
+.worktrees
+.claude
+.github
+**/node_modules
+**/dist
+*.log
+*.tsbuildinfo
+.env
+.env.*
+deploy/.env
+deploy/backups

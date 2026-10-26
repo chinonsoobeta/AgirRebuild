@@ -86,6 +86,8 @@ export function describeEvent(i: I18n, e: AuditEvent): string {
       const on = (b: boolean) => (fr ? (b ? "activées" : "désactivées") : b ? "on" : "off");
       return fr ? `A changé les suggestions de libellés\u00a0: ${on(p.from)} → ${on(p.to)}` : `Changed label suggestions: ${on(p.from)} to ${on(p.to)}`;
     }
+    case "workspace.ai_reading":
+      return fr ? (p.on ? "A activé la lecture des documents par l'IA" : "A désactivé la lecture des documents par l'IA") : p.on ? "Turned AI reading of documents on" : "Turned AI reading of documents off";
     case "review.granted":
       return fr ? `A donné accès à un réviseur${p.expires_at ? ` jusqu'au ${i.f.date(p.expires_at)}` : ""}` : `Gave a reviewer access${p.expires_at ? ` until ${i.f.date(p.expires_at)}` : ""}`;
     case "document.suggestions_failed":
@@ -102,6 +104,9 @@ export function describeEvent(i: I18n, e: AuditEvent): string {
     case "workspace.renamed": return fr ? `A renommé l'espace de travail «\u00a0${p.from}\u00a0» en «\u00a0${p.to}\u00a0»` : `Renamed the workspace from "${p.from}" to "${p.to}"`;
     case "review.ended": return fr ? "A mis fin à l'accès d'un réviseur" : "Ended a reviewer's access";
     case "user.renamed": return fr ? "A changé son nom" : "Changed their name";
+    case "user.deleted": return fr ? "A supprimé son compte" : "Deleted their account";
+    case "workspace.closed": return fr ? `A fermé l'espace de travail\u00a0: ${p.reason}` : `Closed the workspace: ${p.reason}`;
+    case "workspace.purged": return fr ? "L'espace de travail fermé a été supprimé après la période de conservation" : "The closed workspace was deleted after the retention period";
     default:
       if (e.action.startsWith("assumption.")) {
         const action = e.action.slice(11);
@@ -159,10 +164,11 @@ export function Audit({ dealId }: { dealId: string }) {
     queryFn: ({ pageParam }) => api.get<AuditEvent[]>(pageParam === null ? `/deals/${dealId}/audit` : `/deals/${dealId}/audit?before=${pageParam}`),
     getNextPageParam: (last) => (last.length >= SERVER_PAGE ? last[last.length - 1]!.seq : undefined),
   });
-  // fn_verify_audit_chain walks every event in the installation, in order: ok, how many it read, and where it stopped.
+  // fn_verify_audit_chain_for walks every event in the installation, in order, and answers for this workspace only: ok,
+  // how many of its events there are, and whether the event where the chain broke is one of them.
   const verify = useQuery({
     queryKey: ["audit-verify", workspaceId],
-    queryFn: () => api.get<{ ok: boolean; events: number; broken_at: number | null }>(`/workspaces/${workspaceId}/audit/verify`),
+    queryFn: () => api.get<{ ok: boolean; events: number; broken: boolean }>(`/workspaces/${workspaceId}/audit/verify`),
   });
   if (!deal.data) return <p className="muted">{t("common.loading")}</p>;
   const o = deal.data;
@@ -189,11 +195,11 @@ export function Audit({ dealId }: { dealId: string }) {
           <div>
             <h2 className="h1">{t("audit.title")}</h2>
             <p className="lead">{t("audit.lead")}</p>
-            {v && <p className="small muted audit-checked">{t("audit.checked", { ok: v.ok, n: v.events, at: v.broken_at })}</p>}
+            {v && <p className="small muted audit-checked">{t("audit.checked", { ok: v.ok, n: v.events, mine: v.broken })}</p>}
             {verify.error && <p className="small muted audit-checked" role="alert">{t("audit.verifyFailed")}</p>}
           </div>
           <div className="row">
-            {v ? <Tag tone={v.ok ? "pass" : "stop"}>{v.ok ? t("audit.intact", { n: v.events }) : t("audit.broken", { n: v.broken_at })}</Tag>
+            {v ? <Tag tone={v.ok ? "pass" : "stop"}>{v.ok ? t("audit.intact", { n: v.events }) : t("audit.broken")}</Tag>
               : verify.isFetching ? <Tag>{t("audit.checking")}</Tag> : null}
             <button className="btn quiet" type="button" disabled={verify.isFetching} onClick={() => void verify.refetch()}>{t("audit.verifyAgain")}</button>
           </div>

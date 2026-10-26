@@ -8,6 +8,8 @@ export const en = {
   "shell.mainNav": "Main",
   "shell.allDeals": "All deals",
   "shell.skip": "Skip to the main content",
+  "shell.closed": "This workspace is closed.",
+  "shell.closedBody": "It is read-only: you can open its deals, runs and reports, and change nothing.",
 } satisfies Record<string, Entry>;
 
 export const fr: FrenchOf<typeof en> = {
@@ -17,4 +19,6 @@ export const fr: FrenchOf<typeof en> = {
   "shell.mainNav": "Principal",
   "shell.allDeals": "Tous les projets",
   "shell.skip": "Passer au contenu principal",
+  "shell.closed": "Cet espace de travail est fermé.",
+  "shell.closedBody": "Il est en lecture seule\u00a0: vous pouvez ouvrir ses projets, ses analyses et ses rapports, sans rien modifier.",
 };

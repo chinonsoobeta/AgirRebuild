@@ -25,6 +25,8 @@ admin, for trying dual control and decisions.
 For development with hot reload: `npm run dev` (API on :8787, Vite on :5173).
 To start empty: `AGIR_SEED=0 npm start`. To reset: delete `.data/`.
 
+To deploy with Docker (Postgres, the API and a separate worker): [docs/deploy.md](docs/deploy.md).
+
 ## Check it
 
 ```bash
@@ -45,13 +47,14 @@ npm run gate -- --tier=release   # typecheck, every test, web build, size budget
 | `apps/api` | Hono API: sessions, governed use cases, audit package |
 | `apps/worker` | Job runner: verify, read, extract, reconcile, render |
 | `apps/web` | React app: BC Sans, light and dark themes, English and French |
+| `deploy` | Container image, compose stack, backup and restore scripts |
 | `oracles/deals` | Six reference deals with their expected outcomes |
 
 ## Rules the code enforces
 
 - Only the engine produces numbers. When `ANTHROPIC_API_KEY` is set, a model reads the documents, and
   every reading is checked against the quote it cites before it becomes a candidate; without the key,
-  the rules alone read. A model may also suggest a label for a figure, only when a workspace owner turns
+  or in a workspace whose owner turned AI reading off, the rules alone read. A model may also suggest a label for a figure, only when a workspace owner turns
   that on. A person approves or accepts every value before a run uses it.
 - The engine reads only approved or explicitly default-accepted inputs. Missing, conflicting,
   pending or out-of-range inputs block the run and are named.

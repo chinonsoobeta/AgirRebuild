@@ -1,4 +1,4 @@
-import { stressLabel, tableSourceLabel, tableStaleWarning, pbrhExplanation } from "@agir/contracts";
+import { isSigned, stressLabel, tableSourceLabel, tableStaleWarning, pbrhExplanation } from "@agir/contracts";
 import { Link } from "@tanstack/react-router";
 import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
 import { Fragment, useRef, useState } from "react";
@@ -189,7 +189,7 @@ export function RunInProgress({ n, startedAt, by, progress, stopping, onStop }: 
           <dl className="kv">
             {x && <>
               <dt>{t("run.kv.inputs")}</dt><dd className="hash">{hash}</dd>
-              <dt>{t("run.kv.policy")}</dt><dd>{x.policyDraft ? t("run.kv.policyDraft", { p: policy }) : policy}</dd>
+              <dt>{t("run.kv.policy")}</dt><dd>{policyValue(i, x.policyVersion, x.policyDraft)}</dd>
               <dt>{t("run.kv.engine")}</dt><dd>{x.engineVersion}</dd>
             </>}
             {by && <><dt>{t("run.kv.startedBy")}</dt><dd>{by}</dd></>}
@@ -369,7 +369,7 @@ export function Run({ dealId, run: fromAddress }: { dealId: string; run?: string
               <div className="row">
                 <VerdictBadge code={v.result.verdict.code} />
                 {v.policyCustom && <span>{t("threshold.withYours")}</span>}
-                <span className="muted">{t("run.verdictLine", { n: v.number, policy: policyName(i, v.policyVersion), draft: v.policyDraft })}</span>
+                <span className="muted">{t("run.verdictLine", { n: v.number, policy: policyName(i, v.policyVersion), draft: v.policyDraft, unsigned: !isSigned(v.policyVersion) })}</span>
               </div>
               <p className="run-headline">{vt.headline}</p>
               <p className="muted">{vt.explanation}</p>
@@ -517,7 +517,7 @@ export function Run({ dealId, run: fromAddress }: { dealId: string; run?: string
             <dl className="kv">
               <dt>{t("run.kv.run")}</dt><dd>{t("run.kv.runValue", { n: v.number, date: f.date(v.createdAt), by: v.createdBy })}</dd>
               <dt>{t("run.kv.engine")}</dt><dd>{v.engineVersion}</dd>
-              <dt>{t("run.kv.policy")}</dt><dd>{v.policyDraft ? t("run.kv.policyDraft", { p: policyName(i, v.policyVersion) }) : policyName(i, v.policyVersion)}</dd>
+              <dt>{t("run.kv.policy")}</dt><dd>{policyValue(i, v.policyVersion, v.policyDraft)}</dd>
               <dt>{t("run.kv.inputs")}</dt><dd className="hash">{v.inputHash.slice(0, 16)}</dd>
               <dt>{t("run.kv.result")}</dt><dd className="hash">{v.resultHash.slice(0, 16)}</dd>
               <dt>{t("run.kv.signed")}</dt><dd>{t("run.kv.signedValue", { key: v.signed === "development key" ? t("run.devKey") : t("run.prodKey") })}</dd>
@@ -563,4 +563,10 @@ export function Run({ dealId, run: fromAddress }: { dealId: string; run?: string
       </div>
     </>
   );
+}
+
+/** The run's policy by name, saying when it is a draft or otherwise not yet signed by credit (card E). */
+function policyValue(i: ReturnType<typeof useI18n>, version: string, draft: boolean): string {
+  const p = policyName(i, version);
+  return draft ? i.t("run.kv.policyDraft", { p }) : isSigned(version) ? p : i.t("run.kv.policyUnsigned", { p });
 }

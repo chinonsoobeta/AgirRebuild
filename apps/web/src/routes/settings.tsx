@@ -1,7 +1,7 @@
 import { useMutation, useQueries, useQuery, useQueryClient } from "@tanstack/react-query";
-import { Fragment, useState, type FormEvent, type ReactNode } from "react";
+import { Fragment, useRef, useState, type FormEvent, type ReactNode } from "react";
 import { Link } from "@tanstack/react-router";
-import { api, type ClientInvite, type DealClient, type DealOverview } from "../api";
+import { api, type ClientInvite, type DealClient, type DealOverview, type Me } from "../api";
 import { ErrorText, useSession } from "../components/ui";
 import { ChangeEmail } from "./verify";
 import { Thresholds } from "../components/thresholds";
@@ -316,10 +316,12 @@ function Row({ title, body, children }: { title: ReactNode; body?: ReactNode; ch
   );
 }
 
-/** The address is not confirmed yet (card W12): send a new link, or enter the code on /verify. */
-function ConfirmEmail() {
+/** The address is not confirmed yet (card W12): send a new link, or enter the code on /verify. Without a mail provider
+ * (card B), it says so instead. */
+function ConfirmEmail({ mail }: { mail: boolean }) {
   const { t } = useI18n();
   const send = useMutation({ mutationFn: () => api.post("/auth/verify/send", {}) });
+  if (!mail) return <div className="stack tight"><Notice tone="review">{t("auth.verify.notYet")}</Notice><p className="small">{t("auth.noMail")}</p></div>;
   return (
     <div className="stack tight">
       <Notice tone="review">{t("auth.verify.notYet")}</Notice>
@@ -336,16 +338,16 @@ function ConfirmEmail() {
 /** Card R6: a reset link to the person's own address, so a signed-in person can set a new password. */
 function PasswordRow({ email }: { email: string }) {
   const { t } = useI18n();
-  const [sent, setSent] = useState(false);
+  const [sent, setSent] = useState<boolean | null>(null);
   const [error, setError] = useState<unknown>(null);
   const [busy, setBusy] = useState(false);
   const send = async () => {
-    setSent(false);
+    setSent(null);
     setError(null);
     setBusy(true);
     try {
-      await api.post("/auth/reset/send", { email });
-      setSent(true);
+      const r = await api.post<{ sent?: false }>("/auth/reset/send", { email });
+      setSent(r.sent !== false);
     } catch (e) {
       setError(e);
     } finally {
@@ -357,8 +359,91 @@ function PasswordRow({ email }: { email: string }) {
       <Row title={t("settings.ac.password")} body={t("settings.ac.passwordBody")}>
         <button className="btn quiet sm" type="button" disabled={busy} onClick={send}>{t("auth.reset.send")}</button>
       </Row>
-      {sent && <p className="small" role="status">{t("settings.ac.passwordSent", { email })}</p>}
+      {sent === true && <p className="small" role="status">{t("settings.ac.passwordSent", { email })}</p>}
+      {sent === false && <p className="small" role="status">{t("auth.noMail")}</p>}
       <ErrorText error={error} />
+    </div>
+  );
+}
+
+/** Card F: the owner closes the workspace. The dialog says what happens before anything does. */
+function CloseWorkspace({ workspaceId }: { workspaceId: string }) {
+  const { t } = useI18n();
+  const qc = useQueryClient();
+  const dialog = useRef<HTMLDialogElement>(null);
+  const close = useMutation({
+    mutationFn: (reason: string) => api.post(`/workspaces/${workspaceId}/close`, { reason }),
+    onSuccess: () => { dialog.current?.close(); return qc.invalidateQueries({ queryKey: ["me"] }); },
+  });
+  return (
+    <div className="set-sub">
+      <Row title={t("settings.close.title")} body={t("settings.close.body")}>
+        <button className="btn danger sm" type="button" onClick={() => { close.reset(); dialog.current?.showModal(); }}>{t("settings.close.title")}</button>
+      </Row>
+      <dialog ref={dialog} aria-labelledby="close-ws-title">
+        <form
+          aria-label={t("settings.close.title")}
+          onSubmit={(e: FormEvent<HTMLFormElement>) => {
+            e.preventDefault();
+            close.mutate((e.currentTarget.elements.namedItem("reason") as HTMLTextAreaElement).value);
+          }}
+        >
+          <h2 id="close-ws-title" className="h2">{t("settings.close.title")}</h2>
+          <p className="muted">{t("settings.close.what")}</p>
+          <div className="field">
+            <label htmlFor="close-reason">{t("settings.close.reason")}</label>
+            <textarea className="input" id="close-reason" name="reason" required minLength={10} maxLength={500} rows={3} aria-describedby="close-reason-hint" />
+            <p className="small muted" id="close-reason-hint">{t("settings.close.reasonHint")}</p>
+          </div>
+          <ErrorText error={close.error} />
+          <div className="row">
+            <button className="btn danger" type="submit" disabled={close.isPending}>{t("settings.close.confirm")}</button>
+            <button className="btn quiet" type="button" onClick={() => dialog.current?.close()}>{t("common.cancel")}</button>
+          </div>
+        </form>
+      </dialog>
+    </div>
+  );
+}
+
+/** Card F: deleting your own account, with your password. While you own an open workspace, the dialog names it instead. */
+function DeleteAccount({ workspaces }: { workspaces: Me["workspaces"] }) {
+  const { t } = useI18n();
+  const dialog = useRef<HTMLDialogElement>(null);
+  const ownsOpen = workspaces.filter((w) => w.role === "owner" && !w.closed_at);
+  // The session is gone: a full load starts the app afresh at sign-in.
+  const remove = useMutation({ mutationFn: (password: string) => api.post(`/auth/delete-account`, { password }), onSuccess: () => window.location.assign("/login") });
+  return (
+    <div>
+      <Row title={t("settings.delete.title")} body={t("settings.delete.body")}>
+        <button className="btn danger sm" type="button" onClick={() => { remove.reset(); dialog.current?.showModal(); }}>{t("settings.delete.title")}</button>
+      </Row>
+      <dialog ref={dialog} aria-labelledby="delete-ac-title">
+        <form
+          aria-label={t("settings.delete.title")}
+          onSubmit={(e: FormEvent<HTMLFormElement>) => {
+            e.preventDefault();
+            remove.mutate((e.currentTarget.elements.namedItem("password") as HTMLInputElement).value);
+          }}
+        >
+          <h2 id="delete-ac-title" className="h2">{t("settings.delete.title")}</h2>
+          <p className="muted">{t("settings.delete.body")}</p>
+          <p className="muted">{t("settings.delete.audit")}</p>
+          {ownsOpen.length > 0 ? (
+            <Notice tone="review">{t("settings.delete.ownsOpen", { names: ownsOpen.map((w) => w.name).join(", ") })}</Notice>
+          ) : (
+            <div className="field">
+              <label htmlFor="delete-password">{t("settings.delete.password")}</label>
+              <input className="input" id="delete-password" name="password" type="password" required autoComplete="current-password" />
+            </div>
+          )}
+          <ErrorText error={remove.error} />
+          <div className="row">
+            {ownsOpen.length === 0 && <button className="btn danger" type="submit" disabled={remove.isPending}>{t("settings.delete.confirm")}</button>}
+            <button className="btn quiet" type="button" onClick={() => dialog.current?.close()}>{t("common.cancel")}</button>
+          </div>
+        </form>
+      </dialog>
     </div>
   );
 }
@@ -371,6 +456,7 @@ export function Settings() {
   const members = useQuery({ queryKey: ["members", workspaceId], queryFn: () => api.get<{ id: string; name: string; email: string; role: string; expires_at: string | null }[]>(`/workspaces/${workspaceId}/members`) });
   const add = useMutation({ mutationFn: (b: { email: string; role: string }) => api.post(`/workspaces/${workspaceId}/members`, b), onSuccess: () => qc.invalidateQueries({ queryKey: ["members"] }) });
   const mode = useMutation({ mutationFn: (m: "team" | "solo") => api.post(`/workspaces/${workspaceId}/review-mode`, { mode: m }), onSuccess: () => qc.invalidateQueries({ queryKey: ["me"] }) });
+  const aiReading = useMutation({ mutationFn: (on: boolean) => api.put(`/workspaces/${workspaceId}/ai-reading`, { on }), onSuccess: () => qc.invalidateQueries({ queryKey: ["me"] }) });
   const suggest = useMutation({ mutationFn: (on: boolean) => api.post(`/workspaces/${workspaceId}/label-suggestions`, { on }), onSuccess: () => qc.invalidateQueries({ queryKey: ["me"] }) });
   const setRole = useMutation({ mutationFn: (b: { email: string; role: string }) => api.post(`/workspaces/${workspaceId}/members`, b), onSuccess: () => qc.invalidateQueries({ queryKey: ["members"] }) });
   // The new workspace becomes the current one once the session knows it.
@@ -419,6 +505,7 @@ export function Settings() {
   const sections: { id: string; nav: string; show: boolean; node: ReactNode }[] = [
     { id: "workspace", nav: t("settings.nav.workspace"), show: true, node: (
       <Section id="workspace" title={t("settings.nav.workspace")} body={t("settings.ws.body")}>
+        {ws?.closed_at && <Notice tone="review">{t("settings.closed.since", { date: shortDay(ws.closed_at, lang) })}</Notice>}
         {owner && nameField("ws", "ws-name", t("settings.ws.name"), ws?.name, (name) => rename.mutate(name), rename.isPending)}
         <ErrorText error={rename.error} />
         <div>
@@ -453,6 +540,7 @@ export function Settings() {
           <div><button className="btn quiet" type="submit">{t("settings.ws.createBtn")}</button></div>
           <ErrorText error={create.error} />
         </form>
+        {owner && me.closure && !ws?.closed_at && <CloseWorkspace workspaceId={workspaceId} />}
       </Section>
     ) },
     { id: "appearance", nav: t("settings.nav.appearance"), show: true, node: (
@@ -561,12 +649,15 @@ export function Settings() {
     { id: "reading", nav: t("settings.nav.reading"), show: member, node: (
       <Section id="reading" title={t("settings.nav.reading")} body={t("settings.rd.body")}>
         <div>
+          <Row title={t("settings.aiOn")} body={t("settings.aiNotice")}>
+            <Switch label={t("settings.aiOn")} checked={ws?.ai_reading ?? false} disabled={!owner} onChange={(on) => aiReading.mutate(on)} />
+          </Row>
           <Row title={t("settings.suggestOn")} body={t("settings.suggestNotice")}>
             <Switch label={t("settings.suggestOn")} checked={ws?.label_suggestions ?? false} disabled={!owner} onChange={(on) => suggest.mutate(on)} />
           </Row>
         </div>
         {!owner && <p className="hint">{t("settings.rd.locked")}</p>}
-        <ErrorText error={suggest.error} />
+        <ErrorText error={aiReading.error ?? suggest.error} />
       </Section>
     ) },
     { id: "logo", nav: t("logo.title"), show: owner, node: <LogoPanel workspaceId={workspaceId} hasLogo={ws?.has_logo ?? false} /> },
@@ -581,7 +672,7 @@ export function Settings() {
           </Row>
         </div>
         {changingEmail && <ChangeEmail current={me.user.email} verified={me.user.email_verified} onCancel={() => setChangingEmail(false)} />}
-        {me.user.email_verified === false && <ConfirmEmail />}
+        {me.user.email_verified === false && <ConfirmEmail mail={me.mail !== false} />}
         <PasswordRow email={me.user.email} />
         {/* Each live session by the kind of device it signed in from, this one first (card R4). */}
         <div>
@@ -602,6 +693,7 @@ export function Settings() {
         </div>
         {ended !== null && <p className="small" role="status">{t("settings.ac.ended", { n: ended })}</p>}
         <ErrorText error={sessions.error ?? endOthers.error} />
+        {me.closure && <DeleteAccount workspaces={me.workspaces} />}
       </Section>
     ) },
   ];

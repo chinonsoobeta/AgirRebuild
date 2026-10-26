@@ -59,6 +59,7 @@ export const api = {
   get: <T>(p: string) => request<T>("GET", p),
   stream: streamLines,
   post: <T>(p: string, body?: unknown) => request<T>("POST", p, body ?? {}),
+  put: <T>(p: string, body: unknown) => request<T>("PUT", p, body),
   upload: <T>(p: string, file: File, method: "PUT" | "POST" = "PUT") => request<T>(method, p, undefined, file),
   del: <T>(p: string, body: unknown) => request<T>("DELETE", p, body),
 };
@@ -71,7 +72,8 @@ export type RunFacts = { approved: number; defaults: number; policyVersion: stri
 export type RunLine = { stage: RunStage; at: string; facts?: RunFacts } | { done: { id: string } } | { stopped: true };
 /** What the screen holds while a run streams: the time each stage finished, and the facts from the inputs stage. */
 export type RunProgress = { stages: Partial<Record<RunStage, string>>; facts?: RunFacts | undefined };
-export type Me = { user: { id: string; email: string; name: string; email_verified: boolean }; workspaces: { id: string; name: string; review_mode: "team" | "solo"; label_suggestions: boolean; has_logo: boolean; role: "owner" | "admin" | "analyst" | "viewer" | "reviewer" | "client" }[] };
+export type Me = { user: { id: string; email: string; name: string; email_verified: boolean }; /** False when the server cannot send email (card B). */ mail?: boolean; workspaces: { id: string; name: string; review_mode: "team" | "solo"; label_suggestions: boolean; ai_reading: boolean; has_logo: boolean; /** Card F: when the owner closed it; a closed workspace is read-only. */ closed_at?: string | null; role: "owner" | "admin" | "analyst" | "viewer" | "reviewer" | "client" }[];
+  /** Card F: closing a workspace and deleting an account are offered (AGIR_ACCOUNT_CLOSURE=1). */ closure?: boolean };
 export type Tone = "pass" | "review" | "stop" | "neutral";
 export type DealOverview = {
   deal: {
@@ -166,6 +168,8 @@ export type SharedReport = {
   /** What the shared run stored, never recomputed (card Y2). A link whose run cannot be read has none of these. */
   workspace?: string; location?: string; province?: string | null; currency?: string | null; runAt?: string;
   units?: number; exit?: "sale" | "refinance_hold" | "for_sale"; policyDraft?: boolean;
+  /** False when credit has not signed the run's policy (card E); the page then says so. */
+  policySigned?: boolean;
   verdict?: RunView["result"]["verdict"]; errorChecks?: number;
   /** Stored base-case metrics in a fixed order; only the ones the run has. */
   figures?: Pick<Metric, "key" | "unit" | "value" | "status" | "reason">[];

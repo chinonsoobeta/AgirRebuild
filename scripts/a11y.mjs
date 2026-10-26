@@ -44,7 +44,7 @@ const ready = new Promise((ok, fail) => {
   const timer = setTimeout(() => fail(new Error("The API did not start within 5 minutes.")), 300_000);
   server.stdout.on("data", (b) => {
     serverLog += b;
-    if (serverLog.includes("Agir API listening")) {
+    if (serverLog.includes("\"event\":\"api.listening\"")) {
       clearTimeout(timer);
       ok();
     }

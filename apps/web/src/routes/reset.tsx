@@ -17,6 +17,7 @@ export function Reset() {
   const qc = useQueryClient();
   const [token, setToken] = useState(takeToken);
   const [sentTo, setSentTo] = useState<string | null>(null);
+  const [unsent, setUnsent] = useState(false);
   const [error, setError] = useState<unknown>(null);
   const [mismatch, setMismatch] = useState(false);
   const [others, setOthers] = useState(true);
@@ -38,7 +39,9 @@ export function Reset() {
     const email = value(e, "email").trim();
     setSentTo(null);
     return run(async () => {
-      await api.post("/auth/reset/send", { email });
+      const r = await api.post<{ sent?: false }>("/auth/reset/send", { email });
+      // sent: false means this server has no mail provider (card B), never whether the account exists.
+      setUnsent(r.sent === false);
       setSentTo(email);
     });
   };
@@ -83,7 +86,8 @@ export function Reset() {
             <p className="muted auth-sub">{t("auth.reset.lead")}</p>
           </div>
           <div className="field"><label htmlFor="email">{t("auth.email")}</label><input className="input" id="email" name="email" type="email" autoComplete="username" required /></div>
-          {sentTo !== null && <Notice tone="pass" role="status">{t("auth.reset.sent", { email: sentTo })}</Notice>}
+          {sentTo !== null && (unsent ? <Notice tone="review" role="status">{t("auth.noMail")}</Notice>
+            : <Notice tone="pass" role="status">{t("auth.reset.sent", { email: sentTo })}</Notice>)}
           <FormError error={error} />
           <button className="btn primary auth-wide" type="submit" disabled={busy}>{t("auth.reset.send")}</button>
           <p className="small muted auth-alt">{sentTo === null && <>{t("auth.reset.works")} </>}<Link to="/login">{t("auth.reset.back")}</Link></p>

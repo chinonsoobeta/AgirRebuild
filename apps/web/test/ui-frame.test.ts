@@ -40,7 +40,7 @@ beforeEach(() => {
 afterEach(() => { vi.unstubAllGlobals(); });
 
 type Role = Me["workspaces"][number]["role"];
-const workspace = (id: string, name: string, role: Role = "owner"): Me["workspaces"][number] => ({ id, name, review_mode: "team", label_suggestions: false, has_logo: false, role });
+const workspace = (id: string, name: string, role: Role = "owner"): Me["workspaces"][number] => ({ id, name, review_mode: "team", label_suggestions: false, ai_reading: true, has_logo: false, role });
 const me = (workspaces: Me["workspaces"]): Me => ({ user: { id: "u1", email: "ada@example.com", name: "Ada Lovelace", email_verified: true }, workspaces });
 const render = (node: ReactNode, who: Me = me([workspace("w1", "First workspace")])) => {
   state.me = who;
@@ -243,5 +243,21 @@ describe("one theme for the whole page", () => {
     renderToStaticMarkup(createElement(Probe));
     expect(got).toMatchObject({ pref: "dark", theme: "dark" });
     themeStore.setPref("light");
+  });
+});
+
+describe("a closed workspace (card F)", () => {
+  it("shows a read-only notice above every screen of a closed workspace, in both languages", () => {
+    const closed = me([{ ...workspace("w1", "First workspace"), closed_at: "2026-10-20T12:00:00Z" }]);
+    const out = render(createElement(Shell, null, "content"), closed);
+    expect(out).toMatch(/<main[^>]*><div class="closed-banner"><div class="notice review" role="status">.*This workspace is closed\..*It is read-only.*<\/div><\/div>content<\/main>/);
+    store.set("agir.lang", "fr");
+    expect(render(createElement(Shell, null, "x"), closed)).toContain("Cet espace de travail est fermé.");
+  });
+
+  it("shows nothing for an open workspace, or when another workspace is the closed one", () => {
+    expect(render(createElement(Shell, null, "content"))).not.toContain("closed-banner");
+    const other = me([workspace("w1", "First workspace"), { ...workspace("w2", "Second workspace"), closed_at: "2026-10-20T12:00:00Z" }]);
+    expect(render(createElement(Shell, null, "content"), other)).not.toContain("closed-banner");
   });
 });

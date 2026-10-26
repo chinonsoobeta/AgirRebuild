@@ -1123,3 +1123,8 @@ it.each([
 ])("Card 170 translates %s", (en, fr) => {
   expect(translateMessage(en)).toBe(fr);
 });
+
+it("Card 174 translates the financing refusal", () => {
+  expect(translateMessage("The AI read a financing figure as other costs; interest and lender fees are computed by Agir or belong to the stated interest reserve"))
+    .toBe("L’IA a lu un montant de financement comme autres coûts\u00a0; les intérêts et les frais du prêteur sont calculés par Agir ou relèvent de la réserve d’intérêts déclarée");
+});

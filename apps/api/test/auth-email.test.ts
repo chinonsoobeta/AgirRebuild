@@ -214,7 +214,7 @@ describe("the development mailer", () => {
   test("writes each message to a file in its folder", async () => {
     const dir = mkdtempSync(join(tmpdir(), "agir-mail-"));
     const lines: string[] = [];
-    const m = fileMailer(dir, (line) => lines.push(line));
+    const m = fileMailer(dir, (event, fields) => lines.push(JSON.stringify({ event, ...fields })));
     await m.send({ to: "q@example.com", subject: "Hello", text: "Body" });
     const files = readdirSync(dir);
     expect(files).toHaveLength(1);

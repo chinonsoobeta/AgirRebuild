@@ -52,7 +52,7 @@ function SharedRun({ s, i }: { s: SharedReport; i: I18n }) {
           </Figures>
         </div>
       )}
-      <div className="card-foot small muted">{[s.policyDraft ? t("auth.share.draft") : "", t("auth.share.printed", { n: s.runNumber })].filter(Boolean).join(" ")}</div>
+      <div className="card-foot small muted">{[s.policyDraft ? t("auth.share.draft") : s.policySigned === false ? t("auth.share.unsigned") : "", t("auth.share.printed", { n: s.runNumber })].filter(Boolean).join(" ")}</div>
     </section>
   );
 }

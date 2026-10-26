@@ -33,7 +33,7 @@ const { DealFrame, SessionGate } = await import("../src/components/ui.tsx");
 const text = (html: string) =>
   html.replace(/<[^>]+>/g, " ").replace(/&#x27;/g, "'").replace(/&quot;/g, '"').replace(/&amp;/g, "&").replace(/&nbsp;/g, "\u00a0").replace(/[ \t\n]+/g, " ").trim();
 
-const me: Me = { user: { id: "u1", email: "ada@example.com", name: "Ada Lovelace", email_verified: true }, workspaces: [{ id: "w1", name: "First", review_mode: "solo", label_suggestions: false, has_logo: false, role: "owner" }] };
+const me: Me = { user: { id: "u1", email: "ada@example.com", name: "Ada Lovelace", email_verified: true }, workspaces: [{ id: "w1", name: "First", review_mode: "solo", label_suggestions: false, ai_reading: true, has_logo: false, role: "owner" }] };
 const render = (node: ReturnType<typeof createElement>) => renderToStaticMarkup(createElement(SessionGate, null, node));
 
 beforeEach(() => {

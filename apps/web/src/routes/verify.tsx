@@ -16,24 +16,26 @@ export function takeToken(): string | null {
   return token;
 }
 
-/** "Send it again": a fresh link and code; earlier ones stop working. Shows that it was sent, or the API's sentence. */
+/** "Send it again": a fresh link and code; earlier ones stop working. Shows that it was sent, that this server cannot send
+ * email (card B: the answer says sent: false), or the API's sentence. */
 function useResend() {
   const { t } = useI18n();
-  const [sent, setSent] = useState(false);
+  const [sent, setSent] = useState<boolean | null>(null);
   const [error, setError] = useState<unknown>(null);
   const send = async () => {
-    setSent(false);
+    setSent(null);
     setError(null);
     try {
-      await api.post("/auth/verify/send", {});
-      setSent(true);
+      const r = await api.post<{ sent?: false }>("/auth/verify/send", {});
+      setSent(r.sent !== false);
     } catch (e) {
       setError(e);
     }
   };
   const status = (
     <>
-      {sent && <Notice tone="pass" role="status">{t("auth.verify.againSent")}</Notice>}
+      {sent === true && <Notice tone="pass" role="status">{t("auth.verify.againSent")}</Notice>}
+      {sent === false && <Notice tone="review" role="status">{t("auth.noMail")}</Notice>}
       <FormError error={error} />
     </>
   );
@@ -48,7 +50,7 @@ function useResend() {
 export function ChangeEmail({ current, verified, onCancel, onChanged }: { current: string; verified: boolean; onCancel: () => void; onChanged?: () => void }) {
   const { t } = useI18n();
   const qc = useQueryClient();
-  const [done, setDone] = useState<{ pending: boolean; email: string; old: string } | null>(null);
+  const [done, setDone] = useState<{ pending: boolean; email: string; old: string; sent: boolean } | null>(null);
   const [error, setError] = useState<unknown>(null);
   const [busy, setBusy] = useState(false);
   const submit = async (e: FormEvent<HTMLFormElement>) => {
@@ -59,8 +61,8 @@ export function ChangeEmail({ current, verified, onCancel, onChanged }: { curren
     setError(null);
     setBusy(true);
     try {
-      const r = await api.post<{ pending?: true; changed?: true }>("/me/email", { email, password });
-      setDone({ pending: Boolean(r.pending), email, old: current });
+      const r = await api.post<{ pending?: true; changed?: true; sent?: false }>("/me/email", { email, password });
+      setDone({ pending: Boolean(r.pending), email, old: current, sent: r.sent !== false });
       if (r.changed) {
         await qc.invalidateQueries({ queryKey: ["me"] });
         onChanged?.();
@@ -71,6 +73,8 @@ export function ChangeEmail({ current, verified, onCancel, onChanged }: { curren
       setBusy(false);
     }
   };
+  // With no mail provider (card B), nothing claims a send: a pending change cannot complete, and a done one is only said.
+  if (done && !done.sent) return <p className="small" role="status">{!done.pending && <>{t("auth.email.confirmed", { email: done.email })} </>}{t("auth.noMail")}</p>;
   if (done) return <p className="small" role="status">{done.pending ? t("auth.email.pending", { email: done.email, old: done.old }) : t("auth.email.changed", { email: done.email })}</p>;
   return (
     <form id="change-email" className="stack tight" onSubmit={submit} noValidate>
@@ -153,7 +157,7 @@ export function Verify() {
         <>
           <h1 className="h1">{t("auth.verify.failed")}</h1>
           <FormError error={result.error} />
-          {loading ? null : signedIn ? (
+          {loading ? null : me.data?.mail === false ? <Notice tone="review">{t("auth.noMail")}</Notice> : signedIn ? (
             <div className="stack tight">
               <div><button className="btn primary" type="button" onClick={resend.send}>{t("auth.verify.newLink")}</button></div>
               {resend.status}
@@ -165,6 +169,15 @@ export function Verify() {
     body = <p className="muted">{t("common.loading")}</p>;
   } else if (me.data?.user.email_verified) {
     body = confirmed;
+  } else if (me.data?.mail === false) {
+    // Card B: this server cannot send email, so there is no link or code to wait for.
+    body = (
+      <>
+        <h1 className="h1">{t("auth.verify.title")}</h1>
+        <Notice tone="review">{t("auth.noMail")}</Notice>
+        <p className="small"><Link to="/deals">{t("auth.verify.skip")}</Link></p>
+      </>
+    );
   } else if (me.data) {
     body = (
       <>

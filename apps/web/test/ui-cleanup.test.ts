@@ -46,7 +46,7 @@ beforeEach(() => {
 afterEach(() => { vi.unstubAllGlobals(); });
 
 const who: Me = { user: { id: "u1", email: "ada@example.com", name: "Ada Lovelace", email_verified: true },
-  workspaces: [{ id: "w1", name: "First workspace", review_mode: "team", label_suggestions: false, has_logo: false, role: "owner" }] };
+  workspaces: [{ id: "w1", name: "First workspace", review_mode: "team", label_suggestions: false, ai_reading: true, has_logo: false, role: "owner" }] };
 const render = (node: ReactNode) => {
   state.me = who;
   return renderToStaticMarkup(createElement(I18nProvider, null, createElement(SessionGate, null, node)));
