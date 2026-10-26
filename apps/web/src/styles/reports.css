@@ -1,0 +1,14 @@
+/* Styles for the reports area: design tokens only (var(--…)), no literal colours. */
+.rep-lead{margin-top:8px}
+.rep-acts{margin-top:4px;gap:8px}
+.rep-err{gap:4px}
+.rep-share-lead{margin-top:4px}
+.rep-secret{flex:1 1 320px;width:auto;font-family:var(--mono);font-size:13px}
+/* Each report's name, with its state on the line below, the same in every card however narrow. */
+.rep-head{display:flex;flex-direction:column;align-items:flex-start;gap:8px}
+.rep-page-head{margin-bottom:0}
+/* The other language sits under the main actions, quieter. */
+.rep-other{margin-top:0}
+/* The files a link shares, one checkbox each (card R2). */
+.rep-pick{display:flex;flex-direction:column;gap:8px}
+.rep-pick legend{margin-bottom:4px}

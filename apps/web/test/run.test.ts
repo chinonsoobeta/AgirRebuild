@@ -26,6 +26,8 @@ vi.mock("@tanstack/react-query", () => ({
       : key === "share-links" ? { data: queryState.links } : key === "share" ? { data: queryState.shared, error: queryState.shareError }
       : key === "audit" ? { data: queryState.events } : {};
   },
+  // Card Z2: the audit trail loads its events as pages; one page of fewer than 500 has reached the start.
+  useInfiniteQuery: () => ({ data: { pages: [queryState.events] }, hasNextPage: false, isFetchingNextPage: false, fetchNextPage: async () => {} }),
   useMutation: (options: { mutationFn: (body: any) => Promise<any>; onSuccess?: (data: any) => unknown }) => ({
     mutate: async (body: unknown) => { const data = await options.mutationFn(body); await options.onSuccess?.(data); },
     isPending: false, reset: () => {},
@@ -37,7 +39,7 @@ vi.mock("../src/components/ui", async (original) => {
   const { createElement } = await import("react");
   return {
     ...ui,
-    DealHeader: () => createElement("header", null, "Deal header"),
+    DealFrame: () => createElement("header", null, "Deal header"),
     useDeal: () => ({ data: { run: { id: "sale-run", number: 1 }, documents: { total: 0, processing: 0, failed: 0 },
       review: { status: "ready", approved: 1, needsReview: 0, conflicting: 0, awaitingSecond: 0, missing: 0, impossible: 0 } } }),
     useSession: () => ({ solo: true, role: queryState.role }),
@@ -284,9 +286,9 @@ describe("the run screen shows the partners (task 85d)", () => {
 
 describe("share links on the web (task 86b)", () => {
   const artifact = (id: string, status: string) => ({ id, kind: "ic_memo", format: "pdf", status, error: null, sha256: null,
-    created_at: "2026-10-19T12:00:00Z", run_id: "run", run_number: 1, provenance_entries: null });
-  const link = (id: string, expires_at: string | null, revoked_at: string | null = null) => ({ id, artifact_id: "ready", kind: "ic_memo", format: "pdf",
-    run_number: 1, term: expires_at ? "7d" : "none", expires_at, created_at: "2026-10-19T12:00:00Z", created_by: "Alice Analyst",
+    created_at: "2026-10-19T12:00:00Z", run_id: "sale-run", run_number: 1, provenance_entries: null });
+  const link = (id: string, expires_at: string | null, revoked_at: string | null = null) => ({ id, artifact_id: "ready", run_id: "sale-run", kind: "ic_memo", format: "pdf",
+    files: [{ kind: "ic_memo", format: "pdf", lang: "en" }], run_number: 1, term: expires_at ? "7d" : "none", expires_at, created_at: "2026-10-19T12:00:00Z", created_by: "Alice Analyst",
     revoked_at, revoked_by: revoked_at ? "Bob Approver" : null, openings: 3, last_opened_at: "2026-10-19T13:00:00Z" });
   const render = (element: Parameters<typeof renderToStaticMarkup>[0] = createElement(Reports, { dealId: "links" })) => {
     queryState.index = 0; queryState.nodes = [];
@@ -308,35 +310,36 @@ describe("share links on the web (task 86b)", () => {
     vi.stubGlobal("navigator", { clipboard: { writeText: vi.fn(async () => {}) } });
   });
   afterEach(() => { queryState.interactive = false; queryState.artifacts = []; queryState.links = []; queryState.lang = "en"; vi.unstubAllGlobals(); });
+  // Card R2: files are chosen with a checkbox each, not a Share button per row.
   it.each(["owner", "analyst", "viewer"])("%s can share only the ready report", (role) => {
     queryState.role = role; render();
-    const buttons = queryState.nodes.filter((n) => n.tag === "button" && n.props.children === "Share");
-    expect(buttons.length).toBe(1);
-    expect(Boolean(buttons[0]!.props.disabled)).toBe(false);
+    const boxes = queryState.nodes.filter((n) => n.tag === "input" && n.props.type === "checkbox");
+    expect(boxes.map((b) => b.props.value)).toEqual(["ready"]);
+    expect(Boolean(button("Make link").props.disabled)).toBe(false);
   });
   it("card 93c: requests the interface language, keeps Excel English, and labels French drafts", async () => {
     queryState.lang = "fr";
     queryState.run = { result: rental };
     queryState.artifacts = [{ ...artifact("french", "ready"), lang: "fr" }];
     expect(render()).toContain("Français, traduction provisoire");
-    const make = queryState.nodes.filter((n) => n.tag === "button" && n.props.className === "btn" && n.props.type === "button");
+    const make = queryState.nodes.filter((n) => n.tag === "button" && n.props.name === "generate");
     for (const b of make) await b.props.onClick();
     const bodies = vi.mocked(api.post).mock.calls.filter(([path]) => path.endsWith("/artifacts")).map(([, body]) => body as { kind: string; lang: string });
     expect(bodies.length).toBeGreaterThan(1);
     for (const body of bodies) expect(body.lang).toBe(body.kind === "model_export" ? "en" : "fr");
   });
   it("offers four terms, makes a link and shows its once-only copy field after success", async () => {
-    render(); await button("Share").props.onClick();
     const choices = render();
     for (const term of ["24 hours", "7 days", "30 days", "No expiry"]) expect(choices).toContain(term);
-    queryState.nodes.find((n) => n.tag === "select")!.props.onChange({ target: { value: "24h" } });
+    button("24 hours").props.onClick();
     render(); await button("Make link").props.onClick();
     const made = render();
     expect(made).toContain("Copy this link now. It is not shown again.");
     const input = queryState.nodes.find((n) => n.tag === "input" && n.props.readOnly)!;
     expect(Boolean(input)).toBe(true);
     expect(input.props.value === `https://agir.test/s/${queryState.secret}`).toBe(true);
-    expect(vi.mocked(api.post).mock.calls.some(([path, body]) => path === "/artifacts/ready/share-links" && (body as { term: string }).term === "24h")).toBe(true);
+    expect(vi.mocked(api.post).mock.calls.some(([path, body]) => path === "/runs/sale-run/share-links" && (body as { term: string }).term === "24h"
+      && JSON.stringify((body as { artifacts: string[] }).artifacts) === '["ready"]')).toBe(true);
     await button("Copy").props.onClick();
     const copy = vi.mocked(navigator.clipboard.writeText);
     expect(copy.mock.calls.length).toBe(1);
@@ -357,11 +360,12 @@ describe("share links on the web (task 86b)", () => {
     queryState.shared = { ...queryState.shared as object, standardFailures: { en: ["Fails CMHC's 1.10x coverage rule"], fr: ["Ne respecte pas la règle de la SCHL de 1,10x"] } };
     expect(await sharePage()).toContain("Fails CMHC&#x27;s 1.10x coverage rule");
   });
-  it("hides the Shared links table when there are no links", () => { expect(render()).not.toContain("Shared links"); });
+  // Card X5: the Shared links section is always shown to staff; its table of links appears only once a link exists.
+  it("hides the Shared links table when there are no links", () => { const html = render(); expect(html).toContain("Shared links"); expect(html).not.toContain("Made by"); });
   it.each(["pdf", "docx"])("the public %s page has its metadata, downloads and appropriate Open button, without requesting me", async (format) => {
     queryState.shared = { ...queryState.shared as object, format };
     const html = await sharePage();
-    for (const text of ["Shared reference", "IC memo", "Run 7", "This link expires on", "Download", "Download the audit package", "Shared from Agir. Read-only."]) expect(html).toContain(text);
+    for (const text of ["Shared reference", "Committee memo", "Run 7", "This link expires on", "Download", "Download the audit package", "Shared from Agir. Read-only."]) expect(html).toContain(text);
     expect(html).not.toMatch(/m\.\./); // the date's "a.m." / "p.m." ends the sentence once
     expect(queryState.nodes.some((n) => n.tag === "a" && n.props.children === "Open")).toBe(format === "pdf");
     const fileLinks = queryState.nodes.filter((n) => n.tag === "a" && String(n.props.href).includes("/file"));
@@ -379,7 +383,8 @@ describe("share links on the web (task 86b)", () => {
   it("a public 404 shows only the API sentence", async () => {
     queryState.shared = undefined;
     queryState.shareError = new ApiError(404, "This link is not available. It may have expired or been revoked.");
-    const text = (await sharePage()).replace(/<[^>]*>/g, "").trim();
+    // The top bar keeps the language switch; the page's main region holds only the API sentence.
+    const text = (await sharePage()).match(/<main[^>]*>([\s\S]*)<\/main>/)![1]!.replace(/<[^>]*>/g, "").trim();
     expect(text).toBe("This link is not available. It may have expired or been revoked.");
   });
   it.each(["en", "fr"] as const)("an anonymous opening uses the link-holder actor label in %s", (lang) => {

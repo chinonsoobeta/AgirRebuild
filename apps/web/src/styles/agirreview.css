@@ -1,0 +1,7 @@
+/* Styles for the agirreview area: design tokens only (var(--…)), no literal colours. */
+.ra-lead{margin-top:8px;max-width:64ch}
+.ra-card .h3+p{margin-top:6px}
+/* The reviewers in the side column, one under another, each with its end date and buttons below the name. */
+.ra-reviewers{list-style:none;margin:0;padding:0}
+.ra-reviewers>li{display:flex;flex-direction:column;gap:8px;padding:14px 0;border-top:1px solid var(--line)}
+.ra-reviewers .sub{display:block;font-size:13px;color:var(--ink-3);overflow-wrap:anywhere}

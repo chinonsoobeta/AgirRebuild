@@ -1,9 +1,11 @@
 import { Link, useNavigate, useRouterState } from "@tanstack/react-router";
 import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
 import { createContext, useContext, useEffect, useRef, useState, type FormEvent, type ReactNode } from "react";
+import { CURRENCY_NAMES, type Currency } from "@agir/contracts";
 import { api, ApiError, type DealOverview, type Me, type Tone } from "../api";
-import { dealStatus, useI18n } from "../i18n";
+import { dealStatus, useI18n, type I18n } from "../i18n";
 import * as I from "./icons";
+import { Notice, Tag, ThemeToggle, type TagTone } from "./kit";
 
 // ---- Session and workspace -----------------------------------------------------------
 
@@ -51,14 +53,20 @@ export const canDecide = (role: string) => role === "owner" || role === "admin";
 
 // ---- Shell ----------------------------------------------------------------------------
 
-export function LanguageSwitch() {
+export function LanguageSwitch({ className }: { className: string }) {
   const { lang, setLang, t } = useI18n();
   return (
-    <button type="button" className="btn quiet small" style={{ alignSelf: "flex-start", paddingLeft: 0 }} lang={lang === "en" ? "fr" : "en"} onClick={() => setLang(lang === "en" ? "fr" : "en")}>
+    <button type="button" className={className} lang={lang === "en" ? "fr" : "en"} onClick={() => setLang(lang === "en" ? "fr" : "en")}>
       {t("nav.language")}
     </button>
   );
 }
+
+const initials = (name: string, email: string) => {
+  const words = name.trim().split(/\s+/).filter(Boolean);
+  const letters = words.length > 1 ? words[0]![0]! + words[words.length - 1]![0]! : (words[0] ?? email).slice(0, 2);
+  return letters.toUpperCase();
+};
 
 export function Shell({ children }: { children: ReactNode }) {
   const { me, workspaceId, setWorkspace, role } = useSession();
@@ -71,51 +79,59 @@ export function Shell({ children }: { children: ReactNode }) {
     qc.clear();
     void navigate({ to: "/login" });
   };
+  const onDeals = path.startsWith("/deals") || path === "/";
+  const onSettings = path.startsWith("/settings");
   return (
-    <div className="shell">
-      <nav className="rail" aria-label="Main">
-        <Link to="/deals" className="brand" aria-label="Agir">
-          <i />
-          <b>agir</b>
+    <>
+      <a className="skip" href="#main-content" onClick={(e) => { e.preventDefault(); document.getElementById("main-content")?.focus(); }}>{t("shell.skip")}</a>
+      <header className="topbar">
+        <Link to="/deals" className="brand">
+          <span className="brand-mark">
+            <svg width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="3" strokeLinecap="round" strokeLinejoin="round" aria-hidden="true"><path d="M4 18L12 5l8 13" /><path d="M8 18h8" /></svg>
+          </span>
+          {t("shell.brand")}
         </Link>
-        <div className="nav">
-          <Link to="/deals" aria-current={path.startsWith("/deals") || path === "/" ? "page" : undefined}>{t("nav.deals")}</Link>
-          <Link to="/settings" aria-current={path.startsWith("/settings") ? "page" : undefined}>{t("nav.settings")}</Link>
-        </div>
-        <div className="rail-foot">
-          <div className="wide-only stack" style={{ gap: 8 }}>
-            <label className="sr-only" htmlFor="ws-select">{t("common.workspace")}</label>
-            {me.workspaces.length > 1 ? (
-              <select id="ws-select" value={workspaceId} onChange={(e) => setWorkspace(e.target.value)}>
+        <nav className="nav" aria-label={t("shell.mainNav")}>
+          <Link to="/deals" className={onDeals ? "current" : undefined} aria-current={onDeals ? "page" : undefined}>{t("nav.deals")}</Link>
+          <Link to="/settings" className={onSettings ? "current" : undefined} aria-current={onSettings ? "page" : undefined}>{t("nav.settings")}</Link>
+        </nav>
+        <div className="topbar-right">
+          {me.workspaces.length > 1 ? (
+            <>
+              <label className="sr-only" htmlFor="ws-select">{t("common.workspace")}</label>
+              <select id="ws-select" className="ws" value={workspaceId} onChange={(e) => setWorkspace(e.target.value)}>
                 {me.workspaces.map((w) => <option key={w.id} value={w.id}>{w.name}</option>)}
               </select>
-            ) : (
-              <span style={{ fontWeight: 600 }}>{me.workspaces[0]?.name}</span>
-            )}
-            <span className="faint">{me.user.name} · {L.role(role)}</span>
-          </div>
-          <LanguageSwitch />
-          <button type="button" className="btn quiet small" style={{ alignSelf: "flex-start", paddingLeft: 0 }} onClick={signOut}>{t("nav.signOut")}</button>
+            </>
+          ) : (
+            <span className="ws-name">{me.workspaces[0]?.name}</span>
+          )}
+          <LanguageSwitch className="toplink" />
+          <ThemeToggle />
+          <span className="avatar" aria-hidden="true">{initials(me.user.name, me.user.email)}</span>
+          <span className="who">{me.user.name} · {L.role(role)}</span>
+          <button type="button" className="toplink" onClick={signOut}>{t("nav.signOut")}</button>
         </div>
-      </nav>
-      <main className="page">{children}</main>
-    </div>
+      </header>
+      <main className="page" id="main-content" tabIndex={-1}>{children}</main>
+    </>
   );
 }
 
 // ---- Status -------------------------------------------------------------------------------
 
-const TONE_GLYPH: Record<Tone, (p: { size?: number }) => React.JSX.Element> = { pass: I.Check, review: I.Eye, stop: I.Stop, neutral: I.Spinner };
-
+/** A status as the design's tag: a dot and a word. A glyph, when one is given, stands in for the dot. */
 export function StatusTag({ tone, children, glyph }: { tone: Tone; children: ReactNode; glyph?: (p: { size?: number }) => React.JSX.Element }) {
-  const G = glyph ?? TONE_GLYPH[tone];
-  return <span className={`tag ${tone}`}><G size={14} />{children}</span>;
+  const cls = tone === "neutral" ? "tag" : `tag ${tone}`;
+  if (!glyph) return <span className={cls}>{children}</span>;
+  const G = glyph;
+  return <span className={`${cls} plain`}><G size={14} />{children}</span>;
 }
 
+const VERDICT_TONE: Record<string, TagTone> = { APPROVE: "pass", APPROVE_WITH_CONDITIONS: "review", REJECT: "stop" };
 export function VerdictBadge({ code }: { code: string }) {
   const { L } = useI18n();
-  const G = code === "APPROVE" ? I.Check : code === "APPROVE_WITH_CONDITIONS" ? I.Eye : code === "REJECT" ? I.Stop : I.Dashed;
-  return <span className={`badge ${code}`}><G size={14} />{L.verdict(code)}</span>;
+  return <Tag tone={VERDICT_TONE[code] ?? "neutral"}>{L.verdict(code)}</Tag>;
 }
 
 export function MetricValue({ value, unit, status, reason }: { value: number | null; unit: string; status: string; reason?: string | undefined }) {
@@ -131,16 +147,7 @@ export function MetricValue({ value, unit, status, reason }: { value: number | n
 }
 
 export function Banner({ tone, title, children }: { tone: "stop" | "review" | "neutral"; title: string; children?: ReactNode }) {
-  const G = tone === "stop" ? I.Stop : tone === "review" ? I.Eye : I.Dashed;
-  return (
-    <div className={`banner ${tone}`} role="status">
-      <G size={18} />
-      <div className="stack" style={{ gap: 4 }}>
-        <strong>{title}</strong>
-        {children}
-      </div>
-    </div>
-  );
+  return <Notice tone={tone === "neutral" ? undefined : tone} title={title} role="status">{children}</Notice>;
 }
 
 export function ErrorText({ error }: { error: unknown }) {
@@ -150,23 +157,25 @@ export function ErrorText({ error }: { error: unknown }) {
 }
 
 /** What the main figures mean, in a sentence each. Shown on the Run and Review pages. */
-const GLOSSARY = ["dcr", "noi", "capRate", "yieldOnCost", "loanToCost", "equityIrr", "equityMultiple", "breakEven"] as const;
+/** Plain words first leads with the plain name and ends the meaning with the finance name; finance terms first leads with the finance name. */
+const GLOSSARY = ["dcr", "noi", "capRate", "yieldOnCost", "developmentSpread", "loanToCost", "equityIrr", "equityMultiple", "unrealizedMultiple", "breakEven"] as const;
 export function Glossary() {
-  const { t } = useI18n();
+  const { t, terms } = useI18n();
   return (
     <details>
       <summary>{t("glossary.title")}</summary>
-      <dl className="stack" style={{ gap: 10, marginTop: 12 }}>
+      <dl className="stack gloss">
         {GLOSSARY.map((k) => {
-          const [term, meaning] = t(`glossary.${k}`);
-          return <div key={k}><dt style={{ fontWeight: 600 }}>{term}</dt><dd className="muted">{meaning}</dd></div>;
+          const [term, meaning] = terms === "plain" ? t(`terms.gloss.${k}`)
+            : k === "developmentSpread" || k === "unrealizedMultiple" ? t(`terms.financeGloss.${k}`) : t(`glossary.${k}`);
+          return <div key={k}><dt>{term}</dt><dd className="muted">{meaning}</dd></div>;
         })}
       </dl>
     </details>
   );
 }
 
-// ---- Deal header and stepper ----------------------------------------------------------------
+// ---- Deal frame and path ----------------------------------------------------------------
 
 const STEPS = ["documents", "review", "run", "decision", "reports"] as const;
 
@@ -177,25 +186,15 @@ export function reviewWaiting(o: Pick<DealOverview, "documents" | "review">): bo
   return o.documents.processing > 0 || (o.documents.total === 0 && !hasValues);
 }
 
-export function DealHeader({ o, active }: { o: DealOverview; active: string }) {
-  const i = useI18n();
+type StepKey = (typeof STEPS)[number];
+export type PathState = { key: StepKey; text: string; tone: "done" | "stop" | "faint" | "normal" };
+
+/** What each of the five steps says about a deal, and in which tone. */
+export function pathStates(o: DealOverview, i: I18n, solo: boolean): PathState[] {
   const { t, L } = i;
-  const { solo, role } = useSession();
-  const navigate = useNavigate();
-  const qc = useQueryClient();
-  const dialog = useRef<HTMLDialogElement>(null);
-  const copy = useMutation({
-    mutationFn: (name: string) => api.post<{ id: string }>(`/deals/${o.deal.id}/copy`, { name }),
-    onSuccess: async (r) => {
-      dialog.current?.close();
-      await qc.invalidateQueries({ queryKey: ["deals"] });
-      void navigate({ to: "/deals/$dealId/review", params: { dealId: r.id } });
-    },
-  });
-  const defaultName = `${o.deal.name}${t("copy.suffix")}`.slice(0, 160);
   const status = dealStatus(i, o, solo);
   const order: string[] = [...STEPS];
-  const state = (key: string): { text: string; tone: "done" | "stop" | "faint" | "normal" } => {
+  const state = (key: StepKey): Omit<PathState, "key"> => {
     const past = order.indexOf(key) < order.indexOf(o.step);
     switch (key) {
       case "documents":
@@ -216,36 +215,99 @@ export function DealHeader({ o, active }: { o: DealOverview; active: string }) {
         return { text: o.reports ? t("step.ready", { n: o.reports }) : t("step.noneYet"), tone: o.reports ? "done" : "faint" };
     }
   };
+  return STEPS.map((key) => ({ key, ...state(key) }));
+}
+
+/** The five steps across the top of a deal: done, where the deal is (now), and the page being viewed (here). */
+export function DealPath({ o, active }: { o: DealOverview; active: string }) {
+  const i = useI18n();
+  const { solo } = useSession();
+  return (
+    <ol className="path" aria-label={i.t("step.steps")}>
+      {pathStates(o, i, solo).map((st) => {
+        const cls = ["step", st.tone === "done" && "done", o.step === st.key && "now", active === st.key && "here"].filter(Boolean).join(" ");
+        return (
+          <li key={st.key}>
+            <Link to={`/deals/$dealId/${st.key}`} params={{ dealId: o.deal.id }} className={cls} aria-current={active === st.key ? "step" : undefined}>
+              <span className="marker">{st.tone === "done" && <I.Check size={9} />}</span>
+              <span className="step-name">{i.t(`step.${st.key}`)}</span>
+              <span className={st.tone === "stop" ? "step-state stop" : "step-state"}>
+                {st.tone === "stop" && <I.Stop size={12} />}
+                {st.text}
+              </span>
+            </Link>
+          </li>
+        );
+      })}
+    </ol>
+  );
+}
+
+/** The deal's units and how it ends, as the deal heading and the shared page say them: "6 rental units, kept and refinanced".
+ * Each part shows only when the API knows it (null means not approved yet), so it is never a 0 or a guess; "" when neither is known. */
+export function dealFacts(i: Pick<I18n, "t" | "f">, units: number | null | undefined, exit: DealOverview["exit"] | undefined): string {
+  const known = typeof units === "number";
+  return i.t("deals.facts", { n: known ? i.f.value(units, "count") : "", one: units === 1, known, exit: exit ?? null }) as string;
+}
+
+/** The head of every deal page: back to the deals, the name and its facts, the actions, and the path. */
+export function DealFrame({ o, active }: { o: DealOverview; active: string }) {
+  const i = useI18n();
+  const { t, L } = i;
+  const currency = CURRENCY_NAMES[o.deal.currency as Currency];
+  const { role } = useSession();
+  const navigate = useNavigate();
+  const qc = useQueryClient();
+  const dialog = useRef<HTMLDialogElement>(null);
+  // Compare needs two runs: two of this deal, or one here and one of a variant or of the original (the workspace's deals list, as Settings reads it).
+  const deals = useQuery({ queryKey: ["deals", o.deal.workspace_id], queryFn: () => api.get<DealOverview[]>(`/workspaces/${o.deal.workspace_id}/deals`), enabled: o.run?.number === 1 });
+  const related = (d: DealOverview) => d.deal.id !== o.deal.id && (d.copiedFrom?.id === o.deal.id || d.deal.id === o.copiedFrom?.id);
+  const canCompare = Boolean(o.run && (o.run.number >= 2 || deals.data?.some((d) => d.run && related(d))));
+  const copy = useMutation({
+    mutationFn: (name: string) => api.post<{ id: string }>(`/deals/${o.deal.id}/copy`, { name }),
+    onSuccess: async (r) => {
+      dialog.current?.close();
+      await qc.invalidateQueries({ queryKey: ["deals"] });
+      void navigate({ to: "/deals/$dealId/review", params: { dealId: r.id } });
+    },
+  });
+  const defaultName = `${o.deal.name}${t("copy.suffix")}`.slice(0, 160);
   return (
     <>
-      <div className="stack" style={{ gap: 10 }}>
-        <Link to="/deals" className="small muted">{t("nav.deals")}</Link>
-        <div className="spread" style={{ alignItems: "flex-end" }}>
-          <div className="stack" style={{ gap: 6 }}>
-            <h1 className="h-title">{o.deal.name}</h1>
-            <span className="muted">{[L.asset(o.deal.asset_type), L.place(o.deal.location, o.deal.province), L.currency(o.deal.currency)].filter(Boolean).join(" · ")}</span>
-            {o.copiedFrom && (
-              <span className="small muted">{t("copy.variantOf")} <Link to="/deals/$dealId/review" params={{ dealId: o.copiedFrom.id }}>{o.copiedFrom.name}</Link></span>
-            )}
-          </div>
-          <div className="row">
-            {canEdit(role) && (
-              <button
-                className="btn small"
-                type="button"
-                onClick={() => {
-                  // Each opening starts from this deal's name in the current language, with no earlier error.
-                  const field = dialog.current?.querySelector<HTMLInputElement>("#cd-name");
-                  if (field) field.value = defaultName;
-                  copy.reset();
-                  dialog.current?.showModal();
-                }}
-              >
-                {t("copy.button")}
-              </button>
-            )}
-            <Link to="/deals/$dealId/audit" params={{ dealId: o.deal.id }} className="btn small">{t("step.audit")}</Link>
-          </div>
+      <div className="deal-head">
+        <div>
+          <Link to="/deals" className="back">
+            <I.Back />
+            {t("shell.allDeals")}
+          </Link>
+          <h1 className="deal-name">{o.deal.name}</h1>
+          {/* As the boards: "Edmonton, Alberta · 6 rental units, kept and refinanced · amounts in Canadian dollars". The asset type
+              stays until the units and the exit say what the deal is, as on the deals home. */}
+          <p className="meta">{[L.place(o.deal.location, o.deal.province), o.units != null && o.exit != null ? "" : L.asset(o.deal.asset_type), dealFacts(i, o.units, o.exit),
+            currency ? t("deals.amountsIn", { c: currency[i.lang === "fr" ? 1 : 0] }) : L.currency(null)].filter(Boolean).join(" · ")}</p>
+          {o.copiedFrom && (
+            <p className="small muted variant-of">{t("copy.variantOf")} <Link to="/deals/$dealId/review" params={{ dealId: o.copiedFrom.id }}>{o.copiedFrom.name}</Link></p>
+          )}
+        </div>
+        <div className="actions">
+          {o.run && <Link to="/deals/$dealId/explore" params={{ dealId: o.deal.id }} className="btn quiet sm">{t("explore.action")}</Link>}
+          {canCompare && <Link to="/deals/$dealId/compare" params={{ dealId: o.deal.id }} className="btn quiet sm">{t("compare.action")}</Link>}
+          <Link to="/deals/$dealId/audit" params={{ dealId: o.deal.id }} className="btn quiet sm">{t("step.audit")}</Link>
+          {canEdit(role) && (
+            <button
+              className="btn quiet sm"
+              type="button"
+              onClick={() => {
+                // Each opening starts from this deal's name in the current language, with no earlier error.
+                const field = dialog.current?.querySelector<HTMLInputElement>("#cd-name");
+                if (field) field.value = defaultName;
+                copy.reset();
+                dialog.current?.showModal();
+              }}
+            >
+              {t("copy.button")}
+            </button>
+          )}
         </div>
       </div>
       <dialog ref={dialog} aria-labelledby="copy-deal-title">
@@ -255,30 +317,14 @@ export function DealHeader({ o, active }: { o: DealOverview; active: string }) {
             copy.mutate(String(new FormData(e.currentTarget).get("name")));
           }}
         >
-          <h2 id="copy-deal-title" className="h-section">{t("copy.title")}</h2>
+          <h2 id="copy-deal-title" className="h2">{t("copy.title")}</h2>
           <p className="muted">{t("copy.intro")}</p>
           <div className="field"><label htmlFor="cd-name">{t("copy.name")}</label><input className="input" id="cd-name" name="name" required maxLength={160} defaultValue={defaultName} /></div>
           <ErrorText error={copy.error} />
           <div className="row"><button className="btn primary" type="submit" disabled={copy.isPending}>{t("copy.create")}</button><button className="btn quiet" type="button" onClick={() => dialog.current?.close()}>{t("common.cancel")}</button></div>
         </form>
       </dialog>
-      <ol className="stepper" aria-label={t("step.steps")}>
-        {STEPS.map((key, n) => {
-          const st = state(key);
-          return (
-            <li key={key}>
-              <Link to={`/deals/$dealId/${key}`} params={{ dealId: o.deal.id }} aria-current={active === key ? "step" : undefined}>
-                <span className="step-name"><span className="num">0{n + 1}</span>{t(`step.${key}`)}</span>
-                <span className={`step-state ${st.tone === "stop" ? "stop" : st.tone === "faint" ? "faint" : ""}`}>
-                  {st.tone === "done" && <I.Check size={12} />}
-                  {st.tone === "stop" && <I.Stop size={12} />}
-                  {st.text}
-                </span>
-              </Link>
-            </li>
-          );
-        })}
-      </ol>
+      <DealPath o={o} active={active} />
     </>
   );
 }
@@ -301,5 +347,5 @@ export function useDeal(dealId: string, poll = false) {
 export function WindowConfirmation({ error, busy, onConfirm }: { error: unknown; busy: boolean; onConfirm: () => void }) {
   const { t } = useI18n();
   if (!(error instanceof ApiError && error.status === 422 && error.detail?.code === "outside_window")) return null;
-  return <button className="btn small" type="button" disabled={busy} onClick={onConfirm}>{t("review.useOutsideWindow")}</button>;
+  return <button className="btn quiet sm" type="button" disabled={busy} onClick={onConfirm}>{t("review.useOutsideWindow")}</button>;
 }

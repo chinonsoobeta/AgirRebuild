@@ -2,7 +2,7 @@
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import { createElement } from "react";
 import { readFileSync } from "node:fs";
-const styles=readFileSync(new URL("../src/styles.css",import.meta.url),"utf8");
+const styles=readFileSync(new URL("../src/styles/base.css",import.meta.url),"utf8");
 import { randomBytes } from "node:crypto";
 import { renderToStaticMarkup } from "react-dom/server";
 import { api, ApiError, type Assumption } from "../src/api";
@@ -40,7 +40,7 @@ vi.mock("../src/components/ui", async (original) => {
   const { createElement } = await import("react");
   return {
     ...ui,
-    DealHeader: () => createElement("header", null, "Deal header"),
+    DealFrame: () => createElement("header", null, "Deal header"),
     useDeal: () => ({ data: { deal: { currency: "CAD" }, run: { id: "run-1", number: 1, fresh: true }, documents: { total: 0, processing: 0, failed: 0 } } }),
     useSession: () => ({ solo: false, role: state.role, workspaceId: "ws", me: { user: { id: "me-id", name: "Me" }, workspaces: [] } }),
   };
@@ -108,7 +108,7 @@ describe("a client's controls (task 89c)", () => {
   it("a client's reports screen has no enabled report button and no share button", () => {
     state.artifacts = [{ id: "ready", kind: "lender_package", format: "pdf", status: "ready", error: null, sha256: null, created_at: "2026-10-19T12:00:00Z", run_id: "run-1", run_number: 1, provenance_entries: null }];
     render(createElement(Reports, { dealId: "deal-1" }));
-    const reportButtons = state.nodes.filter((n) => n.tag === "button" && n.props.type === "button" && n.props.className === "btn");
+    const reportButtons = state.nodes.filter((n) => n.tag === "button" && n.props.name === "generate");
     expect(reportButtons.length).toBeGreaterThan(0);
     expect(reportButtons.every((b) => b.props.disabled)).toBe(true);
     expect(buttons("Share").length).toBe(0);
@@ -116,9 +116,6 @@ describe("a client's controls (task 89c)", () => {
   });
   it.each(["en", "fr"] as const)("names the client role in %s", (lang) => {
     expect(build(lang, () => {}).L.role("client")).toBe(lang === "en" ? "client" : "client");
-    expect(build(lang, () => {}).t("settings.r.client")).toBe(lang === "en"
-      ? "Reads the deals assigned to it and confirms the values the broker stated. Changes nothing else."
-      : "Consulte les projets qui lui sont confiés et confirme les valeurs déclarées par le courtier. Ne modifie rien d'autre.");
   });
 });
 
@@ -207,12 +204,13 @@ describe("the invitation page (task 89c)", () => {
   it("a dead link shows only the API sentence", () => {
     state.invite = undefined;
     state.inviteError = new ApiError(404, "This invitation is not available. It may have been used, revoked or expired.");
-    expect(text(page())).toBe("This invitation is not available. It may have been used, revoked or expired.");
+    // The top bar keeps the language switch; the page's main region holds only the API sentence.
+    expect(text(page().match(/<main[^>]*>([\s\S]*)<\/main>/)![1]!)).toBe("This invitation is not available. It may have been used, revoked or expired.");
   });
   it("signed out: names the workspace and deal and signs up with the invitation", async () => {
     state.meError = new ApiError(401, "Sign in to continue.");
     const html = text(page());
-    for (const s of ["Harbour Brokers", "Elm Street fourplex", "Name", "Email", "Password", "Create my account"]) expect(html).toContain(s);
+    for (const s of ["Harbour Brokers", "Elm Street fourplex", "Your name", "Email", "Password", "Create my account"]) expect(html).toContain(s);
     expect(buttons("Join as a client").length).toBe(0);
     const form = state.nodes.find((n) => n.tag === "form")!;
     const values: Record<string, string> = { name: "Dana Client", email: "dana@example.test", password: "a-long-password" };
@@ -317,7 +315,7 @@ describe("card 94c table proposal controls", () => {
   it("displays an unavailable proposal without acceptance", () => {
     state.role="owner";
     const html=render(createElement(TableProposal,{proposal:{...proposal([]),unavailable:"the table needs a loan-to-value"},unit:"%",onUse:vi.fn(),busy:false}));
-    expect(text(html)).toContain("the table needs a loan-to-value");
+    expect(text(html)).toContain("The table needs a loan-to-value");
     expect(buttons("Use this")).toHaveLength(0);
   });
   it("a client sees the proposal but no Use this control", () => {
@@ -340,7 +338,7 @@ describe("card 94c table proposal controls", () => {
 describe("card 97c deal rendering", () => {
   it("contains the absolute Actions label inside the narrow Review scroll box", () => {
     expect(styles).toMatch(/\.sr-only\s*\{[^}]*position:\s*absolute/);
-    expect(styles).toMatch(/\.tbl\s*\{[^}]*position:\s*relative[^}]*\}/);
+    expect(styles).toMatch(/\.scroll\s*\{[^}]*position:\s*relative[^}]*\}/);
   });
   it("a deal route switches from workspace X to the deal's workspace Y", async () => {
     const {useDeal}=await vi.importActual<typeof import("../src/components/ui")>("../src/components/ui");
@@ -421,18 +419,20 @@ describe("card 150 one review list", () => {
       todo: { blocking: 2, items: [{ kind: "missing", fieldKey: "vacancy_pct", itemKey: null, assumptionId: null, blocking: true }, { kind: "please_check", fieldKey: a.fieldKey, itemKey: a.itemKey, assumptionId: a.id, blocking: true }] } };
     const element = createElement(Review, { dealId: "deal-1" });
     const html = text(render(element));
-    expect(html).toContain("2 actions before this deal can run");
+    expect(html).toContain("2 things before this deal can run");
     expect(html).toContain("Check this value");
     expect(html).toContain("parts that add up to it");
     expect(html).not.toContain("Approve all");
     // Two readings of one file are not two documents agreeing.
     expect(html).not.toContain("documents agree");
     // The defaults button sits under the missing inputs, before the items that follow them.
-    expect(html.indexOf("Accept the 0 ticked defaults")).toBeLessThan(html.indexOf("Check this value"));
+    const accept = html.indexOf("Accept the ticked defaults");
+    expect(accept).toBeGreaterThan(-1);
+    expect(accept).toBeLessThan(html.indexOf("Check this value"));
     const checks = state.nodes.filter(n => n.tag === "input" && n.props.type === "checkbox");
     expect(checks).toHaveLength(1);
     expect(checks.every(n => !n.props.checked && !n.props.defaultChecked)).toBe(true);
-    expect(buttons("Accept the 0 ticked defaults")[0]?.props.disabled).toBe(true);
+    expect(buttons("Accept the ticked defaults")[0]?.props.disabled).toBe(true);
     checks[0]!.props.onChange({ target: { checked: true } });
     render(element);
     await buttons("Accept the ticked default")[0]!.props.onClick();

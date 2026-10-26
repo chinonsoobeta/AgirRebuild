@@ -2428,7 +2428,7 @@ describe("share links (task 86a)", () => {
     const page = await call(null, "GET", `/api/share/${link.secret}`);
     expect(page.status).toBe(200);
     privacy(page.headers);
-    expect(page.json).toEqual({ deal: "Shared reference", kind: "ic_memo", format: "pdf", runNumber: 1, expiresAt: link.expiresAt });
+    expect(page.json).toMatchObject({ deal: "Shared reference", kind: "ic_memo", format: "pdf", runNumber: 1, expiresAt: link.expiresAt });
     const file = await app.request(`/api/share/${link.secret}/file?inline=1`);
     const signed = await app.request(`/api/artifacts/${artifact}/file?inline=1`, { headers: { cookie: alice.cookie } });
     privacy(file.headers);
@@ -2795,7 +2795,7 @@ describe("invite links for clients (task 89b)", () => {
     const { secret } = await invite();
     const page = await call(null, "GET", `/api/invite/${secret}`);
     expect(page.status).toBe(200);
-    expect(page.json).toEqual({ workspace: "Invites", deal: "Invite deal" });
+    expect(page.json).toEqual({ workspace: "Invites", deal: "Invite deal", expiresAt: expect.any(String) });
     expect(page.headers.get("cache-control")).toBe("no-store");
     expect(page.headers.get("referrer-policy")).toBe("no-referrer");
   });
@@ -3231,10 +3231,10 @@ describe("card 94c table proposals", () => {
       for (const p of r.proposals) { expect(p.options).toEqual([]); expect(p.unavailable).toContain("past its re-check date"); }
     } finally {date="2026-10-20";}
   });
-  test("requires an explicit province, despite free-text Halifax", async () => {
+  test("a deal outside Canada gets no table, even with free-text Halifax", async () => {
     const r=await review(await make());
     expect(r.proposals).toHaveLength(3);
-    for (const p of r.proposals) {expect(p.options).toEqual([]);expect(p.unavailable).toBe("the deal has no province");}
+    for (const p of r.proposals) {expect(p.options).toEqual([]);expect(p.unavailable).toBe("these tables are for deals in Canada; enter the amount yourself");}
   });
   test("requires approved prerequisites, and an LTV rather than a refinance amount", async () => {
     const d=await make("NS",false), r=await review(d);

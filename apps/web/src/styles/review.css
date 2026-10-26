@@ -1,0 +1,44 @@
+/* Styles for the review area: design tokens only (var(--…)), no literal colours. */
+.rv-lead{margin-top:4px}
+.rv-todo{list-style:none;margin:0;padding:0}
+.rv-todo-link{color:var(--ink)}
+.rv-fieldset{margin:0;padding:0;min-width:0}
+.rv-grow{flex:1;min-width:0;display:flex;flex-direction:column;gap:8px}
+.rv-quote{display:flex;flex-direction:column;gap:4px}
+.rv-quote strong{font-size:13px;color:var(--ink)}
+.rv-quote .src{margin-top:0;display:flex;align-items:center;gap:6px}
+.rv-question{color:var(--review);font-weight:700}
+.rv-note{gap:6px}
+.rv-big{font-size:20px}
+.rv-radio{gap:6px}
+.rv-flag{gap:16px;min-height:42px}
+.rv-entry{gap:16px;align-items:end}
+.rv-line{padding-top:12px;border-top:1px solid var(--line)}
+.rv-line>.between>span:first-child{flex:1 1 18rem;min-width:0}
+.rv-affix{display:flex;align-items:center;max-width:320px;min-height:42px;border:1px solid var(--line-2);border-radius:9px;background:var(--surface);color:var(--ink)}
+.rv-affix:focus-within{border-color:var(--accent);outline:2px solid var(--accent);outline-offset:0}
+.rv-affix input{flex-grow:1;min-width:0;min-height:40px;border:0;background:transparent;color:var(--ink);padding:0 12px;font:inherit;font-variant-numeric:tabular-nums lining-nums}
+.rv-affix input:focus{outline:0}
+.rv-affix span{padding:0 12px;color:var(--ink-3)}
+.rv-affix select{border:0;background:transparent;min-height:40px;padding:0 8px;color:var(--ink-3);font:inherit}
+.table tr.rv-on td{background:var(--accent-soft)}
+.rv-pick{border:0;background:none;padding:0;font:inherit;color:var(--ink);text-align:left;cursor:pointer}
+.rv-pick:hover{color:var(--accent)}
+.rv-pick:focus-visible{outline:2px solid var(--accent);outline-offset:2px;border-radius:4px}
+.rv-tick{display:inline-flex;vertical-align:-2px;margin-right:8px;color:var(--pass)}
+.rv-details summary{cursor:pointer;color:var(--ink-2)}
+.rv-list{list-style:none;margin:12px 0 0;padding:0}
+.rv-unused summary{cursor:pointer;list-style:none}
+.rv-unused summary::-webkit-details-marker{display:none}
+.rv-unused summary:focus-visible{outline:2px solid var(--accent);outline-offset:-2px;border-radius:12px}
+.rv-link{color:var(--accent)}
+.rv-unused-body{border-top:1px solid var(--line)}
+.rv-aside{gap:16px}
+/* The rebate's info button sits inline at the end of its label. */
+.info-inline{width:26px;height:26px;vertical-align:middle}
+.proposal-pick{display:flex;align-items:center;gap:8px}
+.proposal-pick>.select{flex:1 1 auto;min-width:0}
+/* The thresholds in force: the name takes the room and wraps, the bound stays whole on the right, and any note runs under both. */
+.th-list{grid-template-columns:minmax(0,1fr) auto;gap:6px 16px}
+.th-list dd.num{text-align:right;white-space:nowrap}
+.th-list .th-note{grid-column:1/-1;margin-top:-4px}

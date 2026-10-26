@@ -17,9 +17,9 @@ import {
   type Readiness,
   type RunResult,
 } from "@agir/contracts";
-import { assemble, canonicalJson, ENGINE_VERSION, heldPartnerReturns, replay } from "@agir/engine";
+import { assemble, buildLedger, canonicalJson, ENGINE_VERSION, heldPartnerReturns, replay } from "@agir/engine";
 import { currentDocuments, documentsHash, type Db } from "@agir/db";
-import { applyLabels, figureOrder, labelPhrase, labelUnit, offeredIds, suggestFields, type ReaderResponse, type ReadingVerification, READER_PROMPT_VERSION, type SourcedCandidate } from "@agir/extraction";
+import { applyLabels, figureOrder, itemFold, labelPhrase, labelUnit, offeredIds, suggestFields, type ReaderResponse, type ReadingVerification, READER_PROMPT_VERSION, type SourcedCandidate } from "@agir/extraction";
 
 export const sha256 = (s: string) => createHash("sha256").update(s).digest("hex");
 /** The hash of each registered policy, by version. A run is fresh against the hash of the policy it was made under. */
@@ -259,7 +259,38 @@ export async function dealOverview(tx: Db, dealId: string) {
     run: latest ? { id: latest.id, number: latest.run_number, verdict: latest.verdict_code, fresh, createdAt: latest.created_at } : null,
     decision: decision ?? null,
     reports: artifacts?.n ?? 0,
+    units: dealUnits(assumptions),
+    exit: dealExit(assumptions),
   };
+}
+
+const settled = (a: AssumptionDb) => a.status === "approved" || a.status === "default_accepted";
+const live = (rows: AssumptionDb[], fieldKey: string) => rows.filter((a) => a.field_key === fieldKey && a.status !== "rejected");
+
+/**
+ * The deal's units: the sum of the approved counts of its unit types, as the run's revenue lines count them, or null
+ * while none is approved, any still waits, or one type is written two ways. A stated total is not added to the types.
+ * Never a partial count.
+ */
+function dealUnits(rows: AssumptionDb[]): number | null {
+  const items = live(rows, "unit_count").filter((a) => a.item_key);
+  const types = new Set(items.map((a) => itemFold(a.item_key)));
+  return items.length > 0 && types.size === items.length && items.every(settled) ? items.reduce((n, a) => n + a.value!, 0) : null;
+}
+
+/**
+ * How the deal ends, from its two approved flags (see readiness): kept and refinanced, units sold, or a sale at the end
+ * of the hold when neither is at 1. Null while a flag waits for review or is in conflict, or when both are at 1.
+ */
+function dealExit(rows: AssumptionDb[]): "refinance_hold" | "for_sale" | "sale" | null {
+  const flag = (fieldKey: string) => {
+    const items = live(rows, fieldKey);
+    return items.some((a) => !settled(a)) ? null : items.some((a) => a.value === 1);
+  };
+  const hold = flag("refinance_and_hold");
+  const sell = flag("sell_units");
+  if (hold === null || sell === null || (hold && sell)) return null;
+  return sell ? "for_sale" : hold ? "refinance_hold" : "sale";
 }
 
 // ---- Review ---------------------------------------------------------------------------
@@ -372,8 +403,11 @@ export function todoList(
 export async function reviewView(tx: Db, dealId: string, asOf: string) {
   const assumptions = await loadAssumptions(tx, dealId);
   const { readiness, gaps } = readinessFor(assumptions);
-  const [deal] = await tx.query<{province: string | null}>(`select province from deals where id = $1`, [dealId]);
-  const province = deal?.province;
+  const [deal] = await tx.query<{country: string; province: string | null}>(`select country, province from deals where id = $1`, [dealId]);
+  // The tables are Canadian: a deal elsewhere is told so, and a Canadian deal with no province is asked for one.
+  const outside = deal !== undefined && deal.country !== "CA";
+  const province = outside ? null : deal?.province;
+  const noProvince = outside ? "these tables are for deals in Canada; enter the amount yourself" : "the deal has no province";
   const approved = assumptions.filter(a => ENGINE_READABLE_STATUSES.includes(a.status) && a.value !== null);
   const value = (key: string) => approved.find(a => a.field_key === key && !a.item_key)?.value ?? undefined;
   const unapprovedUnits = assumptions.some(a => a.field_key === "unit_count" && !ENGINE_READABLE_STATUSES.includes(a.status));
@@ -393,18 +427,18 @@ export async function reviewView(tx: Db, dealId: string, asOf: string) {
   };
   if (offered.has("land_transfer_tax")) {
     const land = value("land_cost");
-    propose("land_transfer_tax", province ? landTable(province,asOf) : undefined, !province ? {unavailable:"the deal has no province"} : land === undefined ? {unavailable:"state the land cost first"} : landTransferTaxOptions({province,value:land,asOf}));
+    propose("land_transfer_tax", province ? landTable(province,asOf) : undefined, !province ? {unavailable:noProvince} : land === undefined ? {unavailable:"state the land cost first"} : landTransferTaxOptions({province,value:land,asOf}));
   }
-  if (offered.has("gst_hst_net")) propose("gst_hst_net",GST_HST,!province ? {unavailable:"the deal has no province"} : unapprovedUnits ? {unavailable:"approve the unit counts first"} : gstHstNetOptions({province,units,selling:value("sell_units") === 1,asOf}));
+  if (offered.has("gst_hst_net")) propose("gst_hst_net",GST_HST,!province ? {unavailable:noProvince} : unapprovedUnits ? {unavailable:"approve the unit counts first"} : gstHstNetOptions({province,units,selling:value("sell_units") === 1,asOf}));
   if (offered.has("refinance_insurance_premium_pct")) {
     const ltvPct=value("refinance_ltv_pct"), amortYears=value("refinance_amort_years");
-    const premium = !province ? {unavailable:"the deal has no province"} : unapprovedUnits ? {unavailable:"approve the unit counts first"} : units < 5 ? {unavailable:"CMHC multi-unit insurance needs at least 5 units; enter the premium yourself"}
+    const premium = !province ? {unavailable:noProvince} : unapprovedUnits ? {unavailable:"approve the unit counts first"} : units < 5 ? {unavailable:"CMHC multi-unit insurance needs at least 5 units; enter the premium yourself"}
       : ltvPct === undefined || value("refinance_amount") !== undefined ? {unavailable:"the table needs a loan-to-value"}
       : amortYears === undefined ? {unavailable:"state the refinance amortization first"}
       : cmhcPremium({ltvPct,amortYears,points:value("refinance_mli_select_points"),asOf});
     propose("refinance_insurance_premium_pct",CMHC_PREMIUM,"value" in premium ? {options:[{key:"cmhc",label:premium.label,value:premium.value}]} : premium);
   }
-  if (offered.has("refinance_premium_tax_pct")) propose("refinance_premium_tax_pct",province ? PREMIUM_TAX_TABLES[province as keyof typeof PREMIUM_TAX_TABLES] : undefined,!province ? {unavailable:"the deal has no province"} : premiumTaxOptions({province,asOf}));
+  if (offered.has("refinance_premium_tax_pct")) propose("refinance_premium_tax_pct",province ? PREMIUM_TAX_TABLES[province as keyof typeof PREMIUM_TAX_TABLES] : undefined,!province ? {unavailable:noProvince} : premiumTaxOptions({province,asOf}));
   const tableNotices: Proposal[] = [];
   for (let index=proposals.length-1; index>=0; index--) {
     const proposal=proposals[index]!;
@@ -532,7 +566,13 @@ export function flattenMetrics(result: RunResult) {
   );
 }
 
-export async function createRun(tx: Db, dealId: string, asOf: string) {
+/** What a streamed run reports when its inputs are settled (card R1). Counts and names only; no financial figure. */
+export type RunFacts = { approved: number; defaults: number; policyVersion: string; policyDraft: boolean; exit: "sale" | "refinance_hold" | "for_sale";
+  constructionMonths: number; holdYears?: number; stresses: number; inputHash: string; engineVersion: string };
+/** A run's progress (card R1): each stage as it finishes, and `check`, which throws when a stop was asked for. */
+export type RunProgress = { stage(key: "inputs" | "ledger" | "loans" | "stresses" | "gates", at: Date, facts?: RunFacts): Promise<void> | void; check(): void };
+
+export async function createRun(tx: Db, dealId: string, asOf: string, progress?: RunProgress) {
   const assumptions = await loadAssumptions(tx, dealId);
   const { readiness, input } = readinessFor(assumptions);
   if (!input) throw new HttpError(409, "Underwriting is blocked until review is clear.", { readiness });
@@ -541,7 +581,22 @@ export async function createRun(tx: Db, dealId: string, asOf: string) {
   const { policy, changes, invalid } = effectivePolicy(base, layers.workspace, layers.deal);
   if (invalid.length) throw new HttpError(409, `A threshold set for ${base.version} no longer fits this policy: ${invalid.map((v) => `${v.path} (${v.layer})`).join(", ")}. Change or clear it under Thresholds, then run again.`, { invalid });
   const policyHash = sha256(canonicalJson(policy));
+  const inputHash = sha256(canonicalJson(input));
+  if (progress) {
+    await progress.stage("inputs", new Date(), {
+      approved: assumptions.filter((a) => a.status === "approved").length, defaults: assumptions.filter((a) => a.status === "default_accepted").length,
+      policyVersion: policy.version, policyDraft: policy.draft === true, exit: input.exit ?? "sale", constructionMonths: input.constructionMonths,
+      ...(input.exit === "for_sale" ? {} : { holdYears: input.holdYears }), stresses: policy.stresses.length, inputHash, engineVersion: ENGINE_VERSION,
+    });
+    progress.check();
+  }
   const result = runResult(ENGINE_VERSION,input,policy,policy.custom ? base : undefined);
+  // The engine is one synchronous call: its four stages finish together, when it returns.
+  if (progress) {
+    const at = new Date();
+    for (const key of ["ledger", "loans", "stresses", "gates"] as const) await progress.stage(key, at);
+    progress.check();
+  }
   const setters = changes.length ? await tx.query<{ id: string; name: string }>(`select id,name from users where id=any($1::uuid[])`, [[...new Set(changes.map((change) => change.setById))]]) : [];
   const policyChanges = changes.map((change) => ({ ...change, setBy: setters.find((user) => user.id === change.setById)?.name ?? "—" }));
   const used = assumptions
@@ -562,7 +617,6 @@ export async function createRun(tx: Db, dealId: string, asOf: string) {
       // Only when set, so a snapshot without a client's confirmation is what it was before card 89.
       ...(a.client_confirmed_at ? { clientConfirmedBy: a.client_confirmed_by_name, clientConfirmedAt: a.client_confirmed_at } : {}),
     }));
-  const inputHash = sha256(canonicalJson(input));
   const resultHash = sha256(canonicalJson(result));
   const [{ h }] = (await tx.query<{ h: string }>(`select fn_assumptions_hash($1) as h`, [dealId])) as [{ h: string }];
   const payload = {
@@ -582,6 +636,8 @@ export async function createRun(tx: Db, dealId: string, asOf: string) {
     checks: result.checks,
   };
   const [{ id }] = (await tx.query<{ id: string }>(`select fn_persist_run($1, $2) as id`, [dealId, JSON.stringify(payload)])) as [{ id: string }];
+  // A stop asked for before the commit rolls the run back: no run row, no audit event, no run number used.
+  progress?.check();
   return id;
 }
 
@@ -610,6 +666,17 @@ export async function runView(tx: Db, runId: string) {
   const { input } = run.input_snapshot;
   const held = input.exit === "refinance_hold" && input.waterfall ? heldPartnerReturns(run.result.equityFlows, input.waterfall) : null;
   const positive = (flows: readonly { amount: number }[]) => flows.filter((f) => f.amount > 0).reduce((n, f) => n + f.amount, 0);
+  // The refinance loan (card R3) is the engine's own ledger replayed on the run's recorded input: not one of the run's signed figures.
+  // Only under the engine version that recorded the run, and left out if the ledger cannot be built.
+  let refinance: { loan: number; value: number; month: number; ltvPct: number | null; stated: boolean } | null = null;
+  if (input.refinance && run.engine_version === ENGINE_VERSION) {
+    try {
+      const r = buildLedger(input).refinance;
+      if (r) refinance = { loan: r.newAmount, value: r.value, month: r.month, ltvPct: input.refinance.ltvPct ?? null, stated: input.refinance.amount !== undefined };
+    } catch {
+      refinance = null;
+    }
+  }
   return {
     id: run.id,
     dealId: run.deal_id,
@@ -631,6 +698,7 @@ export async function runView(tx: Db, runId: string) {
     decisions,
     ...(held ? { heldPartners: { lpIrr: held.withValue.lpIrr, gpIrr: held.withValue.gpIrr, promote: held.withValue.promote,
       paidLp: positive(held.paid.lp), paidGp: positive(held.paid.gp), paidPromote: held.paid.promote } } : {}),
+    ...(refinance ? { refinance } : {}),
   };
 }
 

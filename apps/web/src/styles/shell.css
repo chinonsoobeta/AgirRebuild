@@ -1,0 +1,21 @@
+/* Styles for the shell area: design tokens only (var(--…)), no literal colours. */
+
+/* Top bar: the workspace, the name and role, and the button-shaped links. */
+button.toplink{border:0;background:transparent;font:inherit;cursor:pointer}
+select.ws{font:inherit;appearance:auto}
+.ws-name{padding:0 8px;font-weight:600;color:var(--ink)}
+.who{padding:0 8px 0 4px;font-size:13px;color:var(--ink-3)}
+@media (max-width:960px){.topbar{padding:10px 16px}}
+
+/* The deal path as a list: each item holds one step link. */
+ol.path{list-style:none}
+.path > li{display:flex}
+.path > li > .step{flex:1}
+.step-state.stop{display:inline-flex;align-items:center;gap:5px;color:var(--stop)}
+.step-state.stop svg{flex:none}
+.variant-of{margin-top:4px}
+
+/* The skip link: hidden until focused, then shown over the top bar. */
+.skip{position:absolute;left:16px;top:-100px;z-index:10;padding:8px 14px;border-radius:8px;background:var(--surface);color:var(--accent);border:1px solid var(--line-2);box-shadow:var(--shadow)}
+.skip:focus{top:12px}
+#main-content:focus{outline:0}

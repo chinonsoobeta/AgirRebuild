@@ -54,8 +54,9 @@ describe("a figure in another currency, on review", () => {
 });
 
 describe("the plain-language layer", () => {
-  const en = build("en", () => {});
-  const fr = build("fr", () => {});
+  // These assert the finance names and the DSCR-to-DCR swap, so they read with finance terms first (card X1).
+  const en = build("en", () => {}, "finance");
+  const fr = build("fr", () => {}, "finance");
 
   it("shows DCR for DSCR, as a whole word only", () => {
     expect(en.msg("Base-case sizing DSCR of 1.05x is under the 1.20x floor.")).toBe("Base-case sizing DCR of 1.05x is under the 1.20x floor.");
@@ -113,8 +114,8 @@ describe("the plain-language layer", () => {
     expect(fr.L.metric("stated_value")).toMatch(/non réalisée/);
     expect(fr.L.field("refinance_and_hold")).not.toBe(en.L.field("refinance_and_hold"));
     expect(fr.L.absent("refinance_and_hold")).not.toBe(en.L.absent("refinance_and_hold"));
-    expect(en.t("run.draftPolicy")).toBe("Draft policy, not signed by credit");
-    expect(fr.t("run.draftPolicy")).toMatch(/provisoire/);
+    expect(en.t("run.kv.policyDraft", { p: "Rental hold" })).toBe("Rental hold, draft, not signed by credit");
+    expect(fr.t("run.kv.policyDraft", { p: "Location conservée et refinancée" })).toMatch(/provisoire/);
     for (const g of ["dcr_after_refinance", "stressed_unrealized_equity_multiple"]) expect(fr.L.gate(g, "x"), g).not.toBe("x");
     expect(fr.msg("The deal is kept and refinanced, not sold.")).not.toBe("The deal is kept and refinanced, not sold.");
     const wipe = { key: "equity_wipeout", kind: "bound", severity: "error", message: "The stated value of $200,000 does not cover the $720,000 of debt outstanding. Equity has no value at the end of the hold.", expected: 720_000, actual: 200_000 };
@@ -139,7 +140,7 @@ describe("the plain-language layer", () => {
   it("calls the decision the owner's own when the review is solo", () => {
     expect(en.t("next.decideSolo")).toBe("Record your decision");
     expect(en.t("decision.titleSolo")).toBe("Your decision");
-    expect(en.t("next.decide")).toBe("Record the committee decision");
+    expect(en.t("next.decide")).toBe("Record the decision");
     expect(fr.t("decision.titleSolo")).toBe("Votre décision");
     const gates = [{ key: "g", label: "G", status: "failed" }];
     expect(verdictText(en, { code: "APPROVE_WITH_CONDITIONS", hardFailReasons: [], gates }, [], true).headline).toBe("1 gate fails. You set the conditions.");
@@ -209,7 +210,7 @@ describe("the quick start's gaps", () => {
     expect(a.reason).toBe("from the plans (entered as 870 m²)");
     const r = enteredInUnit("$/sf/yr", true, 107.64, "broker letter", "fr");
     expect(r.value).toBeCloseTo(107.64 / SF_PER_M2, 9);
-    expect(r.reason).toBe("broker letter (saisi en 107,64 $/m²/an)");
+    expect(r.reason).toBe("broker letter (saisi en 107,64\u00a0$/m²/an)");
     expect(enteredInUnit("sf", false, 870, "from the plans", "en")).toEqual({ value: 870, reason: "from the plans" });
     expect(enteredInUnit("$", true, 5, "x".repeat(10), "en")).toEqual({ value: 5, reason: "x".repeat(10) });
   });
@@ -386,8 +387,8 @@ describe("breakeven rows in both languages (task 38)", () => {
   const rowOf = (driver: keyof typeof shock, state: string) => ({
     gate: gate.key, driver, state, shock: state === "value" ? shock[driver] : null, limit: limit[driver], actual: state === "value" ? 15.2 : null, to: state === "value" ? [echo[driver]] : [], reason: state === "value" ? undefined : "x",
   });
-  const en = build("en", () => {});
-  const fr = build("fr", () => {});
+  const en = build("en", () => {}, "finance");
+  const fr = build("fr", () => {}, "finance");
 
   it("every driver and every state has a sentence, in English and in French", () => {
     for (const d of Object.keys(shock) as (keyof typeof shock)[]) {
@@ -598,15 +599,19 @@ describe("card 58c: every audit action has a sentence in both languages", () => 
   });
   it("says a label the workspace remembers, and forgets (card 113)", () => {
     expect(say("label.remembered", { phrase: "marketing window", unit: "none", field: "lease_up_months", item: "" }))
-      .toEqual(["Remembered the label \"marketing window\" as Lease-up period for this workspace's deals", "A retenu le libellé « marketing window » comme Période de location pour les projets de cet espace"]);
+      .toEqual(["Remembered the label \"marketing window\" as Lease-up period for this workspace's deals", "A retenu le libellé «\u00a0marketing window\u00a0» comme Période de location pour les projets de cet espace"]);
     expect(say("label.forgotten", { phrase: "marketing window", unit: "none", field: "lease_up_months", item: "" }))
-      .toEqual(["Forgot the label \"marketing window\" as Lease-up period", "A oublié le libellé « marketing window » comme Période de location"]);
+      .toEqual(["Forgot the label \"marketing window\" as Lease-up period", "A oublié le libellé «\u00a0marketing window\u00a0» comme Période de location"]);
     expect(build("fr", () => {}).msg("Labelled the same way before in this workspace; confirm it")).toBe("Étiqueté de la même façon auparavant dans cet espace ; à confirmer");
     expect(build("fr", () => {}).msg("The label it was remembered from was removed")).not.toBe("The label it was remembered from was removed");
   });
   it("says a copy, from both ends", () => {
     expect(say("deal.copied", { name: "Fourplex, variant" })).toEqual(["Copied as Fourplex, variant", "A copié comme Fourplex, variant"]);
     expect(say("deal.created_as_copy", { name: "Fourplex" })).toEqual(["Created as a copy of Fourplex", "A créé comme copie de Fourplex"]);
+  });
+  it("counts the values a reading found, one or several", () => {
+    expect(say("document.extracted", { candidates: 1 })).toEqual(["Read a document: 1 value found", "A lu un document\u00a0: 1 valeur trouvée"]);
+    expect(say("document.extracted", { candidates: 5 })).toEqual(["Read a document: 5 values found", "A lu un document\u00a0: 5 valeurs trouvées"]);
   });
   it("says the old and new setting in words", () => {
     expect(describeEvent(en, ev("workspace.review_mode_changed", { from: "solo", to: "team" }))).toMatch(/Solo review.*Team review/);
@@ -629,7 +634,7 @@ describe("card 58c: every audit action has a sentence in both languages", () => 
     for (const [a, [e, f]] of Object.entries(words)) {
       const [english, french] = say(`assumption.${a}`, p);
       expect(english, a).toMatch(new RegExp(`^${e}: Exit cap rate = `));
-      expect(french, a).toMatch(new RegExp(`^${f} : Taux de capitalisation à la sortie = `));
+      expect(french, a).toMatch(new RegExp(`^${f}\u00a0: Taux de capitalisation à la sortie = `));
     }
   });
   it("still prints the key of an action it has no sentence for", () => {
@@ -702,7 +707,7 @@ describe("setting up unit sales in English and French (task 78)", () => {
       if (def.absentMeans) expect(fr.L.absent(key)).not.toBe(en.L.absent(key));
       if (def.help) expect(fr.L.help(key, def.help)).not.toBe(en.L.help(key, def.help));
     }
-    for (const key of ["qs.t.townhomes", "qs.saleLine", "qs.unitSalePrice", "qs.doneSales", "qs.saleGstQuestion"] as Key[]) {
+    for (const key of ["qs.saleLine", "qs.unitSalePrice", "qs.doneSales", "qs.saleGstQuestion"] as Key[]) {
       expect(en.t(key), key).not.toBe(key);
       expect(fr.t(key), key).not.toBe(key);
       expect(fr.t(key), key).not.toBe(en.t(key));
@@ -844,7 +849,7 @@ describe("partner memo wording (task 84d)", () => {
   });
   it.each(["artifact.requested", "artifact.ready"])("%s names the partner memo in both languages", (action) => {
     const event = { seq: 1, action, entity: "artifact", entity_id: null, payload: { kind: "partner_memo", format: "pdf" }, hash: "", created_at: "", actor: null };
-    expect(describeEvent(en, event)).toBe(`${action === "artifact.requested" ? "Requested" : "Released"} a partner memo (pdf)`);
+    expect(describeEvent(en, event)).toBe(`${action === "artifact.requested" ? "Requested" : "Released"} the Partner memo (PDF)`);
     expect(describeEvent(fr, event)).toContain("Note aux partenaires");
   });
 });
@@ -852,11 +857,13 @@ describe("partner memo wording (task 84d)", () => {
 
 describe("share-link wording (task 86b)", () => {
   it.each([
-    ["share.created", { kind: "ic_memo", format: "pdf", term: "7d" }, "Shared a link to the IC memo (pdf), 7 days", "A partagé un lien : Mémo du comité (pdf), 7 jours"],
+    ["share.created", { kind: "ic_memo", format: "pdf", term: "7d" }, "Shared a link to the Committee memo (PDF), 7 days", "A partagé un lien\u00a0: Mémo du comité (PDF), 7 jours"],
+    ["share.created", { run_id: "r", artifact_ids: ["a", "b", "c"], term: "30d" }, "Shared a link to 3 files, 30 days", "A partagé un lien vers 3 fichiers, 30 jours"],
+    ["share.created", { run_id: "r", artifact_ids: ["a"], term: "none" }, "Shared a link to 1 file, no expiry", "A partagé un lien vers 1 fichier, sans expiration"],
     ["share.revoked", {}, "Revoked a shared link", "A révoqué un lien partagé"],
-    ["share.opened", { what: "page" }, "Opened a shared link: the page", "A ouvert un lien partagé : la page"],
-    ["share.opened", { what: "file" }, "Opened a shared link: the report", "A ouvert un lien partagé : le rapport"],
-    ["share.opened", { what: "audit_package" }, "Opened a shared link: the audit package", "A ouvert un lien partagé : le dossier d'audit"],
+    ["share.opened", { what: "page" }, "Opened a shared link: the page", "A ouvert un lien partagé\u00a0: la page"],
+    ["share.opened", { what: "file" }, "Opened a shared link: the report", "A ouvert un lien partagé\u00a0: le rapport"],
+    ["share.opened", { what: "audit_package" }, "Opened a shared link: the audit package", "A ouvert un lien partagé\u00a0: le dossier d'audit"],
   ] as const)("%s %j has the specified audit sentences", (action, payload, en, fr) => {
     const event = { seq: 1, action, payload, actor: null, entity: "share_link", entity_id: "link-id", hash: "hash", created_at: "2026-10-19T12:00:00Z" };
     expect(describeEvent(build("en", () => {}), event)).toBe(en);
@@ -933,7 +940,7 @@ describe("card 112: suggested fields and likely figures on review", () => {
     expect(en.t("review.useAsSuggested", { field: "lease-up period" })).toBe("Use as lease-up period");
     expect(fr.t("review.useAsSuggested", { field: "période de location" })).toBe("Utiliser comme période de location");
     expect(en.t("review.likely")).toBe("Possibly in your documents:");
-    expect(fr.t("review.likely")).toBe("Peut-être dans vos documents :");
+    expect(fr.t("review.likely")).toBe("Peut-être dans vos documents\u00a0:");
     expect(en.t("review.useFigure")).toBe("Use this figure");
     expect(fr.t("review.useFigure")).toBe("Utiliser ce chiffre");
   });
@@ -1015,7 +1022,7 @@ it.each(["en", "fr"] as const)("card 133 renders arithmetic source notes in %s",
       const s = { context: "Hard cost: $9,000,000", raw: "$9,000,000", document_name: "cedar.txt", location: "line 1", check_outcome, check_note } as any;
       const html = renderToStaticMarkup(h(I18nProvider, { children: h(Quote, {s, currency: "CAD"}) }));
       expect(html).toContain(build(lang, () => {}).msg(check_note));
-      expect(html.includes("var(--review-text)")).toBe(check_outcome === "questions");
+      expect(html.includes("rv-question")).toBe(check_outcome === "questions");
     }
   } finally { vi.unstubAllGlobals(); }
 });
@@ -1069,7 +1076,7 @@ it.each(["en", "fr"] as const)("card 135 offers confirmation only for an outside
 describe("Card 137 region text", () => {
   it("names the table and exclusions in French", () => {
     const fr = build("fr", () => {});
-    expect(fr.t("review.regionIntro", { kind: fr.t("review.regionRent"), fields: "type, nombre, loyer mensuel" })).toBe("Ce tableau ressemble à votre état locatif : type, nombre, loyer mensuel.");
+    expect(fr.t("review.regionIntro", { kind: fr.t("review.regionRent"), fields: "type, nombre, loyer mensuel" })).toBe("Ce tableau ressemble à votre état des loyers\u00a0: type, nombre, loyer mensuel.");
     expect(fr.t("review.regionConfirm", { n: 12 })).toBe("Confirmer les 12 valeurs");
     expect(fr.msg("read by OCR")).toBe("lu par ROC");
     expect(fr.msg("please check")).toBe("à vérifier");
@@ -1078,7 +1085,7 @@ describe("Card 137 region text", () => {
 
  it("card 160b: Review AI strings have French", () => {
   const en = build("en", () => {}), fr = build("fr", () => {});
-  for (const key of ["review.aiUnused", "review.aiCheck", "review.aiEnter", "review.aiUnavailable"] as Key[]) {
+  for (const key of ["review.aiUnused", "review.aiEnter", "review.aiUnavailable"] as Key[]) {
     expect(fr.t(key)).not.toBe(en.t(key));
     expect(fr.t(key)).not.toBe(key);
   }
@@ -1089,12 +1096,17 @@ describe("card 150 French action sentences", () => {
   it("translates every new list and banner string", () => {
     const fr = build("fr", () => {});
     const en = build("en", () => {});
-    for (const key of ["review.todoCount", "review.todoReady", "review.useDefault", "review.acceptTickedDefaults", "review.b.conflicts", "review.b.missing", "review.b.pending", "review.b.awaiting", "review.b.impossible", "review.b.tail"] as Key[]) {
+    for (const key of ["review.todoCount", "review.todoReady", "review.useDefault", "review.acceptTickedDefaults", "review.b.conflicts", "review.b.missing", "review.b.pending", "review.b.awaiting", "review.b.impossible"] as Key[]) {
       const params = { n: 2, v: "3%" };
       expect(fr.t(key, params)).not.toBe(en.t(key, params));
       expect(fr.t(key, params)).not.toBe(key);
     }
-    expect(fr.t("review.todoCount", { n: 2 })).toBe("2 actions avant de pouvoir lancer ce projet");
+    expect(fr.t("review.todoCount", { n: 2 })).toBe("2 points à régler avant de pouvoir lancer ce projet");
+  });
+
+  it("names no count on the defaults button while none is ticked", () => {
+    expect(build("en", () => {}).t("review.acceptTickedDefaults", { n: 0 })).toBe("Accept the ticked defaults");
+    expect(build("fr", () => {}).t("review.acceptTickedDefaults", { n: 0 })).toBe("Accepter les valeurs par défaut cochées");
   });
 });
 

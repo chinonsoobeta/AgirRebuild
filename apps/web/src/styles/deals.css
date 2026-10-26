@@ -1,0 +1,17 @@
+/* Styles for the deals area: design tokens only (var(--…)), no literal colours. */
+.deals-lead{margin-top:8px}
+.chip-n{margin-left:6px;opacity:.75;font-variant-numeric:tabular-nums}
+.deals-list{margin-top:20px}
+.deal-meta{margin-top:4px}
+.deal-state{gap:10px}
+.deal-next{text-align:right}
+.deals-foot{margin-top:28px;max-width:70ch}
+.empty-title{font-size:32px}
+.empty .empty-lead{margin:14px auto 0}
+@media (max-width:900px){.deal-next{text-align:left}}
+@media (min-width:901px){
+  .deals-list{display:grid;grid-template-columns:minmax(0,1.1fr) minmax(0,1.4fr) auto;column-gap:32px}
+  .deals-list>*{grid-column:1/-1}
+  .deals-list>.deal{grid-template-columns:subgrid}
+  .deals-list>.deal>:last-child{justify-self:end}
+}

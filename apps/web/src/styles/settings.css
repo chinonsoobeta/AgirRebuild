@@ -1,0 +1,20 @@
+/* Styles for the settings area: design tokens only (var(--…)), no literal colours. */
+.set-lead{margin-top:8px}
+.set-body{margin-top:6px}
+.set-list{list-style:none;margin:0;padding:0;display:flex;flex-direction:column;gap:8px}
+.set-list li{display:flex;flex-wrap:wrap;align-items:center;justify-content:space-between;gap:12px;color:var(--ink-2)}
+.set-sub{padding-top:16px;border-top:1px solid var(--line)}
+.set-vh{position:absolute;width:1px;height:1px;padding:0;margin:-1px;overflow:hidden;clip:rect(0 0 0 0);white-space:nowrap;border:0}
+.set-nav a:focus-visible{outline:2px solid var(--accent);outline-offset:2px}
+.set section[id]{scroll-margin-top:24px}
+/* The counts headers are long labels: they wrap, so the deal names can stay on one line. */
+.counts thead th{white-space:normal;vertical-align:bottom;min-width:5.5em}
+.counts td:first-child,.counts td:nth-child(2){white-space:nowrap}
+/* The total row reads like the rows above it, in bold, under a line. */
+.counts tfoot>tr>*{border-top:1px solid var(--line);border-bottom:0;vertical-align:top;font-size:15px;font-weight:700;color:var(--ink)}
+/* The per-deal counts sit in a disclosure under the four totals. */
+.set-each>summary{cursor:pointer;color:var(--ink-2);padding:4px 0}
+.set-each>summary:focus-visible{outline:2px solid var(--accent);outline-offset:2px}
+.set-each[open]>summary{margin-bottom:12px}
+/* The four totals fit in one row, as on the board; the shared 200 px minimum wrapped them three and one. */
+#counts .figs{grid-template-columns:repeat(auto-fit,minmax(min(150px,100%),1fr))}
