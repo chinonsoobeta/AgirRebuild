@@ -1,5 +1,5 @@
 import { describe, expect, test } from "vitest";
-import { addressedText, extractCandidates, consolidate, checkArithmetic, verifyReadings, verifyReading, READING_FAILURE, type NormalizedDocument, type Reading } from "../src/index.ts";
+import { parseDocument, addressedText, extractCandidates, consolidate, checkArithmetic, verifyReadings, verifyReading, READING_FAILURE, type NormalizedDocument, type Reading } from "../src/index.ts";
 import { SF_PER_M2 } from "@agir/numbers";
 const doc = (kind: NormalizedDocument["kind"]): NormalizedDocument => ({ kind, lines: [], tables: [], pageCount: null, needsOcr: false, fullText: "" });
 describe("addressed text", () => {
@@ -12,9 +12,9 @@ describe("addressed text", () => {
   });
 });
 const d = doc("txt");
-d.lines = [{ location: "line 1", text: "Area 100 m²; vacancy 4%; duration 2 years; cost $400." }, { location: "line 2", text: "Elsewhere 900" }];
+d.lines = [{ location: "line 1", text: "Area 100 m²; vacancy 4%; duration 2 years; cost $1400." }, { location: "line 2", text: "Elsewhere 900" }];
 const documents = [{ id: "d", name: "fiction.txt", document: d }];
-const reading: Reading = { field: "land_cost", item: null, value: 400, unit_seen: "$", file: "fiction.txt", location: "line 1", quote: "$400", note: null, confidence: "high" };
+const reading: Reading = { field: "land_cost", item: null, value: 1400, unit_seen: "$", file: "fiction.txt", location: "line 1", quote: "$1400", note: null, confidence: "high" };
 describe("reading verification", () => {
   test.each([
     ["Taux : 7,215 %\nTerrain : 1 250 000 $\nCoût : 2 500 000,00 $", "7,215 %", 7.215, "exit_cap_rate_pct", "%"],
@@ -75,7 +75,7 @@ describe("reading verification", () => {
   const document = doc("xlsx");
   document.tables = [{ name: "Inputs", rows: [[..."ABCDE"].map(c => ({ ref: `Inputs!${c}1`, text: "Fictional test deal" }))] }];
   expect(addressedText(document, "fiction.xlsx")).toBe("=== FILE fiction.xlsx ===\n[Inputs!A1..E1] Fictional test deal");
-  document.tables[0]!.rows.push([..."ABCDE"].map(c => ({ ref: `Inputs!${c}2`, text: "$400" })));
+  document.tables[0]!.rows.push([..."ABCDE"].map(c => ({ ref: `Inputs!${c}2`, text: "$1400" })));
   for (const location of ["Inputs!C2", "Inputs!A2..E2"]) expect(verifyReading({ ...reading, file: "fiction.xlsx", location }, [{ id: "d", name: "fiction.xlsx", document }]).outcome).toBe("verified");
  });
  test.each([["$1.15M", 1150000], ["$1.001M", 1001000]] as const)("card 160b: scaled rounding %s", (quote, value) => {
@@ -108,7 +108,7 @@ describe("Card 166: the verifier reads the quoted figure in context", () => {
     ["line", "Land: $1,250,000 CAD", "land_cost", 1250000, "$", "", "verified"],
     ["line", "Land: C$1,250,000", "land_cost", 1250000, "$", "", "verified"],
     ["line", "Période de détention : vingt et un ans", "hold_years", 21, "years", "", "verified"],
-    ["cell", "185K", "soft_cost", 185, "$", "", READING_FAILURE.value],
+    ["cell", "185K", "soft_cost", 185, "$", "", "verified"],
   ] as const)("%s %s for %s = %s: %s %s %s", (where, quote, field, value, unit_seen, evidence, outcome) => {
     const document = doc(where === "cell" ? "xlsx" : "txt");
     document.fullText = [quote, evidence].filter(Boolean).join("\n");
@@ -118,7 +118,7 @@ describe("Card 166: the verifier reads the quoted figure in context", () => {
     const got = verifyReading({ ...reading, location, quote, field, value, unit_seen }, [{ ...documents[0]!, document }]);
     expect(got.outcome).toBe(outcome);
     if (outcome === "verified") {
-      expect(got.candidate).toMatchObject({ value });
+      expect(got.candidate).toMatchObject({ value: quote === "185K" ? 185000 : value });
       expect(got.candidate).not.toHaveProperty("ambiguous");
     }
   });
@@ -222,5 +222,102 @@ describe("Card 169: a field's usual range settles three digits with review", () 
       if (ambiguous) expect(got.candidate).toHaveProperty("ambiguous", true);
       else expect(got.candidate).not.toHaveProperty("ambiguous");
     }
+  });
+});
+
+describe("Card 171: two figures separated by a plain space", () => {
+  test.each([
+    ["d.txt", 2, "unit_count", "one-bedroom", 60, "units", "verified", true],
+    ["d.txt", 2, "unit_count", "one-bedroom", 60590, "units", READING_FAILURE.value, false],
+    ["d.txt", 2, "rentable_area_sf", "one-bedroom", 590, "sf", "verified", true],
+    ["d.txt", 3, "unit_count", "two-bedroom", 50, "units", "verified", true],
+    ["d.txt", 4, "land_cost", null, 8500000, "$", "verified", false],
+    ["e.txt", 3, "unit_count", null, 1200, "units", "verified", false],
+    ["e.txt", 3, "unit_count", null, 1, "units", READING_FAILURE.value, false],
+    ["f.txt", 2, "unit_count", "studio", 50, "units", READING_FAILURE.value, false],
+  ] as const)("%s line %s: %s %s = %s", async (file, line, field, item, value, unit_seen, outcome, ambiguous) => {
+    const text = {
+      "d.txt": "Suite mix\nOne-bedroom 60 590 $2,200\nTwo-bedroom 50 820 $2,600\nLand $8,500,000",
+      "e.txt": "Sommaire\nTerrain 8 500 000 $\nLogements 1 200",
+      "f.txt": "Suite mix\nStudio 1 050 $1,900",
+    }[file];
+    const document = await parseDocument(new TextEncoder().encode(text), file);
+    const quote = text.split("\n")[line - 1]!;
+    const got = verifyReading({ ...reading, file, location: `line ${line}`, quote, field, item, value, unit_seen }, [{ id: file, name: file, document }]);
+    expect(got.outcome).toBe(outcome);
+    if (outcome === "verified") {
+      expect(got.candidate).toMatchObject({ value });
+      if (ambiguous) expect(got.candidate).toHaveProperty("ambiguous", true);
+      else expect(got.candidate).not.toHaveProperty("ambiguous");
+    }
+  });
+});
+
+describe("Card 170: money scales and accounting brackets", () => {
+  const texts = {
+    "a.txt": "Project budget\nEstimated development costs ($M)\nLand 9.44\nDevelopment costs 60.34\nTotal $69.78\nRequired mortgage ($M) $43.63",
+    "c.txt": "Term sheet\nFacility size $276.8 million\nEquity $184.6 million\nLand $9.44",
+    "g.txt": "Operating budget\nProperty taxes ($705,000)\nGST rebate ($50,000)",
+    "h.txt": "Budget ($K)\nLand 8,500\nHard costs 29,150",
+    "i.txt": "Coûts du projet (M$)\nTerrain 9,44\nConstruction 60,34",
+    "j.csv": "Item,Cost ($M)\nLand,9.44\nTotal,69.78",
+    "k.csv": 'Item,Cost ($000s)\nLand,"8,500"\nTotal,"69,780"',
+    "m.txt": "Budget (in thousands of dollars)\nLand 8,500\nLoan $12,000,000",
+    "plain.txt": "Land $8,500,000\nTerrain 8 500 000 $\nContingency $0",
+    "mixed.txt": "Budget ($K; $M)\nLand $8,500",
+    "own.txt": "Budget ($K)\nLand $1.2M",
+    "words.txt": "Purchase agreement\n(e) Purchase Price: Twenty One Million Seven Hundred Fifty\nThousand Dollars\nAncillary income $71,000",
+    "mots.txt": "Convention d'achat\nPrix : vingt et un millions sept cent cinquante\nmille dollars\nAutres revenus 71 000 $",
+    "over.txt": "Proceeds\nOver a million\nAncillary income $71,000",
+  };
+  const millions = "$ (stated in millions; × 1,000,000)";
+  const thousands = "$ (stated in thousands; × 1,000)";
+  test.each([
+    ["a.txt", "line 3", "Land 9.44", "land_cost", 9.44, 9440000, millions],
+    ["a.txt", "line 3", "Land 9.44", "land_cost", 9440000, 9440000, millions],
+    ["a.txt", "line 5", "Total $69.78", "stated_total_cost", 69.78, 69780000, millions],
+    ["a.txt", "line 6", "Required mortgage ($M) $43.63", "senior_loan_amount", 43.63, 43630000, millions],
+    ["c.txt", "line 2", "Facility size $276.8 million", "senior_loan_amount", 276.8, 276800000, "$"],
+    ["c.txt", "line 2", "Facility size $276.8 million", "senior_loan_amount", 276800000, 276800000, "$"],
+    ["c.txt", "line 4", "Land $9.44", "land_cost", 9.44, "small", "$"],
+    ["g.txt", "line 2", "Property taxes ($705,000)", "property_tax_annual", 705000, 705000, "$"],
+    ["g.txt", "line 2", "Property taxes ($705,000)", "property_tax_annual", -705000, -705000, "$"],
+    ["g.txt", "line 3", "GST rebate ($50,000)", "other_cost", -50000, -50000, "$"],
+    ["g.txt", "line 3", "GST rebate ($50,000)", "other_cost", 50000, "value", "$"],
+    ["h.txt", "line 2", "Land 8,500", "land_cost", 8500, 8500000, thousands],
+    ["i.txt", "line 2", "Terrain 9,44", "land_cost", 9.44, 9440000, millions],
+    ["j.csv", "B2", "9.44", "land_cost", 9.44, 9440000, millions],
+    ["k.csv", "B2", "8,500", "land_cost", 8500, 8500000, thousands],
+    ["m.txt", "line 2", "Land 8,500", "land_cost", 8500000, 8500000, thousands],
+    ["m.txt", "line 3", "Loan $12,000,000", "senior_loan_amount", 12000000, "scale", "$"],
+    ["plain.txt", "line 1", "Land $8,500,000", "land_cost", 8500000, 8500000, "$"],
+    ["plain.txt", "line 2", "Terrain 8 500 000 $", "land_cost", 8500000, 8500000, "$"],
+    ["plain.txt", "line 3", "Contingency $0", "contingency", 0, 0, "$"],
+    ["mixed.txt", "line 2", "Land $8,500", "land_cost", 8500, "scale", "$"],
+    ["own.txt", "line 2", "Land $1.2M", "land_cost", 1.2, 1200000, "$"],
+    ["words.txt", "line 4", "Ancillary income $71,000", "other_income_annual", 71000, 71000, "$"],
+    ["mots.txt", "line 4", "Autres revenus 71 000 $", "other_income_annual", 71000, 71000, "$"],
+    ["over.txt", "line 3", "Ancillary income $71,000", "other_income_annual", 71000, 71000, "$"],
+  ] as const)("%s %s %s = %s", async (file, location, quote, field, value, expected, unitSeen) => {
+    const document = await parseDocument(new TextEncoder().encode(texts[file]), file);
+    const got = verifyReading({ ...reading, file, location, quote, field, value }, [{ id: file, name: file, document }]);
+    expect(got.outcome).toBe(typeof expected === "number" ? "verified" : READING_FAILURE[expected]);
+    if (typeof expected === "number") expect(got.candidate).toMatchObject({ value: expected, unitSeen });
+  });
+  test("a scale heading in running text ends at its page", () => {
+    const lines = ([
+      ["Building permit values ($ 000)", "page 1, line 1"],
+      ["Permit values reached", "page 1, line 2"],
+      ["Land $8,500", "page 1, line 3"],
+      ["Property taxes $120,000", "page 2, line 1"],
+      ["Land cost: $9,440,000", "page 2, line 2"],
+    ] as [string, string][]).map(([text, location]) => ({ text, location }));
+    const document = { ...doc("pdf"), lines, pageCount: 2, fullText: lines.map(l => l.text).join("\n") };
+    const read = (location: string, quote: string, field: string, value: number) =>
+      verifyReading({ ...reading, file: "p.pdf", location, quote, field, value }, [{ id: "p.pdf", name: "p.pdf", document }]).outcome;
+    expect(read("page 1, line 3", "Land $8,500", "land_cost", 8500)).toBe(READING_FAILURE.scale);
+    expect(read("page 2, line 1", "Property taxes $120,000", "property_tax_annual", 120000)).toBe("verified");
+    // The rule reader, frozen as the fallback, still keeps the heading to the end of the document.
+    expect(extractCandidates(document).candidates.filter(c => c.fieldKey === "land_cost")).toEqual([]);
   });
 });

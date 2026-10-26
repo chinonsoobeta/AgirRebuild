@@ -2665,17 +2665,23 @@ function withoutStruck(text: string, struck: [number, number][] | undefined, loc
 type Stated = { factor: number } | "unclear";
 type Ruling = { factor: number } | { refuse: true };
 type Scaling = { rule: Ruling | null; own: boolean };
-const SCALE_PHRASE_RE = /\$\s?['’]?000s?\b|\b000s?\s?\$|['’]000s?\b|\(\s*000s?\s*\)|\$\s?mm\b|\bthousands?\b|\bmilliers?\b|\bmillions?\b/g;
+// "$M", "M$", "$K" and "k$" right after a figure scale that figure ("Valeur 4.2 M$"), not the figures below it.
+const SCALE_PHRASE_RE = /\$\s?['’]?000s?\b|\b000s?\s?\$|['’]000s?\b|\(\s*000s?\s*\)|\$\s?mm\b|(?<!\d\s?)(?:\$\s?[mk]\b|\b[mk]\$)|\bthousands?\b|\bmilliers?\b|\bmillions?\b/g;
 const SCALE_MEASURE_RE = /\b(?:areas?|superficies?|surfaces?|sf|sq\.? ?ft|square|pi2|m2|units?|unites?|logements?|doors?|suites?|homes?|population|people|persons?|habitants?|stalls?|employees?)\b/;
 const SCALE_NOTE = "The document states a scale for these amounts that Agir cannot read safely; enter the figure";
 const OWN_SCALE_RE = /\d\s?(?:billions?|bn|millions?|mm|mn|m|thousands?|k)\b/i;
 
-/** The money scales a text states, one entry per scale phrase; a phrase that measures something else (areas, units, people) is left out. */
-function statedScales(text: string): Stated[] {
+// A number word just before "million" or "thousand" makes it part of a figure written in words ("Twenty One Million Seven Hundred Fifty / Thousand Dollars").
+const NUMBER_WORD_END = /\b(?:an?|one|two|three|four|five|six|seven|eight|nine|ten|eleven|twelve|thirteen|fourteen|fifteen|sixteen|seventeen|eighteen|nineteen|twenty|thirty|forty|fifty|sixty|seventy|eighty|ninety|hundred|un|une|deux|trois|quatre|cinq|sept|huit|neuf|dix|onze|douze|treize|quatorze|quinze|seize|vingt|trente|quarante|cinquante|soixante|cents?)\s*$/;
+
+/** The money scales a text states, one entry per scale phrase; a phrase that measures something else (areas, units, people) is left out. `before` is the preceding line, for a figure in words that wraps. */
+function statedScales(text: string, before = ""): Stated[] {
   const f = fold(text).replace(/²/g, "2");
   const out: Stated[] = [];
   for (const m of f.matchAll(SCALE_PHRASE_RE)) {
-    const factor = /million|mm/.test(m[0]) ? 1e6 : 1e3;
+    const lead = f.slice(0, m.index);
+    if (NUMBER_WORD_END.test(lead.trim() ? lead : fold(before))) continue;
+    const factor = /million|mm|\$\s?m\b|\bm\$/.test(m[0]) ? 1e6 : 1e3;
     // The words between the nearest delimiters; inside parentheses the words just before them count too ("Units (thousands)").
     const left = Math.max(...[";", ",", "|", "(", ")"].map((d) => f.lastIndexOf(d, m.index! - 1)));
     const right = Math.min(...[";", ",", "|", ")"].map((d) => (f.indexOf(d, m.index! + m[0].length) + 1 || f.length + 1) - 1));
@@ -2698,13 +2704,19 @@ const rulingOf = (stated: Stated[]): Ruling | null => {
 /** A heading or title line: it states a scale and holds no figure of its own. */
 const isScaleHeading = (text: string, stated: Stated[]) => stated.length > 0 && text.trim().split(/\s+/).length <= 14 && !/\d/.test(fold(text).replace(SCALE_PHRASE_RE, " ").replace(/\b(?:19|20)\d\d\b/g, " "));
 
-/** For every line location and cell reference: the scale that governs it (a heading line; a sheet name, caption row or column header, the column's header winning), and whether the cell's own text carries a scale. */
-function scalings(doc: NormalizedDocument, format: DocumentFormat): Map<string, Scaling> {
+/** For every line location and cell reference: the scale that governs it (a heading line; a sheet name, caption row or column header, the column's header winning), and whether the cell's own text carries a scale.
+ * `byPage`: a heading line governs only the rest of its page. The verifier asks for this; the rule reader, frozen as the fallback, keeps a heading to the end of the document. */
+function scalings(doc: NormalizedDocument, format: DocumentFormat, byPage = false): Map<string, Scaling> {
   const out = new Map<string, Scaling>();
   let heading: Stated[] = [];
   const headingAt: Stated[][] = [];
+  let before = "";
+  let page = "";
   for (const l of doc.lines) {
-    const stated = statedScales(l.text);
+    const at = /^page (\d+),/.exec(l.location)?.[1] ?? "";
+    if (byPage && at !== page) [page, heading] = [at, []];
+    const stated = statedScales(l.text, before);
+    before = l.text;
     if (isScaleHeading(l.text, stated)) heading = stated;
     // Another heading under a scale heading may start a section the scale does not cover ("Financing"): its figures are neither scaled nor read as written.
     else if (heading.length > 0 && stated.length === 0 && l.text.trim() !== "" && !/\d/.test(l.text) && l.text.trim().split(/\s+/).length <= 6) heading = ["unclear"];
@@ -2732,6 +2744,18 @@ function scalings(doc: NormalizedDocument, format: DocumentFormat): Map<string, 
   return out;
 }
 
+/** The declared money scale governing a single verification address. The verifier asks once per reading, so each document's map is kept. */
+const DECLARED = new WeakMap<NormalizedDocument, Map<string, Scaling>>();
+export function declaredScale(doc: NormalizedDocument, format: DocumentFormat, location: string): Scaling {
+  let map = DECLARED.get(doc);
+  if (!map) DECLARED.set(doc, map = scalings(doc, format, true));
+  return map.get(location) ?? { rule: null, own: false };
+}
+
+export function statedScaleUnit(factor: number): string {
+  return `$ (stated in ${factor === 1e3 ? "thousands" : "millions"}; × ${factor.toLocaleString("en-US")})`;
+}
+
 /** Money candidates under a declared scale are multiplied by it; ones under a scale that is unclear, or differs, are shown with a note instead. */
 function applyScales(doc: NormalizedDocument, result: ExtractionResult) {
   const map = scalings(doc, result.format);
@@ -2753,7 +2777,7 @@ function applyScales(doc: NormalizedDocument, result: ExtractionResult) {
     }
     const factor = [...factors][0]!;
     c.value = Number((c.value * factor).toPrecision(12));
-    c.unitSeen = withCurrency(`$ (stated in ${factor === 1e3 ? "thousands" : "millions"}; × ${factor.toLocaleString("en-US")})`, currencyOf(c.unitSeen));
+    c.unitSeen = withCurrency(statedScaleUnit(factor), currencyOf(c.unitSeen));
     return true;
   });
 }

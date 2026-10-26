@@ -1380,6 +1380,8 @@ const SALE_SHARES: Record<string, string> = {
 };
 
 const FR_REASONS: [RegExp, string | ((m: RegExpMatchArray) => string)][] = [
+  [/^The document states a scale for this amount that Agir cannot read safely$/, "Le document indique pour ce montant une échelle qu’Agir ne peut pas lire avec certitude"],
+  [/^The AI amount is under \$1,000; check whether the document states it in thousands or millions$/, "Le montant IA est inférieur à 1 000 $; vérifiez si le document l’exprime en milliers ou en millions"],
   [/^One soft-cost item \(a permit\), not the total soft cost; enter the total$/, "Un poste des coûts indirects (un permis), pas le total des coûts indirects ; entrez le total"],
   [/^(.+\.) The documents state (.+) units in all; the types read so far have (.+)\.$/, m => `${translateMessage(m[1])} Les documents indiquent ${m[2]} logements au total ; les types lus jusqu’ici en comptent ${m[3]}.`],
   [/^The 1 unit of type (.+) has no rent in the documents\.$/, m => `Les documents ne donnent aucun loyer pour le logement de type ${m[1]}.`],
@@ -1514,6 +1516,7 @@ const FR_REASONS: [RegExp, string | ((m: RegExpMatchArray) => string)][] = [
   [/^The AI quote is not at this address$/, "La citation IA ne se trouve pas à cette adresse"],
   [/^The AI value is not written in its quote$/, "La valeur IA n’est pas écrite dans sa citation"],
   [/^The AI unit does not match this field$/, "L’unité IA ne correspond pas à ce champ"],
+  [/^Please check: the separator in this figure can be read more than one way; the AI read it as shown$/, "À vérifier : le séparateur de ce chiffre peut se lire de plus d’une façon; l’IA l’a lu comme indiqué"],
   [/^Please check: the separator in this figure could be a decimal point or a thousands group; the AI read it as shown$/, "À vérifier : le séparateur de ce chiffre pourrait être une virgule décimale ou un séparateur de milliers; l’IA l’a lu comme indiqué"],
   [/^Please check: every source is a low-confidence AI reading$/, "À vérifier : chaque source est une lecture IA de faible confiance"],
   [/^Rejected in review$/, "Rejetée à l'examen"],
