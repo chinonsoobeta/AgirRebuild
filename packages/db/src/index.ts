@@ -167,7 +167,8 @@ export async function asUser<T>(db: Db, userId: string, fn: (tx: Db) => Promise<
   });
 }
 
-export { fileStore, sha256Hex, type BlobStore } from "./storage.ts";
+export { fileStore, s3Store, sha256Hex, type BlobStore, type S3Like, type S3StoreOptions } from "./storage.ts";
+export { checkStartup, openStore, type AgirEnv, type Startup, type StoreConfig } from "./startup.ts";
 
 /** A deal's unretired documents, as the AI reader keys its stored reading on them (card 160a). */
 export const currentDocuments = (db: Db, dealId: string) =>

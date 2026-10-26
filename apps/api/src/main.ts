@@ -2,31 +2,32 @@ import { existsSync, mkdirSync, readFileSync } from "node:fs";
 import { join, relative, resolve } from "node:path";
 import { serve } from "@hono/node-server";
 import { serveStatic } from "@hono/node-server/serve-static";
-import { fileStore, migrate, openPglite, openPostgres } from "@agir/db";
+import { checkStartup, migrate, openPglite, openPostgres, openStore, type Startup } from "@agir/db";
 import { startWorker } from "@agir/worker";
 import { createApp } from "./app.ts";
 import { fileMailer, unsentMailer } from "./mailer.ts";
 import { DEMO, seedDemo } from "./seed.ts";
 
 const root = resolve(import.meta.dirname, "../../..");
-const env = process.env.AGIR_ENV ?? "development";
+let startup: Startup;
+try {
+  startup = checkStartup(process.env);
+} catch (e) {
+  console.error((e as Error).message);
+  process.exit(1);
+}
+const env = startup.env;
+for (const w of startup.warnings) console.warn(w);
 const dataDir = resolve(process.env.AGIR_DATA_DIR ?? join(root, ".data"));
 mkdirSync(dataDir, { recursive: true });
 const port = Number(process.env.PORT ?? 8787);
-
-if (env === "production") {
-  for (const k of ["DATABASE_URL", "AGIR_RUN_SIGNING_SECRET"]) {
-    if (!process.env[k]) {
-      console.error(`${k} is required in production.`);
-      process.exit(1);
-    }
-  }
-}
+// 127.0.0.1 behind a proxy on the same host; 0.0.0.0 in a container.
+const bind = process.env.AGIR_BIND || "127.0.0.1";
 
 const db = process.env.DATABASE_URL ? await openPostgres(process.env.DATABASE_URL) : await openPglite(join(dataDir, "pg"));
 const { applied } = await migrate(db);
 if (applied.length) console.log(`Applied migrations: ${applied.join(", ")}`);
-const store = fileStore(join(dataDir, "blobs"));
+const store = openStore(startup.store, dataDir);
 
 if (env !== "production" && process.env.AGIR_SEED !== "0") {
   await seedDemo(db, store);
@@ -52,7 +53,7 @@ if (existsSync(webDist)) {
 const embeddedWorker = !process.env.DATABASE_URL || process.env.AGIR_EMBEDDED_WORKER === "1";
 if (embeddedWorker) startWorker({ db, store, log: (e) => (e.event === "job.done" ? undefined : console.log(JSON.stringify(e))) });
 
-serve({ fetch: app.fetch, port, hostname: "127.0.0.1" }, () => {
-  console.log(`Agir API listening on http://127.0.0.1:${port}`);
+serve({ fetch: app.fetch, port, hostname: bind }, () => {
+  console.log(`Agir API listening on http://${bind}:${port}`);
   if (env !== "production") console.log(`Demo sign-in: ${DEMO.analyst.email} / ${DEMO.analyst.password} (second approver: ${DEMO.approver.email})`);
 });
