@@ -150,7 +150,7 @@ export function createApp({ db, store, secureCookies, demoSignIn = false, trustP
   const fileResponse = async (a: { kind: string; format: string; storage_key: string | null; run_number: number; deal: string; lang?: "en" | "fr" }, inline: boolean) => {
     const bytes = await store.get(a.storage_key!);
     const mime = { pdf: "application/pdf", docx: "application/vnd.openxmlformats-officedocument.wordprocessingml.document", xlsx: "application/vnd.openxmlformats-officedocument.spreadsheetml.sheet" }[a.format] ?? "application/octet-stream";
-    const label = { ic_memo: "IC memo", lender_package: "Lender package", build_decision: "Build decision", partner_memo: "Partner memo", model_export: "Model" }[a.kind] ?? a.kind;
+    const label = { ic_memo: "Committee memo", lender_package: "Lender package", build_decision: "Build decision", partner_memo: "Partner memo", model_export: "Model" }[a.kind] ?? a.kind;
     return new Response(new Uint8Array(bytes), {
       headers: { "content-type": mime, "content-disposition": `${inline && a.format === "pdf" ? "inline" : "attachment"}; filename="${encodeURIComponent(`${fileStem(a.deal)} - ${label} - Run ${a.run_number}${a.lang === "fr" ? "-fr" : ""}.${a.format}`)}"` },
     });

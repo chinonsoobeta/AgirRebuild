@@ -244,7 +244,7 @@ export async function dealOverview(tx: Db, dealId: string) {
   } else {
     step = "reports";
     status = { tone: decision.decision.startsWith("approve") ? "pass" : "stop", text: `Decided: ${decision.decision.replace(/_/g, " ")}` };
-    next = (artifacts?.n ?? 0) > 0 ? "Share the reports" : "Generate the IC memo";
+    next = (artifacts?.n ?? 0) > 0 ? "Share the reports" : "Generate the reports";
   }
   const { copied_from: _copiedFrom, ...place } = deal;
   return {
