@@ -82,6 +82,16 @@ export function Shell({ children }: { children: ReactNode }) {
   const onDeals = path.startsWith("/deals") || path === "/";
   const onSettings = path.startsWith("/settings");
   const closed = Boolean(me.workspaces.find((w) => w.id === workspaceId)?.closed_at);
+  const workspacePicker = (id: string) => me.workspaces.length > 1 ? (
+    <>
+      <label className="sr-only" htmlFor={id}>{t("common.workspace")}</label>
+      <select id={id} className="ws" value={workspaceId} onChange={(e) => setWorkspace(e.target.value)}>
+        {me.workspaces.map((w) => <option key={w.id} value={w.id}>{w.name}</option>)}
+      </select>
+    </>
+  ) : (
+    <span className="ws-name">{me.workspaces[0]?.name}</span>
+  );
   return (
     <>
       <a className="skip" href="#main-content" onClick={(e) => { e.preventDefault(); document.getElementById("main-content")?.focus(); }}>{t("shell.skip")}</a>
@@ -97,22 +107,23 @@ export function Shell({ children }: { children: ReactNode }) {
           <Link to="/settings" className={onSettings ? "current" : undefined} aria-current={onSettings ? "page" : undefined}>{t("nav.settings")}</Link>
         </nav>
         <div className="topbar-right">
-          {me.workspaces.length > 1 ? (
-            <>
-              <label className="sr-only" htmlFor="ws-select">{t("common.workspace")}</label>
-              <select id="ws-select" className="ws" value={workspaceId} onChange={(e) => setWorkspace(e.target.value)}>
-                {me.workspaces.map((w) => <option key={w.id} value={w.id}>{w.name}</option>)}
-              </select>
-            </>
-          ) : (
-            <span className="ws-name">{me.workspaces[0]?.name}</span>
-          )}
+          {workspacePicker("ws-select")}
           <LanguageSwitch className="toplink" />
           <ThemeToggle />
           <span className="avatar" aria-hidden="true">{initials(me.user.name, me.user.email)}</span>
           <span className="who">{me.user.name} · {L.role(role)}</span>
           <button type="button" className="toplink" onClick={signOut}>{t("nav.signOut")}</button>
         </div>
+        {/* Below 600 px the same controls fold into the avatar, so the bar keeps one row on a phone (QA #17). */}
+        <details className="me-menu">
+          <summary aria-label={t("shell.menu", { name: me.user.name || me.user.email })}><span className="avatar" aria-hidden="true">{initials(me.user.name, me.user.email)}</span></summary>
+          <div className="me-panel">
+            <span className="who">{t("shell.signedInAs", { name: me.user.name || me.user.email, role: L.role(role) })}</span>
+            {workspacePicker("ws-select-menu")}
+            <div className="row"><LanguageSwitch className="toplink" /><ThemeToggle /></div>
+            <button type="button" className="toplink" onClick={signOut}>{t("nav.signOut")}</button>
+          </div>
+        </details>
       </header>
       <main className="page" id="main-content" tabIndex={-1}>
         {/* Card F: on every screen of a closed workspace, before anything that would offer a change. */}
@@ -184,11 +195,12 @@ export function Glossary() {
 
 const STEPS = ["documents", "review", "run", "decision", "reports"] as const;
 
-/** Review waits on documents only when the deal has neither documents nor entered values, or documents are still being read. */
-export function reviewWaiting(o: Pick<DealOverview, "documents" | "review">): boolean {
-  const r = o.review;
-  const hasValues = r.approved + r.needsReview + r.conflicting + r.awaitingSecond > 0;
-  return o.documents.processing > 0 || (o.documents.total === 0 && !hasValues);
+const hasValues = (r: DealOverview["review"]) => r.approved + r.needsReview + r.conflicting + r.awaitingSecond > 0;
+
+/** Review waits on documents when the deal has no usable document (none, or only failed ones) and no entered values, while
+ * documents are still being read, or while the review is being rebuilt from them (the AI reading included). */
+export function reviewWaiting(o: Pick<DealOverview, "documents" | "review"> & { updating?: boolean }): boolean {
+  return o.documents.processing > 0 || Boolean(o.updating) || (o.documents.total - o.documents.failed === 0 && !hasValues(o.review));
 }
 
 type StepKey = (typeof STEPS)[number];
@@ -205,8 +217,11 @@ export function pathStates(o: DealOverview, i: I18n, solo: boolean): PathState[]
       case "documents":
         if (o.documents.total === 0) return { text: t("step.noDocs"), tone: "faint" };
         if (o.documents.processing) return { text: t("step.reading", { n: o.documents.processing }), tone: "normal" };
-        return { text: t("step.read", { n: o.documents.total, failed: o.documents.failed }), tone: o.documents.failed ? "stop" : "done" };
+        // A rejected file is counted once, as failed, never also as read.
+        return { text: t("step.read", { n: o.documents.total - o.documents.failed, failed: o.documents.failed }), tone: o.documents.failed ? "stop" : "done" };
       case "review":
+        // While reading, the counts would only change (13 missing, then 1 missing and 22 to review): say "Reading…", neutral.
+        if (o.documents.processing > 0 || o.updating) return { text: t(hasValues(o.review) && !o.documents.processing ? "shell.updating" : "shell.reading"), tone: "faint" };
         if (reviewWaiting(o)) return { text: t("step.waitingDocs"), tone: "faint" };
         if (o.review.status === "ready") return { text: t("step.clear"), tone: "done" };
         return { text: status.text, tone: "stop" };
@@ -249,6 +264,8 @@ export function DealPath({ o, active }: { o: DealOverview; active: string }) {
 }
 
 /** The deal's units and how it ends, as the deal heading and the shared page say them: "6 rental units, kept and refinanced".
+ * A deal's "sale" is also what no recorded choice means, so the deal pages pass null for it and say the plan apart (QA #7);
+ * the shared page states a run's exit, which that run did use.
  * Each part shows only when the API knows it (null means not approved yet), so it is never a 0 or a guess; "" when neither is known. */
 export function dealFacts(i: Pick<I18n, "t" | "f">, units: number | null | undefined, exit: DealOverview["exit"] | undefined): string {
   const known = typeof units === "number";
@@ -288,8 +305,10 @@ export function DealFrame({ o, active }: { o: DealOverview; active: string }) {
           <h1 className="deal-name">{o.deal.name}</h1>
           {/* As the boards: "Edmonton, Alberta · 6 rental units, kept and refinanced · amounts in Canadian dollars". The asset type
               stays until the units and the exit say what the deal is, as on the deals home. */}
-          <p className="meta">{[L.place(o.deal.location, o.deal.province), o.units != null && o.exit != null ? "" : L.asset(o.deal.asset_type), dealFacts(i, o.units, o.exit),
-            currency ? t("deals.amountsIn", { c: currency[i.lang === "fr" ? 1 : 0] }) : L.currency(null)].filter(Boolean).join(" · ")}</p>
+          <p className="meta">{[L.place(o.deal.location, o.deal.province), o.units != null && o.exit != null ? "" : L.asset(o.deal.asset_type), dealFacts(i, o.units, o.exit === "sale" ? null : o.exit),
+            currency ? t("deals.amountsIn", { c: currency[i.lang === "fr" ? 1 : 0] }) : L.currency(null)].filter(Boolean).join(" · ")}
+            {/* A sale is also what no recorded choice means, so it is a plan the reader can change, not a fact (QA #7). */}
+            {o.exit === "sale" && <> · {t("shell.planSell")} (<Link to="/deals/$dealId/review" params={{ dealId: o.deal.id }} hash="choices">{t("shell.planChange")}</Link>)</>}</p>
           {o.copiedFrom && (
             <p className="small muted variant-of">{t("copy.variantOf")} <Link to="/deals/$dealId/review" params={{ dealId: o.copiedFrom.id }}>{o.copiedFrom.name}</Link></p>
           )}

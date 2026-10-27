@@ -99,7 +99,7 @@ const SHARED_EN = {
   "copy.variantOf": "Variant of",
   "step.noDocs": "No documents",
   "step.reading": (p) => `Reading ${p.n}`,
-  "step.read": (p) => `${p.n} read${p.failed ? `, ${p.failed} failed` : ""}`,
+  "step.read": (p) => [p.n ? `${p.n} read` : "", p.failed ? `${p.failed} failed` : ""].filter(Boolean).join(", "),
   "step.waitingDocs": "Waiting for documents",
   "step.clear": "Clear",
   "step.readyToRun": "Ready to run",
@@ -231,7 +231,7 @@ const SHARED_FR: FrenchOf<typeof SHARED_EN> = {
   "copy.variantOf": "Variante de",
   "step.noDocs": "Aucun document",
   "step.reading": (p) => `Lecture de ${p.n}`,
-  "step.read": (p) => `${p.n} ${s(p.n, "lu", "lus")}${p.failed ? `, ${p.failed} en échec` : ""}`,
+  "step.read": (p) => [p.n ? `${p.n} ${s(p.n, "lu", "lus")}` : "", p.failed ? `${p.failed} en échec` : ""].filter(Boolean).join(", "),
   "step.waitingDocs": "En attente des documents",
   "step.clear": "Terminé",
   "step.readyToRun": "Prêt à lancer",
@@ -915,6 +915,8 @@ export function checkText(i: I18n, c: CheckLike, ltcCeiling = 85): string {
 export type OverviewLike = {
   step: string;
   documents: { total: number; processing: number; failed: number };
+  /** A reconcile is queued or the AI reading is running: the review counts are not the ones Review will show yet. */
+  updating?: boolean;
   review: { approved: number; needsReview: number; conflicting: number; awaitingSecond: number; missing: number; impossible: number; status: string };
   run: { verdict: string; fresh: boolean } | null;
   decision: { decision: string } | null;
@@ -926,11 +928,13 @@ export function dealStatus(i: I18n, o: OverviewLike, solo = false): { tone: "pas
   const { t, L } = i;
   const r = o.review;
   // Documents are optional evidence: a deal with values and no documents is read from its values, as the server's overview does.
-  if (o.documents.total === 0 && r.approved + r.needsReview + r.conflicting + r.awaitingSecond === 0) return { tone: "neutral", text: t("status.noDocs"), next: t("next.upload"), blockedParts: [] };
-  if (o.documents.processing > 0) {
+  // A file that was rejected or could not be read gives nothing to review, so it counts as no document here.
+  if (o.documents.total - o.documents.failed === 0 && r.approved + r.needsReview + r.conflicting + r.awaitingSecond === 0) return { tone: "neutral", text: t("status.noDocs"), next: t("next.upload"), blockedParts: [] };
+  // Until the documents are read and the review rebuilt (the AI reading included), the counts would only change: say so instead.
+  if (o.documents.processing > 0 || o.updating) {
     return {
       tone: "neutral",
-      text: t("status.reading", { n: o.documents.processing }),
+      text: o.documents.processing > 0 ? t("status.reading", { n: o.documents.processing }) : t("shell.readingValues"),
       next: o.documents.failed ? t("next.retry", { n: o.documents.failed }) : t("next.wait"),
       blockedParts: [],
     };

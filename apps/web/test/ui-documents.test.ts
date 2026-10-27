@@ -68,7 +68,7 @@ describe("Documents screen", () => {
     expect(html).toContain('aria-label="Could not be read"');
     expect(html).toContain('aria-label="Read, values found"');
     expect(html).toContain("3 values found");
-    expect(html).toContain("2 other figures kept but not used");
+    expect(html).toContain("2 figures not needed (<a href=\"/deals/d1/review\">show</a>)");
     expect(html).toContain("Numbers written as 1.234,56: check each value");
     expect(html).toContain("This file could not be used.");
     expect(html).toContain("This file type cannot be read");
@@ -122,6 +122,27 @@ describe("Documents screen", () => {
     expect(count(html, ">Retry<")).toBe(1);
     const retryRow = html.split("<tr").find((r) => r.includes(">Retry<"))!;
     expect(retryRow).toContain("read_failed.pdf");
+  });
+
+  it("counts a rejected file only as failed, finishes its sentence, and keeps the quick start (QA #18)", () => {
+    state.docs = [row("rejected", { stage_detail: "The file does not start like a PDF" })];
+    const html = render();
+    expect(html).toContain("1 could not be used");
+    expect(html).not.toMatch(/\d+ read\b/);
+    expect(html).toContain("The file does not start like a PDF.");
+    expect(html).toContain("Remove it, then upload the original file again.");
+    expect(html).not.toMatch(/PDF\s*—/);
+    expect(html).toContain("Quick start form");
+    expect(html).toContain("No documents? Use the quick start");
+    expect(html).not.toContain("No documents yet. Upload");
+  });
+
+  it("gives each row an id and its cells labels, so a phone can stack them as cards (QA #17)", () => {
+    const html = render();
+    expect(html).toContain('id="doc-doc-extracted"');
+    expect(html).toContain('data-label="Checked · Read · Values"');
+    expect(html).toContain('data-label="Result"');
+    expect(html).toContain('class="scroll docs-list"');
   });
 
   it("links to the quick start only when the deal has no documents", () => {

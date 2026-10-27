@@ -139,13 +139,14 @@ describe("the deals list", () => {
 });
 
 describe("the first visit", () => {
-  it("welcomes an editor by first name and offers the two ways in, both through the new-deal page", () => {
+  it("welcomes an editor by first name and offers one way in, the new-deal page (QA #22)", () => {
     const html = renderToStaticMarkup(createElement(Deals));
     const t = text(html);
     expect(t).toContain("Welcome, Chinonso.");
-    expect(t).toContain("Start from documents");
-    expect(t).toContain("Answer a few questions");
-    expect(html.match(/href="\/deals\/new"/g)?.length).toBe(2);
+    expect(t).toContain("New deal");
+    expect(t).toContain("Name your project, then type your numbers or upload documents.");
+    expect(t).not.toContain("Quick start");
+    expect(html.match(/href="\/deals\/new"/g)?.length).toBe(1);
     expect(t.toLowerCase()).not.toContain("sample");
   });
 
@@ -154,7 +155,7 @@ describe("the first visit", () => {
     const html = renderToStaticMarkup(createElement(Deals));
     expect(text(html)).toContain("There are no deals you can see yet.");
     expect(html).not.toContain('href="/deals/new"');
-    expect(text(html)).not.toContain("Start from documents");
+    expect(text(html)).not.toContain("Name your project");
   });
 });
 
