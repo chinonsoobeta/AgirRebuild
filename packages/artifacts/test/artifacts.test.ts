@@ -331,12 +331,57 @@ describe("the build decision report", () => {
     expect(text).toContain("Weakest stress: Combined");
     expect(text).toContain("Everything else is held");
     expect(text).not.toContain("rents move together");
-    expect(text).toContain("Every input and its source is listed in the IC memo and the lender package.");
+    expect(text).toContain("Every input and its source is listed in the Committee memo and the lender package.");
     expect(text).not.toContain("Approved inputs and where each came from");
-    expect(text).toContain("Out of range");
+    // Card C5: moves out of range are counted and named in one line, not as table rows.
+    expect(text).toMatch(/\d+ inputs? cannot pass within (its|their) range: /);
+    expect(text).not.toContain("Out of range");
     expect(text).toContain("Not monotonic");
+    expect(text).toContain("Agir is not an appraiser, a lender or an adviser. It does not give financial advice, and its reports are not an appraisal.");
+    expect(text).toContain("All the cash paid back to equity divided by all the equity put in.");
     expect(model.formatter.manifest.some((e) => /^run:breakeven\.equity_multiple\.rent/.test(e.ref))).toBe(true);
     expect((await renderArtifact(x, "docx")).provenance.pass).toBe(true);
+  });
+  test("card C5: the values you stated, the named defaults and the latest decision are listed and traced", async () => {
+    const x = mapleInput("build_decision");
+    x.run = { ...x.run, createdBy: "Rowan Builder" };
+    const typed = x.assumptions.find((a) => a.fieldKey === "exit_cap_rate_pct")!;
+    Object.assign(typed, { sourceKind: "analyst", value: 5.75, source: "Entered by Rowan Builder: broker quote of 5.75%", sponsorStated: true });
+    x.assumptions.push({ fieldKey: "expense_ratio_pct", itemKey: null, label: "Operating expense ratio", unit: "%", value: 35, sourceKind: "default", source: "Default accepted" });
+    x.decision = { decision: "reject", rationale: "Sale proceeds miss the debt by $1,363,812; revisit in 2027.", conditions: null, decidedBy: "Rowan Builder", createdAt: "2026-10-27T14:00:00Z" };
+    const { model, text, scan } = textOf(x);
+    expect(scan.orphans).toEqual([]);
+    for (const heading of ["Values you stated yourself", "Named defaults accepted", "Latest recorded decision"]) expect(text).toContain(heading);
+    expect(text).toContain("Exit cap rate 5.75%");
+    expect(text).toContain("Operating expense ratio 35.00% Default accepted");
+    expect(text).toContain("Reject, recorded by Rowan Builder on 2026-10-27.");
+    expect(text).toContain("Reasoning: Sale proceeds miss the debt by $1,363,812; revisit in 2027.");
+    expect(text).toContain("Values were read from the documents by Agir's rules and by an AI reader, then confirmed by Rowan Builder.");
+    expect(text).toContain("Agir is not an appraiser, a lender or an adviser.");
+    const at = (s: string) => text.indexOf(s);
+    expect(at("Values you stated yourself")).toBeLessThan(at("Named defaults accepted"));
+    expect(at("Named defaults accepted")).toBeLessThan(at("Latest recorded decision"));
+    // Each printed figure of the new sections is in the manifest with its source.
+    const refs = model.formatter.manifest.map((m) => m.ref);
+    expect(refs).toEqual(expect.arrayContaining(["input:exit_cap_rate_pct", "input:expense_ratio_pct", "ident:decision.rationale", "ident:decision.date", "ident:decision.decidedBy", "ident:run.createdBy"]));
+    expect((await renderArtifact(x, "docx")).provenance).toMatchObject({ pass: true, orphans: [] });
+    // Without them, none of the three sections is printed.
+    const bare = textOf(mapleInput("build_decision")).text;
+    for (const heading of ["Values you stated yourself", "Named defaults accepted", "Latest recorded decision"]) expect(bare).not.toContain(heading);
+    expect(bare).toContain("then confirmed on Review.");
+  });
+  test("card C5: In this run is never a dash, and moves out of range are one line", () => {
+    const x = dealInput(1);
+    const t = buildModel(x).blocks.find((b) => b.type === "table" && b.columns[0]!.label === "Gate");
+    expect(t?.type).toBe("table");
+    if (t?.type !== "table") return;
+    for (const r of t.rows) {
+      expect(r[4]).not.toBe("\u2014");
+      expect(r[5]).not.toBe("Out of range");
+    }
+    const outOfRange = breakeven(x.input, x.policy).rows.filter((r) => r.state === "out_of_range" && x.result.verdict.gates.some((g) => g.key === r.gate && g.status === "failed")).length;
+    expect(outOfRange).toBeGreaterThan(0);
+    expect(textOf(x).text).toContain(`${outOfRange} inputs cannot pass within their range: `);
   });
   test("an approved run has no break-even section and names its weakest stress", () => {
     const x = dealInput(1.6);
@@ -405,9 +450,10 @@ describe("the build decision report", () => {
     const x = dealInput(1);
     const rows = table(x).filter((r) => r[3]!.startsWith("Rent"));
     expect(rows.length).toBeGreaterThan(0);
-    for (const r of rows.filter((r) => r[5] !== "Out of range" && r[5] !== "No effect" && r[5] !== "Not monotonic")) {
+    for (const r of rows.filter((r) => r[5] !== "No effect" && r[5] !== "Not monotonic")) {
       expect(r[3]).toBe("Rent, all 3 unit types (same share)");
-      expect(r[4]).toBe("\u2014");
+      // Card C5: never a dash where the run has the values; each rent moves from its own.
+      expect(r[4]).toBe("Each as entered");
       expect(r[5]).toMatch(/^\+\d+\.\d{2}%$/);
     }
     expect(table(x).some((r) => /^Rent, (1BR|2BR|3BR)/.test(r[3]!))).toBe(false);
@@ -520,7 +566,7 @@ describe("a deal that is kept and refinanced (card 60)", () => {
       const start = rows.findIndex((r) => r[3] === "Loan interest rates, all 2 together (same move)");
       expect(start).toBeGreaterThanOrEqual(0);
       expect(rows.slice(start, start + 3).map((r) => r.slice(3))).toEqual([
-        ["Loan interest rates, all 2 together (same move)", "—", "-30 bps"],
+        ["Loan interest rates, all 2 together (same move)", "Each as entered", "-30 bps"],
         ["Senior loan rate, in the same move", "6.00%", "5.70%"],
         ["Refinance rate, in the same move", "5.25%", "4.95%"],
       ]);
@@ -655,9 +701,11 @@ describe("a deal that is kept and refinanced (card 60)", () => {
   describe("the reports for a deal that sells its units (task 80)", () => {
     test.each([
     // card 97c: DSCR→DCR rename only; text otherwise identical to `29531862e11b0510111895565f213a8c2d4975d8f2fe79d694e646e4f056f404`
-    ["ic_memo", "22e94946039c8786f9a8793faf7c7d1686ed3bae5b8b7977ea14a4c79c7df731"],
+    // card C5: the kicker is "Committee memo" (was "Investment Committee memorandum"); was `22e94946039c8786f9a8793faf7c7d1686ed3bae5b8b7977ea14a4c79c7df731`
+    ["ic_memo", "e418aab1ea5f92132f0f47bedb5ebe1fda122f07e3f64175f2ea3990b489c6ef"],
     // card 97c: DSCR→DCR rename only; text otherwise identical to `d605a268e8b161c97f6b79a3855f06c93aa3bc3f9a7b0e283b8671c0c8a4b98f`
-    ["build_decision", "61757e6912b7e04bbcee1c3fe37927271b3da4409678b6d8446d535771888a08"],
+    // card C5: plain sentences under the figures, the reading and not-advice line, "Committee memo"; was `61757e6912b7e04bbcee1c3fe37927271b3da4409678b6d8446d535771888a08`
+    ["build_decision", "1b990ebcda4f738ddc2395740f98eb539ce411697dbb9990d65092facd67e6aa"],
     // card 97c: DSCR→DCR rename only; text otherwise identical to `4cf6ef2277600502cf073624101fc3988664370849ef77e986513ebe66afb08a`
     ["lender_package", "a0cc7a283f1ce22d258878b616a500a5eaafc457f2cc6169abb023d08d0e609b"]] as const)("the existing held %s text is byte-identical", (kind, hash) => {
       expect(createHash("sha256").update(textOf(holdInput(kind)).text).digest("hex")).toBe(hash);
@@ -742,9 +790,11 @@ const saleTable = (model: ReturnType<typeof buildModel>, caption: string) => {
 describe("the reports for a deal that sells its units (task 80)", () => {
   test.each([
     // card 97c: DSCR→DCR rename only; text otherwise identical to `fa9dd2f818ca58ba1500ec30db01d5171229546e8828b96d74e9f0138bf93812`
-    ["ic_memo", "200c7159ce649a03fff64ef222399b755da85112d8fce957b0f6df3ea69ff7c4"],
+    // card C5: the kicker is "Committee memo"; was `200c7159ce649a03fff64ef222399b755da85112d8fce957b0f6df3ea69ff7c4`
+    ["ic_memo", "d3d3ec880ff45e2a17988e065670650800bc527d9ba55b0b071933d2e5f113a1"],
     // card 97c: DSCR→DCR rename only; text otherwise identical to `64389bea70bedfb6f257617d58cc54d1bfff3bf08f55eb90e2f967f1d91736d0`
-    ["build_decision", "161df3ae41c30a1322c47bf6b2cb6d4b4b7c18b34de0dbc177b2e819aca70fd9"],
+    // card C5: plain sentences under the figures, the reading and not-advice line, "Committee memo"; was `161df3ae41c30a1322c47bf6b2cb6d4b4b7c18b34de0dbc177b2e819aca70fd9`
+    ["build_decision", "d8f5e1487d0a3b9e59d731e8cf3775a2acaec38388cb2d04fefd6c074dd3b156"],
     // card 97c: DSCR→DCR rename only; text otherwise identical to `5f81e68b930e8735a4036eba356bad6242bc1e05cdaa3ca89a84a69f47dd208c`
     ["lender_package", "be3357a81416eb58bb60c7147850071e584947e517fa7b5e77e3f44bd5cf9641"]] as const)("the existing Maple Heights %s text is byte-identical", (kind, hash) => {
     // card E: the unsigned-policy line is the only change; without it, the text is this pin.
@@ -900,8 +950,9 @@ describe("what would change the answer for a deal that sells its units (task 83)
     const result = breakeven(x.input, x.policy);
     for (const g of failing) {
       const rows = gateRows(model, g.label);
-      const expectedCount = result.rows.filter((r) => r.gate === g.key).reduce((n, r) =>
-        n + (r.state !== "value" || r.driver === "pricePct" ? 1 : r.to.length + (r.driver === "rateBps" && r.to.length > 1 ? 1 : 0)), 0);
+      // Card C5: a move out of range is not a row; a gate with no other move keeps one row that says so.
+      const expectedCount = Math.max(1, result.rows.filter((r) => r.gate === g.key).reduce((n, r) =>
+        n + (r.state === "out_of_range" ? 0 : r.state !== "value" || r.driver === "pricePct" ? 1 : r.to.length + (r.driver === "rateBps" && r.to.length > 1 ? 1 : 0)), 0));
       expect(rows).toHaveLength(expectedCount);
       expect(rows[0]!.slice(1, 3)).toEqual([formatValue(g.threshold, g.unit), formatValue(g.actual!, g.unit)]);
       expect(rows.every((r) => r.length === 6)).toBe(true);
@@ -927,7 +978,7 @@ describe("what would change the answer for a deal that sells its units (task 83)
       const g = x.result.verdict.gates.find((g) => g.key === price.gate)!;
       const rows = gateRows(model, g.label).filter((r) => r[3]!.startsWith("Sale price"));
       expect(rows).toHaveLength(1);
-      expect(rows[0]!.slice(3)).toEqual(["Sale prices, all 3 unit types (same share)", "—", "+" + formatValue(price.shock!, "%")]);
+      expect(rows[0]!.slice(3)).toEqual(["Sale prices, all 3 unit types (same share)", "Each as entered", "+" + formatValue(price.shock!, "%")]);
       expect(model.formatter.manifest).toEqual(expect.arrayContaining([
         { text: "3", ref: `ident:breakeven.${g.key}.price.count` },
         { text: formatValue(price.shock!, "%"), ref: `run:breakeven.${g.key}.price.shock` },
@@ -980,16 +1031,24 @@ describe("what would change the answer for a deal that sells its units (task 83)
     x.input = { ...x.input, forSale: { ...x.input.forSale!, units: [x.input.forSale!.units[0]!] } };
     x.result = underwrite(x.input, x.policy);
     const model = buildModel(x);
-    const states = { out_of_range: "Out of range", no_effect: "No effect", not_monotonic: "Not monotonic" } as const;
+    const states = { no_effect: "No effect", not_monotonic: "Not monotonic" } as const;
     const names = { pricePct: "Sale prices", absorptionPct: "Sales pace", presalesPts: "Presales" } as const;
+    // Card C5: the value the run has, never a dash; a move out of range is named once in the line under the table.
+    const sale = x.input.forSale!;
+    const now = { pricePct: formatValue(sale.units[0]!.price, "$"), absorptionPct: formatValue(sale.absorptionPerMonth, "units/mo"), presalesPts: formatValue(sale.presoldPct, "%") } as const;
+    const text = visibleText(renderHtml(model));
     for (const driver of ["pricePct", "absorptionPct", "presalesPts"] as const) {
       const rows = breakeven(x.input, x.policy).rows.filter((r) => r.driver === driver && r.state !== "value");
       expect(rows.length, driver).toBeGreaterThan(0);
       for (const row of rows) {
         const gate = x.result.verdict.gates.find((g) => g.key === row.gate)!;
-        expect(gateRows(model, gate.label).map((r) => r.slice(3))).toContainEqual([names[driver], "—", states[row.state as keyof typeof states]]);
+        if (row.state === "out_of_range") {
+          expect(gateRows(model, gate.label).map((r) => r[3])).not.toContain(names[driver]);
+          expect(text).toMatch(new RegExp(`\\d+ inputs? cannot pass within (its|their) range: [^.]*${names[driver]}`));
+        } else expect(gateRows(model, gate.label).map((r) => r.slice(3))).toContainEqual([names[driver], now[driver], states[row.state as keyof typeof states]]);
       }
     }
+    expect(verifyProvenance(text, model.formatter.manifest).orphans).toEqual([]);
   });
   test.each(SALE_SLUGS)("%s explains an earlier engine or a different policy as rental reports do", (slug) => {
     const x = saleInput(slug, "build_decision");
@@ -1054,7 +1113,7 @@ describe("the partner memo (task 84d)", () => {
     const captions = model.blocks.flatMap((b) => b.type === "table" && b.caption ? [b.caption] : []);
     expect(captions).toEqual(["Partnership terms", "Capital and distributions", "Sources and uses", "Stresses (each a full re-run of the model)"]);
     expect(text).toContain("Distributions go pro rata until the LP has received its capital and its preferred return, compounded annually on what is unreturned. After that the GP takes its promote share of each dollar and the rest is split pro rata.");
-    expect(text).toContain("Every input and its source is listed in the IC memo and the lender package.");
+    expect(text).toContain("Every input and its source is listed in the Committee memo and the lender package.");
     expect(verifyProvenance(text, model.formatter.manifest)).toMatchObject({ pass: true, orphans: [] });
     if (sale) {
       expect(model.blocks).toContainEqual({ type: "paragraph", muted: true, text: SALE_OPERATIONS });
@@ -1155,7 +1214,7 @@ describe("the partner memo of a held deal (task 87a)", () => {
     expect(text).toContain("Distributions go pro rata until the LP has received its capital and its preferred return");
     expect(text).toContain(NOTHING_SOLD);
     expect(text.indexOf(NOTHING_SOLD)).toBeGreaterThan(text.indexOf("Distributions go pro rata"));
-    expect(text).toContain("Every input and its source is listed in the IC memo and the lender package.");
+    expect(text).toContain("Every input and its source is listed in the Committee memo and the lender package.");
     expect(text).toContain("unrealized, not a sale");
     expect(stats.type === "stats" && stats.items.some((i) => i.value === "Not applicable")).toBe(false);
     expect(verifyProvenance(text, model.formatter.manifest)).toMatchObject({ pass: true, orphans: [] });
@@ -1361,8 +1420,9 @@ describe("a report says when a check decides the verdict (task 85a)", () => {
     // card E: so is the unsigned-policy line, which this run's policy-v1 carries.
     const restored = withoutUnsignedLine({ ...model, blocks: model.blocks.filter((_, n) => n !== at + 2) });
     // card 97c: DSCR→DCR rename only; text otherwise identical to `c49c28c5eafee7e5d6eb89704d4b04584c7887ecbf5d51bd33160417cf83d17e`
+    // card C5: plain sentences, the reading and not-advice line, "Committee memo"; was `3377dc48bc5130ccc4b8941ac7ccb38f612e8c939d1ac8a431cb7476c8ef29ae`
     expect(createHash("sha256").update(visibleText(renderHtml(restored))).digest("hex"))
-      .toBe("3377dc48bc5130ccc4b8941ac7ccb38f612e8c939d1ac8a431cb7476c8ef29ae");
+      .toBe("9c662262a15694c7eda9b7966c9e722efca9c4b087863b3e3e9cfc03d0d37e96");
     expect(verifyProvenance(text, model.formatter.manifest).orphans).toEqual([]);
   });
   test.each(["engine", "policy"])("the %s notice comes before the warning", (notice) => {

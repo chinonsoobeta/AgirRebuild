@@ -48,7 +48,8 @@ function block(b: Block, lang: "en" | "fr"): string {
         <span class="badge" style="background:${VERDICT_COLOR[b.code]}">${esc(b.label)}</span>
         <div><p class="headline">${esc(b.headline)}</p><p class="explain">${esc(b.explanation)}</p></div></section>`;
     case "stats":
-      return `<div class="stats">${b.items.map((i) => `<div><span class="label">${esc(i.label)}</span><span class="num big">${esc(i.value)}</span></div>`).join("")}</div>`;
+      // Figures with a plain sentence take the full width between them, so each sentence wraps over few lines.
+      return `<div class="stats"${b.items.some((i) => i.note) ? ` style="grid-template-columns:repeat(${b.items.length},1fr)"` : ""}>${b.items.map((i) => `<div><span class="label">${esc(i.label)}</span><span class="num big">${esc(i.value)}</span>${i.note ? `<span class="note">${esc(i.note)}</span>` : ""}</div>`).join("")}</div>`;
     case "table":
       return `<section class="tbl${b.long || b.rows.length > 12 ? " long" : ""}">${b.caption ? `<h3>${esc(b.caption)}</h3>` : ""}<table><thead><tr>${b.columns
         .map((c) => `<th class="${c.numeric ? "r" : ""}">${esc(c.label)}</th>`)
@@ -90,6 +91,7 @@ h1{font-family:'Newsreader',Georgia,serif;font-weight:500;font-size:30pt;line-he
 .label{font-size:8pt;font-weight:500;letter-spacing:.06em;text-transform:uppercase;color:#454A55}
 .num{font-family:'IBM Plex Mono',ui-monospace,monospace;font-variant-numeric:tabular-nums}
 .big{font-size:13pt}
+.note{font-size:8pt;line-height:1.3;color:#454A55}
 h2{font-size:11pt;font-weight:600;margin:14pt 0 6pt;break-after:avoid}
 h3{font-size:10.5pt;font-weight:600;margin:0 0 5pt}
 .tbl{margin:0 0 14pt;break-inside:avoid}
