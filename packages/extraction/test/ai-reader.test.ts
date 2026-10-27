@@ -486,7 +486,7 @@ describe("QA card C1: unit types read from one line are one type", () => {
   const ai = (field: string, item: string, value: number, location: string, quote: string) => {
     const v = verifyReading({ field, item, value, unit_seen: field === "unit_count" ? "units" : "$", file: "invented-budget.pdf", location, quote, note: null, confidence: "high" }, docs);
     if (v.outcome !== "verified") throw new Error(v.outcome);
-    return v.candidate;
+    return v.candidate!;
   };
   const types = (ps: ReturnType<typeof consolidate>) => ps.filter(p => ["unit_count", "unit_rent_monthly"].includes(p.fieldKey)).map(p => [p.fieldKey, p.itemKey, p.value]);
 
