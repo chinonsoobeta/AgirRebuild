@@ -451,7 +451,7 @@ CI on `9708f20` failed six "card C" tests in `apps/api/test/api.test.ts` that pa
 case of "reconciles rules after a … failure in readDeal" makes the reader's lookup throw, which fails the extraction
 job, and the worker retries it 2 s later; on the slower runner that retry fired inside card C's "off" test and
 counted as a provider call (locally it fires inside card 160b, harmlessly). The test now runs its own retry and
-asserts it. The run before, on `ae73ea6`, had failed on a 10 s hook timeout in `shared-state.test.ts`, a runner
+asserts it (`78a049d`; CI on that commit passed). The run before, on `ae73ea6`, had failed on a 10 s hook timeout in `shared-state.test.ts`, a runner
 slowness, not code.
 
 
