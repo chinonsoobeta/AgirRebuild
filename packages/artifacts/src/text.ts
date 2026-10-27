@@ -210,8 +210,8 @@ export const TEXT = {
   "latestDecision": ["Latest recorded decision", "Dernière décision consignée"],
   "decisionLine": ["{0}, recorded by {1} on {2}.", "{0}, consignée par {1} le {2}."],
   "reasoning": ["Reasoning: {0}", "Motifs : {0}"],
-  "readBy": ["Values were read from the documents by Agir's rules and by an AI reader, then confirmed by {0}.", "Les valeurs ont été lues dans les documents par les règles d'Agir et par un lecteur IA, puis confirmées par {0}."],
-  "readOnReview": ["Values were read from the documents by Agir's rules and by an AI reader, then confirmed on Review.", "Les valeurs ont été lues dans les documents par les règles d'Agir et par un lecteur IA, puis confirmées à l'étape Examen."],
+  "readBy": ["Values were read from the documents by Agir and approved on Review; this run was started by {0}.", "Les valeurs ont été lues dans les documents par Agir et approuvées à l'étape Examen\u00a0; cette analyse a été lancée par {0}."],
+  "readOnReview": ["Values were read from the documents by Agir and approved on Review.", "Les valeurs ont été lues dans les documents par Agir et approuvées à l'étape Examen."],
   // The website footer's line (landing.footNote), word for word.
   "notAdvice": ["Agir is not an appraiser, a lender or an adviser. It does not give financial advice, and its reports are not an appraisal.", "Agir n'est ni un évaluateur, ni un prêteur, ni un conseiller. Il ne donne pas de conseils financiers, et ses rapports ne sont pas une évaluation."],
   "eachAsEntered": ["Each as entered", "Chacun tel que saisi"],

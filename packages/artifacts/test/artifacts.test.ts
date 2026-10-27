@@ -356,7 +356,7 @@ describe("the build decision report", () => {
     expect(text).toContain("Operating expense ratio 35.00% Default accepted");
     expect(text).toContain("Reject, recorded by Rowan Builder on 2026-10-27.");
     expect(text).toContain("Reasoning: Sale proceeds miss the debt by $1,363,812; revisit in 2027.");
-    expect(text).toContain("Values were read from the documents by Agir's rules and by an AI reader, then confirmed by Rowan Builder.");
+    expect(text).toContain("Values were read from the documents by Agir and approved on Review; this run was started by Rowan Builder.");
     expect(text).toContain("Agir is not an appraiser, a lender or an adviser.");
     const at = (s: string) => text.indexOf(s);
     expect(at("Values you stated yourself")).toBeLessThan(at("Named defaults accepted"));
@@ -368,7 +368,7 @@ describe("the build decision report", () => {
     // Without them, none of the three sections is printed.
     const bare = textOf(mapleInput("build_decision")).text;
     for (const heading of ["Values you stated yourself", "Named defaults accepted", "Latest recorded decision"]) expect(bare).not.toContain(heading);
-    expect(bare).toContain("then confirmed on Review.");
+    expect(bare).toContain("and approved on Review.");
   });
   test("card C5: In this run is never a dash, and moves out of range are one line", () => {
     const x = dealInput(1);
@@ -794,7 +794,7 @@ describe("the reports for a deal that sells its units (task 80)", () => {
     ["ic_memo", "d3d3ec880ff45e2a17988e065670650800bc527d9ba55b0b071933d2e5f113a1"],
     // card 97c: DSCR→DCR rename only; text otherwise identical to `64389bea70bedfb6f257617d58cc54d1bfff3bf08f55eb90e2f967f1d91736d0`
     // card C5: plain sentences under the figures, the reading and not-advice line, "Committee memo"; was `161df3ae41c30a1322c47bf6b2cb6d4b4b7c18b34de0dbc177b2e819aca70fd9`
-    ["build_decision", "d8f5e1487d0a3b9e59d731e8cf3775a2acaec38388cb2d04fefd6c074dd3b156"],
+    ["build_decision", "2228dd662e66b95f6dcabd49584810e2f0600f9325abfa816f1f55a1e1918c35"],
     // card 97c: DSCR→DCR rename only; text otherwise identical to `5f81e68b930e8735a4036eba356bad6242bc1e05cdaa3ca89a84a69f47dd208c`
     ["lender_package", "be3357a81416eb58bb60c7147850071e584947e517fa7b5e77e3f44bd5cf9641"]] as const)("the existing Maple Heights %s text is byte-identical", (kind, hash) => {
     // card E: the unsigned-policy line is the only change; without it, the text is this pin.
@@ -1422,7 +1422,7 @@ describe("a report says when a check decides the verdict (task 85a)", () => {
     // card 97c: DSCR→DCR rename only; text otherwise identical to `c49c28c5eafee7e5d6eb89704d4b04584c7887ecbf5d51bd33160417cf83d17e`
     // card C5: plain sentences, the reading and not-advice line, "Committee memo"; was `3377dc48bc5130ccc4b8941ac7ccb38f612e8c939d1ac8a431cb7476c8ef29ae`
     expect(createHash("sha256").update(visibleText(renderHtml(restored))).digest("hex"))
-      .toBe("9c662262a15694c7eda9b7966c9e722efca9c4b087863b3e3e9cfc03d0d37e96");
+      .toBe("4c6560d7ad180f6aa838a12fdf48c2fa51432290c5181c5f811e5b0f0f502381");
     expect(verifyProvenance(text, model.formatter.manifest).orphans).toEqual([]);
   });
   test.each(["engine", "policy"])("the %s notice comes before the warning", (notice) => {
