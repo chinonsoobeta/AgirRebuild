@@ -17,7 +17,7 @@ vi.mock("@tanstack/react-query", () => ({
 }));
 vi.mock("@tanstack/react-router", async () => {
   const { createElement } = await import("react");
-  return { Link: ({ to, children }: { to: string; children: unknown }) => createElement("a", { href: to }, children as string), useNavigate: () => () => {} };
+  return { Link: ({ to, children }: { to: string; children: unknown }) => createElement("a", { href: to }, children as string), useNavigate: () => () => {}, useBlocker: () => ({ status: "idle" }) };
 });
 vi.mock("../src/components/ui", async (original) => {
   const ui = await original<typeof import("../src/components/ui")>();
@@ -67,7 +67,9 @@ const view = (): ThresholdView => {
 const render = () => renderToStaticMarkup(createElement(Review, { dealId: "deal-1" }));
 const text = (html: string) => html.replace(/<[^>]*>/g, " ").replaceAll("&#x27;", "'").replaceAll("&amp;", "&").replace(/\s+/g, " ").trim();
 const aside = (html: string) => html.slice(html.indexOf("<aside"), html.indexOf("</aside>"));
-const thresholdsCard = (html: string) => { const a = aside(html); const i = a.indexOf('id="thresholds"'); return a.slice(i, a.indexOf("</section>", i)); };
+// Card C2: the thresholds sit folded under "Advanced: pass marks"; the card's content is what follows that summary.
+const thresholdsSection = (html: string) => { const a = aside(html); const i = a.indexOf('id="thresholds"'); return a.slice(i, a.indexOf("</section>", i)); };
+const thresholdsCard = (html: string) => { const s = thresholdsSection(html); return s.slice(s.indexOf("</summary>") + "</summary>".length); };
 const choices = (html: string) => html.slice(html.indexOf('id="choices"'), html.indexOf("</section>", html.indexOf('id="choices"')));
 const buttonLabels = (html: string) => [...html.matchAll(/<button[^>]*>(.*?)<\/button>/g)].map((m) => text(m[1]!));
 
@@ -77,6 +79,10 @@ beforeEach(() => {
 });
 
 describe("card X4 thresholds in the open", () => {
+  it("folds the thresholds by default under Advanced: pass marks (card C2)", () => {
+    const section = thresholdsSection(render());
+    expect(section).toMatch(/^id="thresholds"><details class="rv-adv"><summary><h2 class="h3">Advanced: pass marks<\/h2><\/summary>/);
+  });
   it("lists the thresholds of the latest run's policy without opening anything, each with its bound and note", () => {
     const card = thresholdsCard(render());
     expect(card).not.toBe("");
