@@ -49,7 +49,8 @@ const run = (over: object = {}) => ({ id: "run-2", number: 2, result, fresh: tru
   inputHash: "a".repeat(64), resultHash: "b".repeat(64), signed: "development key", ...over });
 const text = (html: string) => html.replace(/<[^>]*>/g, " ").replaceAll("&#x27;", "'").replaceAll("&quot;", '"').replace(/\s+/g, " ");
 const render = (el: Parameters<typeof renderToStaticMarkup>[0]) => text(renderToStaticMarkup(el));
-const detail = (words: string, label: string) => words.match(new RegExp(` ${label} (.*?) (?:Inputs|Données|Engine|Moteur) `))?.[1];
+// The run record's line: the last match, since "What this run assumed" (card C5) may name the policy above it.
+const detail = (words: string, label: string) => [...words.matchAll(new RegExp(` ${label} (.*?) (?:Inputs|Données|Engine|Moteur) `, "g"))].at(-1)?.[1];
 const options = (html: string) => [...html.matchAll(/<option[^>]*value="([^"]*)"[^>]*>([^<]*)<\/option>/g)].map((m) => [m[1], m[2]]);
 
 beforeEach(() => {

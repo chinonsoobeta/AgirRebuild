@@ -72,6 +72,8 @@ const SHARED_EN = {
   "nav.signOut": "Sign out",
   "nav.language": "Français",
   "common.loading": "Loading…",
+  "form.count": (p) => `${p.n} / ${p.max}`,
+  "form.atLimit": (p) => `${p.max} characters: that is the limit, anything longer is cut.`,
   "common.cancel": "Cancel",
   "common.save": "Save",
   "common.download": "Download",
@@ -99,7 +101,7 @@ const SHARED_EN = {
   "copy.variantOf": "Variant of",
   "step.noDocs": "No documents",
   "step.reading": (p) => `Reading ${p.n}`,
-  "step.read": (p) => `${p.n} read${p.failed ? `, ${p.failed} failed` : ""}`,
+  "step.read": (p) => [p.n ? `${p.n} read` : "", p.failed ? `${p.failed} failed` : ""].filter(Boolean).join(", "),
   "step.waitingDocs": "Waiting for documents",
   "step.clear": "Clear",
   "step.readyToRun": "Ready to run",
@@ -204,6 +206,8 @@ const SHARED_FR: FrenchOf<typeof SHARED_EN> = {
   "nav.signOut": "Se déconnecter",
   "nav.language": "English",
   "common.loading": "Chargement…",
+  "form.count": (p) => `${p.n} / ${p.max}`,
+  "form.atLimit": (p) => `${p.max} caractères\u00a0: c'est la limite, le reste est coupé.`,
   "common.cancel": "Annuler",
   "common.save": "Enregistrer",
   "common.download": "Télécharger",
@@ -231,7 +235,7 @@ const SHARED_FR: FrenchOf<typeof SHARED_EN> = {
   "copy.variantOf": "Variante de",
   "step.noDocs": "Aucun document",
   "step.reading": (p) => `Lecture de ${p.n}`,
-  "step.read": (p) => `${p.n} ${s(p.n, "lu", "lus")}${p.failed ? `, ${p.failed} en échec` : ""}`,
+  "step.read": (p) => [p.n ? `${p.n} ${s(p.n, "lu", "lus")}` : "", p.failed ? `${p.failed} en échec` : ""].filter(Boolean).join(", "),
   "step.waitingDocs": "En attente des documents",
   "step.clear": "Terminé",
   "step.readyToRun": "Prêt à lancer",
@@ -690,6 +694,15 @@ const FR_REASONS: [RegExp, string | ((m: RegExpMatchArray) => string)][] = [
   [/^Choose two different drivers\.$/, "Choisissez deux hypothèses différentes."],
   [/^The approved inputs changed while the run was being computed\. Run it again\.$/, "Les données approuvées ont changé pendant le calcul. Relancez l'analyse."],
   [/^Give the committee's reasoning/, "Indiquez les motifs du comité (au moins 10 caractères)"],
+  [/^Give the reasoning \(at least 10 characters\)$/, "Indiquez les motifs (au moins 10 caractères)"],
+  [/^Enter your name$/, "Entrez votre nom"],
+  [/^Enter a deal name$/, "Entrez un nom de projet"],
+  [/^Name too long \(120 characters at most\)$/, "Nom trop long (120 caractères au plus)"],
+  [/^Deal name too long \(160 characters at most\)$/, "Nom de projet trop long (160 caractères au plus)"],
+  [/^Location too long \(160 characters at most\)$/, "Emplacement trop long (160 caractères au plus)"],
+  [/^Reasoning too long \(5,000 characters at most\)$/, "Motifs trop longs (5\u00a0000 caractères au plus)"],
+  [/^Conditions too long \(5,000 characters at most\)$/, "Conditions trop longues (5\u00a0000 caractères au plus)"],
+  [/^Reason too long \(2,000 characters at most\)$/, "Motif trop long (2\u00a0000 caractères au plus)"],
   // The engine's own checks (validateInput and readiness). Numbers in the sentence are written the French way.
   [/^budget (land|hard|soft|contingency|other|developmentCharges|landTransferTax|gstHstNet) must be a number of at least 0$/, (m) => `Le poste « ${BUDGET_LINES[m[1]!]} » du budget doit être un nombre positif ou nul`],
   [/^property tax must be a number of at least 0$/, "La taxe foncière doit être un nombre positif ou nul"],
@@ -915,6 +928,8 @@ export function checkText(i: I18n, c: CheckLike, ltcCeiling = 85): string {
 export type OverviewLike = {
   step: string;
   documents: { total: number; processing: number; failed: number };
+  /** A reconcile is queued or the AI reading is running: the review counts are not the ones Review will show yet. */
+  updating?: boolean;
   review: { approved: number; needsReview: number; conflicting: number; awaitingSecond: number; missing: number; impossible: number; status: string };
   run: { verdict: string; fresh: boolean } | null;
   decision: { decision: string } | null;
@@ -926,11 +941,13 @@ export function dealStatus(i: I18n, o: OverviewLike, solo = false): { tone: "pas
   const { t, L } = i;
   const r = o.review;
   // Documents are optional evidence: a deal with values and no documents is read from its values, as the server's overview does.
-  if (o.documents.total === 0 && r.approved + r.needsReview + r.conflicting + r.awaitingSecond === 0) return { tone: "neutral", text: t("status.noDocs"), next: t("next.upload"), blockedParts: [] };
-  if (o.documents.processing > 0) {
+  // A file that was rejected or could not be read gives nothing to review, so it counts as no document here.
+  if (o.documents.total - o.documents.failed === 0 && r.approved + r.needsReview + r.conflicting + r.awaitingSecond === 0) return { tone: "neutral", text: t("status.noDocs"), next: t("next.upload"), blockedParts: [] };
+  // Until the documents are read and the review rebuilt (the AI reading included), the counts would only change: say so instead.
+  if (o.documents.processing > 0 || o.updating) {
     return {
       tone: "neutral",
-      text: t("status.reading", { n: o.documents.processing }),
+      text: o.documents.processing > 0 ? t("status.reading", { n: o.documents.processing }) : t("shell.readingValues"),
       next: o.documents.failed ? t("next.retry", { n: o.documents.failed }) : t("next.wait"),
       blockedParts: [],
     };

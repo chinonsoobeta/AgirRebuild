@@ -84,7 +84,7 @@ type AssumptionDb = {
 
 async function loadAssumptions(tx: Db, dealId: string): Promise<AssumptionDb[]> {
   return tx.query<AssumptionDb>(
-    `select a.*, u.name as decided_by_name, s.name as second_approver_name, k.name as client_confirmed_by_name,
+    `select a.*, coalesce(nullif(btrim(u.name), ''), u.email) as decided_by_name, coalesce(nullif(btrim(s.name), ''), s.email) as second_approver_name, coalesce(nullif(btrim(k.name), ''), k.email) as client_confirmed_by_name,
        exists (select 1 from workspace_members m where m.workspace_id = a.workspace_id and m.user_id = a.second_approver and m.role = 'reviewer') as confirmed_by_review,
        (a.status = 'approved' and a.source_kind = 'analyst' and a.second_approver is null and f.material) as sponsor_stated
      from assumptions a join field_catalog f on f.key = a.field_key
@@ -137,7 +137,7 @@ export async function thresholdsView(tx: Db, scope: "workspace" | "deal", id: st
     if (!row) throw new HttpError(404, "Workspace not found");
     layers = { workspace: row.policy_overrides, deal: {} };
   }
-  const users = await tx.query<{ id: string; name: string }>(`select id,name from users where id = any($1::uuid[])`, [[...new Set(Object.values(layers).flatMap((versions) => Object.values(versions).flatMap((values) => Object.values(values).map((note) => note.setBy))))]]);
+  const users = await tx.query<{ id: string; name: string }>(`select id, coalesce(nullif(btrim(name), ''), email) as name from users where id = any($1::uuid[])`, [[...new Set(Object.values(layers).flatMap((versions) => Object.values(versions).flatMap((values) => Object.values(values).map((note) => note.setBy))))]]);
   const names = new Map(users.map((user) => [user.id,user.name]));
   // Stored values the policies no longer allow (a draft edited after they were set), including a policy this build no longer has.
   const invalid = (["workspace", "deal"] as const).flatMap((layer) => Object.entries(layers[layer]).flatMap(([version, values]) => {
@@ -244,7 +244,7 @@ export async function dealOverview(tx: Db, dealId: string) {
   } else {
     step = "reports";
     status = { tone: decision.decision.startsWith("approve") ? "pass" : "stop", text: `Decided: ${decision.decision.replace(/_/g, " ")}` };
-    next = (artifacts?.n ?? 0) > 0 ? "Share the reports" : "Generate the IC memo";
+    next = (artifacts?.n ?? 0) > 0 ? "Share the reports" : "Generate the reports";
   }
   const { copied_from: _copiedFrom, ...place } = deal;
   return {
@@ -315,7 +315,7 @@ export async function labelRefusal(tx: Db, documentId: string, label: { id: stri
  */
 export async function clientViewer(tx: Db, dealId: string): Promise<{ id: string; name: string } | null> {
   const [me] = await tx.query<{ id: string; name: string }>(
-    `select u.id, u.name from users u join workspace_members m on m.user_id = u.id join deals d on d.workspace_id = m.workspace_id
+    `select u.id, coalesce(nullif(btrim(u.name), ''), u.email) as name from users u join workspace_members m on m.user_id = u.id join deals d on d.workspace_id = m.workspace_id
      where u.id = agir_uid() and d.id = $1 and m.role = 'client'`,
     [dealId],
   );
@@ -461,7 +461,7 @@ export async function reviewView(tx: Db, dealId: string, asOf: string) {
   const figures = figureOrder(rows.map((r) => ({ fieldKey: null, itemKey: null, value: r.value, raw: r.raw, unitSeen: r.unit_seen, location: r.location, context: r.context, rule: "", documentId: r.document_id, documentName: r.document_name, rowId: r.id }) as SourcedCandidate));
   const figureIds = new Map(offeredIds(figures).map((id, i) => [(figures[i] as SourcedCandidate & { rowId: string }).rowId, id]));
   const labels = await tx.query<{ document_id: string; figure_id: string; field_key: string; item_key: string; by: string; created_at: string | Date }>(
-    `select l.document_id, l.figure_id, l.field_key, l.item_key, u.name as by, l.created_at from figure_labels l join users u on u.id = l.created_by where l.deal_id = $1`,
+    `select l.document_id, l.figure_id, l.field_key, l.item_key, coalesce(nullif(btrim(u.name), ''), u.email) as by, l.created_at from figure_labels l join users u on u.id = l.created_by where l.deal_id = $1`,
     [dealId],
   );
   const other = rows.map((r) => {
@@ -597,7 +597,7 @@ export async function createRun(tx: Db, dealId: string, asOf: string, progress?:
     for (const key of ["ledger", "loans", "stresses", "gates"] as const) await progress.stage(key, at);
     await progress.check();
   }
-  const setters = changes.length ? await tx.query<{ id: string; name: string }>(`select id,name from users where id=any($1::uuid[])`, [[...new Set(changes.map((change) => change.setById))]]) : [];
+  const setters = changes.length ? await tx.query<{ id: string; name: string }>(`select id, coalesce(nullif(btrim(name), ''), email) as name from users where id=any($1::uuid[])`, [[...new Set(changes.map((change) => change.setById))]]) : [];
   const policyChanges = changes.map((change) => ({ ...change, setBy: setters.find((user) => user.id === change.setById)?.name ?? "—" }));
   const used = assumptions
     .filter((a) => a.status === "approved" || a.status === "default_accepted")
@@ -645,9 +645,9 @@ export async function runView(tx: Db, runId: string) {
   const [run] = await tx.query<{
     id: string; deal_id: string; run_number: number; engine_version: string; policy_version: string; policy_hash: string;
     input_hash: string; result_hash: string; assumptions_hash: string; verdict_code: string; signature: string; created_at: string;
-    created_by_name: string | null; result: RunResult; input_snapshot: { input: EngineInput; policy?: Policy; standardPolicy?: Policy; policyChanges?: PolicyChange[]; assumptions: unknown[] };
+    created_by_name: string | null; result: RunResult; input_snapshot: { input: EngineInput; policy?: Policy; standardPolicy?: Policy; policyChanges?: PolicyChange[]; assumptions: unknown[]; notFound?: { fieldKey: string; itemKey?: string; label: string; detail?: string }[] };
   }>(
-    `select r.*, u.name as created_by_name from runs r left join users u on u.id = r.created_by where r.id = $1`,
+    `select r.*, coalesce(nullif(btrim(u.name), ''), u.email) as created_by_name from runs r left join users u on u.id = r.created_by where r.id = $1`,
     [runId],
   );
   if (!run) throw new HttpError(404, "Run not found");
@@ -658,7 +658,7 @@ export async function runView(tx: Db, runId: string) {
   if (run.policy_hash !== await currentPolicyHash(tx, run.deal_id, run.policy_version)) staleReasons.push("The policy thresholds changed after this run.");
   if (run.engine_version !== ENGINE_VERSION) staleReasons.push("The engine was updated after this run.");
   const decisions = await tx.query(
-    `select d.id, d.decision, d.rationale, d.conditions, d.override_reason, d.created_at, u.name as decided_by
+    `select d.id, d.decision, d.rationale, d.conditions, d.override_reason, d.created_at, coalesce(nullif(btrim(u.name), ''), u.email) as decided_by
      from decisions d join users u on u.id = d.decided_by where d.run_id = $1 order by d.created_at desc`,
     [runId],
   );
@@ -695,6 +695,8 @@ export async function runView(tx: Db, runId: string) {
     isLatest: latest?.id === run.id,
     result: run.result,
     inputs: hideClientInputs(await clientViewer(tx, run.deal_id), run.input_snapshot.assumptions),
+    // Read only (card C5): the optional lines no document gave and what the run assumed instead, as the run recorded them.
+    notFound: run.input_snapshot.notFound ?? [],
     decisions,
     ...(held ? { heldPartners: { lpIrr: held.withValue.lpIrr, gpIrr: held.withValue.gpIrr, promote: held.withValue.promote,
       paidLp: positive(held.paid.lp), paidGp: positive(held.paid.gp), paidPromote: held.paid.promote } } : {}),

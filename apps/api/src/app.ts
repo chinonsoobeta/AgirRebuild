@@ -32,6 +32,25 @@ export type AppDeps = { db: Db; store: BlobStore; secureCookies: boolean; demoSi
 type Env = { Variables: { user: { id: string; email: string; name: string }; requestId: string } };
 
 const COOKIE = "agir_session";
+
+/** Sentences a refused field is answered with (QA card C4) instead of "Some fields are missing or not valid.". */
+const FIELD_SENTENCES = new Set<string>();
+/** Free text a person types: trimmed on save, then refused when blank (with `blank`) or longer than `max`. */
+function text(max: number, long: string, blank?: string) {
+  FIELD_SENTENCES.add(long);
+  if (blank) FIELD_SENTENCES.add(blank);
+  const s = z.string().trim();
+  return (blank ? s.min(1, blank) : s).max(max, long);
+}
+const PERSON_NAME = text(120, "Name too long (120 characters at most)", "Enter your name");
+const DEAL_NAME = text(160, "Deal name too long (160 characters at most)", "Enter a deal name");
+const REASON = text(2000, "Reason too long (2,000 characters at most)");
+const RATIONALE_SHORT = "Give the reasoning (at least 10 characters)";
+FIELD_SENTENCES.add(RATIONALE_SHORT);
+/** An empty optional text is no text. */
+const orNull = (s: string | null | undefined) => (s ? s : null);
+/** Two identical requests this close together are one double click: the second gets the first's answer. */
+const REPEAT_SECONDS = 15;
 // A new workspace starts in team review; asking for solo goes through fn_set_review_mode, so the change is audited.
 async function createWorkspace(tx: Db, name: string, reviewMode?: string): Promise<string> {
   const [r] = await tx.query<{ id: string }>(`select fn_create_workspace($1) as id`, [name]);
@@ -62,12 +81,31 @@ function errorAnswer(err: unknown, path: string, report: (fields: LogFields) => 
   if (err instanceof HttpError && err.body && typeof err.body === "object" && "code" in err.body && err.body.code === "outside_window") return { status: 422, body: { error: err.message, ...err.body } };
   if (err instanceof HttpError) return { status: err.status, body: { error: err.message, ...(err.body ? { detail: err.body } : {}) } };
   if (err instanceof EngineInputError) return { status: 422, body: { error: err.message, problems: err.problems } };
-  if (err instanceof z.ZodError) return { status: 422, body: { error: "Some fields are missing or not valid.", issues: err.issues } };
+  if (err instanceof z.ZodError) {
+    // The first refused field is named (`detail.field`), so a screen can show the sentence under that field.
+    const first = err.issues[0];
+    const field = first?.path.length ? String(first.path[0]) : null;
+    const sentence = first && FIELD_SENTENCES.has(first.message) ? first.message : "Some fields are missing or not valid.";
+    return { status: 422, body: { error: sentence, issues: err.issues, ...(field ? { detail: { field } } : {}) } };
+  }
   const code = (err as { code?: string }).code;
   if (code && PG_STATUS[code]) return { status: PG_STATUS[code]!, body: { error: code === "22P02" ? "Not found." : (err as Error).message } };
   const shared = path.startsWith("/api/share/") || path.startsWith("/api/invite/");
   report({ error: shared ? "Shared link request failed" : (err as Error).message });
   return { status: 500, body: { error: "Something went wrong on our side. It has been logged." } };
+}
+
+/** A deal name as a file name: no control characters, emoji or characters a file system refuses; runs of spaces and
+ * underscores become one space; trimmed, and at most 100 characters. */
+export function fileStem(name: string): string {
+  const clean = name
+    .replace(/[\p{Cc}\p{Cf}\p{Extended_Pictographic}\u{FE0F}\u{1F3FB}-\u{1F3FF}]/gu, "")
+    .replace(/[<>:"/\\|?*]/g, " ")
+    .replace(/[\s_]+/g, " ")
+    .trim()
+    .slice(0, 100)
+    .trim();
+  return clean || "Deal";
 }
 
 /** A run token: 32 random bytes the starting browser makes, in base64url (card R1). */
@@ -112,9 +150,9 @@ export function createApp({ db, store, secureCookies, demoSignIn = false, trustP
   const fileResponse = async (a: { kind: string; format: string; storage_key: string | null; run_number: number; deal: string; lang?: "en" | "fr" }, inline: boolean) => {
     const bytes = await store.get(a.storage_key!);
     const mime = { pdf: "application/pdf", docx: "application/vnd.openxmlformats-officedocument.wordprocessingml.document", xlsx: "application/vnd.openxmlformats-officedocument.spreadsheetml.sheet" }[a.format] ?? "application/octet-stream";
-    const label = { ic_memo: "IC memo", lender_package: "Lender package", build_decision: "Build decision", partner_memo: "Partner memo", model_export: "Model" }[a.kind] ?? a.kind;
+    const label = { ic_memo: "Committee memo", lender_package: "Lender package", build_decision: "Build decision", partner_memo: "Partner memo", model_export: "Model" }[a.kind] ?? a.kind;
     return new Response(new Uint8Array(bytes), {
-      headers: { "content-type": mime, "content-disposition": `${inline && a.format === "pdf" ? "inline" : "attachment"}; filename="${encodeURIComponent(`${a.deal} - ${label} - Run ${a.run_number}${a.lang === "fr" ? "-fr" : ""}.${a.format}`)}"` },
+      headers: { "content-type": mime, "content-disposition": `${inline && a.format === "pdf" ? "inline" : "attachment"}; filename="${encodeURIComponent(`${fileStem(a.deal)} - ${label} - Run ${a.run_number}${a.lang === "fr" ? "-fr" : ""}.${a.format}`)}"` },
     });
   };
 
@@ -168,7 +206,7 @@ export function createApp({ db, store, secureCookies, demoSignIn = false, trustP
   app.post("/api/auth/signup", async (c) => {
     if (!(await authLimit(clientKey(c)))) return c.json({ error: "Too many attempts. Wait a minute." }, 429);
     const body = z
-      .object({ email: z.string().email(), name: z.string().min(1).max(120), password: PASSWORD_RULE, reviewMode: z.enum(REVIEW_MODES).optional(),
+      .object({ email: z.string().trim().email(), name: PERSON_NAME, password: PASSWORD_RULE, reviewMode: z.enum(REVIEW_MODES).optional(),
         invite: z.string().min(1).max(200).optional() })
       .parse(await c.req.json());
     // During the pilot, only a client invitation creates an account (card B); an invitation is checked below as before.
@@ -328,16 +366,21 @@ export function createApp({ db, store, secureCookies, demoSignIn = false, trustP
   app.get("/api/me", async (c) => {
     const workspaces = await as(c, (tx) =>
       tx.query(
-        `select w.id, w.name, w.review_mode, w.label_suggestions, w.ai_reading, w.logo_key is not null as has_logo, w.closed_at, m.role from workspaces w join workspace_members m on m.workspace_id = w.id and m.user_id = agir_uid() order by w.created_at`,
+        // A workspace named after a blank name (before QA card C4 refused one) is named after its owner's email instead.
+        `select w.id, case when btrim(w.name) = '''s workspace' then coalesce((select o.email from users o join workspace_members om on om.user_id = o.id
+                  where om.workspace_id = w.id and om.role = 'owner' limit 1), '') || '''s workspace' else w.name end as name,
+                w.review_mode, w.label_suggestions, w.ai_reading, w.logo_key is not null as has_logo, w.closed_at, m.role from workspaces w join workspace_members m on m.workspace_id = w.id and m.user_id = agir_uid() order by w.created_at`,
       ),
     );
+    const user = c.get("user");
     const [v] = await db.query<{ verified: boolean }>(`select email_verified_at is not null as verified from users where id = $1`, [c.get("user").id]);
     // mail: whether this server can send email at all (card B); without it, the screens say so instead of offering a send.
-    return c.json({ user: { ...c.get("user"), email_verified: v?.verified ?? false }, workspaces, mail: mailer.configured, closure });
+    // A blank name (accepted before QA card C4) is shown as the email.
+    return c.json({ user: { ...user, name: user.name.trim() || user.email, email_verified: v?.verified ?? false }, workspaces, mail: mailer.configured, closure });
   });
 
   app.post("/api/me/name", async (c) => {
-    const { name } = z.object({ name: z.string().min(1).max(120) }).parse(await c.req.json());
+    const { name } = z.object({ name: PERSON_NAME }).parse(await c.req.json());
     await as(c, (tx) => tx.query(`select fn_set_my_name($1)`, [name]));
     return c.json({ ok: true });
   });
@@ -462,7 +505,7 @@ export function createApp({ db, store, secureCookies, demoSignIn = false, trustP
 
   app.get("/api/workspaces/:ws/members", async (c) => {
     const rows = await as(c, (tx) =>
-      tx.query(`select u.id, u.name, u.email, m.role, m.expires_at from workspace_members m join users u on u.id = m.user_id where m.workspace_id = $1 order by u.name`, [c.req.param("ws")]),
+      tx.query(`select u.id, coalesce(nullif(btrim(u.name), ''), u.email) as name, u.email, m.role, m.expires_at from workspace_members m join users u on u.id = m.user_id where m.workspace_id = $1 order by u.name`, [c.req.param("ws")]),
     );
     return c.json(rows);
   });
@@ -530,17 +573,27 @@ export function createApp({ db, store, secureCookies, demoSignIn = false, trustP
   app.post("/api/workspaces/:ws/deals", async (c) => {
     const body = z
       .object({
-        name: z.string().min(1).max(160),
+        name: DEAL_NAME,
         assetType: z.string().min(1).max(60),
-        location: z.string().max(160).default(""),
+        location: text(160, "Location too long (160 characters at most)").default(""),
         currency: z.enum(CURRENCIES).default("CAD"),
         country: z.enum(COUNTRIES).default("CA"),
         province: z.enum(PROVINCE_CODES).nullable().default(null),
       })
       .refine((b) => b.province === null || b.country === "CA", { message: "A province is given only for a deal in Canada.", path: ["province"] })
       .parse(await c.req.json());
-    const [r] = await as(c, (tx) =>
-      tx.query<{ id: string }>(`select fn_create_deal($1, $2, $3, $4, $5, $6, $7) as id`, [
+    const [r] = await as(c, async (tx) => {
+      // A double click: the same person's deal of the same name and place, made in the last few seconds and still
+      // untouched (no document, no value), is the answer.
+      await tx.query(`select pg_advisory_xact_lock(hashtext('deal:' || $1 || ':' || agir_uid()::text))`, [c.req.param("ws")]);
+      const same = await tx.query<{ id: string }>(
+        `select d.id from deals d where d.workspace_id = $1 and d.name = $2 and d.location = $3 and d.created_by = agir_uid() and d.archived_at is null
+           and d.created_at > now() - make_interval(secs => $4)
+           and not exists (select 1 from documents x where x.deal_id = d.id) and not exists (select 1 from assumptions x where x.deal_id = d.id)
+         order by d.created_at desc limit 1`,
+        [c.req.param("ws"), body.name, body.location, REPEAT_SECONDS]);
+      if (same.length) return same;
+      return tx.query<{ id: string }>(`select fn_create_deal($1, $2, $3, $4, $5, $6, $7) as id`, [
         c.req.param("ws"),
         body.name,
         body.assetType,
@@ -548,14 +601,14 @@ export function createApp({ db, store, secureCookies, demoSignIn = false, trustP
         body.currency,
         body.country,
         body.province,
-      ]),
-    );
+      ]);
+    });
     return c.json({ id: r!.id });
   });
 
   // A variant: a copy in exactly the state of its source, which a person then changes (card 62).
   app.post("/api/deals/:id/copy", async (c) => {
-    const { name } = z.object({ name: z.string().min(1).max(160) }).parse(await c.req.json());
+    const { name } = z.object({ name: DEAL_NAME }).parse(await c.req.json());
     const [r] = await as(c, (tx) => tx.query<{ id: string }>(`select fn_copy_deal($1, $2) as id`, [c.req.param("id"), name]));
     return c.json({ id: r!.id });
   });
@@ -569,7 +622,7 @@ export function createApp({ db, store, secureCookies, demoSignIn = false, trustP
       if (!d) throw new HttpError(404, "Deal not found");
       if (!d.staff) throw new HttpError(403, "Your role in this workspace does not allow this action");
       // A confirmation stands until its value changes (0018's trigger clears it), so these count only the ones that still stand.
-      return tx.query(`select u.id, u.name, u.email, dc.created_at as assigned_at,
+      return tx.query(`select u.id, coalesce(nullif(btrim(u.name), ''), u.email) as name, u.email, dc.created_at as assigned_at,
           (select count(*)::int from assumptions a where a.deal_id = dc.deal_id and a.client_confirmed_by = dc.user_id) as confirmed,
           (select max(a.client_confirmed_at) from assumptions a where a.deal_id = dc.deal_id and a.client_confirmed_by = dc.user_id) as last_confirmed_at
         from deal_clients dc join users u on u.id = dc.user_id
@@ -602,7 +655,7 @@ export function createApp({ db, store, secureCookies, demoSignIn = false, trustP
     const rows = await as(c, (tx) =>
       tx.query(
         `select d.id, d.name, d.kind, d.role_set, d.read_role, d.size_bytes, d.stage, d.stage_detail, d.page_count, d.number_format, d.needs_ocr, d.candidate_count,
-                d.created_at, d.updated_at, u.name as uploaded_by,
+                d.created_at, d.updated_at, coalesce(nullif(btrim(u.name), ''), u.email) as uploaded_by,
                 (select count(*)::int from candidates c where c.document_id = d.id and c.field_key is null) as other_count
          from documents d left join users u on u.id = d.uploaded_by
          where d.deal_id = $1 and d.retired_at is null order by d.created_at, d.name`,
@@ -724,7 +777,7 @@ export function createApp({ db, store, secureCookies, demoSignIn = false, trustP
         confirmOutsideWindow: z.boolean().optional(),
         action: z.enum(["approve", "resolve", "modify", "second_approve", "use_as_stated", "reject", "reopen"]),
         value: z.number().finite().nullable().optional(),
-        reason: z.string().max(2000).nullable().optional(),
+        reason: REASON.nullable().optional(),
         version: z.number().int().nullable().optional(),
       })
       .parse(await c.req.json());
@@ -760,7 +813,7 @@ export function createApp({ db, store, secureCookies, demoSignIn = false, trustP
 
   app.post("/api/deals/:id/values", async (c) => {
     const body = z
-      .object({ confirmOutsideWindow: z.boolean().optional(), fieldKey: z.string(), itemKey: z.string().max(60).nullable().optional(), value: z.number().finite(), reason: z.string().max(2000) })
+      .object({ confirmOutsideWindow: z.boolean().optional(), fieldKey: z.string(), itemKey: z.string().max(60).nullable().optional(), value: z.number().finite(), reason: REASON })
       .parse(await c.req.json());
     const [r] = await as(c, (tx) =>
       tx.query(`select (a).status from (select fn_enter_value($1, $2, $3, $4, $5) a) x`, [c.req.param("id"), body.fieldKey, body.itemKey ?? null, body.value, windowReason(body.fieldKey, body.value, body.reason, body.confirmOutsideWindow)]),
@@ -780,7 +833,7 @@ export function createApp({ db, store, secureCookies, demoSignIn = false, trustP
         areaSf: num,
         rentPsfAnnual: num,
         occupancyPct: num,
-        reason: z.string().max(2000),
+        reason: REASON,
       })
       .refine((x) => (x.unitCount !== undefined && x.rentMonthly !== undefined && x.areaSf === undefined && x.rentPsfAnnual === undefined)
         || (x.areaSf !== undefined && x.rentPsfAnnual !== undefined && x.unitCount === undefined && x.rentMonthly === undefined), "Give either a count and a monthly rent, or an area and an annual rent per square foot")
@@ -847,7 +900,7 @@ export function createApp({ db, store, secureCookies, demoSignIn = false, trustP
   app.get("/api/deals/:id/runs", async (c) => {
     const rows = await as(c, (tx) =>
       tx.query(
-        `select r.id, r.run_number, r.verdict_code, r.created_at, r.engine_version, r.policy_version, u.name as created_by
+        `select r.id, r.run_number, r.verdict_code, r.created_at, r.engine_version, r.policy_version, coalesce(nullif(btrim(u.name), ''), u.email) as created_by
          from runs r left join users u on u.id = r.created_by where r.deal_id = $1 order by r.run_number desc`,
         [c.req.param("id")],
       ),
@@ -861,20 +914,28 @@ export function createApp({ db, store, secureCookies, demoSignIn = false, trustP
     const body = z
       .object({
         decision: z.enum(["approve", "approve_with_conditions", "reject", "return_to_underwriting"]),
-        rationale: z.string().min(10, "Give the committee's reasoning (at least 10 characters)").max(5000),
-        conditions: z.string().max(5000).nullable().optional(),
-        overrideReason: z.string().max(2000).nullable().optional(),
+        rationale: text(5000, "Reasoning too long (5,000 characters at most)").min(10, RATIONALE_SHORT),
+        conditions: text(5000, "Conditions too long (5,000 characters at most)").nullable().optional(),
+        overrideReason: text(2000, "Reason too long (2,000 characters at most)").nullable().optional(),
       })
       .parse(await c.req.json());
-    const [r] = await as(c, (tx) =>
-      tx.query<{ id: string }>(`select fn_record_decision($1, $2, $3, $4, $5) as id`, [
+    const [r] = await as(c, async (tx) => {
+      // Decisions are permanent: the same decision with the same reasoning by the same person a moment ago is a double
+      // click, answered with the decision already recorded.
+      await tx.query(`select pg_advisory_xact_lock(hashtext('decision:' || $1))`, [c.req.param("id")]);
+      const same = await tx.query<{ id: string }>(
+        `select id from decisions where run_id = $1 and decision = $2 and rationale = $3 and decided_by = agir_uid()
+           and created_at > now() - make_interval(secs => $4) order by created_at desc limit 1`,
+        [c.req.param("id"), body.decision, body.rationale, REPEAT_SECONDS]);
+      if (same.length) return same;
+      return tx.query<{ id: string }>(`select fn_record_decision($1, $2, $3, $4, $5) as id`, [
         c.req.param("id"),
         body.decision,
         body.rationale,
-        body.conditions ?? null,
-        body.overrideReason ?? null,
-      ]),
-    );
+        orNull(body.conditions),
+        orNull(body.overrideReason),
+      ]);
+    });
     return c.json({ id: r!.id });
   });
 
@@ -944,6 +1005,13 @@ export function createApp({ db, store, secureCookies, demoSignIn = false, trustP
         const heldSplit = run.input_snapshot.input.exit === "refinance_hold" && run.input_snapshot.input.waterfall !== undefined;
         if (!heldSplit && (!lp || lp.status === "NOT_APPLICABLE")) throw new HttpError(422, "This deal has no LP/GP split, so it has no partner memo.");
       }
+      // While a file of this kind, format and language is being made, a second click gets that file. A ready one can
+      // still be made again on purpose ("Make again", for example after a logo change).
+      await tx.query(`select pg_advisory_xact_lock(hashtext('artifact:' || $1))`, [c.req.param("id")]);
+      const same = await tx.query<{ id: string }>(
+        `select id from artifacts where run_id = $1 and kind = $2 and format = $3 and lang = $4 and status = 'queued' order by created_at desc limit 1`,
+        [c.req.param("id"), body.kind, body.format, body.lang]);
+      if (same.length) return same;
       return tx.query<{ id: string }>(`select fn_request_artifact($1, $2, $3, $4) as id`, [c.req.param("id"), body.kind, body.format, body.lang]);
     });
     return c.json({ id: r!.id });
@@ -998,7 +1066,7 @@ export function createApp({ db, store, secureCookies, demoSignIn = false, trustP
   // `kind` and `format` are the first file's, in the shared page's order; `files` lists them all.
   app.get("/api/deals/:id/share-links", async (c) => c.json(await as(c, (tx) => tx.query(
     `select l.id, l.artifact_id, l.run_id, x.files->0->>'kind' as kind, x.files->0->>'format' as format, r.run_number, x.files,
-      l.term, l.expires_at, l.created_at, maker.name as created_by, l.revoked_at, revoker.name as revoked_by, o.openings, o.last_opened_at
+      l.term, l.expires_at, l.created_at, coalesce(nullif(btrim(maker.name), ''), maker.email) as created_by, l.revoked_at, coalesce(nullif(btrim(revoker.name), ''), revoker.email) as revoked_by, o.openings, o.last_opened_at
       from share_links l join runs r on r.id = l.run_id
       left join users maker on maker.id = l.created_by left join users revoker on revoker.id = l.revoked_by
       cross join lateral (select coalesce(jsonb_agg(jsonb_build_object('kind', a.kind, 'format', a.format, 'lang', a.lang) order by ${FILE_ORDER_SQL}), '[]'::jsonb) as files
@@ -1039,7 +1107,7 @@ export function createApp({ db, store, secureCookies, demoSignIn = false, trustP
   });
 
   app.get("/api/deals/:id/invites", async (c) => c.json(await as(c, (tx) => tx.query(
-    `select i.id, i.created_at, i.expires_at, maker.name as created_by, i.used_at, client.name as used_by, i.revoked_at, revoker.name as revoked_by
+    `select i.id, i.created_at, i.expires_at, coalesce(nullif(btrim(maker.name), ''), maker.email) as created_by, i.used_at, coalesce(nullif(btrim(client.name), ''), client.email) as used_by, i.revoked_at, coalesce(nullif(btrim(revoker.name), ''), revoker.email) as revoked_by
       from client_invites i left join users maker on maker.id = i.created_by left join users client on client.id = i.used_by
       left join users revoker on revoker.id = i.revoked_by where i.deal_id = $1 order by i.created_at desc`, [c.req.param("id")]))));
 
@@ -1077,7 +1145,7 @@ export function createApp({ db, store, secureCookies, demoSignIn = false, trustP
     const { before } = z.object({ before: z.string().regex(/^[1-9][0-9]{0,14}$/).transform(Number).optional() }).parse(c.req.query());
     const rows = await as(c, async (tx) =>
       hideClientEvents(await clientViewer(tx, c.req.param("id")), await tx.query<{ entity_id: string | null; payload: unknown }>(
-        `select e.seq, e.action, e.entity, e.entity_id, e.payload, e.hash, e.created_at, u.name as actor
+        `select e.seq, e.action, e.entity, e.entity_id, e.payload, e.hash, e.created_at, coalesce(nullif(btrim(u.name), ''), u.email) as actor
          from audit_events e left join users u on u.id = e.actor where e.deal_id = $1 and ($2::bigint is null or e.seq < $2::bigint)
          order by e.seq desc limit 500`,
         [c.req.param("id"), before ?? null],

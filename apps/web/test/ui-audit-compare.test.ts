@@ -89,9 +89,9 @@ describe("the audit trail", () => {
     const html = render(createElement(Audit, { dealId: "d1" }));
     expect(html).toContain('class="tag pass"');
     expect(text(html)).toContain("Chain intact · 212 events");
-    expect(text(html)).toMatch(/every workspace/);
-    // Card B: the count is this workspace's.
-    expect(text(html)).toContain("212 of those events are this workspace");
+    expect(text(html)).toContain("The check verified the whole chain (every workspace shares one hash chain, so a break anywhere would show).");
+    // Card B and QA item 21: the count is this workspace's, and no other count is shown.
+    expect(text(html)).toContain("Your workspace has 212 events.");
     button("Verify the chain again")!.props.onClick();
     expect(state.refetch).toHaveBeenCalled();
   });

@@ -116,12 +116,51 @@ describe("create an account", () => {
     const html = render(createElement(Signup));
     const words = text(html);
     for (const id of ["name", "email", "password"]) expect(labelled(id)).toBe(true);
-    for (const s of ["Create an account", "Your name", "At least 10 characters.", "How are values reviewed?", "On my own", "With a team", "I have an account"]) expect(words).toContain(s);
+    for (const s of ["Create an account", "Your name", "At least 10 characters.", "Who checks your numbers?", "Only me", "Me and a colleague", "I have an account"]) expect(words).toContain(s);
     const radios = state.nodes.filter((n) => n.tag === "input" && n.props.type === "radio");
     expect(radios.map((r) => [r.props.name, r.props.value, Boolean(r.props.checked)])).toEqual([["reviewMode", "solo", true], ["reviewMode", "team", false]]);
-    expect(words).not.toMatch(/forgot|terms/i);
+    expect(words).not.toMatch(/forgot/i);
     expect(html).toContain('href="/login"');
     expect(buttons("Français").length).toBe(1);
+  });
+  it("says it in plain words (QA card C4): no material, traces to, audit trail or workspace; the draft terms are linked, never accepted", () => {
+    const html = render(createElement(Signup));
+    const words = text(html);
+    expect(words).toContain("Each value I confirm is marked as stated by me.");
+    expect(words).toContain("A second person confirms the important values");
+    expect(words).not.toMatch(/material|traces to|audit trail|workspace|you accept/i);
+    expect(words).toContain("Read the draft terms of use and privacy notice");
+    expect(html.match(/href="\/legal"/g)?.length).toBe(2);
+    expect(state.nodes.find((n) => n.tag === "input" && n.props.id === "name")!.props.maxLength).toBe(120);
+    expect(words).toContain("0 / 120");
+  });
+  it("trims the name, and refuses a name of spaces under the field without posting", async () => {
+    render(createElement(Signup));
+    await submit({ name: "     ", email: "d@example.test", password: "a-long-password" });
+    expect(api.post).not.toHaveBeenCalled();
+    expect(text(render(createElement(Signup)))).toContain("Enter your name");
+    await submit({ name: "  Dana  ", email: " d@example.test ", password: "a-long-password" });
+    expect(vi.mocked(api.post).mock.calls[0]).toEqual(["/auth/signup", { name: "Dana", email: "d@example.test", password: "a-long-password", reviewMode: "solo" }]);
+  });
+  it("a double click sends one request", async () => {
+    let release = () => {};
+    vi.mocked(api.post).mockImplementationOnce(() => new Promise((r) => { release = () => r({ ok: true }); }));
+    render(createElement(Signup));
+    const form = state.nodes.find((n) => n.tag === "form")!;
+    const event = { preventDefault: () => {}, currentTarget: { elements: { namedItem: (k: string) => ({ value: { name: "Dana", email: "d@example.test", password: "a-long-password" }[k] }) } } };
+    const first = form.props.onSubmit(event);
+    const second = form.props.onSubmit(event);
+    release();
+    await Promise.all([first, second]);
+    expect(api.post).toHaveBeenCalledTimes(1);
+  });
+  it("an API refusal that names the name shows under the name", async () => {
+    vi.mocked(api.post).mockRejectedValueOnce(new ApiError(422, "Name too long (120 characters at most)", { field: "name" }));
+    render(createElement(Signup));
+    await submit({ name: "Dana", email: "d@example.test", password: "a-long-password" });
+    const html = render(createElement(Signup));
+    expect(html).toMatch(/id="name-error"[^>]*>Name too long \(120 characters at most\)/);
+    expect(html.match(/Name too long/g)?.length).toBe(1);
   });
   it("posts the chosen review mode, then asks to confirm the email address (card W12)", async () => {
     render(createElement(Signup));
@@ -134,7 +173,7 @@ describe("create an account", () => {
   it("French", () => {
     state.lang = "fr";
     const words = text(render(createElement(Signup)));
-    for (const s of ["Votre nom", "Seul", "En équipe", "J'ai déjà un compte"]) expect(words).toContain(s);
+    for (const s of ["Votre nom", "Qui vérifie vos chiffres", "Moi seulement", "Moi et un collègue", "J'ai déjà un compte", "Lisez l'ébauche des conditions d'utilisation et de la politique de confidentialité"]) expect(words).toContain(s);
   });
 });
 

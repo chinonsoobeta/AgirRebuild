@@ -15,6 +15,7 @@ vi.mock("@tanstack/react-query", () => ({
   },
   useMutation: (o: { mutationFn: (b: any) => Promise<any>; onSuccess?: (d: any) => unknown }) => ({
     mutate: async (b: unknown) => { const d = await o.mutationFn(b); await o.onSuccess?.(d); }, isPending: false, reset: () => {}, error: null,
+    mutateAsync: async (b: unknown) => { const d = await o.mutationFn(b); await o.onSuccess?.(d); return d; },
   }),
   useQueryClient: () => ({ invalidateQueries: s.invalidate }),
 }));
@@ -113,6 +114,31 @@ describe("the decision screen (card W9)", () => {
     expect(html).toContain("Only a workspace admin or owner records a decision.");
     expect(s.nodes.some((n) => n.tag === "form")).toBe(false);
     expect(html).not.toContain("What do you decide?");
+  });
+  it("QA card C4: the reasoning has a 5,000-character limit with a visible count", () => {
+    const html = render(createElement(DecisionStep, { dealId: "d" }));
+    expect(s.nodes.find((n) => n.tag === "textarea" && n.props.name === "rationale")!.props.maxLength).toBe(5000);
+    expect(html).toContain("0 / 5,000");
+  });
+  it("QA card C4: ten spaces and an x are not ten characters of reasoning; the reasoning is sent trimmed, once per double click", async () => {
+    s.interactive = true;
+    vi.stubGlobal("document", { getElementById: () => null });
+    render(createElement(DecisionStep, { dealId: "d" }));
+    s.nodes.find((n) => n.tag === "input" && n.props.value === "reject")!.props.onChange();
+    render(createElement(DecisionStep, { dealId: "d" }));
+    const submit = (rationale: string) => s.nodes.find((n) => n.tag === "form")!.props.onSubmit({ preventDefault: () => {},
+      currentTarget: { elements: { namedItem: (k: string) => (k === "rationale" ? { value: rationale } : null) } } });
+    await submit("          x");
+    expect(api.post).not.toHaveBeenCalled();
+    expect(render(createElement(DecisionStep, { dealId: "d" }))).toContain("Give the reasoning (at least 10 characters).");
+    let release = () => {};
+    vi.mocked(api.post).mockImplementationOnce(() => new Promise((r) => { release = () => r({ id: "dec" }); }));
+    const first = submit("  Sale proceeds do not repay the debt.  ");
+    const second = submit("  Sale proceeds do not repay the debt.  ");
+    release();
+    await Promise.all([first, second]);
+    expect(api.post).toHaveBeenCalledTimes(1);
+    expect(vi.mocked(api.post).mock.calls[0]).toEqual(["/runs/run-2/decision", { decision: "reject", rationale: "Sale proceeds do not repay the debt.", conditions: null, overrideReason: null }]);
   });
   it("renders in French", () => {
     s.lang = "fr";

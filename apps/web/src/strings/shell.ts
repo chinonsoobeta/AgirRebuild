@@ -10,6 +10,13 @@ export const en = {
   "shell.skip": "Skip to the main content",
   "shell.closed": "This workspace is closed.",
   "shell.closedBody": "It is read-only: you can open its deals, runs and reports, and change nothing.",
+  "shell.reading": "Reading…",
+  "shell.updating": "Updating…",
+  "shell.readingValues": "Reading the documents",
+  "shell.planSell": "Plan: sell after the hold",
+  "shell.planChange": "change on Review",
+  "shell.menu": (p) => `Account menu for ${p.name}`,
+  "shell.signedInAs": (p) => `${p.name} · ${p.role}`,
 } satisfies Record<string, Entry>;
 
 export const fr: FrenchOf<typeof en> = {
@@ -21,6 +28,13 @@ export const fr: FrenchOf<typeof en> = {
   "shell.skip": "Passer au contenu principal",
   "shell.closed": "Cet espace de travail est fermé.",
   "shell.closedBody": "Il est en lecture seule\u00a0: vous pouvez ouvrir ses projets, ses analyses et ses rapports, sans rien modifier.",
+  "shell.reading": "Lecture…",
+  "shell.updating": "Mise à jour…",
+  "shell.readingValues": "Lecture des documents",
+  "shell.planSell": "Plan\u00a0: vendre après la détention",
+  "shell.planChange": "modifier à l'étape Examen",
+  "shell.menu": (p) => `Menu du compte de ${p.name}`,
+  "shell.signedInAs": (p) => `${p.name} · ${p.role}`,
 };
 
 register(en, fr);

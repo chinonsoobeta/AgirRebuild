@@ -28,8 +28,8 @@ vi.mock("@tanstack/react-query", () => ({
   },
   // Card Z2: the audit trail loads its events as pages; one page of fewer than 500 has reached the start.
   useInfiniteQuery: () => ({ data: { pages: [queryState.events] }, hasNextPage: false, isFetchingNextPage: false, fetchNextPage: async () => {} }),
-  useMutation: (options: { mutationFn: (body: any) => Promise<any>; onSuccess?: (data: any) => unknown }) => ({
-    mutate: async (body: unknown) => { const data = await options.mutationFn(body); await options.onSuccess?.(data); },
+  useMutation: (options: { mutationFn: (body: any) => Promise<any>; onSuccess?: (data: any) => unknown; onSettled?: () => unknown }) => ({
+    mutate: async (body: unknown) => { try { const data = await options.mutationFn(body); await options.onSuccess?.(data); } finally { options.onSettled?.(); } },
     isPending: false, reset: () => {},
   }),
   useQueryClient: () => ({ invalidateQueries: queryState.invalidate }),
@@ -171,7 +171,9 @@ describe("offering the partner memo (task 84d)", () => {
   ] as const)("%s", (_name, input, offered) => {
     queryState.run = { result: underwrite(input, policyFor(input)), ...("waterfall" in input ? { inputs: [{ fieldKey: "lp_share_pct" }] } : {}) } as never;
     const html = renderToStaticMarkup(createElement(Reports, { dealId: "partners" }));
-    expect(html.includes("Partner memo")).toBe(offered);
+    // Card C5: the partner memo is always listed; without a split it says where to enter one.
+    expect(html.includes("Partner memo")).toBe(true);
+    expect(html.includes("Needs the partner split (LP/GP) to be entered on Review")).toBe(!offered);
   });
 });
 
@@ -405,5 +407,78 @@ describe("card 152 signed table notes on the run", () => {
     expect(html).toContain(lang === "en" ? "Published table past its re-check date (2027-04-30); check the source before relying on this value." : "Tableau publié dont la date de revérification (2027-04-30) est passée ; vérifiez la source avant de vous fier à cette valeur.");
     expect(html).toContain(lang === "en" ? "GST/HST net is $0" : "TPS/TVH nette de 0 $");
     queryState.lang="en";
+  });
+});
+
+describe("the reports screen (card C5)", () => {
+  const artifact = (id: string, kind: string, format: string, status: string) => ({ id, kind, format, lang: "en", status, error: null, sha256: null,
+    created_at: "2026-10-19T12:00:00Z", run_id: "sale-run", run_number: 1, provenance_entries: null });
+  const render = () => { queryState.index = 0; queryState.nodes = []; return renderToStaticMarkup(createElement(Reports, { dealId: "c5" })); };
+  const generate = () => queryState.nodes.filter((n) => n.tag === "button" && n.props.name === "generate");
+  beforeEach(() => {
+    queryState.interactive = true; queryState.hooks = []; queryState.lang = "en"; queryState.role = "owner"; queryState.links = [];
+    queryState.run = { result: underwrite(rentalInput, policyFor(rentalInput)) };
+    vi.clearAllMocks();
+  });
+  afterEach(() => { queryState.interactive = false; queryState.artifacts = []; vi.unstubAllGlobals(); });
+
+  it("leads with the build decision, marked as the first report to make, with one primary button per card", () => {
+    queryState.artifacts = [];
+    const html = render();
+    const order = ["Build decision", "Committee memo", "Lender package", "Partner memo", "Model export"].map((x) => html.indexOf(`<h3 class="h3">${x}</h3>`));
+    expect(order.every((x) => x > 0)).toBe(true);
+    expect([...order].sort((a, b) => a - b)).toEqual(order);
+    expect(html.indexOf("Recommended first report")).toBeGreaterThan(order[0]!);
+    expect(html.indexOf("Recommended first report")).toBeLessThan(order[1]!);
+    for (const kind of ["build_decision", "ic_memo", "lender_package", "model_export"]) {
+      const mine = generate().filter((b) => String(b.props.value).startsWith(`${kind}:`));
+      expect(mine.filter((b) => String(b.props.className).includes("primary")).length).toBe(1);
+    }
+    expect(html).not.toContain("IC memo");
+  });
+
+  it("keeps the share button off until a report exists, and says why", () => {
+    queryState.artifacts = [];
+    let html = render();
+    const share = () => queryState.nodes.find((n) => n.tag === "button" && n.props.children === "Make a shareable link")!;
+    expect(share().props.disabled).toBe(true);
+    expect(html).toContain("Make a report first");
+    queryState.artifacts = [artifact("done", "build_decision", "pdf", "ready")];
+    html = render();
+    expect(share().props.disabled).toBe(false);
+    expect(html).not.toContain("Make a report first");
+  });
+
+  it("holds a disabled Rendering button in place while a file is made, then shows its download", () => {
+    queryState.artifacts = [artifact("q", "build_decision", "pdf", "queued")];
+    let html = render();
+    const busy = queryState.nodes.find((n) => n.tag === "button" && n.props["aria-busy"] === "true")!;
+    expect(busy.props.disabled).toBe(true);
+    expect(html).toContain("Making the PDF…");
+    // The list polls while a file is queued.
+    const options = queryState.options.filter((o) => o.queryKey[0] === "artifacts").at(-1) as unknown as { refetchInterval: (q: unknown) => unknown };
+    expect(options.refetchInterval({ state: { data: queryState.artifacts } })).toBe(1200);
+    queryState.artifacts = [artifact("q", "build_decision", "pdf", "ready")];
+    html = render();
+    expect(html).toContain("/api/artifacts/q/file");
+    expect(html).not.toContain("Making the PDF…");
+  });
+
+  it("sends one request when the generate button is clicked twice", async () => {
+    queryState.artifacts = [];
+    render();
+    const b = generate().find((x) => x.props.value === "build_decision:pdf")!;
+    const first = b.props.onClick(), second = b.props.onClick();
+    await first; await second;
+    expect(vi.mocked(api.post).mock.calls.filter(([path]) => String(path).endsWith("/artifacts")).length).toBe(1);
+  });
+
+  it("stacks the list of files on a phone, each cell with its column name", () => {
+    queryState.artifacts = [artifact("done", "build_decision", "pdf", "ready")];
+    const html = render();
+    expect(html).toContain('class="table rep-made"');
+    for (const label of ["Report", "Status", "Made"]) expect(html).toContain(`data-label="${label}`);
+    const css = readFileSync(new URL("../src/styles/reports.css", import.meta.url), "utf8");
+    expect(css).toMatch(/@media \(max-width:600px\)\{[^}]*\.rep-made thead\{display:none\}/);
   });
 });

@@ -171,12 +171,12 @@ export function Verify() {
   } else if (me.data?.user.email_verified) {
     body = confirmed;
   } else if (me.data?.mail === false) {
-    // Card B: this server cannot send email, so there is no link or code to wait for.
+    // Card B: this server cannot send email, so there is no link or code to wait for; going on is the main action.
     body = (
       <>
-        <h1 className="h1">{t("auth.verify.title")}</h1>
-        <Notice tone="review">{t("auth.noMail")}</Notice>
-        <p className="small"><Link to="/deals">{t("auth.verify.skip")}</Link></p>
+        <h1 className="h1">{t("auth.verify.readyTitle")}</h1>
+        <Notice tone="review">{t("auth.verify.noMail")}</Notice>
+        <p><Link className="btn primary auth-wide" to="/deals">{t("auth.verify.toDealsNow")}</Link></p>
       </>
     );
   } else if (me.data) {
@@ -188,17 +188,21 @@ export function Verify() {
         </div>
         <form className="stack tight" onSubmit={submit} noValidate>
           <div className="field"><label htmlFor="code">{t("auth.verify.code")}</label>
-            <input className="input num auth-code" id="code" name="code" inputMode="numeric" autoComplete="one-time-code" pattern="[0-9]{6}" maxLength={6} required aria-invalid={badCode || undefined} /></div>
+            {/* Room for a pasted code with spaces around or inside it: the spaces are taken out before it is checked. */}
+            <input className="input num auth-code" id="code" name="code" inputMode="numeric" autoComplete="one-time-code" maxLength={20} required aria-invalid={badCode || undefined} /></div>
           {badCode && <Notice tone="stop" role="alert">{t("auth.verify.codeBad")}</Notice>}
           <FormError error={error} />
-          <button className="btn primary auth-wide" type="submit" disabled={busy}>{t("auth.verify.continue")}</button>
+          <div className="auth-actions">
+            <button className="btn primary" type="submit" disabled={busy}>{t("auth.verify.continue")}</button>
+            <Link className="btn quiet" to="/deals">{t("auth.verify.skip")}</Link>
+          </div>
+          <p className="small muted">{t("auth.verify.later")}</p>
         </form>
         <p className="small muted">{t("auth.verify.nothing")} <button type="button" className="auth-linkbtn" onClick={resend.send}>{t("auth.verify.again")}</button>.</p>
         {resend.status}
         <p className="small muted">{t("auth.email.wrong")} <button type="button" className="auth-linkbtn" onClick={() => setChanging(true)}>{t("auth.email.different")}</button>.</p>
         {/* Once changed, the form closes and the sentence above names the new address from the refreshed `me`. */}
         {changing && <ChangeEmail current={me.data.user.email} verified={false} onCancel={() => setChanging(false)} onChanged={() => setChanging(false)} />}
-        <p className="small"><Link to="/deals">{t("auth.verify.skip")}</Link></p>
       </>
     );
   } else {

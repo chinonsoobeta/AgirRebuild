@@ -18,7 +18,14 @@
     <title>Agir</title>
   </head>
   <body>
-    <div id="root"></div>
+    <!-- What shows before the code arrives (QA item 9): the name and the landing headline, in the words of
+         src/strings/landing.ts. React replaces it when it starts; test/ui-landing.test.ts keeps the words in step. -->
+    <div id="root">
+      <div class="landing" aria-busy="true">
+        <header class="topbar"><div class="ld-bar ld-bar-full"><span class="brand"><span class="brand-mark"><svg width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="3" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M4 18L12 5l8 13" /><path d="M8 18h8" /></svg></span>Agir</span></div></header>
+        <main class="ld-wrap"><section class="ld-hero"><div><h1 class="ld-h1">Decide whether to build, with numbers a lender can check.</h1><p class="ld-sub">Agir takes a small Canadian project from your documents to a build decision, a lender package and a partner memo. Every figure comes from one engine and keeps its source. Nothing is guessed.</p></div></section></main>
+      </div>
+    </div>
     <script type="module" src="/src/main.tsx"></script>
   </body>
 </html>

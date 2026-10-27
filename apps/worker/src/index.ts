@@ -188,6 +188,7 @@ async function extractDocument(deps: WorkerDeps, documentId: string) {
   const asSourced = (c: (typeof result.candidates)[number]): SourcedCandidate => ({ ...c, documentId: d.id, documentName: d.name });
   const suggestions = await suggestLabels(deps, d.workspace_id, offeredOf([...result.candidates, ...result.other].map(asSourced)));
   let aiRead = false;
+  let reconcileJob = 0;
   await db.transaction(async (tx) => {
     await tx.query(`delete from candidates where document_id = $1`, [d.id]);
     await tx.query(`delete from label_suggestions where document_id = $1`, [d.id]);
@@ -210,13 +211,19 @@ async function extractDocument(deps: WorkerDeps, documentId: string) {
     );
     // Read once per job: with AI reading off for the workspace, the rules reconcile alone, as with no key.
     aiRead = Boolean(deps.read || process.env.ANTHROPIC_API_KEY) && (await aiReadingOn(tx, d.workspace_id)) && !(await currentDocuments(tx, d.deal_id)).some(doc => ["uploaded", "checking", "reading", "extracting"].includes(doc.stage));
-    if (!aiRead) await tx.query(`insert into jobs (kind, payload) values ('reconcile_deal', $1)`, [JSON.stringify({ deal_id: d.deal_id })]);
+    // With AI reading, the reconcile is queued now but held until the reading ends, so the deal reads as updating meanwhile
+    // (QA 2026-10-27 #6: the stepper said "Blocked · 13 missing" during the AI pass). If this worker dies, it runs anyway later.
+    const [job] = await tx.query<{ id: number }>(
+      `insert into jobs (kind, payload, run_after) values ('reconcile_deal', $1, now() + ($2 || ' seconds')::interval) returning id`,
+      [JSON.stringify({ deal_id: d.deal_id }), aiRead ? "600" : "0"],
+    );
+    reconcileJob = job!.id;
   });
   if (aiRead) {
     try {
       await readDeal(db, store, d.deal_id, d.workspace_id, deps.read);
     } finally {
-      await db.query(`insert into jobs (kind, payload) values ('reconcile_deal', $1)`, [JSON.stringify({ deal_id: d.deal_id })]);
+      await db.query(`update jobs set run_after = now() where id = $1 and status = 'queued'`, [reconcileJob]);
     }
   }
   for (const r of suggestions) if (r.error) await audit(db, d.workspace_id, d.deal_id, "document.suggestions_failed", "document", d.id, r.error);
@@ -564,7 +571,8 @@ async function renderJob(deps: WorkerDeps, artifactId: string) {
   const [run] = await db.query<{
     id: string; run_number: number; created_at: string | Date; engine_version: string; policy_version: string; policy_hash: string;
     input_hash: string; result_hash: string; result: RunResult; input_snapshot: { input: EngineInput; policy?: Policy; standardPolicy?: Policy; policyChanges?: ArtifactInput["policyChanges"]; assumptions: ArtifactInput["assumptions"]; notFound?: ArtifactInput["notFound"] };
-  }>(`select * from runs where id = $1`, [a.run_id]);
+    created_by_name: string | null;
+  }>(`select r.*, u.name as created_by_name from runs r left join users u on u.id = r.created_by where r.id = $1`, [a.run_id]);
   const [deal] = await db.query<{ name: string; asset_type: string; location: string; currency: Currency | null; province: string | null }>(
     `select name, asset_type, location, currency, province from deals where id = $1`,
     [a.deal_id],
@@ -602,6 +610,8 @@ async function renderJob(deps: WorkerDeps, artifactId: string) {
       policyHash: run.policy_hash,
       inputHash: run.input_hash,
       resultHash: run.result_hash,
+      // Read only: the build decision names who confirmed the values the run used (card C5).
+      createdBy: run.created_by_name,
     },
     result: run.result,
     input: run.input_snapshot.input,

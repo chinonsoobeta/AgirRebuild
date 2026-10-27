@@ -4,9 +4,10 @@ import { register, type Entry, type FrenchOf } from "./entry";
 export const en = {
   "audit.lead": "Every event is chained to the one before it by a hash, and nothing in this list can be edited or deleted. The audit package carries this deal's events with their hashes and the result of the chain check.",
   // The check walks every workspace's events (the chain is one chain); the count and the broken event are this workspace's (card B).
+  // Only this workspace's count is shown, never the installation's (QA item 21).
   "audit.checked": (p) => p.ok
-    ? `The check read every event Agir has recorded, in every workspace, from the first one; each hash matched the event before it and its own contents. ${p.n} of those events are this workspace's.`
-    : `The check read the events Agir has recorded, in every workspace, from the first one, and stopped at an event of ${p.mine ? "this workspace" : "another workspace"}: its hash does not match the event before it or its own contents.`,
+    ? `The check verified the whole chain (every workspace shares one hash chain, so a break anywhere would show). Your workspace has ${p.n} events.`
+    : `The check walked the whole chain (every workspace shares one hash chain) and stopped at an event of ${p.mine ? "this workspace" : "another workspace"}: its hash does not match the event before it or its own contents.`,
   "audit.checking": "Checking the chain…",
   "audit.verifyAgain": "Verify the chain again",
   "audit.verifyFailed": "The chain could not be checked. Try again.",
@@ -50,8 +51,8 @@ export const en = {
 export const fr: FrenchOf<typeof en> = {
   "audit.lead": "Chaque événement est lié au précédent par une empreinte, et rien dans cette liste ne peut être modifié ni supprimé. Le dossier d'audit contient les événements de ce projet avec leurs empreintes et le résultat de la vérification de la chaîne.",
   "audit.checked": (p) => p.ok
-    ? `La vérification a lu tous les événements qu'Agir a consignés, dans tous les espaces de travail, depuis le premier\u00a0; chaque empreinte correspond à l'événement précédent et à son propre contenu. ${p.n} de ces événements appartiennent à cet espace de travail.`
-    : `La vérification a lu les événements qu'Agir a consignés, dans tous les espaces de travail, depuis le premier, et s'est arrêtée à un événement ${p.mine ? "de cet espace de travail" : "d'un autre espace de travail"}\u00a0: son empreinte ne correspond pas à l'événement précédent ou à son propre contenu.`,
+    ? `La vérification a validé toute la chaîne (tous les espaces de travail partagent une seule chaîne de hachage, si bien qu'une rupture n'importe où se verrait). Votre espace de travail compte ${p.n} événements.`
+    : `La vérification a parcouru toute la chaîne (tous les espaces de travail partagent une seule chaîne de hachage) et s'est arrêtée à un événement ${p.mine ? "de cet espace de travail" : "d'un autre espace de travail"}\u00a0: son empreinte ne correspond pas à l'événement précédent ou à son propre contenu.`,
   "audit.checking": "Vérification de la chaîne…",
   "audit.verifyAgain": "Vérifier la chaîne de nouveau",
   "audit.verifyFailed": "La chaîne n'a pas pu être vérifiée. Réessayez.",

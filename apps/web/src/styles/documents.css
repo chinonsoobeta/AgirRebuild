@@ -13,3 +13,18 @@
 .docs-link:hover{color:var(--ink)}
 .docs-role{margin-top:6px;max-width:100%}
 .docs-what{margin-top:6px}
+.docs-inline{display:inline-flex;align-items:center;gap:6px;margin-top:8px;color:var(--ink-2)}
+/* QA #18: a 200-character file name wraps instead of running past its column. */
+.docs-list td a,.docs-note{overflow-wrap:anywhere}
+/* QA #17: below 600 px each document is a stacked card, so nothing needs a sideways swipe. */
+@media (max-width:600px){
+  .docs-list{overflow-x:visible}
+  .docs-list .table thead{position:absolute;width:1px;height:1px;overflow:hidden;clip:rect(0 0 0 0);white-space:nowrap}
+  .docs-list .table,.docs-list .table tbody,.docs-list .table tr,.docs-list .table td{display:block;width:100%}
+  .docs-list .table tr{padding:12px 16px;border-bottom:1px solid var(--line)}
+  .docs-list .table tr:last-child{border-bottom:0}
+  .docs-list .table td{padding:4px 0;border-bottom:0}
+  .docs-list .table td[data-label]::before{content:attr(data-label);display:block;font-size:12px;color:var(--ink-3)}
+  .docs-list .table td.acts,.docs-list .table td:last-child{text-align:left}
+  .docs-list .table .acts{justify-content:flex-start}
+}

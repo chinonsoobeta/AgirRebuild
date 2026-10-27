@@ -219,6 +219,77 @@ export function RunReused({ n }: { n: number }) {
   const { t } = useI18n();
   return <Notice role="status">{t("run.reused", { n })}</Notice>;
 }
+/** The parts of the model's total development cost, in the ledger's order: costs before financing, any lease-up
+ * operating cost, then capitalized interest. Returned only when they add up to the model's total, so nothing is shown that
+ * the run did not compute (card C5). */
+export const COST_PARTS = ["hard_and_soft_cost", "leaseup_operating_cost", "capitalized_interest"] as const;
+export function costParts(metrics: readonly Pick<Metric, "key" | "status" | "value">[], model: number): { key: string; value: number }[] | null {
+  const parts = COST_PARTS.flatMap((key) => {
+    const m = metrics.find((x) => x.key === key);
+    return m && m.status === "VALID" && m.value !== null ? [{ key, value: m.value }] : [];
+  });
+  const sum = parts.reduce((a, x) => a + x.value, 0);
+  return parts.length > 0 && Math.abs(sum - model) < 1 ? parts : null;
+}
+
+/** What the run took from people, defaults and its own setup rather than from documents (card C5). */
+export function RunAssumed({ v }: { v: RunView }) {
+  const i = useI18n();
+  const { t, f, L } = i;
+  const unit = (k: string) => FIELD_BY_KEY.get(k)?.unit ?? "count";
+  const stated = v.inputs.filter((x) => x.sourceKind !== "default" && x.sourceKind !== "table" && (x.sourceKind === "analyst" || x.sponsorStated));
+  const defaults = v.inputs.filter((x) => x.sourceKind === "default");
+  const notFound = v.notFound ?? [];
+  const unsigned = v.policyDraft || !isSigned(v.policyVersion);
+  const devKey = v.signed === "development key";
+  const gap = v.result.checks.find((c) => c.key === "stated_total_cost" && c.severity !== "pass" && c.expected !== undefined && c.actual !== undefined);
+  const parts = gap ? costParts(v.result.scenarios[0]!.metrics, gap.expected!) : null;
+  const values = (rows: RunView["inputs"]) => (
+    <dl className="kv run-assumed-kv">
+      {rows.map((x) => <Fragment key={`${x.fieldKey}:${x.itemKey ?? ""}`}><dt>{L.field(x.fieldKey, x.itemKey)}</dt><dd className="num">{f.value(x.value, unit(x.fieldKey))}</dd></Fragment>)}
+    </dl>
+  );
+  const empty = !stated.length && !defaults.length && !notFound.length && !unsigned && !devKey && !gap;
+  return (
+    <section className="card card-pad stack tight run-assumed" aria-labelledby="run-assumed-h">
+      <h2 className="h2" id="run-assumed-h">{t("run.assumedTitle")}</h2>
+      {empty ? <p className="muted">{t("run.assumed.none")}</p> : <p className="muted">{t("run.assumedLead")}</p>}
+      {stated.length > 0 && <div><h3 className="h3">{t("run.assumed.stated")}</h3>{values(stated)}</div>}
+      {defaults.length > 0 && <div><h3 className="h3">{t("run.assumed.defaults")}</h3>{values(defaults)}</div>}
+      {notFound.length > 0 && (
+        <div>
+          <h3 className="h3">{t("run.assumed.notFound")}</h3>
+          <dl className="kv run-assumed-kv">
+            {notFound.map((x) => <Fragment key={`${x.fieldKey}:${x.itemKey ?? ""}`}><dt>{L.field(x.fieldKey, x.itemKey ?? null)}</dt><dd>{t("run.assumed.instead", { what: L.absent(x.fieldKey) || x.detail || "" })}</dd></Fragment>)}
+          </dl>
+        </div>
+      )}
+      {(unsigned || devKey) && (
+        <div>
+          <h3 className="h3">{t("run.assumed.setup")}</h3>
+          <dl className="kv run-assumed-kv">
+            {unsigned && <><dt>{t("run.assumed.policy")}</dt><dd>{t(v.policyDraft ? "run.assumed.policyWhy" : "run.assumed.policyWhyUnsigned")}</dd></>}
+            {devKey && <><dt>{t("run.assumed.devKey")}</dt><dd>{t("run.assumed.devKeyWhy")}</dd></>}
+          </dl>
+        </div>
+      )}
+      {gap && (
+        <div>
+          <h3 className="h3">{t("run.costGap")}</h3>
+          <p>{t("run.costGapLine", { stated: f.value(gap.actual!, "$"), model: f.value(gap.expected!, "$"), diff: f.value(Math.abs(gap.expected! - gap.actual!), "$"), more: gap.expected! > gap.actual! })}</p>
+          {parts && (
+            <dl className="kv run-assumed-kv">
+              {parts.map((x) => <Fragment key={x.key}><dt>{L.metric(x.key)}</dt><dd className="num">{f.value(x.value, "$")}</dd></Fragment>)}
+              <dt>{t("run.costGapTotal")}</dt><dd className="num"><strong>{f.value(gap.expected!, "$")}</strong></dd>
+            </dl>
+          )}
+          <p className="small muted">{t("run.costGapHint")}</p>
+        </div>
+      )}
+    </section>
+  );
+}
+
 /** Operating years shown before "Show all". */
 const FIRST_YEARS = 5;
 
@@ -339,6 +410,10 @@ export function Run({ dealId, run: fromAddress }: { dealId: string; run?: string
     net_sales_revenue: () => so(valid("gross_sales_revenue"), (x) => t("run.sub.sales", { v: x })),
   };
   const scenarioLabel = (key: string) => L.stress(key, v.result.scenarios.find((s) => s.key === key)?.label ?? key);
+  const stressName = (s: { key: string; label: string }) => {
+    const custom = v.policy?.custom ? v.policy.stresses.find((stress) => stress.key === s.key) : undefined;
+    return custom ? stressLabel(custom, i.lang, v.standardPolicy?.stresses.find((stress) => stress.key === s.key)) : L.stress(s.key, s.label);
+  };
   const gateFor = (k: string) => v.result.verdict.gates.find((g) => g.metricKey === k && g.scenario === base.key);
   const operating = v.result.annual.filter((y) => y.year > 0).length;
   const years = allYears ? v.result.annual : v.result.annual.filter((y) => y.year <= FIRST_YEARS);
@@ -391,6 +466,8 @@ export function Run({ dealId, run: fromAddress }: { dealId: string; run?: string
             </div>
           </div>
         </section>
+
+        <RunAssumed v={v} />
 
         <section className="section">
           <h2 className="h2">{t("run.keyFigures")}</h2>
@@ -450,7 +527,7 @@ export function Run({ dealId, run: fromAddress }: { dealId: string; run?: string
         </section>
 
         <section className="section">
-          <div><h2 className="h2" id="run-stress-h">{t("run.underStress")}</h2><p className="muted">{t("run.underStressLead")}</p></div>
+          <div><h2 className="h2" id="run-stress-h">{t("run.underStress")}</h2><p className="muted">{t("run.underStressLead", { n: v.result.scenarios.filter((s) => s.key !== base.key && s.key !== "combined").length })}</p></div>
           {/* The table is wider than the page: the box takes focus so the keyboard can scroll it. */}
           <div className="card scroll run-stress" tabIndex={0} role="region" aria-labelledby="run-stress-h">
             <table className="table">
@@ -459,7 +536,7 @@ export function Run({ dealId, run: fromAddress }: { dealId: string; run?: string
                 {v.result.scenarios.map((s) => (
                   <tr key={s.key} className={s.key === "combined" ? "run-combined" : undefined}>
                     <th scope="row" className="run-rowhead">
-                      {v.policy?.custom && v.policy.stresses.some((stress) => stress.key === s.key) ? stressLabel(v.policy.stresses.find((stress) => stress.key === s.key)!, i.lang, v.standardPolicy?.stresses.find((stress) => stress.key === s.key)) : L.stress(s.key, s.label)}{s.key === "combined" && <span className="muted">{t("run.readByGates")}</span>}
+                      {stressName(s)}{s.key === "combined" && <span className="muted">{t("run.readByGates")}</span>}
                     </th>
                     {columns.map((k) => {
                       const m = s.metrics.find((x) => x.key === k);
@@ -470,12 +547,27 @@ export function Run({ dealId, run: fromAddress }: { dealId: string; run?: string
               </tbody>
             </table>
           </div>
+          {/* On a phone the same figures, one card per scenario (card C5). */}
+          <ul className="run-phone-cards">
+            {v.result.scenarios.map((s) => (
+              <li key={s.key} className={`card card-pad${s.key === "combined" ? " run-combined" : ""}`}>
+                <h3 className="h3">{stressName(s)}</h3>
+                {s.key === "combined" && <p className="small muted">{t("run.readByGates")}</p>}
+                <dl className="kv">
+                  {columns.map((k) => {
+                    const m = s.metrics.find((x) => x.key === k);
+                    return <Fragment key={k}><dt>{L.metric(k)}</dt><dd className="r">{m ? <MetricValue {...m} /> : <span className="not-meaningful">{t("common.notMeasured")}</span>}</dd></Fragment>;
+                  })}
+                </dl>
+              </li>
+            ))}
+          </ul>
         </section>
 
         {sale ? <p className="muted">{t("run.saleCashFlows")}</p> : (
           <section className="section">
             <h2 className="h2">{t("run.annual")}</h2>
-            <div className="card scroll">
+            <div className="card scroll run-annual">
               <table className="table">
                 <thead><tr><th scope="col">{t("run.col.period")}</th><th scope="col" className="r">{t("run.col.egi")}</th><th scope="col" className="r">{t("run.col.opex")}</th><th scope="col" className="r">{t("run.col.noi")}</th><th scope="col" className="r">{t("run.col.ds")}</th><th scope="col" className="r">{t("run.col.cf")}</th></tr></thead>
                 <tbody>
@@ -493,6 +585,24 @@ export function Run({ dealId, run: fromAddress }: { dealId: string; run?: string
                 </div>
               )}
             </div>
+            {/* On a phone, one card per year (card C5). */}
+            <ul className="run-phone-cards">
+              {years.map((y) => (
+                <li key={y.year} className="card card-pad">
+                  <h3 className="h3">{y.year === 0 ? t("run.beforeStab") : t("run.year", { n: y.year })}</h3>
+                  <dl className="kv">
+                    {([["run.col.egi", y.egi], ["run.col.opex", y.opex], ["run.col.noi", y.noi], ["run.col.ds", y.debtService], ["run.col.cf", y.cashFlow]] as const).map(([label, n]) => (
+                      <Fragment key={label}><dt>{t(label)}</dt><dd className="r num">{f.value(n, "$")}</dd></Fragment>
+                    ))}
+                  </dl>
+                </li>
+              ))}
+            </ul>
+            {operating > FIRST_YEARS && (
+              <div className="row run-phone-only">
+                <button type="button" className="btn ghost sm" aria-expanded={allYears} onClick={() => setAllYears(!allYears)}>{allYears ? t("run.showFirstYears") : t("run.showAllYears", { n: operating })}</button>
+              </div>
+            )}
           </section>
         )}
 

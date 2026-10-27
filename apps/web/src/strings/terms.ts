@@ -98,6 +98,21 @@ export const en = {
   // Finance-first entries for the two terms the glossary did not have before.
   "terms.financeGloss.developmentSpread": () => ["Development spread", "Yield on cost less the exit cap rate, in basis points. It is the reward for building rather than buying."],
   "terms.financeGloss.unrealizedMultiple": () => ["Equity multiple (unrealized, not a sale)", "Operating and refinance distributions plus the equity's share of the stated value, divided by the equity contributed. Unrealized because nothing is sold."],
+  // Card C2: the Review page's glossary, in the words that page uses.
+  "terms.rv.dcr": () => ["DCR or DSCR (debt coverage ratio)", "Net operating income divided by the year's loan payments. 1.20x means the income covers the payments 1.2 times."],
+  "terms.rv.covenant": () => ["Covenant (minimum DSCR covenant)", "A condition in the loan agreement, such as a DSCR the building must keep. Falling below it is a breach the lender can act on."],
+  "terms.rv.capRate": () => ["Exit cap rate", "The yield a buyer is assumed to require at sale; the final year's NOI divided by it gives the sale value. A higher rate means a lower price."],
+  "terms.rv.noi": () => ["NOI (net operating income)", "The rent and other income actually collected, less operating costs, before any loan payments."],
+  "terms.rv.egi": () => ["EGI (effective gross income)", "The rent if every unit were rented, less vacancy: the income actually expected. The operating expense ratio is a share of year-one EGI."],
+  "terms.rv.ltc": () => ["Loan to cost (LTC)", "The share of the total development cost that is financed by loans."],
+  "terms.rv.amortization": () => ["Amortization", "The number of years over which regular payments of interest and principal pay a loan down to zero."],
+  "terms.rv.interestOnly": () => ["Interest-only period", "Months in which the loan payment covers interest only, so the balance does not go down."],
+  "terms.rv.leaseUp": () => ["Lease-up period", "The months after construction while the units fill, before the building reaches its stabilized occupancy."],
+  "terms.rv.stabilized": () => ["Stabilized occupancy", "The share of units expected to be rented once lease-up is over: the building's normal, steady state."],
+  "terms.rv.hold": () => ["Hold period", "The years the building is owned after it is stabilized, before it is sold or the run ends."],
+  "terms.rv.mezzanine": () => ["Mezzanine loan", "A second loan that is repaid only after the senior loan, so it costs more."],
+  "terms.rv.bps": () => ["bps (basis points)", "Hundredths of a percentage point: 100 bps is 1%."],
+  "terms.rv.material": () => ["Material", "A value that can change the verdict. In a team, a material value someone enters by hand counts only once a second person confirms it."],
 } satisfies Record<string, Entry>;
 
 export const fr: FrenchOf<typeof en> = {
@@ -192,6 +207,20 @@ export const fr: FrenchOf<typeof en> = {
   "terms.gloss.breakEven": () => ["Occupation au seuil de rentabilité", "La part des loyers potentiels qui doit être encaissée à l'année 1 pour couvrir les charges fixes, les charges variables et les paiements de prêt."],
   "terms.financeGloss.developmentSpread": () => ["Écart de développement", "Le rendement sur coût moins le taux de capitalisation de sortie, en points de base. C'est la récompense de construire plutôt que d'acheter."],
   "terms.financeGloss.unrealizedMultiple": () => ["Multiple des fonds propres (non réalisé, pas une vente)", "Les distributions d'exploitation et de refinancement plus la part des fonds propres de la valeur déclarée, divisées par les fonds propres apportés. Non réalisé, parce que rien n'est vendu."],
+  "terms.rv.dcr": () => ["CCD ou RCSD (ratio de couverture de la dette)", "Le revenu net d'exploitation divisé par les paiements de prêt de l'année. 1,20x veut dire que le revenu couvre les paiements 1,2 fois."],
+  "terms.rv.covenant": () => ["Clause (clause de RCSD minimal)", "Une condition du contrat de prêt, comme un RCSD que l'immeuble doit maintenir. Passer sous ce seuil est un manquement sur lequel le prêteur peut agir."],
+  "terms.rv.capRate": () => ["Taux de capitalisation à la sortie", "Le rendement qu'un acheteur est supposé exiger à la vente\u00a0; le RNE de la dernière année divisé par ce taux donne la valeur de vente. Un taux plus élevé veut dire un prix plus bas."],
+  "terms.rv.noi": () => ["RNE (revenu net d'exploitation)", "Les loyers et autres revenus réellement encaissés, moins les charges d'exploitation, avant tout paiement de prêt."],
+  "terms.rv.egi": () => ["RBE (revenu brut effectif)", "Les loyers si tous les logements étaient loués, moins l'inoccupation\u00a0: le revenu réellement attendu. Le ratio des charges d'exploitation est une part du RBE de la première année."],
+  "terms.rv.ltc": () => ["Ratio prêt-coût", "La part du coût total de développement qui est financée par des prêts."],
+  "terms.rv.amortization": () => ["Amortissement", "Le nombre d'années pendant lesquelles des paiements réguliers d'intérêts et de capital ramènent un prêt à zéro."],
+  "terms.rv.interestOnly": () => ["Période d'intérêts seulement", "Les mois pendant lesquels le paiement du prêt ne couvre que les intérêts\u00a0; le solde ne baisse pas."],
+  "terms.rv.leaseUp": () => ["Période de location", "Les mois après la construction pendant lesquels les logements se louent, avant que l'immeuble atteigne son occupation stabilisée."],
+  "terms.rv.stabilized": () => ["Occupation stabilisée", "La part des logements qui devraient être loués une fois la location initiale terminée\u00a0: le régime normal de l'immeuble."],
+  "terms.rv.hold": () => ["Période de détention", "Les années pendant lesquelles l'immeuble est détenu après sa stabilisation, avant sa vente ou la fin de l'analyse."],
+  "terms.rv.mezzanine": () => ["Prêt mezzanine", "Un second prêt, remboursé seulement après le prêt principal\u00a0; il coûte donc plus cher."],
+  "terms.rv.bps": () => ["pb (points de base)", "Des centièmes de point de pourcentage\u00a0: 100 pb font 1\u00a0%."],
+  "terms.rv.material": () => ["Déterminant", "Une valeur qui peut changer le verdict. En équipe, une valeur déterminante saisie à la main ne compte qu'une fois confirmée par une seconde personne."],
 };
 
 register(en, fr);

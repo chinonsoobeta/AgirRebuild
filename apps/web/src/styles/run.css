@@ -22,3 +22,14 @@
 .run-stress .table{min-width:880px}
 .run-history td.run-status{white-space:normal;min-width:16ch;max-width:44ch}
 .run-changes{margin:8px 0 0;padding-left:20px;display:flex;flex-direction:column;gap:4px}
+/* What the run assumed (card C5): label and value side by side, wrapping on a phone. */
+.run-assumed h3{margin:12px 0 4px}
+.run-assumed-kv dd{white-space:normal}
+/* Wide tables become one card per scenario or year on a phone (card C5). */
+.run-phone-cards,.run-phone-only{display:none}
+@media (max-width:600px){
+  .run-stress,.run-annual{display:none}
+  .run-phone-cards{display:flex;flex-direction:column;gap:12px;list-style:none;padding:0;margin:0}
+  .run-phone-only{display:flex}
+  .run-phone-cards .kv dd{text-align:right}
+}

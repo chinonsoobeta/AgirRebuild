@@ -1,4 +1,4 @@
-import { Fragment, useState } from "react";
+import { Fragment, useEffect, useRef, useState } from "react";
 import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
 import { Link } from "@tanstack/react-router";
 import { api, type Artifact, type ShareLink, type ShareTerm } from "../api";
@@ -9,10 +9,11 @@ import { useRun } from "./run";
 import { useI18n } from "../i18n";
 import "../strings/reports";
 
+// The build decision comes first: it is the report to make first (card C5).
 const KINDS = [
+  { kind: "build_decision", formats: ["pdf", "docx"] },
   { kind: "ic_memo", formats: ["pdf", "docx"] },
   { kind: "lender_package", formats: ["pdf", "docx"] },
-  { kind: "build_decision", formats: ["pdf", "docx"] },
   { kind: "partner_memo", formats: ["pdf", "docx"] },
   { kind: "model_export", formats: ["xlsx"] },
 ] as const;
@@ -35,11 +36,21 @@ export function Reports({ dealId }: { dealId: string }) {
   const heldSplit = Boolean(run.data?.result.scenarios.find((s) => s.key === "base")?.metrics.some((m) => m.key === "unrealized_equity_irr")
     && run.data?.inputs?.some((i) => i.fieldKey === "lp_share_pct"));
   const partnerMemo = heldSplit || Boolean(lp && lp.status !== "NOT_APPLICABLE");
+  // Files asked for here and not yet finished: the list is polled until each is ready, blocked or failed (card C5).
+  const [waiting, setWaiting] = useState<string[]>([]);
   const arts = useQuery({
     queryKey: ["artifacts", dealId],
     queryFn: () => api.get<Artifact[]>(`/deals/${dealId}/artifacts`),
-    refetchInterval: (q) => (q.state.data?.some((a) => a.status === "queued") ? 1200 : false),
+    refetchInterval: (q) => (waiting.length > 0 || q.state.data?.some((a) => a.status === "queued") ? 1200 : false),
+    refetchIntervalInBackground: true,
   });
+  useEffect(() => {
+    if (!waiting.length || !arts.data) return;
+    const done = waiting.filter((id) => arts.data.some((a) => a.id === id && a.status !== "queued"));
+    if (!done.length) return;
+    setWaiting(waiting.filter((id) => !done.includes(id)));
+    void qc.invalidateQueries({ queryKey: ["deal", dealId] });
+  }, [arts.data, waiting, qc, dealId]);
   const links = useQuery({ queryKey: ["share-links", dealId], queryFn: () => api.get<ShareLink[]>(`/deals/${dealId}/share-links`) });
   // Sharing is open to every staff role (card 86): a link is read-only and shows no more than its maker can see.
   // A client (card 89) may not share. A link shares the ticked files of the current run (card R2); every one starts ticked.
@@ -60,11 +71,22 @@ export function Reports({ dealId }: { dealId: string }) {
     mutationFn: (id: string) => api.post(`/share-links/${id}/revoke`),
     onSuccess: () => qc.invalidateQueries({ queryKey: ["share-links", dealId] }),
   });
+  // One request at a time: a second click before the first returns would make a duplicate file (card C5).
+  const inFlight = useRef(false);
   const make = useMutation({
     mutationFn: (b: { kind: string; format: string; lang?: "en" | "fr" }) =>
-      api.post(`/runs/${deal.data!.run!.id}/artifacts`, { kind: b.kind, format: b.format, lang: b.kind === "model_export" ? "en" : b.lang ?? lang }),
-    onSuccess: () => Promise.all([qc.invalidateQueries({ queryKey: ["artifacts", dealId] }), qc.invalidateQueries({ queryKey: ["deal", dealId] })]),
+      api.post<{ id: string }>(`/runs/${deal.data!.run!.id}/artifacts`, { kind: b.kind, format: b.format, lang: b.kind === "model_export" ? "en" : b.lang ?? lang }),
+    onSuccess: (r) => {
+      if (r?.id) setWaiting([...waiting, r.id]);
+      return Promise.all([qc.invalidateQueries({ queryKey: ["artifacts", dealId] }), qc.invalidateQueries({ queryKey: ["deal", dealId] })]);
+    },
+    onSettled: () => { inFlight.current = false; },
   });
+  const go = (b: { kind: string; format: string; lang?: "en" | "fr" }) => {
+    if (inFlight.current) return;
+    inFlight.current = true;
+    return make.mutate(b);
+  };
   if (!deal.data) return <p className="muted">{t("common.loading")}</p>;
   const o = deal.data;
   const all = arts.data ?? [];
@@ -88,6 +110,18 @@ export function Reports({ dealId }: { dealId: string }) {
 
   const kindCard = (k: (typeof KINDS)[number]) => {
     const r = o.run!;
+    // The partner memo needs a split; without one the card says where to enter it, rather than being left out (card C5).
+    if (k.kind === "partner_memo" && !partnerMemo) return (
+      <div key={k.kind} className="card card-pad stack tight">
+        <div className="rep-head"><h3 className="h3">{kind(k.kind)}</h3><Tag tone="plain">{t("reports.notAvailable")}</Tag></div>
+        <p className="muted">{t(`reports.kd.${k.kind}`)}</p>
+        <p className="small">{t("reports.partnerNeeds")}</p>
+        <div className="row rep-acts">
+          {k.formats.map((fmt) => <button key={fmt} className="btn quiet sm" type="button" disabled>{t("reports.generateFmt", { f: fmtName(fmt), n: r.number })}</button>)}
+        </div>
+        <div className="row rep-acts"><Link className="btn ghost sm" to="/deals/$dealId/review" params={{ dealId }}>{t("reports.partnerToReview")}</Link></div>
+      </div>
+    );
     const want = k.kind === "model_export" ? "en" : lang;
     const ofRun = all.filter((a) => a.kind === k.kind && a.run_id === r.id).sort(newest);
     const mine = ofRun.filter((a) => a.lang === want);
@@ -103,9 +137,10 @@ export function Reports({ dealId }: { dealId: string }) {
       : (made.length ? made : [want]).map((l) => (l === "fr" ? t("reports.frDraft") : t("reports.english"))).join(" · ");
     const facts = [k.formats.map(fmtName).join(" · "), langs, traced ? t("reports.tracedN", { n: traced }) : t("reports.fromRun", { n: r.number })];
     const other = (fmt: string) => ofRun.find((a) => a.lang === otherLang && a.format === fmt);
+    const firstToMake = k.formats.find((fmt) => { const a = of(fmt); return !a || (a.status !== "ready" && a.status !== "queued"); });
     return (
       <div key={k.kind} className="card card-pad stack tight">
-        <div className="rep-head"><h3 className="h3">{kind(k.kind)}</h3>{tag}</div>
+        <div className="rep-head"><h3 className="h3">{kind(k.kind)}</h3><div className="row rep-tags">{tag}{k.kind === "build_decision" && <Tag>{t("reports.recommended")}</Tag>}</div></div>
         <p className="muted">{t(`reports.kd.${k.kind}`)}</p>
         <p className="small muted">{facts.join(" · ")}</p>
         <div className="row rep-acts">
@@ -117,14 +152,18 @@ export function Reports({ dealId }: { dealId: string }) {
                 <a className="btn quiet sm" href={`/api/artifacts/${a.id}/file`}><I.Download />{t("reports.downloadFmt", { f: fmtName(fmt) })}</a>
                 {canEdit(role) && (
                   <button name="regenerate" value={`${k.kind}:${fmt}`} className="btn ghost sm" type="button" disabled={make.isPending}
-                    aria-label={t("reports.makeAgainFmt", { f: fmtName(fmt) })} onClick={() => make.mutate({ kind: k.kind, format: fmt })}>{t("reports.makeAgain")}</button>
+                    aria-label={t("reports.makeAgainFmt", { f: fmtName(fmt) })} onClick={() => go({ kind: k.kind, format: fmt })}>{t("reports.makeAgain")}</button>
                 )}
               </Fragment>
             );
-            if (a?.status === "queued") return null;
+            // While the file is made, its place holds a disabled button; the download replaces it when the poll sees it ready.
+            if (a?.status === "queued") return (
+              <button key={fmt} className="btn quiet sm" type="button" disabled aria-busy="true"><span className="spin" aria-hidden="true" />{t("reports.renderingFmt", { f: fmtName(fmt) })}</button>
+            );
+            // One primary action per card: the first file still to make.
             return (
-              <button key={fmt} name="generate" value={`${k.kind}:${fmt}`} className="btn primary sm" type="button" disabled={!canEdit(role) || make.isPending}
-                onClick={() => make.mutate({ kind: k.kind, format: fmt })}>{t("reports.generateFmt", { f: fmtName(fmt), n: r.number })}</button>
+              <button key={fmt} name="generate" value={`${k.kind}:${fmt}`} className={`btn ${fmt === firstToMake ? "primary" : "quiet"} sm`} type="button" disabled={!canEdit(role) || make.isPending}
+                onClick={() => go({ kind: k.kind, format: fmt })}>{t("reports.generateFmt", { f: fmtName(fmt), n: r.number })}</button>
             );
           })}
         </div>
@@ -139,14 +178,14 @@ export function Reports({ dealId }: { dealId: string }) {
                   <a className="btn ghost sm" href={`/api/artifacts/${a.id}/file`}><I.Download />{what}</a>
                   {canEdit(role) && (
                     <button name="regenerate-other" value={`${k.kind}:${fmt}:${otherLang}`} className="btn ghost sm" type="button" disabled={make.isPending}
-                      aria-label={t("reports.makeAgainOther", { l: otherName, f: fmtName(fmt) })} onClick={() => make.mutate({ kind: k.kind, format: fmt, lang: otherLang })}>{t("reports.makeAgain")}</button>
+                      aria-label={t("reports.makeAgainOther", { l: otherName, f: fmtName(fmt) })} onClick={() => go({ kind: k.kind, format: fmt, lang: otherLang })}>{t("reports.makeAgain")}</button>
                   )}
                 </Fragment>
               );
               if (a?.status === "queued") return <span key={fmt} className="small muted">{what} · {t("reports.rendering")}</span>;
               return (
                 <button key={fmt} name="generate-other" value={`${k.kind}:${fmt}:${otherLang}`} className="btn ghost sm" type="button" disabled={!canEdit(role) || make.isPending}
-                  onClick={() => make.mutate({ kind: k.kind, format: fmt, lang: otherLang })}>{what}</button>
+                  onClick={() => go({ kind: k.kind, format: fmt, lang: otherLang })}>{what}</button>
               );
             })}
           </div>
@@ -164,7 +203,12 @@ export function Reports({ dealId }: { dealId: string }) {
             <h2 className="h1">{t("reports.title")}</h2>
             {o.run && <p className="lead rep-lead">{t("reports.lead", { n: o.run.number })}</p>}
           </div>
-          {o.run && staff && <button className="btn primary" type="button" onClick={toPicker}>{t("reports.shareTop")}</button>}
+          {o.run && staff && (
+            <div className="stack tight rep-share-top">
+              <button className="btn quiet" type="button" disabled={shareable.length === 0} aria-describedby={shareable.length === 0 ? "rep-share-hint" : undefined} onClick={toPicker}>{t("reports.shareTop")}</button>
+              {shareable.length === 0 && <span className="small muted" id="rep-share-hint">{t("reports.shareTopHint")}</span>}
+            </div>
+          )}
         </div>
         {!o.run ? (
           <Banner tone="neutral" title={t("reports.needRun")}>{t("reports.needRunBody")}</Banner>
@@ -172,7 +216,7 @@ export function Reports({ dealId }: { dealId: string }) {
           <>
             {!o.run.fresh && <Banner tone="review" title={t("reports.stale", { n: o.run.number })}>{t("reports.staleBody")}</Banner>}
             <div className="grid3">
-              {KINDS.filter((k) => k.kind !== "partner_memo" || partnerMemo).map(kindCard)}
+              {KINDS.map(kindCard)}
               <div className="card card-pad stack tight">
                 <div className="rep-head"><h3 className="h3">{t("reports.package")}</h3><Tag tone="pass">{t("reports.always")}</Tag></div>
                 <p className="muted">{t("reports.kd.audit")}</p>
@@ -187,14 +231,14 @@ export function Reports({ dealId }: { dealId: string }) {
         <section className="section">
           <h2 className="h2">{t("reports.madeSoFar")}</h2>
           <div className="card scroll">
-            <table className="table">
+            <table className="table rep-made">
               <thead><tr><th>{t("reports.col.report")}</th><th>{t("step.run")}</th><th>{t("reports.col.status")}</th><th>{t("reports.col.made")}</th><th className="r"><span className="sr-only">{t("common.download")}</span></th></tr></thead>
               <tbody>
                 {all.map((a) => (
                   <tr key={a.id}>
-                    <td>{kind(a.kind)}<span className="sub">{fmtName(a.format)} · {langName(a)}</span></td>
-                    <td className="num">{t("common.run", { n: a.run_number })}</td>
-                    <td>
+                    <td data-label={t("reports.col.report")}>{kind(a.kind)}<span className="sub">{fmtName(a.format)} · {langName(a)}</span></td>
+                    <td className="num" data-label={t("step.run")}>{t("common.run", { n: a.run_number })}</td>
+                    <td data-label={t("reports.col.status")}>
                       {a.status === "ready" && (outOfDate(a)
                         ? <><StatusTag tone="review">{t("reports.outOfDate")}</StatusTag> <span className="small muted">· {t("reports.outOfDateNote", { n: a.run_number })}</span></>
                         : <><StatusTag tone="pass">{t("reports.ready")}</StatusTag>{a.provenance_entries ? <span className="small muted"> · {t("reports.tracedN", { n: a.provenance_entries })}</span> : null}</>)}
@@ -203,7 +247,7 @@ export function Reports({ dealId }: { dealId: string }) {
                         <div className="stack tight rep-err"><StatusTag tone="stop">{a.status === "blocked" ? t("reports.blocked") : t("reports.failed")}</StatusTag><span className="small muted">{a.error}</span></div>
                       )}
                     </td>
-                    <td className="small muted">{f.date(a.created_at)}</td>
+                    <td className="small muted" data-label={t("reports.col.made")}>{f.date(a.created_at)}</td>
                     <td>
                       <div className="acts">
                         {a.status === "ready" && <a className="btn quiet sm" href={`/api/artifacts/${a.id}/file`}><I.Download />{t("common.download")}</a>}

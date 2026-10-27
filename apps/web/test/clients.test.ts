@@ -51,7 +51,7 @@ vi.mock("../src/i18n", async (original) => {
 });
 vi.mock("@tanstack/react-router", async () => {
   const { createElement } = await import("react");
-  return { Link: ({ children }: { children: unknown }) => createElement("a", null, children as string), useNavigate: () => state.navigate };
+  return { Link: ({ children }: { children: unknown }) => createElement("a", null, children as string), useNavigate: () => state.navigate, useBlocker: () => ({ status: "idle" }) };
 });
 vi.mock("../src/api", async (original) => {
   const real = await original<typeof import("../src/api")>();
@@ -425,17 +425,14 @@ describe("card 150 one review list", () => {
     expect(html).not.toContain("Approve all");
     // Two readings of one file are not two documents agreeing.
     expect(html).not.toContain("documents agree");
-    // The defaults button sits under the missing inputs, before the items that follow them.
-    const accept = html.indexOf("Accept the ticked defaults");
-    expect(accept).toBeGreaterThan(-1);
-    expect(accept).toBeLessThan(html.indexOf("Check this value"));
-    const checks = state.nodes.filter(n => n.tag === "input" && n.props.type === "checkbox");
-    expect(checks).toHaveLength(1);
-    expect(checks.every(n => !n.props.checked && !n.props.defaultChecked)).toBe(true);
-    expect(buttons("Accept the ticked defaults")[0]?.props.disabled).toBe(true);
-    checks[0]!.props.onChange({ target: { checked: true } });
-    render(element);
-    await buttons("Accept the ticked default")[0]!.props.onClick();
+    // Card C2: the named default is one button on its own input, with its basis; nothing to tick first.
+    const use = html.indexOf("Use the named default (3%)");
+    expect(use).toBeGreaterThan(-1);
+    expect(use).toBeLessThan(html.indexOf("Check this value"));
+    expect(html).toContain("Agir house assumption, no external source.");
+    expect(state.nodes.filter(n => n.tag === "input" && n.props.type === "checkbox")).toHaveLength(0);
+    expect(buttons("Use the named default (3%)")).toHaveLength(1);
+    await buttons("Use the named default (3%)")[0]!.props.onClick();
     expect(vi.mocked(api.post).mock.calls).toContainEqual(["/deals/deal-1/defaults", { fields: ["vacancy_pct"] }]);
     state.review.todo = { blocking: 0, items: [] };
     expect(text(render(element))).toContain("Nothing is left; this deal can run");

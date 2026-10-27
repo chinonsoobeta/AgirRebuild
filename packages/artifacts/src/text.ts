@@ -139,7 +139,7 @@ export const TEXT = {
   "paidMultiple": ["Paid out / contributed", "Versé / apports"],
   "waterfall": ["Distributions go pro rata until the LP has received its capital and its preferred return, compounded annually on what is unreturned. After that the GP takes its promote share of each dollar and the rest is split pro rata.", "Les distributions sont proportionnelles jusqu'au remboursement du capital et du rendement privilégié des commanditaires, composé annuellement sur le solde non remboursé. Ensuite, le commandité reçoit son intéressement et le reste est réparti proportionnellement."],
   "heldExplanation": ["Nothing is sold. The stated value is final-year NOI over the exit cap rate, less the debt outstanding; returns that include it are unrealized. Cash paid out is the operating and refinance cash only.", "Rien n'est vendu. La valeur déclarée est le RNE de dernière année divisé par le taux de sortie, moins la dette. Les rendements qui l'incluent sont non réalisés. Seuls les flux d'exploitation et de refinancement sont versés."],
-  "inputSources": ["Every input and its source is listed in the IC memo and the lender package.", "Sources détaillées : mémo et dossier prêteur."],
+  "inputSources": ["Every input and its source is listed in the Committee memo and the lender package.", "Sources détaillées : mémo du comité et dossier prêteur."],
   "committeeDecision": ["Committee decision", "Décision du comité"],
   "yieldOnCost": ["Yield on cost", "Rendement sur coût"],
   "equityMultiple": ["Equity multiple", "Multiple des fonds propres"],
@@ -163,7 +163,7 @@ export const TEXT = {
   "debt": ["Debt", "Dette"],
   "debtCoverage": ["Debt and coverage", "Dette et couverture"],
   "currencyMissing": ["Currency not stated", "Devise non indiquée"],
-  "icMemo": ["Investment Committee memorandum", "Mémo du comité d'investissement"],
+  "icMemo": ["Committee memo", "Mémo du comité"],
   "buildDecision": ["Build decision", "Décision de construire"],
   "partnerMemo": ["Partner memo", "Note aux partenaires"],
   "lenderPackage": ["Lender package", "Dossier pour le prêteur"],
@@ -204,6 +204,27 @@ export const TEXT = {
   "labelledByPerson": [", labelled by a person", ", libellé par une personne"],
   "convertedMetres": [", converted from square metres (\"{0}\")", ", converti de mètres carrés (\"{0}\")"],
   "allUnits": ["All units", "Tous les logements"],
+  // Card C5: the build decision says what a person put in, how the inputs were read, and that it is not advice.
+  "statedYourself": ["Values you stated yourself", "Valeurs que vous avez saisies vous-même"],
+  "defaultsAccepted": ["Named defaults accepted", "Valeurs par défaut nommées acceptées"],
+  "latestDecision": ["Latest recorded decision", "Dernière décision consignée"],
+  "decisionLine": ["{0}, recorded by {1} on {2}.", "{0}, consignée par {1} le {2}."],
+  "reasoning": ["Reasoning: {0}", "Motifs : {0}"],
+  "readBy": ["Values were read from the documents by Agir and approved on Review; this run was started by {0}.", "Les valeurs ont été lues dans les documents par Agir et approuvées à l'étape Examen\u00a0; cette analyse a été lancée par {0}."],
+  "readOnReview": ["Values were read from the documents by Agir and approved on Review.", "Les valeurs ont été lues dans les documents par Agir et approuvées à l'étape Examen."],
+  // The website footer's line (landing.footNote), word for word.
+  "notAdvice": ["Agir is not an appraiser, a lender or an adviser. It does not give financial advice, and its reports are not an appraisal.", "Agir n'est ni un évaluateur, ni un prêteur, ni un conseiller. Il ne donne pas de conseils financiers, et ses rapports ne sont pas une évaluation."],
+  "eachAsEntered": ["Each as entered", "Chacun tel que saisi"],
+  "noneInRange": ["No single input passes it within its range", "Aucune donnée seule ne le franchit dans sa plage"],
+  "outOfRangeOne": ["{0} input cannot pass within its range: {1}.", "{0} donnée ne peut pas passer dans sa plage : {1}."],
+  "outOfRangeMany": ["{0} inputs cannot pass within their range: {1}.", "{0} données ne peuvent pas passer dans leur plage : {1}."],
+  // In the glossary's words (Run and Review pages), without its worked example.
+  "plainYieldOnCost": ["Stabilized net operating income divided by the total cost of developing the project.", "Le revenu net d'exploitation stabilisé divisé par le coût total de développement du projet."],
+  "plainSizingDscr": ["Net operating income divided by the full amortizing loan payment, even during an interest-only period, for the weakest year of the hold.", "Le revenu net d'exploitation divisé par le paiement complet d'un prêt amorti, même pendant une période d'intérêts seulement, pour l'année la plus faible de la détention."],
+  "plainEquityMultiple": ["All the cash paid back to equity divided by all the equity put in.", "Tout l'argent rendu aux fonds propres divisé par tous les fonds propres investis."],
+  "plainProfitOnCost": ["The development profit divided by everything it cost to build and carry the units until they sold.", "Le profit de développement divisé par tout ce qu'ont coûté la construction et le portage des logements jusqu'à leur vente."],
+  "plainMargin": ["The development profit as a share of the net sales revenue.", "Le profit de développement en proportion du revenu net des ventes."],
+  "plainDcrAfterRefinance": ["Net operating income over the first year after the refinance divided by the payments on all the loans in force.", "Le revenu net d'exploitation de la première année après le refinancement divisé par les paiements de tous les prêts en vigueur."],
 } as const;
 
 export function reportText(lang: "en" | "fr", key: keyof typeof TEXT, ...values: string[]): string {

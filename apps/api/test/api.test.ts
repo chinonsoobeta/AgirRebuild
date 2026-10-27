@@ -3731,7 +3731,7 @@ describe("card 160a: the deal AI reader", () => {
     expect(loan?.value).toBe(614000);
     expect(loan.sources.every((s: any) => !s.check_outcome)).toBe(true);
   });
-  test("calls the provider after committing extraction and queues reconciliation afterward", async () => {
+  test("calls the provider after committing extraction and holds reconciliation until afterward", async () => {
     const id = await setup();
     let inTransaction = false;
     const wrapped: Db = { ...db, transaction: fn => db.transaction(async tx => {
@@ -3742,7 +3742,9 @@ describe("card 160a: the deal AI reader", () => {
     const read = vi.fn(async () => {
       calls.push(inTransaction);
       expect(inTransaction).toBe(false);
-      expect(await db.query(`select id from jobs where kind='reconcile_deal' and payload->>'deal_id'=$1`, [id])).toEqual([]);
+      // The reconcile is queued but held until the reading ends, so the deal reads as updating meanwhile (QA #6).
+      expect(await db.query(`select id from jobs where kind='reconcile_deal' and payload->>'deal_id'=$1 and status in ('queued', 'running') and run_after <= now()`, [id])).toEqual([]);
+      expect(await db.query(`select id from jobs where kind='reconcile_deal' and status='queued' and payload->>'deal_id'=$1`, [id])).toHaveLength(1);
       return { readings: [], conflicts: [], not_used: [] };
     });
     await drain({ db: wrapped, store, read });
