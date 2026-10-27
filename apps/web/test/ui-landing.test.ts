@@ -124,9 +124,9 @@ describe("the signed-out home", () => {
 
 // QA item 9: before any code arrives, index.html shows the name and the landing headline, in the landing strings' words.
 describe("the static page before the code loads", () => {
-  it("carries the product name, the headline and the lead as plain text inside #root", () => {
+  it("carries the product name, the headline and the lead as plain text in #boot, beside #root", () => {
     const page = readFileSync(new URL("../index.html", import.meta.url), "utf8");
-    const root = page.slice(page.indexOf('<div id="root">'), page.indexOf("<script type=\"module\""));
+    const root = page.slice(page.indexOf('<div id="boot">'), page.indexOf('<div id="root">'));
     expect(root).toContain(">Agir</span>");
     expect(root).toContain(en["landing.heroTitle"]);
     expect(root).toContain(en["landing.heroLead"]);

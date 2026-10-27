@@ -1,5 +1,5 @@
 import "./styles.css";
-import { lazy, StrictMode, Suspense, type ComponentType } from "react";
+import { lazy, StrictMode, Suspense, useEffect, type ComponentType } from "react";
 import { createRoot } from "react-dom/client";
 import { QueryClient, QueryClientProvider } from "@tanstack/react-query";
 import { createRootRoute, createRoute, createRouter, Navigate, Outlet, RouterProvider } from "@tanstack/react-router";
@@ -36,9 +36,14 @@ const Legal = screen(() => import("./routes/legal"), "Legal");
 
 const queryClient = new QueryClient({ defaultOptions: { queries: { staleTime: 5_000, retry: (n, e: any) => e?.status !== 401 && e?.status !== 403 && e?.status !== 404 && n < 2 } } });
 
-// index.html carries a static page (the name and the landing headline) that shows before any code has arrived (QA item 9).
-// "/" keeps showing it while the landing screen's file loads, so the words stay put instead of flashing.
-const boot = document.getElementById("root")?.innerHTML ?? "";
+// index.html carries a static page (the name and the landing headline) in #boot, beside #root, that shows before any code
+// has arrived and while the router loads its first screen (QA item 9). The root route removes it when it first draws, and
+// "/" keeps showing the same words while the landing screen's file loads, so they stay put instead of flashing.
+const boot = document.getElementById("boot")?.innerHTML ?? "";
+function RootScreen() {
+  useEffect(() => { document.getElementById("boot")?.remove(); }, []);
+  return <Suspense fallback={<Loading bar />}><Outlet /></Suspense>;
+}
 // While a screen's file loads, the page says so instead of going blank (QA item 9). Signed out there is no shell, so the
 // fallback draws the top bar with the name; inside the app the shell's header stays and only the page area waits.
 function Loading({ bar }: { bar?: boolean }) {
@@ -60,7 +65,7 @@ function Loading({ bar }: { bar?: boolean }) {
     </>
   );
 }
-const root = createRootRoute({ component: () => <Suspense fallback={<Loading bar />}><Outlet /></Suspense> });
+const root = createRootRoute({ component: RootScreen });
 const login = createRoute({ getParentRoute: () => root, path: "/login", component: Login });
 const signup = createRoute({ getParentRoute: () => root, path: "/signup", component: Signup });
 // A shared link: outside the session gate, so it opens without an account (card 86).
