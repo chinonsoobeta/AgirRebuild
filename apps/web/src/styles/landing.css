@@ -8,6 +8,14 @@
 /* A figure-free picture of the five steps: the design's path, as a list. */
 .ld-path{list-style:none;margin:28px 0 8px;grid-template-columns:repeat(5,minmax(0,1fr))}
 .ld-path .step{padding-bottom:4px}
+/* On a phone five columns are narrower than "Documents", so the labels ran into each other: the path stands upright. */
+@media (max-width:560px){
+  .ld-path{grid-template-columns:1fr;row-gap:0}
+  .ld-path .step{border-top:0;border-left:2px solid var(--line-2);padding:0 0 18px 20px}
+  .ld-path .step:last-child{padding-bottom:0}
+  .ld-path .step .marker{top:2px;left:-8px}
+}
+.ld-start-hint{margin-top:12px}
 .ld-steps{list-style:none;padding:0}
 .ld-body{margin-top:8px}
 /* These cards space their own text, so the shared card gap is not added on top. */

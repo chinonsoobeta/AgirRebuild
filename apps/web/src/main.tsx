@@ -4,7 +4,7 @@ import { createRoot } from "react-dom/client";
 import { QueryClient, QueryClientProvider } from "@tanstack/react-query";
 import { createRootRoute, createRoute, createRouter, Navigate, Outlet, RouterProvider } from "@tanstack/react-router";
 import { SessionGate, Shell } from "./components/ui";
-import { I18nProvider } from "./i18n";
+import { I18nProvider, useI18n } from "./i18n";
 
 // Each screen loads when it is first opened, so the first visit downloads only the shell (plan L5).
 // `vite.config.ts` gathers the screens into one file per group: deal, settings, auth, share, landing.
@@ -36,8 +36,31 @@ const Legal = screen(() => import("./routes/legal"), "Legal");
 
 const queryClient = new QueryClient({ defaultOptions: { queries: { staleTime: 5_000, retry: (n, e: any) => e?.status !== 401 && e?.status !== 403 && e?.status !== 404 && n < 2 } } });
 
-// While a screen's file loads, nothing is drawn in its place; inside the app the shell stays.
-const root = createRootRoute({ component: () => <Suspense fallback={null}><Outlet /></Suspense> });
+// index.html carries a static page (the name and the landing headline) that shows before any code has arrived (QA item 9).
+// "/" keeps showing it while the landing screen's file loads, so the words stay put instead of flashing.
+const boot = document.getElementById("root")?.innerHTML ?? "";
+// While a screen's file loads, the page says so instead of going blank (QA item 9). Signed out there is no shell, so the
+// fallback draws the top bar with the name; inside the app the shell's header stays and only the page area waits.
+function Loading({ bar }: { bar?: boolean }) {
+  const { t } = useI18n();
+  if (bar && boot.trim() && location.pathname === "/") return <div dangerouslySetInnerHTML={{ __html: boot }} />;
+  const body = (
+    <div className="route-loading" aria-busy="true">
+      <p className="muted">{t("common.loading")}</p>
+      <span className="skel" /><span className="skel" /><span className="skel short" />
+    </div>
+  );
+  if (!bar) return body;
+  return (
+    <>
+      <header className="topbar">
+        <span className="brand"><span className="brand-mark"><svg width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="3" strokeLinecap="round" strokeLinejoin="round" aria-hidden="true"><path d="M4 18L12 5l8 13" /><path d="M8 18h8" /></svg></span>Agir</span>
+      </header>
+      <main className="page">{body}</main>
+    </>
+  );
+}
+const root = createRootRoute({ component: () => <Suspense fallback={<Loading bar />}><Outlet /></Suspense> });
 const login = createRoute({ getParentRoute: () => root, path: "/login", component: Login });
 const signup = createRoute({ getParentRoute: () => root, path: "/signup", component: Signup });
 // A shared link: outside the session gate, so it opens without an account (card 86).
@@ -59,7 +82,7 @@ const app = createRoute({
   component: () => (
     <SessionGate>
       <Shell>
-        <Suspense fallback={null}>
+        <Suspense fallback={<Loading />}>
           <Outlet />
         </Suspense>
       </Shell>
