@@ -21,3 +21,18 @@ ol.path{list-style:none}
 #main-content:focus{outline:0}
 /* Card F: the closed workspace notice, above each page's heading. */
 .closed-banner{margin-bottom:24px}
+
+/* QA #17: on a phone the workspace, language, theme and sign-out fold into the avatar menu; the bar keeps one row. */
+.me-menu{display:none;position:relative}
+.me-menu>summary{list-style:none;display:inline-grid;place-items:center;min-width:44px;min-height:44px;cursor:pointer}
+.me-menu>summary::-webkit-details-marker{display:none}
+.me-menu>summary .avatar{margin-left:0}
+.me-panel{position:absolute;right:0;top:calc(100% + 6px);z-index:20;display:flex;flex-direction:column;align-items:flex-start;gap:8px;min-width:220px;max-width:calc(100vw - 32px);padding:12px;background:var(--surface);border:1px solid var(--line-2);border-radius:10px;box-shadow:var(--shadow)}
+.me-panel .who{padding:0 12px;overflow-wrap:anywhere}
+.me-panel .ws{max-width:100%}
+@media (max-width:600px){
+  .topbar{flex-wrap:nowrap;gap:8px}
+  .topbar .nav a{padding:0 8px}
+  .topbar-right{display:none}
+  .me-menu{display:block;margin-left:auto}
+}

@@ -11,3 +11,4 @@
 .qs-units .input,.qs-units .qs-affix{min-width:120px}
 .qs-absent{margin:0;padding-left:20px;display:flex;flex-direction:column;gap:4px}
 .qs-notes{gap:16px}
+.qs-assumed .qs-absent{margin-top:8px}

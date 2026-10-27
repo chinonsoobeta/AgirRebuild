@@ -22,7 +22,7 @@ vi.mock("react", async (original) => {
   const react = await original<typeof import("react")>();
   return { ...react, useState: (initial: unknown) => {
     const [value, set] = react.useState(initial);
-    if (initial === "multiplex") return [state.template, set];
+    if (initial === "") return [state.template, set];
     if (initial === false && state.booleanIndex++ === 0) return [state.held, set];
     if (Array.isArray(initial) && initial.length === 1 && initial[0] === 0) return [state.types, set];
     return [value, set];

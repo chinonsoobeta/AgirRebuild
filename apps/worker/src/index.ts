@@ -188,6 +188,7 @@ async function extractDocument(deps: WorkerDeps, documentId: string) {
   const asSourced = (c: (typeof result.candidates)[number]): SourcedCandidate => ({ ...c, documentId: d.id, documentName: d.name });
   const suggestions = await suggestLabels(deps, d.workspace_id, offeredOf([...result.candidates, ...result.other].map(asSourced)));
   let aiRead = false;
+  let reconcileJob = 0;
   await db.transaction(async (tx) => {
     await tx.query(`delete from candidates where document_id = $1`, [d.id]);
     await tx.query(`delete from label_suggestions where document_id = $1`, [d.id]);
@@ -210,13 +211,19 @@ async function extractDocument(deps: WorkerDeps, documentId: string) {
     );
     // Read once per job: with AI reading off for the workspace, the rules reconcile alone, as with no key.
     aiRead = Boolean(deps.read || process.env.ANTHROPIC_API_KEY) && (await aiReadingOn(tx, d.workspace_id)) && !(await currentDocuments(tx, d.deal_id)).some(doc => ["uploaded", "checking", "reading", "extracting"].includes(doc.stage));
-    if (!aiRead) await tx.query(`insert into jobs (kind, payload) values ('reconcile_deal', $1)`, [JSON.stringify({ deal_id: d.deal_id })]);
+    // With AI reading, the reconcile is queued now but held until the reading ends, so the deal reads as updating meanwhile
+    // (QA 2026-10-27 #6: the stepper said "Blocked · 13 missing" during the AI pass). If this worker dies, it runs anyway later.
+    const [job] = await tx.query<{ id: number }>(
+      `insert into jobs (kind, payload, run_after) values ('reconcile_deal', $1, now() + ($2 || ' seconds')::interval) returning id`,
+      [JSON.stringify({ deal_id: d.deal_id }), aiRead ? "600" : "0"],
+    );
+    reconcileJob = job!.id;
   });
   if (aiRead) {
     try {
       await readDeal(db, store, d.deal_id, d.workspace_id, deps.read);
     } finally {
-      await db.query(`insert into jobs (kind, payload) values ('reconcile_deal', $1)`, [JSON.stringify({ deal_id: d.deal_id })]);
+      await db.query(`update jobs set run_after = now() where id = $1 and status = 'queued'`, [reconcileJob]);
     }
   }
   for (const r of suggestions) if (r.error) await audit(db, d.workspace_id, d.deal_id, "document.suggestions_failed", "document", d.id, r.error);

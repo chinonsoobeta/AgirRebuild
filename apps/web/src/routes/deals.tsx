@@ -45,7 +45,7 @@ export function Deals() {
   const deals = useQuery({
     queryKey: ["deals", workspaceId],
     queryFn: () => api.get<DealOverview[]>(`/workspaces/${workspaceId}/deals`),
-    refetchInterval: (query) => (query.state.data?.some((d) => d.documents.processing > 0) ? 2000 : false),
+    refetchInterval: (query) => (query.state.data?.some((d) => d.documents.processing > 0 || d.updating) ? 2000 : false),
   });
   const all = deals.data ?? [];
   if (deals.isLoading) return <p className="muted">{t("common.loading")}</p>;
@@ -80,7 +80,7 @@ export function Deals() {
         {shown.map((d) => {
           const st = dealStatus(i, d, solo);
           const n = STEPS.indexOf(d.step) + 1;
-          const waiting = d.documents.processing > 0 && !d.documents.failed;
+          const waiting = (d.documents.processing > 0 || d.updating) && !d.documents.failed;
           // The tag says the state once; the sentence beside it adds what the tag does not.
           const key = tagKey(d);
           const tag = key === "decided" && d.decision ? L.decision(d.decision.decision) : t(`deals.tag.${key}`);
@@ -93,7 +93,7 @@ export function Deals() {
                 <Link to={`/deals/$dealId/${d.step}`} params={{ dealId: d.deal.id }} className="deal-name sm">{d.deal.name}</Link>
                 <p className="small muted deal-meta">
                   {/* The board drops the asset type once the units and the exit say what the deal is. */}
-                  {[L.place(d.deal.location, d.deal.province), d.units != null && d.exit != null ? "" : L.asset(d.deal.asset_type), dealFacts(i, d.units, d.exit),
+                  {[L.place(d.deal.location, d.deal.province), d.units != null && d.exit != null ? "" : L.asset(d.deal.asset_type), dealFacts(i, d.units, d.exit === "sale" ? null : d.exit),
                     d.documents.total ? t("deals.docs", { n: d.documents.total }) : ""].filter(Boolean).join(" · ")}
                 </p>
               </div>
@@ -135,17 +135,10 @@ function FirstVisit({ name, editor }: { name: string; editor: boolean }) {
     <div className="empty">
       <h1 className="h1 empty-title">{t("deals.welcome", { name })}</h1>
       <p className="lead empty-lead">{t("deals.welcomeLead")}</p>
-      <div className="ways">
-        <Link to="/deals/new" className="way">
-          <span className="h3">{t("deals.way.docs")}</span>
-          <p>{t("deals.way.docsBody")}</p>
-          <span className="go">{t("deals.new")} <Arrow /></span>
-        </Link>
-        <Link to="/deals/new" className="way">
-          <span className="h3">{t("deals.way.qs")}</span>
-          <p>{t("deals.way.qsBody")}</p>
-          <span className="go">{t("deals.way.qsGo")} <Arrow /></span>
-        </Link>
+      {/* One way in (QA #22): both paths start by naming the project; the questions and the upload are on the next page. */}
+      <div className="deals-start">
+        <Link to="/deals/new" className="btn primary">{t("deals.new")} <Arrow /></Link>
+        <p className="muted">{t("deals.newSub")}</p>
       </div>
       <p className="small muted empty-lead"><Link to="/legal" hash="privacy">{t("deals.privacy")}</Link></p>
     </div>

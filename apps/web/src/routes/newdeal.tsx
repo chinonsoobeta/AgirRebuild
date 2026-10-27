@@ -10,7 +10,8 @@ import "../strings/newdeal";
 import * as I from "../components/icons";
 
 // The kinds the API stores and displays through L.asset.
-const ASSET_TYPES = ["Multifamily", "Mixed-use", "Industrial", "Office", "Retail", "Hospitality", "Self storage", "Other"];
+const ASSET_TYPES = ["Multifamily", "Mixed-use", "Industrial", "Office", "Retail", "Hospitality", "Self storage", "Other"] as const;
+const NAME_MAX = 160;
 
 export function NewDeal() {
   const { t, L, lang } = useI18n();
@@ -20,6 +21,10 @@ export function NewDeal() {
   // The currency follows the country until someone picks another.
   const [country, setCountry] = useState<Country>("CA");
   const [currency, setCurrency] = useState<Currency>("CAD");
+  // The name as typed: its length drives the counter, and a paste longer than the limit says it was cut (QA #18).
+  const [name, setName] = useState("");
+  const [cut, setCut] = useState(false);
+  const [blank, setBlank] = useState(false);
   const create = useMutation({
     mutationFn: (body: { name: string; assetType: string; location: string; country: Country; province: string | null; currency: Currency }) =>
       api.post<{ id: string }>(`/workspaces/${workspaceId}/deals`, body),
@@ -31,10 +36,17 @@ export function NewDeal() {
   const submit = (e: FormEvent<HTMLFormElement>) => {
     e.preventDefault();
     const f = new FormData(e.currentTarget);
+    // Spaces around a name or a place are never kept, and a name of spaces is no name.
+    const trimmed = String(f.get("name") ?? "").trim();
+    if (!trimmed) {
+      setBlank(true);
+      document.getElementById("nd-name")?.focus();
+      return;
+    }
     create.mutate({
-      name: String(f.get("name")),
+      name: trimmed,
       assetType: String(f.get("assetType")),
-      location: String(f.get("location") ?? ""),
+      location: String(f.get("location") ?? "").trim(),
       country,
       province: country === "CA" ? String(f.get("province")) : null,
       currency,
@@ -54,13 +66,22 @@ export function NewDeal() {
       ) : (
         <form className="card card-pad newdeal-form" onSubmit={submit}>
           <div className="field">
-            <label htmlFor="nd-name">{t("deals.name")}</label>
-            <input className="input" id="nd-name" name="name" required maxLength={160} aria-describedby="nd-name-help" />
+            <label htmlFor="nd-name">{t("newdeal.name")}</label>
+            <input className="input" id="nd-name" name="name" required maxLength={NAME_MAX} aria-describedby="nd-name-help nd-name-count" aria-invalid={blank || undefined}
+              value={name}
+              onChange={(e) => { setName(e.target.value); setBlank(false); if (e.target.value.length < NAME_MAX) setCut(false); }}
+              onPaste={(e) => {
+                const el = e.currentTarget;
+                const kept = el.value.length - (el.selectionEnd ?? 0) + (el.selectionStart ?? 0);
+                setCut(kept + e.clipboardData.getData("text").length > NAME_MAX);
+              }} />
             <p className="hint" id="nd-name-help">{t("newdeal.nameHelp")}</p>
+            <p className={cut ? "hint newdeal-cut" : "hint"} id="nd-name-count" aria-live="polite">{cut ? t("newdeal.cut", { max: NAME_MAX }) : name.length > NAME_MAX - 40 ? t("newdeal.count", { n: name.length, max: NAME_MAX }) : null}</p>
+            {blank && <p className="error-text" role="alert">{t("newdeal.blank")}</p>}
           </div>
           <div className="field">
             <label htmlFor="nd-type">{t("newdeal.kind")}</label>
-            <select className="select" id="nd-type" name="assetType">{ASSET_TYPES.map((a) => <option key={a} value={a}>{L.asset(a)}</option>)}</select>
+            <select className="select" id="nd-type" name="assetType">{ASSET_TYPES.map((a) => <option key={a} value={a}>{`${L.asset(a)}: ${t(`newdeal.hint.${a}`)}`}</option>)}</select>
           </div>
           <div className="grid2 newdeal-pair">
             <div className="field">
@@ -92,7 +113,7 @@ export function NewDeal() {
           </div>
           <div className="field">
             <label htmlFor="nd-loc">{t("deals.location")}</label>
-            <input className="input" id="nd-loc" name="location" maxLength={160} aria-describedby="nd-loc-help" />
+            <input className="input" id="nd-loc" name="location" maxLength={NAME_MAX} aria-describedby="nd-loc-help" />
             <p className="hint" id="nd-loc-help">{t("newdeal.locationHelp")}</p>
           </div>
           <div className="field">

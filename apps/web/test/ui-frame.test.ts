@@ -166,7 +166,45 @@ describe("the deal path", () => {
   });
 });
 
+describe("the deal path while documents are read (QA 2026-10-27 #6 and #18)", () => {
+  const fr = build("fr", () => {});
+  it("says Reading… in the neutral tone, never a red block, until the review is rebuilt (the AI reading included)", () => {
+    // Extraction done, the reconcile held while the AI reads: the counts are the empty deal's, so they must not show.
+    const aiPass: DealOverview = { ...base, step: "review", documents: { total: 2, processing: 0, failed: 0 }, updating: true, review: { ...base.review, missing: 13 } };
+    expect(pathStates(aiPass, en, false)[1]).toEqual({ key: "review", text: "Reading…", tone: "faint" });
+    expect(pathStates(aiPass, fr, false)[1]!.text).toBe("Lecture…");
+    const stillReading: DealOverview = { ...aiPass, updating: false, documents: { total: 2, processing: 1, failed: 0 } };
+    expect(pathStates(stillReading, en, false)[1]).toMatchObject({ text: "Reading…", tone: "faint" });
+    const out = render(createElement(DealPath, { o: aiPass, active: "documents" }));
+    expect(out).not.toContain("Blocked");
+    expect(out).not.toContain("step-state stop");
+    // Once rebuilt, the badge says what Review says.
+    const done: DealOverview = { ...aiPass, updating: false, review: { ...base.review, missing: 1, needsReview: 22 } };
+    expect(pathStates(done, en, false)[1]).toMatchObject({ text: "Blocked · 1 missing, 22 to review", tone: "stop" });
+    // A rebuild after a change to values already there says Updating….
+    expect(pathStates({ ...done, updating: true }, en, false)[1]).toMatchObject({ text: "Updating…", tone: "faint" });
+  });
+  it("counts a rejected file only as failed, and Review waits for a usable document", () => {
+    const rejected: DealOverview = { ...base, documents: { total: 1, processing: 0, failed: 1 }, review: { ...base.review, missing: 13 } };
+    const st = pathStates(rejected, en, false);
+    expect(st[0]).toMatchObject({ text: "1 failed", tone: "stop" });
+    expect(st[1]).toMatchObject({ text: "Waiting for documents", tone: "faint" });
+    expect(pathStates(rejected, build("fr", () => {}), false)[0]!.text).toBe("1 en échec");
+    const mixed: DealOverview = { ...rejected, documents: { total: 3, processing: 0, failed: 1 }, review: { ...base.review, needsReview: 4 } };
+    expect(pathStates(mixed, en, false)[0]!.text).toBe("2 read, 1 failed");
+  });
+});
+
 describe("the deal frame", () => {
+  it("states a sale as a plan with a link to change it, never as a fact (QA #7)", () => {
+    const out = render(createElement(DealFrame, { o: { ...decided, units: 4, exit: "sale" }, active: "documents" }));
+    expect(out).not.toContain("sold at the end of the hold");
+    expect(out).toContain("4 units");
+    expect(out).toMatch(/Plan: sell after the hold \(<a href="\/deals\/d1\/review"[^>]*hash="choices"[^>]*>change on Review<\/a>\)/);
+    const kept = render(createElement(DealFrame, { o: { ...decided, units: 6, exit: "refinance_hold" }, active: "documents" }));
+    expect(kept).toContain("6 rental units, kept and refinanced");
+    expect(kept).not.toContain("Plan:");
+  });
   it("has the back link, the name, the meta line and the actions", () => {
     const out = render(createElement(DealFrame, { o: { ...decided, copiedFrom: { id: "d0", name: "Original" } }, active: "run" }));
     expect(out).toMatch(/<div class="deal-head">/);

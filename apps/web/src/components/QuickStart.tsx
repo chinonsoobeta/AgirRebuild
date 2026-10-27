@@ -25,7 +25,8 @@ const sectionOf = (field: string): Section => {
 export function QuickStart({ dealId }: { dealId: string }) {
   const { t, f, L } = useI18n();
   const qc = useQueryClient();
-  const [key, setKey] = useState(TEMPLATES[0]!.key);
+  // No kind is chosen for the person: the quick start asks "What are you building?" first (QA #16).
+  const [key, setKey] = useState<string>("");
   const [held, setHeld] = useState(false);
   const [saleNoLoan, setSaleNoLoan] = useState(false);
   const [amortUnused, setAmortUnused] = useState(false);
@@ -34,7 +35,8 @@ export function QuickStart({ dealId }: { dealId: string }) {
   const [formError, setFormError] = useState<unknown>(null);
   const [total, setTotal] = useState<number>();
   const formRef = useRef<HTMLFormElement>(null);
-  const tpl = TEMPLATES.find((x) => x.key === key)!;
+  const chosen = TEMPLATES.find((x) => x.key === key);
+  const tpl = chosen ?? TEMPLATES[0]!;
   const reviewQ = ["review", dealId];
   const review = useQuery({ queryKey: reviewQ, queryFn: () => api.get<Review>(`/deals/${dealId}/review`) });
   const save = useMutation({
@@ -136,6 +138,22 @@ export function QuickStart({ dealId }: { dealId: string }) {
   if (save.isSuccess) return <Notice tone="pass" role="status" title={t(tpl.sells ? "qs.doneSales" : "qs.done")}><Link className="btn primary sm" to="/deals/$dealId/review" params={{ dealId }}>{t("qs.next")}</Link></Notice>;
   if (!review.data || (review.data.assumptions.length > 0 && !save.isPending && !save.isError)) return null;
 
+  const templateChoice = (
+    <section className="section">
+      <ChoiceCards name="template" legend={<span className="h2">{t("qs.template")}</span>} value={key}
+        onChange={(v) => { setKey(v); setAmortUnused(false); setSaleNoLoan(false); }}
+        options={TEMPLATES.map((x) => ({ value: x.key, title: t(`quickstart.kind.${x.key}`), description: t("quickstart.range", { min: x.minUnits, max: x.maxUnits }) }))} />
+      {chosen?.sells && <p className="small muted">{t("qs.saleLine")}</p>}
+    </section>
+  );
+  const head = (
+    <div>
+      <h2 className="h1">{t("qs.title")}</h2>
+      <p className="lead qs-lead">{t("qs.intro")}</p>
+    </div>
+  );
+  if (!chosen) return <div className="stack">{head}{templateChoice}<p className="small muted">{t("quickstart.chooseFirst")}</p></div>;
+
   const hidden = FIELDS.filter((d) => (tpl.sells ? !RENTAL_ONLY_FIELDS.includes(d.key) && d.key !== "sell_units" : d.group !== "sale") && d.required === false && d.absentMeans && !tpl.questions.some((q) => q.field === d.key && (!q.heldOnly || held)));
   const input = (name: string, field: string, optional?: boolean, label?: string, describedBy?: string) => {
     const unit = FIELD_BY_KEY.get(field)!.unit;
@@ -186,16 +204,8 @@ export function QuickStart({ dealId }: { dealId: string }) {
   return (
     <div className="with-aside">
       <form ref={formRef} className="stack" onSubmit={submit} onChange={(e) => { if (!save.isPending) save.reset(); setTotal(countUnits(e.currentTarget)); }}>
-        <div>
-          <h2 className="h1">{t("qs.title")}</h2>
-          <p className="lead qs-lead">{t("qs.intro")}</p>
-        </div>
-        <section className="section">
-          <ChoiceCards name="template" legend={<span className="h2">{t("qs.template")}</span>} value={key}
-            onChange={(v) => { setKey(v as typeof key); setAmortUnused(false); setSaleNoLoan(false); }}
-            options={TEMPLATES.map((x) => ({ value: x.key, title: t(`quickstart.kind.${x.key}`), description: t("quickstart.range", { min: x.minUnits, max: x.maxUnits }) }))} />
-          {tpl.sells && <p className="small muted">{t("qs.saleLine")}</p>}
-        </section>
+        {head}
+        {templateChoice}
         <div className="stack" key={key}>
           {ask && <section className="section">
             <ChoiceCards name="refinance_and_hold" legend={<span className="h2">{t("quickstart.andThen")}</span>} value={held ? "1" : ""}
@@ -255,7 +265,10 @@ export function QuickStart({ dealId }: { dealId: string }) {
                 {tpl.defaults.map((d) => <Fragment key={d}><dt>{L.field(d)}</dt><dd>{f.value(FIELD_BY_KEY.get(d)!.default!, FIELD_BY_KEY.get(d)!.unit)}</dd></Fragment>)}
               </dl>
             </>}
-            {hidden.length > 0 && <ul className="small muted qs-absent">{hidden.map((d) => <li key={d.key}>{t("qs.hiddenLine", { label: L.field(d.key), means: L.absent(d.key) })}</li>)}</ul>}
+            {hidden.length > 0 && <details className="qs-assumed">
+              <summary className="small">{t("quickstart.showAssumed", { n: hidden.length })}</summary>
+              <ul className="small muted qs-absent">{hidden.map((d) => <li key={d.key}>{t("qs.hiddenLine", { label: L.field(d.key), means: L.absent(d.key) })}</li>)}</ul>
+            </details>}
             {tpl.defaults.length > 0 && <label className="check"><input type="checkbox" name="accept" /><span>{t("qs.accept")}</span></label>}
           </div>
         </section>}
