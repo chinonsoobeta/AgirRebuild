@@ -1,5 +1,5 @@
 import { FIELD_BY_KEY, FIELDS } from "@agir/contracts";
-import { detectFormat, tokenize, unitTypesIn } from "@agir/numbers";
+import { detectFormat, tokenize, unitTypesIn, wholeUnitType } from "@agir/numbers";
 import type { Candidate } from "./candidates.ts";
 import { originalKindNote } from "./document-kind.ts";
 import { CONCEPTS } from "./concepts.ts";
@@ -31,6 +31,43 @@ function groupForm(list: readonly SourcedCandidate[]): string {
   const count = new Map<string, number>();
   for (const c of list) count.set(c.itemKey ?? "", (count.get(c.itemKey ?? "") ?? 0) + 1);
   return [...count].sort(([a, n], [b, m]) => m - n || (a < b ? -1 : a > b ? 1 : 0))[0]![0];
+}
+
+/**
+ * QA card C1. Two readings of one itemized field from the same document, place and value name one item, whatever each reader called it
+ * ("Rents" from a heading, "All units", the AI's "rental unit"). Names linked this way on any itemized field of the deal are one class;
+ * each candidate's itemKey is rewritten in place (callers match sources by identity) to the class's name: never "All units" when a real name
+ * exists, then a unit type ("2BR"), then the AI's name, then the name most sources use. A place where one reader gives two names
+ * ("4 2BR and 4 3BR"), or a link between two different unit types, links nothing.
+ */
+function sameItemNames(cs: readonly SourcedCandidate[]): void {
+  const itemized = cs.filter((c) => c.fieldKey && c.itemKey && c.value !== null && FIELD_BY_KEY.get(c.fieldKey)?.itemized);
+  const parent = new Map<string, string>();
+  const types = new Map<string, Set<string>>();
+  const root = (k: string): string => { const p = parent.get(k) ?? k; return p === k ? k : root(p); };
+  for (const c of itemized) { const k = itemFold(c.itemKey!); parent.set(k, k); const t = wholeUnitType(c.itemKey!); types.set(k, new Set(t ? [t] : [])); }
+  const places = new Map<string, SourcedCandidate[]>();
+  for (const c of itemized) { const k = `${c.fieldKey}|${c.documentId}|${c.location}|${c.value}`; places.set(k, [...(places.get(k) ?? []), c]); }
+  for (const list of places.values()) {
+    const ai = new Set(list.filter((c) => c.rule === "ai").map((c) => itemFold(c.itemKey!)));
+    const rules = new Set(list.filter((c) => c.rule !== "ai").map((c) => itemFold(c.itemKey!)));
+    if (ai.size !== 1 || rules.size !== 1) continue;
+    const a = root([...ai][0]!), b = root([...rules][0]!);
+    if (a === b) continue;
+    const ta = types.get(a)!, tb = types.get(b)!;
+    if (ta.size && tb.size && [...ta].some((t) => !tb.has(t))) continue;
+    parent.set(b, a);
+    types.set(a, new Set([...ta, ...tb]));
+  }
+  const classes = new Map<string, SourcedCandidate[]>();
+  for (const c of itemized) { const r = root(itemFold(c.itemKey!)); classes.set(r, [...(classes.get(r) ?? []), c]); }
+  for (const list of classes.values()) {
+    if (new Set(list.map((c) => itemFold(c.itemKey!))).size < 2) continue;
+    const rank = (c: SourcedCandidate) => (c.itemKey === "All units" ? 4 : 0) + (wholeUnitType(c.itemKey!) ? 0 : 2) + (c.rule === "ai" ? 0 : 1);
+    const best = Math.min(...list.map(rank));
+    const name = groupForm(list.filter((c) => rank(c) === best));
+    for (const c of list) c.itemKey = name;
+  }
 }
 
 const money = (n: number) => `$${n.toLocaleString("en-US", { maximumFractionDigits: 2 })}`;
@@ -82,6 +119,7 @@ export function consolidate(candidates: readonly SourcedCandidate[], dealCurrenc
     const code = currencyOf(c.unitSeen);
     return code !== null && code !== dealCurrency; // a deal with no currency compares none
   };
+  sameItemNames(candidates);
   const totals = buildingTotals(candidates);
   const groups = new Map<string, SourcedCandidate[]>();
   for (const c of candidates) {

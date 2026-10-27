@@ -2131,7 +2131,8 @@ const BLOCK_FIELDS = new Set(["unit_count", "unit_rent_monthly", "rentable_area_
 const BLOCK_RELATIVE_RE = /\s*\b((of|for) this (type|component|unit|space)|this (type|component|unit|space)|(de|pour) ce (type|local)|ce local|(de|pour) cette composante|cette composante)\s*$/i;
 // A suite, unit or file number, or a year, is a reference, not an item: "Suite 204", "File 2026". A name with a number is an item: "Shop 2".
 const REFERENCE_RE = /\b(suite|unit|apt|apartment|appartement|logement|no|num|number|numero|room|bureau|file|dossier|ref|reference|version|edition)\s*#?\s*\d|\b(19|20)\d\d\b|#\s*\d/;
-const NOT_HEADING_RE = /^(number of|nombre de|total|average|avg|monthly|annual|rent|loyer|area|superficie|occupancy|occupation|unit count)\b|\b(revenues?|revenus?|leasing|location|budget|budgets|notes?|capital|assumptions?|hypotheses|financing|financement|loan|pret|costs?|couts?|summary|sommaire|schedule|totals?)\b/;
+// An income or budget section ("Rents", "Rental income", "Operations and exit") is no unit type (QA card C1).
+const NOT_HEADING_RE = /^(number of|nombre de|total|average|avg|monthly|annual|rent|rents|rent roll|rental income|revenue|income(?!-)|loyers?|area|superficie|occupancy|occupation|operations?|operating|unit count)\b|\b(revenues?|revenus?|leasing|location|budget|budgets|notes?|capital|assumptions?|hypotheses|financing|financement|loan|pret|costs?|couts?|summary|sommaire|schedule|totals?)\b/;
 
 /** The item a row names when it is a short text with no number and the next row is a label and value row for an item field ("Garden suite" over "Number of units | 2"). */
 function blockHeading(row: Cell[], next: Cell[] | undefined, scope: Scope, format: DocumentFormat): string | null {

@@ -1,5 +1,5 @@
 import { describe, expect, test } from "vitest";
-import { parseDocument, addressedText, extractCandidates, consolidate, checkArithmetic, verifyReadings, verifyReading, READING_FAILURE, READER_PROMPT, READER_PROMPT_VERSION, type NormalizedDocument, type Reading } from "../src/index.ts";
+import { parseDocument, addressedText, extractCandidates, consolidate, checkArithmetic, verifyReadings, verifyReading, READING_FAILURE, READER_PROMPT, READER_PROMPT_VERSION, type NormalizedDocument, type Reading, type SourcedCandidate } from "../src/index.ts";
 import { SF_PER_M2 } from "@agir/numbers";
 
 describe("Card 173: financing costs in the reader prompt", () => {
@@ -475,5 +475,53 @@ describe("Card J: verifier refusals of figures that are written", () => {
   test("a lone group under real evidence of both separators is still refused", () => {
     const got = verifyReading({ ...reading, file: "both.txt", location: "line 3", quote: "Transfer Tax 102,000", field: "land_transfer_tax", value: 102000 }, sources);
     expect(got.outcome).toBe(READING_FAILURE.value);
+  });
+});
+
+describe("QA card C1: unit types read from one line are one type", () => {
+  const lines = ["Rents", "Units 4", "Rent per unit per month $1,850"];
+  const budget: NormalizedDocument = { kind: "pdf", lines: lines.map((text, i) => ({ text, location: `page 1, line ${i + 19}` })), tables: [], pageCount: 1, needsOcr: false, fullText: lines.join("\n") };
+  const docs = [{ id: "b", name: "invented-budget.pdf", document: budget }];
+  const sourced = (r: ReturnType<typeof extractCandidates>) => r.candidates.map(c => ({ ...c, documentId: "b", documentName: "invented-budget.pdf" }));
+  const ai = (field: string, item: string, value: number, location: string, quote: string) => {
+    const v = verifyReading({ field, item, value, unit_seen: field === "unit_count" ? "units" : "$", file: "invented-budget.pdf", location, quote, note: null, confidence: "high" }, docs);
+    if (v.outcome !== "verified") throw new Error(v.outcome);
+    return v.candidate;
+  };
+  const types = (ps: ReturnType<typeof consolidate>) => ps.filter(p => ["unit_count", "unit_rent_monthly"].includes(p.fieldKey)).map(p => [p.fieldKey, p.itemKey, p.value]);
+
+  test("an income section heading is not a unit type; a type heading still is", () => {
+    expect(extractCandidates(budget).candidates.map(c => [c.fieldKey, c.itemKey, c.value])).toEqual([["unit_count", "All units", 4], ["unit_rent_monthly", "All units", 1850]]);
+    for (const heading of ["Rent", "Rent roll", "Rental income", "Revenue", "Income", "Loyers", "Revenus", "Operations", "Operations and exit", "Operating"]) {
+      const d = { ...budget, lines: budget.lines.map((l, i) => (i ? l : { ...l, text: heading })) };
+      expect(extractCandidates(d).candidates.map(c => c.itemKey), heading).toEqual(["All units", "All units"]);
+    }
+    const typed = { ...budget, lines: budget.lines.map((l, i) => (i ? l : { ...l, text: "Two-bedroom" })) };
+    expect(extractCandidates(typed).candidates.find(c => c.fieldKey === "unit_count")?.itemKey).toBe("2BR");
+  });
+
+  test("the rule reader's and the AI's names for one line consolidate to one type", () => {
+    const read = [...sourced(extractCandidates(budget)), ai("unit_count", "rental unit", 4, "page 1, line 20", "Units 4"), ai("unit_rent_monthly", "rental unit", 1850, "page 1, line 21", "$1,850")];
+    expect(types(consolidate(read, "CAD"))).toEqual([["unit_count", "rental unit", 4], ["unit_rent_monthly", "rental unit", 1850]]);
+  });
+
+  test("a heading name, All units and the AI's name linked across a count and a rent are one type, named by the AI", () => {
+    const rule = (fieldKey: string, itemKey: string, value: number, location: string) => ({ fieldKey, itemKey, value, location, raw: String(value), unitSeen: null, context: "", rule: "line:prose", note: null, documentId: "b", documentName: "invented-budget.pdf" }) as unknown as SourcedCandidate;
+    const read = [rule("unit_count", "Rents", 4, "page 1, line 20"), rule("unit_rent_monthly", "All units", 1850, "page 1, line 21"), ai("unit_count", "rental unit", 4, "page 1, line 20", "Units 4"), ai("unit_rent_monthly", "rental unit", 1850, "page 1, line 21", "$1,850")];
+    const ps = consolidate(read, "CAD");
+    expect(types(ps)).toEqual([["unit_count", "rental unit", 4], ["unit_rent_monthly", "rental unit", 1850]]);
+    expect(ps.find(p => p.fieldKey === "unit_count")!.sources).toHaveLength(2);
+    // "All units" alone keeps its name.
+    expect(types(consolidate([rule("unit_rent_monthly", "All units", 1850, "page 1, line 21")], "CAD"))).toEqual([["unit_rent_monthly", "All units", 1850]]);
+    // Two types one reader names on one line with one value stay two types.
+    const two = [rule("unit_count", "2BR", 4, "page 1, line 20"), rule("unit_count", "3BR", 4, "page 1, line 20"), ai("unit_count", "rental unit", 4, "page 1, line 20", "Units 4")];
+    expect(types(consolidate(two, "CAD")).map(t => t[1])).toEqual(["2BR", "3BR", "rental unit"]);
+  });
+
+  test("the AI's \"Two-bedroom\" is the rule reader's \"2BR\", from another line", () => {
+    for (const item of ["Two-bedroom", "2-bedroom", "two bedroom", "2 bed", "2 chambres"]) expect(ai("unit_rent_monthly", item, 1850, "page 1, line 21", "$1,850").itemKey, item).toBe("2BR");
+    expect(ai("unit_count", "3½", 4, "page 1, line 20", "Units 4").itemKey).toBe("3½");
+    const rule = { fieldKey: "unit_rent_monthly", itemKey: "2BR", value: 1850, location: "page 2, line 4", raw: "$1,850", unitSeen: "$/mo", context: "", rule: "table:labelled-roll", note: null, documentId: "r", documentName: "invented-roll.pdf" } as unknown as SourcedCandidate;
+    expect(types(consolidate([rule, ai("unit_rent_monthly", "Two-bedroom", 1850, "page 1, line 21", "$1,850")], "CAD"))).toEqual([["unit_rent_monthly", "2BR", 1850]]);
   });
 });
