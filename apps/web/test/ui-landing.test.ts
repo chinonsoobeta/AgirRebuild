@@ -1,3 +1,4 @@
+import { readFileSync } from "node:fs";
 import { describe, expect, it, vi } from "vitest";
 import { createElement } from "react";
 import { renderToStaticMarkup } from "react-dom/server";
@@ -5,6 +6,7 @@ import { ApiError } from "../src/api";
 import { type Lang } from "../src/i18n.tsx";
 import { Home, Landing, homeDecision } from "../src/routes/landing.tsx";
 import { Legal } from "../src/routes/legal.tsx";
+import { en } from "../src/strings/landing";
 
 const state = vi.hoisted(() => ({ lang: "en" as "en" | "fr", me: {} as { isLoading?: boolean; data?: unknown; error?: unknown } }));
 vi.mock("@tanstack/react-query", () => ({
@@ -101,19 +103,53 @@ describe("the terms and privacy page", () => {
 });
 
 describe("the signed-out home", () => {
-  it("decides from the session: signed in goes to the deals, a 401 shows the landing page, loading shows nothing", () => {
+  it("decides from the session: signed in goes to the deals, a 401 shows the landing page, loading waits", () => {
     expect(homeDecision({ isLoading: true })).toBe("wait");
     expect(homeDecision({ isLoading: false, data: { user: {}, workspaces: [] } })).toBe("deals");
     expect(homeDecision({ isLoading: false, error: new ApiError(401, "Sign in to continue.") })).toBe("landing");
     expect(homeDecision({ isLoading: false, error: new ApiError(500, "Down") })).toBe("deals");
   });
 
-  it("renders the redirect, the landing page or nothing", () => {
+  it("renders the redirect, the landing page, or the headline while the session loads", () => {
     state.me = { isLoading: false, data: { user: { id: "u", email: "a@b.c", name: "A" }, workspaces: [] } };
     expect(html(Home)).toBe('<meta data-navigate="/deals"/>');
     state.me = { isLoading: false, error: new ApiError(401, "Sign in to continue.") };
     expect(text(html(Home))).toContain("Decide whether to build");
     state.me = { isLoading: true };
-    expect(html(Home)).toBe("");
+    const waiting = text(html(Home));
+    expect(waiting).toContain("Decide whether to build");
+    expect(waiting).not.toContain("Sign in");
+  });
+});
+
+// QA item 9: before any code arrives, index.html shows the name and the landing headline, in the landing strings' words.
+describe("the static page before the code loads", () => {
+  it("carries the product name, the headline and the lead as plain text inside #root", () => {
+    const page = readFileSync(new URL("../index.html", import.meta.url), "utf8");
+    const root = page.slice(page.indexOf('<div id="root">'), page.indexOf("<script type=\"module\""));
+    expect(root).toContain(">Agir</span>");
+    expect(root).toContain(en["landing.heroTitle"]);
+    expect(root).toContain(en["landing.heroLead"]);
+  });
+});
+
+// QA items 16 and 19: the jargon is explained where it first appears, and the FAQ and the terms say what is true today.
+describe("plain words and today's facts", () => {
+  it("glosses the jargon, explains the first step and answers price and AI reading", () => {
+    const words = text(html(Landing));
+    for (const gloss of ["missing-middle builders (", "rent roll (", "term sheet (", "stresses (", "gates (", "verdict (", "equity (", "hash chain ("]) expect(words).toContain(gloss);
+    expect(words).toContain("Free account, then name your project and add its numbers.");
+    expect(words).toContain("What does it cost?");
+    expect(words).toContain("Pricing is not set yet; there is no charge during the technical preview.");
+    expect(words).toContain("on by default");
+    expect(words).toContain("never the files, to Anthropic's Claude in the United States");
+    expect(words).toContain("The workspace owner can turn it off in Settings");
+  });
+
+  it("describes the AI reading switch on the terms page and keeps Anthropic's terms to be settled", () => {
+    const words = text(html(Legal));
+    expect(words).toContain("Reading with Claude is on by default, and Claude processes the text in the United States.");
+    expect(words).toContain("To be settled: the terms that apply to the text sent to Anthropic.");
+    expect(words).not.toContain("how a workspace can turn document reading off");
   });
 });

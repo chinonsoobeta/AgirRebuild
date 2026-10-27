@@ -25,7 +25,8 @@ export function Home() {
   const decided = homeDecision(me);
   if (decided !== "wait") shown.current = decided;
   const next = decided === "wait" ? shown.current : decided;
-  if (!next) return null;
+  // While the session loads, the headline the static page in index.html showed stays on screen (item 9), not a blank page.
+  if (!next) return <LandingWait />;
   if (next === "deals") return <Navigate to="/deals" />;
   return <Landing />;
 }
@@ -43,6 +44,17 @@ function LanguageLink() {
     <button type="button" className="toplink ld-lang" lang={lang === "en" ? "fr" : "en"} onClick={() => setLang(lang === "en" ? "fr" : "en")}>
       {t("nav.language")}
     </button>
+  );
+}
+
+/** The top of the landing page, the same words as the static page in index.html, shown while the session loads. */
+function LandingWait() {
+  const { t } = useI18n();
+  return (
+    <div className="landing" aria-busy="true">
+      <header className="topbar"><div className="ld-bar ld-bar-full"><span className="brand"><Mark />Agir</span></div></header>
+      <main className="ld-wrap"><section className="ld-hero"><div><h1 className="ld-h1">{t("landing.heroTitle")}</h1><p className="ld-sub">{t("landing.heroLead")}</p></div></section></main>
+    </div>
   );
 }
 
@@ -105,6 +117,7 @@ export function Landing() {
                 <Link to="/signup" className="btn primary">{t("landing.start")} <I.Chevron size={16} /></Link>
                 <a className="btn quiet" href="#how">{t("landing.heroHow")}</a>
               </div>
+              <p className="small muted ld-start-hint">{t("landing.startHint")}</p>
               <p className="small muted ld-for">{t("landing.heroFor")}</p>
             </div>
             <div className="ld-glimpse">
@@ -175,7 +188,7 @@ export function Landing() {
           <section className="ld-sec" id="questions" aria-labelledby="ld-questions">
             <h2 className="h1" id="ld-questions">{t("landing.questionsTitle")}</h2>
             <div className="ld-faq">
-              {(["Advice", "Scans", "Share", "Ai"] as const).map((k) => (
+              {(["Advice", "Scans", "Share", "Ai", "Price"] as const).map((k) => (
                 <div key={k}>
                   <h3>{t(`landing.q${k}`)}</h3>
                   <p>{t(`landing.a${k}`)}</p>
