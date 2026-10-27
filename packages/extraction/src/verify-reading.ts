@@ -2,7 +2,7 @@ import { FIELD_BY_KEY } from "@agir/contracts";
 import { detectFormat, normalizeText, SCALE_RE, scaleOf, SF_PER_M2, tokenize } from "@agir/numbers";
 import { declaredScale, labelScale, statedScaleUnit } from "./candidates.ts";
 import { addressedEntries } from "./addressed.ts";
-import { foldText } from "./mapping.ts";
+import { canonicalItem, foldText } from "./mapping.ts";
 import type { NormalizedDocument } from "./document.ts";
 import type { SourcedCandidate } from "./consolidate.ts";
 
@@ -182,7 +182,8 @@ export function verifyReading(reading: Reading, documents: readonly ReadingDocum
   else if (seen === "vacancy_%" && ["stabilized_occupancy_pct", "item_occupancy_pct"].includes(field.key)) value = 100 - value;
   else if (seen !== unit) return { outcome: READING_FAILURE.unit };
   return { outcome: "verified", candidate: {
-    fieldKey: field.key, itemKey, value, unitSeen, raw: token.raw,
+    // The rule reader's name for the same type ("Two-bedroom" and "2BR" are "2BR"), so the two group in consolidate (QA card C1).
+    fieldKey: field.key, itemKey: itemKey === null ? null : canonicalItem(itemKey.trim()), value, unitSeen, raw: token.raw,
     documentId: doc.id, documentName: doc.name, location: reading.location, context: reading.quote,
     rule: "ai", ...(ambiguous ? { ambiguous: true as const } : {}), confidence: reading.confidence, ...(reading.note ? { note: reading.note } : {}),
   } };
