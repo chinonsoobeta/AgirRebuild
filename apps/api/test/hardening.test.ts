@@ -3,7 +3,7 @@ import { mkdtempSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { fileStore, migrate, openPglite, type Db } from "@agir/db";
-import { createApp, type AppDeps } from "../src/app.ts";
+import { createApp, fileStem, type AppDeps } from "../src/app.ts";
 import { alerter, log, type LogFields } from "../src/log.ts";
 import { memoryMailer, unsentMailer } from "../src/mailer.ts";
 
@@ -289,5 +289,127 @@ describe("with no mail provider, nothing claims a send", () => {
     const mailed = createApp({ db, store, secureCookies: false, mailer: memoryMailer() });
     expect((await signup(mailed, "with-mail@example.com")).json).toEqual({ ok: true });
     expect((await call(mailed, null, "POST", "/api/auth/reset/send", { email: "with-mail@example.com" })).json).toEqual({ ok: true });
+  });
+});
+
+// QA card C4: free text is trimmed on save, blank or too long is refused naming the field, and a double click is one request.
+const C4_BASE: [string, number, string?][] = [
+  ["land_cost", 1_000_000], ["hard_cost", 0], ["soft_cost", 0], ["contingency", 0], ["construction_months", 0], ["lease_up_months", 0],
+  ["hold_years", 1], ["stabilized_occupancy_pct", 100], ["expense_ratio_pct", 0], ["exit_cap_rate_pct", 10], ["selling_costs_pct", 0],
+  ["senior_loan_amount", 0], ["unit_count", 10, "A"], ["unit_rent_monthly", 1_000, "A"],
+];
+async function c4Run(app: App, s: Session, ws: string, name: string) {
+  const deal = (await call(app, s, "POST", `/api/workspaces/${ws}/deals`, { name, assetType: "Multifamily", location: "Burnaby", province: "BC" })).json.id as string;
+  for (const [fieldKey, value, itemKey] of C4_BASE) {
+    expect((await call(app, s, "POST", `/api/deals/${deal}/values`, { fieldKey, value, reason: "Form hygiene test", ...(itemKey ? { itemKey } : {}) })).status).toBe(200);
+  }
+  const made = await call(app, s, "POST", `/api/deals/${deal}/runs`);
+  expect(made.status).toBe(200);
+  return { deal, run: made.json.id as string };
+}
+
+describe("free text is trimmed, and blank or too long is refused with the field's name", () => {
+  let app: App, s: Session, ws: string;
+  const mailer = memoryMailer();
+  beforeAll(async () => {
+    app = createApp({ db, store, secureCookies: false, mailer });
+    s = (await signup(app, "trim@example.com", { name: "  Tess   Trim  ", reviewMode: "solo" })).session!;
+    ws = await wsOf(app, s);
+  });
+
+  test("sign-up: a name of spaces and a name too long are refused under the name; a padded name is saved trimmed", async () => {
+    const blank = await signup(app, "blank-name@example.com", { name: "     " });
+    expect(blank).toMatchObject({ status: 422, json: { error: "Enter your name", detail: { field: "name" } } });
+    const long = await signup(app, "long-name@example.com", { name: "x".repeat(121) });
+    expect(long).toMatchObject({ status: 422, json: { error: "Name too long (120 characters at most)", detail: { field: "name" } } });
+    const me = (await call(app, s, "GET", "/api/me")).json;
+    expect(me.user.name).toBe("Tess   Trim");
+    expect(me.workspaces[0].name).toBe("Tess's workspace");
+    expect((await call(app, s, "POST", "/api/me/name", { name: " \t " })).json).toMatchObject({ error: "Enter your name", detail: { field: "name" } });
+  });
+
+  test("a pasted code with spaces confirms the address", async () => {
+    const code = /code in Agir: (\d{6})/.exec(mailer.sent.at(-1)!.text)![1]!;
+    expect((await call(app, s, "POST", "/api/auth/verify", { code: ` ${code.slice(0, 3)} ${code.slice(3)} ` })).status).toBe(200);
+  });
+
+  test("a deal: a name of spaces is refused under the name; name and location are saved trimmed", async () => {
+    const blank = await call(app, s, "POST", `/api/workspaces/${ws}/deals`, { name: "     ", assetType: "Multifamily", province: "BC" });
+    expect(blank).toMatchObject({ status: 422, json: { error: "Enter a deal name", detail: { field: "name" } } });
+    const long = await call(app, s, "POST", `/api/workspaces/${ws}/deals`, { name: "d".repeat(161), assetType: "Multifamily", province: "BC" });
+    expect(long.json).toMatchObject({ error: "Deal name too long (160 characters at most)", detail: { field: "name" } });
+    const made = await call(app, s, "POST", `/api/workspaces/${ws}/deals`, { name: "  Kingsway Eight ", assetType: "Multifamily", location: "  Burnaby ", province: "BC" });
+    expect((await db.query(`select name, location from deals where id = $1`, [made.json.id]))[0]).toEqual({ name: "Kingsway Eight", location: "Burnaby" });
+  });
+
+  test("a decision: the reasoning's ten characters are counted after trimming", async () => {
+    const { run } = await c4Run(app, s, ws, "Trim decision");
+    const short = await call(app, s, "POST", `/api/runs/${run}/decision`, { decision: "reject", rationale: "          x" });
+    expect(short).toMatchObject({ status: 422, json: { error: "Give the reasoning (at least 10 characters)", detail: { field: "rationale" } } });
+    const ok = await call(app, s, "POST", `/api/runs/${run}/decision`, { decision: "reject", rationale: "  Sale proceeds do not repay the debt.  " });
+    expect(ok.status).toBe(200);
+    expect((await db.query(`select rationale from decisions where id = $1`, [ok.json.id]))[0]).toEqual({ rationale: "Sale proceeds do not repay the debt." });
+  });
+
+  test("a blank name saved before this card shows as the email", async () => {
+    await db.query(`update users set name = '  ' where email = 'trim@example.com'`);
+    try {
+      expect((await call(app, s, "GET", "/api/me")).json.user.name).toBe("trim@example.com");
+      const { run } = await c4Run(app, s, ws, "Blank name");
+      await call(app, s, "POST", `/api/runs/${run}/decision`, { decision: "reject", rationale: "Recorded by someone with no name." });
+      const view = (await call(app, s, "GET", `/api/runs/${run}`)).json;
+      expect(view.decisions[0].decided_by).toBe("trim@example.com");
+    } finally {
+      await db.query(`update users set name = 'Tess Trim' where email = 'trim@example.com'`);
+    }
+  });
+
+  test("a report's file name carries no control characters, emoji or runs of spaces and underscores", () => {
+    expect(fileStem("  <script>alert(1)</script>  Kingsway Eight \u{1F608} __ \u0007 ")).toBe("script alert(1) script Kingsway Eight");
+    expect(fileStem("\u{1F608}  ")).toBe("Deal");
+    expect(fileStem("Triplex rue Laurier")).toBe("Triplex rue Laurier");
+  });
+});
+
+describe("a double click records one deal, one decision and one report", () => {
+  let app: App, s: Session, ws: string;
+  beforeAll(async () => {
+    app = createApp({ db, store, secureCookies: false });
+    s = (await signup(app, "double@example.com", { reviewMode: "solo" })).session!;
+    ws = await wsOf(app, s);
+  });
+
+  test("the same deal twice at once is one deal; another place is another deal", async () => {
+    const body = { name: "Double Deal", assetType: "Multifamily", location: "Burnaby", province: "BC" };
+    const [a, b] = await Promise.all([1, 2].map(() => call(app, s, "POST", `/api/workspaces/${ws}/deals`, body)));
+    expect(a!.json.id).toBe(b!.json.id);
+    expect((await db.query<{ n: number }>(`select count(*)::int as n from deals where workspace_id = $1 and name = 'Double Deal'`, [ws]))[0]!.n).toBe(1);
+    const other = await call(app, s, "POST", `/api/workspaces/${ws}/deals`, { ...body, location: "Surrey" });
+    expect(other.json.id).not.toBe(a!.json.id);
+  });
+
+  test("an identical decision is answered with the one already recorded; a different one is added", async () => {
+    const { run } = await c4Run(app, s, ws, "Double decision");
+    const body = { decision: "reject", rationale: "Sale proceeds do not repay the debt." };
+    const [a, b] = await Promise.all([1, 2].map(() => call(app, s, "POST", `/api/runs/${run}/decision`, body)));
+    expect(a!.status).toBe(200);
+    expect(b!.json.id).toBe(a!.json.id);
+    const again = await call(app, s, "POST", `/api/runs/${run}/decision`, { ...body, rationale: ` ${body.rationale} ` });
+    expect(again.json.id).toBe(a!.json.id);
+    const other = await call(app, s, "POST", `/api/runs/${run}/decision`, { decision: "return_to_underwriting", rationale: "Ask for a firm construction price first." });
+    expect(other.json.id).not.toBe(a!.json.id);
+    expect((await db.query<{ n: number }>(`select count(*)::int as n from decisions where run_id = $1`, [run]))[0]!.n).toBe(2);
+  });
+
+  test("an identical report while one is being made is the same report; another language is another", async () => {
+    const { run } = await c4Run(app, s, ws, "Double report");
+    const body = { kind: "build_decision", format: "pdf" };
+    const [a, b] = await Promise.all([1, 2].map(() => call(app, s, "POST", `/api/runs/${run}/artifacts`, body)));
+    expect(a!.status).toBe(200);
+    expect(b!.json.id).toBe(a!.json.id);
+    expect((await call(app, s, "POST", `/api/runs/${run}/artifacts`, body)).json.id).toBe(a!.json.id);
+    const fr = await call(app, s, "POST", `/api/runs/${run}/artifacts`, { ...body, lang: "fr" });
+    expect(fr.json.id).not.toBe(a!.json.id);
+    expect((await db.query<{ n: number }>(`select count(*)::int as n from artifacts where run_id = $1`, [run]))[0]!.n).toBe(2);
   });
 });

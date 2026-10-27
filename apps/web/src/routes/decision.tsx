@@ -8,6 +8,7 @@ import { useI18n, verdictText } from "../i18n";
 import "../strings/decision";
 import { useRun } from "./run";
 import { policyName } from "../components/thresholds";
+import { CharCount, FieldError, fieldText, refusedField, useLength, useSubmitting } from "../components/forms";
 
 const DECISIONS = ["approve", "approve_with_conditions", "reject", "return_to_underwriting"] as const;
 const TONE: Record<string, TagTone> = { approve: "pass", approve_with_conditions: "pass", reject: "stop", return_to_underwriting: "review" };
@@ -16,17 +17,21 @@ const shortHash = (h: string) => (h.length > 16 ? `${h.slice(0, 8)} … ${h.slic
 
 export function DecisionStep({ dealId }: { dealId: string }) {
   const i = useI18n();
-  const { t, f, L } = i;
+  const { t, f, L, err } = i;
   const { role, solo } = useSession();
   const qc = useQueryClient();
   const deal = useDeal(dealId);
   const run = useRun(deal.data?.run?.id);
   const [choice, setChoice] = useState<string>("");
+  const [shortReason, setShortReason] = useState(false);
+  const sending = useSubmitting();
+  const lengths = { rationale: useLength(), conditions: useLength(), override: useLength() };
   const record = useMutation({
     mutationFn: (b: object) => api.post(`/runs/${deal.data!.run!.id}/decision`, b),
     onSuccess: () => {
       setChoice("");
       (document.getElementById("decision-form") as HTMLFormElement | null)?.reset();
+      for (const l of Object.values(lengths)) l.reset();
       return Promise.all([qc.invalidateQueries({ queryKey: ["deal", dealId] }), qc.invalidateQueries({ queryKey: ["run"] })]);
     },
   });
@@ -49,9 +54,18 @@ export function DecisionStep({ dealId }: { dealId: string }) {
   const blockedReason = !v.fresh ? t("decision.stale") : !canDecide(role) ? t(solo ? "decision.roleSolo" : "decision.role") : null;
   const submit = (e: FormEvent<HTMLFormElement>) => {
     e.preventDefault();
-    const fd = new FormData(e.currentTarget);
-    record.mutate({ decision: choice, rationale: fd.get("rationale"), conditions: fd.get("conditions") || null, overrideReason: fd.get("override") || null });
+    // Trimmed, as the API saves it: ten spaces and an "x" is not ten characters of reasoning.
+    const rationale = fieldText(e, "rationale");
+    setShortReason(rationale.length < 10);
+    if (rationale.length < 10) return;
+    const body = { decision: choice, rationale, conditions: fieldText(e, "conditions") || null, overrideReason: fieldText(e, "override") || null };
+    // One decision per click, however fast the clicks: decisions are permanent.
+    return sending.run(() => record.mutateAsync(body).catch(() => {}));
   };
+  /** The API's refusal under the field it names; anything else under the form. */
+  const refused = refusedField(record.error);
+  const under = (field: string) => (refused === field ? err(record.error) : null);
+  const rationaleError = shortReason ? t("decision.reasoningShort") : under("rationale");
   return (
     <>
       <DealFrame o={o} active="decision" />
@@ -77,25 +91,34 @@ export function DecisionStep({ dealId }: { dealId: string }) {
                     options={DECISIONS.map((k) => ({ value: k, title: L.decision(k), description: t(`decision.d.${k}`) }))} />
                   <div className="field">
                     <label htmlFor="rationale">{t(solo ? "decision.reasoningSolo" : "decision.reasoning")}</label>
-                    <textarea className="textarea" id="rationale" name="rationale" minLength={10} required placeholder={t("decision.reasoningHint")} />
+                    <textarea className="textarea" id="rationale" name="rationale" minLength={10} maxLength={5000} required placeholder={t("decision.reasoningHint")}
+                      onInput={lengths.rationale.onInput} aria-invalid={rationaleError ? true : undefined} aria-describedby={`rationale-count${rationaleError ? " rationale-error" : ""}`} />
+                    <FieldError id="rationale-error" message={rationaleError} />
+                    <CharCount id="rationale-count" n={lengths.rationale.n} max={5000} />
                   </div>
                   {/* Conditions belong to "approve with conditions" only, so a permanent "approve" never carries any. */}
                   {choice === "approve_with_conditions" && (
                     <div className="field">
                       <label htmlFor="conditions">{t("decision.conditionsLabel")}</label>
-                      <textarea className="textarea dec-short" id="conditions" name="conditions" minLength={5} required placeholder={t("decision.conditionsHint")} />
+                      <textarea className="textarea dec-short" id="conditions" name="conditions" minLength={5} maxLength={5000} required placeholder={t("decision.conditionsHint")}
+                        onInput={lengths.conditions.onInput} aria-describedby="conditions-count" />
+                      <FieldError id="conditions-error" message={under("conditions")} />
+                      <CharCount id="conditions-count" n={lengths.conditions.n} max={5000} />
                     </div>
                   )}
                   {against && (
                     <div className="field">
                       <label htmlFor="override">{t("decision.overrideLabel", { v: L.verdict(verdict).toLowerCase() })}</label>
-                      <textarea className="textarea" id="override" name="override" minLength={20} required aria-describedby="override-help" />
+                      <textarea className="textarea" id="override" name="override" minLength={20} maxLength={2000} required aria-describedby="override-help override-count"
+                        onInput={lengths.override.onInput} />
+                      <FieldError id="override-error" message={under("overrideReason")} />
                       <span className="small muted" id="override-help">{t("decision.overrideHelp")}</span>
+                      <CharCount id="override-count" n={lengths.override.n} max={2000} />
                     </div>
                   )}
-                  <ErrorText error={record.error} />
+                  <ErrorText error={refused && ["rationale", "conditions", "overrideReason"].includes(refused) ? null : record.error} />
                   <div className="row">
-                    <button className="btn primary" type="submit" disabled={!choice || record.isPending}>{t("decision.record")}</button>
+                    <button className="btn primary" type="submit" disabled={!choice || record.isPending || sending.pending}>{t("decision.record")}</button>
                     <span className="small muted">{t("decision.permanentNote")}</span>
                   </div>
                 </form>

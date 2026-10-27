@@ -8,18 +8,22 @@ import { useI18n } from "../i18n";
 import "../strings/deals";
 import "../strings/newdeal";
 import * as I from "../components/icons";
+import { CharCount, FieldError, fieldText, refusedField, useLength, useSubmitting } from "../components/forms";
 
 // The kinds the API stores and displays through L.asset.
 const ASSET_TYPES = ["Multifamily", "Mixed-use", "Industrial", "Office", "Retail", "Hospitality", "Self storage", "Other"];
 
 export function NewDeal() {
-  const { t, L, lang } = useI18n();
+  const { t, L, lang, err } = useI18n();
   const { workspaceId, role } = useSession();
   const navigate = useNavigate();
   const qc = useQueryClient();
   // The currency follows the country until someone picks another.
   const [country, setCountry] = useState<Country>("CA");
   const [currency, setCurrency] = useState<Currency>("CAD");
+  const [blankName, setBlankName] = useState(false);
+  const sending = useSubmitting();
+  const nameLength = useLength();
   const create = useMutation({
     mutationFn: (body: { name: string; assetType: string; location: string; country: Country; province: string | null; currency: Currency }) =>
       api.post<{ id: string }>(`/workspaces/${workspaceId}/deals`, body),
@@ -31,15 +35,15 @@ export function NewDeal() {
   const submit = (e: FormEvent<HTMLFormElement>) => {
     e.preventDefault();
     const f = new FormData(e.currentTarget);
-    create.mutate({
-      name: String(f.get("name")),
-      assetType: String(f.get("assetType")),
-      location: String(f.get("location") ?? ""),
-      country,
-      province: country === "CA" ? String(f.get("province")) : null,
-      currency,
-    });
+    // Trimmed, as the API saves it; a name of spaces is no name. One deal per click, however fast the clicks (QA card C4).
+    const name = fieldText(e, "name");
+    setBlankName(!name);
+    if (!name) return;
+    const body = { name, assetType: String(f.get("assetType")), location: fieldText(e, "location"), country,
+      province: country === "CA" ? String(f.get("province")) : null, currency };
+    return sending.run(() => create.mutateAsync(body).catch(() => {}));
   };
+  const nameError = blankName ? t("newdeal.nameBlank") : refusedField(create.error) === "name" ? err(create.error) : null;
   return (
     <div className="newdeal">
       <Link to="/deals" className="back"><I.Back />{t("newdeal.back")}</Link>
@@ -55,8 +59,11 @@ export function NewDeal() {
         <form className="card card-pad newdeal-form" onSubmit={submit}>
           <div className="field">
             <label htmlFor="nd-name">{t("deals.name")}</label>
-            <input className="input" id="nd-name" name="name" required maxLength={160} aria-describedby="nd-name-help" />
+            <input className="input" id="nd-name" name="name" required maxLength={160} onInput={nameLength.onInput}
+              aria-invalid={nameError ? true : undefined} aria-describedby={`nd-name-help nd-name-count${nameError ? " nd-name-error" : ""}`} />
+            <FieldError id="nd-name-error" message={nameError} />
             <p className="hint" id="nd-name-help">{t("newdeal.nameHelp")}</p>
+            <CharCount id="nd-name-count" n={nameLength.n} max={160} />
           </div>
           <div className="field">
             <label htmlFor="nd-type">{t("newdeal.kind")}</label>
@@ -102,9 +109,9 @@ export function NewDeal() {
             </select>
             <p className="hint" id="nd-cur-help">{t("deals.currencyHint")}</p>
           </div>
-          <ErrorText error={create.error} />
+          <ErrorText error={refusedField(create.error) === "name" ? null : create.error} />
           <div className="row newdeal-actions">
-            <button className="btn primary" type="submit" disabled={create.isPending}>{t("deals.create")}</button>
+            <button className="btn primary" type="submit" disabled={create.isPending || sending.pending}>{t("deals.create")}</button>
             <Link to="/deals" className="btn quiet">{t("common.cancel")}</Link>
             <span className="small muted newdeal-landing">{t("newdeal.landing")}</span>
           </div>

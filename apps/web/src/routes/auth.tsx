@@ -3,6 +3,7 @@ import { useQuery, useQueryClient } from "@tanstack/react-query";
 import { useState, type FormEvent, type ReactNode } from "react";
 import { api } from "../api";
 import { ChoiceCards, Notice, ThemeToggle } from "../components/kit";
+import { CharCount, FieldError, fieldText, refusedField, useLength, useSubmitting } from "../components/forms";
 import { useI18n } from "../i18n";
 import "../strings/auth";
 
@@ -144,25 +145,34 @@ export function Login() {
 }
 
 export function Signup() {
-  const { t } = useI18n();
+  const { t, err } = useI18n();
   const navigate = useNavigate();
   const qc = useQueryClient();
   const [error, setError] = useState<unknown>(null);
+  const [blankName, setBlankName] = useState(false);
   const [mode, setMode] = useState<string>("solo");
   const signupOpen = useSignupOpen();
-  const submit = async (e: FormEvent<HTMLFormElement>) => {
+  const sending = useSubmitting();
+  const nameLength = useLength();
+  const submit = (e: FormEvent<HTMLFormElement>) => {
     e.preventDefault();
-    const body = { name: value(e, "name"), email: value(e, "email"), password: value(e, "password"), reviewMode: mode };
+    // Trimmed, as the API saves it; a name of spaces is no name.
+    const body = { name: fieldText(e, "name"), email: fieldText(e, "email"), password: value(e, "password"), reviewMode: mode };
     setError(null);
-    try {
-      await api.post("/auth/signup", body);
-      await qc.invalidateQueries();
-      // The API has sent a confirmation email: the next page asks for its code.
-      void navigate({ to: "/verify" });
-    } catch (err) {
-      setError(err);
-    }
+    setBlankName(!body.name);
+    if (!body.name) return;
+    return sending.run(async () => {
+      try {
+        await api.post("/auth/signup", body);
+        await qc.invalidateQueries();
+        // The next page asks for the emailed code, or says that this server sends no email (card B).
+        void navigate({ to: "/verify" });
+      } catch (e2) {
+        setError(e2);
+      }
+    });
   };
+  const nameError = blankName ? t("auth.nameBlank") : refusedField(error) === "name" ? err(error) : null;
   if (!signupOpen) {
     return (
       <AuthFrame pitch={t("auth.pitchBody")}>
@@ -175,22 +185,29 @@ export function Signup() {
     );
   }
   return (
-    <AuthFrame pitch={t("auth.signupPitch")}>
+    <AuthFrame heading={t("auth.signupHeading")} pitch={t("auth.signupPitch")}>
       <form className="card card-pad auth-card auth-card-wide" onSubmit={submit} noValidate>
         <div>
           <h1 className="h1">{t("auth.createAccount")}</h1>
           <p className="muted auth-sub">{t("auth.signupLead")}</p>
         </div>
-        <div className="field"><label htmlFor="name">{t("auth.name")}</label><input className="input" id="name" name="name" autoComplete="name" required aria-describedby="name-hint" /><p className="hint" id="name-hint">{t("auth.nameHint")}</p></div>
+        <div className="field"><label htmlFor="name">{t("auth.name")}</label>
+          <input className="input" id="name" name="name" autoComplete="name" required maxLength={120} onInput={nameLength.onInput}
+            aria-invalid={nameError ? true : undefined} aria-describedby={`name-hint name-count${nameError ? " name-error" : ""}`} />
+          <FieldError id="name-error" message={nameError} />
+          <p className="hint" id="name-hint">{t("auth.nameHint")}</p>
+          <CharCount id="name-count" n={nameLength.n} max={120} /></div>
         <div className="field"><label htmlFor="email">{t("auth.email")}</label><input className="input" id="email" name="email" type="email" autoComplete="username" required /></div>
         <div className="field"><label htmlFor="password">{t("auth.password")}</label><input className="input" id="password" name="password" type="password" autoComplete="new-password" minLength={10} required aria-describedby="password-hint" /><p className="hint" id="password-hint">{t("auth.passwordHelp")}</p></div>
         <div className="stack tight">
-          <ChoiceCards name="reviewMode" legend={t("auth.reviewMode")} value={mode} onChange={setMode}
+          <ChoiceCards name="reviewMode" legend={t("auth.whoChecks")} value={mode} onChange={setMode}
             options={(["solo", "team"] as const).map((m) => ({ value: m, title: t(`auth.modeTitle.${m}`), description: t(`auth.modeDesc.${m}`) }))} />
           <p className="hint">{t("auth.modeHint")}</p>
         </div>
-        <FormError error={error} />
-        <button className="btn primary auth-wide" type="submit">{t("auth.create")}</button>
+        <FormError error={refusedField(error) === "name" ? null : error} />
+        <button className="btn primary auth-wide" type="submit" disabled={sending.pending}>{t("auth.create")}</button>
+        {/* The terms are a draft that does not apply yet, so nothing here says "you accept". */}
+        <p className="small auth-alt">{t("auth.legalRead")} <Link to="/legal" hash="terms">{t("auth.legalTerms")}</Link> {t("auth.legalAnd")} <Link to="/legal" hash="privacy">{t("auth.legalPrivacy")}</Link>.</p>
         <p className="small auth-alt"><Link to="/login">{t("auth.haveAccount")}</Link></p>
       </form>
     </AuthFrame>
