@@ -31,6 +31,7 @@ work it describes.
 | `env -u ANTHROPIC_API_KEY AGIR_DATA_DIR=<empty folder> PORT=8798 AGIR_ACCOUNT_CLOSURE=1 npm start` | The same, with closing a workspace and deleting an account offered; without `AGIR_ACCOUNT_CLOSURE` both routes answer 404 and Settings shows neither | 2026-10-25, `card/F-close-account` (migration `0039` applied to a fresh database) |
 | `env -u ANTHROPIC_API_KEY NODE_OPTIONS=--max-old-space-size=3072 node --import tsx scripts/a11y.mjs` (after `npm run build -w @agir/web`) | 92 scans (23 screens, light and dark, English and French), 0 violations of any impact. It runs in the release gate as `accessibility scan`; that whole gate took 176 s on this machine | 2026-10-25, `card/G-a11y-perf` |
 | `env -u ANTHROPIC_API_KEY NODE_OPTIONS=--max-old-space-size=3072 VITEST_MAX_WORKERS=2 npm run gate -- --tier=release` | Both typechecks, 6682 tests in 72 files, the fallback test (1 passed, 252 skipped), web build, `performance budget` (first visit 547.4 kB of 690, largest chunk 339.9 kB of 500, all JavaScript 939.8 kB of 1200, CSS 37.6 kB of 60) and the accessibility scan (92 scans, 0 violations), in 172 s; PR tier 6682 tests in 72 files | 2026-10-25, `card/I-strings-by-screen` |
+| The same gate, from the main checkout | Both typechecks, 6786 tests in 74 files, the fallback test (1 passed, 252 skipped), web build within budget (first visit 558.1 kB of 690, largest chunk 341.4 kB of 500), 92 accessibility scans with 0 violations. A worktree without its own `node_modules` builds the web app without the vendor chunk (one 540 kB file) and fails the chunk budget for no code reason: run this gate from the main checkout. | 2026-10-27, `main` `dbb4e2b` (launch QA fixes and the static-shell fix) |
 
 The first walk ran on `ui/redesign`, where migrations go to `0029` as on `main`. The second ran on `ui/y-screens`,
 which adds `0031` and `0032`. `0030` is on `ui/w12-email` only. The three touch different objects (`0030` a new table
@@ -418,6 +419,34 @@ Left out on purpose, because a person must decide first (the plan's "Decisions t
 - Compare and Explore show each change by subtracting two stored values in the browser (Explore did so on `main`
   already). A screen is not meant to derive a figure; the owner decides whether this display arithmetic stays or the
   API returns the changes. Compare treats a change under one part in a billion as no change.
+
+## Launch QA with five first-time users (2026-10-27)
+
+Five persona subagents (impatient, skeptic, phone at 375 px on slow 3G, non-native English speaker, breaker), each
+with its own fictional deal, drove `npm start` of `main` `ae73ea6` with AI reading on in a headless browser and
+screenshotted every moment of confusion. The merged list (22 items ranked by how many users hit them), the six fix
+cards, the rerun on the fixed build and what is still open are in `LAUNCH-QA-2026-10-27.md` in `agir-reading-work/`
+outside the repository. The cards were merged into `main` as `1dcf8e6`:
+
+| Card | What changed |
+|---|---|
+| C1 | One budget line no longer becomes three unit types: candidates with the same item name are consolidated (`sameItemNames` in `packages/extraction/src/consolidate.ts`); the package gate stays at 0 wrong and the reader gate is unchanged. |
+| C2 | Review: one count with its reason ("19 can be approved together; 1 needs your eye first"), an in-page Approve-all confirmation, one button for a named default with its source stated, the land transfer tax proposal by location, the source line inline under its row, the stale-tab notice on its row. |
+| C3 | Documents and the stepper: "Reading N files… usually within a minute", a green bar with a Review button when values are waiting, the reconcile job held with `run_after` while the AI pass runs, "Plan: sell after the hold (change on Review)" instead of an assertion, one New deal button with plain hints per deal type. |
+| C4 | Sign-up and forms: trimmed fields, inline errors, a 15 s double-submit reuse, "Skip for now" as a button, spaced codes accepted, counters on long fields, "Who checks your numbers?" in plain words, links to the draft terms. |
+| C5 | Run, Reports and the Build decision PDF: "What this run assumed", the cost gap broken down, one name per report, a recommended first report, status moving to Ready without a reload, stated values, accepted defaults, the recorded decision, a not-advice line and a plain sentence per key figure in the PDF. |
+| C6 | A static shell in `apps/web/index.html` so the landing's text paints before JavaScript, a Suspense loading state for every route, plain words on the landing page, the audit page's shared-chain wording. `dbb4e2b` then moved the shell beside the React root, because React's first commit emptied it about 300 ms before the router had a screen. |
+
+The rerun: all five reached first success with no workaround; 93 of 93 read values right (run 1: 88 of 90); of
+the 116 first-run findings, 76 fixed, 26 partly, 13 not fixed (mostly needs-a-person items) and 1 not reachable.
+Open after run 2, by users hit: the PDF's "N inputs cannot pass within their range" count against the five rows it
+lists; a source quote printed twice under one value; the verify page's "We sent a link" on a server with the file
+mailer; red "Blocked" in the stepper during normal review; a stray "Approve the unit counts first" hint; two
+coverage names for one figure; the decision's reasoning field not marked required. Two bugs: the unused-figures
+panel lists figures that were used, and rejecting a value a document states gives "Review is clear" with no reason
+asked and a false "Not found in the documents" label. On slow 3G a signed-in cold page shows the marketing shell for
+13 s before "Loading…", and app screens take about 20 s; the phone's Gates table still clips.
+
 
 ## Model suggestions
 
