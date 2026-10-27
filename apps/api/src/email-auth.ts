@@ -204,7 +204,7 @@ export function emailAuth({ db, mailer, publicOrigin, cookie, cookieOpts, client
     });
 
     app.post("/api/auth/verify", async (c) => {
-      const body = z.union([z.object({ token: z.string().min(1).max(200) }).strict(), z.object({ code: z.string().regex(/^\d{6}$/) }).strict()]).parse(await c.req.json());
+      const body = z.union([z.object({ token: z.string().min(1).max(200) }).strict(), z.object({ code: z.string().max(40).transform((c) => c.replace(/\s/g, "")).pipe(z.string().regex(/^\d{6}$/)) }).strict()]).parse(await c.req.json());
       let userId: string | null;
       if ("token" in body) {
         if (!(await tokenLimit(clientKey(c)))) return tooMany(c);

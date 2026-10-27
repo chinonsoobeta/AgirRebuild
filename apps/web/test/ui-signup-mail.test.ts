@@ -127,14 +127,16 @@ describe("invite-only sign-up", () => {
 });
 
 describe("with no mail provider, no screen claims a send", () => {
-  it("the verify page: the sentence instead of We sent, and no code form or send-again", () => {
+  it("the verify page: no code will arrive, the account is created, and going on is the main button (QA card C4)", () => {
     at("/verify");
     state.me = person(false, false);
-    const words = text(render(Verify));
-    expect(words).toContain(NO_MAIL);
-    expect(words).not.toMatch(/We sent|send it again/);
+    const html = render(Verify);
+    const words = text(html);
+    expect(words).toContain("Your account is ready");
+    expect(words).toContain("Email is not set up on this server yet, so no code will arrive. Your account is already created.");
+    expect(words).not.toMatch(/We sent|send it again|Skip for now/);
     expect(input("code")).toBeUndefined();
-    expect(words).toContain("Skip for now");
+    expect(html).toContain('<a href="/deals" class="btn primary auth-wide">Continue to your deals</a>');
   });
 
   it("the verify page: a send that answers sent: false says so instead of We sent a new link", async () => {
@@ -218,7 +220,8 @@ describe("with no mail provider, no screen claims a send", () => {
     state.lang = "fr";
     at("/verify");
     state.me = person(false, false);
-    expect(text(render(Verify))).toContain(NO_MAIL_FR);
+    expect(text(render(Verify))).toContain("Le courriel n'est pas encore configuré sur ce serveur, donc aucun code n'arrivera. Votre compte est déjà créé.");
+    expect(text(render(Verify))).toContain("Continuer vers vos projets");
     expect(account(render(Settings))).toContain(NO_MAIL_FR);
   });
 });

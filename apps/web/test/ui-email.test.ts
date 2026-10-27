@@ -118,6 +118,22 @@ describe("the confirm-your-email page", () => {
     await button("send it again")!.props.onClick();
     expect(vi.mocked(api.post).mock.calls[1]![0]).toBe("/auth/verify/send");
   });
+  it("Skip for now is a full-size button beside Continue, and says the account is already created (QA card C4)", () => {
+    at("/verify");
+    state.me = person(false);
+    const html = render(Verify);
+    const words = text(html);
+    expect(html).toContain('<a href="/deals" class="btn quiet">Skip for now</a>');
+    expect(words).toContain("You can confirm later; your account is already created.");
+  });
+  it("a pasted code with spaces is checked without them, and is not cut by the field's length", async () => {
+    at("/verify");
+    state.me = person(false);
+    render(Verify);
+    expect(input("code")!.props.maxLength).toBeGreaterThanOrEqual(9);
+    await submit({ code: " 123 456 " });
+    expect(vi.mocked(api.post).mock.calls[0]).toEqual(["/auth/verify", { code: "123456" }]);
+  });
   it("a wrong code shows the API's sentence and goes nowhere", async () => {
     at("/verify");
     state.me = person(false);

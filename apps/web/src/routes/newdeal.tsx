@@ -8,23 +8,23 @@ import { useI18n } from "../i18n";
 import "../strings/deals";
 import "../strings/newdeal";
 import * as I from "../components/icons";
+import { CharCount, FieldError, fieldText, refusedField, useLength, useSubmitting } from "../components/forms";
 
 // The kinds the API stores and displays through L.asset.
 const ASSET_TYPES = ["Multifamily", "Mixed-use", "Industrial", "Office", "Retail", "Hospitality", "Self storage", "Other"] as const;
 const NAME_MAX = 160;
 
 export function NewDeal() {
-  const { t, L, lang } = useI18n();
+  const { t, L, lang, err } = useI18n();
   const { workspaceId, role } = useSession();
   const navigate = useNavigate();
   const qc = useQueryClient();
   // The currency follows the country until someone picks another.
   const [country, setCountry] = useState<Country>("CA");
   const [currency, setCurrency] = useState<Currency>("CAD");
-  // The name as typed: its length drives the counter, and a paste longer than the limit says it was cut (QA #18).
-  const [name, setName] = useState("");
-  const [cut, setCut] = useState(false);
-  const [blank, setBlank] = useState(false);
+  const [blankName, setBlankName] = useState(false);
+  const sending = useSubmitting();
+  const nameLength = useLength();
   const create = useMutation({
     mutationFn: (body: { name: string; assetType: string; location: string; country: Country; province: string | null; currency: Currency }) =>
       api.post<{ id: string }>(`/workspaces/${workspaceId}/deals`, body),
@@ -36,22 +36,15 @@ export function NewDeal() {
   const submit = (e: FormEvent<HTMLFormElement>) => {
     e.preventDefault();
     const f = new FormData(e.currentTarget);
-    // Spaces around a name or a place are never kept, and a name of spaces is no name.
-    const trimmed = String(f.get("name") ?? "").trim();
-    if (!trimmed) {
-      setBlank(true);
-      document.getElementById("nd-name")?.focus();
-      return;
-    }
-    create.mutate({
-      name: trimmed,
-      assetType: String(f.get("assetType")),
-      location: String(f.get("location") ?? "").trim(),
-      country,
-      province: country === "CA" ? String(f.get("province")) : null,
-      currency,
-    });
+    // Trimmed, as the API saves it; a name of spaces is no name. One deal per click, however fast the clicks (QA card C4).
+    const name = fieldText(e, "name");
+    setBlankName(!name);
+    if (!name) { document.getElementById("nd-name")?.focus(); return; }
+    const body = { name, assetType: String(f.get("assetType")), location: fieldText(e, "location"), country,
+      province: country === "CA" ? String(f.get("province")) : null, currency };
+    return sending.run(() => create.mutateAsync(body).catch(() => {}));
   };
+  const nameError = blankName ? t("newdeal.nameBlank") : refusedField(create.error) === "name" ? err(create.error) : null;
   return (
     <div className="newdeal">
       <Link to="/deals" className="back"><I.Back />{t("newdeal.back")}</Link>
@@ -67,17 +60,11 @@ export function NewDeal() {
         <form className="card card-pad newdeal-form" onSubmit={submit}>
           <div className="field">
             <label htmlFor="nd-name">{t("newdeal.name")}</label>
-            <input className="input" id="nd-name" name="name" required maxLength={NAME_MAX} aria-describedby="nd-name-help nd-name-count" aria-invalid={blank || undefined}
-              value={name}
-              onChange={(e) => { setName(e.target.value); setBlank(false); if (e.target.value.length < NAME_MAX) setCut(false); }}
-              onPaste={(e) => {
-                const el = e.currentTarget;
-                const kept = el.value.length - (el.selectionEnd ?? 0) + (el.selectionStart ?? 0);
-                setCut(kept + e.clipboardData.getData("text").length > NAME_MAX);
-              }} />
+            <input className="input" id="nd-name" name="name" required maxLength={NAME_MAX} onInput={nameLength.onInput}
+              aria-invalid={nameError ? true : undefined} aria-describedby={`nd-name-help nd-name-count${nameError ? " nd-name-error" : ""}`} />
+            <FieldError id="nd-name-error" message={nameError} />
             <p className="hint" id="nd-name-help">{t("newdeal.nameHelp")}</p>
-            <p className={cut ? "hint newdeal-cut" : "hint"} id="nd-name-count" aria-live="polite">{cut ? t("newdeal.cut", { max: NAME_MAX }) : name.length > NAME_MAX - 40 ? t("newdeal.count", { n: name.length, max: NAME_MAX }) : null}</p>
-            {blank && <p className="error-text" role="alert">{t("newdeal.blank")}</p>}
+            <CharCount id="nd-name-count" n={nameLength.n} max={NAME_MAX} />
           </div>
           <div className="field">
             <label htmlFor="nd-type">{t("newdeal.kind")}</label>
@@ -123,9 +110,9 @@ export function NewDeal() {
             </select>
             <p className="hint" id="nd-cur-help">{t("deals.currencyHint")}</p>
           </div>
-          <ErrorText error={create.error} />
+          <ErrorText error={refusedField(create.error) === "name" ? null : create.error} />
           <div className="row newdeal-actions">
-            <button className="btn primary" type="submit" disabled={create.isPending}>{t("deals.create")}</button>
+            <button className="btn primary" type="submit" disabled={create.isPending || sending.pending}>{t("deals.create")}</button>
             <Link to="/deals" className="btn quiet">{t("common.cancel")}</Link>
             <span className="small muted newdeal-landing">{t("newdeal.landing")}</span>
           </div>

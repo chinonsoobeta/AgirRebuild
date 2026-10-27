@@ -30,3 +30,6 @@
 /* A shared link's files, one row each (card R2). */
 .auth-files{list-style:none;margin:0;padding:0}
 .auth-files>li+li{border-top:1px solid var(--line)}
+/* Continue and Skip for now side by side, the same size (QA card C4). */
+.auth-actions{display:flex;flex-wrap:wrap;gap:12px}
+.auth-actions>.btn{flex:1 1 140px;justify-content:center}
