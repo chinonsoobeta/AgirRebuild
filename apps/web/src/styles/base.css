@@ -23,7 +23,7 @@ ul,ol{padding-left:1.2em}
 a{color:var(--accent);text-decoration:none}
 a:hover{text-decoration:underline}
 /* A link inside a sentence is underlined, so colour is not the only thing that sets it apart (WCAG 1.4.1). */
-:is(p,.small,.notice,.card-foot) a:not(.btn){text-decoration:underline;text-underline-offset:2px}
+:is(p,.small,.notice,.card-foot,.sub) a:not(.btn){text-decoration:underline;text-underline-offset:2px}
 button,input,select,textarea{font:inherit;color:inherit}
 :focus-visible{outline:2px solid var(--accent);outline-offset:2px}
 svg{display:inline-block;vertical-align:middle}
