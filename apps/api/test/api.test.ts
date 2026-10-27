@@ -3768,6 +3768,17 @@ describe("card 160a: the deal AI reader", () => {
     await drain({ db: wrapped, store, read });
     spy.mockRestore();
     expect((await db.query<any>(`select value from assumptions where deal_id=$1 and field_key='land_cost'`, [id]))[0]?.value).toBe(400000);
+    // A lookup failure fails the extraction job, so the worker retries it after a backoff; a parsing failure is
+    // stored as a safe failure and the job is done. Run the retry here, with this test's reader, so it cannot fire
+    // inside a later test (on CI on 2026-10-27 it fired during card C's "off" test and counted as a provider call).
+    const [document] = await db.query<any>(`select id from documents where deal_id=$1`, [id]);
+    const retry = () => db.query(`select id from jobs where kind='extract_document' and status='queued' and run_after > now() and payload->>'document_id'=$1`, [document.id]);
+    expect(await retry()).toHaveLength(failure === "escaping" ? 1 : 0);
+    expect(read).toHaveBeenCalledTimes(0);
+    await db.query(`update jobs set run_after = now() where status = 'queued' and payload->>'document_id'=$1`, [document.id]);
+    await drain({ db, store, read });
+    expect(await retry()).toEqual([]);
+    expect(read).toHaveBeenCalledTimes(failure === "escaping" ? 1 : 0);
   });
   test("checks sources, agreement, conflicts, low confidence and reuse", async () => {
     const id = await setup();
