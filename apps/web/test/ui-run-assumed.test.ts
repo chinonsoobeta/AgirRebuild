@@ -1,0 +1,133 @@
+/// <reference types="node" />
+import { beforeEach, describe, expect, it, vi } from "vitest";
+import { createElement } from "react";
+import { readFileSync } from "node:fs";
+import { renderToStaticMarkup } from "react-dom/server";
+import { policyFor, type EngineInput } from "@agir/contracts";
+import { underwrite } from "../../../packages/engine/src/index.ts";
+import { developmentDeal } from "../../../packages/engine/test/fixtures.ts";
+import { costParts, Run } from "../src/routes/run.tsx";
+import { build, type Lang } from "../src/i18n.tsx";
+
+// Card C5: the run screen says what the run assumed, counts its stresses as the engine does, and on a phone shows
+// one card per scenario and per year. Mocks follow apps/web/test/ui-policy-names.test.ts.
+const s = vi.hoisted(() => ({ lang: "en" as Lang, run: undefined as unknown }));
+vi.mock("@tanstack/react-query", () => ({
+  useQuery: (o: { queryKey: unknown[] }) => (o.queryKey[0] === "run" ? { data: s.run } : o.queryKey[0] === "runs" ? { data: [] } : {}),
+  useQueries: (o: { queries: unknown[] }) => o.queries.map(() => ({})),
+  useMutation: () => ({ mutate: () => {}, isPending: false, reset: () => {}, error: null }),
+  useQueryClient: () => ({ invalidateQueries: async () => {} }),
+}));
+vi.mock("../src/components/ui", async (original) => {
+  const ui = await original<typeof import("../src/components/ui")>();
+  const { createElement } = await import("react");
+  return { ...ui, DealFrame: () => createElement("header", null, "Deal frame"),
+    useDeal: () => ({ data: { run: { id: "run-2", number: 2, fresh: true }, documents: { total: 0, processing: 0, failed: 0 },
+      review: { status: "ready", approved: 1, needsReview: 0, conflicting: 0, awaitingSecond: 0, missing: 0, impossible: 0 } } }),
+    useSession: () => ({ solo: true, role: "owner", me: { user: { id: "u", email: "u@example.test", name: "Invented starter" }, workspaces: [] } }) };
+});
+vi.mock("../src/i18n", async (original) => {
+  const i18n = await original<typeof import("../src/i18n")>();
+  return { ...i18n, useI18n: () => i18n.build(s.lang, () => {}) };
+});
+vi.mock("@tanstack/react-router", async () => {
+  const { createElement } = await import("react");
+  return { Link: ({ children }: { children: unknown }) => createElement("a", null, children as string) };
+});
+
+const input = developmentDeal() as EngineInput;
+const result = underwrite(input, policyFor(input));
+const base = result.scenarios[0]!.metrics;
+const tdc = base.find((m) => m.key === "total_development_cost")!.value!;
+const stated = tdc - 1_250_000;
+const withGap = { ...result, checks: [...result.checks, { key: "stated_total_cost", kind: "agreement", severity: "warning",
+  message: "The documents state a total cost; the model computes another.", expected: tdc, actual: stated }] };
+const run = (over: object = {}) => ({ id: "run-2", number: 2, result: withGap, fresh: true, staleReasons: [], isLatest: true, decisions: [],
+  policyVersion: "rental-hold-draft", policyDraft: true, engineVersion: "invented-engine", createdAt: "2026-10-24T15:58:00Z", createdBy: "Invented author",
+  inputHash: "a".repeat(64), resultHash: "b".repeat(64), signed: "development key",
+  inputs: [
+    { fieldKey: "exit_cap_rate_pct", itemKey: null, label: "Exit cap rate", value: 5.25, sourceKind: "analyst", source: "Entered by an analyst", sponsorStated: true, confirmedBy: null, confirmedByReview: false, confirmedAt: null },
+    { fieldKey: "selling_costs_pct", itemKey: null, label: "Selling costs", value: 2, sourceKind: "default", source: "Named default", sponsorStated: false, confirmedBy: null, confirmedByReview: false, confirmedAt: null },
+    { fieldKey: "hard_cost", itemKey: null, label: "Hard cost", value: 1000, sourceKind: "document", source: "Budget.pdf", sponsorStated: false, confirmedBy: "Invented author", confirmedByReview: false, confirmedAt: null },
+  ],
+  notFound: [{ fieldKey: "other_income_annual", label: "Other income", detail: "no other income" }],
+  ...over });
+const text = (html: string) => html.replace(/<[^>]*>/g, " ").replace(/[\u00a0\u202f]/g, " ").replaceAll("&#x27;", "'").replaceAll("&quot;", '"').replace(/\s+/g, " ");
+/** Any space as a plain one, as text() leaves the page. */
+const sp = (x: string) => x.replace(/[\u00a0\u202f]/g, " ");
+const render = () => renderToStaticMarkup(createElement(Run, { dealId: "deal" }));
+
+beforeEach(() => { s.lang = "en"; s.run = run(); });
+
+describe("what this run assumed (card C5)", () => {
+  it.each(["en", "fr"] as const)("lists stated values, named defaults, values not found, the policy and the key, in %s", (lang) => {
+    s.lang = lang;
+    const i = build(lang, () => {});
+    const words = text(render());
+    const box = words.slice(words.indexOf(i.t("run.assumedTitle")), words.indexOf(i.t("run.keyFigures")));
+    for (const key of ["run.assumed.stated", "run.assumed.defaults", "run.assumed.notFound", "run.assumed.policy", "run.assumed.policyWhy", "run.assumed.devKey", "run.assumed.devKeyWhy"] as const) {
+      expect(box).toContain(sp(i.t(key)));
+    }
+    expect(box).toContain(sp(i.L.field("exit_cap_rate_pct", null)));
+    expect(box).toContain(sp(i.f.value(5.25, "%")));
+    expect(box).toContain(sp(i.L.field("selling_costs_pct", null)));
+    // A value read from a document and confirmed is not an assumption.
+    expect(box).not.toContain(sp(i.L.field("hard_cost", null)));
+    expect(box).toContain(sp(i.t("run.assumed.instead", { what: i.L.absent("other_income_annual") })));
+  });
+
+  it("names the parts of the model's total cost when the documents state another", () => {
+    const i = build("en", () => {});
+    const words = text(render());
+    expect(words).toContain(sp(i.t("run.costGap")));
+    expect(words).toContain(sp(i.t("run.costGapLine", { stated: i.f.value(stated, "$"), model: i.f.value(tdc, "$"), diff: i.f.value(1_250_000, "$"), more: true })));
+    const parts = costParts(base, tdc)!;
+    expect(parts.map((p) => p.key)).toContain(sp("hard_and_soft_cost"));
+    expect(parts.map((p) => p.key)).toContain(sp("capitalized_interest"));
+    for (const p of parts) expect(words).toContain(sp(`${i.L.metric(p.key)} ${i.f.value(p.value, "$")}`));
+    // Parts that do not add up to the model's total are not shown.
+    expect(costParts(base, tdc + 10)).toBe(null);
+  });
+
+  it("says nothing was assumed when every value came from a confirmed document on a signed policy", () => {
+    s.run = run({ result, inputs: [], notFound: [], policyVersion: "policy-v1", policyDraft: false, signed: "production key" });
+    const i = build("en", () => {});
+    const words = text(render());
+    expect(i.t("run.verdictLine", { n: 2, policy: "x", draft: false, unsigned: false })).toBe("Run 2 · x");
+    // policy-v1 is not signed by credit, so that line still shows; the key line does not.
+    expect(words).toContain(sp(i.t("run.assumed.policyWhyUnsigned")));
+    expect(words).not.toContain(sp(i.t("run.assumed.devKey")));
+  });
+
+  it("counts six stresses and a combined stress, seven in all, as the engine runs them", () => {
+    const stresses = result.scenarios.filter((x) => x.key !== result.scenarios[0]!.key && x.key !== "combined").length;
+    expect(stresses).toBe(6);
+    for (const lang of ["en", "fr"] as const) {
+      s.lang = lang;
+      const i = build(lang, () => {});
+      const words = text(render());
+      expect(words).toContain(sp(i.t("run.underStressLead", { n: stresses })));
+      expect(i.t("run.underStressLead", { n: stresses })).toContain(sp(lang === "en" ? "six stresses and a combined stress (seven in all)" : "six stress et un stress combiné (sept en tout)"));
+    }
+  });
+
+  it("names the reports screen as the place to go, not a memo to make", () => {
+    const i = build("en", () => {});
+    expect(i.t("run.memoAction")).toBe("Go to reports");
+    expect(text(render())).toContain(sp("Go to reports"));
+  });
+});
+
+describe("the wide tables on a phone (card C5)", () => {
+  it("adds one card per scenario and one per year, hidden on a wide screen", () => {
+    const html = render();
+    const cards = html.split('class="run-phone-cards"');
+    expect(cards.length).toBe(3);
+    const scenarios = cards[1]!.split("</ul>")[0]!;
+    expect(scenarios.match(/<li /g)!.length).toBe(result.scenarios.length);
+    const years = cards[2]!.split("</ul>")[0]!;
+    expect(years.match(/<li /g)!.length).toBe(Math.min(result.annual.length, 6));
+    const css = readFileSync(new URL("../src/styles/run.css", import.meta.url), "utf8");
+    expect(css).toMatch(/@media \(max-width:600px\)\{[^}]*\.run-stress,\.run-annual\{display:none\}/);
+  });
+});

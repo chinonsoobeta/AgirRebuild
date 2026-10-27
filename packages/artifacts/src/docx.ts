@@ -41,6 +41,8 @@ export async function renderDocx(m: DocModel): Promise<Uint8Array> {
             children: b.items.flatMap((i, n) => [run(`${n ? "   |   " : ""}${i.label}: `, { color: "454A55", size: 18 }), run(i.value, { mono: true, size: 18 })]),
           }),
         );
+        // A figure's plain sentence, one line each, under the figures.
+        for (const i of b.items.filter((x) => x.note)) children.push(new Paragraph({ children: [run(`${i.label}: `, { color: "454A55", size: 16 }), run(i.note!, { color: "454A55", size: 16 })] }));
         break;
       case "table": {
         if (b.caption) children.push(new Paragraph({ spacing: { before: 200, after: 80 }, children: [run(b.caption, { bold: true })] }));
@@ -98,7 +100,7 @@ export function docxText(m: DocModel): string {
   for (const b of m.blocks) {
     if (b.type === "heading" || b.type === "paragraph") parts.push(b.text);
     else if (b.type === "verdict") parts.push(b.label, b.headline, b.explanation);
-    else if (b.type === "stats") for (const i of b.items) parts.push(i.label, i.value);
+    else if (b.type === "stats") for (const i of b.items) parts.push(i.label, i.value, ...(i.note ? [i.note] : []));
     else if (b.type === "table") {
       if (b.caption) parts.push(b.caption);
       parts.push(...b.columns.map((c) => c.label), ...b.rows.flat());

@@ -1,6 +1,10 @@
 // Strings for the run area. Keys start with "run.", and a "common." and a "threshold." key only this screen uses.
 import { register, type Entry, type FrenchOf } from "./entry";
 
+const WORDS = { en: ["zero", "one", "two", "three", "four", "five", "six", "seven", "eight", "nine", "ten"], fr: ["zéro", "un", "deux", "trois", "quatre", "cinq", "six", "sept", "huit", "neuf", "dix"] };
+/** A small count in words, as the rest of the screen writes it; a larger one in figures. */
+const count = (lang: "en" | "fr", n: number) => WORDS[lang][n] ?? String(n);
+
 export const en = {
   "run.inProgress": (p) => `Run ${p.n} is in progress`,
   "run.inProgressLead": "The engine is working from the approved values under the deal's policy. Nothing on the other screens changes until it finishes.",
@@ -11,10 +15,10 @@ export const en = {
   "run.verdictLine": (p) => p.draft ? `Run ${p.n} · ${p.policy}, draft, not signed by credit` : p.unsigned ? `Run ${p.n} · ${p.policy}, not yet signed by credit` : `Run ${p.n} · ${p.policy}`,
   "run.currentLine": "Current: no input, threshold or engine version has changed since this run.",
   "run.staleLine": (p) => `Out of date: ${p.reasons}`,
-  "run.memoAction": "Generate the memo",
+  "run.memoAction": "Go to reports",
   "run.atLeast": (p) => `at least ${p.v}`,
   "run.underStress": "Under stress",
-  "run.underStressLead": "The same ledger, run again with one thing worse at a time, then with everything worse at once.",
+  "run.underStressLead": (p) => `The same ledger, run again with one thing worse at a time, then with everything worse at once: ${count("en", p.n)} ${p.n === 1 ? "stress" : "stresses"} and a combined stress (${count("en", p.n + 1)} in all).`,
   "run.showAllYears": (p) => `Show all ${p.n} years`,
   "run.showFirstYears": "Show the first five years",
   "run.checksLead": (p) => p.k === 0 ? (p.n === 1 ? "The check passes." : `All ${p.n} checks pass.`) : `${p.k} of ${p.n} ${p.k === 1 ? "check needs" : "checks need"} attention.`,
@@ -84,7 +88,7 @@ export const en = {
   "threshold.withYours": "with your thresholds",
   "common.notMeasured": "Not measured",
   "run.noRun": "No run yet",
-  "run.noRunBody": "A run reads only the approved inputs, builds one monthly ledger, re-runs it under six stresses and a combined stress, and records a verdict you can reproduce exactly.",
+  "run.noRunBody": "A run reads only the approved inputs, builds one monthly ledger, re-runs it under six stresses and a combined stress (seven in all), and records a verdict you can reproduce exactly.",
   "run.run": "Run underwriting",
   "run.running": "Running…",
   "run.again": "Run again",
@@ -140,6 +144,23 @@ export const en = {
   "run.stale.policy": "The policy thresholds changed after this run.",
   "run.stale.engine": "The engine was updated after this run.",
   "run.clientWhy": "Clients can read results and confirm the values the broker stated, but not run underwriting.",
+  "run.assumedTitle": "What this run assumed",
+  "run.assumedLead": "Everything below came from you, from a named default or from the run's own rules, not from a document. Check it before you rely on the verdict.",
+  "run.assumed.stated": "Values you stated yourself",
+  "run.assumed.defaults": "Named defaults used",
+  "run.assumed.notFound": "Not found in the documents",
+  "run.assumed.instead": (p) => `Assumed instead: ${p.what}`,
+  "run.assumed.setup": "How this run was set up",
+  "run.assumed.policy": "Policy not yet signed by credit",
+  "run.assumed.policyWhy": "The pass marks are Agir's draft, not yet signed off by a credit reviewer.",
+  "run.assumed.policyWhyUnsigned": "The pass marks are Agir's standard set, not yet signed off by a credit reviewer.",
+  "run.assumed.devKey": "Signed with the development key",
+  "run.assumed.devKeyWhy": "This test server's signing key, not a production one.",
+  "run.assumed.none": "Nothing: every value came from a document and was confirmed.",
+  "run.costGap": "Why the total cost differs",
+  "run.costGapLine": (p) => `The documents state ${p.stated}; the model computes ${p.model}, ${p.diff} ${p.more ? "more" : "less"}. The model's total is made of:`,
+  "run.costGapTotal": "Model total",
+  "run.costGapHint": "Compare each part with the documents' own budget. A stated total often leaves out financing costs.",
 } satisfies Record<string, Entry>;
 
 export const fr: FrenchOf<typeof en> = {
@@ -152,10 +173,10 @@ export const fr: FrenchOf<typeof en> = {
   "run.verdictLine": (p) => p.draft ? `Analyse ${p.n} · ${p.policy}, provisoire, non approuvée par le crédit` : p.unsigned ? `Analyse ${p.n} · ${p.policy}, non encore approuvée par le crédit` : `Analyse ${p.n} · ${p.policy}`,
   "run.currentLine": "À jour\u00a0: aucune donnée, aucun seuil ni aucune version du moteur n'a changé depuis cette analyse.",
   "run.staleLine": (p) => `Périmée\u00a0: ${p.reasons}`,
-  "run.memoAction": "Générer le mémo",
+  "run.memoAction": "Aller aux rapports",
   "run.atLeast": (p) => `au moins ${p.v}`,
   "run.underStress": "Sous stress",
-  "run.underStressLead": "Le même grand livre, recalculé avec un seul élément défavorable à la fois, puis avec tous à la fois.",
+  "run.underStressLead": (p) => `Le même grand livre, recalculé avec un seul élément défavorable à la fois, puis avec tous à la fois : ${count("fr", p.n)} stress et un stress combiné (${count("fr", p.n + 1)} en tout).`,
   "run.showAllYears": (p) => `Afficher les ${p.n} années`,
   "run.showFirstYears": "Afficher les cinq premières années",
   "run.checksLead": (p) => p.k === 0 ? (p.n === 1 ? "Le contrôle est conforme." : `Les ${p.n} contrôles sont conformes.`) : p.k === 1 ? `1 contrôle sur ${p.n} demande votre attention.` : `${p.k} contrôles sur ${p.n} demandent votre attention.`,
@@ -228,7 +249,7 @@ export const fr: FrenchOf<typeof en> = {
   "threshold.withYours": "avec vos seuils",
   "common.notMeasured": "Non mesuré",
   "run.noRun": "Aucune analyse pour l'instant",
-  "run.noRunBody": "Une analyse lit uniquement les données approuvées, construit un grand livre mensuel, le recalcule sous six stress et un stress combiné, et consigne un verdict reproductible à l'identique.",
+  "run.noRunBody": "Une analyse lit uniquement les données approuvées, construit un grand livre mensuel, le recalcule sous six stress et un stress combiné (sept en tout), et consigne un verdict reproductible à l'identique.",
   "run.run": "Lancer l'analyse",
   "run.running": "Calcul…",
   "run.again": "Relancer l'analyse",
@@ -284,6 +305,23 @@ export const fr: FrenchOf<typeof en> = {
   "run.stale.policy": "Les seuils de la politique ont changé après cette analyse.",
   "run.stale.engine": "Le moteur a été mis à jour après cette analyse.",
   "run.clientWhy": "Les clients peuvent consulter les résultats et confirmer les valeurs déclarées par le courtier, mais pas lancer d'analyse.",
+  "run.assumedTitle": "Ce que cette analyse a supposé",
+  "run.assumedLead": "Tout ce qui suit vient de vous, d'une valeur par défaut nommée ou des règles de l'analyse, et non d'un document. Vérifiez-le avant de vous fier au verdict.",
+  "run.assumed.stated": "Valeurs que vous avez déclarées vous-même",
+  "run.assumed.defaults": "Valeurs par défaut nommées utilisées",
+  "run.assumed.notFound": "Introuvables dans les documents",
+  "run.assumed.instead": (p) => `Supposé à la place : ${p.what}`,
+  "run.assumed.setup": "Comment cette analyse a été préparée",
+  "run.assumed.policy": "Politique non encore approuvée par le crédit",
+  "run.assumed.policyWhy": "Les seuils sont la version provisoire d'Agir, pas encore validés par un responsable du crédit.",
+  "run.assumed.policyWhyUnsigned": "Les seuils sont l'ensemble standard d'Agir, pas encore validés par un responsable du crédit.",
+  "run.assumed.devKey": "Signée avec la clé de développement",
+  "run.assumed.devKeyWhy": "La clé de signature de ce serveur d'essai, et non une clé de production.",
+  "run.assumed.none": "Rien : chaque valeur vient d'un document et a été confirmée.",
+  "run.costGap": "Pourquoi le coût total diffère",
+  "run.costGapLine": (p) => `Les documents indiquent ${p.stated} ; le modèle calcule ${p.model}, soit ${p.diff} de ${p.more ? "plus" : "moins"}. Le total du modèle se compose de :`,
+  "run.costGapTotal": "Total du modèle",
+  "run.costGapHint": "Comparez chaque partie au budget des documents. Un total déclaré omet souvent les frais de financement.",
 };
 
 register(en, fr);

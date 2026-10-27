@@ -645,7 +645,7 @@ export async function runView(tx: Db, runId: string) {
   const [run] = await tx.query<{
     id: string; deal_id: string; run_number: number; engine_version: string; policy_version: string; policy_hash: string;
     input_hash: string; result_hash: string; assumptions_hash: string; verdict_code: string; signature: string; created_at: string;
-    created_by_name: string | null; result: RunResult; input_snapshot: { input: EngineInput; policy?: Policy; standardPolicy?: Policy; policyChanges?: PolicyChange[]; assumptions: unknown[] };
+    created_by_name: string | null; result: RunResult; input_snapshot: { input: EngineInput; policy?: Policy; standardPolicy?: Policy; policyChanges?: PolicyChange[]; assumptions: unknown[]; notFound?: { fieldKey: string; itemKey?: string; label: string; detail?: string }[] };
   }>(
     `select r.*, coalesce(nullif(btrim(u.name), ''), u.email) as created_by_name from runs r left join users u on u.id = r.created_by where r.id = $1`,
     [runId],
@@ -695,6 +695,8 @@ export async function runView(tx: Db, runId: string) {
     isLatest: latest?.id === run.id,
     result: run.result,
     inputs: hideClientInputs(await clientViewer(tx, run.deal_id), run.input_snapshot.assumptions),
+    // Read only (card C5): the optional lines no document gave and what the run assumed instead, as the run recorded them.
+    notFound: run.input_snapshot.notFound ?? [],
     decisions,
     ...(held ? { heldPartners: { lpIrr: held.withValue.lpIrr, gpIrr: held.withValue.gpIrr, promote: held.withValue.promote,
       paidLp: positive(held.paid.lp), paidGp: positive(held.paid.gp), paidPromote: held.paid.promote } } : {}),

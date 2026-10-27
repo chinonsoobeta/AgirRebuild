@@ -26,6 +26,8 @@ export type ArtifactInput = {
     policyHash: string;
     inputHash: string;
     resultHash: string;
+    /** Who started the run, by name; absent on inputs made before the build decision named them (card C5). */
+    createdBy?: string | null;
   };
   result: RunResult;
   input: EngineInput;
@@ -61,7 +63,7 @@ export type Block =
   | { type: "heading"; text: string }
   | { type: "paragraph"; text: string; muted?: boolean }
   | { type: "verdict"; code: VerdictCode; label: string; headline: string; explanation: string }
-  | { type: "stats"; items: { label: string; value: string }[] }
+  | { type: "stats"; items: { label: string; value: string; note?: string }[] }
   | { type: "table"; columns: { label: string; numeric?: boolean }[]; rows: string[][]; strong?: number[]; caption?: string; long?: boolean }
   | { type: "checks"; items: { tone: "pass" | "warning" | "error"; text: string; lenderCited?: boolean }[] };
 
@@ -439,7 +441,41 @@ function weakestStress(f: Formatter, r: RunResult, sale = false): Block[] {
   return [{ type: "paragraph", text: reportText(f.lang, "weakest", f.ident(f.stress(w.key, w.label), `policy.stress.${w.key}`), fails, reportText(f.lang, sale ? "profitOnCostPhrase" : "sizingDscrPhrase"), f.metric(w.key, metricKey)) }];
 }
 
-/** For each failing gate, the one input that would make it pass, from `breakeven()` over the run's stored input and policy. */
+/** What a driver that has no passing move stands at in this run, from the run's own input; never a dash when the run has one value. */
+function driverNow(f: Formatter, x: ArtifactInput, driver: BreakevenRow["driver"]): string {
+  const i = x.input;
+  const each = reportText(f.lang, "eachAsEntered");
+  switch (driver) {
+    case "rentPct": {
+      if (i.revenue.length !== 1) return each;
+      const c = i.revenue[0]!;
+      return c.basis === "per_unit" ? f.input(c.rentMonthly ?? 0, "$/mo", `unit_rent_monthly|${c.key}`) : f.input(c.rentPsfAnnual ?? 0, "$/sf", `rent_psf_annual|${c.key}`);
+    }
+    case "pricePct": {
+      const u = i.forSale?.units ?? [];
+      return u.length === 1 ? f.input(u[0]!.price, "$", `unit_sale_price|${u[0]!.key}`) : each;
+    }
+    case "absorptionPct": return i.forSale ? f.input(i.forSale.absorptionPerMonth, "units/mo", "absorption_units_per_month") : each;
+    case "presalesPts": return i.forSale ? f.input(i.forSale.presoldPct, "%", "presold_units_pct") : each;
+    case "exitCapBps": return f.input(i.exitCapPct, "%", "exit_cap_rate_pct");
+    case "occupancyPts": return f.input(i.stabilizedOccupancyPct, "%", "stabilized_occupancy_pct");
+    case "costPct": {
+      const b = i.budget;
+      return f.derived(b.land + b.hard + b.soft + b.contingency + b.other + (b.developmentCharges ?? 0) + (b.landTransferTax ?? 0) + (b.gstHstNet ?? 0), "$",
+        "land_cost + hard_cost + soft_cost + contingency + other_cost + development_charges + land_transfer_tax + gst_hst_net");
+    }
+    case "rateBps": {
+      const rates = (i.senior.amount > 0 ? 1 : 0) + (i.mezzanine ? 1 : 0) + (i.refinance ? 1 : 0);
+      return rates === 1 && i.senior.amount > 0 ? f.input(i.senior.ratePct, "%", "senior_rate_pct") : each;
+    }
+    default: return each;
+  }
+}
+
+/**
+ * For each failing gate, the one input that would make it pass, from `breakeven()` over the run's stored input and policy.
+ * A move that cannot pass within its searched range is not a row: one line after the table names them (card C5).
+ */
 function changeTheAnswer(f: Formatter, x: ArtifactInput): Block[] {
   const heading: Block = { type: "heading", text: reportText(f.lang, "changeAnswer") };
   const failing = x.result.verdict.gates.filter((g) => g.status === "failed");
@@ -457,6 +493,7 @@ function changeTheAnswer(f: Formatter, x: ArtifactInput): Block[] {
   if (failing.length === 0) return intro;
   const { rows } = breakeven(x.input, x.policy);
   const body: string[][] = [];
+  const outOfRange: string[] = [];
   let ratesTogether = false;
   for (const g of failing) {
     const needs = f.run(g.threshold, g.unit, `gate.${g.key}.threshold`);
@@ -468,22 +505,27 @@ function changeTheAnswer(f: Formatter, x: ArtifactInput): Block[] {
       first = false;
     };
     for (const row of rows.filter((k) => k.gate === g.key)) {
+      const driver = DRIVER_NAME(f.lang)[row.driver] ?? row.driver;
+      if (row.state === "out_of_range") {
+        outOfRange.push(driver);
+        continue;
+      }
       if (row.state !== "value") {
-        add([DRIVER_NAME(f.lang)[row.driver] ?? row.driver, "\u2014", STATE_WORDS(f.lang)[row.state]]);
+        add([driver, driverNow(f, x, row.driver), STATE_WORDS(f.lang)[row.state]]);
         continue;
       }
       if (row.driver === "rentPct" && row.to.length > 1) {
         // Rents move together by one share: the row says so, and the engine's own shock is the figure.
-        add([reportText(f.lang, "rentTogether", f.ident(String(row.to.length), `breakeven.${g.key}.rent.count`)), "\u2014", `+${f.run(row.shock, "%", `breakeven.${g.key}.rent.shock`)}`]);
+        add([reportText(f.lang, "rentTogether", f.ident(String(row.to.length), `breakeven.${g.key}.rent.count`)), reportText(f.lang, "eachAsEntered"), `+${f.run(row.shock, "%", `breakeven.${g.key}.rent.shock`)}`]);
         continue;
       }
       if (row.driver === "pricePct" && row.to.length > 1) {
-        add([reportText(f.lang, "priceTogether", f.ident(String(row.to.length), `breakeven.${g.key}.price.count`)), "—", `+${f.run(row.shock, "%", `breakeven.${g.key}.price.shock`)}`]);
+        add([reportText(f.lang, "priceTogether", f.ident(String(row.to.length), `breakeven.${g.key}.price.count`)), reportText(f.lang, "eachAsEntered"), `+${f.run(row.shock, "%", `breakeven.${g.key}.price.shock`)}`]);
         continue;
       }
       const allRates = row.driver === "rateBps" && row.to.length > 1;
       if (allRates) {
-        add([reportText(f.lang, "rateTogether", f.ident(String(row.to.length), `breakeven.${g.key}.rate.count`)), "\u2014", `${row.shock! > 0 ? "+" : ""}${f.run(row.shock, "bps", `breakeven.${g.key}.rate.shock`)}`]);
+        add([reportText(f.lang, "rateTogether", f.ident(String(row.to.length), `breakeven.${g.key}.rate.count`)), reportText(f.lang, "eachAsEntered"), `${row.shock! > 0 ? "+" : ""}${f.run(row.shock, "bps", `breakeven.${g.key}.rate.shock`)}`]);
         ratesTogether = true;
       }
       for (const e of row.to) {
@@ -494,7 +536,11 @@ function changeTheAnswer(f: Formatter, x: ArtifactInput): Block[] {
         add([f.ident(name, `${ref}.label`), f.run(e.from, unit, `${ref}.from`), f.derived(roundToward(e.to, dir, step), unit, `${dir > 0 ? "ceil" : "floor"}(${ref}.to, ${step})`)]);
       }
     }
+    // Every move for this gate is out of range: the gate still has its row, and says so.
+    if (first) add([reportText(f.lang, "noneInRange"), "", ""]);
   }
+  // Counted by move, named once each.
+  const n = outOfRange.length;
   return [
     ...intro,
     {
@@ -502,9 +548,57 @@ function changeTheAnswer(f: Formatter, x: ArtifactInput): Block[] {
       columns: [{ label: reportText(f.lang, "gate") }, { label: reportText(f.lang, "needs"), numeric: true }, { label: reportText(f.lang, "thisRun"), numeric: true }, { label: reportText(f.lang, "inputMoved") }, { label: reportText(f.lang, "inThisRun"), numeric: true }, { label: reportText(f.lang, "passesAt"), numeric: true }],
       rows: body,
     },
+    ...(n > 0 ? [{ type: "paragraph", muted: true, text: reportText(f.lang, n === 1 ? "outOfRangeOne" : "outOfRangeMany", f.ident(String(n), "breakeven.outOfRange.count"), [...new Set(outOfRange)].join("; ")) } as Block] : []),
     { type: "paragraph", muted: true, text: reportText(f.lang, "oneInput") + (ratesTogether ? reportText(f.lang, "ratesTogether") : "") },
   ];
 }
+
+/** The decision recorded on this run, in words: the verdict a person chose, who, when, and why. */
+function decisionWord(f: Formatter, d: NonNullable<ArtifactInput["decision"]>): string {
+  return f.lang === "fr"
+    ? ({ approve: reportText("fr", "approve"), approve_with_conditions: reportText("fr", "approveConditions"), reject: reportText("fr", "reject"), return_to_underwriting: reportText("fr", "returnToUnderwriting") }[d.decision] ?? d.decision)
+    : d.decision.replace(/_/g, " ");
+}
+
+/** The build decision's account of what a person put in (card C5): the values typed, the named defaults accepted, and the latest decision. */
+function statedYourselfBlocks(f: Formatter, x: ArtifactInput): Block[] {
+  const typed = x.assumptions.filter((a) => a.sourceKind !== "table" && a.sourceKind !== "default" && (a.sourceKind === "analyst" || a.sponsorStated));
+  if (typed.length === 0) return [];
+  // The sponsor-stated count and the warning that goes with it, when any typed value no one else confirmed.
+  const summary = sponsorStatedBlocks(f, x).filter((b) => b.type === "paragraph");
+  return [{ type: "heading", text: reportText(f.lang, "statedYourself") }, ...summary, { type: "table", long: true, columns: INPUT_COLUMNS(f.lang), rows: typed.map((a) => inputRow(f, a)) }];
+}
+
+function defaultsBlocks(f: Formatter, x: ArtifactInput): Block[] {
+  const rows = x.assumptions.filter((a) => a.sourceKind === "default");
+  return rows.length ? [{ type: "heading", text: reportText(f.lang, "defaultsAccepted") }, { type: "table", long: true, columns: INPUT_COLUMNS(f.lang), rows: rows.map((a) => inputRow(f, a)) }] : [];
+}
+
+function latestDecisionBlocks(f: Formatter, x: ArtifactInput): Block[] {
+  const d = x.decision;
+  if (!d) return [];
+  return [
+    { type: "heading", text: reportText(f.lang, "latestDecision") },
+    { type: "paragraph", text: reportText(f.lang, "decisionLine", decisionWord(f, d).replace(/^./, (c) => c.toUpperCase()), f.ident(d.decidedBy, "decision.decidedBy"), f.ident(d.createdAt.slice(0, 10), "decision.date")) },
+    { type: "paragraph", text: reportText(f.lang, "reasoning", f.ident(d.rationale, "decision.rationale")) },
+    ...(d.conditions ? [{ type: "paragraph", text: reportText(f.lang, "conditions", f.ident(d.conditions, "decision.conditions")) } as Block] : []),
+  ];
+}
+
+/** How the inputs were read, and the same "not advice" line the website's footer carries. */
+function readingAndDisclaimer(f: Formatter, x: ArtifactInput): Block[] {
+  const read = x.assumptions.some((a) => a.sourceKind === "document");
+  const by = x.run.createdBy;
+  const how = read ? (by ? reportText(f.lang, "readBy", f.ident(by, "run.createdBy")) : reportText(f.lang, "readOnReview")) + " " : "";
+  return [{ type: "paragraph", muted: true, text: how + reportText(f.lang, "notAdvice") }];
+}
+
+/** A plain sentence for each headline figure of the build decision, in the glossary's words. */
+const PLAIN_NOTE: Record<string, Parameters<typeof reportText>[1]> = {
+  yield_on_cost: "plainYieldOnCost", sizing_dscr: "plainSizingDscr", equity_multiple: "plainEquityMultiple",
+  profit_on_cost_for_sale: "plainProfitOnCost", margin_on_revenue: "plainMargin", dcr_after_refinance: "plainDcrAfterRefinance",
+};
+const withNote = (f: Formatter, key: string, item: { label: string; value: string }) => (PLAIN_NOTE[key] ? { ...item, note: reportText(f.lang, PLAIN_NOTE[key]!) } : item);
 
 class PartnerMemoUnavailableError extends Error {
   constructor() {
@@ -622,7 +716,7 @@ export function buildModel(x: ArtifactInput): DocModel {
     if (x.decision) {
       blocks.push({ type: "heading", text: reportText(f.lang, "committeeDecision") });
       // Recorded human text: printed as written and listed in the manifest as such.
-      blocks.push({ type: "paragraph", text: `${f.lang === "fr" ? ({ approve: reportText("fr", "approve"), approve_with_conditions: reportText("fr", "approveConditions"), reject: reportText("fr", "reject"), return_to_underwriting: reportText("fr", "returnToUnderwriting") }[x.decision.decision] ?? x.decision.decision) : x.decision.decision.replace(/_/g, " ")}: ${f.ident(x.decision.rationale, "decision.rationale")}` });
+      blocks.push({ type: "paragraph", text: `${decisionWord(f, x.decision)}: ${f.ident(x.decision.rationale, "decision.rationale")}` });
       if (x.decision.conditions) blocks.push({ type: "paragraph", text: reportText(f.lang, "conditions", f.ident(x.decision.conditions, "decision.conditions")) });
     }
     blocks.push(sourcesAndUses(f, x), ...mezzAccrual(f, r), ...(sale ? [unitSales(f, x), saleResults(f, x), SALE_OPERATIONS(f.lang)] : [revenueProgram(f, x), operations(f, x)]), gates(f, r), stresses(f, r, held, sale), ...(sale ? [] : [annual(f, r, false)]));
@@ -669,19 +763,21 @@ export function buildModel(x: ArtifactInput): DocModel {
     if (sale) blocks.push(SALE_OPERATIONS(f.lang));
     blocks.push(...notFoundBlocks(f, x), { type: "paragraph", muted: true, text: reportText(f.lang, "inputSources") });
   } else if (x.kind === "build_decision") {
-    blocks.push(verdict, ...draftLine(x), ...customThresholdBlocks(f,x), ...sponsorStatedBlocks(f, x), ...tableValueBlocks(f,x));
+    blocks.push(verdict, ...draftLine(x), ...customThresholdBlocks(f,x), ...statedYourselfBlocks(f, x), ...defaultsBlocks(f, x), ...tableValueBlocks(f,x));
+    const saleKeys = ["profit_on_cost_for_sale", "margin_on_revenue", "equity_multiple"];
+    const heldKeys = ["refinance_cash_returned", "cash_left_in_deal", "dcr_after_refinance", "cash_on_cash_after_refinance"];
     blocks.push({
       type: "stats",
-      items: sale ? saleStats(f, false) : held
+      items: sale ? saleStats(f, false).map((item, k) => withNote(f, saleKeys[k]!, item)) : held
         ? [
-            ...heldStats(f, false),
-            { label: reportText(f.lang, "yieldOnCost"), value: f.metric("base", "yield_on_cost") },
-            { label: reportText(f.lang, "sizingWorst"), value: f.metric("base", "sizing_dscr") },
+            ...heldStats(f, false).map((item, k) => withNote(f, heldKeys[k]!, item)),
+            withNote(f, "yield_on_cost", { label: reportText(f.lang, "yieldOnCost"), value: f.metric("base", "yield_on_cost") }),
+            withNote(f, "sizing_dscr", { label: reportText(f.lang, "sizingWorst"), value: f.metric("base", "sizing_dscr") }),
           ]
         : [
-            { label: reportText(f.lang, "yieldOnCost"), value: f.metric("base", "yield_on_cost") },
-            { label: reportText(f.lang, "sizingWorst"), value: f.metric("base", "sizing_dscr") },
-            { label: reportText(f.lang, "equityMultiple"), value: f.metric("base", "equity_multiple") },
+            withNote(f, "yield_on_cost", { label: reportText(f.lang, "yieldOnCost"), value: f.metric("base", "yield_on_cost") }),
+            withNote(f, "sizing_dscr", { label: reportText(f.lang, "sizingWorst"), value: f.metric("base", "sizing_dscr") }),
+            withNote(f, "equity_multiple", { label: reportText(f.lang, "equityMultiple"), value: f.metric("base", "equity_multiple") }),
           ],
     });
     blocks.push(...weakestStress(f, r, sale));
@@ -690,7 +786,7 @@ export function buildModel(x: ArtifactInput): DocModel {
     if (r.verdict.code !== "APPROVE" && r.verdict.hardFailReasons.length > 0 && !r.verdict.gates.some((g) => g.status === "failed")) {
       blocks.push(stresses(f, r, held, sale));
     }
-    blocks.push(...notFoundBlocks(f, x), { type: "paragraph", muted: true, text: reportText(f.lang, "inputSources") });
+    blocks.push(...latestDecisionBlocks(f, x), ...notFoundBlocks(f, x), { type: "paragraph", muted: true, text: reportText(f.lang, "inputSources") }, ...readingAndDisclaimer(f, x));
   } else {
     blocks.push(verdict, ...draftLine(x), ...customThresholdBlocks(f,x), ...sponsorStatedBlocks(f, x), ...tableValueBlocks(f,x));
     if (held) blocks.push({ type: "stats", items: heldStats(f) });

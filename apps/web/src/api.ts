@@ -142,11 +142,13 @@ export type RunView = {
     standard?: import("@agir/contracts").RunResult["standard"];
     scenarios: { key: string; label: string; metrics: Metric[] }[];
     verdict: { code: string; headline: string; explanation: string; hardFailReasons: string[]; gates: { key: string; label: string; scenario: string; metricKey: string; threshold: number; unit: string; actual: number | null; status: string }[] };
-    checks: { key: string; kind: string; severity: "pass" | "warning" | "error"; message: string }[];
+    checks: { key: string; kind: string; severity: "pass" | "warning" | "error"; message: string; expected?: number; actual?: number }[];
     annual: { year: number; gpr: number; egi: number; opex: number; noi: number; debtService: number; sizingDebtService: number; cashFlow: number }[];
     warnings: { key: string; message: string }[];
   };
   inputs: { fieldKey: string; itemKey: string | null; label: string; value: number; sourceKind: string; source: string; tableSource?: import("@agir/contracts").TableSource; tableStale?: true; sponsorStated: boolean; confirmedBy: string | null; confirmedByReview: boolean; confirmedAt: string | null }[];
+  /** The optional lines no document gave, and what the run took instead (card C5). Older runs may not carry it. */
+  notFound?: { fieldKey: string; itemKey?: string; label: string; detail?: string }[];
   decisions: { id: string; decision: string; rationale: string; conditions: string | null; override_reason: string | null; created_at: string; decided_by: string }[];
   heldPartners?: { lpIrr: number | null; gpIrr: number | null; promote: number; paidLp: number; paidGp: number; paidPromote: number };
   /** The refinance loan, from the engine's ledger replayed on the run's recorded input by the same engine version; not stored with the run (card R3). */
