@@ -13,7 +13,7 @@ vi.mock("@tanstack/react-query", () => ({
 }));
 vi.mock("@tanstack/react-router", async () => {
   const { createElement } = await import("react");
-  return { Link: ({ to, children }: { to: string; children: unknown }) => createElement("a", { href: to }, children as string), useNavigate: () => () => {} };
+  return { Link: ({ to, children }: { to: string; children: unknown }) => createElement("a", { href: to }, children as string), useNavigate: () => () => {}, useBlocker: () => ({ status: "idle" }) };
 });
 vi.mock("../src/components/ui", async (original) => {
   const ui = await original<typeof import("../src/components/ui")>();
@@ -101,11 +101,16 @@ describe("card W7 the review screen", () => {
     const html = render();
     const pending = html.slice(html.indexOf('id="pending"'), html.indexOf('id="approved"'));
     expect(text(pending)).toContain("Read from your documents, waiting for your approval");
-    expect(pending).toContain('<table class="table">');
+    expect(pending).toContain('<table class="table rv-table">');
     const labels = buttonLabels(pending);
     for (const action of ["Approve", "Edit", "Reject"]) expect(labels.filter((l) => l === action)).toHaveLength(2);
-    expect(labels).toContain("Approve all 2");
-    expect(pending).toContain("<mark>$1,150,000</mark>");
+    // Card C2: Approve all sits in the summary card at the top; the table links to it.
+    expect(labels).not.toContain("Approve all 2");
+    expect(pending).toContain('href="#approve-all"');
+    const top = html.slice(0, html.indexOf('id="conflicts"'));
+    expect(buttonLabels(top)).toContain("Approve all 2");
+    // The selected value's source line sits in a row right under it.
+    expect(pending).toMatch(/Land cost<\/button><\/td>[\s\S]*?<\/tr><tr class="rv-src"><td colSpan="4"[^>]*>[\s\S]*<mark>\$1,150,000<\/mark>/);
   });
   it("shows the first approved values and a disclosure for all of them, with the accepted default ticked", () => {
     const html = render();
@@ -117,7 +122,7 @@ describe("card W7 the review screen", () => {
   it("puts the deal's thresholds, the review mode and the audit sentence in the aside", () => {
     const html = render();
     const aside = html.slice(html.indexOf("<aside"), html.indexOf("</aside>"));
-    expect(aside).toMatch(/<h2[^>]*>Thresholds<\/h2>/);
+    expect(aside).toMatch(/<summary><h2[^>]*>Advanced: pass marks<\/h2><\/summary>/);
     expect(text(aside)).toContain("You review on your own.");
     expect(text(aside)).toContain("Every action is recorded");
     expect(aside).toContain('href="/settings/review-access"');

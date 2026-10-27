@@ -1,10 +1,10 @@
 import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
 import { Fragment, useEffect, useRef, useState, useId, type FormEvent, type ReactNode } from "react";
-import { Link } from "@tanstack/react-router";
+import { Link, useBlocker } from "@tanstack/react-router";
 import { FIELD_BY_KEY, FIELDS, tableSourceLabel, pbrhExplanation } from "@agir/contracts";
 import { SF_PER_M2 } from "@agir/numbers";
-import { api, type Assumption, type Review as ReviewData, type Source } from "../api";
-import { Banner, WindowConfirmation, canEdit, DealFrame, ErrorText, Glossary, StatusTag, useDeal, useSession } from "../components/ui";
+import { api, ApiError, type Assumption, type Review as ReviewData, type Source } from "../api";
+import { Banner, WindowConfirmation, canEdit, DealFrame, ErrorText, StatusTag, useDeal, useSession } from "../components/ui";
 import { Notice, Tag } from "../components/kit";
 import { ThresholdList, Thresholds } from "../components/thresholds";
 import * as I from "../components/icons";
@@ -76,6 +76,88 @@ export function enteredInUnit(unit: string, metric: boolean, value: number, reas
   return { value: unit === "sf" ? value * SF_PER_M2 : value / SF_PER_M2, reason: `${reason} (${lang === "fr" ? "saisi en" : "entered as"} ${typed}${lang === "fr" ? "\u00a0" : " "}${label})` };
 }
 
+/** Card C2: in a percent or other non-dollar field a lone comma is a decimal point ("12,5" is 12.5);
+ * a dollar field, and "1,200" in a count or an area, keep it as a thousands group. */
+export function decimalComma(raw: FormDataEntryValue | null, unit: string): string {
+  const s = String(raw ?? "").trim();
+  if (unit.startsWith("$") || !/^[^,.]*,[^,.]*$/.test(s)) return s;
+  return unit === "%" || !/,\d{3}\D*$/.test(s) ? s.replace(",", ".") : s;
+}
+
+/** Card C2: the field's hard limits from the contract, checked before anything is posted, so an impossible value is never offered "Use this value". */
+export function hardLimit(fieldKey: string, value: number): { kind: "min" | "max"; bound: number } | { kind: "whole" } | null {
+  const d = FIELD_BY_KEY.get(fieldKey);
+  if (!d) return null;
+  if (d.min !== undefined && value < d.min) return { kind: "min", bound: d.min };
+  if (d.max !== undefined && value > d.max) return { kind: "max", bound: d.max };
+  if (d.integer && !Number.isInteger(value)) return { kind: "whole" };
+  return null;
+}
+
+/** The figures a deal's documents gave but Agir did not use, one row per sentence (card C2): the same sentence read twice, or the
+ * same number in it read twice, shows once. */
+export function groupOther<O extends { documentId: string; context: string; raw: string; label: unknown }>(other: O[]): O[][] {
+  const groups = new Map<string, O[]>();
+  for (const o of other) {
+    const key = `${o.documentId}\u0000${o.context}`;
+    const rows = groups.get(key) ?? [];
+    const twin = rows.findIndex((x) => x.raw === o.raw);
+    if (twin < 0) rows.push(o);
+    else if (o.label && !rows[twin]!.label) rows[twin] = o;
+    groups.set(key, rows);
+  }
+  return [...groups.values()];
+}
+
+/** Each number of a sentence marked where it stands, not inside a longer number. */
+function marked(context: string, raws: string[]): ReactNode[] {
+  const spans: [number, number][] = [];
+  for (const raw of new Set(raws.filter(Boolean))) {
+    for (let i = context.indexOf(raw); i >= 0; i = context.indexOf(raw, i + 1)) {
+      const before = context[i - 1] ?? "", after = context[i + raw.length] ?? "";
+      if (/\d/.test(before) || /\d/.test(after) || spans.some(([s, e]) => i < e && i + raw.length > s)) continue;
+      spans.push([i, i + raw.length]);
+      break;
+    }
+  }
+  spans.sort((x, y) => x[0] - y[0]);
+  const out: ReactNode[] = [];
+  let at = 0;
+  spans.forEach(([s, e], n) => { out.push(context.slice(at, s), <mark key={n}>{context.slice(s, e)}</mark>); at = e; });
+  out.push(context.slice(at));
+  return out;
+}
+
+const LOOKS_LIKE = /^Looks like (.+), but the number is not written as /;
+/** A one-click label is offered only when it agrees with what the note says the figure looks like (card C2): a heading line's
+ * "12 rental units" that looks like hard costs is not offered as a construction period. */
+export function offeredLabels(o: { note: string | null; suggestions: string[] }): string[] {
+  const named = LOOKS_LIKE.exec(o.note ?? "")?.[1];
+  if (!named) return o.suggestions;
+  const d = FIELDS.find((x) => x.label.toLowerCase() === named.toLowerCase());
+  return d && o.suggestions.includes(d.key) ? o.suggestions : [];
+}
+
+// A municipality's own land transfer tax row, matched against the deal's location as typed.
+const CITY_ROWS: Record<string, RegExp> = { "quebec-city": /^(ville de )?quebec( city)?$/, montreal: /montreal/, toronto: /toronto/, "toronto-homes": /toronto/ };
+const fold = (s: string) => s.normalize("NFD").replace(/[\u0300-\u036f]/g, "").toLowerCase().trim();
+/** Card C2: the land transfer tax options for where the deal is. A municipality with its own row gets that row first; any other
+ * (Gatineau, Laval, Ottawa) gets only the province-wide rule. In Nova Scotia, the municipality named in the location comes first.
+ * `matched` is false when nothing tells which option applies. */
+export function landOptions<O extends { key: string; label: string }>(options: O[], location: string | null | undefined): { options: O[]; matched: boolean } {
+  const parts = (location ?? "").split(",").map(fold).filter(Boolean);
+  // The last part of "Gatineau, QC" names the province, not the city.
+  const places = parts.length > 1 ? parts.slice(0, -1) : parts;
+  if (options.length > 0 && options.every((o) => o.key.startsWith("ns-"))) {
+    const named = options.filter((o) => places.some((p) => p.length >= 4 && fold(o.label).includes(p)));
+    return named.length ? { options: [...named, ...options.filter((o) => !named.includes(o))], matched: true } : { options, matched: false };
+  }
+  const general = options.filter((o) => !CITY_ROWS[o.key]);
+  const local = options.filter((o) => CITY_ROWS[o.key] && places.some((p) => CITY_ROWS[o.key]!.test(p)));
+  return { options: local.length ? [...local, ...general] : general.length ? general : options, matched: true };
+}
+const trimCents = (s: string) => s.replace(/([.,])00(?!\d)/, "");
+
 function ValueInput({ unit, id, defaultValue, label, prefix = "" }: { unit: string; id: string; defaultValue?: number | null; label: string; prefix?: string }) {
   const { t, f, lang } = useI18n();
   const [metric, setMetric] = useState(false);
@@ -142,10 +224,13 @@ function UseAs({ o, items, onSave, busy }: { o: ReviewData["other"][number]; ite
 }
 
 /** The same proposed-value controls in Not found and Choices. Acceptance uses the existing entry mutation. */
-export function TableProposal({ proposal, unit, onUse, busy }: { proposal: import("@agir/contracts").Proposal; unit: string; onUse: (b: {fieldKey: string; tableId: string; optionKey: string}) => void; busy: boolean }) {
+export function TableProposal({ proposal: given, unit, onUse, busy, location }: { proposal: import("@agir/contracts").Proposal; unit: string; onUse: (b: {fieldKey: string; tableId: string; optionKey: string}) => void; busy: boolean; location?: string | null }) {
   const { t, f, msg, lang } = useI18n();
   const { role } = useSession();
-  const [selected,setSelected] = useState(proposal.options.length === 1 ? "0" : "");
+  const land = given.fieldKey === "land_transfer_tax";
+  const local = land ? landOptions(given.options, location) : { options: given.options, matched: false };
+  const proposal = { ...given, options: local.options };
+  const [selected,setSelected] = useState(proposal.options.length === 1 || (land && local.matched) ? "0" : "");
   const [infoOpen,setInfoOpen] = useState(false);
   const infoId = useId();
   if (proposal.unavailable) {
@@ -155,8 +240,14 @@ export function TableProposal({ proposal, unit, onUse, busy }: { proposal: impor
   }
   const option = selected === "" ? undefined : proposal.options[Number(selected)];
   const amount = (n: number) => unit === "$" ? new Intl.NumberFormat(lang === "fr" ? "fr-CA" : "en-CA",{style:"currency",currency:"CAD",currencyDisplay:"narrowSymbol",minimumFractionDigits:2,maximumFractionDigits:2}).format(n) : f.value(n,unit);
+  const source = <a href={proposal.url} target="_blank" rel="noreferrer">{t("review.proposalSource")}</a>;
+  // Card C2: the land transfer tax is optional and says what skipping it does; nothing shows an empty amount.
+  const head = land
+    ? <><div>{option ? t(CITY_ROWS[option.key] ? "review.lttCity" : "review.ltt", { v: amount(option.value), place: msg(option.label.split(" — ")[0]!) }) : t("review.lttChoose")}</div>
+      <div className="muted">{t("review.proposalBasis", { title: proposal.title, publisher: proposal.publisher, date: proposal.effective })}{" "}{source}</div></>
+    : <div>{option ? t("review.proposed",{value:amount(option.value),publisher:proposal.publisher,date:proposal.effective}) : t("review.proposedBy",{publisher:proposal.publisher,date:proposal.effective})}{" "}{source}</div>;
   return <div className="stack tight small">
-    <div>{t("review.proposed",{value:option ? amount(option.value) : "—",publisher:proposal.publisher,date:proposal.effective})}{" "}<a href={proposal.url} target="_blank" rel="noreferrer">{t("review.proposalSource")}</a></div>
+    {head}
     {/* The rebate's reason sits beside its label, not on a line of its own. */}
     {(() => {
       const pbrh = proposal.tableId === "gst-hst-pbrh" && option?.key === "pbrh";
@@ -171,7 +262,7 @@ export function TableProposal({ proposal, unit, onUse, busy }: { proposal: impor
         {pbrh && <span id={infoId} hidden={!infoOpen}>{pbrhExplanation(proposal.readOn,lang)}</span>}
       </>;
     })()}
-    {canEdit(role) && <div><button className="btn quiet sm" type="button" disabled={busy || !option} onClick={()=>option && onUse({fieldKey:proposal.fieldKey,tableId:proposal.tableId,optionKey:option.key})}>{t("review.useProposal")}</button></div>}
+    {canEdit(role) && <div><button className="btn quiet sm" type="button" disabled={busy || !option} onClick={()=>option && onUse({fieldKey:proposal.fieldKey,tableId:proposal.tableId,optionKey:option.key})}>{t(land ? "review.lttAdd" : "review.useProposal")}</button></div>}
   </div>;
 }
 
@@ -194,9 +285,19 @@ export function Review({ dealId }: { dealId: string }) {
   const [keeping, setKeeping] = useState<string | null>(null);
   const [aiEntry, setAiEntry] = useState<{ id: string; value: number; field: string; item: string } | null>(null);
   const [entering, setEntering] = useState<string | null>(null);
-  const [tickedDefaults, setTickedDefaults] = useState<string[]>([]);
   const [picked, setPicked] = useState<Record<string, number>>({});
-  const [formError, setFormError] = useState<unknown>(null);
+  // A form's own error shows in that form (card C2), keyed by the form.
+  const [formError, setFormErrorAt] = useState<{ at: string; error: unknown } | null>(null);
+  const errAt = (at: string) => (formError?.at === at ? formError.error : null);
+  // Card C2: a 409 shows on its row, and says "in another tab" when the person who changed the value is the one looking.
+  const [stale, setStale] = useState<{ id: string; mine: boolean } | null>(null);
+  const [confirming, setConfirming] = useState(false);
+  const [bulkDone, setBulkDone] = useState<{ n: number; held: string[] } | null>(null);
+  const sending = useRef(false);
+  const [glossOpen, setGlossOpen] = useState(false);
+  const [thresholdsOpen, setThresholdsOpen] = useState(() => typeof window !== "undefined" && window.location?.hash === "#thresholds");
+  // Card C2: a half-typed edit is not lost to Back, Forward or a link without a word.
+  const [dirty, setDirty] = useState(false);
   // The deal first: if it says no reconcile is waiting, the review read after it is already current; if one is, the effect above reads it again when it is done.
   const refresh = async () => {
     await qc.invalidateQueries({ queryKey: ["deal", dealId] });
@@ -206,9 +307,21 @@ export function Review({ dealId }: { dealId: string }) {
     mutationFn: (b: { id: string; action: string; value?: number | null; reason?: string | null; version?: number; confirmOutsideWindow?: boolean }) => api.post(`/assumptions/${b.id}/review`, b),
     onSuccess: () => {
       setEditing(null);
+      setDirty(false);
+      setStale(null);
+      setBulkDone(null);
       return refresh();
     },
+    onError: (error, b) => {
+      if (!(error instanceof ApiError && error.status === 409)) return;
+      setStale({ id: b.id, mine: false });
+      // Who changed it: the review read again for that one fact, leaving the one on screen as it is until Reload.
+      void api.get<ReviewData>(`/deals/${dealId}/review`).then((fresh) => {
+        if (fresh.assumptions.find((x) => x.id === b.id)?.decidedById === me.user.id) setStale({ id: b.id, mine: true });
+      }).catch(() => {});
+    },
   });
+  const reload = () => { setStale(null); act.reset(); void refresh(); };
   const confirmRegion = useMutation({
     mutationFn: (group: ReviewData["regions"][number]) => api.post(`/deals/${dealId}/regions/confirm`, { documentId: group.documentId, source: group.source, table: group.table }),
     onSuccess: () => refresh(),
@@ -222,6 +335,7 @@ export function Review({ dealId }: { dealId: string }) {
     onSuccess: () => {
       setEntering(null);
       setAiEntry(null);
+      setDirty(false);
       return refresh();
     },
   });
@@ -231,6 +345,7 @@ export function Review({ dealId }: { dealId: string }) {
     mutationFn: (b: Record<string, string | number | boolean>) => api.post(`/deals/${dealId}/items`, b),
     onSuccess: () => {
       setAdding(false);
+      setDirty(false);
       return refresh();
     },
   });
@@ -243,7 +358,7 @@ export function Review({ dealId }: { dealId: string }) {
     mutationFn: (b: { documentId: string; figureId: string }) => api.del(`/deals/${dealId}/figure-labels`, b),
     onSuccess: () => refresh(),
   });
-  const defaults = useMutation({ mutationFn: (fields: string[]) => api.post(`/deals/${dealId}/defaults`, { fields }), onSuccess: () => { setTickedDefaults([]); return refresh(); } });
+  const defaults = useMutation({ mutationFn: (fields: string[]) => api.post(`/deals/${dealId}/defaults`, { fields }), onSuccess: () => refresh() });
   const bulk = useMutation({
     mutationFn: async (items: Assumption[]) => {
       for (const a of items) await api.post(`/assumptions/${a.id}/review`, { action: "approve", version: a.version });
@@ -251,6 +366,9 @@ export function Review({ dealId }: { dealId: string }) {
     onSuccess: () => refresh(),
   });
   const [showAll, setShowAll] = useState(false);
+  const formOpen = !!(editing || keeping || entering || adding || aiEntry);
+  useEffect(() => { if (!formOpen) setDirty(false); }, [formOpen]);
+  const blocker = useBlocker({ shouldBlockFn: () => dirty, enableBeforeUnload: () => dirty, disabled: !dirty, withResolver: true });
 
   if (!deal.data || !review.data) return <p className="muted">{t("common.loading")}</p>;
   const r = review.data;
@@ -276,15 +394,25 @@ export function Review({ dealId }: { dealId: string }) {
   const focused = pending.find((a) => a.id === focus) ?? pending[0];
   const unused = r.other.filter((o) => o.figureId && o.value !== null && !o.label).length;
   const itemNames = [...new Set(r.assumptions.map((a) => a.itemKey).filter((i): i is string => !!i))];
-  const selectedDefaults = tickedDefaults.filter(key => r.missing.some(m => m.fieldKey === key && m.default !== null));
   const plainPending = pending.filter(a => r.todo.items.some(item => item.kind === "needs_review" && item.assumptionId === a.id));
   const docsBusy = deal.data.documents.processing > 0;
   const summary: string[] = t("review.summary", { c: conflicts.length, m: r.missing.length, r: pending.length + awaiting.length, a: approved.length });
   const materialNote = <p className="small muted row rv-note"><I.Lock />{t(solo ? "review.materialNoteSolo" : "review.materialNote")}</p>;
-
+  /** A value typed in a form: a decimal comma read as a point, a non-number refused, and the hard limits checked before anything is posted. */
+  const readValue = (fd: FormData, fieldKey: string, unit: string, prefix = "") => {
+    const n = f.parse(decimalComma(fd.get(`${prefix}value`), unit));
+    const p = hardLimit(fieldKey, enteredInUnit(unit, fd.get(`${prefix}unit`) === "m2", n, "", lang).value);
+    if (p) throw new Error(p.kind === "whole" ? t("review.errWhole") : t(p.kind === "min" ? "review.errMin" : "review.errMax", { v: f.value(p.bound, unit) }));
+    return n;
+  };
+  const termLink = (k: GlossKey | undefined) => k && (
+    <a className="rv-term" href={`#term-${k}`} onClick={() => setGlossOpen(true)} aria-label={t("review.termLink", { term: t(`terms.rv.${k}`)[0] })}>?</a>
+  );
+  const materialLink = <a className="sub rv-material" href="#term-material" onClick={() => setGlossOpen(true)}>{t("common.material")}</a>;
   const keepForm = (a: Assumption) => (
     <form
       className="stack tight"
+      onChange={() => setDirty(true)}
       onSubmit={(e: FormEvent<HTMLFormElement>) => {
         e.preventDefault();
         act.mutate({ id: a.id, action: "approve", reason: String(new FormData(e.currentTarget).get("reason")).trim(), version: a.version });
@@ -300,16 +428,16 @@ export function Review({ dealId }: { dealId: string }) {
   const modifyForm = (a: Assumption) => (
     <form
       className="stack tight"
-      onChange={() => { if (!act.isPending) act.reset(); }}
+      onChange={() => { setDirty(true); if (!act.isPending) act.reset(); }}
       onSubmit={(e: FormEvent<HTMLFormElement>) => {
         e.preventDefault();
-        setFormError(null);
+        setFormErrorAt(null);
         const fd = new FormData(e.currentTarget);
         try {
-          const e = enteredInUnit(a.unit, fd.get("unit") === "m2", f.parse(fd.get("value")), String(fd.get("reason")), lang);
+          const e = enteredInUnit(a.unit, fd.get("unit") === "m2", readValue(fd, a.fieldKey, a.unit), String(fd.get("reason")), lang);
           act.mutate({ id: a.id, action: "modify", ...e, version: a.version });
         } catch (err) {
-          setFormError(err);
+          setFormErrorAt({ at: `v-${a.id}`, error: err });
         }
       }}
     >
@@ -318,7 +446,7 @@ export function Review({ dealId }: { dealId: string }) {
         <div className="field"><label htmlFor={`r-${a.id}`}>{t("review.why")}</label><input className="input" id={`r-${a.id}`} name="reason" minLength={10} required placeholder={t("review.whyHint")} /></div>
       </div>
       {a.material && materialNote}
-      <ErrorText error={formError ?? act.error} />
+      <ErrorText error={errAt(`v-${a.id}`) ?? (act.variables?.id === a.id && !stale ? act.error : null)} />
       <WindowConfirmation error={act.variables?.id === a.id ? act.error : null} busy={act.isPending} onConfirm={() => act.variables && act.mutate({...act.variables, confirmOutsideWindow: true})} />
       <div className="row"><button className="btn primary sm" type="submit">{t("review.saveValue")}</button><button className="btn quiet sm" type="button" onClick={() => setEditing(null)}>{t("common.cancel")}</button></div>
     </form>
@@ -329,20 +457,20 @@ export function Review({ dealId }: { dealId: string }) {
     <form
       key={id}
       className="stack tight"
-      onChange={() => { if (!enter.isPending) enter.reset(); }}
+      onChange={() => { setDirty(true); if (!enter.isPending) enter.reset(); }}
       onSubmit={(e) => {
         e.preventDefault();
-        setFormError(null);
+        setFormErrorAt(null);
         const fd = new FormData(e.currentTarget);
         try {
-          enter.mutate({ fieldKey: m.fieldKey, itemKey: m.itemKey ?? null, ...enteredInUnit(m.unit, fd.get("unit") === "m2", f.parse(fd.get("value")), String(fd.get("reason")), lang) });
+          enter.mutate({ fieldKey: m.fieldKey, itemKey: m.itemKey ?? null, ...enteredInUnit(m.unit, fd.get("unit") === "m2", readValue(fd, m.fieldKey, m.unit), String(fd.get("reason")), lang) });
         } catch (err) {
-          setFormError(err);
+          setFormErrorAt({ at: id, error: err });
         }
       }}
     >
       {head}
-      <ErrorText error={enter.variables?.fieldKey === m.fieldKey && enter.variables?.itemKey === (m.itemKey ?? null) ? enter.error : null} />
+      <ErrorText error={errAt(id) ?? (enter.variables?.fieldKey === m.fieldKey && enter.variables?.itemKey === (m.itemKey ?? null) ? enter.error : null)} />
       <WindowConfirmation error={enter.variables?.fieldKey === m.fieldKey && enter.variables?.itemKey === (m.itemKey ?? null) ? enter.error : null} busy={enter.isPending} onConfirm={() => enter.variables && enter.mutate({...enter.variables, confirmOutsideWindow: true})} />
       {editable && (
         <>
@@ -360,7 +488,7 @@ export function Review({ dealId }: { dealId: string }) {
   );
 
   const aiEntryControl = (id: string, value: number) => editable && <>
-    <div><button className="btn quiet sm" type="button" onClick={() => { setAiEntry({ id, value, field: "", item: "" }); enter.reset(); setFormError(null); }}>{t("review.aiEnter")}</button></div>
+    <div><button className="btn quiet sm" type="button" onClick={() => { setAiEntry({ id, value, field: "", item: "" }); enter.reset(); setFormErrorAt(null); }}>{t("review.aiEnter")}</button></div>
     {aiEntry?.id === id && <div className="stack tight">
       <select className="select" aria-label={t("review.col.input")} value={aiEntry.field} onChange={e => setAiEntry({ ...aiEntry, field: e.target.value, item: "" })}>
         <option value="">{t("review.useAs")}</option>
@@ -382,10 +510,10 @@ export function Review({ dealId }: { dealId: string }) {
   const addItemForm = () => (
     <form
       className="card card-pad stack tight"
-      onChange={() => { if (!addItem.isPending) addItem.reset(); }}
+      onChange={() => { setDirty(true); if (!addItem.isPending) addItem.reset(); }}
       onSubmit={(e) => {
         e.preventDefault();
-        setFormError(null);
+        setFormErrorAt(null);
         const fd = new FormData(e.currentTarget);
         try {
           const itemName = String(fd.get("name") ?? "").trim();
@@ -393,19 +521,19 @@ export function Review({ dealId }: { dealId: string }) {
           if (itemName.includes("|")) throw new Error(t("qs.errPipe"));
           const reason = String(fd.get("reason") ?? "").trim();
           if (reason.length < 10) throw new Error(t("qs.errReason"));
-          const num = (k: string) => f.parse(fd.get(k));
+          const num = (k: string, unit: string) => f.parse(decimalComma(fd.get(k), unit));
           const occ = String(fd.get("occ-value") ?? "").trim();
-          const body: Record<string, string | number> = { name: itemName, reason, ...(occ ? { occupancyPct: num("occ-value") } : {}) };
+          const body: Record<string, string | number> = { name: itemName, reason, ...(occ ? { occupancyPct: num("occ-value", "%") } : {}) };
           if (perSf) {
-            const area = enteredInUnit("sf", fd.get("area-unit") === "m2", num("area-value"), reason, lang);
-            const rent = enteredInUnit("$/sf/yr", fd.get("psf-unit") === "m2", num("psf-value"), area.reason, lang);
+            const area = enteredInUnit("sf", fd.get("area-unit") === "m2", num("area-value", "sf"), reason, lang);
+            const rent = enteredInUnit("$/sf/yr", fd.get("psf-unit") === "m2", num("psf-value", "$/sf/yr"), area.reason, lang);
             Object.assign(body, { areaSf: area.value, rentPsfAnnual: rent.value, reason: rent.reason });
           } else {
-            Object.assign(body, { unitCount: num("count-value"), rentMonthly: num("rent-value") });
+            Object.assign(body, { unitCount: num("count-value", "units"), rentMonthly: num("rent-value", "$/unit/mo") });
           }
           addItem.mutate(body);
         } catch (err) {
-          setFormError(err);
+          setFormErrorAt({ at: "add", error: err });
         }
       }}
     >
@@ -434,9 +562,9 @@ export function Review({ dealId }: { dealId: string }) {
       <div className="field"><label htmlFor="add-why">{t("review.why")}</label><input className="input" id="add-why" name="reason" placeholder={t("review.sourceHint")} minLength={10} required /></div>
       <div className="row">
         <button className="btn primary sm" type="submit" disabled={addItem.isPending}>{t("common.save")}</button>
-        <button className="btn quiet sm" type="button" onClick={() => { setAdding(false); setFormError(null); }}>{t("common.cancel")}</button>
+        <button className="btn quiet sm" type="button" onClick={() => { setAdding(false); setFormErrorAt(null); }}>{t("common.cancel")}</button>
       </div>
-      <ErrorText error={formError ?? addItem.error} />
+      <ErrorText error={errAt("add") ?? addItem.error} />
       <WindowConfirmation error={addItem.error} busy={addItem.isPending} onConfirm={() => addItem.variables && addItem.mutate({...addItem.variables, confirmOutsideWindow: true})} />
     </form>
   );
@@ -448,7 +576,7 @@ export function Review({ dealId }: { dealId: string }) {
       <fieldset key={`conflict-${a.id}`} className="card rv-fieldset">
         <legend className="sr-only">{name(a)}</legend>
         <div className="card-head">
-          <div><h3 className="h3">{name(a)}</h3><span className="small muted">{a.material ? `${t("common.material")} · ` : ""}{t("review.conflictFigures", { n: vals.length })}</span></div>
+          <div><h3 className="h3">{name(a)}{termLink(termOf(a.fieldKey))}</h3><span className="small muted">{a.material ? `${t("common.material")} · ` : ""}{t("review.conflictFigures", { n: vals.length })}</span></div>
           <StatusTag tone="stop" glyph={I.Conflict}>{t("review.conflicting")}</StatusTag>
         </div>
         <div className="card-pad stack tight">
@@ -514,12 +642,13 @@ export function Review({ dealId }: { dealId: string }) {
       <div className="card card-pad" key={id}>
         {entryForm(m, id,
           <>
-            <div className="row between"><h3 className="h3">{name(m)}</h3><Tag tone="review">{t("review.required")}</Tag></div>
+            <div className="row between"><h3 className="h3">{name(m)}{termLink(termOf(m.fieldKey))}</h3><Tag tone="review">{t("review.required")}</Tag></div>
             <p className="small muted">{L.group(m.groupLabel ? groupKey(m.groupLabel) : "")}{m.default !== null ? t("review.default", { v: f.value(m.default, m.unit) }) : ""}{m.material ? t("review.materialTag") : ""}</p>
-            {editable && m.default !== null && <label className="row small rv-radio">
-              <input type="checkbox" checked={selectedDefaults.includes(m.fieldKey)} onChange={e => setTickedDefaults(e.target.checked ? [...selectedDefaults, m.fieldKey] : selectedDefaults.filter(key => key !== m.fieldKey))} />
-              {t("review.useDefault", { v: f.value(m.default, m.unit) })}
-            </label>}
+            {/* Card C2: the named default is one action, with what it rests on; the audit path is the same defaults route. */}
+            {m.default !== null && <div className="stack tight rv-default">
+              {editable && <div><button className="btn primary sm" type="button" disabled={defaults.isPending} onClick={() => defaults.mutate([m.fieldKey])}>{t("review.useDefault", { v: trimCents(f.value(m.default, m.unit)) })}</button></div>}
+              <p className="small muted">{t("review.defaultBasis")}</p>
+            </div>}
             {m.detail && <p className="small muted">{msg(m.detail)}</p>}
             {L.help(m.fieldKey, m.help) && <p className="small muted">{L.help(m.fieldKey, m.help)}</p>}
             {m.likely.length > 0 && (
@@ -541,14 +670,15 @@ export function Review({ dealId }: { dealId: string }) {
   const pendingRow = (a: Assumption) => {
     const open = editable && (editing === a.id || keeping === a.id);
     const docs = new Set(a.sources.filter((s) => a.value !== null && Math.abs(s.value - a.value) < 0.5).map((s) => s.document_id));
+    const on = focused?.id === a.id;
     return (
       <Fragment key={a.id}>
-        <tr className={focused?.id === a.id ? "rv-on" : undefined}>
+        <tr className={on ? "rv-on" : undefined}>
           <td>
-            <button type="button" className="rv-pick" aria-pressed={focused?.id === a.id} onClick={() => setFocus(a.id)}>{name(a)}</button>
+            <button type="button" className="rv-pick" aria-pressed={on} onClick={() => setFocus(a.id)}>{name(a)}</button>{termLink(termOf(a.fieldKey))}
             {a.sources.filter((s, i, all) => s.check_note && all.findIndex(x => x.check_note === s.check_note) === i).map((s, i) => <span key={i} className={s.check_outcome === "questions" ? "sub rv-question" : "sub"}>{msg(s.check_note)}</span>)}
             {a.reason && <span className="sub">{msg(a.reason)}</span>}
-            {a.material && <span className="sub">{t("common.material")}</span>}
+            {a.material && materialLink}
           </td>
           <td className="r num">{f.value(a.value, a.unit)}</td>
           <td>{docs.size > 1 ? t("review.agree", { n: docs.size }) : a.sources[0]?.document_name}</td>
@@ -564,10 +694,22 @@ export function Review({ dealId }: { dealId: string }) {
             )}
           </td>
         </tr>
+        {/* Card C2: the selected value's source line sits under its row. */}
+        {on && !open && <tr className="rv-src"><td colSpan={4} aria-live="polite"><div className="stack tight">{sourceOf(a)}</div></td></tr>}
         {open && <tr><td colSpan={4}>{editing === a.id ? modifyForm(a) : keepForm(a)}</td></tr>}
+        {stale?.id === a.id && <tr className="rv-stale"><td colSpan={4}>{staleNote}</td></tr>}
       </Fragment>
     );
   };
+  const sourceOf = (a: Assumption) => a.sources.length
+    ? a.sources.slice(0, 4).map((src, n) => <Quote key={n} s={src} currency={dealCurrency} fieldKey={a.sourceKind === "document" ? a.fieldKey : undefined} />)
+    : <p className="small muted">{a.tableSource ? tableSourceLabel(a.tableSource, lang) : a.sourceKind === "default" ? t("review.namedDefault") : t("review.enteredByShort", { who: a.decidedBy ?? "—" })}</p>;
+  const staleNote = stale && (
+    <div className="row between rv-stale-note" role="alert">
+      <span className="error-text">{t(stale.mine ? "review.staleTab" : "review.staleOther")}</span>
+      <button className="btn quiet sm" type="button" onClick={reload}>{t("review.reload")}</button>
+    </div>
+  );
   const approvedRow = (a: Assumption) => {
     const ticked = a.sourceKind === "default" || !!a.tableSource;
     const approvedBy = a.decidedBy ? t("review.approvedBy", { who: a.decidedBy, date: a.decidedAt ? f.date(a.decidedAt) : null }) : null;
@@ -627,12 +769,61 @@ export function Review({ dealId }: { dealId: string }) {
   const FEW = 5;
   const shownApproved = showAll ? approvedSorted : approvedSorted.slice(0, Math.max(FEW, alwaysShown));
   const approvable_ = approvable(plainPending);
+  // Card C2: one count. Every value to review is either approved together or held back with its reason, so the two add up.
+  const heldBack = [...pending.filter((a) => !approvable_.includes(a)), ...awaiting];
+  const heldReason = (a: Assumption): string => {
+    const question = a.sources.find((s) => s.check_outcome === "questions" && s.check_note);
+    return keepsWithReason(a) ? t("review.heldNoSource")
+      : a.status === "awaiting_second_approval" ? t("review.heldAwaiting")
+      : question ? msg(question.check_note)
+      : a.sources.some((s) => s.ocr) ? t("review.ocr")
+      : L.verify(a.fieldKey) ?? t("review.heldCheck");
+  };
+  const heldLine = (a: Assumption) => `${name(a)} — ${heldReason(a)}`;
+  const approveAll = () => {
+    if (sending.current || bulk.isPending) return;
+    sending.current = true;
+    setConfirming(false);
+    const items = approvable_, held = heldBack.map(heldLine);
+    bulk.mutate(items, { onSuccess: () => setBulkDone({ n: items.length, held }), onSettled: () => { sending.current = false; } });
+  };
+  const bulkBlock = editable && approvable_.length > 1 && (
+    <div className="stack tight rv-bulk" id="approve-all">
+      <div><button className="btn primary" type="button" disabled={bulk.isPending || confirming} aria-expanded={confirming} aria-controls="approve-all-confirm" onClick={() => setConfirming(true)}>{t("review.approveAll", { n: approvable_.length })}</button></div>
+      {heldBack.length > 0 && (
+        <div className="small">
+          <p>{t("review.canApproveTogether", { n: approvable_.length, h: heldBack.length })}</p>
+          <ul className="rv-held">{heldBack.map((a) => <li key={a.id}>{heldLine(a)}</li>)}</ul>
+        </div>
+      )}
+      {confirming && (
+        <div id="approve-all-confirm" className="rv-confirm stack tight" role="alertdialog" aria-labelledby="approve-all-q" onKeyDown={(e) => { if (e.key === "Escape") setConfirming(false); }}>
+          <p id="approve-all-q">{t("review.approveAllConfirm", { n: approvable_.length })}</p>
+          <div className="row">
+            <button className="btn primary sm" type="button" autoFocus disabled={bulk.isPending} onClick={approveAll}>{t("review.approveAllYes", { n: approvable_.length })}</button>
+            <button className="btn quiet sm" type="button" onClick={() => setConfirming(false)}>{t("common.cancel")}</button>
+          </div>
+        </div>
+      )}
+    </div>
+  );
+  const otherGroups = groupOther(r.other);
+  const otherCount = otherGroups.reduce((n, g) => n + g.length, 0);
 
   return (
     <>
       <DealFrame o={deal.data} active="review" />
       <div className="with-aside">
         <div className="stack">
+          {blocker?.status === "blocked" && (
+            <div className="card card-pad stack tight rv-leave" role="alertdialog" aria-labelledby="rv-leave-q">
+              <p id="rv-leave-q"><strong>{t("review.leaveTitle")}</strong> {t("review.leaveBody")}</p>
+              <div className="row">
+                <button className="btn primary sm" type="button" autoFocus onClick={() => blocker.reset()}>{t("review.stay")}</button>
+                <button className="btn quiet sm" type="button" onClick={() => blocker.proceed()}>{t("review.leave")}</button>
+              </div>
+            </div>
+          )}
           {docsBusy && <Banner tone="neutral" title={t("review.stillReading")}>{t("review.stillReadingBody")}</Banner>}
           {updating && <p className="small muted" role="status">{t("review.updating")}</p>}
 
@@ -654,11 +845,24 @@ export function Review({ dealId }: { dealId: string }) {
             ) : (
               <div className="card-pad stack tight">
                 <Banner tone="neutral" title={t("review.clear")}>{t("review.clearBody")}{stated > 0 && ` ${t("review.statedWaiting", { n: stated })}`}</Banner>
+                <div><Link to="/deals/$dealId/run" params={{ dealId }} className="btn primary">{t("review.goRun")}</Link></div>
+              </div>
+            )}
+            {(bulkBlock || bulkDone || bulk.error) && (
+              <div className="card-pad stack tight rv-bulk-pad">
+                {bulkDone && (
+                  <div role="status" className="small">
+                    <p>{t("review.bulkDone", { n: bulkDone.n, h: bulkDone.held.length })}</p>
+                    {bulkDone.held.length > 0 && <ul className="rv-held">{bulkDone.held.map((line) => <li key={line}>{line}</li>)}</ul>}
+                  </div>
+                )}
+                {bulkBlock}
+                <ErrorText error={bulk.error} />
               </div>
             )}
             <div className="card-foot small muted">{summary.join(" · ")}</div>
           </div>
-          <ErrorText error={enter.error ?? defaults.error ?? label.error ?? formError} />
+          <ErrorText error={enter.error ?? defaults.error ?? label.error} />
 
           {impossibleItems.length > 0 && (
             <section className="section" id="impossible">
@@ -686,10 +890,9 @@ export function Review({ dealId }: { dealId: string }) {
                 {r.missing.length > 0 && unused > 0 && <p className="small muted rv-lead">{t("review.unusedLine", { n: unused })} <a href="#unused-figures" onClick={() => setOtherOpen(true)}>{t("review.unusedLink")}</a></p>}
               </div>
               {r.missing.map(missingItem)}
-              {editable && r.missing.some(m => m.default !== null) && <div><button className="btn quiet" type="button" disabled={!selectedDefaults.length || defaults.isPending} onClick={() => defaults.mutate(selectedDefaults)}>{t("review.acceptTickedDefaults", { n: selectedDefaults.length })}</button></div>}
               {(r.tableNotices ?? []).map(p => <div className="card card-pad stack tight" key={p.fieldKey}>
                 <p>{t("review.tableNow",{value:f.value(p.options[0]?.value,FIELDS.find(d=>d.key === p.fieldKey)?.unit ?? "$")})}</p>
-                <TableProposal proposal={p} unit={FIELDS.find(d=>d.key === p.fieldKey)?.unit ?? "$"} onUse={b=>acceptTable.mutate(b)} busy={acceptTable.isPending} />
+                <TableProposal proposal={p} unit={FIELDS.find(d=>d.key === p.fieldKey)?.unit ?? "$"} onUse={b=>acceptTable.mutate(b)} busy={acceptTable.isPending} location={deal.data.deal.location} />
               </div>)}
               {r.notFound.length > 0 && (
                 <div className="card card-pad stack tight">
@@ -703,7 +906,7 @@ export function Review({ dealId }: { dealId: string }) {
                           <span>{t("review.notFoundLine", { field: name(m), meaning: L.absent(m.fieldKey) })}</span>
                           {editable && entering !== id && <button className="btn quiet sm" type="button" onClick={() => setEntering(id)}>{t("review.notFoundEnter")}</button>}
                         </div>
-                        {r.proposals?.find(p=>p.fieldKey === m.fieldKey) && <TableProposal key={r.proposals.find(p=>p.fieldKey === m.fieldKey)!.tableId} proposal={r.proposals.find(p=>p.fieldKey === m.fieldKey)!} unit={m.unit} onUse={b=>acceptTable.mutate(b)} busy={acceptTable.isPending} />}
+                        {r.proposals?.find(p=>p.fieldKey === m.fieldKey) && <TableProposal key={r.proposals.find(p=>p.fieldKey === m.fieldKey)!.tableId} proposal={r.proposals.find(p=>p.fieldKey === m.fieldKey)!} unit={m.unit} onUse={b=>acceptTable.mutate(b)} busy={acceptTable.isPending} location={deal.data.deal.location} />}
                         {entering === id && entryForm(m, id, null)}
                       </div>
                     );
@@ -718,22 +921,16 @@ export function Review({ dealId }: { dealId: string }) {
             <section className="section" id="pending">
               <div className="row between">
                 <div><h2 className="h2">{t("review.pendingTitle")}</h2>{pending.length > 0 && <p className="muted rv-lead">{t("review.selectValue")}</p>}</div>
-                {editable && approvable_.length > 1 && <button className="btn quiet" type="button" disabled={bulk.isPending} onClick={() => { if (confirm(t("review.approveAllConfirm", { n: approvable_.length }))) bulk.mutate(approvable_); }}>{t("review.approveAll", { n: approvable_.length })}</button>}
+                {bulkBlock && <a className="small" href="#approve-all">{t("review.approveAllLink", { n: approvable_.length })}</a>}
               </div>
               {pending.length > 0 && (
                 <div className="card">
                   <div className="scroll">
-                    <table className="table">
+                    <table className="table rv-table">
                       <thead><tr><th>{t("review.col.input")}</th><th className="r">{t("review.col.value")}</th><th>{t("review.col.source")}</th><th><span className="sr-only">{t("docs.actions")}</span></th></tr></thead>
                       <tbody>{pending.map(pendingRow)}</tbody>
                     </table>
                   </div>
-                  {focused && (
-                    <div className="card-foot stack tight" aria-live="polite">
-                      {focused.sources.length ? focused.sources.slice(0, 4).map((src, n) => <Quote key={n} s={src} currency={dealCurrency} fieldKey={focused.sourceKind === "document" ? focused.fieldKey : undefined} />)
-                        : <p className="small muted">{focused.tableSource ? tableSourceLabel(focused.tableSource,lang) : focused.sourceKind === "default" ? t("review.namedDefault") : t("review.enteredByShort", { who: focused.decidedBy ?? "—" })}</p>}
-                    </div>
-                  )}
                 </div>
               )}
               {awaiting.map(awaitingItem)}
@@ -761,7 +958,7 @@ export function Review({ dealId }: { dealId: string }) {
               })}
             </section>
           )}
-          <ErrorText error={act.error ?? bulk.error} />
+          {stale && !pending.some((a) => a.id === stale.id) ? staleNote : <ErrorText error={stale ? null : act.error} />}
 
           <section className="section" id="approved">
             <div className="row between">
@@ -773,7 +970,7 @@ export function Review({ dealId }: { dealId: string }) {
             {approved.length > 0 && (
               <div className="card">
                 <div className="scroll">
-                  <table className="table" id="approved-rows">
+                  <table className="table rv-table" id="approved-rows">
                     <thead><tr><th>{t("review.col.input")}</th><th className="r">{t("review.col.value")}</th><th>{t("review.col.source")}</th><th><span className="sr-only">{t("docs.actions")}</span></th></tr></thead>
                     <tbody>{shownApproved.map(approvedRow)}</tbody>
                   </table>
@@ -781,7 +978,7 @@ export function Review({ dealId }: { dealId: string }) {
                 <div className="card-foot small muted">{t("review.approvedFoot")}</div>
               </div>
             )}
-            {editable && (adding ? addItemForm() : <div><button className="btn quiet sm" type="button" onClick={() => { setAdding(true); setFormError(null); }}>{t("review.addItem")}</button></div>)}
+            {editable && (adding ? addItemForm() : <div><button className="btn quiet sm" type="button" onClick={() => { setAdding(true); setFormErrorAt(null); }}>{t("review.addItem")}</button></div>)}
             {rejected.length > 0 && (
               <details className="rv-details">
                 <summary>{t("review.rejected")} <span className="num muted">{rejected.length}</span></summary>
@@ -806,7 +1003,7 @@ export function Review({ dealId }: { dealId: string }) {
                         {editable && entering !== id && <button className="btn ghost sm" type="button" onClick={() => setEntering(id)}>{m.unit === "flag" ? t("review.choiceEnter") : t("review.notFoundEnter")}</button>}
                       </div>
                       {L.help(m.fieldKey, m.help) && <p className="small muted">{L.help(m.fieldKey, m.help)}</p>}
-                      {r.proposals?.find(p=>p.fieldKey === m.fieldKey) && <TableProposal key={r.proposals.find(p=>p.fieldKey === m.fieldKey)!.tableId} proposal={r.proposals.find(p=>p.fieldKey === m.fieldKey)!} unit={m.unit} onUse={b=>acceptTable.mutate(b)} busy={acceptTable.isPending} />}
+                      {r.proposals?.find(p=>p.fieldKey === m.fieldKey) && <TableProposal key={r.proposals.find(p=>p.fieldKey === m.fieldKey)!.tableId} proposal={r.proposals.find(p=>p.fieldKey === m.fieldKey)!} unit={m.unit} onUse={b=>acceptTable.mutate(b)} busy={acceptTable.isPending} location={deal.data.deal.location} />}
                       {entering === id && entryForm(m, id, null)}
                     </div>
                   );
@@ -824,7 +1021,7 @@ export function Review({ dealId }: { dealId: string }) {
           {r.aiReading?.outcome === "failed" && <p className="small muted">{t("review.aiUnavailable")}</p>}
           <details id="unused-figures" className="card rv-unused" open={otherOpen} onToggle={(e) => setOtherOpen(e.currentTarget.open)}>
             <summary className="card-pad row between">
-              <span className="muted">{t("review.otherIntro", { n: r.other.length })}</span>
+              <span className="muted">{t("review.otherIntro", { n: otherCount })}</span>
               <span className="rv-link">{t("review.unusedLink")}</span>
             </summary>
             <div className="card-pad stack tight rv-unused-body">
@@ -846,25 +1043,29 @@ export function Review({ dealId }: { dealId: string }) {
                 <table className="table">
                   <thead><tr><th>{t("review.col.doc")}</th><th>{t("review.col.text")}</th><th>{t("review.col.whyNot")}</th></tr></thead>
                   <tbody>
-                    {r.other.map((o, n) => (
+                    {otherGroups.map((rows, n) => (
                       <tr key={n}>
-                        <td className="small">{o.document_name}<span className="sub">{msg(o.location)}</span></td>
-                        <td className="small num">{o.context}</td>
-                        <td className="small muted">
-                          {msg(o.note)}
-                          {o.label ? (
-                            <div className="stack tight">
-                              <strong>{t("review.labelledAs", { field: L.field(o.label.fieldKey, o.label.itemKey), who: o.label.by })}</strong>
-                              {editable && <div><button className="btn quiet sm" type="button" disabled={unlabel.isPending} onClick={() => unlabel.mutate({ documentId: o.documentId, figureId: o.figureId! })}>{t("review.undo")}</button></div>}
+                        <td className="small">{rows[0]!.document_name}<span className="sub">{[...new Set(rows.map((o) => msg(o.location)))].join(", ")}</span></td>
+                        <td className="small num">{marked(rows[0]!.context, rows.map((o) => o.raw))}</td>
+                        <td className="small muted stack tight">
+                          {rows.map((o, i) => (
+                            <div key={i} className="stack tight">
+                              <span>{rows.length > 1 && <><mark className="num">{o.raw}</mark>{" "}</>}{msg(o.note)}</span>
+                              {o.label ? (
+                                <div className="stack tight">
+                                  <strong>{t("review.labelledAs", { field: L.field(o.label.fieldKey, o.label.itemKey), who: o.label.by })}</strong>
+                                  {editable && <div><button className="btn quiet sm" type="button" disabled={unlabel.isPending} onClick={() => unlabel.mutate({ documentId: o.documentId, figureId: o.figureId! })}>{t("review.undo")}</button></div>}
+                                </div>
+                              ) : editable && o.figureId && o.value !== null ? (
+                                <div className="stack tight">
+                                  {offeredLabels(o).map((k) => (
+                                    <div key={k}><button className="btn quiet sm" type="button" disabled={label.isPending} onClick={() => label.mutate({ documentId: o.documentId, figureId: o.figureId!, fieldKey: k })}>{t("review.useAsSuggested", { field: L.field(k) })}</button></div>
+                                  ))}
+                                  <UseAs o={o} items={itemNames} busy={label.isPending} onSave={(b) => label.mutate(b)} />
+                                </div>
+                              ) : null}
                             </div>
-                          ) : editable && o.figureId && o.value !== null ? (
-                            <div className="stack tight">
-                              {o.suggestions.map((k) => (
-                                <div key={k}><button className="btn quiet sm" type="button" disabled={label.isPending} onClick={() => label.mutate({ documentId: o.documentId, figureId: o.figureId!, fieldKey: k })}>{t("review.useAsSuggested", { field: L.field(k) })}</button></div>
-                              ))}
-                              <UseAs o={o} items={itemNames} busy={label.isPending} onSave={(b) => label.mutate(b)} />
-                            </div>
-                          ) : null}
+                          ))}
                         </td>
                       </tr>
                     ))}
@@ -876,13 +1077,19 @@ export function Review({ dealId }: { dealId: string }) {
         </div>
 
         <aside className="stack rv-aside" aria-label={t("review.aside")}>
-          <section className="card card-pad stack tight" id="thresholds">
-            <h2 className="h3">{t("review.thresholds")}</h2>
-            <p className="small muted">{t("review.thresholdsBody")}</p>
-            <ThresholdList dealId={dealId}>
-              {(version, invalid) => role === "owner" && <Thresholds key={version} scope="deals" id={dealId} initialVersion={version} open={invalid || undefined} summary={t("thresholds.change")} />}
-            </ThresholdList>
-            {role !== "owner" && <p className="small muted">{t("thresholds.ownerOnly")}</p>}
+          <div className="card card-pad"><ReviewGlossary open={glossOpen} onToggle={setGlossOpen} /></div>
+          {/* Card C2: the pass marks are there for whoever wants them, folded by default. */}
+          <section className="card card-pad" id="thresholds">
+            <details className="rv-adv" open={thresholdsOpen} onToggle={(e) => setThresholdsOpen(e.currentTarget.open)}>
+              <summary><h2 className="h3">{t("review.thresholds")}</h2></summary>
+              <div className="stack tight rv-adv-body">
+                <p className="small muted">{t("review.thresholdsBody")}</p>
+                <ThresholdList dealId={dealId}>
+                  {(version, invalid) => role === "owner" && <Thresholds key={version} scope="deals" id={dealId} initialVersion={version} open={invalid || undefined} summary={t("thresholds.change")} />}
+                </ThresholdList>
+                {role !== "owner" && <p className="small muted">{t("thresholds.ownerOnly")}</p>}
+              </div>
+            </details>
           </section>
           <Notice>{t(solo ? "review.modeSolo" : "review.modeTeam")}</Notice>
           <Notice title={t("review.recorded")}>{t("review.recordedBody")}</Notice>
@@ -891,10 +1098,31 @@ export function Review({ dealId }: { dealId: string }) {
               {t("settings.eyes.body")} <Link to="/settings/review-access">{t("settings.eyes.link")}</Link>
             </Notice>
           )}
-          <div className="card card-pad"><Glossary /></div>
         </aside>
       </div>
     </>
+  );
+}
+
+// Card C2: the review's own glossary, in the words the page uses, each entry an anchor the page links to.
+const GLOSS = ["dcr", "covenant", "capRate", "noi", "egi", "ltc", "amortization", "interestOnly", "leaseUp", "stabilized", "hold", "mezzanine", "bps", "material"] as const;
+type GlossKey = (typeof GLOSS)[number];
+export const termOf = (fieldKey: string): GlossKey | undefined =>
+  fieldKey === "exit_cap_rate_pct" ? "capRate" : fieldKey === "min_dscr_covenant" ? "covenant" : fieldKey.endsWith("_amort_years") ? "amortization"
+  : fieldKey.endsWith("_io_months") ? "interestOnly" : fieldKey === "lease_up_months" ? "leaseUp" : fieldKey === "stabilized_occupancy_pct" ? "stabilized"
+  : fieldKey === "hold_years" ? "hold" : fieldKey === "expense_ratio_pct" ? "egi" : fieldKey.startsWith("mezz_") ? "mezzanine" : fieldKey.includes("ltc") ? "ltc" : undefined;
+function ReviewGlossary({ open, onToggle }: { open: boolean; onToggle: (open: boolean) => void }) {
+  const { t } = useI18n();
+  return (
+    <details id="terms" open={open} onToggle={(e) => onToggle(e.currentTarget.open)}>
+      <summary>{t("glossary.title")}</summary>
+      <dl className="stack gloss">
+        {GLOSS.map((k) => {
+          const [term, meaning] = t(`terms.rv.${k}`);
+          return <div key={k} id={`term-${k}`}><dt>{term}</dt><dd className="muted">{meaning}</dd></div>;
+        })}
+      </dl>
+    </details>
   );
 }
 

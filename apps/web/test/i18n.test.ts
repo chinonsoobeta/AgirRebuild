@@ -1096,7 +1096,7 @@ describe("card 150 French action sentences", () => {
   it("translates every new list and banner string", () => {
     const fr = build("fr", () => {});
     const en = build("en", () => {});
-    for (const key of ["review.todoCount", "review.todoReady", "review.useDefault", "review.acceptTickedDefaults", "review.b.conflicts", "review.b.missing", "review.b.pending", "review.b.awaiting", "review.b.impossible"] as Key[]) {
+    for (const key of ["review.todoCount", "review.todoReady", "review.useDefault", "review.b.conflicts", "review.b.missing", "review.b.pending", "review.b.awaiting", "review.b.impossible"] as Key[]) {
       const params = { n: 2, v: "3%" };
       expect(fr.t(key, params)).not.toBe(en.t(key, params));
       expect(fr.t(key, params)).not.toBe(key);
@@ -1104,9 +1104,9 @@ describe("card 150 French action sentences", () => {
     expect(fr.t("review.todoCount", { n: 2 })).toBe("2 points à régler avant de pouvoir lancer ce projet");
   });
 
-  it("names no count on the defaults button while none is ticked", () => {
-    expect(build("en", () => {}).t("review.acceptTickedDefaults", { n: 0 })).toBe("Accept the ticked defaults");
-    expect(build("fr", () => {}).t("review.acceptTickedDefaults", { n: 0 })).toBe("Accepter les valeurs par défaut cochées");
+  it("names the default's basis, in both languages (card C2)", () => {
+    expect(build("en", () => {}).t("review.defaultBasis")).toBe("Agir house assumption, no external source.");
+    expect(build("fr", () => {}).t("review.defaultBasis")).toBe("Hypothèse maison d'Agir, sans source externe.");
   });
 });
 
