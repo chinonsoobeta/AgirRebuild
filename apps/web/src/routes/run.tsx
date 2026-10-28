@@ -59,6 +59,29 @@ function stressColumns(sale: boolean, stressKeys: string[], gates: readonly { me
   return [...new Set([...first, ...stressKeys, ...gates.filter((g) => g.scenario !== baseKey).map((g) => g.metricKey)])];
 }
 
+/** The glossary entry that already defines a key figure; its meaning is reused word for word (card D4). */
+type GlossKey = "dcr" | "noi" | "yieldOnCost" | "developmentSpread" | "loanToCost" | "equityIrr" | "equityMultiple" | "unrealizedMultiple" | "breakEven";
+const GLOSS_FOR: Record<string, GlossKey> = {
+  sizing_dscr: "dcr", stabilized_noi: "noi", yield_on_cost: "yieldOnCost", development_spread: "developmentSpread", loan_to_cost: "loanToCost",
+  equity_irr: "equityIrr", equity_multiple: "equityMultiple", unrealized_equity_multiple: "unrealizedMultiple", break_even_occupancy: "breakEven",
+};
+/** Key figures the glossary does not define, each with its own plain sentence in strings/run.ts. */
+const MEANINGS = new Set(["total_development_cost", "capitalized_interest", "exit_value", "development_profit", "profit_on_cost", "required_equity",
+  "debt_yield", "contractual_dscr", "cost_per_unit", "lp_irr", "gp_irr", "gp_promote", "refinance_cash_returned", "cash_left_in_deal",
+  "dcr_after_refinance", "cash_on_cash_after_refinance", "stated_value", "unrealized_equity_irr", "interest_before_completion", "gross_sales_revenue",
+  "net_sales_revenue", "carry_total", "interest_after_completion", "development_profit_for_sale", "profit_on_cost_for_sale", "margin_on_revenue",
+  "peak_equity", "deposits_held_at_completion", "completion_month", "sellout_month"]);
+/** One plain sentence for a key figure: the glossary's meaning in the reader's chosen terms (as the Glossary shows it), else the figure's own. */
+export function meaning(i: ReturnType<typeof useI18n>, key: string): string | undefined {
+  const g = GLOSS_FOR[key];
+  if (g) {
+    const entry: readonly [string, string] = i.terms === "plain" ? i.t(`terms.gloss.${g}`)
+      : g === "developmentSpread" || g === "unrealizedMultiple" ? i.t(`terms.financeGloss.${g}`) : i.t(`glossary.${g}`);
+    return entry[1];
+  }
+  return MEANINGS.has(key) ? i.t(`run.meaning.${key}` as "run.meaning.debt_yield") : undefined;
+}
+
 const INPUTS_CHANGED = "An approved input changed after this run.";
 type Change = { fieldKey: string; itemKey: string | null; now?: { value: number; unit: string }; was?: { value: number; unit: string } };
 /** Approved values that differ from the ones the run used, matched on field and item. Both are shown as recorded; nothing is subtracted. */
@@ -242,6 +265,8 @@ export function RunAssumed({ v }: { v: RunView }) {
   const notFound = v.notFound ?? [];
   const unsigned = v.policyDraft || !isSigned(v.policyVersion);
   const devKey = v.signed === "development key";
+  // The engine compounds loan interest monthly; a senior loan says so beside the run's setup (card D4).
+  const loan = v.inputs.some((x) => x.fieldKey === "senior_loan_amount" && x.value > 0);
   const gap = v.result.checks.find((c) => c.key === "stated_total_cost" && c.severity !== "pass" && c.expected !== undefined && c.actual !== undefined);
   const parts = gap ? costParts(v.result.scenarios[0]!.metrics, gap.expected!) : null;
   const values = (rows: RunView["inputs"]) => (
@@ -249,7 +274,7 @@ export function RunAssumed({ v }: { v: RunView }) {
       {rows.map((x) => <Fragment key={`${x.fieldKey}:${x.itemKey ?? ""}`}><dt>{L.field(x.fieldKey, x.itemKey)}</dt><dd className="num">{f.value(x.value, unit(x.fieldKey))}</dd></Fragment>)}
     </dl>
   );
-  const empty = !stated.length && !defaults.length && !notFound.length && !unsigned && !devKey && !gap;
+  const empty = !stated.length && !defaults.length && !notFound.length && !unsigned && !devKey && !loan && !gap;
   return (
     <section className="card card-pad stack tight run-assumed" aria-labelledby="run-assumed-h">
       <h2 className="h2" id="run-assumed-h">{t("run.assumedTitle")}</h2>
@@ -264,12 +289,13 @@ export function RunAssumed({ v }: { v: RunView }) {
           </dl>
         </div>
       )}
-      {(unsigned || devKey) && (
+      {(unsigned || devKey || loan) && (
         <div>
           <h3 className="h3">{t("run.assumed.setup")}</h3>
           <dl className="kv run-assumed-kv">
             {unsigned && <><dt>{t("run.assumed.policy")}</dt><dd>{t(v.policyDraft ? "run.assumed.policyWhy" : "run.assumed.policyWhyUnsigned")}</dd></>}
             {devKey && <><dt>{t("run.assumed.devKey")}</dt><dd>{t("run.assumed.devKeyWhy")}</dd></>}
+            {loan && <><dt>{t("run.assumed.loan")}</dt><dd>{t("run.assumed.loanWhy")}</dd></>}
           </dl>
         </div>
       )}
@@ -422,50 +448,56 @@ export function Run({ dealId, run: fromAddress }: { dealId: string; run?: string
   const refi = v.refinance;
   const refiAfter = figures.includes("dcr_after_refinance") ? "dcr_after_refinance" : figures[figures.length - 1];
   return (
-    <>
+    // On a phone the verdict comes before the step tiles: the body's first block is lifted above the path (run.css, card D4).
+    <div className="run-page">
       <DealFrame o={o} active="run" />
-      <div className="stack">
-        {!v.fresh && (
-          <Banner tone="review" title={t("run.outOfDate", { n: v.number })}>
-            <span>{stale} {t("run.outOfDateBody")}</span>
-            {changes.length > 0 && (
-              <ul className="run-changes">
-                {changes.slice(0, SHOWN_CHANGES).map((c) => <li key={`${c.fieldKey}:${c.itemKey ?? ""}`}>{changeText(c)}</li>)}
-                {changes.length > SHOWN_CHANGES && <li>{t("run.changed.more", { n: changes.length - SHOWN_CHANGES })}</li>}
-              </ul>
-            )}
-          </Banner>
-        )}
-        {stoppedNotice}
-        <ErrorText error={start.error} />
+      <div className="stack run-body">
+        <div className="stack run-top">
+          {!v.fresh && (
+            <Banner tone="review" title={t("run.outOfDate", { n: v.number })}>
+              <span>{stale} {t("run.outOfDateBody")}</span>
+              {changes.length > 0 && (
+                <ul className="run-changes">
+                  {changes.slice(0, SHOWN_CHANGES).map((c) => <li key={`${c.fieldKey}:${c.itemKey ?? ""}`}>{changeText(c)}</li>)}
+                  {changes.length > SHOWN_CHANGES && <li>{t("run.changed.more", { n: changes.length - SHOWN_CHANGES })}</li>}
+                </ul>
+              )}
+            </Banner>
+          )}
+          {stoppedNotice}
+          <ErrorText error={start.error} />
 
-        <section className="card" aria-label={t("run.verdictAria")}>
-          <div className="card-pad run-verdict">
-            <div className="run-verdict-text">
-              <div className="row">
-                <VerdictBadge code={v.result.verdict.code} />
-                {v.policyCustom && <span>{t("threshold.withYours")}</span>}
-                <span className="muted">{t("run.verdictLine", { n: v.number, policy: policyName(i, v.policyVersion), draft: v.policyDraft, unsigned: !isSigned(v.policyVersion) })}</span>
+          <section className="card" aria-label={t("run.verdictAria")}>
+            <div className="card-pad run-verdict">
+              <div className="run-verdict-text">
+                <div className="row">
+                  <VerdictBadge code={v.result.verdict.code} />
+                  {v.policyCustom && <span>{t("threshold.withYours")}</span>}
+                  <span className="muted">{t("run.verdictLine", { n: v.number, policy: policyName(i, v.policyVersion), draft: v.policyDraft, unsigned: !isSigned(v.policyVersion) })}</span>
+                </div>
+                <p className="run-headline">{vt.headline}</p>
+                <p className="muted">{vt.explanation}</p>
+                <p className="small muted">{v.fresh ? t("run.currentLine") : t("run.staleLine", { reasons: stale })}</p>
+                <StandardVerdict custom={v.policyCustom ?? false} standard={v.result.standard} />
+                <p className="small muted">{t("run.thresholdsLine")} <Link to="/deals/$dealId/review" params={{ dealId }} hash="thresholds">{t("run.thresholdsLink")}</Link></p>
+                <p className="small muted">{t("run.notAdvice")}</p>
               </div>
-              <p className="run-headline">{vt.headline}</p>
-              <p className="muted">{vt.explanation}</p>
-              <p className="small muted">{v.fresh ? t("run.currentLine") : t("run.staleLine", { reasons: stale })}</p>
-              <StandardVerdict custom={v.policyCustom ?? false} standard={v.result.standard} />
-              <p className="small muted">{t("run.thresholdsLine")} <Link to="/deals/$dealId/review" params={{ dealId }} hash="thresholds">{t("run.thresholdsLink")}</Link></p>
-            </div>
-            <div className="stack tight run-verdict-actions">
-              {/* An out-of-date run cannot be decided on, so running again comes first. */}
-              <div className="actions">
-                {!v.fresh && runBtn(t("run.again"))}
-                <Link to="/deals/$dealId/decision" params={{ dealId }} className={v.fresh ? "btn primary" : "btn quiet"}>{t("run.decide")}</Link>
-                <Link to="/deals/$dealId/reports" params={{ dealId }} className="btn quiet">{t("run.memoAction")}</Link>
-                <Link to="/deals/$dealId/explore" params={{ dealId }} className="btn quiet">{t("run.explore")}</Link>
-                {v.fresh && runBtn(t("run.again"), "ghost")}
+              <div className="stack tight run-verdict-actions">
+                {/* An out-of-date run cannot be decided on, so running again comes first. */}
+                <div className="actions">
+                  {!v.fresh && runBtn(t("run.again"))}
+                  <Link to="/deals/$dealId/decision" params={{ dealId }} className={v.fresh ? "btn primary" : "btn quiet"}>{t("run.decide")}</Link>
+                  <Link to="/deals/$dealId/reports" params={{ dealId }} className="btn quiet">{t("run.memoAction")}</Link>
+                  {/* The only explore button on this screen (the deal header leaves it to this card), with what it does (card D4). */}
+                  <Link to="/deals/$dealId/explore" params={{ dealId }} className="btn quiet" aria-describedby="run-explore-hint">{t("run.explore")}</Link>
+                  {v.fresh && runBtn(t("run.again"), "ghost")}
+                </div>
+                <p className="hint" id="run-explore-hint">{t("run.exploreHint")}</p>
+                {reasons}
               </div>
-              {reasons}
             </div>
-          </div>
-        </section>
+          </section>
+        </div>
 
         <RunAssumed v={v} />
 
@@ -478,9 +510,12 @@ export function Run({ dealId, run: fromAddress }: { dealId: string; run?: string
               const p = k === "unrealized_equity_irr" ? v.heldPartners : undefined;
               const sub = m.status !== "VALID" && m.reason ? i.msg(m.reason) : g ? t("run.gateNeeds", { v: f.value(g.threshold, g.unit) })
                 : m.status === "VALID" ? context[k]?.() : undefined;
+              const why = m.status !== "VALID" && m.reason?.includes("no sign change") ? t("run.meaning.noSignChange") : undefined;
+              const plain = meaning(i, k);
+              const s = sub || why || plain ? <>{sub && <span className="run-fig-sub">{sub}</span>}{why && <span className="run-fig-sub">{why}</span>}{plain && <span className="run-fig-meaning">{plain}</span>}</> : undefined;
               return (
                 <Fragment key={k}>
-                  <Figure k={<button type="button" className="run-fig-btn" aria-pressed={trace?.key === k} onClick={() => { setTrace(m); setRefiTrace(false); }}>{L.metric(k)}</button>} v={<MetricValue {...m} />} s={sub} />
+                  <Figure k={<button type="button" className="run-fig-btn" aria-pressed={trace?.key === k} onClick={() => { setTrace(m); setRefiTrace(false); }}>{L.metric(k)}</button>} v={<MetricValue {...m} />} s={s} />
                   {/* A held deal's partner returns (card 88): report arithmetic, not metrics, so they have no formula trace. */}
                   {p && ([["run.heldLpIrr", p.lpIrr, "%"], ["run.heldGpIrr", p.gpIrr, "%"], ["run.heldPromote", p.promote, "$"]] as const).map(([label, value, unit]) => (
                     <Figure key={label} k={t(label)} v={<MetricValue value={value} unit={unit} status={value === null ? "NOT_MEANINGFUL" : "VALID"} />} />
@@ -508,7 +543,7 @@ export function Run({ dealId, run: fromAddress }: { dealId: string; run?: string
 
         <section className="section">
           <h2 className="h2">{t("run.gates")}</h2>
-          <div className="card scroll">
+          <div className="card scroll run-gates">
             <table className="table">
               <thead><tr><th scope="col">{t("run.col.gate")}</th><th scope="col">{t("run.col.needs")}</th><th scope="col" className="r">{t("run.col.result")}</th><th scope="col">{t("run.col.outcome")}</th></tr></thead>
               <tbody>
@@ -524,6 +559,21 @@ export function Run({ dealId, run: fromAddress }: { dealId: string; run?: string
             </table>
             <div className="card-foot small muted">{t("run.gatesNote")}</div>
           </div>
+          {/* On a phone, one card per gate, as the stresses (card D4). */}
+          <ul className="run-phone-cards">
+            {v.result.verdict.gates.map((g) => (
+              <li key={g.key} className="card card-pad">
+                <h3 className="h3">{L.gate(g.key, g.label)}</h3>
+                <p className="small muted">{scenarioLabel(g.scenario)}</p>
+                <dl className="kv">
+                  <dt>{t("run.col.needs")}</dt><dd className="r">{t("run.atLeast", { v: f.value(g.threshold, g.unit) })}</dd>
+                  <dt>{t("run.col.result")}</dt><dd className="r">{g.actual === null ? <span className="not-meaningful">{g.status === "not_applicable" ? t("common.notApplicable") : t("common.notMeasured")}</span> : <span className="num">{f.value(g.actual, g.unit)}</span>}</dd>
+                  <dt>{t("run.col.outcome")}</dt><dd className="r"><GateOutcome status={g.status} /></dd>
+                </dl>
+              </li>
+            ))}
+          </ul>
+          <p className="small muted run-phone-only">{t("run.gatesNote")}</p>
         </section>
 
         <section className="section">
@@ -672,7 +722,7 @@ export function Run({ dealId, run: fromAddress }: { dealId: string; run?: string
           </section>
         </div>
       </div>
-    </>
+    </div>
   );
 }
 

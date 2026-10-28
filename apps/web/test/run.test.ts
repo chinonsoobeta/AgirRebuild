@@ -422,7 +422,7 @@ describe("the reports screen (card C5)", () => {
   });
   afterEach(() => { queryState.interactive = false; queryState.artifacts = []; vi.unstubAllGlobals(); });
 
-  it("leads with the build decision, marked as the first report to make, with one primary button per card", () => {
+  it("leads with the build decision, marked as the first report to make, with the page's one primary button on it (card D4)", () => {
     queryState.artifacts = [];
     const html = render();
     const order = ["Build decision", "Committee memo", "Lender package", "Partner memo", "Model export"].map((x) => html.indexOf(`<h3 class="h3">${x}</h3>`));
@@ -430,10 +430,14 @@ describe("the reports screen (card C5)", () => {
     expect([...order].sort((a, b) => a - b)).toEqual(order);
     expect(html.indexOf("Recommended first report")).toBeGreaterThan(order[0]!);
     expect(html.indexOf("Recommended first report")).toBeLessThan(order[1]!);
+    // Card D4: only the recommended report's first file is primary; every other Generate button is quiet.
     for (const kind of ["build_decision", "ic_memo", "lender_package", "model_export"]) {
       const mine = generate().filter((b) => String(b.props.value).startsWith(`${kind}:`));
-      expect(mine.filter((b) => String(b.props.className).includes("primary")).length).toBe(1);
+      expect(mine.length).toBeGreaterThan(0);
+      expect(mine.filter((b) => String(b.props.className).includes("primary")).length, kind).toBe(kind === "build_decision" ? 1 : 0);
+      if (kind !== "build_decision") for (const b of mine) expect(String(b.props.className)).toContain("quiet");
     }
+    expect(generate().filter((b) => String(b.props.className).includes("primary"))).toHaveLength(1);
     expect(html).not.toContain("IC memo");
   });
 

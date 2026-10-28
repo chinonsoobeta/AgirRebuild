@@ -160,9 +160,9 @@ export function Reports({ dealId }: { dealId: string }) {
             if (a?.status === "queued") return (
               <button key={fmt} className="btn quiet sm" type="button" disabled aria-busy="true"><span className="spin" aria-hidden="true" />{t("reports.renderingFmt", { f: fmtName(fmt) })}</button>
             );
-            // One primary action per card: the first file still to make.
+            // One primary action on the page: the recommended report's first file still to make; the other cards stay quiet (card D4).
             return (
-              <button key={fmt} name="generate" value={`${k.kind}:${fmt}`} className={`btn ${fmt === firstToMake ? "primary" : "quiet"} sm`} type="button" disabled={!canEdit(role) || make.isPending}
+              <button key={fmt} name="generate" value={`${k.kind}:${fmt}`} className={`btn ${k.kind === "build_decision" && fmt === firstToMake ? "primary" : "quiet"} sm`} type="button" disabled={!canEdit(role) || make.isPending}
                 onClick={() => go({ kind: k.kind, format: fmt })}>{t("reports.generateFmt", { f: fmtName(fmt), n: r.number })}</button>
             );
           })}

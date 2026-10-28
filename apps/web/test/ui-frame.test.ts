@@ -206,7 +206,7 @@ describe("the deal frame", () => {
     expect(kept).not.toContain("Plan:");
   });
   it("has the back link, the name, the meta line and the actions", () => {
-    const out = render(createElement(DealFrame, { o: { ...decided, copiedFrom: { id: "d0", name: "Original" } }, active: "run" }));
+    const out = render(createElement(DealFrame, { o: { ...decided, copiedFrom: { id: "d0", name: "Original" } }, active: "decision" }));
     expect(out).toMatch(/<div class="deal-head">/);
     expect(out).toMatch(/<a href="\/deals" class="back"><svg[^>]*>.*<\/svg>All deals<\/a>/);
     expect(out).toContain('<h1 class="deal-name">Test deal</h1>');
@@ -231,6 +231,11 @@ describe("the deal frame", () => {
     expect(render(createElement(DealFrame, { o: unitsOnly, active: "run" }))).toContain('<p class="meta">Halifax, Nova Scotia · multifamily · 6 units · amounts in Canadian dollars</p>');
   });
 
+  it("leaves Explore changes to the run screen's verdict card on the run step (card D4)", () => {
+    expect(render(createElement(DealFrame, { o: decided, active: "run" }))).not.toContain("Explore changes");
+    expect(render(createElement(DealFrame, { o: decided, active: "reports" }))).toContain("Explore changes");
+  });
+
   it("hides Explore changes without a run", () => {
     const out = render(createElement(DealFrame, { o: reviewBlocked, active: "review" }));
     expect(out).not.toContain("Explore changes");
@@ -238,14 +243,14 @@ describe("the deal frame", () => {
   });
 
   it("hides Copy as a variant from a viewer", () => {
-    const out = render(createElement(DealFrame, { o: decided, active: "run" }), me([workspace("w1", "First workspace", "viewer")]));
+    const out = render(createElement(DealFrame, { o: decided, active: "decision" }), me([workspace("w1", "First workspace", "viewer")]));
     expect(out).not.toContain("Copy as a variant</button>");
     expect(out).toContain("Explore changes");
   });
 
   it("speaks French", () => {
     store.set("agir.lang", "fr");
-    const out = render(createElement(DealFrame, { o: decided, active: "run" }));
+    const out = render(createElement(DealFrame, { o: decided, active: "decision" }));
     expect(out).toContain("Tous les projets");
     expect(out).toContain("Explorer des changements");
     const o: DealOverview = { ...decided, units: 6, exit: "refinance_hold" };

@@ -24,3 +24,7 @@
   .rep-made td .acts{justify-content:flex-start}
 }
 .rep-tags{gap:8px}
+/* On a touch screen every report button is at least 44 px tall (card D4). */
+@media (pointer:coarse){
+  .rep-acts .btn,.rep-other .btn{min-height:44px}
+}

@@ -96,7 +96,8 @@ describe("the run screen with figures in context, history status and a run in th
   it("leaves a sub-line out when its value is not valid or its input is absent, never showing 0", () => {
     state.byId["run-2"] = view("run-2", 2, withMetric(withMetric(held, "cost_per_unit", { status: "NOT_MEANINGFUL", value: null }), "cash_left_in_deal",
       { status: "NOT_APPLICABLE", value: null }), { inputs: [] });
-    const words = figures(render());
+    // Card D4: each figure's plain meaning (which may name the cap rate) is not a sub-line, so it is left out here.
+    const words = figures(render().replace(/<span class="run-fig-meaning">[^<]*<\/span>/g, ""));
     expect(words).not.toContain("a unit");
     expect(words).not.toContain("stays in the deal");
     expect(words).not.toContain("cap rate");
