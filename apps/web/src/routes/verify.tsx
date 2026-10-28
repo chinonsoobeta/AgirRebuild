@@ -17,13 +17,24 @@ export function takeToken(): string | null {
   return token;
 }
 
+/** How long "send it again" stays disabled after a click, so a double click sends one email, not two (QA card D3). */
+export const RESEND_WAIT_MS = 15_000;
+
 /** "Send it again": a fresh link and code; earlier ones stop working. Shows that it was sent, that this server cannot send
- * email (card B: the answer says sent: false), or the API's sentence. */
+ * email (card B: the answer says sent: false), or the API's sentence. After a click the control rests for 15 s: each send
+ * retires the code before it, so a second click would kill the code the first one just sent. */
 function useResend() {
   const { t } = useI18n();
   const [sent, setSent] = useState<boolean | null>(null);
   const [error, setError] = useState<unknown>(null);
+  const [resting, setResting] = useState(false);
+  // The state above is only seen on the next draw; the ref stops a second click that arrives before it.
+  const clicked = useRef(false);
   const send = async () => {
+    if (clicked.current || resting) return;
+    clicked.current = true;
+    setResting(true);
+    setTimeout(() => { clicked.current = false; setResting(false); }, RESEND_WAIT_MS);
     setSent(null);
     setError(null);
     try {
@@ -40,7 +51,7 @@ function useResend() {
       <FormError error={error} />
     </>
   );
-  return { send, status };
+  return { send, status, resting };
 }
 
 /**
@@ -160,7 +171,7 @@ export function Verify() {
           <FormError error={result.error} />
           {loading ? null : me.data?.mail === false ? <Notice tone="review">{t("auth.noMail")}</Notice> : signedIn ? (
             <div className="stack tight">
-              <div><button className="btn primary" type="button" onClick={resend.send}>{t("auth.verify.newLink")}</button></div>
+              <div><button className="btn primary" type="button" disabled={resend.resting} onClick={resend.send}>{t("auth.verify.newLink")}</button></div>
               {resend.status}
             </div>
           ) : <p><Link to="/login">{t("auth.signIn")}</Link></p>}
@@ -183,8 +194,10 @@ export function Verify() {
     body = (
       <>
         <div>
-          <h1 className="h1">{t("auth.verify.check")}</h1>
-          <p className="muted auth-sub">{t("auth.verify.sent", { email: me.data.user.email })}</p>
+          {/* A server whose mailer writes to a folder (development) sends nothing, so nothing here claims a send (QA card D3). */}
+          <h1 className="h1">{t(me.data.mailFolder ? "auth.verify.title" : "auth.verify.check")}</h1>
+          {me.data.mailFolder ? <Notice tone="review">{t("auth.verify.folder")}</Notice>
+            : <p className="muted auth-sub">{t("auth.verify.sent", { email: me.data.user.email })}</p>}
         </div>
         <form className="stack tight" onSubmit={submit} noValidate>
           <div className="field"><label htmlFor="code">{t("auth.verify.code")}</label>
@@ -198,7 +211,7 @@ export function Verify() {
           </div>
           <p className="small muted">{t("auth.verify.later")}</p>
         </form>
-        <p className="small muted">{t("auth.verify.nothing")} <button type="button" className="auth-linkbtn" onClick={resend.send}>{t("auth.verify.again")}</button>.</p>
+        <p className="small muted">{t("auth.verify.nothing")} <button type="button" className="auth-linkbtn" disabled={resend.resting} onClick={resend.send}>{t("auth.verify.again")}</button>.</p>
         {resend.status}
         <p className="small muted">{t("auth.email.wrong")} <button type="button" className="auth-linkbtn" onClick={() => setChanging(true)}>{t("auth.email.different")}</button>.</p>
         {/* Once changed, the form closes and the sentence above names the new address from the refreshed `me`. */}

@@ -36,10 +36,10 @@ const Legal = screen(() => import("./routes/legal"), "Legal");
 
 const queryClient = new QueryClient({ defaultOptions: { queries: { staleTime: 5_000, retry: (n, e: any) => e?.status !== 401 && e?.status !== 403 && e?.status !== 404 && n < 2 } } });
 
-// index.html carries a static page (the name and the landing headline) in #boot, beside #root, that shows before any code
-// has arrived and while the router loads its first screen (QA item 9). The root route removes it when it first draws, and
-// "/" keeps showing the same words while the landing screen's file loads, so they stay put instead of flashing.
-const boot = document.getElementById("boot")?.innerHTML ?? "";
+// index.html carries a static page in #boot, beside #root, that shows before any code has arrived (QA item 9): the top of
+// the landing page on "/", the top bar and "Loading…" elsewhere (QA card D3). The root route removes it when it first
+// draws, and "/" keeps showing the landing top while the landing screen's file loads, so it stays put instead of flashing.
+const boot = document.querySelector("#boot .boot-landing")?.outerHTML ?? "";
 function RootScreen() {
   useEffect(() => { document.getElementById("boot")?.remove(); }, []);
   return <Suspense fallback={<Loading bar />}><Outlet /></Suspense>;

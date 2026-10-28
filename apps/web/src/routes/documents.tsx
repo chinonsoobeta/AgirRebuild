@@ -1,6 +1,6 @@
 import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
 import { Link } from "@tanstack/react-router";
-import { useEffect, useRef, useState } from "react";
+import { Fragment, useEffect, useRef, useState } from "react";
 import { api, type DocumentRow } from "../api";
 import { canEdit, DealFrame, ErrorText, useDeal, useSession } from "../components/ui";
 import { ChoiceCards, Notice, Tag } from "../components/kit";
@@ -95,6 +95,9 @@ export function Documents({ dealId }: { dealId: string }) {
   // The files added in this visit: the banner speaks once they are read, and a phone scrolls to the first new row.
   const [added, setAdded] = useState<string[]>([]);
   const [touch, setTouch] = useState(false);
+  // The file whose Remove is waiting for the in-page Yes (QA card D3: no native confirm(), one request per removal).
+  const [removing, setRemoving] = useState<string | null>(null);
+  const retiring = useRef(false);
   useEffect(() => {
     try { setTouch(window.matchMedia("(pointer: coarse)").matches); } catch { /* no matchMedia: keep the desktop words */ }
   }, []);
@@ -144,25 +147,34 @@ export function Documents({ dealId }: { dealId: string }) {
   // The count Review shows: the values waiting for a person there, from the same overview the stepper reads.
   const toReview = (o.review?.needsReview ?? 0) + (o.review?.conflicting ?? 0);
   const addedNow = added.length > 0;
+  // The files the overview counts as read: the banner's count on a return visit, before or without the list (QA card D3).
+  const filesRead = Math.max(readCount, o.documents.total - o.documents.failed - o.documents.processing);
+  // The green "N values to review" banner shows whenever values wait for review, not only right after an upload (QA card D3).
+  const showDone = !reading && ((addedNow && readCount > 0) || (toReview > 0 && filesRead > 0));
+  const retire = (id: string) => {
+    if (retiring.current || act.isPending) return;
+    retiring.current = true;
+    act.mutate({ id, action: "retire" }, { onSettled: () => { retiring.current = false; setRemoving(null); } });
+  };
   const counts = [
     ["documents.count.read", list.filter((d) => d.stage === "extracted").length],
     ["documents.count.processing", list.filter((d) => !DONE.includes(d.stage)).length],
     ["documents.count.failed", list.filter((d) => FAILED.includes(d.stage)).length],
   ] as const;
   return (
-    <>
+    <div className="docs-page">
       <DealFrame o={deal.data} active="documents" />
       <div className="stack">
-        {addedNow && (reading ? (
+        {addedNow && reading ? (
           <Notice title={t("documents.banner.reading", { n: list.filter((d) => !DONE.includes(d.stage)).length || added.length })} role="status" />
-        ) : readCount > 0 ? (
-          <Notice tone="pass" role="status" title={t("documents.banner.done", { files: readCount, n: toReview })}>
+        ) : showDone ? (
+          <Notice tone="pass" role="status" title={t("documents.banner.done", { files: filesRead, n: toReview })}>
             {failedCount > 0 && <p className="small">{t("documents.banner.failed", { n: failedCount })}</p>}
             <Link className="btn primary sm" to="/deals/$dealId/review" params={{ dealId }}>{toReview > 0 ? t("documents.banner.go", { n: toReview }) : t("documents.banner.goNone")}</Link>
           </Notice>
-        ) : failedCount > 0 ? (
+        ) : addedNow && !reading && failedCount > 0 ? (
           <Notice tone="stop" role="status" title={t("documents.banner.allFailed", { n: failedCount })} />
-        ) : null)}
+        ) : null}
         {editable && (
           <div className="docs-top">
             <div
@@ -219,12 +231,16 @@ export function Documents({ dealId }: { dealId: string }) {
                   const usedRole = readRole === "deal source" ? "deal_source" : readRole === "evidence" || readRole === "context" ? readRole : null;
                   const byPerson = d.read_role?.includes(", set by a person)");
                   const open = changing === d.id;
+                  const asking = removing === d.id;
                   return (
-                    <tr key={d.id} id={`doc-${d.id}`}>
+                    <Fragment key={d.id}>
+                    <tr id={`doc-${d.id}`}>
                       <td>
                         <a href={`/api/documents/${d.id}/file`}>{d.name}</a>
                         <span className="sub">
-                          {d.page_count ? `${t("docs.pages", { n: d.page_count })} · ` : ""}{f.bytes(d.size_bytes)} · {t("documents.added", { date: f.date(d.created_at), name: d.uploaded_by })}
+                          {d.page_count ? `${t("docs.pages", { n: d.page_count })} · ` : ""}{f.bytes(d.size_bytes)} · {t("documents.added", { date: f.date(d.created_at) })}
+                          {/* A long name is cut with an ellipsis, whole on hover, so the table never scrolls sideways (QA card D3). */}
+                          {d.uploaded_by && <> {t("documents.by")} <span className="docs-by" title={d.uploaded_by}>{d.uploaded_by}</span></>}
                         </span>
                       </td>
                       <td data-label={t("docs.col.stages")}><Stages d={d} i={i} /></td>
@@ -248,19 +264,28 @@ export function Documents({ dealId }: { dealId: string }) {
                             {d.stage === "read_failed" && (
                               <button className="btn quiet sm" type="button" onClick={() => act.mutate({ id: d.id, action: "retry" })}>{t("docs.retry")}</button>
                             )}
-                            <button
-                              className="btn ghost sm"
-                              type="button"
-                              onClick={() => {
-                                if (confirm(t("docs.removeConfirm", { name: d.name }))) act.mutate({ id: d.id, action: "retire" });
-                              }}
-                            >
+                            <button className="btn ghost sm" type="button" disabled={asking || act.isPending} aria-expanded={asking} aria-controls={`remove-${d.id}`}
+                              onClick={() => setRemoving(d.id)}>
                               {t("docs.remove")}
                             </button>
                           </div>
                         )}
                       </td>
                     </tr>
+                    {editable && asking && (
+                      <tr className="docs-confirm-row">
+                        <td colSpan={5}>
+                          <div id={`remove-${d.id}`} className="docs-confirm stack tight" role="alertdialog" aria-labelledby={`remove-q-${d.id}`} onKeyDown={(e) => { if (e.key === "Escape") setRemoving(null); }}>
+                            <p id={`remove-q-${d.id}`}>{t("docs.removeConfirm", { name: d.name })}</p>
+                            <div className="row">
+                              <button className="btn primary sm" type="button" autoFocus disabled={act.isPending} onClick={() => retire(d.id)}>{act.isPending ? t("documents.removing") : t("documents.removeYes")}</button>
+                              <button className="btn quiet sm" type="button" disabled={act.isPending} onClick={() => setRemoving(null)}>{t("common.cancel")}</button>
+                            </div>
+                          </div>
+                        </td>
+                      </tr>
+                    )}
+                    </Fragment>
                   );
                 })}
                 {list.length === 0 && docs.data && <tr><td colSpan={5} className="muted">{t("docs.empty")}</td></tr>}
@@ -283,6 +308,6 @@ export function Documents({ dealId }: { dealId: string }) {
           </div>
         </section>
       </div>
-    </>
+    </div>
   );
 }

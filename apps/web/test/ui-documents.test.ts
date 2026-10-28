@@ -5,10 +5,11 @@ import type { DocumentRow } from "../src/api";
 import { Documents } from "../src/routes/documents.tsx";
 
 // Card W5: the Documents screen. Mocks follow apps/web/test/run.test.ts.
-const state = vi.hoisted(() => ({ docs: undefined as unknown, role: "owner", ai: true, lang: "en" as "en" | "fr" }));
+const state = vi.hoisted(() => ({ docs: undefined as unknown, role: "owner", ai: true, lang: "en" as "en" | "fr",
+  overview: {} as Record<string, unknown>, mutate: [] as unknown[], hooks: [] as unknown[], index: 0, nodes: [] as { tag: string; props: Record<string, any> }[] }));
 vi.mock("@tanstack/react-query", () => ({
   useQuery: (options: { queryKey: unknown[] }) => (options.queryKey[0] === "documents" ? { data: state.docs } : {}),
-  useMutation: () => ({ mutate: () => {}, isPending: false, reset: () => {}, error: null }),
+  useMutation: () => ({ mutate: (vars: unknown) => { state.mutate.push(vars); }, isPending: false, reset: () => {}, error: null }),
   useQueryClient: () => ({ invalidateQueries: async () => {} }),
 }));
 vi.mock("@tanstack/react-router", async () => {
@@ -24,13 +25,29 @@ vi.mock("../src/components/ui", async (original) => {
   return {
     ...ui,
     DealFrame: () => createElement("header", null, "Deal header"),
-    useDeal: () => ({ data: { deal: { id: "d1", name: "Test deal", workspace_id: "ws" }, documents: { total: 0, processing: 0, failed: 0 } } }),
+    useDeal: () => ({ data: { deal: { id: "d1", name: "Test deal", workspace_id: "ws" }, documents: { total: 0, processing: 0, failed: 0 }, ...state.overview } }),
     useSession: () => ({ solo: true, role: state.role, me: { workspaces: [{ id: "other", ai_reading: !state.ai }, { id: "ws", ai_reading: state.ai }] } }),
   };
 });
 vi.mock("../src/i18n", async (original) => {
   const i18n = await original<typeof import("../src/i18n")>();
   return { ...i18n, useI18n: () => i18n.build(state.lang, () => {}) };
+});
+// useState keeps its values between renders, and buttons are recorded, so a test can click and draw again (as ui-auth.test.ts).
+vi.mock("react", async (original) => {
+  const react = await original<typeof import("react")>();
+  return { ...react, useState: (initial: unknown) => {
+    const n = state.index++;
+    if (!(n in state.hooks)) state.hooks[n] = typeof initial === "function" ? (initial as () => unknown)() : initial;
+    return [state.hooks[n], (value: unknown) => { state.hooks[n] = value; }];
+  } };
+});
+vi.mock("react/jsx-dev-runtime", async (original) => {
+  const runtime = await original<typeof import("react/jsx-dev-runtime")>();
+  return { ...runtime, jsxDEV: (...args: Parameters<typeof runtime.jsxDEV>) => {
+    if (args[0] === "button") state.nodes.push({ tag: "button", props: args[1] as Record<string, any> });
+    return runtime.jsxDEV(...args);
+  } };
 });
 vi.mock("../src/components/QuickStart", async () => {
   const { createElement } = await import("react");
@@ -50,7 +67,8 @@ const everyStage = (): DocumentRow[] => [
   row("extracting"),
   row("extracted", { candidate_count: 3, other_count: 2, number_format: "1.234,56", read_role: "budget (deal source)" }),
 ];
-const render = () => renderToStaticMarkup(createElement(Documents, { dealId: "d1" }));
+const render = () => { state.index = 0; state.nodes = []; return renderToStaticMarkup(createElement(Documents, { dealId: "d1" })); };
+const buttons = (label: string) => state.nodes.filter((n) => n.props.children === label || (Array.isArray(n.props.children) && n.props.children.includes(label)));
 const count = (html: string, s: string) => html.split(s).length - 1;
 
 beforeEach(() => {
@@ -58,6 +76,9 @@ beforeEach(() => {
   state.role = "owner";
   state.ai = true;
   state.lang = "en";
+  state.overview = {};
+  state.mutate = [];
+  state.hooks = [];
 });
 
 describe("Documents screen", () => {
@@ -158,5 +179,70 @@ describe("Documents screen", () => {
     state.docs = [];
     state.role = "viewer";
     expect(render()).not.toContain("Use the quick start");
+  });
+
+  // QA card D3 (impatient N1): the banner comes from the overview's counts, so it is there after a reload too.
+  it("shows the Review N values banner on a return visit whenever values wait for review", () => {
+    state.docs = [row("extracted", { candidate_count: 19 })];
+    state.overview = { documents: { total: 1, processing: 0, failed: 0 }, review: { needsReview: 18, conflicting: 2, approved: 0, awaitingSecond: 0 } };
+    let html = render();
+    expect(html).toContain("1 file read, 20 values to review.");
+    expect(html).toContain('href="/deals/d1/review"');
+    expect(html).toContain("Review 20 values →");
+    // Before the list arrives the overview alone is enough.
+    state.docs = undefined;
+    expect(render()).toContain("1 file read, 20 values to review.");
+    // Nothing waiting: no banner on a return visit.
+    state.docs = [row("extracted", { candidate_count: 19 })];
+    state.overview = { documents: { total: 1, processing: 0, failed: 0 }, review: { needsReview: 0, conflicting: 0, approved: 19, awaitingSecond: 0 } };
+    html = render();
+    expect(html).not.toContain("to review.");
+    // While a file is still being read, the values are not counted yet.
+    state.docs = [row("reading")];
+    state.overview = { documents: { total: 1, processing: 1, failed: 0 }, review: { needsReview: 3, conflicting: 0, approved: 0, awaitingSecond: 0 } };
+    expect(render()).not.toContain("to review.");
+  });
+
+  // QA card D3 (breaker #12): Remove asks in the page, and a double click on its Yes sends one request.
+  it("asks before removing in the page, not with a native confirm, and sends one request", () => {
+    vi.stubGlobal("confirm", vi.fn(() => true));
+    state.docs = [row("extracted", { candidate_count: 3 })];
+    let html = render();
+    expect(html).not.toContain("Remove extracted.pdf from this deal?");
+    buttons("Remove")[0]!.props.onClick();
+    html = render();
+    expect(html).toContain('role="alertdialog"');
+    expect(html).toContain("Remove extracted.pdf from this deal? Values found only in it go back to review.");
+    expect(buttons("Remove")[0]!.props.disabled).toBe(true);
+    const yes = buttons("Remove the file")[0]!;
+    yes.props.onClick();
+    yes.props.onClick();
+    expect(state.mutate).toEqual([{ id: "doc-extracted", action: "retire" }]);
+    expect(confirm).not.toHaveBeenCalled();
+    vi.unstubAllGlobals();
+    // Cancel closes it without a request.
+    state.hooks = [];
+    state.mutate = [];
+    render();
+    buttons("Remove")[0]!.props.onClick();
+    render();
+    buttons("Cancel")[0]!.props.onClick();
+    expect(render()).not.toContain('role="alertdialog"');
+    expect(state.mutate).toEqual([]);
+    state.lang = "fr";
+    state.hooks = [];
+    render();
+    buttons("Retirer")[0]!.props.onClick();
+    expect(render()).toContain("Retirer le fichier");
+  });
+
+  // QA card D3 (breaker N2): a long uploader name is cut, with the whole name in its title.
+  it("cuts a long uploader name with an ellipsis and keeps it whole in the title", () => {
+    const long = "Bartholomew-Maximilian Featherstonehaugh-Cholmondeley the Third";
+    state.docs = [row("extracted", { uploaded_by: long })];
+    const html = render();
+    expect(html).toContain(`by <span class="docs-by" title="${long}">${long}</span>`);
+    state.docs = [row("extracted", { uploaded_by: null as unknown as string })];
+    expect(render()).not.toContain("docs-by");
   });
 });

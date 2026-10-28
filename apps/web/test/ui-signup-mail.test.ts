@@ -225,3 +225,51 @@ describe("with no mail provider, no screen claims a send", () => {
     expect(account(render(Settings))).toContain(NO_MAIL_FR);
   });
 });
+
+// QA card D3: a server whose mailer writes to a folder sends nothing, so the verify page does not say "We sent a link".
+describe("the verify page and a mailer that writes to a folder", () => {
+  it("says the email goes to a folder and to use Skip for now, instead of We sent a link", () => {
+    at("/verify");
+    state.me = { ...person(false, true), mailFolder: true };
+    const words = text(render(Verify));
+    expect(words).toContain("This server writes email to a folder instead of sending it. Use Skip for now; you can confirm your address later.");
+    expect(words).not.toMatch(/We sent|Check your email/);
+    expect(words).toContain("Skip for now");
+    state.lang = "fr";
+    expect(text(render(Verify))).toContain("Ce serveur enregistre les courriels dans un dossier au lieu de les envoyer.");
+  });
+
+  it("a real mailer still says We sent a link, and points to the spam folder, not the junk folder", () => {
+    at("/verify");
+    state.me = person(false, true);
+    const words = text(render(Verify));
+    expect(words).toContain("We sent a link to morgan@example.test.");
+    expect(words).toContain("Check the spam folder");
+    expect(words).not.toMatch(/junk/i);
+    state.lang = "fr";
+    expect(text(render(Verify))).toContain("dossier des pourriels");
+  });
+
+  it("send it again rests for 15 seconds after a click, so a double click sends one email (breaker N6)", async () => {
+    vi.useFakeTimers();
+    try {
+      at("/verify");
+      state.me = person(false, true);
+      render(Verify);
+      const again = button("send it again")!;
+      expect(again.props.disabled).toBe(false);
+      await Promise.all([again.props.onClick(), again.props.onClick()]);
+      expect(vi.mocked(api.post).mock.calls.filter((c) => c[0] === "/auth/verify/send")).toHaveLength(1);
+      render(Verify);
+      expect(button("send it again")!.props.disabled).toBe(true);
+      vi.advanceTimersByTime(14_000);
+      render(Verify);
+      expect(button("send it again")!.props.disabled).toBe(true);
+      vi.advanceTimersByTime(1_000);
+      render(Verify);
+      expect(button("send it again")!.props.disabled).toBe(false);
+    } finally {
+      vi.useRealTimers();
+    }
+  });
+});
