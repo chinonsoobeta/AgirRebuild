@@ -400,6 +400,73 @@ export function todoList(
   return { blocking: readiness.missing.length + readiness.conflicting.length + readiness.pending.length + readiness.impossible.length, items };
 }
 
+/** Where a figure sits and what it says: a figure some reader made a value is the same figure wherever it is stored. */
+const figureKeys = (documentId: string, location: string, value: number | null, raw: string | null | undefined) =>
+  [...(value === null ? [] : [`${documentId}\u0000${location}\u0000v${value}`]), ...(raw ? [`${documentId}\u0000${location}\u0000r${raw}`] : [])];
+
+/**
+ * The figures no reader used (QA run 2, skeptic N1). A figure the rules left unmatched is still used when a reader, the rules
+ * or the AI reading, made it a candidate or a value's source; it is left out unless a person labelled it, which the list shows.
+ * `all` keeps every figure, for the ids the AI reading's own unused list names.
+ */
+async function otherFigures(tx: Db, dealId: string, assumptions: Pick<AssumptionDb, "sources">[]) {
+  const rows = await tx.query<{ id: string; document_id: string; document_name: string; raw: string; value: number | null; unit_seen: string | null; location: string; context: string; note: string | null }>(
+    `select c.id, c.document_id, d.name as document_name, c.raw, c.value, c.unit_seen, c.location, c.context, c.note
+     from candidates c join documents d on d.id = c.document_id
+     where c.deal_id = $1 and c.field_key is null and d.retired_at is null
+     order by d.name, c.location`,
+    [dealId],
+  );
+  // The id a figure label names: the same one the worker's reconcile computes.
+  const figures = figureOrder(rows.map((r) => ({ fieldKey: null, itemKey: null, value: r.value, raw: r.raw, unitSeen: r.unit_seen, location: r.location, context: r.context, rule: "", documentId: r.document_id, documentName: r.document_name, rowId: r.id }) as SourcedCandidate));
+  const figureIds = new Map(offeredIds(figures).map((id, i) => [(figures[i] as SourcedCandidate & { rowId: string }).rowId, id]));
+  const labels = await tx.query<{ document_id: string; figure_id: string; field_key: string; item_key: string; by: string; created_at: string | Date }>(
+    `select l.document_id, l.figure_id, l.field_key, l.item_key, coalesce(nullif(btrim(u.name), ''), u.email) as by, l.created_at from figure_labels l join users u on u.id = l.created_by where l.deal_id = $1`,
+    [dealId],
+  );
+  const all = rows.map((r) => {
+    const figureId = figureIds.get(r.id) ?? null;
+    const l = labels.find((x) => x.document_id === r.document_id && x.figure_id === figureId);
+    return {
+      documentId: r.document_id, document_name: r.document_name, raw: r.raw, value: r.value, location: r.location, context: r.context, note: r.note, figureId,
+      label: l ? { fieldKey: l.field_key, itemKey: l.item_key || null, by: l.by, at: l.created_at } : null,
+      // Card 112: fields a person might label it with. Never stored or read; a click saves an ordinary label.
+      suggestions: l || !figureId || r.value === null ? [] : suggestFields({ raw: r.raw, context: r.context, note: r.note, unitSeen: r.unit_seen, value: r.value }),
+    };
+  });
+  const used = new Set<string>();
+  // Only a reading uses a figure. A choice between a figure's readings, a remembered label or a suggested one is a proposal on a figure
+  // no reader named, which a person settles by labelling it here, so that figure stays listed.
+  const proposal = new Set(["arithmetic-choice", "remembered", "suggested", "labelled"]);
+  for (const a of assumptions) for (const s of a.sources ?? []) if (s.document_id && s.location && !proposal.has(s.rule ?? "")) for (const k of figureKeys(s.document_id, s.location, s.value, s.raw)) used.add(k);
+  const matched = await tx.query<{ document_id: string; location: string; value: number | null; raw: string }>(
+    `select document_id, location, value, raw from candidates where deal_id = $1 and field_key is not null`, [dealId]);
+  for (const c of matched) for (const k of figureKeys(c.document_id, c.location, c.value, c.raw)) used.add(k);
+  const other = all.filter((o) => o.label || !figureKeys(o.documentId, o.location, o.value, o.raw).some((k) => used.has(k)));
+  return { all, other };
+}
+
+/**
+ * The deal's documents (QA run 2, skeptic N2). used_count is the number of current values with a source in the document, from
+ * the rules or the AI reading; candidate_count stays what the rules alone found. other_count is the figures no reader used.
+ */
+export async function documentsView(tx: Db, dealId: string) {
+  const rows = await tx.query<{ id: string; candidate_count: number }>(
+    `select d.id, d.name, d.kind, d.role_set, d.read_role, d.size_bytes, d.stage, d.stage_detail, d.page_count, d.number_format, d.needs_ocr, d.candidate_count,
+            d.created_at, d.updated_at, coalesce(nullif(btrim(u.name), ''), u.email) as uploaded_by
+     from documents d left join users u on u.id = d.uploaded_by
+     where d.deal_id = $1 and d.retired_at is null order by d.created_at, d.name`,
+    [dealId],
+  );
+  const assumptions = (await loadAssumptions(tx, dealId)).filter((a) => a.status !== "rejected");
+  const { other } = await otherFigures(tx, dealId, assumptions);
+  return rows.map((d) => ({
+    ...d,
+    used_count: assumptions.filter((a) => a.sources.some((s) => s.document_id === d.id)).length,
+    other_count: other.filter((o) => o.documentId === d.id).length,
+  }));
+}
+
 export async function reviewView(tx: Db, dealId: string, asOf: string) {
   const assumptions = await loadAssumptions(tx, dealId);
   const { readiness, gaps } = readinessFor(assumptions);
@@ -450,30 +517,7 @@ export async function reviewView(tx: Db, dealId: string, asOf: string) {
     if (option && (option.value !== saved.value || proposal.effective !== source.effective || proposal.tableId !== source.tableId)) tableNotices.unshift({...proposal,options:[option]});
   }
   const viewer = await clientViewer(tx, dealId);
-  const rows = await tx.query<{ id: string; document_id: string; document_name: string; raw: string; value: number | null; unit_seen: string | null; location: string; context: string; note: string | null }>(
-    `select c.id, c.document_id, d.name as document_name, c.raw, c.value, c.unit_seen, c.location, c.context, c.note
-     from candidates c join documents d on d.id = c.document_id
-     where c.deal_id = $1 and c.field_key is null and d.retired_at is null
-     order by d.name, c.location`,
-    [dealId],
-  );
-  // The id a figure label names: the same one the worker's reconcile computes.
-  const figures = figureOrder(rows.map((r) => ({ fieldKey: null, itemKey: null, value: r.value, raw: r.raw, unitSeen: r.unit_seen, location: r.location, context: r.context, rule: "", documentId: r.document_id, documentName: r.document_name, rowId: r.id }) as SourcedCandidate));
-  const figureIds = new Map(offeredIds(figures).map((id, i) => [(figures[i] as SourcedCandidate & { rowId: string }).rowId, id]));
-  const labels = await tx.query<{ document_id: string; figure_id: string; field_key: string; item_key: string; by: string; created_at: string | Date }>(
-    `select l.document_id, l.figure_id, l.field_key, l.item_key, coalesce(nullif(btrim(u.name), ''), u.email) as by, l.created_at from figure_labels l join users u on u.id = l.created_by where l.deal_id = $1`,
-    [dealId],
-  );
-  const other = rows.map((r) => {
-    const figureId = figureIds.get(r.id) ?? null;
-    const l = labels.find((x) => x.document_id === r.document_id && x.figure_id === figureId);
-    return {
-      documentId: r.document_id, document_name: r.document_name, raw: r.raw, value: r.value, location: r.location, context: r.context, note: r.note, figureId,
-      label: l ? { fieldKey: l.field_key, itemKey: l.item_key || null, by: l.by, at: l.created_at } : null,
-      // Card 112: fields a person might label it with. Never stored or read; a click saves an ordinary label.
-      suggestions: l || !figureId || r.value === null ? [] : suggestFields({ raw: r.raw, context: r.context, note: r.note, unitSeen: r.unit_seen, value: r.value }),
-    };
-  });
+  const { all, other } = await otherFigures(tx, dealId, assumptions);
   const docs = await currentDocuments(tx, dealId);
   // RLS on ai_readings limits this snapshot to staff, including when a client can read the deal.
   const [stored] = await tx.query<{ outcome: "ok" | "failed"; model: string; prompt_version: string; created_at: string | Date; response: ReaderResponse | null; verification: { readings: ReadingVerification[]; conflicts: ReadingVerification[][] } | null }>(
@@ -487,7 +531,7 @@ export async function reviewView(tx: Db, dealId: string, asOf: string) {
     notUsed: (stored.response?.not_used ?? []).map(r => {
       const matches = docs.filter(d => d.name === r.file);
       const document = matches.length === 1 ? matches[0] : undefined;
-      return { ...r, figureId: other.find(o => !o.label && o.documentId === document?.id && o.location === r.location && o.value === r.value)?.figureId ?? null };
+      return { ...r, figureId: all.find(o => !o.label && o.documentId === document?.id && o.location === r.location && o.value === r.value)?.figureId ?? null };
     }),
     pleaseCheck: [
       ...(stored.response?.readings ?? []).flatMap((r, i) => rejectedReading(r, stored.verification?.readings[i])),

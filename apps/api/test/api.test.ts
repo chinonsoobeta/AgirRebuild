@@ -377,7 +377,8 @@ describe("a new run after a change", () => {
   const selling = async () => (await call(alice, "GET", `/api/deals/${deal}/review`)).json.assumptions.find((a: any) => a.fieldKey === "selling_costs_pct");
   const review = async (action: string) => {
     const a = await selling();
-    expect((await call(alice, "POST", `/api/assumptions/${a.id}/review`, { action, version: a.version })).status).toBe(200);
+    // Card D2: a value a document states is rejected with a written reason.
+    expect((await call(alice, "POST", `/api/assumptions/${a.id}/review`, { action, version: a.version, ...(action === "reject" ? { reason: "Using the named default instead" } : {}) })).status).toBe(200);
   };
   const acceptDefault = async () => {
     await review("reject");

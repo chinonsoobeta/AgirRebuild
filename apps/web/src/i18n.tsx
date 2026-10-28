@@ -676,6 +676,7 @@ const FR_REASONS: [RegExp, string | ((m: RegExpMatchArray) => string)][] = [
   [/^Someone changed this value while you were looking at it\. Reload and try again\.$/, "Quelqu'un a modifié cette valeur pendant que vous la consultiez. Rechargez la page et réessayez."],
   [/^A conflict can only be resolved to one of the documented values\./, "Un conflit ne peut être résolu que par l'une des valeurs documentées. Utilisez « Saisir une autre valeur » pour déroger."],
   [/^Say why you are entering a different value \(at least 10 characters\)$/, "Expliquez pourquoi vous saisissez une autre valeur (au moins 10 caractères)"],
+  [/^A document states this value; to reject it, say why \(at least 10 characters\)\.$/, "Un document indique cette valeur ; pour la rejeter, dites pourquoi (au moins 10 caractères)."],
   [/^Only a workspace in solo review can use its own value as stated; here a second person must confirm it$/, "Seul un espace de travail en examen individuel peut utiliser sa propre valeur comme déclarée ; ici, une seconde personne doit la confirmer"],
   [/^Only a value waiting for a second approver can be used as stated$/, "Seule une valeur qui attend un second approbateur peut être utilisée comme déclarée"],
   [/^Only the person who entered this value can use it as stated$/, "Seule la personne qui a saisi cette valeur peut l'utiliser comme déclarée"],

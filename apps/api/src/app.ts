@@ -14,7 +14,7 @@ import { addressTaken, emailAuth } from "./email-auth.ts";
 import { log as defaultLog, type LogFields, type Logger } from "./log.ts";
 import type { Mailer } from "./mailer.ts";
 import { limiter, memoryState, type SharedState } from "./shared-state.ts";
-import { thresholdsView, auditPackage, clientViewer, createRun, dealOverview, hideClientEvents, HttpError, labelRefusal, regionGroups, reviewView, runView, sha256 } from "./services.ts";
+import { thresholdsView, auditPackage, clientViewer, createRun, dealOverview, hideClientEvents, HttpError, labelRefusal, regionGroups, reviewView, documentsView, runView, sha256 } from "./services.ts";
 
 export type AppDeps = { db: Db; store: BlobStore; secureCookies: boolean; demoSignIn?: boolean; trustProxy?: boolean; now?: () => Date;
   /** Sends verification and reset emails. Without one, nothing is sent. */ mailer?: Mailer;
@@ -652,16 +652,7 @@ export function createApp({ db, store, secureCookies, demoSignIn = false, trustP
 
   // ---- Documents --------------------------------------------------------------------
   app.get("/api/deals/:id/documents", async (c) => {
-    const rows = await as(c, (tx) =>
-      tx.query(
-        `select d.id, d.name, d.kind, d.role_set, d.read_role, d.size_bytes, d.stage, d.stage_detail, d.page_count, d.number_format, d.needs_ocr, d.candidate_count,
-                d.created_at, d.updated_at, coalesce(nullif(btrim(u.name), ''), u.email) as uploaded_by,
-                (select count(*)::int from candidates c where c.document_id = d.id and c.field_key is null) as other_count
-         from documents d left join users u on u.id = d.uploaded_by
-         where d.deal_id = $1 and d.retired_at is null order by d.created_at, d.name`,
-        [c.req.param("id")],
-      ),
-    );
+    const rows = await as(c, (tx) => documentsView(tx, c.req.param("id")));
     return c.json(rows);
   });
 
@@ -787,6 +778,11 @@ export function createApp({ db, store, secureCookies, demoSignIn = false, trustP
         const [a] = await tx.query<{field_key: string}>(`select field_key from assumptions where id=$1`, [c.req.param("id")]);
         if (!a) throw new HttpError(404, "Assumption not found");
         reason = windowReason(a.field_key, body.value, reason, body.confirmOutsideWindow, body.action === "modify");
+      }
+      if (body.action === "reject") {
+        // QA run 2 (breaker #21): turning down a value a document states is a judgement on the document, so it is written down.
+        const [a] = await tx.query<{ stated: boolean }>(`select jsonb_array_length(coalesce(sources, '[]'::jsonb)) > 0 as stated from assumptions where id=$1`, [c.req.param("id")]);
+        if (a?.stated && (reason ?? "").trim().length < 10) throw new HttpError(422, "A document states this value; to reject it, say why (at least 10 characters).");
       }
       return tx.query(`select (a).status, (a).version from (select fn_review($1, $2, $3, $4, $5) a) x`, [
         c.req.param("id"), body.action, body.value ?? null, reason ?? null, body.version ?? null,
