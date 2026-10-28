@@ -28,6 +28,8 @@ work it describes.
 | The same gate, and `--tier=pr` | 6560 tests in 64 files, the fallback test, web build; PR tier 6560 in 64 | 2026-10-25, `card/A-deploy` |
 | `docker build -f deploy/Dockerfile -t agir .` then `docker compose -f deploy/compose.yml up -d --wait` (Docker 29, Compose 5.6, colima arm64) | Image 1.87 GB; Postgres 16, the API (all migrations applied) and the standalone worker healthy; an upload through the API was read, run and rendered to a memo PDF | 2026-10-25, `card/A-deploy` |
 | `deploy/backup.sh`, `docker compose down -v`, `deploy/restore.sh <dump> <tar>` | The deal, 6 documents, 1 run, 1 memo, 53 audit events (chain verifies) and 7 blobs came back; no migration re-applied | 2026-10-25, `card/A-deploy` |
+| The same gate from the main checkout | 6828 tests in 76 files, the fallback test (1 passed, 254 skipped), web build within budget (first visit 559.0 kB of 690, largest chunk 341.4 kB of 500, CSS 45.1 kB of 60), 92 accessibility scans with 0 violations | 2026-10-27, `main` `1c8ef5f` (QA cards D1 to D5 merged) |
+| The same gate | 6833 tests in 77 files, the fallback test (1 passed, 255 skipped), the same budgets and scans | 2026-10-27, `main` `cafb35c` (the two run-3 follow-ups) |
 | `env -u ANTHROPIC_API_KEY AGIR_DATA_DIR=<empty folder> PORT=8798 AGIR_ACCOUNT_CLOSURE=1 npm start` | The same, with closing a workspace and deleting an account offered; without `AGIR_ACCOUNT_CLOSURE` both routes answer 404 and Settings shows neither | 2026-10-25, `card/F-close-account` (migration `0039` applied to a fresh database) |
 | `env -u ANTHROPIC_API_KEY NODE_OPTIONS=--max-old-space-size=3072 node --import tsx scripts/a11y.mjs` (after `npm run build -w @agir/web`) | 92 scans (23 screens, light and dark, English and French), 0 violations of any impact. It runs in the release gate as `accessibility scan`; that whole gate took 176 s on this machine | 2026-10-25, `card/G-a11y-perf` |
 | `env -u ANTHROPIC_API_KEY NODE_OPTIONS=--max-old-space-size=3072 VITEST_MAX_WORKERS=2 npm run gate -- --tier=release` | Both typechecks, 6682 tests in 72 files, the fallback test (1 passed, 252 skipped), web build, `performance budget` (first visit 547.4 kB of 690, largest chunk 339.9 kB of 500, all JavaScript 939.8 kB of 1200, CSS 37.6 kB of 60) and the accessibility scan (92 scans, 0 violations), in 172 s; PR tier 6682 tests in 72 files | 2026-10-25, `card/I-strings-by-screen` |
@@ -453,6 +455,30 @@ job, and the worker retries it 2 s later; on the slower runner that retry fired 
 counted as a provider call (locally it fires inside card 160b, harmlessly). The test now runs its own retry and
 asserts it (`78a049d`; CI on that commit passed). The run before, on `ae73ea6`, had failed on a 10 s hook timeout in `shared-state.test.ts`, a runner
 slowness, not code.
+
+### Second pass (2026-10-27, evening)
+
+The run-2 list was fixed in five cards on their own branches and worktrees (D1 Review tone and flow, D2 Review data,
+D3 the static shell and the public pages, D4 the run screen and the PDFs, D5 the decision form, the header name and the
+audit counts), each audited by running before the merge; merged into `main` as `1c8ef5f`. Two follow-ups from the
+rerun: `1ce67db` (the reading verifier strips a quote's own `[line N] ` marker before the exact-substring check, and a
+failed AI reading of a figure the rules already read is not raised again) and `cafb35c` (the router's default pending
+component keeps the static shell on screen while the first screen's file loads; the session gate shows the same
+header and skeleton). The rerun (run 3) in `LAUNCH-QA-2026-10-27.md`: all five reached first success with no
+workaround; 93 of 93 read values right; of the 78 items still open after run 2, 41 fixed, 26 partly, 10 not fixed
+(the needs-a-person items and wording) and 1 not reachable. Open after run 3, by users hit: the PDFs print the UTC
+date (5 of 5); the committee memo and the lender package lack the not-advice line (4); "Sizing DCR" survives in the
+PDF tables and the screen's Checks beside "Coverage, full payment" (4); the memo and the package say property tax is
+"within operating expenses" while the build decision says it is entered separately (3); the document counts ("found
+by rules" under an AI-on banner, changing on reload) (3); the build decision's page layout (3). Two review bugs from
+junk input (breaker): "1e9" is saved as $1,000,000,000, and after an edit plus Reopen the user's value shows the
+document as its source. On the phone the cold first paint waits 3.6 s for the stylesheet and usable content about
+20 s on slow 3G; the two-column step grid pushes the main button off the first screen.
+
+Two harness lessons: a worktree without its own `node_modules` resolves `@agir/*` to the main checkout's packages, so a
+card that changes a package must symlink its packages under `node_modules/@agir/` before its tests mean anything; and
+vitest must run from the repository root with the root config (`--root apps/web` skips the setup file that loads each
+screen's strings and fails three i18n tests for no code reason).
 
 
 ## Model suggestions
