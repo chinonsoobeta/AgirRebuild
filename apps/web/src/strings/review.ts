@@ -350,7 +350,7 @@ export const fr: FrenchOf<typeof en> = {
   "review.recorded": "Chaque action est consignée.",
   "review.recordedBody": "Votre choix, ses sources et votre nom vont dans la piste d'audit. Une valeur qui change après une analyse rend cette analyse périmée.",
   "review.rejectedInReview": "Rejetée à l'examen",
-  "review.rejectHint": "Un document indique cette valeur. Dites pourquoi vous la rejetez ; la raison est consignée dans la piste d'audit avec votre nom.",
+  "review.rejectHint": "Un document indique cette valeur. Dites pourquoi vous la rejetez\u00a0; la raison est consignée dans la piste d'audit avec votre nom.",
   "review.rejectWhyHint": "p. ex. la ligne du budget n'est plus à jour",
   "review.rejectShort": "Dites pourquoi vous rejetez cette valeur (au moins 10 caractères).",
   "review.rejectedStated": "Rejetées à l'examen",
