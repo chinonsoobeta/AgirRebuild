@@ -190,8 +190,9 @@ describe("an unavailable proposal starts with a capital letter in English (card 
     effective: "2025-01-01", readOn: "2026-10-24", signedOn: "2026-10-24", recheckBy: "2027-01-31", options: [] };
   it("capitalizes the API's lower-case message", () => {
     const html = renderToStaticMarkup(createElement(TableProposal, { proposal: { ...proposal, unavailable: "state the land cost first" }, unit: "$", onUse: () => {}, busy: false }));
-    expect(text(html).trim()).toBe("State the land cost first");
+    // Card D1: the reason names its field, so it reads as part of its own row.
+    expect(text(html).trim()).toBe("Land transfer tax: not proposed yet. State the land cost first.");
     const province = renderToStaticMarkup(createElement(TableProposal, { proposal: { ...proposal, unavailable: "the deal has no province" }, unit: "$", onUse: () => {}, busy: false }));
-    expect(text(province).trim()).toBe("The deal has no province");
+    expect(text(province).trim()).toBe("Land transfer tax: not proposed yet. The deal has no province.");
   });
 });

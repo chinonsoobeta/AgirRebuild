@@ -150,3 +150,51 @@ describe("card W7 the review screen", () => {
     expect(words).not.toContain("Where the documents disagree");
   });
 });
+
+describe("card D1 the review screen", () => {
+  const waiting = (): ReviewData => {
+    const p = payload();
+    return { ...p, assumptions: p.assumptions.filter((a) => a.status !== "conflicting"), todo: { ...p.todo, items: p.todo.items.filter((i) => i.kind !== "conflict") } };
+  };
+  it("says Needs you in the review tone while the review only waits for the person, and Blocked in red for a conflict", () => {
+    expect(render()).toContain('<span class="tag stop">Blocked</span>');
+    state.review = waiting();
+    const html = render();
+    expect(html).not.toContain("tag stop");
+    expect(html).toContain('<span class="tag review">Needs you</span>');
+  });
+  it("prints each distinct source quote of a value once", () => {
+    const p = payload();
+    const land = p.assumptions.find((a) => a.id === "p1")!;
+    land.sources = [...land.sources, { ...land.sources[0]! }, src(1150000, "$1,150,000", "Land acquisition $1,150,000", "budget.txt")];
+    state.review = p;
+    const pending = render().split('id="pending"')[1]!;
+    const shown = pending.slice(pending.indexOf('class="rv-src"'), pending.indexOf("</tr>", pending.indexOf('class="rv-src"')));
+    expect(shown.match(/<mark>\$1,150,000<\/mark>/g)).toHaveLength(2);
+  });
+  it("folds the not-found values under 'Not in the documents (optional)' with no Missing heading when nothing is required", () => {
+    const p = waiting();
+    state.review = { ...p, missing: [], todo: { ...p.todo, items: p.todo.items.filter((i) => i.kind !== "missing") },
+      notFound: [{ fieldKey: "other_cost", label: "Other costs", unit: "$", material: false, default: null, help: null, groupLabel: "Budget", likely: [] }] } as ReviewData;
+    const html = render();
+    const section = html.slice(html.indexOf('id="missing"'), html.indexOf('id="pending"'));
+    expect(text(section)).not.toContain("Missing");
+    expect(section).toMatch(/<details class="card rv-optional"><summary[^>]*><h3[^>]*>Not in the documents \(optional\)/);
+    expect(section).not.toMatch(/<details[^>]*open/);
+  });
+  it("keeps required missing values unfolded under Missing, above the folded optional group", () => {
+    state.review = { ...payload(), notFound: [{ fieldKey: "other_cost", label: "Other costs", unit: "$", material: false, default: null, help: null, groupLabel: "Budget", likely: [] }] } as ReviewData;
+    const html = render();
+    const section = html.slice(html.indexOf('id="missing"'), html.indexOf('id="pending"'));
+    expect(section.indexOf(">Missing<")).toBeGreaterThan(-1);
+    expect(section.indexOf("Development charges")).toBeLessThan(section.indexOf("<details"));
+  });
+  it("gives the last few values Approve and Edit in the top card when Approve all does not cover them", () => {
+    const p = waiting();
+    state.review = { ...p, assumptions: p.assumptions.filter((a) => a.id !== "p2"), todo: { ...p.todo, items: p.todo.items.filter((i) => i.assumptionId !== "p2") } };
+    const html = render();
+    const top = html.slice(0, html.indexOf('id="missing"'));
+    expect(top).toContain('class="rv-quick"');
+    expect(buttonLabels(top)).toEqual(expect.arrayContaining(["Approve", "Edit"]));
+  });
+});

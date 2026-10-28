@@ -116,6 +116,7 @@ const SHARED_EN = {
   "status.noDocs": "No documents yet",
   "status.reading": (p) => `Reading ${p.n} ${s(p.n, "document", "documents")}`,
   "status.blocked": "Blocked",
+  "status.needsYou": "Needs you",
   "status.conflicts": (p) => `${p.n} ${s(p.n, "conflict", "conflicts")}`,
   "status.missing": (p) => `${p.n} missing`,
   "status.toReview": (p) => `${p.n} to review`,
@@ -250,6 +251,7 @@ const SHARED_FR: FrenchOf<typeof SHARED_EN> = {
   "status.noDocs": "Aucun document pour l'instant",
   "status.reading": (p) => `Lecture de ${p.n} ${s(p.n, "document", "documents")}`,
   "status.blocked": "Bloqué",
+  "status.needsYou": "Action requise",
   "status.conflicts": (p) => `${p.n} ${s(p.n, "conflit", "conflits")}`,
   "status.missing": (p) => `${p.n} ${s(p.n, "manquante", "manquantes")}`,
   "status.toReview": (p) => `${p.n} à examiner`,
@@ -513,6 +515,7 @@ const FR_REASONS: [RegExp, string | ((m: RegExpMatchArray) => string)][] = [
   [/^the deal has no province$/, "La province du projet n’est pas indiquée"],
   [/^these tables are for deals in Canada; enter the amount yourself$/, "Ces tableaux valent pour les projets au Canada\u00a0; indiquez le montant vous-même"],
   [/^state the land cost first$/, "Indiquez d’abord le coût du terrain"],
+  [/^approve the land cost first$/, "Approuvez d’abord le coût du terrain"],
   [/^the table needs a loan-to-value$/, "Le tableau exige un ratio prêt-valeur"],
   [/^state the refinance amortization first$/, "Indiquez d’abord l’amortissement du refinancement"],
   [/^CMHC multi-unit insurance needs at least 5 units; enter the premium yourself$/, "L’assurance multilogement de la SCHL exige au moins 5 logements ; saisissez la prime vous-même"],
@@ -953,16 +956,22 @@ export function dealStatus(i: I18n, o: OverviewLike, solo = false): { tone: "pas
     };
   }
   if (r.status === "blocked") {
-    const parts = [
+    // Card D1: red "Blocked" only for values that disagree or cannot be right, as the server's overview says; the rest waits for the person.
+    const stop = !!(r.conflicting || r.impossible);
+    const parts = (stop ? [
       r.conflicting && t("status.conflicts", { n: r.conflicting }),
       r.missing && t("status.missing", { n: r.missing }),
       r.needsReview && t("status.toReview", { n: r.needsReview }),
       r.awaitingSecond && t("status.awaiting", { n: r.awaitingSecond }),
       r.impossible && t("status.outOfRange", { n: r.impossible }),
-    ].filter(Boolean) as string[];
+    ] : [
+      r.needsReview && t("status.toReview", { n: r.needsReview }),
+      r.missing && t("status.missing", { n: r.missing }),
+      r.awaitingSecond && t("status.awaiting", { n: r.awaitingSecond }),
+    ]).filter(Boolean) as string[];
     return {
-      tone: r.conflicting || r.missing || r.impossible ? "stop" : "review",
-      text: `${t("status.blocked")} · ${parts.join(", ")}`,
+      tone: stop ? "stop" : "review",
+      text: `${t(stop ? "status.blocked" : "status.needsYou")} · ${parts.join(", ")}`,
       next: r.conflicting ? t("next.resolve", { n: r.conflicting }) : r.missing ? t("next.enter", { n: r.missing }) : t("next.review"),
       blockedParts: parts,
     };

@@ -235,7 +235,7 @@ export function pathStates(o: DealOverview, i: I18n, solo: boolean): PathState[]
         if (o.documents.processing > 0 || o.updating) return { text: t(hasValues(o.review) && !o.documents.processing ? "shell.updating" : "shell.reading"), tone: "faint" };
         if (reviewWaiting(o)) return { text: t("step.waitingDocs"), tone: "faint" };
         if (o.review.status === "ready") return { text: t("step.clear"), tone: "done" };
-        return { text: status.text, tone: "stop" };
+        return { text: status.text, tone: status.tone === "stop" ? "stop" : "normal" };
       case "run":
         if (!o.run) return { text: o.review.status === "ready" ? t("step.readyToRun") : t("step.locked"), tone: "faint" };
         return { text: t("step.runState", { n: o.run.number, state: o.run.fresh ? L.verdict(o.run.verdict) : t("step.outOfDate") }), tone: o.run.fresh ? (past ? "done" : "normal") : "stop" };

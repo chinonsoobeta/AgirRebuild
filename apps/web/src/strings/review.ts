@@ -5,6 +5,10 @@ const s = (n: number, one: string, many: string) => (n === 1 ? one : many);
 
 export const en = {
   "review.tagBlocked": "Blocked",
+  "review.tagNeedsYou": "Needs you",
+  "review.notProposed": (p) => `${p.field}: not proposed yet.`,
+  "review.optionalTitle": "Not in the documents (optional)",
+  "review.approving": (p) => `Approving ${p.n}…`,
   "review.b.aiCheck": (p) => `Check ${p.n} ${s(p.n, "figure", "figures")} the AI reader was unsure of.`,
   "review.andMore": (p) => `and ${p.n} more`,
   "review.conflictsTitle": "Where the documents disagree",
@@ -175,6 +179,10 @@ export const en = {
 
 export const fr: FrenchOf<typeof en> = {
   "review.tagBlocked": "Bloqué",
+  "review.tagNeedsYou": "Action requise",
+  "review.notProposed": (p) => `${p.field}\u00a0: pas encore proposé.`,
+  "review.optionalTitle": "Absent des documents (facultatif)",
+  "review.approving": (p) => `Approbation de ${p.n} valeurs…`,
   "review.b.aiCheck": (p) => `Vérifiez ${p.n} ${s(p.n, "chiffre", "chiffres")} dont le lecteur IA n'était pas sûr.`,
   "review.andMore": (p) => `et ${p.n} ${s(p.n, "autre", "autres")}`,
   "review.conflictsTitle": "Là où les documents divergent",
