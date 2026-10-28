@@ -72,8 +72,17 @@
   .rv-table td{border-bottom:0;padding:4px 12px}
   .rv-table td.r{text-align:left}
   .rv-table .acts{display:grid;grid-template-columns:1fr;gap:8px;justify-content:stretch}
-  .rv-table .acts .btn,.rv-bulk .btn,.rv-default .btn{width:100%;min-height:44px;margin-block:0}
+  /* Card D1: the table's negative button margin (.table td .btn.sm) is undone, so stacked buttons keep their 8 px gap. */
+  .rv-table .acts .btn,.rv-table .acts .btn.sm,.rv-bulk .btn,.rv-default .btn{width:100%;min-height:44px;margin-block:0}
+  .rv-quick .acts .btn{min-height:44px}
   .rv-pick,.rv-radio,.choice,.rv-term{min-height:44px}
   .rv-term{min-width:44px}
   .rv-radio input,.choice input{width:24px;height:24px}
 }
+/* Card D1: a few values left get their actions in the summary card; the optional not-found group is folded under its title. */
+.rv-quick{list-style:none;margin:8px 0 0;padding:0;display:flex;flex-direction:column;gap:8px}
+.rv-quick .row{gap:8px;flex-wrap:wrap}
+.rv-quick .acts{display:flex;gap:8px;flex-wrap:wrap}
+.rv-optional>summary{cursor:pointer}
+.rv-optional>summary h3{display:inline}
+.rv-optional-body{border-top:1px solid var(--line)}

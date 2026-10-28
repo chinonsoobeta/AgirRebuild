@@ -3245,6 +3245,20 @@ describe("card 94c table proposals", () => {
     expect((await call(owner,"POST",`/api/deals/${d}/values`,{fieldKey:"refinance_amount",value:1000000,reason:"Fictional amount sizing"})).status).toBe(200);
     expect((await review(d)).proposals.find((p:any)=>p.fieldKey === "refinance_insurance_premium_pct").unavailable).toBe("the table needs a loan-to-value");
   });
+  test("card D1: a land cost read but not approved asks for its approval, not for a land cost", async () => {
+    const d=await make("NS");
+    await db.query(`update assumptions set status='needs_review' where deal_id=$1 and field_key='land_cost'`,[d]);
+    expect((await review(d)).proposals.find((p:any)=>p.fieldKey === "land_transfer_tax").unavailable).toBe("approve the land cost first");
+    await db.query(`update assumptions set status='rejected' where deal_id=$1 and field_key='land_cost'`,[d]);
+    expect((await review(d)).proposals.find((p:any)=>p.fieldKey === "land_transfer_tax").unavailable).toBe("state the land cost first");
+  });
+  test("card D1: values waiting for the person are 'Needs you' in the review tone, never red", async () => {
+    const d=await make("NS",false);
+    await db.query(`update assumptions set status='needs_review' where deal_id=$1 and field_key='refinance_month'`,[d]);
+    const o=(await call(owner,"GET",`/api/deals/${d}`)).json;
+    expect(o.status.tone).toBe("review");
+    expect(o.status.text).toMatch(/^Needs you · 1 to review, \d+ missing$/);
+  });
   test("QC has no proposed QST value and explains the entered net amount", async () => {
     const r=await review(await make("QC"));
     const p=r.proposals.find((p:any)=>p.fieldKey === "gst_hst_net");

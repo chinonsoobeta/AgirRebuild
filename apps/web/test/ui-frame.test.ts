@@ -180,7 +180,9 @@ describe("the deal path while documents are read (QA 2026-10-27 #6 and #18)", ()
     expect(out).not.toContain("step-state stop");
     // Once rebuilt, the badge says what Review says.
     const done: DealOverview = { ...aiPass, updating: false, review: { ...base.review, missing: 1, needsReview: 22 } };
-    expect(pathStates(done, en, false)[1]).toMatchObject({ text: "Blocked · 1 missing, 22 to review", tone: "stop" });
+    // Card D1: values waiting for the person are not red.
+    expect(pathStates(done, en, false)[1]).toMatchObject({ text: "Needs you · 22 to review, 1 missing", tone: "normal" });
+    expect(pathStates(done, fr, false)[1]!.text).toBe("Action requise · 22 à examiner, 1 manquante");
     // A rebuild after a change to values already there says Updating….
     expect(pathStates({ ...done, updating: true }, en, false)[1]).toMatchObject({ text: "Updating…", tone: "faint" });
   });

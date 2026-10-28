@@ -223,14 +223,20 @@ export async function dealOverview(tx: Db, dealId: string) {
     next = failed ? `Retry ${failed} failed document${failed === 1 ? "" : "s"}` : "Wait for extraction";
   } else if (readiness.status === "blocked") {
     step = "review";
-    const parts = [
+    // Card D1: red "Blocked" only for values that disagree or cannot be right; values waiting for the person are "Needs you".
+    const stop = !!(counts.conflicting || counts.impossible);
+    const parts = (stop ? [
       counts.conflicting && `${counts.conflicting} conflict${counts.conflicting === 1 ? "" : "s"}`,
       counts.missing && `${counts.missing} missing`,
       counts.needsReview && `${counts.needsReview} to review`,
       counts.awaitingSecond && `${counts.awaitingSecond} awaiting a second approver`,
       counts.impossible && `${counts.impossible} to correct`,
-    ].filter(Boolean);
-    status = { tone: counts.conflicting || counts.missing || counts.impossible ? "stop" : "review", text: `Blocked · ${parts.join(", ")}` };
+    ] : [
+      counts.needsReview && `${counts.needsReview} to review`,
+      counts.missing && `${counts.missing} missing`,
+      counts.awaitingSecond && `${counts.awaitingSecond} awaiting a second approver`,
+    ]).filter(Boolean);
+    status = { tone: stop ? "stop" : "review", text: `${stop ? "Blocked" : "Needs you"} · ${parts.join(", ")}` };
     next = counts.conflicting ? `Resolve ${counts.conflicting} conflict${counts.conflicting === 1 ? "" : "s"}` : counts.missing ? `Enter ${counts.missing} missing input${counts.missing === 1 ? "" : "s"}` : "Review the extracted values";
   } else if (!latest || !fresh) {
     step = "run";
@@ -427,7 +433,7 @@ export async function reviewView(tx: Db, dealId: string, asOf: string) {
   };
   if (offered.has("land_transfer_tax")) {
     const land = value("land_cost");
-    propose("land_transfer_tax", province ? landTable(province,asOf) : undefined, !province ? {unavailable:noProvince} : land === undefined ? {unavailable:"state the land cost first"} : landTransferTaxOptions({province,value:land,asOf}));
+    propose("land_transfer_tax", province ? landTable(province,asOf) : undefined, !province ? {unavailable:noProvince} : land === undefined ? {unavailable:assumptions.some(a => a.field_key === "land_cost" && !a.item_key && a.status !== "rejected") ? "approve the land cost first" : "state the land cost first"} : landTransferTaxOptions({province,value:land,asOf}));
   }
   if (offered.has("gst_hst_net")) propose("gst_hst_net",GST_HST,!province ? {unavailable:noProvince} : unapprovedUnits ? {unavailable:"approve the unit counts first"} : gstHstNetOptions({province,units,selling:value("sell_units") === 1,asOf}));
   if (offered.has("refinance_insurance_premium_pct")) {
