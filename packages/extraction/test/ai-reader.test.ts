@@ -225,6 +225,11 @@ describe("Card 167: whole-building AI unit counts", () => {
     const result = verifyReadings({ readings: [], conflicts: [{ field, item, values: [value], why: "Invented disagreement" }], not_used: [] }, sources);
     expect(result.conflicts[0]).toMatchObject([{ outcome: "verified", candidate: { itemKey: null, note: "Invented disagreement" } }]);
   });
+  test("QA run 3: a quote that starts with its own address marker still verifies", () => {
+    const c = count(null);
+    expect(verifyReading({ ...c, quote: `[${c.location}] ${c.quote}` }, sources)).toMatchObject({ outcome: "verified", candidate: { value: 48, context: c.quote } });
+    expect(verifyReading({ ...c, quote: `[line 9] ${c.quote}` }, sources)).toEqual({ outcome: READING_FAILURE.quote });
+  });
   test.each([
     [{ location: "line 9" }, READING_FAILURE.address],
     [{ quote: "Absent 48" }, READING_FAILURE.quote],

@@ -3851,6 +3851,19 @@ describe("card 160a: the deal AI reader", () => {
   });
 });
 
+ test("QA run 3: a failed AI reading of a figure the rules already read is not asked about again", async () => {
+  const id = (await call(alice, "POST", `/api/workspaces/${ws}/deals`, { name: "Invented Twice", assetType: "Multifamily", location: "Halifax" })).json.id;
+  await call(alice, "PUT", `/api/deals/${id}/documents?name=terms.txt`, undefined, new TextEncoder().encode("Loan amount: $3,900,000\nOther amount 8000"));
+  // The rules read the loan; the AI names the same figure with a quote that is not in the line, so its check fails.
+  const same = { field: "senior_loan_amount", item: null, value: 3900000, unit_seen: "$" as const, file: "terms.txt", location: "line 1", quote: "Loan amount is $3,900,000", note: null, confidence: "high" as const };
+  const other = { ...same, field: "land_cost", value: 8000, location: "line 2", quote: "Absent 8000" };
+  await drain({ db, store, read: async () => ({ readings: [same, other], conflicts: [], not_used: [] }) });
+  const review = (await call(alice, "GET", `/api/deals/${id}/review`)).json;
+  expect(review.assumptions.find((a: any) => a.fieldKey === "senior_loan_amount")).toMatchObject({ value: 3900000, status: "needs_review" });
+  expect(review.aiReading.pleaseCheck).toEqual([{ field: "land_cost", item: null, value: 8000, file: "terms.txt", location: "line 2", quote: "Absent 8000", reason: extraction.READING_FAILURE.quote }]);
+  expect(review.todo.items.filter((i: any) => i.kind === "ai_check")).toHaveLength(1);
+});
+
  test("card 160b: AI omissions and failed verification use governed labels", async () => {
   const id = (await call(alice, "POST", `/api/workspaces/${ws}/deals`, { name: "Invented Review", assetType: "Multifamily", location: "Vancouver" })).json.id;
   await call(alice, "PUT", `/api/deals/${id}/documents?name=fiction.txt`, undefined, new TextEncoder().encode("Unlabelled reserve 7000\nOther amount 8000"));

@@ -530,7 +530,10 @@ export async function reviewView(tx: Db, dealId: string, asOf: string) {
     `select outcome, model, prompt_version, created_at, response, verification from ai_readings where deal_id=$1 and documents_hash=$2 and prompt_version=$3 order by created_at desc, id desc limit 1`,
     [dealId, documentsHash(docs), READER_PROMPT_VERSION],
   );
-  const rejectedReading = (r: ReaderResponse["readings"][number], verification: ReadingVerification | undefined) => verification && verification.outcome !== "verified"
+  // A reading that failed its check is shown for the person to check, unless the review already holds that figure for the
+  // field (the rules read it): then the card would only repeat a row that is already waiting for approval (QA run 3, skeptic R1).
+  const alreadyRead = (r: { field: string; value: number }) => assumptions.some((a) => a.status !== "rejected" && a.field_key === r.field && a.value !== null && Math.abs(a.value - r.value) < 0.5);
+  const rejectedReading = (r: ReaderResponse["readings"][number], verification: ReadingVerification | undefined) => verification && verification.outcome !== "verified" && !alreadyRead(r)
     ? [{ field: r.field, item: r.item, value: r.value, file: r.file, location: r.location, quote: r.quote, reason: verification.outcome }] : [];
   const aiReading = stored ? {
     outcome: stored.outcome, model: stored.model, promptVersion: stored.prompt_version, createdAt: stored.created_at,

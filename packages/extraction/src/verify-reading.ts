@@ -74,6 +74,10 @@ export function verifyReading(reading: Reading, documents: readonly ReadingDocum
   const matches = documents.filter(d => d.name === reading.file);
   const doc = matches.length === 1 ? matches[0] : undefined;
   const location = reading.location.replace(/^(.*![A-Z]+\d+)\.\.[A-Z]+\d+$/, "$1");
+  // The model sometimes copies the address marker into its quote ("[line 4] Loan amount: $3,900,000"); the marker is not
+  // document text, so it is dropped before the quote is looked for (QA run 3, skeptic R1).
+  const marker = `[${reading.location}] `;
+  if (reading.quote.startsWith(marker)) reading = { ...reading, quote: reading.quote.slice(marker.length) };
   const entries = doc ? addressedEntries(doc.document).filter(e => e.location === location) : [];
   if (!doc || entries.length !== 1) return { outcome: READING_FAILURE.address };
   if (!entries[0]!.text.includes(reading.quote)) return { outcome: READING_FAILURE.quote };
