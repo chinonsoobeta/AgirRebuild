@@ -3,8 +3,8 @@ import { lazy, StrictMode, Suspense, useEffect, type ComponentType } from "react
 import { createRoot } from "react-dom/client";
 import { QueryClient, QueryClientProvider } from "@tanstack/react-query";
 import { createRootRoute, createRoute, createRouter, Navigate, Outlet, RouterProvider } from "@tanstack/react-router";
-import { SessionGate, Shell } from "./components/ui";
-import { I18nProvider, useI18n } from "./i18n";
+import { isAppPath, RouteLoading, SessionGate, Shell } from "./components/ui";
+import { I18nProvider } from "./i18n";
 
 // Each screen loads when it is first opened, so the first visit downloads only the shell (plan L5).
 // `vite.config.ts` gathers the screens into one file per group: deal, settings, auth, share, landing.
@@ -38,33 +38,13 @@ const queryClient = new QueryClient({ defaultOptions: { queries: { staleTime: 5_
 
 // index.html carries a static page in #boot, beside #root, that shows before any code has arrived (QA item 9): the top of
 // the landing page on "/", the top bar and "Loading…" elsewhere (QA card D3). The root route removes it when it first
-// draws, and "/" keeps showing the landing top while the landing screen's file loads, so it stays put instead of flashing.
-const boot = document.querySelector("#boot .boot-landing")?.outerHTML ?? "";
+// draws. The router wraps the first screen in its own Suspense, whose fallback is the pending component below, so "/"
+// keeps showing the landing top while the landing screen's file loads instead of flashing blank (run 3).
 function RootScreen() {
   useEffect(() => { document.getElementById("boot")?.remove(); }, []);
-  return <Suspense fallback={<Loading bar />}><Outlet /></Suspense>;
+  return <Outlet />;
 }
-// While a screen's file loads, the page says so instead of going blank (QA item 9). Signed out there is no shell, so the
-// fallback draws the top bar with the name; inside the app the shell's header stays and only the page area waits.
-function Loading({ bar }: { bar?: boolean }) {
-  const { t } = useI18n();
-  if (bar && boot.trim() && location.pathname === "/") return <div dangerouslySetInnerHTML={{ __html: boot }} />;
-  const body = (
-    <div className="route-loading" aria-busy="true">
-      <p className="muted">{t("common.loading")}</p>
-      <span className="skel" /><span className="skel" /><span className="skel short" />
-    </div>
-  );
-  if (!bar) return body;
-  return (
-    <>
-      <header className="topbar">
-        <span className="brand"><span className="brand-mark"><svg width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="3" strokeLinecap="round" strokeLinejoin="round" aria-hidden="true"><path d="M4 18L12 5l8 13" /><path d="M8 18h8" /></svg></span>Agir</span>
-      </header>
-      <main className="page">{body}</main>
-    </>
-  );
-}
+const Pending = () => <RouteLoading bar={!isAppPath(location.pathname)} />;
 const root = createRootRoute({ component: RootScreen });
 const login = createRoute({ getParentRoute: () => root, path: "/login", component: Login });
 const signup = createRoute({ getParentRoute: () => root, path: "/signup", component: Signup });
@@ -87,7 +67,7 @@ const app = createRoute({
   component: () => (
     <SessionGate>
       <Shell>
-        <Suspense fallback={<Loading />}>
+        <Suspense fallback={<RouteLoading />}>
           <Outlet />
         </Suspense>
       </Shell>
@@ -158,7 +138,7 @@ const routeTree = root.addChildren([
     deal.addChildren([dealIndex, step("documents", Documents), step("review", Review), runStep, step("decision", DecisionStep), step("reports", Reports), sharePreview, step("audit", Audit), step("explore", Explore), compare]),
   ]),
 ]);
-const router = createRouter({ routeTree, defaultPreload: "intent" });
+const router = createRouter({ routeTree, defaultPreload: "intent", defaultPendingComponent: Pending });
 declare module "@tanstack/react-router" {
   interface Register {
     router: typeof router;

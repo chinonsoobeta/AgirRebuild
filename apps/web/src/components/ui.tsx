@@ -25,6 +25,33 @@ function storedWorkspace(): string | null {
   }
 }
 
+// What a page shows while a screen's file or the session loads (QA item 9, run 3). The static page in index.html sits in
+// #boot beside #root until the first screen is drawn; on "/" this draws a copy of its landing top, so the headline stays
+// put while the landing screen's file loads instead of flashing blank. Signed out there is no shell, so `bar` draws the
+// top bar with the name; inside the app the shell's header stays and only the page area waits.
+const boot = typeof document === "undefined" ? "" : (document.querySelector("#boot .boot-landing")?.outerHTML ?? "");
+export function RouteLoading({ bar }: { bar?: boolean }) {
+  const { t } = useI18n();
+  if (bar && boot.trim() && location.pathname === "/") return <div dangerouslySetInnerHTML={{ __html: boot }} />;
+  const body = (
+    <div className="route-loading" aria-busy="true">
+      <p className="muted">{t("common.loading")}</p>
+      <span className="skel" /><span className="skel" /><span className="skel short" />
+    </div>
+  );
+  if (!bar) return body;
+  return (
+    <>
+      <header className="topbar">
+        <span className="brand"><span className="brand-mark"><svg width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="3" strokeLinecap="round" strokeLinejoin="round" aria-hidden="true"><path d="M4 18L12 5l8 13" /><path d="M8 18h8" /></svg></span>Agir</span>
+      </header>
+      <main className="page">{body}</main>
+    </>
+  );
+}
+/** The pages outside the session gate have no shell, so their loading state draws the top bar too. */
+export const isAppPath = (pathname: string) => pathname.startsWith("/deals") || pathname.startsWith("/settings");
+
 export function SessionGate({ children }: { children: ReactNode }) {
   const navigate = useNavigate();
   const { t } = useI18n();
@@ -33,7 +60,8 @@ export function SessionGate({ children }: { children: ReactNode }) {
   useEffect(() => {
     if (me.error instanceof ApiError && me.error.status === 401) void navigate({ to: "/login" });
   }, [me.error, navigate]);
-  if (me.isLoading) return <div style={{ padding: 56 }} aria-busy="true">{t("common.loading")}</div>;
+  // The same top bar and skeleton the static page showed, so a cold signed-in page does not drop to a bare line (run 3).
+  if (me.isLoading) return <RouteLoading bar />;
   if (!me.data) return null;
   const workspace = me.data.workspaces.find((w) => w.id === ws) ?? me.data.workspaces[0];
   if (!workspace) return <div style={{ padding: 56 }}>—</div>;
