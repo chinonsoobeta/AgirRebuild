@@ -464,7 +464,7 @@ audit counts), each audited by running before the merge; merged into `main` as `
 rerun: `1ce67db` (the reading verifier strips a quote's own `[line N] ` marker before the exact-substring check, and a
 failed AI reading of a figure the rules already read is not raised again) and `cafb35c` (the router's default pending
 component keeps the static shell on screen while the first screen's file loads; the session gate shows the same
-header and skeleton). The rerun (run 3) in `LAUNCH-QA-2026-10-27.md`: all five reached first success with no
+header and skeleton). STATUS `8fbd79d` was pushed and CI on it passed (5m42s). The rerun (run 3) in `LAUNCH-QA-2026-10-27.md`: all five reached first success with no
 workaround; 93 of 93 read values right; of the 78 items still open after run 2, 41 fixed, 26 partly, 10 not fixed
 (the needs-a-person items and wording) and 1 not reachable. Open after run 3, by users hit: the PDFs print the UTC
 date (5 of 5); the committee memo and the lender package lack the not-advice line (4); "Sizing DCR" survives in the
