@@ -6,8 +6,9 @@ import { renderToStaticMarkup } from "react-dom/server";
 import { policyFor, type EngineInput } from "@agir/contracts";
 import { underwrite } from "../../../packages/engine/src/index.ts";
 import { developmentDeal } from "../../../packages/engine/test/fixtures.ts";
-import { costParts, Run } from "../src/routes/run.tsx";
+import { costParts, layoutFor, meaning, Run } from "../src/routes/run.tsx";
 import { build, type Lang } from "../src/i18n.tsx";
+import "../src/strings/landing";
 
 // Card C5: the run screen says what the run assumed, counts its stresses as the engine does, and on a phone shows
 // one card per scenario and per year. Mocks follow apps/web/test/ui-policy-names.test.ts.
@@ -122,12 +123,93 @@ describe("the wide tables on a phone (card C5)", () => {
   it("adds one card per scenario and one per year, hidden on a wide screen", () => {
     const html = render();
     const cards = html.split('class="run-phone-cards"');
-    expect(cards.length).toBe(3);
-    const scenarios = cards[1]!.split("</ul>")[0]!;
+    // Card D4: the gates come first, then the scenarios and the years.
+    expect(cards.length).toBe(4);
+    const gates = cards[1]!.split("</ul>")[0]!;
+    expect(gates.match(/<li /g)!.length).toBe(result.verdict.gates.length);
+    const scenarios = cards[2]!.split("</ul>")[0]!;
     expect(scenarios.match(/<li /g)!.length).toBe(result.scenarios.length);
-    const years = cards[2]!.split("</ul>")[0]!;
+    const years = cards[3]!.split("</ul>")[0]!;
     expect(years.match(/<li /g)!.length).toBe(Math.min(result.annual.length, 6));
     const css = readFileSync(new URL("../src/styles/run.css", import.meta.url), "utf8");
     expect(css).toMatch(/@media \(max-width:600px\)\{[^}]*\.run-stress,\.run-annual\{display:none\}/);
+  });
+});
+
+describe("the run screen for a first-time reader (card D4)", () => {
+  const css = readFileSync(new URL("../src/styles/run.css", import.meta.url), "utf8");
+  const phone = css.slice(css.lastIndexOf("@media (max-width:600px)"));
+
+  it.each(["en", "fr"] as const)("gives every key figure one plain sentence, and the two coverages one name each, in %s", (lang) => {
+    s.lang = lang;
+    const i = build(lang, () => {});
+    const html = render();
+    const words = text(html);
+    const figures = layoutFor(base).headline.filter((k) => base.some((m) => m.key === k));
+    expect(figures).toEqual(expect.arrayContaining(["sizing_dscr", "contractual_dscr", "debt_yield", "capitalized_interest", "equity_irr"]));
+    for (const k of figures) {
+      const plain = meaning(i, k);
+      expect(plain, k).toBeTruthy();
+      expect(words, k).toContain(sp(plain!));
+    }
+    expect(html.match(/class="run-fig-meaning"/g)!.length).toBe(figures.length);
+    expect(i.L.metric("sizing_dscr")).toBe(lang === "en" ? "Coverage, full payment (weakest year)" : "Couverture, paiement complet (pire année)");
+    expect(i.L.metric("contractual_dscr")).toBe(lang === "en" ? "Coverage, payments due (weakest year)" : "Couverture, paiements dus (pire année)");
+    // The second says how it differs during an interest-only period.
+    expect(meaning(i, "contractual_dscr")).toContain(lang === "en" ? "interest only during an interest-only period" : "intérêts seulement");
+    // Reused, not rewritten: the full-payment coverage reads as the glossary's own entry.
+    expect(meaning(i, "sizing_dscr")).toBe(i.t("terms.gloss.dcr")[1]);
+  });
+
+  it("says why an equity return is not meaningful in plain words", () => {
+    const i = build("en", () => {});
+    const nm = { ...withGap, scenarios: withGap.scenarios.map((x, n) => n ? x : { ...x, metrics: x.metrics.map((m) => m.key === "equity_irr"
+      ? { ...m, status: "NOT_MEANINGFUL", value: null, reason: "The equity cash flows have no rate of return (no sign change)." } : m) }) };
+    s.run = run({ result: nm });
+    expect(text(render())).toContain(sp(i.t("run.meaning.noSignChange")));
+  });
+
+  it.each(["en", "fr"] as const)("has one Explore changes button with its hint, and the not-advice line, in %s", (lang) => {
+    s.lang = lang;
+    const i = build(lang, () => {});
+    const words = text(render());
+    expect(words.split(sp(i.t("run.explore"))).length - 1).toBe(1);
+    expect(words).toContain(sp(i.t("run.exploreHint")));
+    expect(words).toContain(sp(i.t("run.notAdvice")));
+    expect(i.t("run.notAdvice")).toBe(i.t("landing.footNote"));
+  });
+
+  it("states the loan's compounding beside the run's setup when there is a senior loan", () => {
+    const i = build("en", () => {});
+    expect(text(render())).not.toContain(sp(i.t("run.assumed.loanWhy")));
+    s.run = run({ inputs: [...(run() as { inputs: object[] }).inputs, { fieldKey: "senior_loan_amount", itemKey: null, label: "Senior loan", value: 3_900_000,
+      sourceKind: "document", source: "Term sheet", sponsorStated: false, confirmedBy: "Invented author", confirmedByReview: false, confirmedAt: null }] });
+    const words = text(render());
+    expect(words).toContain(sp(i.t("run.assumed.loan")));
+    expect(words).toContain("Interest compounds monthly. Canadian lenders often quote rates compounded semi-annually");
+  });
+
+  it("on a phone shows gates as cards, keeps figures on one line inside the card, and puts the verdict before the steps", () => {
+    const html = render();
+    expect(html).toContain('class="card scroll run-gates"');
+    expect(phone).toMatch(/\.run-gates\{display:none\}/);
+    expect(phone).toMatch(/\.run-phone-cards \.kv\{grid-template-columns:minmax\(0,1fr\) auto\}/);
+    expect(phone).toMatch(/\.run-phone-cards \.kv dd\{white-space:nowrap\}/);
+    // The verdict sits in the body's first block, lifted above the path on a phone.
+    expect(html.indexOf('class="stack run-top"')).toBeLessThan(html.indexOf('aria-label="Verdict"'));
+    expect(html.indexOf('aria-label="Verdict"')).toBeLessThan(html.indexOf(i18nTitle()));
+    expect(phone).toMatch(/\.run-page > \.run-body\{display:contents\}/);
+    expect(phone).toMatch(/\.run-page > \.run-body > \.run-top\{order:1\}/);
+    expect(phone).toMatch(/\.run-page > \.path\{order:2;margin:0\}/);
+  });
+});
+
+/** The title of the box that follows the verdict on every screen size. */
+const i18nTitle = () => build("en", () => {}).t("run.assumedTitle");
+
+describe("the reports buttons on a touch screen (card D4)", () => {
+  it("are at least 44 px tall", () => {
+    const css = readFileSync(new URL("../src/styles/reports.css", import.meta.url), "utf8");
+    expect(css).toMatch(/@media \(pointer:coarse\)\{\s*\.rep-acts \.btn,\.rep-other \.btn\{min-height:44px\}/);
   });
 });

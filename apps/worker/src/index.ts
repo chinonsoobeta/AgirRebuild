@@ -570,7 +570,7 @@ async function renderJob(deps: WorkerDeps, artifactId: string) {
   if (!a) return;
   const [run] = await db.query<{
     id: string; run_number: number; created_at: string | Date; engine_version: string; policy_version: string; policy_hash: string;
-    input_hash: string; result_hash: string; result: RunResult; input_snapshot: { input: EngineInput; policy?: Policy; standardPolicy?: Policy; policyChanges?: ArtifactInput["policyChanges"]; assumptions: ArtifactInput["assumptions"]; notFound?: ArtifactInput["notFound"] };
+    input_hash: string; result_hash: string; signature: string; result: RunResult; input_snapshot: { input: EngineInput; policy?: Policy; standardPolicy?: Policy; policyChanges?: ArtifactInput["policyChanges"]; assumptions: ArtifactInput["assumptions"]; notFound?: ArtifactInput["notFound"] };
     created_by_name: string | null;
   }>(`select r.*, u.name as created_by_name from runs r left join users u on u.id = r.created_by where r.id = $1`, [a.run_id]);
   const [deal] = await db.query<{ name: string; asset_type: string; location: string; currency: Currency | null; province: string | null }>(
@@ -612,6 +612,8 @@ async function renderJob(deps: WorkerDeps, artifactId: string) {
       resultHash: run.result_hash,
       // Read only: the build decision names who confirmed the values the run used (card C5).
       createdBy: run.created_by_name,
+      // The same signing-key words the run screen shows (apps/api services.ts), for the report footer (card D4).
+      signed: run.signature.startsWith("dev-unsafe:") ? "development key" : "production key",
     },
     result: run.result,
     input: run.input_snapshot.input,

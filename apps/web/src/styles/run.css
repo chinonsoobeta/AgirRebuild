@@ -33,3 +33,19 @@
   .run-phone-only{display:flex}
   .run-phone-cards .kv dd{text-align:right}
 }
+/* Card D4: a key figure's plain sentence under its context line. */
+.run-fig-sub,.run-fig-meaning{display:block}
+.run-fig-sub + .run-fig-meaning,.run-fig-sub + .run-fig-sub{margin-top:4px}
+/* Phones: the gates become cards like the stresses; a card's figure keeps to one line and its label wraps beside it;
+   the verdict (the body's first block) comes before the step tiles. */
+@media (max-width:600px){
+  .run-gates{display:none}
+  .run-phone-cards .kv{grid-template-columns:minmax(0,1fr) auto}
+  .run-phone-cards .kv dt{overflow-wrap:break-word}
+  .run-phone-cards .kv dd{white-space:nowrap}
+  .run-page{display:flex;flex-direction:column;gap:24px}
+  .run-page > .run-body{display:contents}
+  .run-page > .run-body > .run-top{order:1}
+  .run-page > .path{order:2;margin:0}
+  .run-page > .run-body > :not(.run-top){order:3}
+}

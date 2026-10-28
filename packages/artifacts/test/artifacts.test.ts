@@ -325,7 +325,7 @@ describe("the build decision report", () => {
     expect(model.kicker).toBe("Build decision");
     expect(scan.orphans).toEqual([]);
     const at = (s: string) => text.indexOf(s);
-    const order = ["Yield on cost", "Sizing DCR (weakest year)", "Weakest stress", "What would change the answer", "Every input and its source"].map(at);
+    const order = ["Yield on cost", "Coverage, full payment (weakest year)", "Weakest stress", "What would change the answer", "Every input and its source"].map(at);
     expect(order.every((n) => n >= 0)).toBe(true);
     expect([...order].sort((a, b) => a - b)).toEqual(order);
     expect(text).toContain("Weakest stress: Combined");
@@ -379,9 +379,36 @@ describe("the build decision report", () => {
       expect(r[4]).not.toBe("\u2014");
       expect(r[5]).not.toBe("Out of range");
     }
-    const outOfRange = breakeven(x.input, x.policy).rows.filter((r) => r.state === "out_of_range" && x.result.verdict.gates.some((g) => g.key === r.gate && g.status === "failed")).length;
-    expect(outOfRange).toBeGreaterThan(0);
-    expect(textOf(x).text).toContain(`${outOfRange} inputs cannot pass within their range: `);
+    const moves = breakeven(x.input, x.policy).rows.filter((r) => r.state === "out_of_range" && x.result.verdict.gates.some((g) => g.key === r.gate && g.status === "failed"));
+    expect(moves.length).toBeGreaterThan(0);
+    // Card D4: the count is of distinct inputs, and it is the number of names listed after it.
+    const distinct = new Set(moves.map((r) => r.driver)).size;
+    const line = /(\d+) inputs? cannot pass within (?:its|their) range: ([^.]*)\./.exec(textOf(x).text);
+    expect(line).not.toBeNull();
+    expect(Number(line![1])).toBe(distinct);
+    expect(line![2]!.split("; ").length).toBe(distinct);
+  });
+  test("card D4: one name per coverage figure, property tax beside a ratio is flagged, and the footer names the signing key", async () => {
+    const base = mapleInput("build_decision");
+    const { fixedOpexAnnual: _fixed, ...rest } = base.input;
+    const x: ArtifactInput = { ...base, input: { ...rest, propertyTaxAnnual: 52_000, expenseRatioPct: 35 }, run: { ...base.run, signed: "development key" } };
+    const { text, scan } = textOf(x);
+    expect(text).toContain("Coverage, full payment (weakest year)");
+    expect(text).not.toContain("Sizing DCR (weakest year)");
+    expect(text).toContain("Property tax of $52,000 a year is entered separately from the 35.00% operating expense ratio; check it is not inside the ratio.");
+    expect(text).toContain("Signed with the development key: a test signature, not for lenders.");
+    expect(scan).toMatchObject({ pass: true, orphans: [] });
+    // Fixed operating costs replace the ratio, so there is nothing to flag; without a recorded key the footer says nothing of it.
+    const fixed = textOf({ ...base, input: { ...base.input, propertyTaxAnnual: 52_000, fixedOpexAnnual: 80_000 } }).text;
+    expect(fixed).not.toContain("entered separately from the");
+    expect(fixed).not.toContain("Signed with the");
+    expect(textOf({ ...x, run: { ...x.run, signed: "production key" } }).text).not.toContain("Signed with the");
+    const fr = textOf({ ...x, lang: "fr" }).text;
+    expect(fr).toContain("Couverture, paiement complet (pire année)");
+    expect(fr).toContain("Signé avec la clé de développement");
+    // The lender package's debt table carries both coverage names.
+    const lender = textOf({ ...x, kind: "lender_package" }).text;
+    expect(lender).toContain("Coverage, payments due (weakest year)");
   });
   test("an approved run has no break-even section and names its weakest stress", () => {
     const x = dealInput(1.6);
@@ -450,7 +477,7 @@ describe("the build decision report", () => {
     const x = dealInput(1);
     const rows = table(x).filter((r) => r[3]!.startsWith("Rent"));
     expect(rows.length).toBeGreaterThan(0);
-    for (const r of rows.filter((r) => r[5] !== "No effect" && r[5] !== "Not monotonic")) {
+    for (const r of rows.filter((r) => r[5] !== "Does not pass on its own" && r[5] !== "Not monotonic")) {
       expect(r[3]).toBe("Rent, all 3 unit types (same share)");
       // Card C5: never a dash where the run has the values; each rent moves from its own.
       expect(r[4]).toBe("Each as entered");
@@ -480,6 +507,8 @@ describe("the build decision report", () => {
   test("card 93c: the French worst case fits two pages", async () => {
     const x = { ...dealInput(0.8, (i) => ({ ...i, revenue: Array.from({ length: 8 }, (_, k) => ({ key: `F${k}`, label: `Logement ${k + 1}`, basis: "per_unit" as const, units: 15, rentMonthly: 1800 + 150 * k })) })), lang: "fr" } as ArtifactInput;
     x.assumptions = mapleInput("build_decision").assumptions.slice(0, 6).map((a) => ({ ...a, sponsorStated: true }));
+    // A production-signed run, as a lender gets it: its footer adds nothing (a development-key footer takes a third page here).
+    x.run = { ...x.run, signed: "production key" };
     const result = await renderArtifact(x, "pdf");
     expect(result.provenance).toMatchObject({ pass: true, orphans: [] });
     const { PDFDocument } = await import("pdf-lib");
@@ -489,6 +518,8 @@ describe("the build decision report", () => {
     const many = (i: EngineInput): EngineInput => ({ ...i, revenue: Array.from({ length: 8 }, (_, k) => ({ key: `T${k}`, label: `Type ${k + 1}`, basis: "per_unit" as const, units: 15, rentMonthly: 1_800 + 150 * k })) });
     const x = dealInput(0.8, many);
     x.assumptions = mapleInput("build_decision").assumptions.slice(0, 6).map((a) => ({ ...a, sponsorStated: true }));
+    // Card D4: a real run's footer also names its signing key.
+    x.run = { ...x.run, signed: "development key" };
     expect(x.result.verdict.gates.filter((g) => g.status === "failed")).toHaveLength(5);
     expect(buildModel(x).blocks.some((b) => b.type === "table" && b.columns[0]!.label === "Gate")).toBe(true);
     let pdf;
@@ -705,9 +736,11 @@ describe("a deal that is kept and refinanced (card 60)", () => {
     ["ic_memo", "e418aab1ea5f92132f0f47bedb5ebe1fda122f07e3f64175f2ea3990b489c6ef"],
     // card 97c: DSCR→DCR rename only; text otherwise identical to `d605a268e8b161c97f6b79a3855f06c93aa3bc3f9a7b0e283b8671c0c8a4b98f`
     // card C5: plain sentences under the figures, the reading and not-advice line, "Committee memo"; was `61757e6912b7e04bbcee1c3fe37927271b3da4409678b6d8446d535771888a08`
-    ["build_decision", "1b990ebcda4f738ddc2395740f98eb539ce411697dbb9990d65092facd67e6aa"],
+    // card D4: the two coverage names, "Does not pass on its own" and the distinct out-of-range count (5, was 11) only; was `1b990ebcda4f738ddc2395740f98eb539ce411697dbb9990d65092facd67e6aa`
+    ["build_decision", "77ee1d9df812c72340810d239aafbca26c9eec6aafd89764a0867e0ffec5a4bf"],
     // card 97c: DSCR→DCR rename only; text otherwise identical to `4cf6ef2277600502cf073624101fc3988664370849ef77e986513ebe66afb08a`
-    ["lender_package", "a0cc7a283f1ce22d258878b616a500a5eaafc457f2cc6169abb023d08d0e609b"]] as const)("the existing held %s text is byte-identical", (kind, hash) => {
+    // card D4: the two coverage names only; was `a0cc7a283f1ce22d258878b616a500a5eaafc457f2cc6169abb023d08d0e609b`
+    ["lender_package", "c9ed0c5c4d3c57991c6e7ae3c0d9a4e277ebdbc98fb202386c47e94d547ba30a"]] as const)("the existing held %s text is byte-identical", (kind, hash) => {
       expect(createHash("sha256").update(textOf(holdInput(kind)).text).digest("hex")).toBe(hash);
     });
   });
@@ -794,9 +827,11 @@ describe("the reports for a deal that sells its units (task 80)", () => {
     ["ic_memo", "d3d3ec880ff45e2a17988e065670650800bc527d9ba55b0b071933d2e5f113a1"],
     // card 97c: DSCR→DCR rename only; text otherwise identical to `64389bea70bedfb6f257617d58cc54d1bfff3bf08f55eb90e2f967f1d91736d0`
     // card C5: plain sentences under the figures, the reading and not-advice line, "Committee memo"; was `161df3ae41c30a1322c47bf6b2cb6d4b4b7c18b34de0dbc177b2e819aca70fd9`
-    ["build_decision", "2228dd662e66b95f6dcabd49584810e2f0600f9325abfa816f1f55a1e1918c35"],
+    // card D4: the full-payment coverage name only; was `2228dd662e66b95f6dcabd49584810e2f0600f9325abfa816f1f55a1e1918c35`
+    ["build_decision", "fc82258878741a23bcdecd0eb80e90b6c494da6291a1ce5b9bc319529715c6d3"],
     // card 97c: DSCR→DCR rename only; text otherwise identical to `5f81e68b930e8735a4036eba356bad6242bc1e05cdaa3ca89a84a69f47dd208c`
-    ["lender_package", "be3357a81416eb58bb60c7147850071e584947e517fa7b5e77e3f44bd5cf9641"]] as const)("the existing Maple Heights %s text is byte-identical", (kind, hash) => {
+    // card D4: the two coverage names only; was `be3357a81416eb58bb60c7147850071e584947e517fa7b5e77e3f44bd5cf9641`
+    ["lender_package", "42d2f2cc73329093c773f6f2c7d94381661ce01eaed10b073c783bbcbfa638bc"]] as const)("the existing Maple Heights %s text is byte-identical", (kind, hash) => {
     // card E: the unsigned-policy line is the only change; without it, the text is this pin.
     const model = buildModel(mapleInput(kind));
     expect(model.blocks.filter(isUnsignedLine)).toHaveLength(1);
@@ -1031,7 +1066,7 @@ describe("what would change the answer for a deal that sells its units (task 83)
     x.input = { ...x.input, forSale: { ...x.input.forSale!, units: [x.input.forSale!.units[0]!] } };
     x.result = underwrite(x.input, x.policy);
     const model = buildModel(x);
-    const states = { no_effect: "No effect", not_monotonic: "Not monotonic" } as const;
+    const states = { no_effect: "Does not pass on its own", not_monotonic: "Not monotonic" } as const;
     const names = { pricePct: "Sale prices", absorptionPct: "Sales pace", presalesPts: "Presales" } as const;
     // Card C5: the value the run has, never a dash; a move out of range is named once in the line under the table.
     const sale = x.input.forSale!;
@@ -1422,7 +1457,8 @@ describe("a report says when a check decides the verdict (task 85a)", () => {
     // card 97c: DSCR→DCR rename only; text otherwise identical to `c49c28c5eafee7e5d6eb89704d4b04584c7887ecbf5d51bd33160417cf83d17e`
     // card C5: plain sentences, the reading and not-advice line, "Committee memo"; was `3377dc48bc5130ccc4b8941ac7ccb38f612e8c939d1ac8a431cb7476c8ef29ae`
     expect(createHash("sha256").update(visibleText(renderHtml(restored))).digest("hex"))
-      .toBe("4c6560d7ad180f6aa838a12fdf48c2fa51432290c5181c5f811e5b0f0f502381");
+      // card D4: the full-payment coverage name only; was `4c6560d7ad180f6aa838a12fdf48c2fa51432290c5181c5f811e5b0f0f502381`
+      .toBe("e11eb742b9b093e3ca1b95e03bf8b7d1835836ad225354ab36fb485c4c089fc0");
     expect(verifyProvenance(text, model.formatter.manifest).orphans).toEqual([]);
   });
   test.each(["engine", "policy"])("the %s notice comes before the warning", (notice) => {
@@ -1621,7 +1657,8 @@ describe("card 96d custom thresholds", () => {
     const x = customInput();
     const plain = { ...x, policy: x.standardPolicy!, result: underwrite(x.input,x.standardPolicy!), standardPolicy: undefined, policyChanges: undefined };
     const text = visibleText(renderHtml(buildModel(plain)));
-    expect(createHash("sha256").update(text).digest("hex")).toBe("9239c2cfd02fa36fe5a3b19676df9053589dd8fdcfd9fbf22e496426b557e411");
+    // card D4: the two coverage names only; was `9239c2cfd02fa36fe5a3b19676df9053589dd8fdcfd9fbf22e496426b557e411`
+    expect(createHash("sha256").update(text).digest("hex")).toBe("cab3b0af24caf640bd2d660d416f4ea6952769e88adacfff56fd59d191a1e194");
   });
   test("prints the changed value and failed cited standard for a 1.08x DCR, with traceable numbers", () => {
     const x = customInput();

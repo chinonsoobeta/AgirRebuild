@@ -28,6 +28,8 @@ export type ArtifactInput = {
     resultHash: string;
     /** Who started the run, by name; absent on inputs made before the build decision named them (card C5). */
     createdBy?: string | null;
+    /** Which key signed the run, as the run screen says it; absent, the footer says nothing about it (card D4). */
+    signed?: "development key" | "production key";
   };
   result: RunResult;
   input: EngineInput;
@@ -539,8 +541,9 @@ function changeTheAnswer(f: Formatter, x: ArtifactInput): Block[] {
     // Every move for this gate is out of range: the gate still has its row, and says so.
     if (first) add([reportText(f.lang, "noneInRange"), "", ""]);
   }
-  // Counted by move, named once each.
-  const n = outOfRange.length;
+  // Each input is counted once and named once, so the count matches the list (card D4).
+  const names = [...new Set(outOfRange)];
+  const n = names.length;
   return [
     ...intro,
     {
@@ -548,7 +551,7 @@ function changeTheAnswer(f: Formatter, x: ArtifactInput): Block[] {
       columns: [{ label: reportText(f.lang, "gate") }, { label: reportText(f.lang, "needs"), numeric: true }, { label: reportText(f.lang, "thisRun"), numeric: true }, { label: reportText(f.lang, "inputMoved") }, { label: reportText(f.lang, "inThisRun"), numeric: true }, { label: reportText(f.lang, "passesAt"), numeric: true }],
       rows: body,
     },
-    ...(n > 0 ? [{ type: "paragraph", muted: true, text: reportText(f.lang, n === 1 ? "outOfRangeOne" : "outOfRangeMany", f.ident(String(n), "breakeven.outOfRange.count"), [...new Set(outOfRange)].join("; ")) } as Block] : []),
+    ...(n > 0 ? [{ type: "paragraph", muted: true, text: reportText(f.lang, n === 1 ? "outOfRangeOne" : "outOfRangeMany", f.ident(String(n), "breakeven.outOfRange.count"), names.join("; ")) } as Block] : []),
     { type: "paragraph", muted: true, text: reportText(f.lang, "oneInput") + (ratesTogether ? reportText(f.lang, "ratesTogether") : "") },
   ];
 }
@@ -572,6 +575,13 @@ function statedYourselfBlocks(f: Formatter, x: ArtifactInput): Block[] {
 function defaultsBlocks(f: Formatter, x: ArtifactInput): Block[] {
   const rows = x.assumptions.filter((a) => a.sourceKind === "default");
   return rows.length ? [{ type: "heading", text: reportText(f.lang, "defaultsAccepted") }, { type: "table", long: true, columns: INPUT_COLUMNS(f.lang), rows: rows.map((a) => inputRow(f, a)) }] : [];
+}
+
+/** A property tax entered on its own line beside an operating expense ratio may already be inside the ratio; the reader is told to check (card D4). */
+function taxBesideRatioBlocks(f: Formatter, x: ArtifactInput): Block[] {
+  const i = x.input;
+  if (!i.propertyTaxAnnual || i.expenseRatioPct === undefined || i.fixedOpexAnnual !== undefined) return [];
+  return [{ type: "paragraph", text: reportText(f.lang, "taxBesideRatio", f.input(i.propertyTaxAnnual, "$", "property_tax_annual"), f.input(i.expenseRatioPct, "%", "expense_ratio_pct")) }];
 }
 
 function latestDecisionBlocks(f: Formatter, x: ArtifactInput): Block[] {
@@ -763,7 +773,7 @@ export function buildModel(x: ArtifactInput): DocModel {
     if (sale) blocks.push(SALE_OPERATIONS(f.lang));
     blocks.push(...notFoundBlocks(f, x), { type: "paragraph", muted: true, text: reportText(f.lang, "inputSources") });
   } else if (x.kind === "build_decision") {
-    blocks.push(verdict, ...draftLine(x), ...customThresholdBlocks(f,x), ...statedYourselfBlocks(f, x), ...defaultsBlocks(f, x), ...tableValueBlocks(f,x));
+    blocks.push(verdict, ...draftLine(x), ...customThresholdBlocks(f,x), ...statedYourselfBlocks(f, x), ...defaultsBlocks(f, x), ...taxBesideRatioBlocks(f, x), ...tableValueBlocks(f,x));
     const saleKeys = ["profit_on_cost_for_sale", "margin_on_revenue", "equity_multiple"];
     const heldKeys = ["refinance_cash_returned", "cash_left_in_deal", "dcr_after_refinance", "cash_on_cash_after_refinance"];
     blocks.push({
@@ -843,7 +853,9 @@ export function buildModel(x: ArtifactInput): DocModel {
   const footer =
     reportText(f.lang, "footerTrace", runLabel) +
     reportText(f.lang, "footerEngine", f.ident(x.run.engineVersion, "run.engine"), f.ident(x.run.policyVersion, "run.policy")) +
-    reportText(f.lang, "footerHashes", f.ident(x.run.inputHash.slice(0, 16), "run.inputHash"), f.ident(x.run.resultHash.slice(0, 16), "run.resultHash"));
+    reportText(f.lang, "footerHashes", f.ident(x.run.inputHash.slice(0, 16), "run.inputHash"), f.ident(x.run.resultHash.slice(0, 16), "run.resultHash")) +
+    // As on the run screen's "What this run assumed": only a development-key signature is called out (card D4).
+    (x.run.signed === "development key" ? reportText(f.lang, "footerDevKey") : "");
   // Every amount prints with "$"; the deal says once which dollar that is.
   const currency = x.deal.currency ? reportText(f.lang, "currency", CURRENCY_NAMES[x.deal.currency][f.lang === "fr" ? 1 : 0], x.deal.currency) : reportText(f.lang, "currencyMissing");
   const logo = x.kind === "lender_package" ? x.broker?.logo : undefined;

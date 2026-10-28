@@ -101,7 +101,7 @@ describe("metric and gate names follow the preference", () => {
     expect(plain.L.metric("required_equity")).toBe("Equity required");
     expect(plain.L.metric("dcr_after_refinance")).toBe("Coverage after refinancing");
     expect(plain.L.metric("unrealized_equity_multiple")).toBe("Unrealized equity multiple");
-    expect(plain.L.metric("sizing_dscr")).toBe("Coverage (weakest year)");
+    expect(plain.L.metric("sizing_dscr")).toBe("Coverage, full payment (weakest year)");
     expect(plain.L.metric("total_development_cost")).toBe("Total development cost");
     expect(plain.L.gate("dcr_after_refinance", "Coverage after refinance (DCR)")).toBe("Coverage after refinancing");
     expect(plain.L.gate("unknown_gate", "Some gate")).toBe("Some gate");
