@@ -677,7 +677,11 @@ function readSentence(sentence: { text: string; start: number }, para0: Paragrap
   const inline = label.split(/\s+/).length <= 8 ? scopeIn(label, false) : null;
   const para = inline ? { ...para0, scope: inline } : para0;
   const conceptScope = scopeIn(para0.text.slice(0, Math.max(para0.text.indexOf(":"), 0)), false) ?? undefined;
-  const locationOf = (pos: number) => para.segs.reduce((loc, g) => (g.start <= sentence.start + pos ? g.location : loc), para.segs[0]!.location);
+  // A token's start can be the space before it ("(invented) 8 ×"): a figure is on the line of its first character, where any reader places it (QA run 2, skeptic N1).
+  const locationOf = (pos: number) => {
+    while (/\s/.test(text[pos] ?? "")) pos++;
+    return para.segs.reduce((loc, g) => (g.start <= sentence.start + pos ? g.location : loc), para.segs[0]!.location);
+  };
   // A Yes/No answer after a flag's label is the flag.
   const colonAt = text.indexOf(":");
   const flag = colonAt > 0 ? flagRead(text.slice(0, colonAt), text.slice(colonAt + 1)) : null;
@@ -3017,7 +3021,10 @@ export function extractCandidates(doc0: NormalizedDocument, options?: { role?: "
     const reads = clauses.map((clause) => {
       const start = para.text.indexOf(clause, offset);
       offset = start + clause.length;
-      const locationOf = (pos: number) => para.segs.reduce((loc, g) => g.start <= start + pos ? g.location : loc, para.segs[0]!.location);
+      const locationOf = (pos: number) => {
+        while (/\s/.test(clause[pos] ?? "")) pos++;
+        return para.segs.reduce((loc, g) => g.start <= start + pos ? g.location : loc, para.segs[0]!.location);
+      };
       const read = proseRentLine(clause, result, item, locationOf);
       item = read.item;
       return read;

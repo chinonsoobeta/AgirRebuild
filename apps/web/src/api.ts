@@ -105,7 +105,7 @@ export type DealOverview = {
 };
 export type DocumentRow = {
   id: string; name: string; kind: string; role_set: "deal_source" | "evidence" | "context" | null; read_role: string | null; size_bytes: number; stage: string; stage_detail: string | null; page_count: number | null;
-  number_format: string | null; needs_ocr: boolean; candidate_count: number; other_count: number; created_at: string; uploaded_by: string | null;
+  number_format: string | null; needs_ocr: boolean; candidate_count: number; used_count: number; other_count: number; created_at: string; uploaded_by: string | null;
 };
 export type Source = { document_id: string; document_name: string; value: number; location: string; raw: string; unit_seen?: string | null; context: string; rule?: string; ocr?: boolean; note?: string; check_outcome?: "confirms" | "questions"; check_note?: string };
 export type Assumption = {

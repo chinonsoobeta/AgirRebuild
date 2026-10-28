@@ -65,7 +65,8 @@ function Result({ d, i, dealId }: { d: DocumentRow; i: I18n; dealId: string }) {
   }
   return (
     <>
-      {d.candidate_count === 0 ? t("docs.noValues") : t("docs.values", { n: d.candidate_count })}
+      {/* QA run 2 (skeptic N2): one number, honestly named: the values in use from this file, or before that what the rules found. */}
+      {d.used_count > 0 ? t("docs.used", { n: d.used_count }) : d.candidate_count > 0 ? t("docs.byRules", { n: d.candidate_count }) : t("docs.noValues")}
       {d.other_count > 0 && <span className="sub">{t("docs.other", { n: d.other_count })} (<Link to="/deals/$dealId/review" params={{ dealId }} hash="unused-figures">{t("documents.otherShow")}</Link>)</span>}
       {d.number_format && d.number_format !== "1,234.56" && d.number_format !== "not detected" && (
         <span className="sub docs-warn"><I.Eye />{t("docs.format", { f: d.number_format })}</span>

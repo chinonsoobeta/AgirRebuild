@@ -296,6 +296,8 @@ export function Review({ dealId }: { dealId: string }) {
   const [focus, setFocus] = useState<string | null>(null);
   const [editing, setEditing] = useState<string | null>(null);
   const [keeping, setKeeping] = useState<string | null>(null);
+  // QA run 2 (breaker #21): rejecting a value a document states asks why, in the page.
+  const [rejecting, setRejecting] = useState<string | null>(null);
   const [aiEntry, setAiEntry] = useState<{ id: string; value: number; field: string; item: string } | null>(null);
   const [entering, setEntering] = useState<string | null>(null);
   const [picked, setPicked] = useState<Record<string, number>>({});
@@ -320,6 +322,7 @@ export function Review({ dealId }: { dealId: string }) {
     mutationFn: (b: { id: string; action: string; value?: number | null; reason?: string | null; version?: number; confirmOutsideWindow?: boolean }) => api.post(`/assumptions/${b.id}/review`, b),
     onSuccess: () => {
       setEditing(null);
+      setRejecting(null);
       setDirty(false);
       setStale(null);
       setBulkDone(null);
@@ -383,7 +386,7 @@ export function Review({ dealId }: { dealId: string }) {
     onSuccess: () => refresh(),
   });
   const [showAll, setShowAll] = useState(false);
-  const formOpen = !!(editing || keeping || entering || adding || aiEntry);
+  const formOpen = !!(editing || keeping || rejecting || entering || adding || aiEntry);
   useEffect(() => { if (!formOpen) setDirty(false); }, [formOpen]);
   const blocker = useBlocker({ shouldBlockFn: () => dirty, enableBeforeUnload: () => dirty, disabled: !dirty, withResolver: true });
   // Card D1: when the person's own approval clears the review far down the page, "Review is clear / Go to Run" is brought into view.
@@ -454,6 +457,29 @@ export function Review({ dealId }: { dealId: string }) {
       <div className="field"><label htmlFor={`k-${a.id}`}>{t("review.why")}</label><input className="input" id={`k-${a.id}`} name="reason" minLength={10} required placeholder={t("review.whyHint")} /></div>
       {a.material && materialNote}
       <div className="row"><button className="btn primary sm" type="submit">{t("review.keep").replace("…", "")}</button><button className="btn quiet sm" type="button" onClick={() => setKeeping(null)}>{t("common.cancel")}</button></div>
+    </form>
+  );
+  // A value a document states is rejected only with a written reason; the reason is the action's own, kept in the audit trail.
+  const fromDocument = (a: Assumption) => a.sources.length > 0;
+  const rejectForm = (a: Assumption) => (
+    <form
+      className="stack tight rv-confirm"
+      onChange={() => { setDirty(true); setFormErrorAt(null); }}
+      onSubmit={(e: FormEvent<HTMLFormElement>) => {
+        e.preventDefault();
+        const reason = String(new FormData(e.currentTarget).get("reason") ?? "").trim();
+        if (reason.length < 10) { setFormErrorAt({ at: `x-${a.id}`, error: new Error(t("review.rejectShort")) }); return; }
+        setFormErrorAt(null);
+        act.mutate({ id: a.id, action: "reject", reason, version: a.version });
+      }}
+    >
+      <p className="small">{t("review.rejectHint")}</p>
+      <div className="field"><label htmlFor={`x-${a.id}`}>{t("review.why")}</label><input className="input" id={`x-${a.id}`} name="reason" maxLength={2000} required autoFocus placeholder={t("review.rejectWhyHint")} /></div>
+      <ErrorText error={errAt(`x-${a.id}`) ?? (act.variables?.id === a.id && act.variables.action === "reject" && !stale ? act.error : null)} />
+      <div className="row">
+        <button className="btn primary sm" type="submit" disabled={act.isPending}>{t("review.reject")}</button>
+        <button className="btn quiet sm" type="button" onClick={() => { setRejecting(null); setFormErrorAt(null); }}>{t("common.cancel")}</button>
+      </div>
     </form>
   );
   const modifyForm = (a: Assumption) => (
@@ -660,10 +686,11 @@ export function Review({ dealId }: { dealId: string }) {
             {mine && solo
               ? <button className="btn primary sm" type="button" onClick={() => act.mutate({ id: a.id, action: "use_as_stated" })}>{t("review.useAsStated")}</button>
               : <button className="btn primary sm" type="button" disabled={mine} onClick={() => act.mutate({ id: a.id, action: "second_approve" })}>{t("review.confirm")}</button>}
-            <button className="btn quiet sm" type="button" onClick={() => act.mutate({ id: a.id, action: "reject", reason: t("review.declined") })}>{t("review.decline")}</button>
+            <button className="btn quiet sm" type="button" onClick={() => fromDocument(a) ? setRejecting(a.id) : act.mutate({ id: a.id, action: "reject", reason: t("review.declined") })}>{t("review.decline")}</button>
             {mine && !solo && <span className="small muted">{t("review.mine")}</span>}
           </div>
         )}
+        {editable && rejecting === a.id && rejectForm(a)}
       </div>
     );
   };
@@ -699,7 +726,7 @@ export function Review({ dealId }: { dealId: string }) {
     );
   };
   const pendingRow = (a: Assumption) => {
-    const open = editable && (editing === a.id || keeping === a.id);
+    const open = editable && (editing === a.id || keeping === a.id || rejecting === a.id);
     const docs = new Set(a.sources.filter((s) => a.value !== null && Math.abs(s.value - a.value) < 0.5).map((s) => s.document_id));
     const on = focused?.id === a.id;
     return (
@@ -720,14 +747,14 @@ export function Review({ dealId }: { dealId: string }) {
                   ? <button className="btn primary sm" type="button" onClick={() => setKeeping(a.id)}>{t("review.keep")}</button>
                   : <button className="btn primary sm" type="button" onClick={() => act.mutate({ id: a.id, action: "approve", version: a.version })}>{t("review.approve")}</button>}
                 <button className="btn quiet sm" type="button" onClick={() => setEditing(a.id)}>{t("review.edit")}</button>
-                <button className="btn ghost sm" type="button" onClick={() => act.mutate({ id: a.id, action: "reject", reason: t("review.rejectedInReview"), version: a.version })}>{t("review.reject")}</button>
+                <button className="btn ghost sm" type="button" onClick={() => fromDocument(a) ? setRejecting(a.id) : act.mutate({ id: a.id, action: "reject", reason: t("review.rejectedInReview"), version: a.version })}>{t("review.reject")}</button>
               </div>
             )}
           </td>
         </tr>
         {/* Card C2: the selected value's source line sits under its row. */}
         {on && !open && <tr className="rv-src"><td colSpan={4} aria-live="polite"><div className="stack tight">{sourceOf(a)}</div></td></tr>}
-        {open && <tr><td colSpan={4}>{editing === a.id ? modifyForm(a) : keepForm(a)}</td></tr>}
+        {open && <tr><td colSpan={4}>{editing === a.id ? modifyForm(a) : rejecting === a.id ? rejectForm(a) : keepForm(a)}</td></tr>}
         {stale?.id === a.id && <tr className="rv-stale"><td colSpan={4}>{staleNote}</td></tr>}
       </Fragment>
     );
@@ -791,6 +818,11 @@ export function Review({ dealId }: { dealId: string }) {
 
   const impossibleItems = r.todo.items.map((item, index) => ({ item, index })).filter(({ item }) => item.kind === "impossible");
   const aiChecks = r.todo.items.map((item, index) => ({ item, index })).filter(({ item }) => item.kind === "ai_check");
+  // QA run 2 (breaker N7): an optional line whose stated value was rejected is not "not found"; it is listed with the reason.
+  const rejectedOf = (m: { fieldKey: string; itemKey?: string | null }) =>
+    rejected.find((a) => a.fieldKey === m.fieldKey && (a.itemKey ?? null) === (m.itemKey ?? null) && fromDocument(a) && a.value !== null);
+  const rejectedStated = r.notFound.flatMap((m) => { const a = rejectedOf(m); return a ? [{ m, a }] : []; });
+  const notFound = r.notFound.filter((m) => !rejectedOf(m));
   const hasMissingSection = r.missing.length > 0 || r.notFound.length > 0 || (r.tableNotices ?? []).length > 0;
   const hasPendingSection = pending.length > 0 || awaiting.length > 0 || aiChecks.length > 0 || (r.regions ?? []).length > 0;
   // Values stated by one person, named defaults and cited tables always show; the rest show a few at a time.
@@ -948,12 +980,31 @@ export function Review({ dealId }: { dealId: string }) {
                 <p>{t("review.tableNow",{value:f.value(p.options[0]?.value,FIELDS.find(d=>d.key === p.fieldKey)?.unit ?? "$")})}</p>
                 <TableProposal proposal={p} unit={FIELDS.find(d=>d.key === p.fieldKey)?.unit ?? "$"} onUse={b=>acceptTable.mutate(b)} busy={acceptTable.isPending} location={deal.data.deal.location} />
               </div>)}
-              {r.notFound.length > 0 && (
+              {rejectedStated.length > 0 && (
+                <div className="card card-pad stack tight" id="rejected-stated">
+                  <h3 className="h3">{t("review.rejectedStated")}</h3>
+                  <p className="small muted">{t("review.rejectedStatedBody")}</p>
+                  {rejectedStated.map(({ m, a }) => {
+                    const id = `rj-${m.fieldKey}-${m.itemKey ?? ""}`;
+                    return (
+                      <div key={id} className="stack tight rv-line">
+                        <div className="row between">
+                          <span>{t("review.rejectedStatedLine", { field: name(m), value: f.value(a.value, m.unit), source: a.sources[0]!.document_name, who: a.decidedBy ?? "—", meaning: L.absent(m.fieldKey) })}</span>
+                          {editable && entering !== id && <button className="btn quiet sm" type="button" onClick={() => setEntering(id)}>{t("review.enterReplacement")}</button>}
+                        </div>
+                        {a.reason && <p className="small muted">{t("review.reason", { r: msg(a.reason) })}</p>}
+                        {entering === id && entryForm(m, id, null)}
+                      </div>
+                    );
+                  })}
+                </div>
+              )}
+              {notFound.length > 0 && (
                 <details className="card rv-optional">
-                <summary className="card-pad"><h3 className="h3">{t("review.optionalTitle")} <span className="num muted">{r.notFound.length}</span></h3></summary>
+                <summary className="card-pad"><h3 className="h3">{t("review.optionalTitle")} <span className="num muted">{notFound.length}</span></h3></summary>
                 <div className="card-pad stack tight rv-optional-body">
                   <p className="small muted">{t("review.notFoundBody")}</p>
-                  {r.notFound.map((m) => {
+                  {notFound.map((m) => {
                     const id = `n-${m.fieldKey}`;
                     return (
                       <div key={id} className="stack tight rv-line">

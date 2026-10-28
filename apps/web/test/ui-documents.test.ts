@@ -56,7 +56,7 @@ vi.mock("../src/components/QuickStart", async () => {
 
 const row = (stage: string, extra: Partial<DocumentRow> = {}): DocumentRow => ({
   id: `doc-${stage}`, name: `${stage}.pdf`, kind: "pdf", role_set: null, read_role: null, size_bytes: 2048, stage, stage_detail: null, page_count: 3,
-  number_format: null, needs_ocr: false, candidate_count: 0, other_count: 0, created_at: "2026-10-20T12:00:00Z", uploaded_by: "Ada", ...extra,
+  number_format: null, needs_ocr: false, candidate_count: 0, used_count: 0, other_count: 0, created_at: "2026-10-20T12:00:00Z", uploaded_by: "Ada", ...extra,
 });
 const everyStage = (): DocumentRow[] => [
   row("uploaded"),
@@ -88,7 +88,7 @@ describe("Documents screen", () => {
     expect(html).toContain('aria-label="Rejected when checked"');
     expect(html).toContain('aria-label="Could not be read"');
     expect(html).toContain('aria-label="Read, values found"');
-    expect(html).toContain("3 values found");
+    expect(html).toContain("3 found by rules");
     expect(html).toContain("2 figures not needed (<a href=\"/deals/d1/review\">show</a>)");
     expect(html).toContain("Numbers written as 1.234,56: check each value");
     expect(html).toContain("This file could not be used.");
@@ -97,6 +97,17 @@ describe("Documents screen", () => {
     expect(html).toContain('href="/api/documents/doc-extracted/file"');
     expect(html).toContain('class="table"');
     expect(html).not.toMatch(/#[0-9a-f]{6}/i);
+  });
+
+  it("counts the values in use from a file, from the rules or the AI reading, once there are any (QA run 2, skeptic N2)", () => {
+    state.docs = [row("extracted", { candidate_count: 2, used_count: 4 })];
+    expect(render()).toContain("4 values used");
+    expect(render()).not.toContain("found by rules");
+    state.docs = [row("extracted", { candidate_count: 0, used_count: 1 })];
+    expect(render()).toContain("1 value used");
+    state.lang = "fr";
+    state.docs = [row("extracted", { candidate_count: 2, used_count: 0 })];
+    expect(render()).toContain("2 trouvées par les règles");
   });
 
   it("notes a file read by OCR only when the worker says so", () => {
