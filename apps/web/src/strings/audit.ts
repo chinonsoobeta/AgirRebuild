@@ -28,8 +28,12 @@ export const en = {
     if (p.n === 0) return "";
     const one = p.filtered ? "matching event" : "event";
     if (p.more) return p.n === 1 ? `Showing the only ${one} loaded so far.` : `Showing the ${p.n} ${what} loaded so far.`;
+    // Every event of this deal is loaded: say whose events they are, so the workspace count beside the chain check reads as
+    // a different number (QA card D5).
+    if (!p.filtered) return p.n === 1 ? "1 event in this deal." : `${p.n} events in this deal.`;
     return p.n === 1 ? `Showing the only ${one}.` : `Showing all ${p.n} ${what}.`;
   },
+  "audit.workspaceCovered": (p) => `The chain check covered ${p.n} ${p.n === 1 ? "event" : "events"} in your workspace.`,
   "audit.capped": "Older events load when you ask for them.",
   "audit.older": "Show older events",
   "audit.package": "Download the audit package",
@@ -72,8 +76,10 @@ export const fr: FrenchOf<typeof en> = {
     if (p.n === 0) return "";
     const one = p.filtered ? "seul événement correspondant" : "seul événement";
     if (p.more) return p.n === 1 ? `Affichage du ${one} chargé jusqu'ici.` : `Affichage des ${p.n} ${what} chargés jusqu'ici.`;
+    if (!p.filtered) return p.n === 1 ? "1 événement dans ce projet." : `${p.n} événements dans ce projet.`;
     return p.n === 1 ? `Affichage du ${one}.` : `Affichage des ${p.n} ${what}.`;
   },
+  "audit.workspaceCovered": (p) => `La vérification de la chaîne a couvert ${p.n} ${p.n === 1 ? "événement" : "événements"} dans votre espace de travail.`,
   "audit.capped": "Les événements plus anciens se chargent à votre demande.",
   "audit.older": "Afficher des événements plus anciens",
   "audit.package": "Télécharger le dossier d'audit",

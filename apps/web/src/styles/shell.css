@@ -3,8 +3,9 @@
 /* Top bar: the workspace, the name and role, and the button-shaped links. */
 button.toplink{border:0;background:transparent;font:inherit;cursor:pointer}
 select.ws{font:inherit;appearance:auto}
-.ws-name{padding:0 8px;font-weight:600;color:var(--ink)}
+.ws-name{padding:0 8px;font-weight:600;color:var(--ink);max-width:16em;overflow:hidden;text-overflow:ellipsis;white-space:nowrap}
 .who{padding:0 8px 0 4px;font-size:13px;color:var(--ink-3)}
+.who-name{display:inline-block;max-width:16em;overflow:hidden;text-overflow:ellipsis;white-space:nowrap;vertical-align:bottom}
 @media (max-width:960px){.topbar{padding:10px 16px}}
 
 /* The deal path as a list: each item holds one step link. */

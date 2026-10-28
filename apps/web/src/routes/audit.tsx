@@ -242,6 +242,7 @@ export function Audit({ dealId }: { dealId: string }) {
             <span className="small muted">
               {t("audit.shown", { n: shown.length, m: matching.length, filtered, more: events.hasNextPage })}
               {events.hasNextPage && ` ${t("audit.capped")}`}
+              {!filtered && !events.hasNextPage && v?.ok && ` ${t("audit.workspaceCovered", { n: v.events })}`}
             </span>
             <div className="row">
               {more && <button className="btn quiet sm" type="button" disabled={events.isFetchingNextPage} onClick={showOlder}>{t("audit.older")}</button>}

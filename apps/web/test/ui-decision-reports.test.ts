@@ -140,6 +140,44 @@ describe("the decision screen (card W9)", () => {
     expect(api.post).toHaveBeenCalledTimes(1);
     expect(vi.mocked(api.post).mock.calls[0]).toEqual(["/runs/run-2/decision", { decision: "reject", rationale: "Sale proceeds do not repay the debt.", conditions: null, overrideReason: null }]);
   });
+  it("QA card D5: the reasoning is marked required, checked inline (no browser bubble), and its error clears as soon as the text is valid", async () => {
+    s.interactive = true;
+    vi.stubGlobal("document", { getElementById: () => null });
+    let html = render(createElement(DecisionStep, { dealId: "d" }));
+    expect(html).toContain("Your reasoning<span class=\"hint\"> (required)</span>");
+    expect(s.nodes.find((n) => n.tag === "form")!.props.noValidate).toBe(true);
+    s.nodes.find((n) => n.tag === "input" && n.props.value === "reject")!.props.onChange();
+    render(createElement(DecisionStep, { dealId: "d" }));
+    const focus = vi.fn();
+    await s.nodes.find((n) => n.tag === "form")!.props.onSubmit({ preventDefault: () => {},
+      currentTarget: { elements: { namedItem: (k: string) => (k === "rationale" ? { value: "", focus } : null) } } });
+    expect(api.post).not.toHaveBeenCalled();
+    expect(focus).toHaveBeenCalled();
+    html = render(createElement(DecisionStep, { dealId: "d" }));
+    expect(html).toContain("Give the reasoning (at least 10 characters).");
+    const input = (value: string) => { s.nodes.find((n) => n.tag === "textarea" && n.props.name === "rationale")!.props.onInput({ currentTarget: { value } }); return render(createElement(DecisionStep, { dealId: "d" })); };
+    expect(input("too short")).toContain("Give the reasoning (at least 10 characters).");
+    html = input("Z".repeat(5000));
+    expect(html).not.toContain("Give the reasoning");
+    expect(html).toContain("5,000 characters");
+    expect(s.nodes.find((n) => n.tag === "textarea" && n.props.name === "rationale")!.props["aria-invalid"]).toBeUndefined();
+  });
+  it("QA card D5: conditions and the reason to approve against a reject are checked inline too", async () => {
+    s.interactive = true;
+    s.run = run({ result: { ...run().result, verdict: { code: "REJECT", headline: "", explanation: "", hardFailReasons: [], gates: [] } } });
+    vi.stubGlobal("document", { getElementById: () => null });
+    render(createElement(DecisionStep, { dealId: "d" }));
+    s.nodes.find((n) => n.tag === "input" && n.props.value === "approve_with_conditions")!.props.onChange();
+    render(createElement(DecisionStep, { dealId: "d" }));
+    const values: Record<string, string> = { rationale: "The market will turn by 2028.", conditions: "x", override: "because" };
+    await s.nodes.find((n) => n.tag === "form")!.props.onSubmit({ preventDefault: () => {},
+      currentTarget: { elements: { namedItem: (k: string) => (k in values ? { value: values[k] } : null) } } });
+    expect(api.post).not.toHaveBeenCalled();
+    const html = render(createElement(DecisionStep, { dealId: "d" }));
+    expect(html).not.toContain("Give the reasoning");
+    expect(html).toContain("Name the conditions (at least 5 characters).");
+    expect(html).toContain("Say why (at least 20 characters).");
+  });
   it("renders in French", () => {
     s.lang = "fr";
     const html = render(createElement(DecisionStep, { dealId: "d" }));

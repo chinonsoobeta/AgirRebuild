@@ -4,7 +4,7 @@ import { renderToStaticMarkup } from "react-dom/server";
 import { I18nProvider } from "../src/i18n.tsx";
 import { THEME_KEY, applyTheme, readPref, resolveTheme, useTheme, watchSystem, writePref } from "../src/theme.ts";
 import { ChoiceCards, Figure, Figures, Notice, Seg, Switch, Tag, ThemeToggle } from "../src/components/kit.tsx";
-import { Banner, StatusTag, VerdictBadge } from "../src/components/ui.tsx";
+import { Banner, initials, StatusTag, VerdictBadge } from "../src/components/ui.tsx";
 
 // ---- Fakes for the browser pieces the theme reads -------------------------------------------
 let store: Map<string, string>;
@@ -179,5 +179,24 @@ describe("the shared status pieces, in the design's look", () => {
     expect(out).toContain("<strong>Blocked</strong>");
     expect(out).toContain("Two documents disagree.");
     expect(renderToStaticMarkup(createElement(Banner, { tone: "neutral", title: "Note" }))).toMatch(/^<div class="notice" role="status">/);
+  });
+});
+
+describe("QA card D5: the header initials", () => {
+  it("take the first letters of the first and last words, or two of a single word", () => {
+    expect(initials("Pat Owner", "p@x.ca")).toBe("PO");
+    expect(initials("Marie-Ève de la Côte", "m@x.ca")).toBe("MC");
+    expect(initials("Sam", "s@x.ca")).toBe("SA");
+    expect(initials("élodie", "e@x.ca")).toBe("ÉL");
+  });
+  it("skip an emoji and anything else that is not a letter, never splitting a character", () => {
+    expect(initials("😈 <script>alert(1)</script> BBBB", "b@x.ca")).toBe("SB");
+    expect(initials("👩‍👩‍👧 Rowan", "r@x.ca")).toBe("RO");
+    expect(initials("😈 Kim Lee", "k@x.ca")).toBe("KL");
+    for (const name of ["😈 <script>alert(1)</script> BBBB", "👩‍👩‍👧 Rowan"]) expect(initials(name, "x@x.ca")).not.toMatch(/[\uD800-\uDFFF\uFFFD]/);
+  });
+  it("fall back to the email's first letter when the name has none", () => {
+    expect(initials("😈 123", "zoe@example.com")).toBe("Z");
+    expect(initials("   ", "1ana@example.com")).toBe("A");
   });
 });

@@ -62,9 +62,19 @@ export function LanguageSwitch({ className }: { className: string }) {
   );
 }
 
-const initials = (name: string, email: string) => {
-  const words = name.trim().split(/\s+/).filter(Boolean);
-  const letters = words.length > 1 ? words[0]![0]! + words[words.length - 1]![0]! : (words[0] ?? email).slice(0, 2);
+/** A text's characters as a person sees them: an emoji or an accented letter is one, never half of one (QA card D5). */
+const graphemes = (s: string): string[] => typeof Intl !== "undefined" && typeof Intl.Segmenter === "function"
+  ? Array.from(new Intl.Segmenter(undefined, { granularity: "grapheme" }).segment(s), (x) => x.segment)
+  : Array.from(s);
+const isLetter = (g: string) => /^\p{L}/u.test(g);
+
+/** The avatar's letters: the first letter of the first and last words, or the first two of a one-word name; anything
+ * that is not a letter (an emoji, a bracket) is skipped. A name with no letter falls back to the email's first letter. */
+export const initials = (name: string, email: string): string => {
+  const words = name.trim().split(/\s+/).map((w) => graphemes(w).filter(isLetter)).filter((w) => w.length > 0);
+  const letters = words.length > 1 ? words[0]![0]! + words[words.length - 1]![0]!
+    : words.length === 1 ? words[0]!.slice(0, 2).join("")
+    : graphemes(email).find(isLetter) ?? "";
   return letters.toUpperCase();
 };
 
@@ -90,7 +100,7 @@ export function Shell({ children }: { children: ReactNode }) {
       </select>
     </>
   ) : (
-    <span className="ws-name">{me.workspaces[0]?.name}</span>
+    <span className="ws-name" title={me.workspaces[0]?.name}>{me.workspaces[0]?.name}</span>
   );
   return (
     <>
@@ -111,7 +121,8 @@ export function Shell({ children }: { children: ReactNode }) {
           <LanguageSwitch className="toplink" />
           <ThemeToggle />
           <span className="avatar" aria-hidden="true">{initials(me.user.name, me.user.email)}</span>
-          <span className="who">{me.user.name} · {L.role(role)}</span>
+          {/* A long name is cut with an ellipsis so the bar keeps its rows (QA card D5); the title and the avatar menu show it whole. */}
+          <span className="who"><span className="who-name" title={me.user.name}>{me.user.name}</span> · {L.role(role)}</span>
           <button type="button" className="toplink" onClick={signOut}>{t("nav.signOut")}</button>
         </div>
         {/* Below 600 px the same controls fold into the avatar, so the bar keeps one row on a phone (QA #17). */}

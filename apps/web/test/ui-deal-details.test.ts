@@ -13,7 +13,7 @@ import { build, type Lang } from "../src/i18n.tsx";
 type Page = AuditEvent[];
 const state = vi.hoisted(() => ({
   lang: "en" as Lang, invite: undefined as unknown, me: undefined as unknown, meError: null as unknown, shared: undefined as unknown,
-  pages: [] as unknown[][], older: [] as unknown[], infiniteKey: [] as unknown[],
+  pages: [] as unknown[][], older: [] as unknown[], infiniteKey: [] as unknown[], verify: undefined as unknown,
   hooks: [] as unknown[], index: 0, nodes: [] as { tag: string; props: Record<string, any> }[],
 }));
 vi.mock("@tanstack/react-query", () => ({
@@ -22,7 +22,7 @@ vi.mock("@tanstack/react-query", () => ({
     if (key === "invite") return { data: state.invite, error: null };
     if (key === "me") return { data: state.me, error: state.meError };
     if (key === "share") return { data: state.shared, error: null };
-    if (key === "audit-verify") return { data: undefined, refetch: () => {}, isFetching: false };
+    if (key === "audit-verify") return { data: state.verify, refetch: () => {}, isFetching: false };
     return {};
   },
   useInfiniteQuery: (o: { queryKey: unknown[]; queryFn: (c: { pageParam: unknown }) => Promise<unknown[]>; getNextPageParam: (last: unknown[], all: unknown[][]) => unknown }) => {
@@ -91,7 +91,7 @@ const event = (seq: number, action: string, payload: Record<string, unknown> = {
   ({ seq, action, entity: "x", entity_id: null, payload, hash: `${seq.toString(16).padStart(4, "0")}abcdef0123456789`, created_at: "2026-10-20T12:00:00Z", actor: "Morgan Owner" });
 
 beforeEach(() => {
-  Object.assign(state, { lang: "en", invite: undefined, me: undefined, meError: null, shared: undefined, pages: [], older: [], infiniteKey: [], hooks: [] });
+  Object.assign(state, { lang: "en", invite: undefined, me: undefined, meError: null, shared: undefined, pages: [], older: [], infiniteKey: [], hooks: [], verify: undefined });
   vi.mocked(api.get).mockClear();
 });
 
@@ -140,15 +140,25 @@ describe("older audit events", () => {
   it("hides the button when the first page already reached the start", () => {
     state.pages = [Array.from({ length: 30 }, (_, k) => event(30 - k, "deal.created"))];
     const html = text(render(createElement(Audit, { dealId: "d1" })));
-    expect(html).toContain("Showing all 30 events.");
+    expect(html).toContain("30 events in this deal.");
     expect(html).not.toContain("30 of 30");
     expect(button("Show older events")).toBeUndefined();
     expect(html).not.toContain(en.t("audit.capped"));
     state.pages = [[event(1, "deal.created")]];
-    expect(text(render(createElement(Audit, { dealId: "d1" })))).toContain("Showing the only event.");
+    expect(text(render(createElement(Audit, { dealId: "d1" })))).toContain("1 event in this deal.");
     state.lang = "fr";
     state.pages = [Array.from({ length: 30 }, (_, k) => event(30 - k, "deal.created"))];
-    expect(text(render(createElement(Audit, { dealId: "d1" })))).toContain("Affichage des 30 événements.");
+    expect(text(render(createElement(Audit, { dealId: "d1" })))).toContain("30 événements dans ce projet.");
+    state.lang = "en";
+  });
+  it("QA card D5: names this deal's count and the workspace count the chain check covered, apart", () => {
+    state.pages = [Array.from({ length: 41 }, (_, k) => event(41 - k, "deal.created"))];
+    state.verify = { ok: true, events: 43, broken: false };
+    let html = text(render(createElement(Audit, { dealId: "d1" })));
+    expect(html).toContain("41 events in this deal. The chain check covered 43 events in your workspace.");
+    state.lang = "fr";
+    html = text(render(createElement(Audit, { dealId: "d1" })));
+    expect(html).toContain("41 événements dans ce projet. La vérification de la chaîne a couvert 43 événements dans votre espace de travail.");
     state.lang = "en";
   });
   it("hides the button when an older page comes back empty", async () => {
