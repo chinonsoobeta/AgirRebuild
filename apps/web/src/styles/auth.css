@@ -20,6 +20,19 @@
 .auth-file .sub{display:block;font-size:13px;color:var(--ink-3);margin-top:2px}
 .auth-file .acts{display:flex;gap:6px}
 @media (max-width:600px){.pitch{padding:40px 24px}.auth-side{padding:32px 16px}.card.auth-invite{padding:24px}}
+/* QA card D3: on a phone the form comes first. The name and the language and theme switches stay at the top, the form
+   follows, and the pitch's words come after it, instead of about 440 px of them above the form. */
+@media (max-width:600px){
+  .split{display:flex;flex-direction:column}
+  .split>.pitch,.split .auth-pitch-top{display:contents}
+  .split .auth-pitch-top>.row{order:-2;padding:24px 16px 0}
+  .split .auth-pitch-top .topbar-right{display:flex}
+  .split>.auth-side{order:-1;padding:24px 16px}
+  .split .pitch-h{padding:8px 16px 0;font-size:24px}
+  .split .auth-pitch-lead{padding:12px 16px 32px}
+  .split>.pitch>.small{padding:0 16px 32px}
+}
+.auth-linkbtn[disabled],.auth-linkbtn[disabled]:hover{color:var(--ink-3);cursor:default;text-decoration:none}
 .auth-from{margin-bottom:10px}
 .auth-invite-body{margin-top:12px}
 .auth-meta{margin-top:6px}

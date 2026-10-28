@@ -16,6 +16,17 @@
   .ld-path .step .marker{top:2px;left:-8px}
 }
 .ld-start-hint{margin-top:12px}
+/* QA card D3: on a phone the shell hides .topbar-right; the signed-out bar keeps Sign in (with the language and the theme)
+   on the first row, and the site links wrap below it. Start a deal is the hero's first button just under the bar. */
+@media (max-width:600px){
+  .ld-bar{column-gap:12px}
+  .ld-bar .topbar-right{display:flex;flex-wrap:nowrap}
+  .ld-bar .topbar-right .toplink{padding:0 8px}
+  .ld-bar .nav{order:2}
+  .ld-bar .ld-bar-start{display:none}
+}
+/* Four documents (QA card D3): four columns where they fit, two otherwise, rather than three and one. */
+.ld-docs{grid-template-columns:repeat(auto-fit,minmax(min(230px,100%),1fr))}
 .ld-steps{list-style:none;padding:0}
 .ld-body{margin-top:8px}
 /* These cards space their own text, so the shared card gap is not added on top. */

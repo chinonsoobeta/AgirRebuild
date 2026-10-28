@@ -67,6 +67,7 @@ const app = createApp({ db, store, secureCookies: env === "production", demoSign
   trustProxy: process.env.AGIR_TRUST_PROXY === "1",
   // No mail provider yet: development writes each email to the data folder's mail/ directory; production sends nothing.
   mailer: env === "production" ? unsentMailer() : fileMailer(join(dataDir, "mail")),
+  mailToFolder: env !== "production",
   publicOrigin: process.env.AGIR_PUBLIC_ORIGIN ?? `http://127.0.0.1:${port}`,
   signup: signup as "open" | "invite", worker: embeddedWorker, log, logRequests: true, alert,
   // Postgres may run several API processes, so rate limits and run stops live in the database. Embedded PGlite is one

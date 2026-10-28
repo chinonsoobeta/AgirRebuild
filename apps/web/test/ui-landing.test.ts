@@ -37,7 +37,10 @@ describe("the landing page", () => {
     const words = text(out);
     expect(words).toContain("Decide whether to build, with numbers a lender can check.");
     expect(words).toContain("Five steps from your documents to a decision");
-    expect(words).toContain("Three documents from one run");
+    expect(words).toContain("Four documents from one run");
+    // QA card D3 (skeptic #24): the four Reports offers in PDF and Word, the committee memo included.
+    for (const doc of ["Build decision", "Lender package", "Partner memo", "Committee memo"]) expect(words).toContain(doc);
+    expect(words).not.toMatch(/Three documents/);
     expect(words).toContain("Built for Canadian deals");
     expect(words).toContain("Only the engine makes numbers");
     expect(words).toContain("Questions people ask first");
@@ -116,20 +119,53 @@ describe("the signed-out home", () => {
     state.me = { isLoading: false, error: new ApiError(401, "Sign in to continue.") };
     expect(text(html(Home))).toContain("Decide whether to build");
     state.me = { isLoading: true };
-    const waiting = text(html(Home));
-    expect(waiting).toContain("Decide whether to build");
-    expect(waiting).not.toContain("Sign in");
+    const waiting = html(Home);
+    expect(text(waiting)).toContain("Decide whether to build");
+    // As the static page draws it (QA card D3): Sign in and Start a deal stay put while the session loads.
+    expect(waiting).toMatch(/<a[^>]*href="\/login"[^>]*>Sign in<\/a>/);
+    expect(waiting).toMatch(/<a[^>]*href="\/signup"[^>]*>Start a deal<\/a>/);
   });
 });
 
 // QA item 9: before any code arrives, index.html shows the name and the landing headline, in the landing strings' words.
 describe("the static page before the code loads", () => {
+  const page = readFileSync(new URL("../index.html", import.meta.url), "utf8");
+  const boot = page.slice(page.indexOf('<div id="boot">'), page.indexOf('<div id="root">'));
+  const landing = boot.slice(boot.indexOf('class="landing boot-landing"'));
+  const wait = boot.slice(boot.indexOf('class="boot-wait"'), boot.indexOf('class="landing boot-landing"'));
+
   it("carries the product name, the headline and the lead as plain text in #boot, beside #root", () => {
-    const page = readFileSync(new URL("../index.html", import.meta.url), "utf8");
-    const root = page.slice(page.indexOf('<div id="boot">'), page.indexOf('<div id="root">'));
-    expect(root).toContain(">Agir</span>");
-    expect(root).toContain(en["landing.heroTitle"]);
-    expect(root).toContain(en["landing.heroLead"]);
+    expect(landing).toContain(">Agir</span>");
+    expect(landing).toContain(en["landing.heroTitle"]);
+    expect(landing).toContain(en["landing.heroLead"]);
+  });
+
+  // QA card D3 (mobile N2): the landing's way in works before the code: plain links, styled as on the landing page.
+  it("links to sign in and to start a deal as plain links", () => {
+    expect(landing).toContain(`<a class="toplink" href="/login">${en["landing.signIn"]}</a>`);
+    expect(landing).toContain(`<a class="btn primary" href="/signup">${en["landing.start"]}</a>`);
+  });
+
+  // QA card D3 (mobile N1): any other path shows the app's loading screen, never the marketing page.
+  it("on any path but / switches to the top bar and one Loading line, with no landing words", () => {
+    expect(wait).toContain(">Agir</span>");
+    expect(wait).toContain("Loading… / Chargement…");
+    expect(wait).not.toContain(en["landing.heroTitle"]);
+    expect(wait).not.toMatch(/href=/);
+    // The switch is the first thing in #boot, so it runs before either face is drawn.
+    expect(boot.indexOf("<script>")).toBeLessThan(boot.indexOf('class="boot-wait"'));
+    const code = boot.slice(boot.indexOf("<script>") + 8, boot.indexOf("</script>"));
+    const run = (pathname: string) => {
+      const el = { className: "" };
+      new Function("location", "document", code)({ pathname }, { getElementById: (id: string) => (id === "boot" ? el : null) });
+      return el.className;
+    };
+    expect(run("/")).toBe("");
+    for (const path of ["/deals", "/deals/abc/review", "/login", "/signup", "/verify"]) expect(run(path)).toBe("boot-app");
+    // The rules that pick the face are inline in the head, so they hold before the stylesheet arrives.
+    const head = page.slice(0, page.indexOf("</head>"));
+    expect(head).toMatch(/#boot \.boot-wait, #boot\.boot-app \.boot-landing \{ display: none; \}/);
+    expect(head).toMatch(/#boot\.boot-app \.boot-wait \{ display: block; \}/);
   });
 });
 

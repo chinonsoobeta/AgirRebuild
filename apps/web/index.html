@@ -14,17 +14,32 @@
         document.documentElement.dataset.theme = "light";
       }
     </script>
+    <style>
+      /* The static shell's two faces (QA card D3): the landing top on "/", the loading screen elsewhere. */
+      #boot .boot-wait, #boot.boot-app .boot-landing { display: none; }
+      #boot.boot-app .boot-wait { display: block; }
+    </style>
     <link rel="icon" href="/favicon.svg" type="image/svg+xml" />
     <title>Agir</title>
   </head>
   <body>
-    <!-- What shows before the code arrives (QA item 9): the name and the landing headline, in the words of
-         src/strings/landing.ts. It sits beside #root, so React's first (empty) commit does not clear it; main.tsx removes it
-         once the first screen is drawn. test/ui-landing.test.ts keeps the words in step. -->
+    <!-- What shows before the code arrives (QA item 9). It sits beside #root, so React's first (empty) commit does not clear
+         it; main.tsx removes it once the first screen is drawn. test/ui-landing.test.ts keeps the words in step with
+         src/strings/landing.ts.
+         On "/" it is the top of the landing page, with Sign in and Start a deal as plain links that work before any code
+         (QA card D3). On every other path the script below switches it to the app's loading screen (the top bar and one
+         "Loading…" line), so a signed-in page opened cold never looks like the marketing page. -->
     <div id="boot">
-      <div class="landing" aria-busy="true">
-        <header class="topbar"><div class="ld-bar ld-bar-full"><span class="brand"><span class="brand-mark"><svg width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="3" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M4 18L12 5l8 13" /><path d="M8 18h8" /></svg></span>Agir</span></div></header>
-        <main class="ld-wrap"><section class="ld-hero"><div><h1 class="ld-h1">Decide whether to build, with numbers a lender can check.</h1><p class="ld-sub">Agir takes a small Canadian project from your documents to a build decision, a lender package and a partner memo. Every figure comes from one engine and keeps its source. Nothing is guessed.</p></div></section></main>
+      <script>
+        if (location.pathname !== "/") document.getElementById("boot").className = "boot-app";
+      </script>
+      <div class="boot-wait" aria-busy="true">
+        <header class="topbar"><span class="brand"><span class="brand-mark"><svg width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="3" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M4 18L12 5l8 13" /><path d="M8 18h8" /></svg></span>Agir</span></header>
+        <main class="page"><div class="route-loading"><p class="muted">Loading… / Chargement…</p><span class="skel"></span><span class="skel"></span><span class="skel short"></span></div></main>
+      </div>
+      <div class="landing boot-landing" aria-busy="true">
+        <header class="topbar"><div class="ld-bar ld-bar-full"><span class="brand"><span class="brand-mark"><svg width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="3" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M4 18L12 5l8 13" /><path d="M8 18h8" /></svg></span>Agir</span><div class="topbar-right"><a class="toplink" href="/login">Sign in</a></div></div></header>
+        <main class="ld-wrap"><section class="ld-hero"><div><h1 class="ld-h1">Decide whether to build, with numbers a lender can check.</h1><p class="ld-sub">Agir takes a small Canadian project from your documents to a build decision, a lender package and a partner memo. Every figure comes from one engine and keeps its source. Nothing is guessed.</p><div class="row"><a class="btn primary" href="/signup">Start a deal</a></div></div></section></main>
       </div>
     </div>
     <div id="root"></div>

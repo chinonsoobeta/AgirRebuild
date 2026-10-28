@@ -47,13 +47,14 @@ function LanguageLink() {
   );
 }
 
-/** The top of the landing page, the same words as the static page in index.html, shown while the session loads. */
+/** The top of the landing page, as the static page in index.html draws it, shown while the session loads: Sign in and
+ * Start a deal included, so they do not vanish and come back between the static page and the landing page (QA card D3). */
 function LandingWait() {
   const { t } = useI18n();
   return (
     <div className="landing" aria-busy="true">
-      <header className="topbar"><div className="ld-bar ld-bar-full"><span className="brand"><Mark />Agir</span></div></header>
-      <main className="ld-wrap"><section className="ld-hero"><div><h1 className="ld-h1">{t("landing.heroTitle")}</h1><p className="ld-sub">{t("landing.heroLead")}</p></div></section></main>
+      <header className="topbar"><div className="ld-bar ld-bar-full"><span className="brand"><Mark />Agir</span><div className="topbar-right"><Link to="/login" className="toplink">{t("landing.signIn")}</Link></div></div></header>
+      <main className="ld-wrap"><section className="ld-hero"><div><h1 className="ld-h1">{t("landing.heroTitle")}</h1><p className="ld-sub">{t("landing.heroLead")}</p><div className="row"><Link to="/signup" className="btn primary">{t("landing.start")}</Link></div></div></section></main>
     </div>
   );
 }
@@ -76,7 +77,7 @@ export function LandingBar({ here }: { here: "/" | "/legal" }) {
           <LanguageLink />
           <ThemeToggle />
           <Link to="/login" className="toplink">{t("landing.signIn")}</Link>
-          <Link to="/signup" className="btn primary">{t("landing.start")}</Link>
+          <Link to="/signup" className="btn primary ld-bar-start">{t("landing.start")}</Link>
         </div>
       </div>
     </header>
@@ -152,8 +153,9 @@ export function Landing() {
 
           <section className="ld-sec" id="get" aria-labelledby="ld-get">
             <h2 className="h1" id="ld-get">{t("landing.getTitle")}</h2>
-            <div className="ld-three">
-              {(["buildDecision", "lenderPackage", "partnerMemo"] as const).map((k) => (
+            {/* What Reports offers (QA card D3): four documents, each in PDF or Word; the Excel workbook is in the note. */}
+            <div className="ld-three ld-docs">
+              {(["buildDecision", "lenderPackage", "partnerMemo", "committeeMemo"] as const).map((k) => (
                 <div key={k} className="card card-pad">
                   <h3 className="h3">{t(`landing.${k}`)}</h3>
                   <p className="muted ld-body">{t(`landing.${k}Body`)}</p>

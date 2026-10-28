@@ -18,6 +18,8 @@ import { thresholdsView, auditPackage, clientViewer, createRun, dealOverview, hi
 
 export type AppDeps = { db: Db; store: BlobStore; secureCookies: boolean; demoSignIn?: boolean; trustProxy?: boolean; now?: () => Date;
   /** Sends verification and reset emails. Without one, nothing is sent. */ mailer?: Mailer;
+  /** True when the mailer writes each email to a folder on the server instead of sending it (development): /api/me says
+   * so, and the verify page does not claim an email was sent (QA card D3). */ mailToFolder?: boolean;
   /** The web app's origin, for links in emails. Configured, never read from a request. */ publicOrigin?: string;
   /** Tests only: awaited after each progress line of a streamed run, so a test can hold a run at a stage. */
   progressHook?: (stage: string) => Promise<void> | void;
@@ -124,7 +126,7 @@ function windowReason(fieldKey: string, value: number, reason: string | null | u
 }
 
 export function createApp({ db, store, secureCookies, demoSignIn = false, trustProxy = false, now = () => new Date(),
-  mailer = { configured: false, send: async () => {} }, publicOrigin = "http://127.0.0.1:8787", progressHook, signup = "open", worker = false,
+  mailer = { configured: false, send: async () => {} }, mailToFolder = false, publicOrigin = "http://127.0.0.1:8787", progressHook, signup = "open", worker = false,
   log = defaultLog, logRequests = false, alert = () => {}, state = memoryState(), closure = false }: AppDeps) {
   const app = new Hono<Env>();
   /** An unexpected error: logged with its sentence (generic for shared links), alerted without it. */
@@ -376,7 +378,9 @@ export function createApp({ db, store, secureCookies, demoSignIn = false, trustP
     const [v] = await db.query<{ verified: boolean }>(`select email_verified_at is not null as verified from users where id = $1`, [c.get("user").id]);
     // mail: whether this server can send email at all (card B); without it, the screens say so instead of offering a send.
     // A blank name (accepted before QA card C4) is shown as the email.
-    return c.json({ user: { ...user, name: user.name.trim() || user.email, email_verified: v?.verified ?? false }, workspaces, mail: mailer.configured, closure });
+    // mailFolder: the email is written to a folder on the server, not sent (QA card D3); only said when mail is configured.
+    return c.json({ user: { ...user, name: user.name.trim() || user.email, email_verified: v?.verified ?? false }, workspaces, mail: mailer.configured,
+      ...(mailer.configured && mailToFolder ? { mailFolder: true } : {}), closure });
   });
 
   app.post("/api/me/name", async (c) => {

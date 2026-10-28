@@ -28,3 +28,16 @@
   .docs-list .table td.acts,.docs-list .table td:last-child{text-align:left}
   .docs-list .table .acts{justify-content:flex-start}
 }
+/* QA card D3: a long uploader name is cut with an ellipsis (whole in its title), so the table never scrolls sideways. */
+.docs-by{display:inline-block;max-width:18ch;overflow:hidden;text-overflow:ellipsis;white-space:nowrap;vertical-align:bottom}
+/* Remove asks in the page, under its row, as Approve all does on Review. */
+.docs-confirm{padding:12px 14px;border:1px solid var(--stop);border-radius:10px;background:var(--surface)}
+.docs-list .table tr.docs-confirm-row td{border-top:0}
+/* QA card D3: on a phone the five steps stand as a short list, one line each, so Choose files is on the first screen. */
+@media (max-width:600px){
+  .docs-page .path{grid-template-columns:minmax(0,1fr);row-gap:0;margin:16px 0 20px}
+  .docs-page .path .step{flex-direction:row;flex-wrap:wrap;align-items:baseline;gap:0 8px;border-top:0;border-left:2px solid var(--line-2);padding:0 0 10px 18px}
+  .docs-page .path .step.done{border-left-color:var(--accent)}
+  .docs-page .path .step .marker{top:3px;left:-8px}
+  .docs-page .path>li:last-child .step{padding-bottom:0}
+}

@@ -283,6 +283,12 @@ describe("with no mail provider, nothing claims a send", () => {
     expect((await call(app, s, "GET", "/api/me")).json.mail).toBe(false);
     const withMail = createApp({ db, store, secureCookies: false, mailer: memoryMailer() });
     expect((await call(withMail, s, "GET", "/api/me")).json.mail).toBe(true);
+    expect((await call(withMail, s, "GET", "/api/me")).json.mailFolder).toBeUndefined();
+    // QA card D3: a mailer that writes to a folder is said apart, so the verify page claims no send.
+    const toFolder = createApp({ db, store, secureCookies: false, mailer: memoryMailer(), mailToFolder: true });
+    expect((await call(toFolder, s, "GET", "/api/me")).json).toMatchObject({ mail: true, mailFolder: true });
+    const noneToFolder = createApp({ db, store, secureCookies: false, mailToFolder: true });
+    expect((await call(noneToFolder, s, "GET", "/api/me")).json.mailFolder).toBeUndefined();
   });
 
   test("with a mail provider, the answers are as before", async () => {
