@@ -147,7 +147,7 @@ Nothing here except the provider choice waits on a person.
 | S4 KMS-signed runs | Asymmetric signing; public verification in the audit package | 1–2 days |
 | S5 Crypto-shred deletion | Delete a workspace or expire a deal's documents by key destruction; a dry-run report first | 2 days; the retention period is the lawyer's |
 | S6 MFA and sessions | TOTP and passkeys, absolute expiry, invalidation on credential change | 3 days |
-| S7 Model boundary | Region pin, per-workspace switch, redaction pass | 2 days |
+| S7 Model boundary | Region pin, per-workspace switch, redaction pass. Done: the region pin and the switch (card C), the redaction pass (card S7, `packages/extraction/src/redact.ts`; names are not redacted) | 2 days |
 | S8 Audit and operations | Per-workspace chain with actor, scoped verify, grants, alerts | 2 days; the migration needs owner review |
 
 About three weeks. S1 to S3 come before any real document is uploaded. S1 and S4 need the KMS, which means the
