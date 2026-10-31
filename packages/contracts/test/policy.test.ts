@@ -1,6 +1,6 @@
 import { describe, expect, it } from "vitest";
 import { POLICIES, stressLabel } from "../src/policy.ts";
-import { STRESS } from "../src/fr.ts";
+import { plainStress, STRESS } from "../src/fr.ts";
 
 describe("card 96a stress labels", () => {
   for (const policy of Object.values(POLICIES)) {
@@ -146,5 +146,22 @@ describe("card E: no policy is signed by credit yet", () => {
     expect(SIGNED_POLICIES.size).toBe(0);
     expect(isSigned("policy-v1")).toBe(false);
     for (const version of Object.keys(POLICIES)) expect(isSigned(version), version).toBe(false);
+  });
+});
+
+describe("card F2 sale stress names in plain words", () => {
+  it("says the sales pace as a multiplier, rates in points and presales in points, for any size", () => {
+    expect(plainStress("en", "absorption", "Absorption -30%")).toBe("Sales pace × 0.70");
+    expect(plainStress("fr", "absorption", "Rythme de vente -20 %")).toBe("Rythme de vente × 0,80");
+    expect(plainStress("en", "rates", "Interest rates +100 bps")).toBe("Interest rates +1 point");
+    expect(plainStress("en", "rates", "Interest rates +150 bps")).toBe("Interest rates +1.5 points");
+    expect(plainStress("fr", "rates", "Taux d'intérêt +150 pb")).toBe("Taux d'intérêt +1,5 point");
+    expect(plainStress("en", "presales", "Presales -15 pts")).toBe("Presales -15 points");
+    expect(plainStress("fr", "presales", "Préventes -15 pts")).toBe("Préventes -15 points");
+  });
+  it("leaves every rental stress name as it is", () => {
+    for (const key of ["exit_cap", "cost", "rate", "rent", "occupancy", "expense", "combined"]) {
+      for (const [n, lang] of (["en", "fr"] as const).entries()) expect(plainStress(lang, key, STRESS[key]![n]!)).toBe(STRESS[key]![n]);
+    }
   });
 });

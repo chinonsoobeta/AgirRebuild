@@ -846,12 +846,14 @@ describe("the reports for a deal that sells its units (task 80)", () => {
     const captions = model.blocks.flatMap((b) => b.type === "table" ? [b.caption] : []);
     for (const caption of ["Revenue program", "Operations", "Stabilized operations, year 1", "Annual cash flows"]) expect(captions).not.toContain(caption);
     if (!(kind === "build_decision" && x.result.verdict.code !== "APPROVE")) expect(saleTable(model, "Stresses (each a full re-run of the model)").columns.map((c) => c.label)).toEqual(["Scenario", "Profit on cost (units sold)", "Margin on sales revenue", "Equity multiple"]);
-    const stats = model.blocks.find((b) => b.type === "stats");
-    expect(stats?.type === "stats" ? stats.items.map((i) => i.label) : []).toEqual(kind === "ic_memo"
-      ? ["Total cost", "Profit on cost (units sold)", "Margin on sales revenue", "Equity multiple", "Equity IRR"]
-      : kind === "build_decision" ? ["Profit on cost (units sold)", "Margin on sales revenue", "Equity multiple"] : []);
+    // card F2: peak equity joins the figures, and the build decision puts sell-out month and multiple in a second row;
+    // was ic_memo [cost, profit on cost, margin, multiple, IRR] and build_decision [profit on cost, margin, multiple].
+    const stats = model.blocks.flatMap((b) => b.type === "stats" ? b.items.map((i) => i.label) : []);
+    expect(stats).toEqual(kind === "ic_memo"
+      ? ["Total cost", "Profit on cost (units sold)", "Margin on sales revenue", "Peak equity outstanding", "Equity multiple", "Equity IRR"]
+      : kind === "build_decision" ? ["Profit on cost (units sold)", "Margin on sales revenue", "Peak equity outstanding", "Last closing (month)", "Equity multiple"] : []);
     if (kind !== "build_decision") {
-      const keys = ["gross_sales_revenue", "net_sales_revenue", "carry_total", "interest_after_completion", "development_profit_for_sale", "profit_on_cost_for_sale", "margin_on_revenue", "sellout_month", "sellout_years", "deposits_held_at_completion", "senior_balance_at_completion", ...(x.input.mezzanine ? ["mezz_balance_at_completion"] : [])];
+      const keys = ["gross_sales_revenue", "net_sales_revenue", "carry_total", "interest_after_completion", "development_profit_for_sale", "profit_on_cost_for_sale", "margin_on_revenue", "peak_equity", "sellout_month", "sellout_years", "deposits_held_at_completion", "senior_balance_at_completion", ...(x.input.mezzanine ? ["mezz_balance_at_completion"] : [])];
       expect(saleTable(model, "Sale results").rows).toEqual(keys.map((key) => {
         const m = x.result.scenarios[0]!.metrics.find((m) => m.key === key)!;
         return [m.label, formatValue(m.value!, m.unit)];
@@ -1124,7 +1126,8 @@ describe("the partner memo (task 84d)", () => {
     const metric = (key: string) => x.result.scenarios[0]!.metrics.find((m) => m.key === key)!;
     expect(model.kicker).toBe("Partner memo");
     const stats = model.blocks.find((b) => b.type === "stats")!;
-    expect(stats.type === "stats" ? stats.items : []).toEqual(["equity_multiple", "equity_irr", "lp_irr", "gp_irr"].map((key) => ({
+    // card F2: a sale's memo leads with its peak equity; was ["equity_multiple", "equity_irr", "lp_irr", "gp_irr"] for both.
+    expect(stats.type === "stats" ? stats.items : []).toEqual([...(sale ? ["peak_equity"] : []), "equity_multiple", "equity_irr", "lp_irr", "gp_irr"].map((key) => ({
       label: metric(key).label, value: formatValue(metric(key).value!, metric(key).unit),
     })));
     expect(saleTable(model, "Partnership terms").rows).toEqual([
@@ -1815,6 +1818,8 @@ describe("the outputs of a deal that sells its units read as such (card F2)", ()
     fr: ["Prix -10 %", "Rythme de vente × 0,70", "Coûts +10 %", "Taux d'intérêt +1 point", "Construction +6 mois", "Préventes -15 points"],
   } as const;
   const KINDS = ["ic_memo", "build_decision", "lender_package", "partner_memo"] as const;
+  /** visibleText folds every space, the no-break ones included. */
+  const fold = (s: string) => s.replace(/\s+/g, " ");
 
   test.each(SALE_SLUGS.flatMap((slug) => KINDS.flatMap((kind) => (["en", "fr"] as const).map((lang) => [slug, kind, lang] as const))))(
     "%s %s (%s) has no rental words, no raw codes and no bare 'not applicable', and passes provenance", (slug, kind, lang) => {
@@ -1825,7 +1830,7 @@ describe("the outputs of a deal that sells its units read as such (card F2)", ()
       expect(text).not.toContain(lang === "en" ? "Not applicable" : "Sans objet");
       expect(text).not.toMatch(RENTAL_WORDS[lang]);
       // A return that cannot be worked out is said with its reason.
-      if (text.includes(NOT_MEANINGFUL[lang])) expect(text).toContain(IRR_REASON[lang]);
+      if (text.includes(NOT_MEANINGFUL[lang])) expect(text).toContain(fold(IRR_REASON[lang]));
       expect(text).not.toMatch(/Absorption -30|-15 pts|\+100 bps|\+100 pb/);
     });
 
@@ -1834,7 +1839,7 @@ describe("the outputs of a deal that sells its units read as such (card F2)", ()
     const caption = lang === "en" ? "Stresses (each a full re-run of the model)" : "Stress (recalcul complet par scénario)";
     expect(saleTable(model, caption).rows.map((r) => r[0]).slice(1, -1)).toEqual([...STRESS_NAMES[lang]]);
     const decision = visibleText(renderHtml(buildModel(withSplit("kestrel-row-townhomes", "build_decision", lang))));
-    expect(decision).toContain(lang === "en" ? "Its profit on cost: -4.32%." : "Profit sur coût : -4,32 %.");
+    expect(decision).toContain(fold(lang === "en" ? "Its profit on cost: -4.32%." : "Profit sur coût : -4,32 %."));
   });
 
   test.each(["en", "fr"] as const)("the build decision leads with profit on cost, margin and peak equity, then the sell-out month and multiple, each with a plain sentence (%s)", (lang) => {

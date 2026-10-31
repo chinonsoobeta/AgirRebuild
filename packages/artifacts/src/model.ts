@@ -239,9 +239,8 @@ function heldStats(f: Formatter, unrealized = true): { label: string; value: str
   return unrealized ? [...hold, ...["unrealized_equity_multiple", "unrealized_equity_irr", "stated_value"].map(item)] : hold;
 }
 
-function saleStats(f: Formatter, full = true): { label: string; value: string }[] {
-  const keys = full ? ["total_development_cost", "profit_on_cost_for_sale", "margin_on_revenue", "equity_multiple", "equity_irr"]
-    : ["profit_on_cost_for_sale", "margin_on_revenue", "equity_multiple"];
+function saleStats(f: Formatter): { label: string; value: string }[] {
+  const keys = ["total_development_cost", "profit_on_cost_for_sale", "margin_on_revenue", "peak_equity", "equity_multiple", "equity_irr"];
   return keys.map((key) => ({ label: key === "total_development_cost" ? reportText(f.lang, "totalCost") : f.metricOf("base", key).label, value: f.metric("base", key) }));
 }
 
@@ -263,13 +262,43 @@ function unitSales(f: Formatter, x: ArtifactInput): Block {
 
 function saleResults(f: Formatter, x: ArtifactInput): Block {
   const keys = ["gross_sales_revenue", "net_sales_revenue", "carry_total", "interest_after_completion", "development_profit_for_sale", "profit_on_cost_for_sale",
-    "margin_on_revenue", "sellout_month", "sellout_years", "deposits_held_at_completion", "senior_balance_at_completion",
+    "margin_on_revenue", "peak_equity", "sellout_month", "sellout_years", "deposits_held_at_completion", "senior_balance_at_completion",
     ...(x.input.mezzanine && x.input.mezzanine.amount > 0 ? ["mezz_balance_at_completion"] : [])];
   return { type: "table", caption: reportText(f.lang, "saleResults"), columns: [{ label: reportText(f.lang, "figure") }, { label: reportText(f.lang, "value"), numeric: true }],
     rows: keys.map((key) => [f.metricOf("base", key).label, f.metric("base", key)]) };
 }
 
 const SALE_OPERATIONS = (lang: "en" | "fr"): Block => ({ type: "paragraph", muted: true, text: reportText(lang, "saleOperations") });
+
+/** A sale's return that cannot be worked out gets its reason once, below the figures that show it (card F2). */
+function saleIrrNote(f: Formatter, r: RunResult, keys: readonly string[], scenarios: readonly string[]): Block[] {
+  const shown = r.scenarios.filter((s) => scenarios.includes(s.key)).flatMap((s) => s.metrics.filter((m) => keys.includes(m.key)));
+  return shown.some((m) => m.status === "NOT_MEANINGFUL") ? [{ type: "paragraph", muted: true, text: reportText(f.lang, "irrNotMeaningful") }] : [];
+}
+
+/**
+ * The lender's view of a sale (card F2): the presale condition as the run's own check found it, the deposits held,
+ * and the month the closings have repaid every loan, read from the stored ledger.
+ */
+function saleDebtRows(f: Formatter, x: ArtifactInput): string[][] {
+  const i = x.input, sale = i.forSale!;
+  const rows: string[][] = [];
+  if (sale.presaleThresholdPct !== undefined) rows.push(
+    [f.field("senior_presale_threshold_pct", FIELD_BY_KEY.get("senior_presale_threshold_pct")!.label), f.input(sale.presaleThresholdPct, "%", "senior_presale_threshold_pct")],
+    [f.field("presold_units_pct", FIELD_BY_KEY.get("presold_units_pct")!.label), f.input(sale.presoldPct, "%", "presold_units_pct")],
+    [reportText(f.lang, "presaleCondition"), reportText(f.lang, x.result.checks.some((c) => c.key === "presale_threshold_unmet") ? "presaleNotMet" : "presaleMet")],
+  );
+  for (const key of ["interest_after_completion", "senior_balance_at_completion", ...(i.mezzanine && i.mezzanine.amount > 0 ? ["mezz_balance_at_completion"] : []), "deposits_held_at_completion"]) {
+    rows.push([f.metricOf("base", key).label, f.metric("base", key)]);
+  }
+  if (i.senior.amount > 0 || (i.mezzanine?.amount ?? 0) > 0) {
+    const repaid = x.result.ledger.find((row) => row.month >= i.constructionMonths && row.debtBalance <= 0.005);
+    rows.push([reportText(f.lang, "repaidMonth"), repaid
+      ? f.derived(repaid.month, "months", "first ledger month from completion with ledger.debtBalance = 0")
+      : reportText(f.lang, "notRepaid")]);
+  }
+  return rows;
+}
 
 function gates(f: Formatter, r: RunResult): Block {
   const label = { passed: reportText(f.lang, "passes"), failed: reportText(f.lang, "fails"), not_applicable: reportText(f.lang, "notApplicable"), not_evaluated: reportText(f.lang, "notEvaluated") } as const;
@@ -607,6 +636,7 @@ function readingAndDisclaimer(f: Formatter, x: ArtifactInput): Block[] {
 const PLAIN_NOTE: Record<string, Parameters<typeof reportText>[1]> = {
   yield_on_cost: "plainYieldOnCost", sizing_dscr: "plainSizingDscr", equity_multiple: "plainEquityMultiple",
   profit_on_cost_for_sale: "plainProfitOnCost", margin_on_revenue: "plainMargin", dcr_after_refinance: "plainDcrAfterRefinance",
+  peak_equity: "plainPeakEquity", sellout_month: "plainSellout",
 };
 const withNote = (f: Formatter, key: string, item: { label: string; value: string }) => (PLAIN_NOTE[key] ? { ...item, note: reportText(f.lang, PLAIN_NOTE[key]!) } : item);
 
@@ -729,6 +759,7 @@ export function buildModel(x: ArtifactInput): DocModel {
       blocks.push({ type: "paragraph", text: `${decisionWord(f, x.decision)}: ${f.ident(x.decision.rationale, "decision.rationale")}` });
       if (x.decision.conditions) blocks.push({ type: "paragraph", text: reportText(f.lang, "conditions", f.ident(x.decision.conditions, "decision.conditions")) });
     }
+    if (sale) blocks.push(...saleIrrNote(f, r, ["equity_irr"], ["base"]));
     blocks.push(sourcesAndUses(f, x), ...mezzAccrual(f, r), ...(sale ? [unitSales(f, x), saleResults(f, x), SALE_OPERATIONS(f.lang)] : [revenueProgram(f, x), operations(f, x)]), gates(f, r), stresses(f, r, held, sale), ...(sale ? [] : [annual(f, r, false)]));
     blocks.push({ type: "heading", text: reportText(f.lang, "checks") }, checks(f, r));
     blocks.push(...notFoundBlocks(f, x), inputsAppendix(f, x));
@@ -736,7 +767,7 @@ export function buildModel(x: ArtifactInput): DocModel {
     blocks.push(verdict, ...draftLine(x), ...customThresholdBlocks(f,x), ...sponsorStatedBlocks(f, x), ...tableValueBlocks(f,x), ...heldPartnerBlocks(f, x));
   } else if (x.kind === "partner_memo") {
     blocks.push(verdict, ...draftLine(x), ...customThresholdBlocks(f,x), ...sponsorStatedBlocks(f, x), ...tableValueBlocks(f,x));
-    blocks.push({ type: "stats", items: ["equity_multiple", "equity_irr", "lp_irr", "gp_irr"].map((key) => ({
+    blocks.push({ type: "stats", items: [...(sale ? ["peak_equity"] : []), "equity_multiple", "equity_irr", "lp_irr", "gp_irr"].map((key) => ({
       label: f.metricOf("base", key).label, value: f.metric("base", key),
     })) });
     const terms = x.input.waterfall!;
@@ -769,16 +800,19 @@ export function buildModel(x: ArtifactInput): DocModel {
       rows: partnerRows,
     });
     blocks.push({ type: "paragraph", muted: true, text: reportText(f.lang, "waterfall") });
+    if (sale) blocks.push({ type: "paragraph", muted: true, text: reportText(f.lang, "saleFlows") });
     blocks.push(sourcesAndUses(f, x), stresses(f, r, false, false, ["equity_multiple", "lp_irr", "gp_irr"]));
-    if (sale) blocks.push(SALE_OPERATIONS(f.lang));
+    if (sale) blocks.push(...saleIrrNote(f, r, ["equity_irr", "lp_irr", "gp_irr"], r.scenarios.map((s) => s.key)), SALE_OPERATIONS(f.lang));
     blocks.push(...notFoundBlocks(f, x), { type: "paragraph", muted: true, text: reportText(f.lang, "inputSources") });
   } else if (x.kind === "build_decision") {
     blocks.push(verdict, ...draftLine(x), ...customThresholdBlocks(f,x), ...statedYourselfBlocks(f, x), ...defaultsBlocks(f, x), ...taxBesideRatioBlocks(f, x), ...tableValueBlocks(f,x));
-    const saleKeys = ["profit_on_cost_for_sale", "margin_on_revenue", "equity_multiple"];
     const heldKeys = ["refinance_cash_returned", "cash_left_in_deal", "dcr_after_refinance", "cash_on_cash_after_refinance"];
+    // A sale leads with what decides it, then the sell-out month and the multiple as support (card F2).
+    const saleItems = (keys: string[]) => keys.map((key) => withNote(f, key, { label: f.metricOf("base", key).label, value: f.metric("base", key) }));
+    if (sale) blocks.push({ type: "stats", items: saleItems(["profit_on_cost_for_sale", "margin_on_revenue", "peak_equity"]) });
     blocks.push({
       type: "stats",
-      items: sale ? saleStats(f, false).map((item, k) => withNote(f, saleKeys[k]!, item)) : held
+      items: sale ? saleItems(["sellout_month", "equity_multiple"]) : held
         ? [
             ...heldStats(f, false).map((item, k) => withNote(f, heldKeys[k]!, item)),
             withNote(f, "yield_on_cost", { label: reportText(f.lang, "yieldOnCost"), value: f.metric("base", "yield_on_cost") }),
@@ -813,18 +847,14 @@ export function buildModel(x: ArtifactInput): DocModel {
       );
     }
     if (i.mezzanine && i.mezzanine.amount > 0) {
-      debtRows.push([reportText(f.lang, "mezz"), f.input(i.mezzanine.amount, "$", "mezz_loan_amount")], [reportText(f.lang, "mezzRateShort"), f.input(i.mezzanine.ratePct, "%", "mezz_rate_pct")], [reportText(f.lang, "mezzExcess"), f.metric("base", "mezz_interest_accrued")]);
+      debtRows.push([reportText(f.lang, "mezz"), f.input(i.mezzanine.amount, "$", "mezz_loan_amount")], [reportText(f.lang, "mezzRateShort"), f.input(i.mezzanine.ratePct, "%", "mezz_rate_pct")]);
+      // A sale accrues no mezzanine interest above its commitment; the row only appears when the engine has a figure.
+      const accrued = x.result.scenarios[0]?.metrics.find((m) => m.key === "mezz_interest_accrued");
+      if (!sale || accrued?.status === "VALID") debtRows.push([reportText(f.lang, "mezzExcess"), f.metric("base", "mezz_interest_accrued")]);
     }
     debtRows.push([reportText(f.lang, "ltc"), f.metric("base", "loan_to_cost")]);
-    if (sale) {
-      if (i.forSale!.presaleThresholdPct !== undefined) debtRows.push(
-        [f.field("senior_presale_threshold_pct", FIELD_BY_KEY.get("senior_presale_threshold_pct")!.label), f.input(i.forSale!.presaleThresholdPct, "%", "senior_presale_threshold_pct")],
-        [f.field("presold_units_pct", FIELD_BY_KEY.get("presold_units_pct")!.label), f.input(i.forSale!.presoldPct, "%", "presold_units_pct")],
-      );
-      for (const key of ["interest_after_completion", "senior_balance_at_completion", ...(i.mezzanine && i.mezzanine.amount > 0 ? ["mezz_balance_at_completion"] : [])]) {
-        debtRows.push([f.metricOf("base", key).label, f.metric("base", key)]);
-      }
-    } else debtRows.push(
+    if (sale) debtRows.push(...saleDebtRows(f, x));
+    else debtRows.push(
       [reportText(f.lang, "debtYield"), f.metric("base", "debt_yield")],
       [reportText(f.lang, "sizingWorst"), f.metric("base", "sizing_dscr")],
       [reportText(f.lang, "contractualWorst"), f.metric("base", "contractual_dscr")],
@@ -835,6 +865,7 @@ export function buildModel(x: ArtifactInput): DocModel {
     const refinanceDcr = r.verdict.gates.find((g) => g.key === "dcr_after_refinance");
     if (refinanceDcr) debtRows.push([reportText(f.lang, "refiCoverageMin"), f.run(refinanceDcr.threshold, refinanceDcr.unit, "gate.dcr_after_refinance.threshold")]);
     blocks.push({ type: "table", caption: sale ? reportText(f.lang, "debt") : reportText(f.lang, "debtCoverage"), columns: [{ label: reportText(f.lang, "term") }, { label: reportText(f.lang, "value"), numeric: true }], rows: debtRows });
+    if (sale) blocks.push({ type: "paragraph", text: reportText(f.lang, "repaidFromClosings") });
     // Beside the refinance loan: the premium is added to it, not paid in cash.
     if (i.refinance?.insurancePremiumPct !== undefined) {
       if (i.refinance.insurancePremiumPct > 0) {

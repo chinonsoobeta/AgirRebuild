@@ -194,7 +194,7 @@ export const TEXT = {
   "run": ["Run {0}", "Calcul {0}"],
   "lp": ["LP", "Commanditaires"],
   "gp": ["GP", "Commandité"],
-  "profitOnCostPhrase": ["profit on cost", "profit sur coût"],
+  "profitOnCostPhrase": ["profit on cost", "Profit sur coût"],
   "sizingDscrPhrase": ["coverage, full payment", "Couverture, paiement complet"],
   "returnToUnderwriting": ["return to underwriting", "renvoyer à l'analyse"],
   "defaultAccepted": ["Default accepted", "Valeur par défaut acceptée"],
@@ -227,6 +227,17 @@ export const TEXT = {
   "plainProfitOnCost": ["The development profit divided by everything it cost to build and carry the units until they sold.", "Le profit de développement divisé par tout ce qu'ont coûté la construction et le portage des logements jusqu'à leur vente."],
   "plainMargin": ["The development profit as a share of the net sales revenue.", "Le profit de développement en proportion du revenu net des ventes."],
   "plainDcrAfterRefinance": ["Net operating income over the first year after the refinance divided by the payments on all the loans in force.", "Le revenu net d'exploitation de la première année après le refinancement divisé par les paiements de tous les prêts en vigueur."],
+  // Card F2: a sale's reports in sale words.
+  "plainPeakEquity": ["The most equity in the deal at any one time.", "Le plus de fonds propres investis dans le projet à un même moment."],
+  "plainSellout": ["The month the last unit closes, counted from the start of construction.", "Le mois où la vente du dernier logement est conclue, compté depuis le début de la construction."],
+  "presaleCondition": ["Presale condition", "Condition de préventes"],
+  "presaleMet": ["Met", "Respectée"],
+  "presaleNotMet": ["Not met", "Non respectée"],
+  "repaidMonth": ["Loans repaid in full from closings (month)", "Prêts remboursés en entier par les ventes conclues (mois)"],
+  "notRepaid": ["Not repaid in full by the last closing", "Non remboursés en entier à la dernière vente conclue"],
+  "repaidFromClosings": ["Each closing's net proceeds repay the senior loan and its interest first, then the mezzanine loan; what is left goes to equity. Buyer deposits stay in trust and repay nothing.", "Le produit net de chaque vente conclue rembourse d'abord le prêt principal et ses intérêts, puis le prêt mezzanine\u00a0; le reste revient aux fonds propres. Les dépôts des acheteurs restent en fiducie et ne remboursent rien."],
+  "saleFlows": ["The waterfall runs over the sale's dated equity flows: each contribution in its month, the carry paid after completion included, and each closing's proceeds at the end of the month it closes.", "La répartition porte sur les flux datés des fonds propres de la vente\u00a0: chaque apport dans son mois, y compris les frais de portage payés après l'achèvement, et le produit de chaque vente conclue à la fin de son mois."],
+  "irrNotMeaningful": ["A return marked not meaningful has dated cash flows that change direction more than once, such as carry paid after the first closings, so no single rate describes it.", "Un rendement marqué non significatif a des flux datés qui changent de sens plus d'une fois, par exemple des frais de portage payés après les premières ventes conclues\u00a0; aucun taux unique ne le décrit."],
 } as const;
 
 export function reportText(lang: "en" | "fr", key: keyof typeof TEXT, ...values: string[]): string {
