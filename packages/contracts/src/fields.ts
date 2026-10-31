@@ -173,6 +173,12 @@ export const RENTAL_ONLY_FIELDS: readonly string[] = [
   "senior_amort_years", "senior_io_months", "mezz_amort_years", "mezz_io_months",
 ];
 
+/** Card F1: why a reading of this field is not needed on a deal that sells (or rents) its units; null when the deal uses it. */
+export function notNeededReason(fieldKey: string, selling: boolean): string | null {
+  if (selling) return RENTAL_ONLY_FIELDS.includes(fieldKey) ? "This deal sells its units" : null;
+  return fieldKey !== "sell_units" && FIELDS.find((f) => f.key === fieldKey)?.group === "sale" ? "This deal rents its units" : null;
+}
+
 export const FIELD_BY_KEY: ReadonlyMap<string, FieldDef> = new Map(FIELDS.map((f) => [f.key, f]));
 
 export function fieldDef(key: string): FieldDef {
