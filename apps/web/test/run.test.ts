@@ -161,6 +161,27 @@ describe("sale exploration layouts (task 82)", () => {
   });
 });
 
+describe("the reports screen of a deal that sells its units (card F2)", () => {
+  afterEach(() => { queryState.lang = "en"; queryState.run = undefined; });
+  it.each(["en", "fr"] as const)("describes the committee memo and lender package in sale words, in %s", (lang) => {
+    queryState.lang = lang;
+    const i = build(lang, () => {});
+    const plain = (x: string) => x.replace(/\u00a0/g, " ").replaceAll("'", "&#x27;");
+    queryState.run = { result: sale } as never;
+    const html = renderToStaticMarkup(createElement(Reports, { dealId: "sale" })).replace(/\u00a0/g, " ");
+    for (const kind of ["ic_memo", "lender_package"] as const) {
+      expect(html).toContain(plain(i.t(`reports.kdSale.${kind}`)));
+      expect(html).not.toContain(plain(i.t(`reports.kd.${kind}`)));
+    }
+    expect(i.t("reports.kdSale.ic_memo")).not.toMatch(/annual|annuels/);
+    expect(i.t("reports.kdSale.lender_package")).toMatch(lang === "en" ? /presale.*deposits.*closings/ : /prévente.*dépôts.*ventes conclues/);
+    queryState.run = { result: rental } as never;
+    const rentalHtml = renderToStaticMarkup(createElement(Reports, { dealId: "rental" })).replace(/\u00a0/g, " ");
+    expect(rentalHtml).toContain(plain(i.t("reports.kd.ic_memo")));
+    expect(rentalHtml).not.toContain(plain(i.t("reports.kdSale.ic_memo")));
+  });
+});
+
 describe("offering the partner memo (task 84d)", () => {
   it.each([
     ["sale with split", { ...saleInput, waterfall: { lpSharePct: 90, preferredReturnPct: 8, gpPromotePct: 20 } }, true],

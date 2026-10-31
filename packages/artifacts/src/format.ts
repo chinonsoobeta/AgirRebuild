@@ -4,7 +4,7 @@
 // approved input, a gate threshold, or simple arithmetic over those. The
 // final scan (provenance.ts) then refuses any digit the manifest cannot explain.
 
-import { stressLabel, changeMeta, type Policy, type PolicyChange, FR_FIELDS, FR_METRICS, STRESS, GATES, plainTerm, numberFormat, checkText, verdictText, type Metric, type MetricUnit, type RunResult } from "@agir/contracts";
+import { stressLabel, plainStress, changeMeta, type Policy, type PolicyChange, FR_FIELDS, FR_METRICS, STRESS, GATES, plainTerm, numberFormat, checkText, verdictText, type Metric, type MetricUnit, type RunResult } from "@agir/contracts";
 import { reportText } from "./text.ts";
 
 export type ProvenanceEntry = { text: string; ref: string; unit?: "years" };
@@ -63,7 +63,7 @@ export class Formatter {
     const preset = this.custom?.policy.stresses.find((stress) => stress.key === key);
     const label = preset ? stressLabel(preset,this.lang,this.custom?.standardPolicy?.stresses.find((stress) => stress.key === key)) : this.lang === "fr" ? STRESS[key]?.[1] ?? en : en;
     const removed = this.custom?.changes?.filter((change) => change.stressRemoved && change.path.startsWith(`stresses.${key}.`)) ?? [];
-    return plainTerm(this.lang,label) + removed.map((change) => {
+    return plainTerm(this.lang,plainStress(this.lang,key,label)) + removed.map((change) => {
       const field = key === "combined" ? `${changeMeta(this.custom!.policy.version, change).label[this.lang]}${this.lang === "fr" ? "\u00a0: " : ": "}` : "";
       return ` · ${field}${reportText(this.lang,"stressRemovedBy",change.setBy ?? change.setById,change.setAt.slice(0,10))}`;
     }).join("");

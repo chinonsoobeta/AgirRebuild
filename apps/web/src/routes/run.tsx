@@ -1,4 +1,4 @@
-import { isSigned, stressLabel, tableSourceLabel, tableStaleWarning, pbrhExplanation } from "@agir/contracts";
+import { isSigned, plainStress, stressLabel, tableSourceLabel, tableStaleWarning, pbrhExplanation } from "@agir/contracts";
 import { Link } from "@tanstack/react-router";
 import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
 import { Fragment, useRef, useState } from "react";
@@ -72,7 +72,9 @@ const MEANINGS = new Set(["total_development_cost", "capitalized_interest", "exi
   "net_sales_revenue", "carry_total", "interest_after_completion", "development_profit_for_sale", "profit_on_cost_for_sale", "margin_on_revenue",
   "peak_equity", "deposits_held_at_completion", "completion_month", "sellout_month"]);
 /** One plain sentence for a key figure: the glossary's meaning in the reader's chosen terms (as the Glossary shows it), else the figure's own. */
-export function meaning(i: ReturnType<typeof useI18n>, key: string): string | undefined {
+export function meaning(i: ReturnType<typeof useI18n>, key: string, sale = false): string | undefined {
+  // A sale's total cost stops at completion: nothing is leased up (card F2).
+  if (sale && key === "total_development_cost") return i.t("run.meaning.total_development_cost_sale");
   const g = GLOSS_FOR[key];
   if (g) {
     const entry: readonly [string, string] = i.terms === "plain" ? i.t(`terms.gloss.${g}`)
@@ -438,7 +440,7 @@ export function Run({ dealId, run: fromAddress }: { dealId: string; run?: string
   const scenarioLabel = (key: string) => L.stress(key, v.result.scenarios.find((s) => s.key === key)?.label ?? key);
   const stressName = (s: { key: string; label: string }) => {
     const custom = v.policy?.custom ? v.policy.stresses.find((stress) => stress.key === s.key) : undefined;
-    return custom ? stressLabel(custom, i.lang, v.standardPolicy?.stresses.find((stress) => stress.key === s.key)) : L.stress(s.key, s.label);
+    return custom ? plainStress(i.lang, s.key, stressLabel(custom, i.lang, v.standardPolicy?.stresses.find((stress) => stress.key === s.key))) : L.stress(s.key, s.label);
   };
   const gateFor = (k: string) => v.result.verdict.gates.find((g) => g.metricKey === k && g.scenario === base.key);
   const operating = v.result.annual.filter((y) => y.year > 0).length;
@@ -511,7 +513,7 @@ export function Run({ dealId, run: fromAddress }: { dealId: string; run?: string
               const sub = m.status !== "VALID" && m.reason ? i.msg(m.reason) : g ? t("run.gateNeeds", { v: f.value(g.threshold, g.unit) })
                 : m.status === "VALID" ? context[k]?.() : undefined;
               const why = m.status !== "VALID" && m.reason?.includes("no sign change") ? t("run.meaning.noSignChange") : undefined;
-              const plain = meaning(i, k);
+              const plain = meaning(i, k, layout.sale);
               const s = sub || why || plain ? <>{sub && <span className="run-fig-sub">{sub}</span>}{why && <span className="run-fig-sub">{why}</span>}{plain && <span className="run-fig-meaning">{plain}</span>}</> : undefined;
               return (
                 <Fragment key={k}>

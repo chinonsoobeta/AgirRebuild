@@ -309,11 +309,12 @@ in this card); and the cited tables that will replace entered values.
 
 ## Selling the units (townhomes and small condos)
 
-**Status: built in cards 77 to 85; documents read since card F1.** The engine, inputs, run screen, reports and
-exploration for a deal that sells its units were built in cards 77 to 85 (see `docs/STATUS.md`). Since card F1 the
-sale figures are also read from documents, by the rules and by the AI reader (`reader-v5`), except the choice to
-sell, which a person makes; a reading for a field the deal's mode does not use is listed on Review as not needed.
-Owner decisions 2026-10-15 (the model) and 2026-10-18 (rules Q1 to Q5 below). The reference workbooks
+**Status: built.** The engine, inputs, quick-start templates ("Townhomes for sale", "Small condo"), run screen and
+Excel and memo tables were built in cards 77 to 85 (see `docs/STATUS.md`). Since card F1 the sale figures are also
+read from documents, by the rules and by the AI reader (`reader-v5`), except the choice to sell, which a person makes;
+a reading for a field the deal's mode does not use is listed on Review as not needed. Since card F2 the build
+decision, committee memo, lender package and partner memo read in sale words, with plain sentences and plain stress
+names. Owner decisions 2026-10-15 (the model) and 2026-10-18 (rules Q1 to Q5 below). The reference workbooks
 `kestrel-row-townhomes.xlsx` (8 townhomes, Ontario, 50% presold) and `alder-court-condo.xlsx` (30-unit condo, BC, 70%
 presold, 4-month closing lag) implement this section; card 77 checks the engine against their outcomes in
 `oracles/for-sale/`.

@@ -169,6 +169,7 @@ export const en = {
   "run.assumed.loanWhy": "Interest compounds monthly. Canadian lenders often quote rates compounded semi-annually, so check how your lender states its rate.",
   "run.meaning.noSignChange": "A return can only be worked out when the equity both puts cash in and gets cash back; here it does not.",
   "run.meaning.total_development_cost": "Everything the project costs until it is leased up: land, construction, fees and the interest added to the cost.",
+  "run.meaning.total_development_cost_sale": "Everything the project costs until construction is complete: land, construction, fees and the interest during construction.",
   "run.meaning.capitalized_interest": "Interest on the loans before the building is leased up. It is added to the cost instead of being paid from rent.",
   "run.meaning.exit_value": "What a buyer is assumed to pay: the final year's net operating income divided by the exit cap rate.",
   "run.meaning.development_profit": "The sale proceeds after selling costs, less the total development cost.",
@@ -365,6 +366,7 @@ export const fr: FrenchOf<typeof en> = {
   "run.assumed.loanWhy": "Les intérêts sont composés mensuellement. Les prêteurs canadiens annoncent souvent des taux composés semestriellement\u00a0; vérifiez comment votre prêteur exprime son taux.",
   "run.meaning.noSignChange": "Un rendement ne peut être calculé que si les fonds propres versent de l'argent et en reçoivent en retour\u00a0; ce n'est pas le cas ici.",
   "run.meaning.total_development_cost": "Tout ce que coûte le projet jusqu'à sa location\u00a0: terrain, construction, frais et intérêts ajoutés au coût.",
+  "run.meaning.total_development_cost_sale": "Tout ce que coûte le projet jusqu'à la fin des travaux\u00a0: terrain, construction, frais et intérêts pendant la construction.",
   "run.meaning.capitalized_interest": "Les intérêts des prêts avant que l'immeuble soit loué. Ils s'ajoutent au coût au lieu d'être payés par les loyers.",
   "run.meaning.exit_value": "Ce qu'un acheteur est supposé payer\u00a0: le revenu net d'exploitation de la dernière année divisé par le taux de capitalisation de sortie.",
   "run.meaning.development_profit": "Le produit de la vente après les frais de vente, moins le coût total de développement.",
@@ -393,7 +395,7 @@ export const fr: FrenchOf<typeof en> = {
   "run.meaning.peak_equity": "Le plus de fonds propres investis dans le projet à un même moment.",
   "run.meaning.deposits_held_at_completion": "Les dépôts des acheteurs détenus en fiducie à la fin des travaux\u00a0; ils ne servent jamais à payer les coûts.",
   "run.meaning.completion_month": "Le mois où la construction se termine.",
-  "run.meaning.sellout_month": "Le mois où le dernier logement est vendu.",
+  "run.meaning.sellout_month": "Le mois où la vente du dernier logement est conclue.",
 };
 
 register(en, fr);

@@ -213,3 +213,50 @@ describe("the reports buttons on a touch screen (card D4)", () => {
     expect(css).toMatch(/@media \(pointer:coarse\)\{\s*\.rep-acts \.btn,\.rep-other \.btn\{min-height:44px\}/);
   });
 });
+
+describe("the run screen of a deal that sells its units (card F2)", () => {
+  const d = JSON.parse(readFileSync(new URL("../../../oracles/for-sale/kestrel-row-townhomes.outcome.json", import.meta.url), "utf8")).inputs;
+  const kestrel: EngineInput = { ...developmentDeal(), revenue: [], leaseUpMonths: 0, exit: "for_sale", mezzanine: undefined,
+    budget: { land: d.land, hard: d.hard, soft: d.soft, contingency: d.contingency, other: 0 }, constructionMonths: d.construction_months,
+    senior: { amount: d.senior_commitment, ratePct: d.senior_rate_pct, ioMonths: 0 },
+    forSale: { units: d.unit_types.map((u: { name: string; units: number; price: number }, n: number) => ({ key: String(n), label: u.name, units: u.units, price: u.price })),
+      presoldPct: d.presold_units_pct, depositPct: d.deposit_pct, absorptionPerMonth: d.absorption_units_per_month, commissionPct: d.sales_commission_pct,
+      closingLagMonths: d.closing_lag_months, carryMonthly: d.unsold_carry_monthly, presaleThresholdPct: d.senior_presale_threshold_pct } } as EngineInput;
+  const sale = underwrite(kestrel, policyFor(kestrel));
+  const saleBase = sale.scenarios[0]!.metrics;
+  const STRESS_NAMES = {
+    en: ["Prices -10%", "Sales pace 30% slower", "Costs +10%", "Interest rates +1 point", "Construction +6 months", "Presales -15 points"],
+    fr: ["Prix -10 %", "Rythme de vente 30 % plus lent", "Coûts +10 %", "Taux d'intérêt +1 point", "Construction +6 mois", "Préventes -15 points"],
+  } as const;
+
+  it.each(["en", "fr"] as const)("gives every sale key figure one plain sentence in sale words, in %s", (lang) => {
+    s.lang = lang;
+    s.run = run({ result: sale, policyVersion: "for-sale-draft" });
+    const i = build(lang, () => {});
+    const html = render();
+    const words = text(html);
+    const layout = layoutFor(saleBase);
+    const figures = layout.headline.filter((k) => saleBase.some((m) => m.key === k));
+    expect(figures).toEqual(expect.arrayContaining(["profit_on_cost_for_sale", "margin_on_revenue", "peak_equity", "sellout_month", "equity_multiple"]));
+    for (const k of figures) {
+      const plain = meaning(i, k, layout.sale);
+      expect(plain, k).toBeTruthy();
+      expect(words, k).toContain(sp(plain!));
+    }
+    expect(html.match(/class="run-fig-meaning"/g)!.length).toBe(figures.length);
+    // The total cost of a sale stops at completion; nothing is leased up.
+    expect(meaning(i, "total_development_cost", true)).toBe(i.t("run.meaning.total_development_cost_sale"));
+    expect(words).not.toContain(sp(i.t("run.meaning.total_development_cost")));
+    expect(meaning(i, "total_development_cost")).toBe(i.t("run.meaning.total_development_cost"));
+    expect(i.t("run.meaning.total_development_cost_sale")).not.toMatch(/lease|location/i);
+    expect(i.t("run.meaning.sellout_month")).toBe(lang === "en" ? "The month the last unit closes." : "Le mois où la vente du dernier logement est conclue.");
+  });
+
+  it.each(["en", "fr"] as const)("names every sale stress in plain words, in %s", (lang) => {
+    s.lang = lang;
+    s.run = run({ result: sale, policyVersion: "for-sale-draft" });
+    const words = text(render());
+    for (const name of STRESS_NAMES[lang]) expect(words).toContain(sp(name));
+    expect(words).not.toMatch(/Absorption -30|-15 pts|\+100 bps|\+100 pb/);
+  });
+});

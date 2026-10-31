@@ -29,7 +29,7 @@ import type * as landingStrings from "./strings/landing";
 import type * as agirreviewStrings from "./strings/agirreview";
 import type * as shareStrings from "./strings/share";
 import { termsStore, useTerms, type TermsPref } from "./terms";
-import { FR_VERIFY, FR_ABSENT, FR_FIELDS, FR_METRICS, STRESS, GATES, plainTerm, numberFormat, verdictText as sharedVerdictText, checkText as sharedCheckText, type VerdictLike, type CheckLike, CURRENCY_NAMES, FIELDS, FIELD_BY_KEY, METRIC_BY_KEY, placeLabel, type Currency, type ReadinessItem } from "@agir/contracts";
+import { FR_VERIFY, FR_ABSENT, FR_FIELDS, FR_METRICS, STRESS, GATES, plainTerm, plainStress, numberFormat, verdictText as sharedVerdictText, checkText as sharedCheckText, type VerdictLike, type CheckLike, CURRENCY_NAMES, FIELDS, FIELD_BY_KEY, METRIC_BY_KEY, placeLabel, type Currency, type ReadinessItem } from "@agir/contracts";
 
 export type Lang = "en" | "fr";
 
@@ -838,7 +838,7 @@ export function build(lang: Lang, setLang: (l: Lang) => void, terms: TermsPref =
     group: (g: string) => GROUPS[g]?.[idx] ?? g,
     metric: (key: string) => plainName("metric", key) ?? plainTerm(lang, (lang === "fr" ? FR_METRICS[key]?.[0] : METRIC_BY_KEY.get(key)?.label) ?? key),
     formula: (key: string) => (lang === "fr" ? FR_METRICS[key]?.[1] : METRIC_BY_KEY.get(key)?.formula) ?? "",
-    stress: (key: string, en: string) => plainTerm(lang, STRESS[key]?.[idx] ?? en),
+    stress: (key: string, en: string) => plainTerm(lang, plainStress(lang, key, STRESS[key]?.[idx] ?? en)),
     gate: (key: string, en: string) => plainName("gate", key) ?? plainTerm(lang, GATES[key]?.[idx] ?? en),
     driver: (key: string) => DRIVERS_L[key]?.[idx] ?? key,
     /** One breakeven row as text: the sentence for a value, the reason for any other state. Every figure is the engine's. */
