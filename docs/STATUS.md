@@ -73,6 +73,13 @@ Which branch holds what today (2026-10-25):
   for the owner's review and a mail provider. The three branches stack in this order and merge in this order.
 - `fix/threshold-labels`: from `main`, card P2 in `packages/contracts` and `packages/artifacts`. Held for the
   owner's review; it merges on its own.
+- `sale/f2-outputs`: from `main` at `0e7c48a`, card F2. A sale deal's reports read as a sale: the build decision
+  leads with profit on cost, margin and peak equity, then the sell-out month and multiple; the lender package states
+  the presale condition, deposits held and the month closings repay the loans; the partner memo says its waterfall runs
+  over the sale's dated flows and why a return is not meaningful; sale stress names read in plain words ("Sales pace
+  × 0.70", "Interest rates +1 point", "Presales -15 points") at display time only, so policy labels and hashes are
+  unchanged. Run screen, reports screen and landing wording for a sale. No engine, policy, oracle or rental text
+  change. Local only, held for the owner's review.
 - Not merged into `main` (`git branch --no-merged main`): the `ui/*` branches, and `task/144b-claude`, `task/154-claude`,
   `task/155-claude`, `task/161-reader-gate`, `task/163-scaled-decimals`, `task/71-reimbursement-and-plans`,
   `task/85a-hard-fail-in-reports`, `task/85a2-hard-fail-in-reports`, `task/85b-partners-sheet`, `task/85b2-partners-sheet`

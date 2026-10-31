@@ -309,7 +309,9 @@ in this card); and the cited tables that will replace entered values.
 
 ## Selling the units (townhomes and small condos)
 
-**Status: specified, not built.** Owner decisions 2026-10-15 (the model) and 2026-10-18 (rules Q1 to Q5 below).
+**Status: built.** The engine, inputs, quick-start templates ("Townhomes for sale", "Small condo"), run screen and
+Excel and memo tables in cards 77 to 85; the build decision, committee memo, lender package and partner memo read in
+sale words, with plain sentences and plain stress names, in card F2. Owner decisions 2026-10-15 (the model) and 2026-10-18 (rules Q1 to Q5 below).
 The reference workbooks `kestrel-row-townhomes.xlsx` (8 townhomes, Ontario, 50% presold) and
 `alder-court-condo.xlsx` (30-unit condo, BC, 70% presold, 4-month closing lag) implement this section; they become
 oracles once a person completes each workbook's "Hand check" sheet. No engine code is written before that.
