@@ -583,6 +583,7 @@ export async function reviewView(tx: Db, dealId: string, asOf: string) {
       .slice(0, 3)
       .map((o) => ({ documentId: o.documentId, figureId: o.figureId!, document_name: o.document_name, location: o.location, raw: o.raw, context: o.context }));
   return {
+    selling,
     aiReading,
     todo: todoList(readiness, assumptions, aiReading),
     readiness,
