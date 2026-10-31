@@ -814,6 +814,25 @@ function saleInput(slug: typeof SALE_SLUGS[number], kind: ArtifactInput["kind"])
     assumptions: [...Object.entries(scalars).map(([k, v]) => assumption(k, v)), ...input.forSale!.units.flatMap((u) => [assumption("unit_count", u.units, u.key), assumption("unit_sale_price", u.price, u.key)])],
   };
 }
+describe("words on a sale deal's report", () => {
+  const meta = (x: ArtifactInput) => JSON.stringify(buildModel(x).meta);
+  test("calls a Multifamily deal that sells its homes what it is, and leaves another asset type alone", () => {
+    const x = saleInput("kestrel-row-townhomes", "build_decision");
+    x.deal = { ...x.deal, assetType: "Multifamily" };
+    expect(meta(x)).toContain("Homes for sale");
+    expect(meta(x)).not.toContain("Multifamily");
+    x.deal = { ...x.deal, assetType: "Other" };
+    expect(meta(x)).toContain("Other");
+  });
+  test("starts the committee memo's decision with a capital", () => {
+    const x = saleInput("kestrel-row-townhomes", "ic_memo");
+    x.decision = { decision: "approve_with_conditions", rationale: "Presales first.", conditions: "Sixty percent presold.", decidedBy: "Rowan", createdAt: "2026-10-27T14:00:00Z" };
+    const text = JSON.stringify(buildModel(x));
+    expect(text).toContain("Approve with conditions: ");
+    expect(text).not.toContain("approve with conditions: ");
+  });
+});
+
 const saleTable = (model: ReturnType<typeof buildModel>, caption: string) => {
   const t = model.blocks.find((b) => b.type === "table" && b.caption === caption);
   if (!t || t.type !== "table") throw new Error(`Missing table: ${caption}`);

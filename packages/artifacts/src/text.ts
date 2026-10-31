@@ -207,6 +207,7 @@ export const TEXT = {
   // Card C5: the build decision says what a person put in, how the inputs were read, and that it is not advice.
   "statedYourself": ["Values you stated yourself", "Valeurs que vous avez saisies vous-même"],
   "defaultsAccepted": ["Named defaults accepted", "Valeurs par défaut nommées acceptées"],
+  "homesForSale": ["Homes for sale", "Logements à vendre"],
   "latestDecision": ["Latest recorded decision", "Dernière décision consignée"],
   "decisionLine": ["{0}, recorded by {1} on {2}.", "{0}, consignée par {1} le {2}."],
   "reasoning": ["Reasoning: {0}", "Motifs : {0}"],

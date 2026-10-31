@@ -181,6 +181,8 @@ function operations(f: Formatter, x: ArtifactInput): Block {
 
 /** A deal that sells its units has no rental operations: its reports show the unit sales and the sale results instead. */
 const isSale = (x: ArtifactInput) => x.input.exit === "for_sale";
+/** "Multifamily" is the rental word: a deal that sells its homes says so. The stored asset type does not change. */
+export const assetLabel = (lang: "en" | "fr", x: ArtifactInput) => isSale(x) && x.deal.assetType === "Multifamily" ? reportText(lang, "homesForSale") : x.deal.assetType;
 /** A deal kept and refinanced has no sale: its reports lead with the hold measures and show the unrealized ones under their label. */
 const isHeld = (x: ArtifactInput) => x.input.exit === "refinance_hold";
 
@@ -589,7 +591,7 @@ function changeTheAnswer(f: Formatter, x: ArtifactInput): Block[] {
 function decisionWord(f: Formatter, d: NonNullable<ArtifactInput["decision"]>): string {
   return f.lang === "fr"
     ? ({ approve: reportText("fr", "approve"), approve_with_conditions: reportText("fr", "approveConditions"), reject: reportText("fr", "reject"), return_to_underwriting: reportText("fr", "returnToUnderwriting") }[d.decision] ?? d.decision)
-    : d.decision.replace(/_/g, " ");
+    : d.decision.replace(/_/g, " ").replace(/^./, (c) => c.toUpperCase());
 }
 
 /** The build decision's account of what a person put in (card C5): the values typed, the named defaults accepted, and the latest decision. */
@@ -618,7 +620,7 @@ function latestDecisionBlocks(f: Formatter, x: ArtifactInput): Block[] {
   if (!d) return [];
   return [
     { type: "heading", text: reportText(f.lang, "latestDecision") },
-    { type: "paragraph", text: reportText(f.lang, "decisionLine", decisionWord(f, d).replace(/^./, (c) => c.toUpperCase()), f.ident(d.decidedBy, "decision.decidedBy"), f.ident(d.createdAt.slice(0, 10), "decision.date")) },
+    { type: "paragraph", text: reportText(f.lang, "decisionLine", decisionWord(f, d), f.ident(d.decidedBy, "decision.decidedBy"), f.ident(d.createdAt.slice(0, 10), "decision.date")) },
     { type: "paragraph", text: reportText(f.lang, "reasoning", f.ident(d.rationale, "decision.rationale")) },
     ...(d.conditions ? [{ type: "paragraph", text: reportText(f.lang, "conditions", f.ident(d.conditions, "decision.conditions")) } as Block] : []),
   ];
@@ -900,7 +902,7 @@ export function buildModel(x: ArtifactInput): DocModel {
     title: f.ident(x.deal.name, "deal.name"),
     kicker: { ic_memo: reportText(f.lang, "icMemo"), build_decision: reportText(f.lang, "buildDecision"), partner_memo: reportText(f.lang, "partnerMemo") }[x.kind as string] ?? reportText(f.lang, "lenderPackage"),
     meta: [
-      f.ident(x.deal.assetType, "deal.assetType"),
+      f.ident(assetLabel(f.lang, x), "deal.assetType"),
       f.ident(placeLabel(x.deal.location, x.deal.province), "deal.location"),
       runLabel,
       date,

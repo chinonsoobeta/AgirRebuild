@@ -247,7 +247,7 @@ const THRESHOLD_RULES: Record<string, [string, string, string, number, number, b
   rentPct: ["Rent shock", "Choc des loyers", "%", -50, 0, false],
   pricePct: ["Price shock", "Choc des prix", "%", -50, 0, false],
   occupancyPts: ["Occupancy shock", "Choc de l'occupation", "pts", -50, 0, false],
-  absorptionPct: ["Absorption shock", "Choc du rythme de vente", "%", -90, 0, false],
+  absorptionPct: ["Sales pace shock", "Choc du rythme de vente", "%", -90, 0, false],
   presalesPts: ["Presales shock", "Choc des préventes", "pts", -100, 0, false],
   constructionMonths: ["Construction delay", "Retard de construction", "months", 0, 36, true],
 };
@@ -273,7 +273,7 @@ export const THRESHOLDS: Readonly<Record<string, readonly Threshold[]>> = Object
   const standard = location.object[location.field] as number;
   const stress = path.startsWith("stresses.");
   // A stress is named by its STRESS name with the size taken off; French puts a no-break space before the colon.
-  const stressName = (lang: 0 | 1) => STRESS[path.split(".")[1]!]?.[lang].replace(/\s*[+-]\d.*$/, "") ?? path.split(".")[1]!;
+  const stressName = (lang: 0 | 1) => path.split(".")[1] === "absorption" ? (["Sales pace", "Rythme de vente"] as const)[lang] : STRESS[path.split(".")[1]!]?.[lang].replace(/\s*[+-]\d.*$/, "") ?? path.split(".")[1]!;
   const mli = path.includes(".select.") ? `MLI Select ${path.split(".")[2]}` : path.includes(".standard.") ? "MLI Standard" : undefined;
   const name: [string, string] | undefined = stress ? [stressName(0), stressName(1)] : mli ? [mli, mli] : undefined;
   const lenderCited = path.startsWith("refinanceLimits.") || (policy.version.startsWith("rental-hold-insured") && ["gates.dcrAfterRefinanceMin", "baseSizingDscrFloor"].includes(path));
