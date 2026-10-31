@@ -589,6 +589,21 @@ describe("model label suggestions", () => {
     expect((await byField("land_cost"))?.status ?? "rejected").toBe("rejected");
     expect(await byField("other_cost")).toMatchObject({ status: "needs_review", value: 5000, reason: "Its label was a model's suggestion, and suggestions are now off; confirm or reject it" });
   });
+
+  test("what is offered for a label has been through the redaction pass", async () => {
+    await db.query(`update workspaces set label_suggestions = true where id = $1`, [sw]);
+    const d = await newDeal("Redacted suggestions");
+    reply = () => ok([]);
+    calls.length = 0;
+    await put(d, "contacts.txt", "Project notes\nSignage kit, ask sam@example.com or 416-555-1234: $3,000\nCall 604-555-9876 for the site\n");
+    await wk();
+    const sent = JSON.stringify(calls);
+    expect(figuresOf(calls[0]!).map((f) => f.raw)).toContain("$3,000");
+    for (const secret of ["sam@example.com", "416-555-1234", "604-555-9876", "555-9876"]) expect(sent, secret).not.toContain(secret);
+    expect(sent).toContain("[redacted email]");
+    calls.length = 0;
+    await db.query(`update workspaces set label_suggestions = false where id = $1`, [sw]);
+  });
 });
 
 describe("a person labels a figure Agir did not use (task 58)", () => {
