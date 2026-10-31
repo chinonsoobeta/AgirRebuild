@@ -6,3 +6,4 @@ dist
 .env.local
 apps/web/dist
 deploy/backups
+.qa-data
