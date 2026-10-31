@@ -510,6 +510,16 @@ describe("QA card C1: unit types read from one line are one type", () => {
     expect(extractCandidates(typed).candidates.find(c => c.fieldKey === "unit_count")?.itemKey).toBe("2BR");
   });
 
+  test("when one reader's name starts the other's, the shorter is the type's name, whoever read it", () => {
+    const rule = (fieldKey: string, itemKey: string, value: number, location: string) => ({ fieldKey, itemKey, value, location, raw: String(value), unitSeen: null, context: "", rule: "line:prose", note: null, documentId: "b", documentName: "invented-budget.pdf" }) as unknown as SourcedCandidate;
+    const read = [rule("unit_count", "End", 4, "page 1, line 20"), rule("unit_rent_monthly", "End", 1850, "page 1, line 21"), ai("unit_count", "End unit", 4, "page 1, line 20", "Units 4"), ai("unit_rent_monthly", "End unit", 1850, "page 1, line 21", "$1,850")];
+    expect(types(consolidate(read, "CAD"))).toEqual([["unit_count", "End", 4], ["unit_rent_monthly", "End", 1850]]);
+    const long = [rule("unit_count", "Residential", 4, "page 1, line 20"), ai("unit_count", "residential rental unit", 4, "page 1, line 20", "Units 4")];
+    expect(types(consolidate(long, "CAD"))).toEqual([["unit_count", "Residential", 4]]);
+    const allUnits = [rule("unit_count", "All units", 4, "page 1, line 20"), ai("unit_count", "rental unit", 4, "page 1, line 20", "Units 4")];
+    expect(types(consolidate(allUnits, "CAD"))).toEqual([["unit_count", "rental unit", 4]]);
+  });
+
   test("the rule reader's and the AI's names for one line consolidate to one type", () => {
     const read = [...sourced(extractCandidates(budget)), ai("unit_count", "rental unit", 4, "page 1, line 20", "Units 4"), ai("unit_rent_monthly", "rental unit", 1850, "page 1, line 21", "$1,850")];
     expect(types(consolidate(read, "CAD"))).toEqual([["unit_count", "rental unit", 4], ["unit_rent_monthly", "rental unit", 1850]]);
