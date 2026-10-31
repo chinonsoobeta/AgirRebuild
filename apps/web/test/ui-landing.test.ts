@@ -182,6 +182,13 @@ describe("plain words and today's facts", () => {
     expect(words).toContain("The workspace owner can turn it off in Settings");
   });
 
+  it("says on the terms page what is removed before text is sent to be read, and that names are not (card S7)", () => {
+    const words = text(html(Legal));
+    expect(words).toContain("Before the text of a document is sent to Claude to be read, Agir removes email addresses, phone numbers, social insurance, card and account numbers, postal codes and dates of birth from it; names are not removed.");
+    expect(words.indexOf("Agir removes email addresses")).toBeLessThan(words.indexOf("Every suggestion is shown to you"));
+    expect(text(html(Legal, "fr"))).toContain("Avant que le texte d'un document soit envoyé à Claude pour être lu, Agir en retire les adresses courriel, les numéros de téléphone, d'assurance sociale, de carte et de compte, les codes postaux et les dates de naissance\u00a0; les noms ne sont pas retirés.");
+  });
+
   it("describes the AI reading switch on the terms page and keeps Anthropic's terms to be settled", () => {
     const words = text(html(Legal));
     expect(words).toContain("Reading with Claude is on by default, and Claude processes the text in the United States.");
