@@ -1,0 +1,105 @@
+{
+  "slug": "tamarack-terrace",
+  "name": "Tamarack Terrace Condominiums",
+  "assetType": "Condominium",
+  "location": "Kelowna, British Columbia",
+  "purpose": "Card F1, fictional: a 30-suite condominium sold, not rented. A price table by suite type, a sales plan with absorption, closing lag and carry, a term sheet and a budget.",
+  "documents": [
+    {
+      "name": "Tamarack_Terrace_Pricing.xlsx",
+      "kind": "xlsx",
+      "sheet": "Pricing",
+      "rows": [
+        [
+          "Suite type",
+          "Suites",
+          "Price"
+        ],
+        [
+          "One-bedroom",
+          "12",
+          489000
+        ],
+        [
+          "Two-bedroom",
+          "14",
+          639000
+        ],
+        [
+          "Three-bedroom",
+          "4",
+          819000
+        ]
+      ]
+    },
+    {
+      "name": "Tamarack_Terrace_Sales_Plan.pdf",
+      "kind": "pdf",
+      "title": "Tamarack Terrace: Sales and Marketing Plan",
+      "lines": [
+        "Presold units: 70%",
+        "21 of 30 suites are under contract.",
+        "Sales pace: 3 units per month",
+        "Closing lag: 4 months",
+        "Carry per unsold unit: $650 per month",
+        "Sales commission: 3.5%",
+        "Buyer deposits: 15%"
+      ]
+    },
+    {
+      "name": "Tamarack_Terrace_Term_Sheet.pdf",
+      "kind": "pdf",
+      "title": "Tamarack Terrace: Construction Financing Term Sheet",
+      "lines": [
+        "Construction loan: $15,400,000",
+        "Interest rate: 7.4%",
+        "Minimum presales: 65%"
+      ]
+    },
+    {
+      "name": "Tamarack_Terrace_Budget.pdf",
+      "kind": "pdf",
+      "title": "Tamarack Terrace: Development Budget",
+      "lines": [
+        "Land acquisition: $4,100,000",
+        "Hard costs: $10,800,000",
+        "Soft costs: $1,950,000",
+        "Contingency: $540,000",
+        "Construction period: 20 months"
+      ]
+    }
+  ],
+  "expect": {
+    "conflicts": [],
+    "missing": [],
+    "values": {
+      "unit_count|1BR": 12,
+      "unit_count|2BR": 14,
+      "unit_count|3BR": 4,
+      "unit_sale_price|1BR": 489000,
+      "unit_sale_price|2BR": 639000,
+      "unit_sale_price|3BR": 819000,
+      "presold_units_pct": 70,
+      "absorption_units_per_month": 3,
+      "closing_lag_months": 4,
+      "unsold_carry_monthly": 650,
+      "sales_commission_pct": 3.5,
+      "deposit_pct": 15,
+      "senior_presale_threshold_pct": 65,
+      "senior_loan_amount": 15400000,
+      "senior_rate_pct": 7.4,
+      "land_cost": 4100000,
+      "hard_cost": 10800000,
+      "construction_months": 20,
+      "soft_cost": 1950000,
+      "contingency": 540000
+    },
+    "neverValues": {
+      "presold_units_pct": [
+        21,
+        30
+      ]
+    },
+    "runs": false
+  }
+}
