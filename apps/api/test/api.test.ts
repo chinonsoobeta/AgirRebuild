@@ -4051,6 +4051,58 @@ describe("card C: the AI reading switch, the region and less stored text", () =>
   });
 });
 
+describe("card S7: the reader sends redacted text", () => {
+  const text = "Land cost: $400,000 (seller jane.doe@example.ca, 416-555-1234)\nUnlabelled reserve 7000\nSeller SIN 046 454 286";
+  const seen = "$400,000 (seller [redacted email], [redacted phone])";
+  const reading = (quote: string) => ({ field: "land_cost", value: 400000, location: "line 1", quote, confidence: "high" as const, item: null, unit_seen: "$" as const, file: "fiction.txt", note: null });
+  const newDeal = async () => {
+    const id = (await call(alice, "POST", `/api/workspaces/${ws}/deals`, { name: "Invented redaction deal", assetType: "Multifamily", location: "Vancouver" })).json.id;
+    await call(alice, "PUT", `/api/deals/${id}/documents?name=fiction.txt`, undefined, new TextEncoder().encode(text));
+    return id;
+  };
+  const landSources = async (id: string) => (await db.query<any>(`select sources from assumptions where deal_id=$1 and field_key='land_cost'`, [id]))[0]?.sources ?? [];
+
+  test("the provider gets no email, phone or SIN; the boundary checks what it saw; the counts are stored, never the text", async () => {
+    const id = await newDeal();
+    const read = vi.fn(async (_request: ReaderRequest) => ({ readings: [reading(seen)], conflicts: [], not_used: [] }));
+    await drain({ db, store, read });
+    expect(read).toHaveBeenCalledTimes(1);
+    const content = read.mock.calls[0]![0].messages[0]!.content;
+    for (const gone of ["jane.doe", "example.ca", "416-555-1234", "046 454 286"]) expect(content).not.toContain(gone);
+    expect(content).toContain(`[line 1] Land cost: ${seen}`);
+    expect(content).toContain("[line 3] Seller SIN [redacted sin]");
+    expect(content).toContain("[line 2] Unlabelled reserve 7000");
+    const [row] = await db.query<any>(`select verification from ai_readings where deal_id=$1`, [id]);
+    const [document] = await db.query<any>(`select id from documents where deal_id=$1`, [id]);
+    expect(row.verification.redactions).toEqual({ [document.id]: [{ kind: "email", count: 1 }, { kind: "sin", count: 1 }, { kind: "phone", count: 1 }] });
+    expect(row.verification.readings[0].outcome).toBe("verified");
+    expect(JSON.stringify(row.verification)).not.toMatch(/jane\.doe|416-555-1234|046 454 286/);
+    expect((await landSources(id)).some((s: any) => s.rule === "ai")).toBe(true);
+    // A replay redacts again, verifies the same and keeps the counts.
+    await reconcileDeal(db, store, id);
+    const [after] = await db.query<any>(`select verification from ai_readings where deal_id=$1`, [id]);
+    expect(after.verification).toEqual(row.verification);
+    expect((await landSources(id)).some((s: any) => s.rule === "ai")).toBe(true);
+  });
+
+  test("a quote copied from the original text fails the boundary; a reading stored before this pass replays against the original", async () => {
+    const id = await newDeal();
+    const original = "$400,000 (seller jane.doe@example.ca, 416-555-1234)";
+    await drain({ db, store, read: async () => ({ readings: [reading(original)], conflicts: [], not_used: [] }) });
+    const [row] = await db.query<any>(`select id, verification from ai_readings where deal_id=$1`, [id]);
+    expect(row.verification.readings[0].outcome).toBe(extraction.READING_FAILURE.quote);
+    expect((await landSources(id)).some((s: any) => s.rule === "ai")).toBe(false);
+    // Before card S7 a row had no redaction counts: the model saw the original text, so the replay checks against it.
+    const { redactions: _, ...before } = row.verification;
+    await db.query(`update ai_readings set verification=$2 where id=$1`, [row.id, JSON.stringify(before)]);
+    await reconcileDeal(db, store, id);
+    const [after] = await db.query<any>(`select verification from ai_readings where deal_id=$1`, [id]);
+    expect(after.verification.redactions).toBeUndefined();
+    expect(after.verification.readings[0].outcome).toBe("verified");
+    expect((await landSources(id)).some((s: any) => s.rule === "ai")).toBe(true);
+  });
+});
+
 describe("fallback: no model", () => {
   test("with no key and no provider, an upload reaches a run with no call and no AI reading", async () => {
     const key = process.env.ANTHROPIC_API_KEY;
