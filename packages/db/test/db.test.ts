@@ -196,16 +196,17 @@ describe("runs and decisions", () => {
 
 describe("audit", () => {
   test("every governed action left a link in an intact chain", async () => {
-    const [v] = await db.query<{ ok: boolean; events: number }>(`select * from fn_verify_audit_chain()`);
-    expect(v!.ok).toBe(true);
-    expect(Number(v!.events)).toBeGreaterThan(8);
+    // One chain per workspace (card S8): every workspace's holds.
+    const all = await db.query<{ ok: boolean; events: number }>(`select * from fn_verify_audit_chains()`);
+    expect(all.every((v) => v.ok)).toBe(true);
+    expect(all.reduce((n, v) => n + Number(v.events), 0)).toBeGreaterThan(8);
   });
   test("the audit log cannot be edited, and a tampered row is detected", async () => {
     await expect(db.query(`delete from audit_events`)).rejects.toThrow(/append-only/);
     await db.query(`alter table audit_events disable trigger audit_events_append_only`);
     await db.query(`update audit_events set payload = '{"tampered": true}' where seq = 2`);
     await db.query(`alter table audit_events enable trigger audit_events_append_only`);
-    const [v] = await db.query<{ ok: boolean; broken_at: number }>(`select * from fn_verify_audit_chain()`);
+    const [v] = await db.query<{ ok: boolean; broken_at: number }>(`select v.* from audit_events e, fn_verify_audit_chain(e.workspace_id) v where e.seq = 2`);
     expect(v!.ok).toBe(false);
     expect(Number(v!.broken_at)).toBe(2);
   });

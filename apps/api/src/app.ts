@@ -528,10 +528,10 @@ export function createApp({ db, store, secureCookies, demoSignIn = false, trustP
   });
 
   app.get("/api/workspaces/:ws/audit/verify", async (c) => {
-    // The whole chain is walked; the answer covers this workspace only, and a non-member gets 403 (migration 0036).
+    // This workspace's own chain (migration 0040): its count, and the event where it breaks; a non-member gets 403.
     const ws = z.string().uuid().parse(c.req.param("ws"));
-    const [r] = await as(c, (tx) => tx.query<{ ok: boolean; events: number | string; broken: boolean }>(`select * from fn_verify_audit_chain_for($1)`, [ws]));
-    return c.json({ ok: r!.ok, events: Number(r!.events), broken: r!.broken });
+    const [r] = await as(c, (tx) => tx.query<{ ok: boolean; events: number | string; broken_at: number | string | null }>(`select * from fn_verify_audit_chain_for($1)`, [ws]));
+    return c.json({ ok: r!.ok, events: Number(r!.events), brokenAt: r!.broken_at === null ? null : Number(r!.broken_at) });
   });
 
   // ---- Production counts (card 155): counts and durations per deal, never content; the owner only. ----------

@@ -85,30 +85,34 @@ beforeEach(() => {
 
 describe("the audit trail", () => {
   it("tags the chain from the verify result and says exactly what was checked", () => {
-    state.verify = { ok: true, events: 212, broken: false };
+    state.verify = { ok: true, events: 212, brokenAt: null };
     const html = render(createElement(Audit, { dealId: "d1" }));
     expect(html).toContain('class="tag pass"');
     expect(text(html)).toContain("Chain intact · 212 events");
-    expect(text(html)).toContain("The check verified the whole chain (every workspace shares one hash chain, so a break anywhere would show).");
-    // Card B and QA item 21: the count is this workspace's, and no other count is shown.
-    expect(text(html)).toContain("Your workspace has 212 events.");
+    // Card S8: the chain is this workspace's own, so the check speaks of it alone.
+    expect(text(html)).toContain("The check verified your workspace's chain: each of its 212 events matches the event before it and its own contents.");
+    expect(text(html)).not.toContain("every workspace");
     button("Verify the chain again")!.props.onClick();
     expect(state.refetch).toHaveBeenCalled();
+    state.lang = "fr";
+    state.hooks = [];
+    expect(text(render(createElement(Audit, { dealId: "d1" })))).toContain("La vérification a validé la chaîne de votre espace de travail : chacun de ses 212 événements correspond à l'événement précédent et à son propre contenu.");
   });
 
-  it("tags a broken chain and says whether the broken event is this workspace's, never its number, in both languages", () => {
-    state.verify = { ok: false, events: 40, broken: true };
-    const mine = text(render(createElement(Audit, { dealId: "d1" })));
-    expect(mine).toContain("Chain broken");
-    expect(mine).toContain("stopped at an event of this workspace");
-    state.hooks = [];
-    state.verify = { ok: false, events: 40, broken: false };
-    expect(text(render(createElement(Audit, { dealId: "d1" })))).toContain("stopped at an event of another workspace");
+  it("tags a broken chain and names the event where it breaks, in both languages", () => {
+    state.verify = { ok: false, events: 40, brokenAt: 17 };
+    const en = text(render(createElement(Audit, { dealId: "d1" })));
+    expect(en).toContain("Chain broken");
+    expect(en).toContain("The check found a break at event 17: its hash does not match the event before it or its own contents.");
     state.lang = "fr";
     state.hooks = [];
     const fr = text(render(createElement(Audit, { dealId: "d1" })));
     expect(fr).toContain("Chaîne rompue");
-    expect(fr).toContain("un autre espace de travail");
+    expect(fr).toContain("La vérification a trouvé une rupture à l'événement 17 : son empreinte ne correspond pas à l'événement précédent ou à son propre contenu.");
+    // The page text above folds spaces; the string itself keeps the French space before the colon.
+    expect(build("fr", () => {}).t("audit.checked", { ok: false, n: 40, at: 17 })).toContain("17\u00a0: son empreinte");
+    expect(build("fr", () => {}).t("audit.checked", { ok: true, n: 1, at: null })).toBe("La vérification a validé la chaîne de votre espace de travail\u00a0: son seul événement correspond à son propre contenu.");
+    expect(build("en", () => {}).t("audit.checked", { ok: true, n: 1, at: null })).toBe("The check verified your workspace's chain: its one event matches its own contents.");
   });
 
   it("maps actions to categories, leaving unknown ones under Everything only", () => {

@@ -767,9 +767,15 @@ export async function auditPackage(tx: Db, runId: string) {
   const [deal] = await tx.query(`select id, name, asset_type, location, currency, country, province from deals where id = $1`, [run.deal_id]);
   const decisions = await tx.query<{ run_id: string }>(`select * from decisions where run_id = $1`, [runId]);
   const artifacts = await tx.query(`select id, kind, format, status, sha256, provenance, created_at from artifacts where run_id = $1`, [runId]);
-  const events = await tx.query(`select seq, action, entity, entity_id, payload, prev_hash, hash, created_at from audit_events where deal_id = $1 order by seq`, [run.deal_id]);
-  const [chain] = await tx.query<{ ok: boolean; events: number; broken_at: number | null }>(`select * from fn_verify_audit_chain()`);
-  const checks: { name: string; status: "passed" | "failed"; message: string }[] = [];
+  // Card S8: each event with every field its hash covers, the text forms exactly as the database hashed them.
+  const events = await tx.query<AuditPackageEvent>(
+    `select seq, workspace_id, deal_id, actor, action, entity, entity_id, payload, payload::text as payload_text, created_at,
+       extract(epoch from created_at)::text as created_at_epoch, prev_hash, hash
+     from audit_events where deal_id = $1 order by seq`, [run.deal_id]);
+  const [{ workspace_id: workspaceId }] = (await tx.query<{ workspace_id: string }>(`select workspace_id from deals where id = $1`, [run.deal_id])) as [{ workspace_id: string }];
+  const [chain] = await tx.query<{ ok: boolean; events: number; broken_at: number | null }>(`select * from fn_verify_audit_chain_for($1)`, [workspaceId]);
+  const links = await tx.query<{ seq: number; prev_hash: string; hash: string }>(`select * from fn_audit_chain_links($1)`, [workspaceId]);
+  const checks: { name: string; status: "passed" | "failed" | "incomplete"; message: string }[] = [];
   const check = (name: string, ok: boolean, message: string) => checks.push({ name, status: ok ? "passed" : "failed", message });
   check("input_hash", sha256(canonicalJson(run.input_snapshot.input)) === run.input_hash, "The stored input hashes to the recorded input hash.");
   check("result_hash", sha256(canonicalJson(run.result)) === run.result_hash, "The stored result hashes to the recorded result hash.");
@@ -785,15 +791,66 @@ export async function auditPackage(tx: Db, runId: string) {
   }
   check("replay", replayed, "Replaying the recorded engine on the recorded input reproduces the result exactly.");
   check("decisions_bound", decisions.every((d) => d.run_id === run.id), "Every decision in the package names this run.");
-  check("audit_chain", Boolean(chain?.ok), chain?.ok ? `The audit chain is intact (${chain.events} events).` : `The audit chain breaks at event ${chain?.broken_at}.`);
+  check("audit_chain", Boolean(chain?.ok), chain?.ok ? `The workspace's audit chain is intact (${chain.events} events).` : `The workspace's audit chain breaks at event ${chain?.broken_at}.`);
   const viewer = await clientViewer(tx, run.deal_id);
+  const shown = await packageEvents(tx, viewer, events);
+  checks.push(dealEventsInChain(shown, links));
   return {
     manifest: { deal, run: { id: run.id, number: run.run_number, createdAt: run.created_at, engineVersion: run.engine_version, policyHash: run.policy_hash, inputHash: run.input_hash, resultHash: run.result_hash } },
-    validation: { status: checks.every((c) => c.status === "passed") ? "passed" : "failed", checkedAt: new Date().toISOString(), checks },
+    validation: { status: checks.some((c) => c.status === "failed") ? "failed" : checks.some((c) => c.status === "incomplete") ? "incomplete" : "passed",
+      checkedAt: new Date().toISOString(), checks },
     inputs: { ...run.input_snapshot, assumptions: hideClientInputs(viewer, run.input_snapshot.assumptions) },
     result: run.result,
     decisions,
     artifacts,
-    auditEvents: hideClientEvents(viewer, events as { entity_id: string | null; payload: unknown }[]),
+    auditEvents: shown,
+    // The workspace's chain from genesis to its last event when the package was made: where the deal's events sit in it.
+    auditChain: { workspace_id: workspaceId, recipe: AUDIT_HASH_RECIPE, links },
   };
+}
+
+type AuditPackageEvent = {
+  seq: number; workspace_id: string | null; deal_id: string | null; actor: string | null; action: string; entity: string; entity_id: string | null;
+  payload: unknown; payload_text?: string; created_at: string; created_at_epoch: string; prev_hash: string; hash: string; redacted?: boolean;
+};
+
+/** Migration 0040's hash recipe in words, carried in every audit package. */
+export const AUDIT_HASH_RECIPE = "Each event's hash is the lowercase hexadecimal SHA-256 of the UTF-8 text " +
+  "prev_hash|workspace_id|action|entity|entity_id|actor|deal_id|payload_text|created_at_epoch, " +
+  "where a missing workspace_id, entity_id, actor or deal_id is empty, and prev_hash is the hash of the event before it in the same " +
+  "workspace (seq order), or genesis for the workspace's first event.";
+
+/** An event's hash by AUDIT_HASH_RECIPE, recomputed here from the fields the package carries. */
+export const auditEventHash = (prev: string, e: AuditPackageEvent) =>
+  sha256([prev, e.workspace_id ?? "", e.action, e.entity, e.entity_id ?? "", e.actor ?? "", e.deal_id ?? "", e.payload_text, e.created_at_epoch].join("|"));
+
+/**
+ * The events as the package shows them. A client of the deal reads no other client's id (card 91): an event that names
+ * one, in its payload (hideClientEvents) or as its actor (a user the client cannot read), is marked hidden, and its
+ * payload_text is left out, so its hash cannot be recomputed from the package and is never reported as recomputed.
+ */
+async function packageEvents(tx: Db, viewer: { id: string } | null, events: AuditPackageEvent[]): Promise<AuditPackageEvent[]> {
+  if (!viewer) return events;
+  const readable = new Set((await tx.query<{ id: string }>(`select id from users`)).map((u) => u.id));
+  return hideClientEvents(viewer, events).map((e) => {
+    const otherActor = e.actor !== null && !readable.has(e.actor);
+    if (!e.redacted && !otherActor) return e;
+    const { payload_text: _hidden, ...rest } = e;
+    return { ...rest, actor: otherActor ? null : e.actor, redacted: true };
+  });
+}
+
+/** Every deal event sits in the workspace's chain, and each one shown in full recomputes to its hash. */
+function dealEventsInChain(events: AuditPackageEvent[], links: { seq: number; prev_hash: string; hash: string }[]) {
+  const name = "deal_events_in_chain";
+  const bySeq = new Map(links.map((l) => [Number(l.seq), l]));
+  const outside = events.find((e) => bySeq.get(Number(e.seq))?.hash !== e.hash || bySeq.get(Number(e.seq))?.prev_hash !== e.prev_hash);
+  if (outside) return { name, status: "failed" as const, message: `Event ${outside.seq} of this deal is not in the workspace's chain.` };
+  const shown = events.filter((e) => e.payload_text !== undefined);
+  const wrong = shown.find((e) => auditEventHash(e.prev_hash, e) !== e.hash);
+  if (wrong) return { name, status: "failed" as const, message: `Event ${wrong.seq}'s hash does not recompute from its fields.` };
+  const hidden = events.length - shown.length;
+  if (hidden === 0) return { name, status: "passed" as const, message: `All ${events.length} of this deal's events are in the workspace's chain, and each hash recomputes from its fields.` };
+  return { name, status: "incomplete" as const, message: `All ${events.length} of this deal's events are in the workspace's chain; ${shown.length} recompute from their fields. ` +
+    `Not checked for ${hidden} hidden ${hidden === 1 ? "event" : "events"}.` };
 }

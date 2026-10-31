@@ -156,7 +156,7 @@ describe("the whole workflow, from documents to an audit package", () => {
   test("the audit package validates itself, including an exact replay of the run", async () => {
     const pkg = (await call(alice, "GET", `/api/runs/${run}/audit-package`)).json;
     expect(pkg.validation.status).toBe("passed");
-    expect(pkg.validation.checks.map((c: any) => c.name)).toEqual(["input_hash", "result_hash", "signature", "replay", "decisions_bound", "audit_chain"]);
+    expect(pkg.validation.checks.map((c: any) => c.name)).toEqual(["input_hash", "result_hash", "signature", "replay", "decisions_bound", "audit_chain", "deal_events_in_chain"]);
   });
 });
 
@@ -3035,8 +3035,11 @@ describe("a client never sees another client (task 91a)", () => {
     expect(hidden.map((e: any) => e.action).sort()).toEqual(["invite.used"]);
     expect(theirs.find((e: any) => e.action === "client.assigned").redacted).toBeUndefined();
     const pkg = (await call(ivan, "GET", `/api/runs/${run}/audit-package`)).json;
-    expect(pkg.validation.status).toBe("passed");
-    expect(pkg.auditEvents.filter((e: any) => e.redacted).map((e: any) => e.action)).toEqual(["invite.used"]);
+    // Card S8: the package carries each event's actor, so the confirming client's own event is hidden too, and hidden
+    // events cannot be recomputed from the package: its validation says so rather than passing.
+    expect(pkg.validation.status).toBe("incomplete");
+    expect(pkg.validation.checks.filter((c: any) => c.status !== "passed").map((c: any) => c.name)).toEqual(["deal_events_in_chain"]);
+    expect(pkg.auditEvents.filter((e: any) => e.redacted).map((e: any) => e.action)).toEqual(["invite.used", "assumption.client_confirm"]);
   });
 });
 

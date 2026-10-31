@@ -2,12 +2,13 @@
 import { register, type Entry, type FrenchOf } from "./entry";
 
 export const en = {
-  "audit.lead": "Every event is chained to the one before it by a hash, and nothing in this list can be edited or deleted. The audit package carries this deal's events with their hashes and the result of the chain check.",
-  // The check walks every workspace's events (the chain is one chain); the count and the broken event are this workspace's (card B).
-  // Only this workspace's count is shown, never the installation's (QA item 21).
+  "audit.lead": "Every event is chained to the one before it by a hash, and nothing in this list can be edited or deleted. The audit package carries this deal's events with everything their hashes cover, and your workspace's chain, so it can be checked without Agir.",
+  // Card S8: each workspace has a chain of its own, so the check covers this workspace's events only and names the
+  // event where it breaks (at, the number shown as "Event N" in the list). Never the installation's count (QA item 21).
   "audit.checked": (p) => p.ok
-    ? `The check verified the whole chain (every workspace shares one hash chain, so a break anywhere would show). Your workspace has ${p.n} events.`
-    : `The check walked the whole chain (every workspace shares one hash chain) and stopped at an event of ${p.mine ? "this workspace" : "another workspace"}: its hash does not match the event before it or its own contents.`,
+    ? p.n === 1 ? "The check verified your workspace's chain: its one event matches its own contents."
+      : `The check verified your workspace's chain: each of its ${p.n} events matches the event before it and its own contents.`
+    : `The check found a break at event ${p.at}: its hash does not match the event before it or its own contents.`,
   "audit.checking": "Checking the chain…",
   "audit.verifyAgain": "Verify the chain again",
   "audit.verifyFailed": "The chain could not be checked. Try again.",
@@ -33,7 +34,7 @@ export const en = {
     if (!p.filtered) return p.n === 1 ? "1 event in this deal." : `${p.n} events in this deal.`;
     return p.n === 1 ? `Showing the only ${one}.` : `Showing all ${p.n} ${what}.`;
   },
-  "audit.workspaceCovered": (p) => `The chain check covered ${p.n} ${p.n === 1 ? "event" : "events"} in your workspace.`,
+  "audit.workspaceCovered": (p) => `The chain check covered ${p.n} ${p.n === 1 ? "event" : "events"} in your workspace and ${p.at === null ? "found no break" : `found a break at event ${p.at}`}.`,
   "audit.capped": "Older events load when you ask for them.",
   "audit.older": "Show older events",
   "audit.package": "Download the audit package",
@@ -53,10 +54,11 @@ export const en = {
 } satisfies Record<string, Entry>;
 
 export const fr: FrenchOf<typeof en> = {
-  "audit.lead": "Chaque événement est lié au précédent par une empreinte, et rien dans cette liste ne peut être modifié ni supprimé. Le dossier d'audit contient les événements de ce projet avec leurs empreintes et le résultat de la vérification de la chaîne.",
+  "audit.lead": "Chaque événement est lié au précédent par une empreinte, et rien dans cette liste ne peut être modifié ni supprimé. Le dossier d'audit contient les événements de ce projet avec tout ce que couvrent leurs empreintes, et la chaîne de votre espace de travail, si bien qu'on peut le vérifier sans Agir.",
   "audit.checked": (p) => p.ok
-    ? `La vérification a validé toute la chaîne (tous les espaces de travail partagent une seule chaîne de hachage, si bien qu'une rupture n'importe où se verrait). Votre espace de travail compte ${p.n} événements.`
-    : `La vérification a parcouru toute la chaîne (tous les espaces de travail partagent une seule chaîne de hachage) et s'est arrêtée à un événement ${p.mine ? "de cet espace de travail" : "d'un autre espace de travail"}\u00a0: son empreinte ne correspond pas à l'événement précédent ou à son propre contenu.`,
+    ? p.n === 1 ? "La vérification a validé la chaîne de votre espace de travail\u00a0: son seul événement correspond à son propre contenu."
+      : `La vérification a validé la chaîne de votre espace de travail\u00a0: chacun de ses ${p.n} événements correspond à l'événement précédent et à son propre contenu.`
+    : `La vérification a trouvé une rupture à l'événement ${p.at}\u00a0: son empreinte ne correspond pas à l'événement précédent ou à son propre contenu.`,
   "audit.checking": "Vérification de la chaîne…",
   "audit.verifyAgain": "Vérifier la chaîne de nouveau",
   "audit.verifyFailed": "La chaîne n'a pas pu être vérifiée. Réessayez.",
@@ -79,7 +81,7 @@ export const fr: FrenchOf<typeof en> = {
     if (!p.filtered) return p.n === 1 ? "1 événement dans ce projet." : `${p.n} événements dans ce projet.`;
     return p.n === 1 ? `Affichage du ${one}.` : `Affichage des ${p.n} ${what}.`;
   },
-  "audit.workspaceCovered": (p) => `La vérification de la chaîne a couvert ${p.n} ${p.n === 1 ? "événement" : "événements"} dans votre espace de travail.`,
+  "audit.workspaceCovered": (p) => `La vérification de la chaîne a couvert ${p.n} ${p.n === 1 ? "événement" : "événements"} dans votre espace de travail et ${p.at === null ? "n'a trouvé aucune rupture" : `a trouvé une rupture à l'événement ${p.at}`}.`,
   "audit.capped": "Les événements plus anciens se chargent à votre demande.",
   "audit.older": "Afficher des événements plus anciens",
   "audit.package": "Télécharger le dossier d'audit",

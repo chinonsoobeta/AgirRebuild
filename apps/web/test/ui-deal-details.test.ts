@@ -153,13 +153,19 @@ describe("older audit events", () => {
   });
   it("QA card D5: names this deal's count and the workspace count the chain check covered, apart", () => {
     state.pages = [Array.from({ length: 41 }, (_, k) => event(41 - k, "deal.created"))];
-    state.verify = { ok: true, events: 43, broken: false };
+    state.verify = { ok: true, events: 43, brokenAt: null };
     let html = text(render(createElement(Audit, { dealId: "d1" })));
-    expect(html).toContain("41 events in this deal. The chain check covered 43 events in your workspace.");
+    // Card S8: and what the check found, a break named by its event number.
+    expect(html).toContain("41 events in this deal. The chain check covered 43 events in your workspace and found no break.");
     state.lang = "fr";
     html = text(render(createElement(Audit, { dealId: "d1" })));
-    expect(html).toContain("41 événements dans ce projet. La vérification de la chaîne a couvert 43 événements dans votre espace de travail.");
+    expect(html).toContain("41 événements dans ce projet. La vérification de la chaîne a couvert 43 événements dans votre espace de travail et n'a trouvé aucune rupture.");
+    state.verify = { ok: false, events: 43, brokenAt: 12 };
+    html = text(render(createElement(Audit, { dealId: "d1" })));
+    expect(html).toContain("La vérification de la chaîne a couvert 43 événements dans votre espace de travail et a trouvé une rupture à l'événement 12.");
     state.lang = "en";
+    html = text(render(createElement(Audit, { dealId: "d1" })));
+    expect(html).toContain("41 events in this deal. The chain check covered 43 events in your workspace and found a break at event 12.");
   });
   it("hides the button when an older page comes back empty", async () => {
     state.pages = [newest()];

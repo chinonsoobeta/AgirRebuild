@@ -168,11 +168,11 @@ export function Audit({ dealId }: { dealId: string }) {
     queryFn: ({ pageParam }) => api.get<AuditEvent[]>(pageParam === null ? `/deals/${dealId}/audit` : `/deals/${dealId}/audit?before=${pageParam}`),
     getNextPageParam: (last) => (last.length >= SERVER_PAGE ? last[last.length - 1]!.seq : undefined),
   });
-  // fn_verify_audit_chain_for walks every event in the installation, in order, and answers for this workspace only: ok,
-  // how many of its events there are, and whether the event where the chain broke is one of them.
+  // fn_verify_audit_chain_for walks this workspace's own chain (card S8): ok, how many events it has, and the event
+  // where it breaks, if it does.
   const verify = useQuery({
     queryKey: ["audit-verify", workspaceId],
-    queryFn: () => api.get<{ ok: boolean; events: number; broken: boolean }>(`/workspaces/${workspaceId}/audit/verify`),
+    queryFn: () => api.get<{ ok: boolean; events: number; brokenAt: number | null }>(`/workspaces/${workspaceId}/audit/verify`),
   });
   if (!deal.data) return <p className="muted">{t("common.loading")}</p>;
   const o = deal.data;
@@ -199,7 +199,7 @@ export function Audit({ dealId }: { dealId: string }) {
           <div>
             <h2 className="h1">{t("audit.title")}</h2>
             <p className="lead">{t("audit.lead")}</p>
-            {v && <p className="small muted audit-checked">{t("audit.checked", { ok: v.ok, n: v.events, mine: v.broken })}</p>}
+            {v && <p className="small muted audit-checked">{t("audit.checked", { ok: v.ok, n: v.events, at: v.brokenAt })}</p>}
             {verify.error && <p className="small muted audit-checked" role="alert">{t("audit.verifyFailed")}</p>}
           </div>
           <div className="row">
@@ -242,7 +242,7 @@ export function Audit({ dealId }: { dealId: string }) {
             <span className="small muted">
               {t("audit.shown", { n: shown.length, m: matching.length, filtered, more: events.hasNextPage })}
               {events.hasNextPage && ` ${t("audit.capped")}`}
-              {!filtered && !events.hasNextPage && v?.ok && ` ${t("audit.workspaceCovered", { n: v.events })}`}
+              {!filtered && !events.hasNextPage && v && ` ${t("audit.workspaceCovered", { n: v.events, at: v.brokenAt })}`}
             </span>
             <div className="row">
               {more && <button className="btn quiet sm" type="button" disabled={events.isFetchingNextPage} onClick={showOlder}>{t("audit.older")}</button>}
