@@ -557,7 +557,7 @@ describe("card F1: the AI reader's sale readings", () => {
     not_used: [],
   };
 
-  test("each sale field and unit verifies, with the rule reader's name for the type", () => {
+  test("each sale field and unit verifies; a type keeps its canonical name (two-bedroom is 2BR)", () => {
     const { readings } = verifyReadings(fake, docs);
     expect(readings.map((v) => v.outcome)).toEqual(fake.readings.map(() => "verified"));
     expect(readings.map((v) => [v.candidate!.fieldKey, v.candidate!.itemKey, v.candidate!.value])).toEqual([
