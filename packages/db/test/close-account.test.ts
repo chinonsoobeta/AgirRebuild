@@ -119,7 +119,7 @@ describe("purging closed workspaces", () => {
     // Audit events are the record that it existed; one more says it was purged, and the chain still holds.
     expect(await count(`audit_events where workspace_id = $1`, [id.ws])).toBe(eventsBefore + 1);
     expect(await count(`audit_events where action = 'workspace.purged' and workspace_id = $1 and actor is null`, [id.ws])).toBe(1);
-    expect((await db.query<{ ok: boolean }>(`select ok from fn_verify_audit_chain()`))[0]!.ok).toBe(true);
+    expect((await db.query<{ ok: boolean }>(`select ok from fn_verify_audit_chain($1)`, [id.ws]))[0]!.ok).toBe(true);
     // The live workspace and its file are untouched.
     expect(await count(`documents where workspace_id = $1 and storage_key = $2`, [id.live, SHARED_KEY])).toBe(1);
     expect(await db.query(`select * from fn_purge_closed_workspaces(interval '30 days')`)).toEqual([]);
