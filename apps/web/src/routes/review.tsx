@@ -1052,13 +1052,14 @@ export function Review({ dealId }: { dealId: string }) {
                 </div>;
               })}
               {(r.regions ?? []).map((g) => {
-                const rent = g.fields.every(k => ["unit_count", "unit_rent_monthly", "rentable_area_sf", "rent_psf_annual"].includes(k));
+                const prices = g.fields.includes("unit_sale_price") ? g.fields.every(k => ["unit_count", "unit_sale_price"].includes(k)) : Boolean(r.selling) && g.fields.every(k => k === "unit_count");
+                const rent = !prices && g.fields.every(k => ["unit_count", "unit_rent_monthly", "rentable_area_sf", "rent_psf_annual"].includes(k));
                 const cost = g.fields.every(k => FIELD_BY_KEY.get(k)?.group === "budget");
                 const loan = g.fields.every(k => ["senior", "mezzanine", "refinance"].includes(FIELD_BY_KEY.get(k)?.group ?? ""));
-                const fields = [...(rent ? [t("review.regionType")] : []), ...g.fields.map(k => L.field(k)).map(x => /^[A-ZÀ-Ý][a-zà-ÿ]/.test(x) ? x.charAt(0).toLowerCase() + x.slice(1) : x)].join(", "); // Card 137 audit: names sit mid-sentence; an acronym (GST/HST) keeps its case.
+                const fields = [...(rent || prices ? [t("review.regionType")] : []), ...g.fields.map(k => L.field(k)).map(x => /^[A-ZÀ-Ý][a-zà-ÿ]/.test(x) ? x.charAt(0).toLowerCase() + x.slice(1) : x)].join(", "); // Card 137 audit: names sit mid-sentence; an acronym (GST/HST) keeps its case.
                 return <div className="card card-pad stack tight" key={`${g.documentId}:${g.source}:${g.table}`}>
                   <h3 className="h3">{g.documentName} · {g.table}</h3>
-                  <p>{rent || cost || loan ? t("review.regionIntro", { kind: t(rent ? "review.regionRent" : cost ? "review.regionBudget" : "review.regionLoan"), fields }) : t("review.regionOther", { fields })}</p>
+                  <p>{prices || rent || cost || loan ? t("review.regionIntro", { kind: t(prices ? "review.regionPrices" : rent ? "review.regionRent" : cost ? "review.regionBudget" : "review.regionLoan"), fields }) : t("review.regionOther", { fields })}</p>
                   {editable && <div><button className="btn primary" type="button" disabled={confirmRegion.isPending} onClick={() => confirmRegion.mutate(g)}>{t("review.regionConfirm", { n: g.ids.length })}</button></div>}
                   {g.leftOut.map(x => <p className="small muted" key={x.id}>{name(r.assumptions.find(a => a.id === x.id)!)}: {msg(x.reason)}</p>)}
                   <ErrorText error={confirmRegion.variables?.documentId === g.documentId && confirmRegion.variables?.table === g.table ? confirmRegion.error : null} />

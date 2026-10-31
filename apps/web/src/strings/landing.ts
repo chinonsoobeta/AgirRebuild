@@ -27,7 +27,7 @@ export const en = {
 
   "landing.stepsTitle": "Five steps from your documents to a decision",
   "landing.stepsLead": "Each step tells you what is done and what comes next. You can stop at any of them and come back later.",
-  "landing.step1Body": "Upload a budget, a rent roll (the list of units and their rents), a term sheet (the loan a lender offers and its conditions), or answer a short set of questions.",
+  "landing.step1Body": "Upload a budget, a rent roll (the list of units and their rents) or a price list, a term sheet (the loan a lender offers and its conditions), or answer a short set of questions.",
   "landing.step2Body": "Agir reads the figures and shows you where each one came from. You approve them, and it names any two documents that disagree.",
   "landing.step3Body": "One engine builds the monthly cash flows, tests seven standard stresses (what happens if costs rise, rents or sale prices fall, or interest rates go up) and applies the gates (the minimums a lender asks for, such as how well the income covers the loan payments, or the profit on cost when the units are sold). A gap blocks the run instead of being filled in.",
   "landing.step4Body": "Record whether you will build, with conditions if you have them. A recorded decision cannot be edited or deleted.",
@@ -137,7 +137,7 @@ export const fr: FrenchOf<typeof en> = {
 
   "landing.stepsTitle": "Cinq étapes, de vos documents à une décision",
   "landing.stepsLead": "Chaque étape vous dit ce qui est fait et ce qui vient ensuite. Vous pouvez vous arrêter à n'importe laquelle et revenir plus tard.",
-  "landing.step1Body": "Téléversez un budget, un état des loyers (la liste des logements et de leurs loyers), une lettre d'offre (le prêt qu'un prêteur propose et ses conditions), ou répondez à quelques questions.",
+  "landing.step1Body": "Téléversez un budget, un état des loyers (la liste des logements et de leurs loyers) ou une liste de prix, une lettre d'offre (le prêt qu'un prêteur propose et ses conditions), ou répondez à quelques questions.",
   "landing.step2Body": "Agir lit les chiffres et vous montre d'où vient chacun. Vous les approuvez, et il signale deux documents qui ne concordent pas.",
   "landing.step3Body": "Un seul moteur établit les flux de trésorerie mensuels, applique sept scénarios de stress standard (ce qui arrive si les coûts montent, si les loyers ou les prix de vente baissent, ou si les taux d'intérêt augmentent) et vérifie les critères (les minimums qu'un prêteur exige, comme la façon dont le revenu couvre les paiements du prêt, ou le profit sur coût quand les logements sont vendus). Une lacune bloque l'analyse au lieu d'être comblée.",
   "landing.step4Body": "Consignez si vous construisez, avec vos conditions s'il y en a. Une décision consignée ne peut être ni modifiée ni supprimée.",

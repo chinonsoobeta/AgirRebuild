@@ -133,6 +133,7 @@ export type Review = {
   choices: Review["missing"];
   other: { documentId: string; document_name: string; raw: string; value: number | null; location: string; context: string; note: string | null; figureId: string | null; label: { fieldKey: string; itemKey: string | null; by: string; at: string } | null; suggestions: string[] }[];
   /** Card F1: readings for a field this deal's mode does not use; never offered for approval. */
+  selling?: boolean;
   notNeeded?: { fieldKey: string; itemKey: string | null; label: string; value: number | null; why: string; sources: { document_name: string; location: string }[] }[];
 };
 export type Metric = { key: string; label: string; unit: string; value: number | null; status: string; reason?: string; formula: string };

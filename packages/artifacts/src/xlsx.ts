@@ -1,7 +1,7 @@
 import { plainTerm, FIELD_BY_KEY, placeLabel } from "@agir/contracts";
 import { heldPartnerReturns, runWaterfall } from "@agir/engine";
 import { Formatter } from "./format.ts";
-import { customThresholdBlocks, confirmationLabel, notFoundSentence, policyLineKey, type ArtifactInput } from "./model.ts";
+import { assetLabel, customThresholdBlocks, confirmationLabel, notFoundSentence, policyLineKey, type ArtifactInput } from "./model.ts";
 import { reportText } from "./text.ts";
 
 /**
@@ -27,7 +27,7 @@ export async function renderXlsx(x: ArtifactInput): Promise<Uint8Array> {
 
   const summary = wb.addWorksheet("Summary");
   summary.addRow([x.deal.name]).font = { bold: true, size: 14 };
-  summary.addRow([[x.deal.assetType, placeLabel(x.deal.location, x.deal.province)].filter(Boolean).join(" · ")]);
+  summary.addRow([[assetLabel("en", x), placeLabel(x.deal.location, x.deal.province)].filter(Boolean).join(" · ")]);
   summary.addRow(["Currency", x.deal.currency ?? "Not stated"]);
   summary.addRow([`Run ${x.run.runNumber}`, x.run.createdAt]);
   summary.addRow(["Engine", x.run.engineVersion, "Policy", x.run.policyVersion]);

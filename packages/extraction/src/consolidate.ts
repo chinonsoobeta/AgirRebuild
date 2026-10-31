@@ -65,7 +65,10 @@ function sameItemNames(cs: readonly SourcedCandidate[]): void {
     if (new Set(list.map((c) => itemFold(c.itemKey!))).size < 2) continue;
     const rank = (c: SourcedCandidate) => (c.itemKey === "All units" ? 4 : 0) + (wholeUnitType(c.itemKey!) ? 0 : 2) + (c.rule === "ai" ? 0 : 1);
     const best = Math.min(...list.map(rank));
-    const name = groupForm(list.filter((c) => rank(c) === best));
+    // "End" and "End unit": one reader's name is the start of every other's, so it is the plain name of the type, whoever read it.
+    const real = list.filter((c) => c.itemKey !== "All units");
+    const start = best < 2 ? undefined : real.find((c) => real.every((o) => (o.itemKey === c.itemKey || itemFold(o.itemKey!) === itemFold(c.itemKey!) || itemFold(o.itemKey!).startsWith(`${itemFold(c.itemKey!)} `))));
+    const name = groupForm(start ? real.filter((c) => itemFold(c.itemKey!) === itemFold(start.itemKey!)) : list.filter((c) => rank(c) === best));
     for (const c of list) c.itemKey = name;
   }
 }

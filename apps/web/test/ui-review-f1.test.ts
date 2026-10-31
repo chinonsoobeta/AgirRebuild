@@ -99,3 +99,16 @@ describe("readings this deal does not need (card F1)", () => {
     expect(text(render())).not.toContain("Not needed for this deal");
   });
 });
+
+describe("a table of prices on Review (open-list fix)", () => {
+  const region = (fields: string[]) => ({ documentId: "d", documentName: "prices.xlsx", source: "s", table: "Prices", fields, ids: ["a"], leftOut: [] });
+  const intro = (fields: string[], selling: boolean) => { s.review = { ...payload([]), selling, regions: [region(fields)] }; return text(render()); };
+  it("calls a sale deal's table a price list, in English and French, and a rent table still a rent roll", () => {
+    expect(intro(["unit_count", "unit_sale_price"], true)).toContain("looks like your price list");
+    expect(intro(["unit_count"], true)).toContain("looks like your price list");
+    expect(intro(["unit_count", "unit_rent_monthly"], false)).toContain("looks like your rent roll");
+    expect(intro(["unit_count"], false)).toContain("looks like your rent roll");
+    s.lang = "fr";
+    expect(intro(["unit_count", "unit_sale_price"], true)).toContain("liste de prix");
+  });
+});

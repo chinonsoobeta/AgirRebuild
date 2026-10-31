@@ -22,7 +22,7 @@ describe("card 96a stress labels", () => {
   });
 });
 
-import { THRESHOLDS, changeMeta, effectivePolicy, validateThreshold, type PolicyOverrides } from "../src/policy.ts";
+import { FOR_SALE_DRAFT, THRESHOLDS, changeMeta, effectivePolicy, validateThreshold, type PolicyOverrides } from "../src/policy.ts";
 const version = "rental-hold-insured-draft";
 const entry = (value: number) => ({ value, setBy: "owner-id", setAt: "2026-10-19T12:00:00Z", reason: "Owner credit decision" });
 describe("card 96a owner thresholds", () => {
@@ -106,6 +106,9 @@ describe("card 96a owner thresholds", () => {
 describe("card P2 threshold labels", () => {
   const all = Object.values(THRESHOLDS).flat();
   it("names every English threshold in words, never by a raw key", () => {
+    const sale = THRESHOLDS[FOR_SALE_DRAFT.version]!;
+    expect(sale.map((t) => t.label.en).join("|")).not.toMatch(/absorption/i);
+    expect(sale.find((t) => t.path === "stresses.absorption.absorptionPct")!.label).toEqual({ en: "Sales pace: Sales pace shock", fr: "Rythme de vente\u00a0: Choc du rythme de vente" });
     for (const threshold of all) expect(threshold.label.en, threshold.path).not.toContain("_");
   });
   it("names a stress threshold by the stress's name in both languages", () => {
