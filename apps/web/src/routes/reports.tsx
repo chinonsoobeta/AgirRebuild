@@ -36,6 +36,9 @@ export function Reports({ dealId }: { dealId: string }) {
   const heldSplit = Boolean(run.data?.result.scenarios.find((s) => s.key === "base")?.metrics.some((m) => m.key === "unrealized_equity_irr")
     && run.data?.inputs?.some((i) => i.fieldKey === "lp_share_pct"));
   const partnerMemo = heldSplit || Boolean(lp && lp.status !== "NOT_APPLICABLE");
+  // A deal that sells its units has no annual cash flows or coverage; its memo and lender package say what they hold (card F2).
+  const saleRun = Boolean(run.data?.result.scenarios.find((s) => s.key === "base")?.metrics.some((m) => m.key === "gross_sales_revenue"));
+  const describe = (kind: string) => t(saleRun && (kind === "ic_memo" || kind === "lender_package") ? `reports.kdSale.${kind}` : `reports.kd.${kind}` as "reports.kd.ic_memo");
   // Files asked for here and not yet finished: the list is polled until each is ready, blocked or failed (card C5).
   const [waiting, setWaiting] = useState<string[]>([]);
   const arts = useQuery({
@@ -114,7 +117,7 @@ export function Reports({ dealId }: { dealId: string }) {
     if (k.kind === "partner_memo" && !partnerMemo) return (
       <div key={k.kind} className="card card-pad stack tight">
         <div className="rep-head"><h3 className="h3">{kind(k.kind)}</h3><Tag tone="plain">{t("reports.notAvailable")}</Tag></div>
-        <p className="muted">{t(`reports.kd.${k.kind}`)}</p>
+        <p className="muted">{describe(k.kind)}</p>
         <p className="small">{t("reports.partnerNeeds")}</p>
         <div className="row rep-acts">
           {k.formats.map((fmt) => <button key={fmt} className="btn quiet sm" type="button" disabled>{t("reports.generateFmt", { f: fmtName(fmt), n: r.number })}</button>)}
@@ -141,7 +144,7 @@ export function Reports({ dealId }: { dealId: string }) {
     return (
       <div key={k.kind} className="card card-pad stack tight">
         <div className="rep-head"><h3 className="h3">{kind(k.kind)}</h3><div className="row rep-tags">{tag}{k.kind === "build_decision" && <Tag>{t("reports.recommended")}</Tag>}</div></div>
-        <p className="muted">{t(`reports.kd.${k.kind}`)}</p>
+        <p className="muted">{describe(k.kind)}</p>
         <p className="small muted">{facts.join(" · ")}</p>
         <div className="row rep-acts">
           {k.formats.map((fmt) => {
