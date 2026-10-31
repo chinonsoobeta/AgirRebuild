@@ -24,8 +24,16 @@ export const READING_FAILURE = {
   unit: "The AI unit does not match this field",
   scale: "The document states a scale for this amount that Agir cannot read safely",
   small: "The AI amount is under $1,000; check whether the document states it in thousands or millions",
+  count: "The AI read a count of homes as a percent; a share presold is read only where the document writes the percent",
   financing: "The AI read a financing figure as other costs; interest and lender fees are computed by Agir or belong to the stated interest reserve",
 } as const;
+// Card F1: "21 of 30", "21/30", "21 sur 30" is a count of a total, never a percent.
+const PRESALE_FIELDS = new Set(["presold_units_pct", "senior_presale_threshold_pct"]);
+const OF_TOTAL_AFTER = /^\s*(?:of|out of|sur|\/)\s*\d/;
+const OF_TOTAL_BEFORE = /\d\s*(?:of|out of|sur|\/)\s*$/;
+// A pace stated per year, quarter or week is not units per month until a person says so.
+const NOT_MONTHLY_PACE = /^\s*(?:[a-z]+\s+){0,2}?(?:per|a|an|each|every|par|\/)\s*(?:years?|yr|annum|quarters?|weeks?|an|annee|trimestres?|semaines?)\b|^\s*(?:[a-z]+\s+){0,2}?(?:annually|yearly|quarterly|weekly|annuellement)\b/;
+
 export const AI_LOW_CONFIDENCE_NOTE = "Please check: every source is a low-confidence AI reading";
 export const AI_AMBIGUOUS_NOTE = "Please check: the separator in this figure can be read more than one way; the AI read it as shown";
 export type ReadingVerification = { outcome: string; candidate?: SourcedCandidate & { confidence: Reading["confidence"]; ambiguous?: true } };
@@ -162,6 +170,11 @@ export function verifyReading(reading: Reading, documents: readonly ReadingDocum
     return matches;
   });
   if (!token) return { outcome: READING_FAILURE.value };
+  if (PRESALE_FIELDS.has(field.key) && token.unit !== "%") {
+    const text = normalizeText(reading.quote);
+    if (token.unit === "units" || OF_TOTAL_AFTER.test(foldText(text.slice(token.end))) || OF_TOTAL_BEFORE.test(foldText(text.slice(0, token.start)))) return { outcome: READING_FAILURE.count };
+  }
+  if (field.key === "absorption_units_per_month" && NOT_MONTHLY_PACE.test(foldText(normalizeText(reading.quote).slice(token.end)))) return { outcome: READING_FAILURE.unit };
   if (token.currencyCode !== null && token.currencyCode !== "CAD") return { outcome: READING_FAILURE.unit };
   let value = reading.value;
   const seen = reading.unit_seen;
@@ -175,7 +188,8 @@ export function verifyReading(reading: Reading, documents: readonly ReadingDocum
       value = roundedScale(token.paren && reading.value >= 0 ? Math.abs(token.value) : token.value, rule.factor);
       unitSeen = statedScaleUnit(rule.factor);
     }
-    if (value !== 0 && Math.abs(value) < 1000) return { outcome: READING_FAILURE.small };
+    // Card F1: a carry per unsold home per month is often a few hundred dollars.
+    if (value !== 0 && Math.abs(value) < 1000 && field.key !== "unsold_carry_monthly") return { outcome: READING_FAILURE.small };
   }
   // The reader schema names money per unit and annual rent by their printed money/area unit.
   const unit = field.unit === "$/unit/mo" ? "$" : field.unit === "$/sf/yr" ? "$/sf" : field.unit;

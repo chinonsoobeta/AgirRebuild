@@ -3,7 +3,7 @@ import { FIELD_BY_KEY, OUTPUT_LIKE_PHRASES } from "@agir/contracts";
 import { detectFormat, normalizeText, SF_PER_M2, tokenize, unitTypesIn, wholeUnitType, type CurrencyCode, type DocumentFormat, type NumberToken } from "@agir/numbers";
 import type { Cell, NormalizedDocument, Table } from "./document.ts";
 import { applyDocumentKind } from "./document-kind.ts";
-import { unconditioned, commercialItem, commercialLabel, genericCommercial, PROPERTY_TAX_WORD, BASIS_AFTER_RE, CREDIT_NOTE, REPLACED_LOAN, DEPOSIT_NOTE, DEPOSIT_RE, LTV_BASIS, canonicalItem, costSentence, currencyOf, flagRead, flagSentence, hasPhrase, isOperatingTarget, isExitCapLabel, isTakeoutTimingLabel, isPlainRentLabel, loanNameOnly, loanTerm, mapToken, normalizeLabel, withoutTaxBasis, OLD_SHEET_RE, rankScope, SCENARIO_SHEET_NOTE, SCENARIO_SHEET_RE, SUPERSEDED_LABEL_NOTE, scopeIn, scopesIn, withCurrency, type MapOptions, type Mapped, type Scope } from "./mapping.ts";
+import { unconditioned, commercialItem, commercialLabel, genericCommercial, PROPERTY_TAX_WORD, BASIS_AFTER_RE, CREDIT_NOTE, REPLACED_LOAN, DEPOSIT_NOTE, DEPOSIT_RE, LTV_BASIS, canonicalItem, costSentence, currencyOf, flagRead, flagSentence, hasPhrase, isOperatingTarget, isExitCapLabel, isTakeoutTimingLabel, isPlainRentLabel, loanNameOnly, loanTerm, mapToken, normalizeLabel, withoutTaxBasis, OLD_SHEET_RE, rankScope, typeItem, SCENARIO_SHEET_NOTE, SCENARIO_SHEET_RE, SUPERSEDED_LABEL_NOTE, scopeIn, scopesIn, withCurrency, type MapOptions, type Mapped, type Scope } from "./mapping.ts";
 
 /** One value found in one document, with where it came from and why it was (or was not) mapped. */
 export type Region = {
@@ -1839,6 +1839,62 @@ function fromTypeColumns(table: Table, result: ExtractionResult): boolean {
   return false;
 }
 
+// Card F1: a price list names each home's type and its sale price; it is a sale price per type, never a rent.
+const PRICE_TYPE_COL_RE = /^(?:(?:unit|suite|home|model)\s*)?type$|^(?:type de logement|typologie|modele)$/;
+const PRICE_COL_RE = /^(?:(?:sale|sales|selling|list|asking|unit|home)\s+)?price(?:\s*\(\$\)|\s*\$)?$|^prix(?: de vente| demande)?(?:\s*\(\$\)|\s*\$)?$/;
+const TOTAL_ROW_RE = /^(?:totals?|sub-?totals?|sous-totaux|sous-total|grand total|average|moyenne)\b/;
+const MIXED_PRICE_NOTE = "Homes of this type are listed at different prices; enter the price to use";
+
+/** A "Unit | Type | Price" or "Type | Units | Price" table. A count column is read only when no suite column lists the homes one by one. */
+function fromPriceList(table: Table, result: ExtractionResult): boolean {
+  const header = table.rows[0];
+  if (!header || header.some((c) => c.number !== undefined)) return false;
+  const heads = header.map((c) => headerOf(c).trim());
+  const typeAt = heads.findIndex((h) => PRICE_TYPE_COL_RE.test(h));
+  const priceAt = heads.findIndex((h) => PRICE_COL_RE.test(h));
+  if (typeAt < 0 || priceAt < 0) return false;
+  const suiteAt = heads.findIndex((h, i) => i !== typeAt && SUITE_COL_RE.test(h));
+  const countAt = suiteAt >= 0 ? -1 : heads.findIndex((h, i) => i !== typeAt && i !== priceAt && homeRole(h) === "units");
+  const byType = new Map<string, { row: Cell[]; price?: { cell: Cell; t: NumberToken } }[]>();
+  const base = (cell: Cell, row: Cell[], t: NumberToken) => ({ region: regionAt(result, cell.ref, "table:price-list"), raw: t.raw, location: cell.ref, context: `${table.name}: ${header.map((c) => c.text).join(" | ")} / ${row.map((c) => c.text).join(" | ")}`.slice(0, 240), rule: "table:price-list" });
+  const aside = (cell: Cell, row: Cell[], t: NumberToken, note: string) => result.other.push({ ...base(cell, row, t), fieldKey: null, itemKey: null, value: t.value, unitSeen: t.unit, note });
+  for (const row of table.rows.slice(1)) {
+    const typeText = row[typeAt]?.text.trim() ?? "";
+    const priceCell = row[priceAt];
+    const t = priceCell ? rollToken(priceCell, result.format) : null;
+    const item = typeText && !TOTAL_ROW_RE.test(headerOf(row[typeAt]!)) && !TOTAL_ROW_RE.test(headerOf(row[0] ?? { text: "", ref: "" })) ? typeItem(typeText) : "";
+    if (!item) {
+      for (const cell of row) {
+        const o = cellToken(cell, result.format);
+        if (o && cell !== row[suiteAt]) aside(cell, row, o, "A total or an unnamed row of the price list; not read");
+      }
+      continue;
+    }
+    const list = byType.get(item) ?? [];
+    list.push({ row, ...(priceCell && t && t.value !== null && t.value > 0 && (t.unit === null || t.unit === "$") ? { price: { cell: priceCell, t } } : {}) });
+    byType.set(item, list);
+    if (priceCell && t && !list.at(-1)!.price) aside(priceCell, row, t, t.refusal ?? "Not a sale price");
+  }
+  for (const [item, rows] of byType) {
+    const prices = rows.flatMap((r) => (r.price ? [r.price] : []));
+    const same = new Set(prices.map((p) => p.t.value)).size === 1;
+    for (const r of rows) {
+      if (!r.price) continue;
+      if (same) result.candidates.push({ ...base(r.price.cell, r.row, r.price.t), fieldKey: "unit_sale_price", itemKey: item, value: r.price.t.value, unitSeen: withCurrency("$", r.price.t.currencyCode) });
+      else aside(r.price.cell, r.row, r.price.t, MIXED_PRICE_NOTE);
+    }
+    // A count beside each type is that type's homes; a type listed twice is not added up.
+    if (countAt >= 0) for (const r of rows) {
+      const cell = r.row[countAt];
+      const c = cell ? rollToken(cell, result.format) : null;
+      if (!cell || !c) continue;
+      if (rows.length === 1 && c.value !== null && Number.isInteger(c.value) && c.value > 0 && (c.unit === null || c.unit === "units")) result.candidates.push({ ...base(cell, r.row, c), fieldKey: "unit_count", itemKey: item, value: c.value, unitSeen: "units" });
+      else aside(cell, r.row, c, rows.length === 1 ? c.refusal ?? "Not a unit count" : "This type is listed on several rows; enter its count");
+    }
+  }
+  return byType.size > 0;
+}
+
 // A suite-by-suite roll: a suite-number column and a status column, with no count column. It is never read row by row.
 const SUITE_HEAD_RE = /^(suite|unit|apt|apartment|no\.?|#|logement|app\.?)(\s*(no\.?|number|#))?$/;
 const STATUS_HEAD_RE = /^(status|statut|occupancy|occupation|lease status|occupied)$/;
@@ -2270,6 +2326,7 @@ function readTable(table0: Table, result: ExtractionResult, notes: string[] = []
   const sheetExcluded = markedNotPart(table.name);
   let excluded = sheetExcluded;
   const sections: Section[] = [];
+  if (fromPriceList(table, result)) return;
   if (fromTypeColumns(table, result)) return;
   let cur: Section = { rows: [], scope, loanScope, costSection, excluded };
   const close = () => {

@@ -90,6 +90,8 @@ const ITEMIZED_ALIASES: Record<string, string[]> = {
   rent_psf_annual: ["rent", "rent psf", "rent per sf", "rent per sq ft", "rent per square foot", "rent per square metre", "rent per square meter", "rent per m2", "base rent", "loyer", "loyer au pi2", "loyer par pi2", "loyer au pied carre", "loyer par pied carre", "loyer au metre carre", "loyer par metre carre", "loyer annuel au pi2", "loyer annuel par pi2", "loyer annuel au pied carre", "loyer annuel au metre carre", "loyer annuel par metre carre"],
   rentable_area_sf: ["area", "rentable area", "leasable area", "gla", "nrsf", "square feet", "sf", "superficie locative", "superficie louable", "superficie locative totale", "superficie louable totale", "surface locative", "aire locative"],
   item_occupancy_pct: ["occupancy", "occupation", "taux d occupation"],
+  // Card F1: never a bare "price", which names a land or purchase price as often as a home's.
+  unit_sale_price: ["sale price", "sales price", "selling price", "list price", "asking price", "unit price", "home price", "price per unit", "price per home", "prix de vente", "prix demande"],
 };
 
 /** Which loan a document, a section or a label is about. A generic label ("Rate", "Loan amount") means the loan in scope. */
@@ -477,6 +479,9 @@ function itemName(prefix: string): string {
   return canonicalItem(words.map((w) => (/^\d/.test(w) ? w.toUpperCase() : w[0]!.toUpperCase() + w.slice(1))).join(" "));
 }
 
+/** Card F1: the item a type cell names, as a label would name it ("End unit" is "End", as in "End units: 2"). */
+export const typeItem = (text: string): string => itemName(normalizeLabel(text).label) || canonicalItem(text.trim());
+
 /**
  * Convert a token to the field's canonical unit, or return null if they are not
  * compatible. Areas are canonical in square feet: m² is converted here, and
@@ -500,6 +505,8 @@ function convert(def: FieldDef, t: NumberToken, label: string, labelUnit: LabelU
     case "$":
       // A monthly total of other income is twelve months of it. Per-item figures are refused before mapping.
       if ((def.key === "other_income_annual" || def.key === "property_tax_annual") && (u === "$/mo" || MONTHLY_RE.test(label)) && (t.currency || u === "$" || u === "$/mo" || (!prose && u === null))) return { value: v * 12, unitSeen: "$/mo" };
+      // Card F1: the carry is per unsold unit per month, so a monthly amount is the field as written.
+      if (def.key === "unsold_carry_monthly" && u === "$/mo") return { value: v, unitSeen: "$/mo" };
       if (u === "$" || labelUnit === "$") return { value: v, unitSeen: "$" };
       // In prose a bare number is never money (a year, a count): tables and label/value lines keep the rule.
       if (u === null && !prose && Math.abs(v) >= 1000) return { value: v, unitSeen: "number" };
@@ -686,6 +693,15 @@ const LEASE_AFTER_RE = new RegExp(String.raw`^\s*(?:to (?:lease(?: up)?|let)|of 
 // A pace ("2 units per month", "3 ventes par mois") is never a count of units.
 const PACE_AFTER_RE = /^\s*(units?|unites?|sales|ventes)?\s*(?:per|a|par|\/)\s*(?:month|mois)\b/;
 const PACE_NOTE = "A sales pace, not the number of units";
+const ABSORPTION = FIELD_BY_KEY.get("absorption_units_per_month")!;
+// Card F1: a cap on a sale figure is a limit ("Presales cap: 60%", "Sales commission cap: 3%"), and presales the lender
+// requires before it funds are its presale condition, not the share presold.
+const NOT_SALE_PRICE_RE = /\b(?:lots?|land|site|terrain|parcel|purchase|acquisition|achat|build|building|construction|hard|soft|costs?|couts?|works?|travaux|gc|contract|contrat|immeuble|batiment)\b/;
+const PER_HOME_PRICE_RE = /\b(?:per (?:unit|home)|unit price|home price)\b/;
+// Interest a buyer's deposit earns is not the deposit.
+const DEPOSIT_INTEREST_RE = /\b(?:interest|rate|earns?|earning|taux|interets?|rapporte\w*)\b/;
+const SALE_CAP_RE = /\b(?:caps?|capped|ceiling|plafond\w*)\b/;
+const PRESALE_CONDITION_RE = /\b(?:required|requires?|requirements?|minimum|min|conditions?|before|prior to|until|exigee?s?|requise?s?|exigences?|minimale?s?|avant)\b/;
 const NOT_AS_RE = /\b(?:do not|don t|never|not to be|must not|should not|ne pas|ne jamais|ne doit pas|ne doivent pas)\s+(?:\w+\s+){0,2}?(?:treat|read|use|count|consider|traiter|lire|utiliser|compter|considerer)\w*\b|\b(?:is not|are not|n est pas|ne sont pas)(?:\s+(?:a|an|the|un|une|de|d))?\s+#|#\s+(?:\w+\s+){0,2}?(?:is not|are not|n est pas|ne sont pas)\b/;
 const NOT_AS_NOTE = "The sentence says this figure is not to be read as that; it is not taken";
 const LEASE_TERM_RE = /\b(?:leases?|bail|baux)\b(?![- ]?up)/;
@@ -1156,7 +1172,11 @@ function mapLabel(rawLabel: string, t: NumberToken, opts: MapOptions = {}): Mapp
   if (t.unit !== "%" && /\b(?:(?:total|gross|aggregate) monthly rents?|loyers? mensuels? totaux?|loyer mensuel total)\b/.test(label)) return { kind: "ignored", reason: "A total of all units' rents, not a rent per unit" };
   // From the figure's own unit word on: "3 unités" may be read as "3 unit" followed by "és".
   const pace = PACE_AFTER_RE.exec(foldText(`${t.raw.replace(/^[\d\s.,]+/, "")}${opts.after ?? ""}`));
-  if (pace && (t.unit === "units" || (t.unit === null && pace[1]))) return { kind: "ignored", reason: PACE_NOTE };
+  const paceLabel = ABSORPTION.aliases.some((a) => hasPhrase(label, a));
+  if (pace && (t.unit === "units" || (t.unit === null && (pace[1] || paceLabel)))) {
+    // Card F1: under a sales-pace label the pace is that field, in units per month; anywhere else it is still not a count.
+    return paceLabel ? { kind: "field", fieldKey: ABSORPTION.key, itemKey: null, value: t.value, unitSeen: "units per month" } : { kind: "ignored", reason: PACE_NOTE };
+  }
   // A minimum coverage covenant is a lender's limit that is read.
   const covenant = coverageCovenant(rawLabel, t, opts);
   const lender = covenant ? null : lenderFigure(rawLabel, t, opts);
@@ -1346,6 +1366,8 @@ function mapLabel(rawLabel: string, t: NumberToken, opts: MapOptions = {}): Mapp
   let item: { def: FieldDef; alias: string; itemKey: string; value: number; unitSeen: string } | null = null;
   for (const def of FIELDS) {
     if (!def.itemized) continue;
+    // Card F1: a land, lot or building price per home is a cost, never a home's sale price.
+    if (def.key === "unit_sale_price" && NOT_SALE_PRICE_RE.test(label)) continue;
     for (const alias of ITEMIZED_ALIASES[def.key] ?? []) {
       const prefix = endsWithPhrase(label, alias);
       // A monthly rent may lead its type name too: "loyer mensuel de notre studio".
@@ -1388,6 +1410,13 @@ function mapLabel(rawLabel: string, t: NumberToken, opts: MapOptions = {}): Mapp
   if (prose && best?.alias === "amort" && !LOAN_NOUN.test(label) && !scopeIn(label) && normalizeLabel(opts.context?.slice(0, t.start) ?? "").label !== label) return { kind: "ignored", reason: "An abbreviated amortization inside a sentence; enter it by hand if it is this loan's" };
   if (best?.def.key === "exit_cap_rate_pct" && (PRESALE_CAP_RE.test(label) || CAP_LIMIT_AFTER_RE.test(foldText(opts.after ?? "")))) return { kind: "ignored", reason: "A presale share or a resale price limit, not the exit cap rate" };
   if (best?.def.key === "min_dscr_covenant" && COVERAGE_RESULT_RE.test(label)) return { kind: "ignored", reason: "A coverage result or a margin over the covenant, not the minimum covenant" };
+  if (best?.def.key === "deposit_pct" && DEPOSIT_INTEREST_RE.test(`${label} ${foldText(opts.after ?? "")}`)) return { kind: "ignored", reason: "Interest on buyers' deposits, not the deposit" };
+  if (best?.def.group === "sale" && SALE_CAP_RE.test(label)) return { kind: "ignored", reason: "A cap on a sale figure, not the figure" };
+  if (best?.def.key === "presold_units_pct" && PRESALE_CONDITION_RE.test(`${label} ${foldText((opts.after ?? "").split(/[,;.]/)[0] ?? "")}`)) {
+    return asField(FIELD_BY_KEY.get("senior_presale_threshold_pct")!) ?? { kind: "unmapped" };
+  }
+  // A pace not stated per month is not converted: "36 a year" is not 3 a month until a person says so.
+  if (best?.def.key === ABSORPTION.key) return { kind: "ignored", reason: "A sales pace not stated per month; enter the units sold per month" };
   if (best) return notAssumed(best.def.key) ?? { kind: "field", fieldKey: best.def.key, itemKey: null, value: best.value, unitSeen: best.unitSeen };
   // An EGI basis supplies the unit, but the cost's own label must identify the field.
   if (t.unit === "%" && STATED_EGI_AFTER_RE.test(foldText(opts.after ?? ""))) {
@@ -1395,6 +1424,8 @@ function mapLabel(rawLabel: string, t: NumberToken, opts: MapOptions = {}): Mapp
       : /\b(expenses|opex|depenses|charges d exploitation)\b/.test(label) ? "expense_ratio_pct" : null;
     if (key) return asField(FIELD_BY_KEY.get(key)!) ?? { kind: "unmapped" };
   }
+  // Card F1: "Selling price: $9,000,000" may be the whole building's; a sale price is read only per home or for a named type.
+  if (item?.def.key === "unit_sale_price" && !PER_HOME_PRICE_RE.test(item.alias)) return { kind: "ignored", reason: "A price that names no home type and is not per home; enter the price per home" };
   if (item) {
     return notAssumed(item.def.key) ?? { kind: "field", fieldKey: item.def.key, itemKey: "All units", value: item.value, unitSeen: item.unitSeen };
   }

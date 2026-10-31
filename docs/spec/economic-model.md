@@ -309,10 +309,14 @@ in this card); and the cited tables that will replace entered values.
 
 ## Selling the units (townhomes and small condos)
 
-**Status: specified, not built.** Owner decisions 2026-10-15 (the model) and 2026-10-18 (rules Q1 to Q5 below).
-The reference workbooks `kestrel-row-townhomes.xlsx` (8 townhomes, Ontario, 50% presold) and
-`alder-court-condo.xlsx` (30-unit condo, BC, 70% presold, 4-month closing lag) implement this section; they become
-oracles once a person completes each workbook's "Hand check" sheet. No engine code is written before that.
+**Status: built in cards 77 to 85; documents read since card F1.** The engine, inputs, run screen, reports and
+exploration for a deal that sells its units were built in cards 77 to 85 (see `docs/STATUS.md`). Since card F1 the
+sale figures are also read from documents, by the rules and by the AI reader (`reader-v5`), except the choice to
+sell, which a person makes; a reading for a field the deal's mode does not use is listed on Review as not needed.
+Owner decisions 2026-10-15 (the model) and 2026-10-18 (rules Q1 to Q5 below). The reference workbooks
+`kestrel-row-townhomes.xlsx` (8 townhomes, Ontario, 50% presold) and `alder-court-condo.xlsx` (30-unit condo, BC, 70%
+presold, 4-month closing lag) implement this section; card 77 checks the engine against their outcomes in
+`oracles/for-sale/`.
 
 **Mode.** A flag `sell_units` ("Sell the units (no rental)") sets `exit = "for_sale"`. It excludes
 `refinance_and_hold`; both together block the run. Rent, occupancy, expense, growth, exit cap, selling cost,

@@ -129,8 +129,13 @@ describe("setting up a deal that sells its units (task 78)", () => {
     expect(assemble(rows).readiness.impossible.every((x) => x.fieldKey === "unit_count")).toBe(true);
     expect(assemble(rows).readiness.impossible).toHaveLength(2);
   });
-  test("the sale catalog has no extraction or defaults and permits a fractional sales pace", () => {
-    for (const key of saleFields) expect(FIELD_BY_KEY.get(key), key).toMatchObject({ extractable: false, aliases: [] });
+  // Card F1 made every sale field but the choice to sell read from documents; the choice stays a person's, with no alias.
+  test("the sale catalog reads every field but the choice to sell, has no defaults and permits a fractional sales pace", () => {
+    for (const key of saleFields) {
+      const def = FIELD_BY_KEY.get(key)!;
+      if (key === "sell_units") expect(def, key).toMatchObject({ extractable: false, aliases: [] });
+      else expect(def.extractable && def.aliases.length > 0, key).toBe(true);
+    }
     expect(FIELDS.filter((f) => saleFields.includes(f.key)).every((f) => f.default === undefined)).toBe(true);
     expect(assemble(rowsFor().map((r) => r.fieldKey === "absorption_units_per_month" ? { ...r, valueNumeric: 0.5 } : r)).readiness.status).toBe("ready");
   });

@@ -8,6 +8,7 @@ import {
   PREMIUM_TAX_TABLES, premiumTaxOptions, CMHC_PREMIUM, GST_HST, cmhcPremium, landTable, landTransferTaxOptions, gstHstNetOptions, ENGINE_READABLE_STATUSES, type Proposal, type Table, type TableOption,
   FIELD_BY_KEY,
   FIELD_GROUP_LABELS,
+  notNeededReason,
   POLICIES,
   runPolicy,
   type Policy,
@@ -82,7 +83,26 @@ type AssumptionDb = {
   updated_at: string;
 };
 
+/** The deal's values, without the document readings its mode does not use (card F1): every view, the run and Approve all see the same rows. */
 async function loadAssumptions(tx: Db, dealId: string): Promise<AssumptionDb[]> {
+  return byMode(await loadAllAssumptions(tx, dealId)).rows;
+}
+
+/** Whether the deal sells its units, as readiness decides it: an approved or accepted "sell the units". */
+const sells = (rows: Pick<AssumptionDb, "field_key" | "item_key" | "status" | "value">[]) =>
+  rows.some((a) => a.field_key === "sell_units" && !a.item_key && ENGINE_READABLE_STATUSES.includes(a.status) && a.value === 1);
+
+/**
+ * Card F1: a document reading still waiting for review, for a field the deal's mode does not use (a rent on a deal that sells
+ * its units, a sale price on one that rents them), is set aside as not needed. It is kept as read, so a change of mode brings it back.
+ */
+function byMode(all: AssumptionDb[]) {
+  const selling = sells(all);
+  const aside = (a: AssumptionDb) => a.source_kind === "document" && (a.status === "needs_review" || a.status === "conflicting") && notNeededReason(a.field_key, selling) !== null;
+  return { selling, rows: all.filter((a) => !aside(a)), notNeeded: all.filter(aside) };
+}
+
+async function loadAllAssumptions(tx: Db, dealId: string): Promise<AssumptionDb[]> {
   return tx.query<AssumptionDb>(
     `select a.*, coalesce(nullif(btrim(u.name), ''), u.email) as decided_by_name, coalesce(nullif(btrim(s.name), ''), s.email) as second_approver_name, coalesce(nullif(btrim(k.name), ''), k.email) as client_confirmed_by_name,
        exists (select 1 from workspace_members m where m.workspace_id = a.workspace_id and m.user_id = a.second_approver and m.role = 'reviewer') as confirmed_by_review,
@@ -464,17 +484,19 @@ export async function documentsView(tx: Db, dealId: string) {
      where d.deal_id = $1 and d.retired_at is null order by d.created_at, d.name`,
     [dealId],
   );
-  const assumptions = (await loadAssumptions(tx, dealId)).filter((a) => a.status !== "rejected");
+  const { rows: kept, notNeeded } = byMode(await loadAllAssumptions(tx, dealId));
+  const assumptions = kept.filter((a) => a.status !== "rejected");
   const { other } = await otherFigures(tx, dealId, assumptions);
   return rows.map((d) => ({
     ...d,
     used_count: assumptions.filter((a) => a.sources.some((s) => s.document_id === d.id)).length,
-    other_count: other.filter((o) => o.documentId === d.id).length,
+    // Card F1: a reading this deal's mode does not use is a figure no value used.
+    other_count: other.filter((o) => o.documentId === d.id).length + notNeeded.filter((a) => a.sources.some((s) => s.document_id === d.id)).length,
   }));
 }
 
 export async function reviewView(tx: Db, dealId: string, asOf: string) {
-  const assumptions = await loadAssumptions(tx, dealId);
+  const { rows: assumptions, notNeeded: setAside, selling } = byMode(await loadAllAssumptions(tx, dealId));
   const { readiness, gaps } = readinessFor(assumptions);
   const [deal] = await tx.query<{country: string; province: string | null}>(`select country, province from deals where id = $1`, [dealId]);
   // The tables are Canadian: a deal elsewhere is told so, and a Canadian deal with no province is asked for one.
@@ -535,6 +557,16 @@ export async function reviewView(tx: Db, dealId: string, asOf: string) {
   const alreadyRead = (r: { field: string; value: number }) => assumptions.some((a) => a.status !== "rejected" && a.field_key === r.field && a.value !== null && Math.abs(a.value - r.value) < 0.5);
   const rejectedReading = (r: ReaderResponse["readings"][number], verification: ReadingVerification | undefined) => verification && verification.outcome !== "verified" && !alreadyRead(r)
     ? [{ field: r.field, item: r.item, value: r.value, file: r.file, location: r.location, quote: r.quote, reason: verification.outcome }] : [];
+  // Card F1: a failed reading of a field this deal's mode does not use is not asked about; it is listed as not needed.
+  const inMode = (r: { field: string }) => notNeededReason(r.field, selling) === null;
+  const failed = stored ? [
+    ...(stored.response?.readings ?? []).flatMap((r, i) => rejectedReading(r, stored.verification?.readings[i])),
+    ...(stored.response?.conflicts ?? []).flatMap((c, i) => c.values.flatMap((v, j) => rejectedReading({ ...v, field: c.field, item: c.item, note: c.why, confidence: "high" }, stored.verification?.conflicts[i]?.[j]))),
+  ] : [];
+  const notNeeded = [
+    ...setAside.map((a) => ({ fieldKey: a.field_key, itemKey: a.item_key || null, label: FIELD_BY_KEY.get(a.field_key)!.label, value: a.value, why: notNeededReason(a.field_key, selling)!, sources: a.sources })),
+    ...failed.filter((r) => !inMode(r)).map((r) => ({ fieldKey: r.field, itemKey: r.item, label: FIELD_BY_KEY.get(r.field)!.label, value: r.value, why: notNeededReason(r.field, selling)!, sources: [{ document_name: r.file, location: r.location, raw: r.quote }] })),
+  ];
   const aiReading = stored ? {
     outcome: stored.outcome, model: stored.model, promptVersion: stored.prompt_version, createdAt: stored.created_at,
     notUsed: (stored.response?.not_used ?? []).map(r => {
@@ -542,10 +574,7 @@ export async function reviewView(tx: Db, dealId: string, asOf: string) {
       const document = matches.length === 1 ? matches[0] : undefined;
       return { ...r, figureId: all.find(o => !o.label && o.documentId === document?.id && o.location === r.location && o.value === r.value)?.figureId ?? null };
     }),
-    pleaseCheck: [
-      ...(stored.response?.readings ?? []).flatMap((r, i) => rejectedReading(r, stored.verification?.readings[i])),
-      ...(stored.response?.conflicts ?? []).flatMap((c, i) => c.values.flatMap((v, j) => rejectedReading({ ...v, field: c.field, item: c.item, note: c.why, confidence: "high" }, stored.verification?.conflicts[i]?.[j]))),
-    ],
+    pleaseCheck: failed.filter(inMode),
   } : null;
   // Up to three unlabelled figures that may hold a missing input: those it ranks first, then the others, each in the table's order.
   const likely = (fieldKey: string) =>
@@ -608,6 +637,7 @@ export async function reviewView(tx: Db, dealId: string, asOf: string) {
       return { ...m, unit: def.unit, material: def.material, default: def.default ?? null, help: def.help ?? null, groupLabel: FIELD_GROUP_LABELS[def.group] };
     }),
     other,
+    notNeeded,
   };
 }
 

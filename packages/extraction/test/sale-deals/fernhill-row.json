@@ -1,0 +1,140 @@
+{
+  "slug": "fernhill-row",
+  "name": "Fernhill Row Townhomes",
+  "assetType": "Townhomes",
+  "location": "Guelph, Ontario",
+  "purpose": "Card F1, fictional: eight freehold townhomes sold, not rented. A price list by type, a budget, a lender's term sheet with a presale condition and a sales brochure.",
+  "documents": [
+    {
+      "name": "Fernhill_Row_Price_List.xlsx",
+      "kind": "xlsx",
+      "sheet": "Price List",
+      "rows": [
+        [
+          "Unit",
+          "Type",
+          "Price"
+        ],
+        [
+          "1",
+          "End unit",
+          899900
+        ],
+        [
+          "2",
+          "Interior",
+          779900
+        ],
+        [
+          "3",
+          "Interior",
+          779900
+        ],
+        [
+          "4",
+          "Interior",
+          779900
+        ],
+        [
+          "5",
+          "Interior",
+          779900
+        ],
+        [
+          "6",
+          "Interior",
+          779900
+        ],
+        [
+          "7",
+          "Interior",
+          779900
+        ],
+        [
+          "8",
+          "End unit",
+          899900
+        ]
+      ]
+    },
+    {
+      "name": "Fernhill_Row_Budget.xlsx",
+      "kind": "xlsx",
+      "sheet": "Budget",
+      "rows": [
+        [
+          "Line item",
+          "Amount"
+        ],
+        [
+          "Land",
+          2100000
+        ],
+        [
+          "Hard costs",
+          3600000
+        ],
+        [
+          "Soft costs",
+          540000
+        ],
+        [
+          "Contingency",
+          180000
+        ],
+        [
+          "Development charges",
+          384000
+        ]
+      ]
+    },
+    {
+      "name": "Fernhill_Row_Term_Sheet.pdf",
+      "kind": "pdf",
+      "title": "Fernhill Row: Construction Loan Term Sheet",
+      "lines": [
+        "Loan amount: $4,650,000",
+        "Interest rate: 7.15%",
+        "Presale requirement: 60% presold before first draw"
+      ]
+    },
+    {
+      "name": "Fernhill_Row_Sales_Brochure.pdf",
+      "kind": "pdf",
+      "title": "Fernhill Row: Sales Brochure",
+      "lines": [
+        "Eight freehold townhomes in Guelph, Ontario.",
+        "End units: 2",
+        "Interior units: 6",
+        "Prices are net of HST.",
+        "Presales: 50%",
+        "Buyer deposit: 10%",
+        "Sales commission: 4%",
+        "Construction period: 14 months"
+      ]
+    }
+  ],
+  "expect": {
+    "conflicts": [],
+    "missing": [],
+    "values": {
+      "unit_sale_price|End": 899900,
+      "unit_sale_price|Interior": 779900,
+      "unit_count|End": 2,
+      "unit_count|Interior": 6,
+      "presold_units_pct": 50,
+      "senior_presale_threshold_pct": 60,
+      "deposit_pct": 10,
+      "sales_commission_pct": 4,
+      "land_cost": 2100000,
+      "hard_cost": 3600000,
+      "senior_loan_amount": 4650000,
+      "senior_rate_pct": 7.15,
+      "construction_months": 14,
+      "soft_cost": 540000,
+      "contingency": 180000,
+      "development_charges": 384000
+    },
+    "runs": false
+  }
+}

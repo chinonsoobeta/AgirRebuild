@@ -1,6 +1,9 @@
 import { describe, expect, test } from "vitest";
 import { parseDocument, addressedText, extractCandidates, consolidate, checkArithmetic, verifyReadings, verifyReading, READING_FAILURE, READER_PROMPT, READER_PROMPT_VERSION, type NormalizedDocument, type Reading, type SourcedCandidate } from "../src/index.ts";
 import { SF_PER_M2 } from "@agir/numbers";
+import { readFileSync } from "node:fs";
+import { join } from "node:path";
+import { toNormalized, type OracleDeal } from "./oracle.ts";
 
 describe("Card 173: financing costs in the reader prompt", () => {
   const otherCostNote = "- `other_cost`: a development cost that is not land, hard costs, soft costs, contingency or one of the other cost fields. Financing costs are never `other_cost`: interest, a construction interest reserve, capitalized interest, and lender, loan, commitment, broker or insurer fees on a loan. Name an interest reserve as `stated_interest_reserve`; list the others under `not_used`.";
@@ -11,7 +14,8 @@ describe("Card 173: financing costs in the reader prompt", () => {
   test("places other_cost after development_charges and before expense_ratio_pct", () => {
     const fieldNotes = READER_PROMPT.split("**Field notes.**\n")[1]!.split("\n\n")[0]!.split("\n");
     expect(fieldNotes.map(line => line.split(":")[0])).toEqual([
-      "- `development_charges`", "- `other_cost`", "- `expense_ratio_pct`", "- `fixed_opex_annual`",
+      // Card F1 added the sale-field note last.
+      "- `development_charges`", "- `other_cost`", "- `expense_ratio_pct`", "- `fixed_opex_annual`", "- `unit_sale_price`",
     ]);
   });
 });
@@ -23,8 +27,9 @@ describe("Card K: operating-expense totals, scenarios, rounding and final figure
   const scenarioRule = "- When the documents give a base case and a downside, upside, sensitivity or stress case for one field, read the base case and list the other cases under `not_used` with the reason; they are not conflicts. When alternatives with no base case all give the same value for a field, read that value.";
   const roundingRule = "- When the same figure is written exactly in one place and rounded in another (for example $12,345,000 in a budget and \"$12.3 million\" in a summary), read the exact one and mention the rounded one in `note`; this is not a conflict.";
 
-  test("uses reader-v4", () => {
-    expect(READER_PROMPT_VERSION).toBe("reader-v4");
+  // Card F1 bumped the prompt to reader-v5 for the sale fields; card K's lines below are unchanged.
+  test("uses reader-v5", () => {
+    expect(READER_PROMPT_VERSION).toBe("reader-v5");
   });
   test.each([
     ["the fixed_opex_annual field note", fixedOpexNote],
@@ -528,5 +533,65 @@ describe("QA card C1: unit types read from one line are one type", () => {
     expect(ai("unit_count", "3½", 4, "page 1, line 20", "Units 4").itemKey).toBe("3½");
     const rule = { fieldKey: "unit_rent_monthly", itemKey: "2BR", value: 1850, location: "page 2, line 4", raw: "$1,850", unitSeen: "$/mo", context: "", rule: "table:labelled-roll", note: null, documentId: "r", documentName: "invented-roll.pdf" } as unknown as SourcedCandidate;
     expect(types(consolidate([rule, ai("unit_rent_monthly", "Two-bedroom", 1850, "page 1, line 21", "$1,850")], "CAD"))).toEqual([["unit_rent_monthly", "2BR", 1850]]);
+  });
+});
+
+describe("card F1: the AI reader's sale readings", () => {
+  const deal = (slug: string) => JSON.parse(readFileSync(join(import.meta.dirname, "sale-deals", `${slug}.json`), "utf8")) as OracleDeal;
+  const docs = ["fernhill-row", "tamarack-terrace"].flatMap((slug) => deal(slug).documents.map((d) => ({ id: d.name, name: d.name, document: toNormalized(d) })));
+  const r = (field: string, item: string | null, value: number, unit_seen: Reading["unit_seen"], file: string, location: string, quote: string): Reading => ({ field, item, value, unit_seen, file, location, quote, note: null, confidence: "high" });
+  // A hand-written model response for the two fictional sale deals.
+  const fake = {
+    readings: [
+      r("unit_sale_price", "End unit", 899900, "$", "Fernhill_Row_Price_List.xlsx", "Price List!C2", "899900"),
+      r("unit_sale_price", "two-bedroom", 639000, "$", "Tamarack_Terrace_Pricing.xlsx", "Pricing!C3", "639000"),
+      r("presold_units_pct", null, 50, "%", "Fernhill_Row_Sales_Brochure.pdf", "page 1, line 6", "Presales: 50%"),
+      r("deposit_pct", null, 10, "%", "Fernhill_Row_Sales_Brochure.pdf", "page 1, line 7", "Buyer deposit: 10%"),
+      r("sales_commission_pct", null, 4, "%", "Fernhill_Row_Sales_Brochure.pdf", "page 1, line 8", "Sales commission: 4%"),
+      r("senior_presale_threshold_pct", null, 60, "%", "Fernhill_Row_Term_Sheet.pdf", "page 1, line 4", "60% presold before first draw"),
+      r("absorption_units_per_month", null, 3, "units", "Tamarack_Terrace_Sales_Plan.pdf", "page 1, line 4", "3 units per month"),
+      r("closing_lag_months", null, 4, "months", "Tamarack_Terrace_Sales_Plan.pdf", "page 1, line 5", "Closing lag: 4 months"),
+      r("unsold_carry_monthly", null, 650, "$", "Tamarack_Terrace_Sales_Plan.pdf", "page 1, line 6", "Carry per unsold unit: $650 per month"),
+    ],
+    conflicts: [],
+    not_used: [],
+  };
+
+  test("each sale field and unit verifies; a type keeps its canonical name (two-bedroom is 2BR)", () => {
+    const { readings } = verifyReadings(fake, docs);
+    expect(readings.map((v) => v.outcome)).toEqual(fake.readings.map(() => "verified"));
+    expect(readings.map((v) => [v.candidate!.fieldKey, v.candidate!.itemKey, v.candidate!.value])).toEqual([
+      ["unit_sale_price", "End unit", 899900], ["unit_sale_price", "2BR", 639000], ["presold_units_pct", null, 50], ["deposit_pct", null, 10], ["sales_commission_pct", null, 4],
+      ["senior_presale_threshold_pct", null, 60], ["absorption_units_per_month", null, 3], ["closing_lag_months", null, 4], ["unsold_carry_monthly", null, 650],
+    ]);
+  });
+
+  test("a sale price needs its type", () => {
+    expect(verifyReading({ ...fake.readings[0]!, item: null }, docs)).toEqual({ outcome: READING_FAILURE.item });
+  });
+
+  const presold = (quote: string) => {
+    const document = { ...doc("txt"), fullText: quote, lines: [{ location: "line 1", text: quote }] };
+    return [{ id: "p", name: "presales.txt", document }];
+  };
+  test("a computed percent fails: 30 of 60 presold is not read as 50", () => {
+    const quote = "30 of 60 units presold";
+    expect(verifyReading(r("presold_units_pct", null, 50, "%", "presales.txt", "line 1", quote), presold(quote))).toEqual({ outcome: READING_FAILURE.value });
+  });
+  test.each([["30 of 60 units presold", 30], ["30 of 60 units presold", 60], ["Presales: 21/30 homes", 21], ["Préventes : 21 sur 30 logements", 21]] as const)("a count of a total is never a share presold: %s as %d", (quote, value) => {
+    for (const field of ["presold_units_pct", "senior_presale_threshold_pct"]) expect(verifyReading(r(field, null, value, "%", "presales.txt", "line 1", quote), presold(quote))).toEqual({ outcome: READING_FAILURE.count });
+  });
+  test("a stated percent beside the count verifies", () => {
+    const quote = "30 of 60 units presold (50%)";
+    expect(verifyReading(r("presold_units_pct", null, 50, "%", "presales.txt", "line 1", quote), presold(quote)).outcome).toBe("verified");
+  });
+  test.each(["Sales pace: 36 units per year", "Absorption: 9 units a quarter", "Sales pace: 1 unit per week", "Rythme des ventes : 36 logements par an"])("a pace not stated per month fails: %s", (quote) => {
+    const value = Number(/\d+/.exec(quote)![0]);
+    expect(verifyReading(r("absorption_units_per_month", null, value, "units", "presales.txt", "line 1", quote), presold(quote))).toEqual({ outcome: READING_FAILURE.unit });
+  });
+  test("a carry under $1,000 is a monthly carry per home, not a missed scale; other money still is", () => {
+    const quote = "Carry per unsold unit: $650 per month";
+    expect(verifyReading(r("unsold_carry_monthly", null, 650, "$", "presales.txt", "line 1", quote), presold(quote)).outcome).toBe("verified");
+    expect(verifyReading(r("land_cost", null, 650, "$", "presales.txt", "line 1", quote), presold(quote))).toEqual({ outcome: READING_FAILURE.small });
   });
 });

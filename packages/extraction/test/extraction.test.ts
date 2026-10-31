@@ -5516,10 +5516,14 @@ describe("card 102: the build period and the lease-up, in common English and Que
     "Interest reserve: 18 months of construction interest", "We budget 24 months of construction financing.", "Construction loan: 16 months to build"])("not the build period: %s", (line) => expect(has(line, "construction_months")).toBe(false));
   test.each(["Letting fee: 2 months", "Notice period before letting: 2 months", "Incitatif : 1 mois de location gratuite.", "We offer 2 months of leasing incentives.", "Lease term: 10 years",
     "Initial letting term: 10 years", "Commercial lease: 10 years to let", "Bail commercial : 10 ans pour louer", "Bail : 5 ans de location", "Absorption: 2 units per month", "Absorption: 3 sales per month", "Rent up 3% per year"])("not the lease-up: %s", (line) => expect(has(line, "lease_up_months")).toBe(false));
-  test.each(["Absorption: 2 units per month", "Sales pace: 4 units per month", "Absorption: 5 units a month", "Pace: 2 units/month", "Absorption : 3 unités par mois", "Rythme : 2 ventes par mois"])("a pace is not a count: %s", (line) => {
+  test.each(["Pace: 2 units/month", "Rythme : 2 ventes par mois"])("a pace is not a count: %s", (line) => {
     const r = read(line);
     expect(pick(r)).toEqual([]);
     expect(r.other.some((o) => o.note === "A sales pace, not the number of units")).toBe(true);
+  });
+  // Card F1 made the sales pace a field: under its own label the pace is now read as units sold per month, and still never as a count.
+  test.each([["Absorption: 2 units per month", 2], ["Sales pace: 4 units per month", 4], ["Absorption: 5 units a month", 5], ["Absorption : 3 unités par mois", 3]] as const)("a pace is not a count: %s", (line, n) => {
+    expect(read(line).candidates.map((c) => [c.fieldKey, c.value])).toEqual([["absorption_units_per_month", n]]);
   });
   test.each([["Units: 24", "All units", 24], ["Studios: 12 units", "Studio", 12]])("a count is still a count: %s", (line, item, n) => expect(read(line).candidates.map((c) => [c.fieldKey, c.itemKey, c.value])).toEqual([["unit_count", item, n]]));
   test("rent growth is not a rent-up", () => expect(pick(read("Rent growth: 3%"))).toEqual([["rent_growth_pct", 3]]));
