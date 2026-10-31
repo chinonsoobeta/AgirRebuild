@@ -126,7 +126,13 @@ The only data that leaves Canada.
 ## 7. Audit and operations
 
 - Fix the two known gaps: one chain per workspace, the actor inside each event's hash, and
-  `GET /api/workspaces/:ws/audit/verify` scoped to the caller's workspace.
+  `GET /api/workspaces/:ws/audit/verify` scoped to the caller's workspace. Done in card S8 (migration `0040`). An event's
+  hash is the lowercase hexadecimal SHA-256 of the UTF-8 text
+  `prev_hash|workspace_id|action|entity|entity_id|actor|deal_id|payload::text|extract(epoch from created_at)::text`,
+  where a missing workspace, entity id, actor or deal is the empty string and `prev_hash` is the hash of the previous
+  event of the same workspace in seq order, or `genesis` for its first. Events with no workspace form one chain of
+  their own. The audit package carries each of these fields as the database hashed them (`payload_text`,
+  `created_at_epoch`) and the workspace's chain, so `scripts/verify-audit-package.mjs` checks it with Node alone.
 - Revoke `update` and `delete` on the audit table from the application role at the grant level, not by convention.
 - Ship logs off the host; log event names and ids, never content (the API already redacts shared-link errors; make
   that the rule everywhere).
@@ -148,7 +154,7 @@ Nothing here except the provider choice waits on a person.
 | S5 Crypto-shred deletion | Delete a workspace or expire a deal's documents by key destruction; a dry-run report first | 2 days; the retention period is the lawyer's |
 | S6 MFA and sessions | TOTP and passkeys, absolute expiry, invalidation on credential change | 3 days |
 | S7 Model boundary | Region pin, per-workspace switch, redaction pass | 2 days |
-| S8 Audit and operations | Per-workspace chain with actor, scoped verify, grants, alerts | 2 days; the migration needs owner review |
+| S8 Audit and operations | Per-workspace chain with actor, scoped verify, grants, alerts | Done, migration `0040` (the chain, the scoped check, a package that stands on its own, the standalone worker's alerts); the migration needs owner review. The application role already holds only `select` on the audit table (a test in `packages/db/test/audit-chain.test.ts` now holds it to that); shipping logs off the host and the other alerts are not in it |
 
 About three weeks. S1 to S3 come before any real document is uploaded. S1 and S4 need the KMS, which means the
 hosting provider.

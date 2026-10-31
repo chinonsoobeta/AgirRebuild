@@ -118,6 +118,8 @@ describe("one chain per workspace", () => {
     const links = await asUser(db, ann, (tx) => tx.query(`select * from fn_audit_chain_links($1)`, [a]));
     expect(links).toEqual((await db.query(`select seq, prev_hash, hash from audit_events where workspace_id = $1 order by seq`, [a])));
     await expect(asUser(db, ann, (tx) => tx.query(`select * from fn_audit_chain_links($1)`, [b]))).rejects.toThrow(/does not allow/);
+    // ADR 0002 section 7: the application role can read events, never change or remove one, by grant.
+    expect(await db.query(`select privilege_type from information_schema.role_table_grants where grantee = 'agir_app' and table_name = 'audit_events'`)).toEqual([{ privilege_type: "SELECT" }]);
     // Events with no workspace (an account deleted with no workspace left) form one chain of their own.
     await db.query(`select agir_audit(null, null, 'user.deleted', 'user', 'x', '{}'::jsonb)`);
     await db.query(`select agir_audit(null, null, 'user.deleted', 'user', 'y', '{}'::jsonb)`);

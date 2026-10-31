@@ -72,7 +72,7 @@ Both processes run `checkStartup` (`packages/db/src/startup.ts`) before opening 
 | `AGIR_SEED` | API | `0` starts development empty. Production never seeds, and refuses `1` |
 | `AGIR_EMBEDDED_WORKER` | API | `1` runs the worker inside the API on Postgres too |
 | `AGIR_SIGNUP` | API | `open` (default) or `invite`: during the pilot only a client invitation creates an account (card B) |
-| `AGIR_ALERT_URL` | API | Where an alert is POSTed as JSON (a refused start, a failed migration, an unhandled error, a failed email, a dead job). Unset: no alerts (card B) |
+| `AGIR_ALERT_URL` | both | Where an alert is POSTed as JSON (a refused start, a failed migration, an unhandled error, a failed email, a dead job, the worker's loop failing). The standalone worker alerts the last two too (card S8). Unset: no alerts (card B) |
 | `AGIR_ACCOUNT_CLOSURE` | API | `1` offers closing a workspace and deleting an account (card F). Unset: neither route exists |
 | `AGIR_RETENTION_DAYS` | both | Whole days after which a closed workspace is purged. Unset: closed workspaces are kept. The lawyer gives the period |
 | `AGIR_BLOB_STORE` | both | `file` (default) or `s3` |
@@ -105,6 +105,23 @@ and the worker rendered the IC memo PDF. `backup.sh` wrote both files; `docker c
 `restore.sh` brought it back with 1 deal, 6 documents, 1 run, 1 ready memo, 53 audit events (the chain verifies) and
 7 blobs, and the API applied no migration. Signed in again, the six document files and the memo PDF downloaded.
 A second `restore.sh` on the restored stack refused, as the database was not empty.
+
+## How to check an audit package without Agir
+
+An audit package (Download the audit package, on the Audit screen, a run, or a shared link) can be checked by anyone
+with Node 22 or later and one file from this repository, `scripts/verify-audit-package.mjs`, which needs nothing else:
+
+```
+node scripts/verify-audit-package.mjs agir-audit-package-run-1.json
+```
+
+It prints one line per check and exits 1 if any fails. It recomputes the run's input and result hashes (with its own
+copy of the canonical JSON the engine hashes with), checks that the workspace's chain in the package runs from
+`genesis` without a gap, that every event of the deal is in it, and that each event's hash recomputes from its fields
+by the recipe in the package (`auditChain.recipe`; migration `0040` and ADR 0002 section 7). A package made for a
+client of the deal hides the events that name another client; those are listed as not checked. It does not check the
+run's signature (it needs the signing key) or replay the run (it needs the engine); the package's own `validation`
+section reports both, as Agir checked them when the package was made.
 
 ## Not done
 
