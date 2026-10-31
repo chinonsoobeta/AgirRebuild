@@ -1794,3 +1794,91 @@ describe("card E: a report under a policy credit has not signed says so", () => 
     expect(cells).not.toContain(DRAFT.en);
   });
 });
+
+describe("the outputs of a deal that sells its units read as such (card F2)", () => {
+  /** The reference sale with an LP/GP split, so it has a partner memo too. */
+  const withSplit = (slug: typeof SALE_SLUGS[number], kind: ArtifactInput["kind"], lang: "en" | "fr" = "en"): ArtifactInput => {
+    const x = saleInput(slug, kind);
+    const input = { ...x.input, waterfall: { lpSharePct: 90, preferredReturnPct: 8, gpPromotePct: 20 } };
+    const split = ["lp_share_pct", "preferred_return_pct", "gp_promote_pct"].map((fieldKey, n) => ({ fieldKey, itemKey: null, value: [90, 8, 20][n]!,
+      label: FIELD_BY_KEY.get(fieldKey)!.label, unit: FIELD_BY_KEY.get(fieldKey)!.unit, sourceKind: "analyst" as const, source: "Stated in the oracle inputs" }));
+    return { ...x, lang, input, result: underwrite(input, x.policy), assumptions: [...x.assumptions, ...split] };
+  };
+  const RENTAL_WORDS = { en: /\brents?\b|occupan|coverage|\bNOI\b|\bDSCR\b|\bDCR\b|lease/i, fr: /\bloyers?\b|occupation|couverture|\bRNE\b|\bCCD\b/i } as const;
+  const NOT_MEANINGFUL = { en: "Not meaningful", fr: "Non significatif" } as const;
+  const IRR_REASON = {
+    en: "A return marked not meaningful has dated cash flows that change direction more than once, such as carry paid after the first closings, so no single rate describes it.",
+    fr: "Un rendement marqué non significatif a des flux datés qui changent de sens plus d'une fois, par exemple des frais de portage payés après les premières ventes conclues ; aucun taux unique ne le décrit.",
+  } as const;
+  const STRESS_NAMES = {
+    en: ["Prices -10%", "Sales pace × 0.70", "Costs +10%", "Interest rates +1 point", "Construction +6 months", "Presales -15 points"],
+    fr: ["Prix -10 %", "Rythme de vente × 0,70", "Coûts +10 %", "Taux d'intérêt +1 point", "Construction +6 mois", "Préventes -15 points"],
+  } as const;
+  const KINDS = ["ic_memo", "build_decision", "lender_package", "partner_memo"] as const;
+
+  test.each(SALE_SLUGS.flatMap((slug) => KINDS.flatMap((kind) => (["en", "fr"] as const).map((lang) => [slug, kind, lang] as const))))(
+    "%s %s (%s) has no rental words, no raw codes and no bare 'not applicable', and passes provenance", (slug, kind, lang) => {
+      const model = buildModel(withSplit(slug, kind, lang));
+      const text = visibleText(renderHtml(model));
+      expect(verifyProvenance(text, model.formatter.manifest)).toMatchObject({ pass: true, orphans: [] });
+      expect(text).not.toMatch(/NOT_APPLICABLE|NOT_MEANINGFUL|NOT_EVALUATED/);
+      expect(text).not.toContain(lang === "en" ? "Not applicable" : "Sans objet");
+      expect(text).not.toMatch(RENTAL_WORDS[lang]);
+      // A return that cannot be worked out is said with its reason.
+      if (text.includes(NOT_MEANINGFUL[lang])) expect(text).toContain(IRR_REASON[lang]);
+      expect(text).not.toMatch(/Absorption -30|-15 pts|\+100 bps|\+100 pb/);
+    });
+
+  test.each(["en", "fr"] as const)("every sale stress is named in plain words in the reports and the weakest-stress line (%s)", (lang) => {
+    const model = buildModel(withSplit("kestrel-row-townhomes", "ic_memo", lang));
+    const caption = lang === "en" ? "Stresses (each a full re-run of the model)" : "Stress (recalcul complet par scénario)";
+    expect(saleTable(model, caption).rows.map((r) => r[0]).slice(1, -1)).toEqual([...STRESS_NAMES[lang]]);
+    const decision = visibleText(renderHtml(buildModel(withSplit("kestrel-row-townhomes", "build_decision", lang))));
+    expect(decision).toContain(lang === "en" ? "Its profit on cost: -4.32%." : "Profit sur coût : -4,32 %.");
+  });
+
+  test.each(["en", "fr"] as const)("the build decision leads with profit on cost, margin and peak equity, then the sell-out month and multiple, each with a plain sentence (%s)", (lang) => {
+    const x = withSplit("kestrel-row-townhomes", "build_decision", lang);
+    const model = buildModel(x);
+    const stats = model.blocks.filter((b) => b.type === "stats");
+    const label = (key: string) => model.formatter.metricOf("base", key).label;
+    expect(stats.map((b) => b.type === "stats" ? b.items.map((i) => i.label) : [])).toEqual([
+      ["profit_on_cost_for_sale", "margin_on_revenue", "peak_equity"].map(label), ["sellout_month", "equity_multiple"].map(label)]);
+    for (const b of stats) if (b.type === "stats") for (const item of b.items) expect(item.note, item.label).toBeTruthy();
+    const peak = x.result.scenarios[0]!.metrics.find((m) => m.key === "peak_equity")!;
+    expect(stats[0]!.type === "stats" && stats[0]!.items[2]!.value).toBe(model.formatter.lang === "en" ? formatValue(peak.value!, "$") : stats[0]!.type === "stats" && stats[0]!.items[2]!.value);
+  });
+
+  test("the committee memo's figures and sale results include peak equity", () => {
+    const model = buildModel(withSplit("kestrel-row-townhomes", "ic_memo"));
+    const stats = model.blocks.find((b) => b.type === "stats");
+    expect(stats?.type === "stats" ? stats.items.map((i) => i.label) : []).toEqual(["Total cost", "Profit on cost (units sold)", "Margin on sales revenue", "Peak equity outstanding", "Equity multiple", "Equity IRR"]);
+    expect(saleTable(model, "Sale results").rows.map((r) => r[0])).toContain("Peak equity outstanding");
+  });
+
+  test.each([["kestrel-row-townhomes", "Met"], ["alder-court-condo", "Met"]] as const)("the %s lender package states the presale condition, the deposits held and the repayment from closings", (slug, met) => {
+    const x = withSplit(slug, "lender_package");
+    const model = buildModel(x);
+    const debt = saleTable(model, "Debt").rows;
+    expect(debt).toContainEqual(["Presale condition", met]);
+    const deposits = x.result.scenarios[0]!.metrics.find((m) => m.key === "deposits_held_at_completion")!;
+    expect(debt).toContainEqual(["Buyer deposits in trust at completion", formatValue(deposits.value!, "$")]);
+    const C = x.input.constructionMonths;
+    const repaid = x.result.ledger.find((r) => r.month >= C && r.debtBalance <= 0.005)!;
+    expect(debt).toContainEqual(["Loans repaid in full from closings (month)", formatValue(repaid.month, "months")]);
+    const text = visibleText(renderHtml(model));
+    expect(text).toContain("Each closing's net proceeds repay the senior loan and its interest first, then the mezzanine loan; what is left goes to equity. Buyer deposits stay in trust and repay nothing.");
+    // Below the lender's threshold, the condition is not met.
+    const below = withSplit(slug, "lender_package");
+    below.input = { ...below.input, forSale: { ...below.input.forSale!, presoldPct: below.input.forSale!.presaleThresholdPct! - 10 } };
+    below.result = underwrite(below.input, below.policy);
+    expect(saleTable(buildModel(below), "Debt").rows).toContainEqual(["Presale condition", "Not met"]);
+  });
+
+  test("a sale's partner memo shows peak equity and says the waterfall runs over the sale's dated flows", () => {
+    const model = buildModel(withSplit("kestrel-row-townhomes", "partner_memo"));
+    const stats = model.blocks.find((b) => b.type === "stats");
+    expect(stats?.type === "stats" ? stats.items.map((i) => i.label) : []).toContain("Peak equity outstanding");
+    expect(visibleText(renderHtml(model))).toContain("The waterfall runs over the sale's dated equity flows: each contribution in its month, the carry paid after completion included, and each closing's proceeds at the end of the month it closes.");
+  });
+});
