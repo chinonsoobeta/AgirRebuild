@@ -5,7 +5,7 @@ import { serveStatic } from "@hono/node-server/serve-static";
 import { checkStartup, migrate, openPglite, openPostgres, openStore, type Startup } from "@agir/db";
 import { retentionDays, startPurge, startWorker } from "@agir/worker";
 import { createApp } from "./app.ts";
-import { alerter, log, type LogFields } from "./log.ts";
+import { alerter, alertWorkerEvent, log, type LogFields } from "./log.ts";
 import { dbState, memoryState } from "./shared-state.ts";
 import { fileMailer, unsentMailer } from "./mailer.ts";
 import { DEMO, seedDemo } from "./seed.ts";
@@ -89,9 +89,7 @@ if (embeddedWorker) {
   const workerLog = ({ event, ...fields }: Record<string, unknown>) => {
     if (event === "job.done") return;
     log(String(event), fields as LogFields);
-    // A job that will not be retried, or the worker's loop failing: alerted with ids only.
-    if (event === "job.dead") void alert("job.dead", { id: String(fields.id), kind: String(fields.kind) });
-    if (event === "worker.error") void alert("worker.error");
+    alertWorkerEvent(alert, { event, ...fields });
   };
   startWorker({ db, store, log: workerLog });
   if (retention !== null) startPurge({ db, store, log: workerLog }, retention);

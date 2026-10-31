@@ -5,6 +5,7 @@
 
 import { aiReadingOn, currentDocuments, readDeal, storedReadings, type ReaderProvider } from "./reader.ts";
 export type { ReaderProvider, ReaderRequest } from "./reader.ts";
+export { alerter, alertWorkerEvent, log, type LogFields, type Logger } from "./log.ts";
 import Anthropic from "@anthropic-ai/sdk";
 import { FIELDS, FIELD_BY_KEY, runPolicy, type Currency, type Policy, type EngineInput, type FieldUnit, type RunResult } from "@agir/contracts";
 import { itemFold } from "@agir/numbers";
