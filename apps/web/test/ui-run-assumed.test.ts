@@ -225,8 +225,8 @@ describe("the run screen of a deal that sells its units (card F2)", () => {
   const sale = underwrite(kestrel, policyFor(kestrel));
   const saleBase = sale.scenarios[0]!.metrics;
   const STRESS_NAMES = {
-    en: ["Prices -10%", "Sales pace × 0.70", "Costs +10%", "Interest rates +1 point", "Construction +6 months", "Presales -15 points"],
-    fr: ["Prix -10 %", "Rythme de vente × 0,70", "Coûts +10 %", "Taux d'intérêt +1 point", "Construction +6 mois", "Préventes -15 points"],
+    en: ["Prices -10%", "Sales pace 30% slower", "Costs +10%", "Interest rates +1 point", "Construction +6 months", "Presales -15 points"],
+    fr: ["Prix -10 %", "Rythme de vente 30 % plus lent", "Coûts +10 %", "Taux d'intérêt +1 point", "Construction +6 mois", "Préventes -15 points"],
   } as const;
 
   it.each(["en", "fr"] as const)("gives every sale key figure one plain sentence in sale words, in %s", (lang) => {

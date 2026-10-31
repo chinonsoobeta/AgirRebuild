@@ -150,9 +150,11 @@ describe("card E: no policy is signed by credit yet", () => {
 });
 
 describe("card F2 sale stress names in plain words", () => {
-  it("says the sales pace as a multiplier, rates in points and presales in points, for any size", () => {
-    expect(plainStress("en", "absorption", "Absorption -30%")).toBe("Sales pace × 0.70");
-    expect(plainStress("fr", "absorption", "Rythme de vente -20 %")).toBe("Rythme de vente × 0,80");
+  it("says how much slower the sales pace is, rates in points and presales in points, for any size", () => {
+    expect(plainStress("en", "absorption", "Absorption -30%")).toBe("Sales pace 30% slower");
+    expect(plainStress("en", "absorption", "Absorption -45%")).toBe("Sales pace 45% slower");
+    expect(plainStress("fr", "absorption", "Rythme de vente -45\u00a0%")).toBe("Rythme de vente 45\u00a0% plus lent");
+    expect(plainStress("fr", "absorption", "Rythme de vente -20 %")).toBe("Rythme de vente 20\u00a0% plus lent");
     expect(plainStress("en", "rates", "Interest rates +100 bps")).toBe("Interest rates +1 point");
     expect(plainStress("en", "rates", "Interest rates +150 bps")).toBe("Interest rates +1.5 points");
     expect(plainStress("fr", "rates", "Taux d'intérêt +150 pb")).toBe("Taux d'intérêt +1,5 point");

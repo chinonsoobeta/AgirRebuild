@@ -1814,8 +1814,8 @@ describe("the outputs of a deal that sells its units read as such (card F2)", ()
     fr: "Un rendement marqué non significatif a des flux datés qui changent de sens plus d'une fois, par exemple des frais de portage payés après les premières ventes conclues ; aucun taux unique ne le décrit.",
   } as const;
   const STRESS_NAMES = {
-    en: ["Prices -10%", "Sales pace × 0.70", "Costs +10%", "Interest rates +1 point", "Construction +6 months", "Presales -15 points"],
-    fr: ["Prix -10 %", "Rythme de vente × 0,70", "Coûts +10 %", "Taux d'intérêt +1 point", "Construction +6 mois", "Préventes -15 points"],
+    en: ["Prices -10%", "Sales pace 30% slower", "Costs +10%", "Interest rates +1 point", "Construction +6 months", "Presales -15 points"],
+    fr: ["Prix -10 %", "Rythme de vente 30 % plus lent", "Coûts +10 %", "Taux d'intérêt +1 point", "Construction +6 mois", "Préventes -15 points"],
   } as const;
   const KINDS = ["ic_memo", "build_decision", "lender_package", "partner_memo"] as const;
   /** visibleText folds every space, the no-break ones included. */

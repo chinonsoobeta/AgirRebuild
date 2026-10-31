@@ -127,16 +127,19 @@ export const GATES: Record<string, [string, string]> = {
 export const plainTerm = (lang: Lang, text: string) => (lang === "fr" ? text.replace(/\bRCSD\b/g, "CCD") : text.replace(/\bDSCR\b/g, "DCR"));
 
 /**
- * A sale's stress names in plain words (card F2): the sales pace as a factor, the rate move and presales in points.
+ * A sale's stress names in plain words (card F2): how much slower the sales pace is, the rate move and presales in points.
  * Display only: the policy's labels, stored with every run and in its hash, stay as they are. Keyed on the sale's own
  * stress keys, so a rental stress ("rate", "Interest rate +150 bps") is never touched.
  */
 export function plainStress(lang: Lang, key: string, label: string): string {
   const fr = lang === "fr";
   const num = (text: string) => Number(text.replace(",", "."));
-  const dec = (value: number, digits?: number) => (digits === undefined ? String(value) : value.toFixed(digits)).replace(".", fr ? "," : ".");
+  const dec = (value: number) => String(value).replace(".", fr ? "," : ".");
   const size = /([+-]\d+(?:[.,]\d+)?)[  ]?/.source;
-  if (key === "absorption") return label.replace(new RegExp(`^(?:Absorption|Rythme de vente) ${size}%`), (_, v: string) => `${fr ? "Rythme de vente" : "Sales pace"} × ${dec(1 + num(v) / 100, 2)}`);
+  if (key === "absorption") return label.replace(new RegExp(`^(?:Absorption|Rythme de vente) ${size}%`), (_, v: string) => {
+    const pct = num(v);
+    return `${fr ? "Rythme de vente" : "Sales pace"} ${dec(Math.abs(pct))}${fr ? "\u00a0" : ""}% ${pct < 0 ? (fr ? "plus lent" : "slower") : (fr ? "plus rapide" : "faster")}`;
+  });
   if (key === "rates") return label.replace(new RegExp(`${size}(?:bps|pb)$`), (_, v: string) => {
     const points = num(v) / 100;
     // French keeps "point" in the singular below 2.

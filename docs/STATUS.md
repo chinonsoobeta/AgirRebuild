@@ -77,7 +77,7 @@ Which branch holds what today (2026-10-25):
   leads with profit on cost, margin and peak equity, then the sell-out month and multiple; the lender package states
   the presale condition, deposits held and the month closings repay the loans; the partner memo says its waterfall runs
   over the sale's dated flows and why a return is not meaningful; sale stress names read in plain words ("Sales pace
-  × 0.70", "Interest rates +1 point", "Presales -15 points") at display time only, so policy labels and hashes are
+  30% slower", "Interest rates +1 point", "Presales -15 points") at display time only, so policy labels and hashes are
   unchanged. Run screen, reports screen and landing wording for a sale. No engine, policy, oracle or rental text
   change. Local only, held for the owner's review.
 - Not merged into `main` (`git branch --no-merged main`): the `ui/*` branches, and `task/144b-claude`, `task/154-claude`,
