@@ -25,7 +25,7 @@ const PARTS: Part[] = [
     title: "landing.legal.privacy",
     sections: [
       { id: "data", title: "landing.legal.data", body: ["landing.legal.data1", "landing.legal.data2", "landing.legal.data3"] },
-      { id: "ai", title: "landing.legal.ai", body: ["landing.legal.ai1", "landing.legal.ai2", "landing.legal.ai3", "landing.legal.ai4"] },
+      { id: "ai", title: "landing.legal.ai", body: ["landing.legal.ai1", "landing.legal.aiRedact", "landing.legal.ai2", "landing.legal.ai3", "landing.legal.ai4"] },
     ],
   },
 ];

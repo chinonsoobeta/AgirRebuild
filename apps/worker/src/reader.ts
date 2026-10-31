@@ -2,7 +2,7 @@ import Anthropic from "@anthropic-ai/sdk";
 import { zodOutputFormat } from "@anthropic-ai/sdk/helpers/zod";
 import * as z from "zod/v4";
 import { currentDocuments, documentsHash, type Db, type BlobStore } from "@agir/db";
-import { addressedText, documentKind, parseDocument, verifyReadings, READER_PROMPT, READER_PROMPT_VERSION, type ReaderResponse, type ReadingDocument } from "@agir/extraction";
+import { addressedText, documentKind, parseDocument, redactDocument, verifyReadings, READER_PROMPT, READER_PROMPT_VERSION, type ReaderResponse, type ReadingDocument, type Redaction } from "@agir/extraction";
 
 const unit = z.enum(["$", "%", "sf", "m2", "$/sf", "$/m2", "months", "years", "units", "x", "vacancy_%"]);
 const value = { value: z.number(), unit_seen: unit, file: z.string(), location: z.string(), quote: z.string() };
@@ -24,6 +24,8 @@ export { currentDocuments, documentsHash };
 type DocumentRef = { id: string; name: string; sha256: string };
 /** Readings stored before card C kept the parsed document itself; both shapes replay. */
 type StoredDocument = DocumentRef | ReadingDocument;
+/** How many of each kind the redaction pass removed from each document, by document id (card S7); absent before it. */
+type Redactions = Record<string, Redaction[]>;
 
 /** Whether the workspace lets Agir read documents with the model (card C); on unless the owner turned it off. */
 export async function aiReadingOn(db: Db, workspaceId: string) {
@@ -43,6 +45,7 @@ export async function readDeal(db: Db, store: BlobStore, dealId: string, workspa
   const model = process.env.AGIR_READER_MODEL || "claude-opus-5-5";
   if ((await db.query(`select id from ai_readings where deal_id=$1 and model=$2 and prompt_version=$3 and documents_hash=$4`, [dealId, model, READER_PROMPT_VERSION, hash])).length) return;
   const documents: (ReadingDocument & { sha256: string })[] = [];
+  const redactions: Redactions = {};
   // The owner's decision of 2026-10-24: inference stays in the United States.
   const request: ReaderRequest = { model, max_tokens: 16000, inference_geo: "us", system: READER_PROMPT, output_config: { effort: "low", format: zodOutputFormat(schema) }, messages: [{ role: "user", content: "" }] };
   let response: ReaderResponse | null = null;
@@ -52,7 +55,10 @@ export async function readDeal(db: Db, store: BlobStore, dealId: string, workspa
     for (const d of extracted) {
       const document = await parseDocument(await store.get(d.storage_key), d.name);
       if ((d.role_set ?? documentKind(document).role) === "context") continue;
-      documents.push({ id: d.id, name: d.name, sha256: d.sha256, document });
+      // Card S7: the model sees, and its quotes are checked against, the redacted text; the rule reader keeps the original.
+      const redacted = redactDocument(document);
+      documents.push({ id: d.id, name: d.name, sha256: d.sha256, document: redacted.document });
+      redactions[d.id] = redacted.redactions;
     }
     if (!documents.length) return;
     request.messages[0]!.content = documents.map(d => addressedText(d.document, d.name)).join("\n\n");
@@ -63,8 +69,8 @@ export async function readDeal(db: Db, store: BlobStore, dealId: string, workspa
   } catch (e) {
     error = { class: e instanceof Error ? e.constructor.name : "Error", status: e instanceof Anthropic.APIError ? e.status ?? null : null };
   }
-  // Keep only which documents the boundary checked against (never their text): a replay parses the same bytes again.
-  const verification = response ? { documents: documents.map(({ id, name, sha256 }) => ({ id, name, sha256 })), ...verifyReadings(response, documents) } : null;
+  // Keep only which documents the boundary checked against and what was redacted (never their text): a replay parses the same bytes again.
+  const verification = response ? { documents: documents.map(({ id, name, sha256 }) => ({ id, name, sha256 })), redactions, ...verifyReadings(response, documents) } : null;
   await db.query(`insert into ai_readings (deal_id,workspace_id,model,prompt_version,documents_hash,response,outcome,error,verification) values ($1,$2,$3,$4,$5,$6,$7,$8,$9) on conflict (deal_id, model, prompt_version, documents_hash) do nothing`, [dealId, workspaceId, model, READER_PROMPT_VERSION, hash, response && JSON.stringify(response), response ? "ok" : "failed", error && JSON.stringify(error), verification && JSON.stringify(verification)]);
 }
 
@@ -73,18 +79,21 @@ export async function storedReadings(db: Db, store: BlobStore, dealId: string) {
   const [deal] = await db.query<{ workspace_id: string }>(`select workspace_id from deals where id=$1`, [dealId]);
   if (!deal || !(await aiReadingOn(db, deal.workspace_id))) return [];
   const docs = await currentDocuments(db, dealId);
-  const [stored] = await db.query<{ id: string; response: ReaderResponse; verification: { documents: StoredDocument[] } }>(`select id,response,verification from ai_readings where deal_id=$1 and documents_hash=$2 and prompt_version=$3 and outcome='ok' order by created_at desc, id desc limit 1`, [dealId, documentsHash(docs), READER_PROMPT_VERSION]);
+  const [stored] = await db.query<{ id: string; response: ReaderResponse; verification: { documents: StoredDocument[]; redactions?: Redactions } }>(`select id,response,verification from ai_readings where deal_id=$1 and documents_hash=$2 and prompt_version=$3 and outcome='ok' order by created_at desc, id desc limit 1`, [dealId, documentsHash(docs), READER_PROMPT_VERSION]);
   if (!stored) return [];
+  // A reading made from redacted text is checked against the same redaction; one stored before card S7 saw the original.
+  const redacted = stored.verification.redactions;
   // A document removed or no longer extracted since the reading is left out, so its readings fail the boundary.
   const documents: ReadingDocument[] = [];
   const refs: DocumentRef[] = [];
   for (const d of stored.verification.documents) {
     const current = docs.find(c => c.id === d.id && c.name === d.name && c.stage === "extracted" && (!("sha256" in d) || c.sha256 === d.sha256));
     if (!current) continue;
-    documents.push({ id: d.id, name: d.name, document: "document" in d ? d.document : await parseDocument(await store.get(current.storage_key), d.name) });
+    const document = "document" in d ? d.document : await parseDocument(await store.get(current.storage_key), d.name);
+    documents.push({ id: d.id, name: d.name, document: redacted ? redactDocument(document).document : document });
     refs.push({ id: d.id, name: d.name, sha256: current.sha256 });
   }
   const verified = verifyReadings(stored.response, documents);
-  await db.query(`update ai_readings set verification=$2 where id=$1`, [stored.id, JSON.stringify({ documents: refs, ...verified })]);
+  await db.query(`update ai_readings set verification=$2 where id=$1`, [stored.id, JSON.stringify({ documents: refs, ...(redacted ? { redactions: redacted } : {}), ...verified })]);
   return [...verified.readings, ...verified.conflicts.flat()].flatMap(r => r.candidate ? [r.candidate] : []);
 }

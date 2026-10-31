@@ -156,7 +156,7 @@ describe("the settings screen", () => {
   it("shows the owner the AI reading switch with what is sent where, and saves a change (card C)", async () => {
     const words = text(render(Settings));
     expect(words).toContain("Read documents with AI");
-    expect(words).toContain("On: Agir sends the text of deal documents, never the files, to Anthropic's Claude in the United States to find figures; every figure it finds is checked against the document before it is used. Off: only Agir's own rules read the documents, and more values will need to be entered by hand.");
+    expect(words).toContain("On: Agir sends the text of deal documents, never the files, to Anthropic's Claude in the United States to find figures; every figure it finds is checked against the document before it is used. Email addresses, phone numbers, social insurance, card and account numbers, postal codes and dates of birth are removed from the text first; names are not. Off: only Agir's own rules read the documents, and more values will need to be entered by hand.");
     const sw = state.nodes.find((n) => n.tag === "button" && n.props["aria-label"] === "Read documents with AI")!;
     expect(sw.props["aria-checked"]).toBe(true);
     expect(sw.props.disabled).toBe(false);
@@ -172,6 +172,8 @@ describe("the settings screen", () => {
     expect(words).toContain("Lire les documents avec l'IA");
     // text() folds the non-breaking space into a plain one.
     expect(words).toContain("Activée : Agir envoie le texte des documents du projet, jamais les fichiers, à Claude d'Anthropic, aux États-Unis");
+    // Card S7: what the redaction pass removes, and that names are not removed.
+    expect(words).toContain("Les adresses courriel, les numéros de téléphone, d'assurance sociale, de carte et de compte, les codes postaux et les dates de naissance en sont d'abord retirés ; les noms ne le sont pas.");
     const sw = state.nodes.find((n) => n.tag === "button" && n.props["aria-label"] === "Lire les documents avec l'IA")!;
     expect(sw.props["aria-checked"]).toBe(true);
     expect(sw.props.disabled).toBe(true);
