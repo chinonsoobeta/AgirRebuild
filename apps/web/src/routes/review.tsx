@@ -888,7 +888,8 @@ export function Review({ dealId }: { dealId: string }) {
     </>
   );
   const otherGroups = groupOther(r.other);
-  const otherCount = otherGroups.reduce((n, g) => n + g.length, 0);
+  const notNeeded = r.notNeeded ?? [];
+  const otherCount = otherGroups.reduce((n, g) => n + g.length, 0) + notNeeded.length;
 
   return (
     <>
@@ -1144,6 +1145,15 @@ export function Review({ dealId }: { dealId: string }) {
                     {editable && figure ? <UseAs o={figure} items={itemNames} busy={label.isPending} onSave={b => label.mutate(b)} /> : aiEntryControl(`unused-${i}`, item.value)}
                   </div>;
                 })}
+              </section>}
+              {notNeeded.length > 0 && <section className="stack tight" id="not-needed">
+                <h3 className="h3">{t("review.notNeeded")}</h3>
+                <p className="small muted">{t("review.notNeededBody")}</p>
+                {notNeeded.map((n, i) => <div key={i} className="stack tight small">
+                  <span>{name(n)} <strong className="num">{f.value(n.value, FIELDS.find((d) => d.key === n.fieldKey)?.unit ?? "")}</strong></span>
+                  {n.sources[0] && <span className="src">{n.sources[0].document_name} · {msg(n.sources[0].location)}</span>}
+                  <span>{msg(n.why)}</span>
+                </div>)}
               </section>}
               <ErrorText error={label.error ?? unlabel.error} />
               <div className="scroll">
