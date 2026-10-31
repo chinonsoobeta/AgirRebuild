@@ -61,9 +61,9 @@ describe("the chain check is scoped to the caller's workspace", () => {
     const all = (await db.query<{ n: number }>(`select count(*)::int as n from audit_events`))[0]!.n;
     const a = await call(app, ann, "GET", `/api/workspaces/${wsAnn}/audit/verify`);
     expect(a.status).toBe(200);
-    expect(a.json).toEqual({ ok: true, events: await eventsOf(wsAnn), broken: false });
+    expect(a.json).toEqual({ ok: true, events: await eventsOf(wsAnn), brokenAt: null });
     const b = await call(app, ben, "GET", `/api/workspaces/${wsBen}/audit/verify`);
-    expect(b.json).toEqual({ ok: true, events: await eventsOf(wsBen), broken: false });
+    expect(b.json).toEqual({ ok: true, events: await eventsOf(wsBen), brokenAt: null });
     expect(a.json.events).not.toBe(b.json.events);
     expect(a.json.events).toBeLessThan(all);
   });
@@ -78,20 +78,19 @@ describe("the chain check is scoped to the caller's workspace", () => {
     expect((await call(app, null, "GET", `/api/workspaces/${wsAnn}/audit/verify`)).status).toBe(401);
   });
 
-  test("a broken row is reported as this workspace's or not, never by its seq", async () => {
-    // Break the chain at one of Ann's events, in a copy of the database's state: a transaction that is rolled back.
+  test("a broken row breaks only its own workspace's chain, which names it (card S8)", async () => {
+    // Break the chain at one of Ann's events, in a transaction that is rolled back.
     await db.transaction(async (tx) => {
       await tx.query(`alter table audit_events disable trigger audit_events_append_only`);
-      await tx.query(`update audit_events set payload = '{"tampered": true}' where seq = (select max(seq) from audit_events where workspace_id = $1)`, [wsAnn]);
+      const [{ seq }] = (await tx.query<{ seq: number }>(`select max(seq)::int as seq from audit_events where workspace_id = $1`, [wsAnn])) as [{ seq: number }];
+      await tx.query(`update audit_events set payload = '{"tampered": true}' where seq = $1`, [seq]);
       const idOf = async (email: string) => (await tx.query<{ id: string }>(`select id from users where email = $1`, [email]))[0]!.id;
       const check = async (email: string, ws: string) => {
         await tx.query(`select set_config('agir.user_id', $1, true)`, [await idOf(email)]);
         return (await tx.query(`select * from fn_verify_audit_chain_for($1)`, [ws]))[0];
       };
-      const seenByAnn = await check("ann-chain@example.com", wsAnn);
-      const seenByBen = await check("ben-chain@example.com", wsBen);
-      expect(seenByAnn).toMatchObject({ ok: false, broken: true });
-      expect(seenByBen).toMatchObject({ ok: false, broken: false });
+      expect(await check("ann-chain@example.com", wsAnn)).toMatchObject({ ok: false, broken_at: seq });
+      expect(await check("ben-chain@example.com", wsBen)).toMatchObject({ ok: true, broken_at: null });
       throw new Error("roll back");
     }).catch((e: Error) => { if (e.message !== "roll back") throw e; });
   });

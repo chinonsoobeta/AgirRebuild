@@ -155,7 +155,7 @@ describe("scripts/verify-audit-package.mjs", () => {
     expect(ok.code, ok.out).toBe(0);
     expect(ok.out).toContain("pass        The stored input hashes to the recorded input hash.");
     expect(ok.out).toContain(`pass        All ${pkg.auditEvents.length} of this deal's events are in the workspace's chain.`);
-    expect(ok.out).toContain("Passed.");
+    expect(ok.out).toContain("Every check passed. 2 items were not checked (listed above).");
     expect(ok.out).not.toMatch(/^fail/m);
 
     const copy = () => structuredClone(pkg);
