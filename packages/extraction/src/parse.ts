@@ -186,11 +186,22 @@ async function parsePdf(bytes: Uint8Array): Promise<NormalizedDocument> {
   for (let p = 1; p <= doc.numPages; p++) {
     const page = await doc.getPage(p);
     const content = await page.getTextContent();
+    const text = content.items.flatMap(item => "str" in item ? [item.str] : []).join("").replace(/\s/g, "");
+    // A symbol font can store its text 0xF000 above the bytes it means. A page mostly of such characters is that text; elsewhere they are bullets and stay.
+    const shifted = (text.match(/[\uf000-\uf0ff]/g) ?? []).length;
+    if (shifted > 0 && shifted * 2 >= text.length) {
+      const decoder = new TextDecoder("windows-1252");
+      for (const item of content.items) if ("str" in item) {
+        item.str = item.str.replace(/[\uf020-\uf0ff]/g, c => decoder.decode(Uint8Array.of(c.charCodeAt(0) - 0xf000)));
+      }
+    }
     // A page drawn rotated is not checked for strike-through lines.
     const pageChars = content.items.reduce((n, item) => n + ("str" in item ? item.str.replace(/\s/g, "").length : 0), 0);
+    // Text a font maps to control characters or U+FFFD can't be read, though the page looks fine. Five such characters and one in ten sends it to recognition.
+    const undecodable = content.items.reduce((n, item) => n + ("str" in item ? (item.str.replace(/\s/g, "").match(/[\ufffd\u0000-\u001f\u007f-\u009f]/g) ?? []).length : 0), 0);
     const drawing = page.rotate === 0 || pageChars < 200 ? await horizontalRules(pdfjs, page) : { rules: [], images: 0, paths: 0, cover: 0 };
     const rules = page.rotate === 0 ? drawing.rules : [];
-    if (pageChars < 16 && (drawing.images > 0 || drawing.paths > 50) || pageChars < 200 && drawing.cover >= 0.5) ocrPages.push(p);
+    if (pageChars < 16 && (drawing.images > 0 || drawing.paths > 50) || pageChars < 200 && drawing.cover >= 0.5 || undecodable >= 5 && undecodable * 10 >= pageChars) ocrPages.push(p);
     // Group text items into lines by their baseline.
     const rows = new Map<number, PdfPiece[]>();
     for (const item of content.items as { str?: string; transform?: number[]; width?: number; height?: number }[]) {
