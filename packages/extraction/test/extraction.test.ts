@@ -3,6 +3,7 @@ import { SF_PER_M2 } from "@agir/numbers";
 import { assemble, type AssumptionRow } from "@agir/engine";
 import { chooseByArithmetic, checkArithmetic, WAIVED_NOTE, REMEMBERED_NOTE, applyLabels, itemFold, applySuggestions, labelPhrase, labelUnit, consolidate, extractCandidates, offerable, offeredIds, figureOrder, withoutLabelled, normalizeLabel, parseDocument, scoreExtraction, suggestFields, type Cell, type NormalizedDocument, type SourcedCandidate, type Table } from "../src/index.ts";
 import { MAX_PDF_PAGES, pdfPageError, relativeLinks } from "../src/parse.ts";
+import { originalKindNote } from "../src/document-kind.ts";
 import { loadOracles, toNormalized } from "./oracle.ts";
 
 const key = (f: string, i: string | null) => (i ? `${f}|${i}` : f);
@@ -9684,5 +9685,22 @@ describe("Card 170: declared money scale spellings", () => {
   ] as const)("%s %s", async (file, text, field, value) => {
     const document = await parseDocument(new TextEncoder().encode(text), file);
     expect(extractCandidates(document).candidates.filter(c => c.fieldKey === field).map(c => c.value)).toEqual([value]);
+  });
+});
+
+describe("the context note's article (card 189)", () => {
+  const filler = Array.from({ length: 20 }, () => "The narrative explains the purpose and background of this document.");
+  const read = (...lines: string[]) => extractCandidates(toNormalized({ name: "invented.pdf", kind: "pdf", lines }));
+  test.each([
+    ["an audit", ["Office of the Auditor General", "Table of contents"]],
+    ["an organization budget", ["Budget notes", "Our operating portfolios"]],
+    ["a market report", ["Market report", "Vacancy rate statistics"]],
+  ])("%s", (phrase, head) => {
+    const c = read(...head, ...filler, "Land cost: $830,000").other.find(c => c.value === 830000)!;
+    expect(c.note).toContain(`This document looks like ${phrase}; its figures are shown, not read.`);
+    expect(originalKindNote(c.note)).toBe("No field matches this label");
+  });
+  test.each(["a", "an"])("originalKindNote strips a note stored with %s", article => {
+    expect(originalKindNote(`This document looks like ${article} audit; its figures are shown, not read. No field matches this label`)).toBe("No field matches this label");
   });
 });

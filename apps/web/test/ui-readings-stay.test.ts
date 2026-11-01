@@ -1,5 +1,5 @@
 /// <reference types="node" />
-import { expect, it, vi } from "vitest";
+import { describe, expect, it, vi } from "vitest";
 import { createElement } from "react";
 import { renderToStaticMarkup } from "react-dom/server";
 import type { Review as ReviewData } from "../src/api";
@@ -79,4 +79,26 @@ it.each(["owner", "admin", "analyst", "viewer"])("read again and unread notice f
   expect(html.includes(">Read again</button>")).toBe(role !== "viewer");
   expect(text(html)).toContain("AI reading has not covered two.txt, three.txt yet. The figures below come from Agir's rules and the earlier reading.");
   expect(text(html)).not.toContain("AI reading did not finish");
+});
+
+describe("Card 189: the notice when every file was set aside", () => {
+  const notice = "Agir set aside every file it read as background, so no figures here came from them.";
+  it("shows the notice and the link to an editor", () => {
+    s.lang = "en"; s.role = "owner"; s.review = { ...payload([]), setAsideAll: true };
+    const html = render();
+    expect(text(html)).toContain(notice);
+    expect(html).toContain('class="notice review" role="status"');
+    expect(html).toContain('<a href="/deals/$dealId/documents">Choose what to read on Documents</a>');
+    s.lang = "fr";
+    const french = text(render());
+    expect(french).toContain("Agir a classé comme contexte tous les fichiers qu'il a lus, donc aucun chiffre ici n'en vient.");
+    expect(french).toContain("Choisir quoi lire à l'étape Documents");
+    s.lang = "en";
+  });
+  it("shows nothing to a viewer, or when it is false", () => {
+    s.lang = "en"; s.role = "viewer"; s.review = { ...payload([]), setAsideAll: true };
+    expect(text(render())).not.toContain(notice);
+    s.role = "owner"; s.review = { ...payload([]), setAsideAll: false };
+    expect(text(render())).not.toContain(notice);
+  });
 });

@@ -270,3 +270,102 @@ it.each(["extracted", "read_failed"])("Card 180 renders separate translated deta
 it("Card 181 accepts picture extensions in the upload picker", () => {
   expect(render()).toContain('accept=".pdf,.xlsx,.csv,.docx,.txt,.png,.jpg,.jpeg,.tif,.tiff"');
 });
+
+describe("Card 189: why a file was set aside", () => {
+  const plain = (html: string) => html.replaceAll("&#x27;", "'");
+  const context = (extra: Partial<DocumentRow> = {}) => row("extracted", { read_role: "market report (context)", ...extra });
+
+  it.each([
+    ["en", "market report (context)", "Looks like a market report, so its figures are not used."],
+    ["fr", "market report (context)", "Ressemble à un rapport de marché, donc ses chiffres ne sont pas utilisés."],
+    ["en", "appraisal (evidence)", "Looks like an appraisal. Agir reads it, skips sections such as comparables, and asks you to check each figure."],
+    ["fr", "appraisal (evidence)", "Ressemble à une évaluation. Agir le lit, saute des sections comme les comparables et vous demande de vérifier chaque chiffre."],
+    ["en", "term sheet (deal source)", "Looks like a term sheet."],
+    ["fr", "term sheet (deal source)", "Ressemble à une lettre d'offre."],
+  ] as const)("in %s, %s gives the reason", (lang, read_role, reason) => {
+    state.lang = lang;
+    state.docs = [row("extracted", { read_role })];
+    expect(plain(render())).toContain(`<span class="sub">${reason}`);
+  });
+
+  it.each([
+    ["unrecognized document (deal source)", {}],
+    ["budget (deal source)", {}],
+    ["market report (context, set by a person)", {}],
+    ["market report (context)", { role_set: "context" as const }],
+    ["market report (context)", { stage: "reading" }],
+    ["market report (context)", { stage: "read_failed" }],
+  ])("gives no reason for %s %j", (read_role, extra) => {
+    state.docs = [row("extracted", { read_role, ...extra })];
+    expect(render()).not.toContain("Looks like");
+  });
+
+  it("offers Read it anyway to an editor, on an Agir decision of context only", () => {
+    state.docs = [context()];
+    let html = render();
+    expect(html).toContain('aria-label="Read extracted.pdf anyway"');
+    expect(html).toContain(">Read it anyway</button>");
+    buttons("Read it anyway")[0]!.props.onClick();
+    expect(state.mutate).toEqual([{ id: "doc-extracted", value: "deal_source" }]);
+    state.lang = "fr";
+    html = render();
+    expect(html).toContain('aria-label="Lire extracted.pdf quand même"');
+    expect(html).toContain(">Le lire quand même</button>");
+    state.lang = "en";
+    state.role = "viewer";
+    html = render();
+    expect(html).toContain("Looks like a market report");
+    expect(html).not.toContain("Read it anyway");
+    state.role = "owner";
+    state.docs = [row("extracted", { read_role: "appraisal (evidence)" })];
+    expect(render()).not.toContain("Read it anyway");
+    state.docs = [context({ read_role: "market report (context, set by a person)" })];
+    expect(render()).not.toContain("Read it anyway");
+  });
+
+  const banner = "Agir set aside every file it read as background, so no figures came from them.";
+  it("replaces the pass banner when every file read was set aside", () => {
+    state.overview = { review: { needsReview: 0, conflicting: 0 }, documents: { total: 1, processing: 0, failed: 0 } };
+    state.docs = [context()];
+    const html = render();
+    expect(html).toContain(banner);
+    expect(html).toContain("If one of them is about this deal, choose Read it anyway beside it.");
+    expect(html).not.toContain("0 values to review");
+    expect(html).toMatch(/class="notice review" role="status"/);
+    state.lang = "fr";
+    expect(plain(render())).toContain("Agir a classé comme contexte tous les fichiers qu'il a lus, donc aucun chiffre n'en vient.");
+  });
+
+  it("wins over a pass banner that would otherwise show, and carries the failed line", () => {
+    state.overview = { review: { needsReview: 2, conflicting: 0 }, documents: { total: 2, processing: 0, failed: 1 } };
+    state.docs = [context(), row("rejected", { id: "bad" })];
+    const html = render();
+    expect(html).toContain(banner);
+    expect(html).not.toContain("to review.");
+    expect(html).toContain("1 file could not be used");
+  });
+
+  it("counts a person's context as context, but needs at least one decision by Agir", () => {
+    state.docs = [context(), row("extracted", { id: "two", read_role: "market report (context, set by a person)" })];
+    expect(render()).toContain(banner);
+    state.docs = [row("extracted", { read_role: "market report (context, set by a person)" })];
+    expect(render()).not.toContain(banner);
+    state.docs = [row("extracted", { read_role: "market report (context)", role_set: "context" })];
+    expect(render()).not.toContain(banner);
+  });
+
+  it("does not show while reading, with another kind of file, or with nothing read", () => {
+    state.docs = [context(), row("reading")];
+    expect(render()).not.toContain(banner);
+    state.docs = [context()];
+    state.overview = { updating: true };
+    expect(render()).not.toContain(banner);
+    state.overview = {};
+    state.docs = [context(), row("extracted", { id: "two", read_role: "term sheet (deal source)" })];
+    expect(render()).not.toContain(banner);
+    state.docs = [row("rejected")];
+    expect(render()).not.toContain(banner);
+    state.docs = [];
+    expect(render()).not.toContain(banner);
+  });
+});
