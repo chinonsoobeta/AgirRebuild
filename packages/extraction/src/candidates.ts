@@ -2687,6 +2687,8 @@ function textTables(doc: NormalizedDocument, format: DocumentFormat, scopes: (Sc
       const run = runs.filter((x) => x.length === numeric.length).pop();
       if (!run) break;
       const itemText = line.text.slice(0, run[0]!.start).trim();
+      // A suite's line with figures still in its name: the numbers at the end (a date's year or day) are not the table's columns.
+      if (kind === "rent") { const suite = suiteLine(itemText); if (suite?.type && /\d/.test(suite.tail)) break; }
       // A budget amount is money, so a page number or a count in a footer is not a line.
       if ((!/\p{L}/u.test(itemText) && !wholeUnitType(itemText)) || (kind === "budget" && !(run[0]!.currency || (run[0]!.unit === null && Math.abs(run[0]!.value ?? 0) >= 1000)))) break;
       const trailing = line.text.slice(run[run.length - 1]!.end).trim();
@@ -2712,6 +2714,11 @@ const SUITE_LINE_NOTE = "A suite's line in a rent roll; its other figures are sh
 const SUITE_LINE_RE = /^(?:\*{1,2}\s*)?(\d{1,4}[A-Za-z]?|[A-Za-z]{1,2}-?\d{1,4})(?:\s*\*{1,2})?(?:\s*\([^)]{1,24}\))?(?:\s+(.*))?$/;
 const SUITE_WORD_RE = /^(?:suite|apt|apartment|app|logement|unit)$/;
 const COUNT_TOTAL_RE = /^\d+\s+(?:units|suites|logements|appartements)\b/;
+// Narrower than ROLL_TOTAL_RE: "Total operating expenses" and "All suites are rented" are not the roll's total.
+const SUITE_TOTAL_RE = /^(?:(?:grand|sub|sous)[- ]*)?totals?\s*(?:[:\u2013\u2014-]\s*)?(?:$|[$(\d]|(?:(?:monthly|annual|mensuel(?:le)?s?|annuel(?:le)?s?)\s+)?(?:rents?|loyers?|units?|suites?|logements?|appartements?)\b)/;
+// Columns named before the rent on the header line: one holding money could take the rent's place in a row; one holding other numbers stands before it.
+const MONEY_COLUMN_RE = /\b(?:deposits?|depots?|parking|stationnement|stalls?|storage|pets?|charges?|fees?|frais)\b/;
+const NUMBER_COLUMN_RE = /\b(?:size|sf|sq|sqft|area|superficie|pi2|m2|baths?|bathrooms?|beds?|bedrooms?|floor|etage)\b/;
 const NOT_RENT_COLUMN_RE = /rent roll|rent\s?\/\s?sf|rent psf|rent per sf|rent increase|last rent|total rent|market rent|loyer du marche/g;
 
 /** A line's text for matching only: a recognized scan leaves stray pipes. */
@@ -2757,7 +2764,7 @@ function isSuiteHeader(text: string): boolean {
   return at >= 0 && words.indexOf("type", at + 1) > at;
 }
 
-const isSuiteTotal = (text: string) => ROLL_TOTAL_RE.test(fold(suiteText(text))) || COUNT_TOTAL_RE.test(fold(suiteText(text)));
+const isSuiteTotal = (text: string) => SUITE_TOTAL_RE.test(fold(suiteText(text))) || COUNT_TOTAL_RE.test(fold(suiteText(text)));
 
 /**
  * A second pass over the lines no other table took, for a roll with one line per suite: a suite's number is never a count.
@@ -2788,8 +2795,11 @@ function plainSuiteRolls(doc: NormalizedDocument, format: DocumentFormat, scopes
     return seen.length >= 3 && new Set(seen.map((x) => x.type)).size < seen.length;
   };
 
-  /** Whether the words around the header name exactly one current rent column, stated by the month or with no basis. */
-  const oneRentColumn = (header: number) => {
+  /**
+   * How the header places the one current rent column; null when rents cannot be read. The rent word must be on the header line itself:
+   * on a wrapped line above or below, the order of the columns is unknown. `numberBefore`: a column of other numbers stands before the rent.
+   */
+  const rentColumn = (header: number): { numberBefore: boolean } | null => {
     const zone = [lines[header]!.text];
     for (const step of [-1, 1]) {
       let taken = 0;
@@ -2800,9 +2810,15 @@ function plainSuiteRolls(doc: NormalizedDocument, format: DocumentFormat, scopes
         taken++;
       }
     }
+    const rentWord = /\b(?:rent|loyer)s?\b/g;
     const words = fold(zone.join(" ")).replace(NOT_RENT_COLUMN_RE, " ");
     // The table's rent column is read by the month, so a roll that states a yearly rent is shown, not read.
-    return (words.match(/\b(?:rent|loyer)s?\b/g) ?? []).length === 1 && !ANNUAL_RE.test(words);
+    if ((words.match(rentWord) ?? []).length !== 1 || ANNUAL_RE.test(words)) return null;
+    const own = fold(suiteText(lines[header]!.text)).replace(NOT_RENT_COLUMN_RE, " ").replace(/²/g, "2");
+    const at = own.search(rentWord);
+    if (at < 0) return null;
+    const before = own.slice(0, at);
+    return MONEY_COLUMN_RE.test(before) ? null : { numberBefore: NUMBER_COLUMN_RE.test(before) };
   };
 
   for (let i = 0; i < lines.length; i++) {
@@ -2849,13 +2865,19 @@ function plainSuiteRolls(doc: NormalizedDocument, format: DocumentFormat, scopes
     }
 
     const figures = new Map(rows.map((r) => [r.at, splitTokens(r.tail, format)]));
-    const firstMoney = (at: number) => figures.get(at)!.find((t) => t.currency);
     const totalTokens = total >= 0 ? splitTokens(suiteText(lines[total]!.text), format) : [];
     let rents = new Map<number, NumberToken>();
-    if (header !== null && oneRentColumn(header)) {
-      const money = rows.filter((r) => firstMoney(r.at)).length * 2 > rows.length;
+    const column = header !== null ? rentColumn(header) : null;
+    if (column) {
+      // A row's money rent is its first $ figure, unless a plain number stands before it that the header does not account for.
+      const moneyRent = (at: number) => {
+        const tokens = figures.get(at)!;
+        const k = tokens.findIndex((t) => t.currency);
+        return k >= 0 && (k === 0 || column.numberBefore) ? tokens[k] : undefined;
+      };
+      const money = rows.filter((r) => moneyRent(r.at)).length * 2 > rows.length;
       for (const r of rows) {
-        const t = money ? firstMoney(r.at) : total >= 0 ? figures.get(r.at)![0] : undefined;
+        const t = money ? moneyRent(r.at) : total >= 0 && !column.numberBefore ? figures.get(r.at)![0] : undefined;
         if (t && t.value !== null) rents.set(r.at, t);
       }
       if (total >= 0) {
@@ -2871,7 +2893,7 @@ function plainSuiteRolls(doc: NormalizedDocument, format: DocumentFormat, scopes
         ["Suite", "Type", "Rent ($)"].map((text) => ({ text, ref })),
         ...rows.map((r) => {
           const rent = rents.get(r.at);
-          return [r.id, r.type, rent ? r.tail.slice(rent.start, rent.end) : ""].map((text) => ({ text, ref: lines[r.at]!.location }));
+          return [r.id, r.type, rent ? rent.raw.trim() : ""].map((text) => ({ text, ref: lines[r.at]!.location }));
         }),
       ],
     };
