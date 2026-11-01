@@ -157,7 +157,11 @@ describe("Card 196 audit: a scale the reader saw and the text no longer shows", 
     const heading = "All figures below are stated ($000's) except where a note on this page says otherwise, and the totals may not add";
     expect(read([heading, row, settled], figure, false)).toEqual({ outcome: READING_FAILURE.scale });
   });
-  test.each(["Montant en milliers de dollars.", "Stated (in thousands).", "Stated in $M."])("the note %s counts", note => {
+  test.each([
+    "Montant en milliers de dollars.", "Stated (in thousands).", "Stated in $M.",
+    // A note that speaks of a scale unclearly refuses as surely as one that states it.
+    "Figure in $000's (10,920 thousand).", "This table is in $000's; the summary is in $M.", "Stated (10,920 thousand).",
+  ])("the note %s counts", note => {
     expect(read(["Harbour Row budget", row, settled], { ...figure, note })).toEqual({ outcome: READING_FAILURE.scale });
   });
   test("a heading Agir can read still scales the figure", () => {
@@ -168,6 +172,8 @@ describe("Card 196 audit: a scale the reader saw and the text no longer shows", 
   test.each([
     ["no note", { ...figure, note: null }],
     ["a note about rounding", { ...figure, note: "Rounded to the nearest thousand." }],
+    ["a note whose brackets name a phase", { ...figure, note: "Budget for the work (phase 2)." }],
+    ["a note whose brackets name an area", { ...figure, note: "Budget for the work (5 thousand sf)." }],
     ["a note about another page, on a figure in full dollars", { value: 1920000, quote: "Hard costs 1,920,000", note: "The summary on page 6 is in $000's." }],
     ["its own scale written beside it", { value: 10900000, quote: "Hard costs $10.9 million", note: "Stated in millions." }],
   ])("%s stays as it was", (_, reading) => {
