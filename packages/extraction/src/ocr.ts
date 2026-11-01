@@ -18,6 +18,20 @@ function languagePath(): Promise<string> {
   })();
 }
 
+async function ocrWorker() {
+  return createWorker("eng+fra", 1, { langPath: await languagePath(), gzip: true, cacheMethod: "none", errorHandler: () => {} });
+}
+
+async function recognizeLines(worker: Awaited<ReturnType<typeof ocrWorker>>, bytes: Uint8Array): Promise<OcrPage["lines"]> {
+  const { data } = await worker.recognize(Buffer.from(bytes), {}, { blocks: true });
+  const lines: OcrPage["lines"] = [];
+  for (const block of data.blocks ?? []) for (const para of block.paragraphs) for (const line of para.lines) {
+    const text = line.text.trim();
+    if (text) lines.push({ text, confidence: line.confidence });
+  }
+  return lines;
+}
+
 /** Local OCR only. Every resulting value still needs a person's check against the scanned page. */
 export async function ocrPdf(bytes: Uint8Array, pages?: number[]): Promise<{ pages: OcrPage[]; failed: number[] }> {
   const pdfjs = await import("pdfjs-dist/legacy/build/pdf.mjs");
@@ -28,7 +42,7 @@ export async function ocrPdf(bytes: Uint8Array, pages?: number[]): Promise<{ pag
     let canvasModule: typeof import("@napi-rs/canvas");
     try { canvasModule = await import("@napi-rs/canvas"); }
     catch { throw new Error("OCR is not available on this machine"); }
-    const worker = await createWorker("eng+fra", 1, { langPath: await languagePath(), gzip: true, cacheMethod: "none", errorHandler: () => {} });
+    const worker = await ocrWorker();
     try {
       const result: OcrPage[] = [], failed: number[] = [];
       for (const n of pages ?? Array.from({ length: doc.numPages }, (_, i) => i + 1)) {
@@ -40,16 +54,31 @@ export async function ocrPdf(bytes: Uint8Array, pages?: number[]): Promise<{ pag
           const viewport = page.getViewport({ scale: Math.min(300 / 72, 3300 / Math.max(size.width, size.height)) });
           canvas = canvasModule.createCanvas(Math.ceil(viewport.width), Math.ceil(viewport.height));
           await page.render({ canvas: canvas as unknown as HTMLCanvasElement, canvasContext: canvas.getContext("2d") as unknown as CanvasRenderingContext2D, viewport }).promise;
-          const { data } = await worker.recognize(canvas.toBuffer("image/png"), {}, { blocks: true });
-          const lines: OcrPage["lines"] = [];
-          for (const block of data.blocks ?? []) for (const para of block.paragraphs) for (const line of para.lines) {
-            const text = line.text.trim();
-            if (text) lines.push({ text, confidence: line.confidence });
-          }
+          const lines = await recognizeLines(worker, canvas.toBuffer("image/png"));
           result.push({ page: n, lines });
         } catch { failed.push(n); } finally { canvas = null; page?.cleanup(); }
       }
       return { pages: result, failed };
     } finally { await worker.terminate(); }
   } finally { await task.destroy(); }
+}
+
+/** Pictures always represent page 1; TIFF goes straight to the OCR decoder. */
+export async function ocrImage(bytes: Uint8Array, _pages?: number[]): Promise<{ pages: OcrPage[]; failed: number[] }> {
+  const worker = await ocrWorker();
+  try {
+    let input = bytes;
+    if (bytes[0] === 0x89 || bytes[0] === 0xff) {
+      try {
+        const { loadImage, createCanvas } = await import("@napi-rs/canvas");
+        const image = await loadImage(Buffer.from(bytes));
+        const scale = Math.min(1, 3300 / Math.max(image.width, image.height));
+        const canvas = createCanvas(Math.max(1, Math.round(image.width * scale)), Math.max(1, Math.round(image.height * scale)));
+        canvas.getContext("2d").drawImage(image, 0, 0, canvas.width, canvas.height);
+        input = canvas.toBuffer("image/png");
+      } catch { /* Pass images canvas cannot open to the OCR decoder. */ }
+    }
+    try { return { pages: [{ page: 1, lines: await recognizeLines(worker, input) }], failed: [] }; }
+    catch { return { pages: [], failed: [1] }; }
+  } finally { await worker.terminate(); }
 }

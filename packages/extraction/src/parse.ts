@@ -2,17 +2,29 @@ import { deflateRawSync, inflateRawSync, crc32 } from "node:zlib";
 import { codeOf } from "@agir/numbers";
 import type { PDFPageProxy } from "pdfjs-dist/legacy/build/pdf.mjs";
 import { columnName, type Cell, type CellUnit, type Line, type NormalizedDocument, type Table } from "./document.ts";
+import { pictureInfo } from "./image.ts";
 
 export class UnsupportedDocumentError extends Error {}
 
 export function kindOf(fileName: string): NormalizedDocument["kind"] | null {
   const ext = fileName.toLowerCase().split(".").pop() ?? "";
+  if (["png", "jpg", "jpeg", "tif", "tiff"].includes(ext)) return "image";
   if (ext === "pdf") return "pdf";
   if (ext === "xlsx") return "xlsx";
   if (ext === "csv") return "csv";
   if (ext === "docx") return "docx";
   if (ext === "txt" || ext === "md") return "txt";
   return null;
+}
+
+/** Format-specific next steps, shared by uploads and direct parsing. */
+export function refusalFor(name: string): string {
+  const ext = name.toLowerCase().split(".").pop();
+  if (ext === "heic" || ext === "heif") return "Agir cannot read HEIC photos. Export the photo as JPEG, then upload it.";
+  if (ext === "xls") return "Agir reads Excel files saved as .xlsx. Open this one in Excel, save it as .xlsx, then upload it.";
+  if (ext === "doc") return "Agir reads Word files saved as .docx. Open this one in Word, save it as .docx, then upload it.";
+  if (ext === "ppt" || ext === "pptx") return "Agir does not read PowerPoint files. Save this one as a PDF, then upload that.";
+  return "Upload a PDF, Excel (.xlsx), CSV, Word (.docx), text file, or a picture (PNG, JPEG or TIFF).";
 }
 
 function linesFromText(text: string, prefix = "line"): Line[] {
@@ -386,6 +398,13 @@ export function relativeLinks(bytes: Uint8Array): Uint8Array {
   }
 }
 
+// Small images are usually logos and icons, rather than pages of figures.
+const MIN_PICTURE_BYTES = 20_000;
+function embeddedPictureNotes(bytes: Uint8Array, prefix: "word" | "xl"): string[] {
+  const count = centralDirectory(Buffer.from(bytes))?.heads.filter(h => h.name.startsWith(`${prefix}/media/`) && h.size >= MIN_PICTURE_BYTES).length ?? 0;
+  return count ? [`This file has ${count} ${count === 1 ? "picture" : "pictures"}. Agir does not read pictures inside Word or Excel files, so check ${count === 1 ? "it" : "them"} for figures.`] : [];
+}
+
 async function parseXlsx(bytes: Uint8Array): Promise<NormalizedDocument> {
   const ExcelJS = (await import("exceljs")).default;
   const wb = new ExcelJS.Workbook();
@@ -444,6 +463,7 @@ async function parseXlsx(bytes: Uint8Array): Promise<NormalizedDocument> {
     tables.push({ name: ws.name, rows });
   });
   const notes = uncached.length > 0 ? [`This workbook has formulas with no saved results (${uncached.join(", ")}). Open and save it in Excel to include them.`] : [];
+  notes.push(...embeddedPictureNotes(bytes, "xl"));
   return { kind: "xlsx", lines: [], tables, pageCount: null, needsOcr: false, fullText: texts.join("\n"), notes };
 }
 
@@ -537,12 +557,19 @@ async function parseDocx(bytes: Uint8Array): Promise<NormalizedDocument> {
     } else if (/^(p|h[1-6]|li|ul|ol|br)$/.test(tag)) flush();
   }
   flush();
-  return { kind: "docx", lines, tables, pageCount: null, needsOcr: false, fullText: full.join("\n") };
+  return { kind: "docx", lines, tables, pageCount: null, needsOcr: false, fullText: full.join("\n"), notes: embeddedPictureNotes(bytes, "word") };
 }
 
 /** Turn a file's bytes into lines and tables, each with its location. */
 export async function parseDocument(bytes: Uint8Array, fileName: string): Promise<NormalizedDocument> {
   const kind = kindOf(fileName);
+  if (kind === "image") {
+    const info = pictureInfo(bytes);
+    if (info === "unknown" || info === "unreadable") throw new UnsupportedDocumentError("Agir could not open this picture. It may be damaged. Upload it again, or save it as a PDF.");
+    if (info.format === "tiff" && info.pages > 1) throw new UnsupportedDocumentError(`This TIFF has ${info.pages} pages. Save it as a PDF, then upload that.`);
+    if (info.width * info.height > 80_000_000) throw new UnsupportedDocumentError(`This picture is ${Math.round(info.width * info.height / 1_000_000)} megapixels, and Agir reads pictures of up to 80. Save a smaller copy, then upload it.`);
+    return { kind, lines: [], tables: [], pageCount: 1, needsOcr: true, ocrPages: [1], fullText: "" };
+  }
   if (kind === "pdf") return parsePdf(bytes);
   if (kind === "xlsx") return parseXlsx(bytes);
   if (kind === "docx") return parseDocx(bytes);
@@ -555,5 +582,5 @@ export async function parseDocument(bytes: Uint8Array, fileName: string): Promis
     return { kind, lines: [], tables: [{ name: "CSV", rows }], pageCount: null, needsOcr: false, fullText };
   }
   if (kind === "txt") return { kind, lines: linesFromText(text), tables: [], pageCount: null, needsOcr: false, fullText: text };
-  throw new UnsupportedDocumentError(`Agir cannot read ${fileName}. Upload PDF, Excel (.xlsx), CSV, Word (.docx) or text.`);
+  throw new UnsupportedDocumentError(refusalFor(fileName));
 }

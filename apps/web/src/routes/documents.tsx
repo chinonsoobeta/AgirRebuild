@@ -201,7 +201,7 @@ export function Documents({ dealId }: { dealId: string }) {
               {(upload.isPending || (addedNow && reading)) && (
                 <p className="small docs-inline" role="status"><I.Spinner />{upload.isPending ? t("docs.uploading") : t("documents.inline.reading")}</p>
               )}
-              <input ref={input} id="doc-upload" type="file" multiple accept=".pdf,.xlsx,.csv,.docx,.txt" className="sr-only" tabIndex={-1} aria-label={t("docs.choose")} onChange={(e) => pick(e.target.files)} />
+              <input ref={input} id="doc-upload" type="file" multiple accept=".pdf,.xlsx,.csv,.docx,.txt,.png,.jpg,.jpeg,.tif,.tiff" className="sr-only" tabIndex={-1} aria-label={t("docs.choose")} onChange={(e) => pick(e.target.files)} />
             </div>
             <div className="card card-pad">
               <ChoiceCards

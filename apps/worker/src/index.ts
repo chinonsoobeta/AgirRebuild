@@ -11,7 +11,7 @@ import { FIELDS, FIELD_BY_KEY, runPolicy, type Currency, type Policy, type Engin
 import { itemFold } from "@agir/numbers";
 import { renderArtifact, RendererUnavailableError, type ArtifactInput } from "@agir/artifacts";
 import { sha256Hex, type BlobStore, type Db } from "@agir/db";
-import { AI_AMBIGUOUS_NOTE, AI_LOW_CONFIDENCE_NOTE, applyLabels, applySuggestions, chooseByArithmetic, checkArithmetic, consolidate, extractCandidates, figureOrder, kindOf, labelPhrase, redactText, labelUnit, offerable, offeredIds, parseDocument, ocrPdf, MAX_OCR_PAGES, parseSavedOcr, serializeOcr, mergeOcr, isOcrLocation, REMEMBERED_NOTE, withoutLabelled, type SourcedCandidate } from "@agir/extraction";
+import { AI_AMBIGUOUS_NOTE, AI_LOW_CONFIDENCE_NOTE, applyLabels, applySuggestions, chooseByArithmetic, checkArithmetic, consolidate, extractCandidates, figureOrder, kindOf, labelPhrase, redactText, labelUnit, offerable, offeredIds, parseDocument, ocrPdf, ocrImage, UnsupportedDocumentError, MAX_OCR_PAGES, parseSavedOcr, serializeOcr, mergeOcr, isOcrLocation, REMEMBERED_NOTE, withoutLabelled, type SourcedCandidate } from "@agir/extraction";
 
 export const MAX_UPLOAD_BYTES = 75 * 1024 * 1024;
 
@@ -104,6 +104,12 @@ type Job = { id: number; kind: string; payload: Record<string, string>; attempts
 
 function sniff(kind: string, bytes: Uint8Array): string | null {
   const head = new TextDecoder("latin1").decode(bytes.slice(0, 8));
+  if (kind === "image" && !(
+    [0x89, 0x50, 0x4e, 0x47, 0x0d, 0x0a, 0x1a, 0x0a].every((x, i) => bytes[i] === x) ||
+    (bytes[0] === 0xff && bytes[1] === 0xd8 && bytes[2] === 0xff) ||
+    (bytes[0] === 73 && bytes[1] === 73 && bytes[2] === 42 && bytes[3] === 0) ||
+    (bytes[0] === 77 && bytes[1] === 77 && bytes[2] === 0 && bytes[3] === 42)
+  )) return "The file does not start like an image";
   if (kind === "pdf" && !head.startsWith("%PDF-")) return "The file does not start like a PDF";
   if ((kind === "xlsx" || kind === "docx") && !head.startsWith("PK\u0003\u0004")) return `The file is not an Office ${kind.toUpperCase()} package`;
   if (kind === "csv" || kind === "txt") {
@@ -169,15 +175,16 @@ async function extractDocument(deps: WorkerDeps, documentId: string) {
     if (!kindOf(d.name)) throw new Error("This file type cannot be read");
     parsed = await parseDocument(bytes, d.name);
   } catch (e) {
-    await setStage(db, d.id, "read_failed", (e as Error).name === "PasswordException" ? "This PDF is protected by a password. Remove the password and upload it again." : `Agir could not read this file: ${(e as Error).message.split("\n")[0]}`);
+    await setStage(db, d.id, "read_failed", (e as Error).name === "PasswordException" ? "This PDF is protected by a password. Remove the password and upload it again." : e instanceof UnsupportedDocumentError ? e.message : `Agir could not read this file: ${(e as Error).message.split("\n")[0]}`);
     return;
   }
   let stageDetail: string | null = null;
   if (parsed.needsOcr) {
     const picturePages = parsed.ocrPages!;
     const whole = picturePages.length === parsed.pageCount;
-    const unavailable = "This PDF is scanned pages with no text layer, and OCR is not available on this machine. Enter its values by hand, or upload a text PDF.";
-    const noText = "Agir found no readable text on the scanned pages of this PDF. Enter its values by hand, or upload a clearer copy.";
+    const image = parsed.kind === "image";
+    const unavailable = image ? "This file is a picture, and OCR is not available on this machine. Enter its values by hand, or upload a text PDF." : "This PDF is scanned pages with no text layer, and OCR is not available on this machine. Enter its values by hand, or upload a text PDF.";
+    const noText = image ? "Agir found no readable text in this picture. Enter its values by hand, or upload a clearer copy." : "Agir found no readable text on the scanned pages of this PDF. Enter its values by hand, or upload a clearer copy.";
     if (whole && picturePages.length > MAX_OCR_PAGES) {
       await setStage(db, d.id, "read_failed", "This scanned PDF has more than 50 pages; Agir reads scans of up to 50 pages. Split it, or enter its values by hand.", { page_count: parsed.pageCount, needs_ocr: true });
       return;
@@ -186,7 +193,7 @@ async function extractDocument(deps: WorkerDeps, documentId: string) {
     let engineMissing = false;
     if (!saved || saved.failed.length) {
       try {
-        const result = await (deps.ocr ?? ocrPdf)(bytes, saved ? saved.failed : picturePages.slice(0, MAX_OCR_PAGES));
+        const result = await (deps.ocr ?? (image ? ocrImage : ocrPdf))(bytes, saved ? saved.failed : picturePages.slice(0, MAX_OCR_PAGES));
         if (saved) {
           const added = result.pages.filter(page => !saved!.pages.some(existing => existing.page === page.page));
           const changed = added.length > 0 || JSON.stringify(saved.failed) !== JSON.stringify(result.failed);
@@ -205,10 +212,13 @@ async function extractDocument(deps: WorkerDeps, documentId: string) {
     const read = new Set(parsed.lines.filter(l => isOcrLocation(l.location)).map(l => /^page (\d+)/.exec(l.location)![1])).size;
     if (whole) {
       if (!read) {
-        await setStage(db, d.id, "read_failed", engineMissing || saved?.failed.length === picturePages.length ? unavailable : noText, { page_count: parsed.pageCount, needs_ocr: true });
+        const allFailed = saved?.failed.length === picturePages.length;
+        const damaged = "Agir could not open this picture. It may be damaged. Upload it again, or save it as a PDF.";
+        const detail = engineMissing ? unavailable : allFailed ? (image ? damaged : unavailable) : noText;
+        await setStage(db, d.id, "read_failed", detail, { page_count: parsed.pageCount, needs_ocr: true });
         return;
       }
-      stageDetail = read === picturePages.length
+      stageDetail = image ? "Read by OCR from this picture. Check every value against the picture before approving it." : read === picturePages.length
         ? `Read by OCR from ${parsed.pageCount} scanned ${parsed.pageCount === 1 ? "page" : "pages"}. Check every value against the page before approving it.`
         : `Read by OCR from ${read} of ${parsed.pageCount} scanned pages; the others gave no text Agir could read. Check every value against the page before approving it.`;
     } else {
@@ -227,6 +237,7 @@ async function extractDocument(deps: WorkerDeps, documentId: string) {
       stageDetail = messages.join("\n");
     }
   }
+  stageDetail = [stageDetail, ...(parsed.notes ?? [])].filter(Boolean).join("\n") || null;
   await setStage(db, d.id, "extracting", null, { page_count: parsed.pageCount, ...(parsed.needsOcr ? { needs_ocr: true } : {}) });
   const result = extractCandidates(parsed, { role: d.role_set === "deal_source" ? "deal source" : d.role_set ?? undefined });
   const format = result.format.mixed ? "mixed" : result.format.decimal === "." ? "1,234.56" : result.format.decimal === "," ? "1.234,56" : "not detected";

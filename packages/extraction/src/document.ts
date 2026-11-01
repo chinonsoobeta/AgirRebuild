@@ -28,11 +28,11 @@ export type Cell = {
 export type Table = { name: string; rows: Cell[][]; at?: number };
 
 export type NormalizedDocument = {
-  kind: "pdf" | "xlsx" | "csv" | "docx" | "txt";
+  kind: "pdf" | "xlsx" | "csv" | "docx" | "txt" | "image";
   lines: Line[];
   tables: Table[];
   pageCount: number | null;
-  /** True when a PDF has pages whose text only OCR can reach. */
+  /** True when a picture or PDF has pages whose text only OCR can reach. */
   needsOcr: boolean;
   ocrPages?: number[];
   /** All readable text, for number-format detection. */
