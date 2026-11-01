@@ -2715,10 +2715,14 @@ const SUITE_LINE_RE = /^(?:\*{1,2}\s*)?(\d{1,4}[A-Za-z]?|[A-Za-z]{1,2}-?\d{1,4})
 const SUITE_WORD_RE = /^(?:suite|apt|apartment|app|logement|unit)$/;
 const COUNT_TOTAL_RE = /^\d+\s+(?:units|suites|logements|appartements)\b/;
 // Narrower than ROLL_TOTAL_RE: "Total operating expenses" and "All suites are rented" are not the roll's total.
-const SUITE_TOTAL_RE = /^(?:(?:grand|sub|sous)[- ]*)?totals?\s*(?:[:\u2013\u2014-]\s*)?(?:$|[$(\d]|(?:(?:monthly|annual|mensuel(?:le)?s?|annuel(?:le)?s?)\s+)?(?:rents?|loyers?|units?|suites?|logements?|appartements?)\b)/;
+const SUITE_TOTAL_RE = /^(?:(?:grand|sub|sous)[- ]*)?totals?\s*(?:[:\u2013\u2014-]\s*)?(?:$|[$(]|\d[\d\s.,]*(?:$|[$(]|(?:units?|suites?|logements?|app?art(?:e)?ments?|sf|sq|pi2|m2)\b)|(?:(?:monthly|annual|mensuel(?:le)?s?|annuel(?:le)?s?)\s+)?(?:d(?:es?|u)\s+)?(?:rents?|loyers?|units?|suites?|logements?|app?art(?:e)?ments?)\b)/;
 // Columns named before the rent on the header line: one holding money could take the rent's place in a row; one holding other numbers stands before it.
 const MONEY_COLUMN_RE = /\b(?:deposits?|depots?|parking|stationnement|stalls?|storage|pets?|charges?|fees?|frais)\b/;
-const NUMBER_COLUMN_RE = /\b(?:size|sf|sq|sqft|area|superficie|pi2|m2|baths?|bathrooms?|beds?|bedrooms?|floor|etage)\b/;
+const NUMBER_COLUMN_RE = /\b(?:size|sf|sq|sqft|square|feet|ft|area|superficie|pi2|m2|baths?|bathrooms?|beds?|bedrooms?|floor|etage)\b/;
+// Words before the rent column that hold no figures, or only qualify the rent. A plain number has no $ to tell a rent from a size, and any column adds up to its own total, so anything else stops a plain read.
+const NO_FIGURES_RE = /\b(?:suites?|units?|apt|apartments?|app|appartements?|logements?|no|number|numero|types?|location|description|emplacement|tenants?|names?|locataires?|noms?|occupants?|status|statut|monthly|mensuel(?:le)?|current|actual|actuel(?:le)?|contract|in[- ]place|base|gross|net)\b/g;
+// A plain figure this small is a fragment or another column, even when the total happens to agree.
+const MIN_PLAIN_RENT = 100;
 const NOT_RENT_COLUMN_RE = /rent roll|rent\s?\/\s?sf|rent psf|rent per sf|rent increase|last rent|total rent|market rent|loyer du marche/g;
 
 /** A line's text for matching only: a recognized scan leaves stray pipes. */
@@ -2798,8 +2802,9 @@ function plainSuiteRolls(doc: NormalizedDocument, format: DocumentFormat, scopes
   /**
    * How the header places the one current rent column; null when rents cannot be read. The rent word must be on the header line itself:
    * on a wrapped line above or below, the order of the columns is unknown. `numberBefore`: a column of other numbers stands before the rent.
+   * `plainFirst`: nothing before the rent can hold a number, so a row's first plain number is its rent.
    */
-  const rentColumn = (header: number): { numberBefore: boolean } | null => {
+  const rentColumn = (header: number): { numberBefore: boolean; plainFirst: boolean } | null => {
     const zone = [lines[header]!.text];
     for (const step of [-1, 1]) {
       let taken = 0;
@@ -2818,7 +2823,8 @@ function plainSuiteRolls(doc: NormalizedDocument, format: DocumentFormat, scopes
     const at = own.search(rentWord);
     if (at < 0) return null;
     const before = own.slice(0, at);
-    return MONEY_COLUMN_RE.test(before) ? null : { numberBefore: NUMBER_COLUMN_RE.test(before) };
+    if (MONEY_COLUMN_RE.test(before)) return null;
+    return { numberBefore: NUMBER_COLUMN_RE.test(before), plainFirst: !before.replace(NO_FIGURES_RE, " ").replace(/[^a-z0-9]+/g, " ").trim() };
   };
 
   for (let i = 0; i < lines.length; i++) {
@@ -2877,8 +2883,8 @@ function plainSuiteRolls(doc: NormalizedDocument, format: DocumentFormat, scopes
       };
       const money = rows.filter((r) => moneyRent(r.at)).length * 2 > rows.length;
       for (const r of rows) {
-        const t = money ? moneyRent(r.at) : total >= 0 && !column.numberBefore ? figures.get(r.at)![0] : undefined;
-        if (t && t.value !== null) rents.set(r.at, t);
+        const t = money ? moneyRent(r.at) : total >= 0 && column.plainFirst ? figures.get(r.at)![0] : undefined;
+        if (t && t.value !== null && (money || t.value >= MIN_PLAIN_RENT)) rents.set(r.at, t);
       }
       if (total >= 0) {
         const sum = [...rents.values()].reduce((n, t) => n + t.value!, 0);

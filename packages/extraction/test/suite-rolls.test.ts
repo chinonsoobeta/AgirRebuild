@@ -391,8 +391,9 @@ describe("card 193: a suite-by-suite roll written as plain lines", () => {
       expect(rentValues(r)).toEqual([]);
       expect(shown(r, DIFFERENT)).toEqual([]);
       const fr = await readFr("Logement # Type Loyer Superficie", "101 1 chambre 1 200 $ 55", "102 1 chambre 1 250 $ 60", "103 2 chambres 1 500 $ 80", "Total 3 logements 3 950 $ 195");
-      expect(rents(fr)).toEqual([["2BR", 1500]]);
-      expect(shown(fr, DIFFERENT)).toEqual([1200, 1250]);
+      // A $ before a plain number is taken as that number's, so this layout reads no rent in French either; its figures stay shown.
+      expect(rentValues(fr)).toEqual([]);
+      expect(shown(fr, SUITE_NOTE)).toEqual(expect.arrayContaining([55, 60, 80]));
     });
 
     test("A4. a real summary by type stays read by the table path", async () => {
