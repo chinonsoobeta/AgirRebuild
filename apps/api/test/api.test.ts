@@ -1518,7 +1518,7 @@ describe("card 61: Canadian cost lines and a mortgage insurance premium are ente
       await db.query(`update assumptions set field_key = 'other_cost', status = 'approved' where deal_id = $1 and field_key = 'development_charges'`, [d]);
       expect(await rowsOf(d, "development_charges")).toEqual([]);
       await upload(d, "notes.txt", "Site visit notes, nothing priced.\n");
-      expect(await rowsOf(d, "other_cost")).toMatchObject([{ status: "needs_review", value: 85000, reason: "Its source document was removed; confirm or reject it" }]);
+      expect(await rowsOf(d, "other_cost")).toMatchObject([{ status: "needs_review", value: 85000, reason: "The latest reading of the documents did not use this figure; confirm or reject it" }]);
       expect(await rowsOf(d, "development_charges")).toMatchObject([{ status: "needs_review", value: 85000 }]);
     });
   });
@@ -3846,11 +3846,12 @@ describe("card 160a: the deal AI reader", () => {
     expect(land.conflict_values.map((v: any) => v.value)).toEqual([400000, 500000]);
     expect(land.sources.some((s: any) => s.rule === "ai")).toBe(true);
     expect(land.sources.some((s: any) => s.rule !== "ai")).toBe(true);
-    // A retired document changes the hash; its stored reading no longer participates.
+    // Retiring another document changes the hash, but this figure's own document stays, so its reading stays (card 184).
     await db.query(`update documents set retired_at=now() where deal_id=$1 and name='second.txt'`, [id]);
     await reconcileDeal(db, store, id);
     const [after] = await db.query<any>(`select * from assumptions where deal_id=$1 and field_key='land_cost'`, [id]);
-    expect(after.sources.some((s: any) => s.rule === "ai")).toBe(false);
+    expect(after.sources.some((s: any) => s.rule === "ai")).toBe(true);
+    expect(after.status).toBe("conflicting");
   });
   test("retries once, stores a safe failure and keeps the rule reader", async () => {
     const id = await setup();

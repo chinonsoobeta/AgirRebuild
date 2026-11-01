@@ -1222,3 +1222,20 @@ it("Card 181 describes picture uploads and counts in both languages", () => {
   expect(build("en", () => {}).t("counts.docs")).toBe("Documents (PDF / Excel / CSV / Word / text / picture)");
   expect(build("fr", () => {}).t("counts.docs")).toBe("Documents (PDF / Excel / CSV / Word / texte / image)");
 });
+
+it.each([
+  ["Its document is now marked as background only", "Son document est maintenant marqué comme contexte seulement"],
+  ["AI reading was turned off, and only AI reading found this figure", "La lecture IA a été désactivée, et elle seule avait trouvé ce chiffre"],
+  ["The latest reading of the documents did not use this figure", "La dernière lecture des documents n’a pas retenu ce chiffre"],
+])("Card 184 translates %s and the approved variant", (en, fr) => {
+  expect(build("en", () => {}).msg(en)).toBe(en);
+  expect(translateMessage(en)).toBe(fr);
+  expect(translateMessage(en + "; confirm or reject it")).toBe(fr + " ; confirmez-la ou rejetez-la");
+});
+it("Card 184 pins retry and reading wording", () => {
+  expect(translateMessage("Agir is still reading this deal. Try again when it finishes.")).toBe("Agir lit encore ce projet. Réessayez lorsque la lecture sera terminée.");
+  expect(build("en", () => {}).t("review.readAgain")).toBe("Read again");
+  expect(build("fr", () => {}).t("review.readAgain")).toBe("Relire");
+  expect(build("en", () => {}).t("review.aiUnavailable")).toBe("AI reading did not finish this time. The figures below come from Agir's rules and any earlier reading.");
+  expect(build("fr", () => {}).t("review.aiUnavailable")).toBe("La lecture IA n’a pas abouti cette fois. Les chiffres ci-dessous viennent des règles d’Agir et de toute lecture antérieure.");
+});

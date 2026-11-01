@@ -73,7 +73,7 @@ test("real mixed OCR reaches Review, saved once on retry, AI redaction, source r
   const picture = (await review(copy.id)).assumptions.find((a: any) => a.fieldKey === "exit_cap_rate_pct");
   expect(picture.value).toBe(5.5);
   expect(picture.sources.some((s: any) => s.rule !== "ai" && s.ocr === true)).toBe(true);
-  // The deal-copy card restores the AI source assertion.
+  expect(picture.sources.some((s: any) => s.rule === "ai" && s.ocr === true)).toBe(true);
   const [sourceDoc] = await db.query<any>(`select storage_key from documents where deal_id=$1`, [deal]);
   const [copyDoc] = await db.query<any>(`select storage_key from documents where deal_id=$1`, [copy.id]);
   expect(await store.getOcr(copyDoc.storage_key)).toEqual(await store.getOcr(sourceDoc.storage_key));
