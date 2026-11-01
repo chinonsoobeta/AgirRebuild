@@ -10,8 +10,11 @@ import { placeConstructionCosts } from "../src/ledger.ts";
 import { allEquityDeal, developmentDeal } from "./fixtures.ts";
 
 const SEED = 20261031;
+// The mutation run repeats these tests on thousands of changed copies of the engine, so it asks for a tenth of the cases.
+// With this seed they are the first cases of the full run. The release gate always runs the full count.
+const RUNS_SCALE = Number(process.env.BEHAVIOUR_RUNS_SCALE ?? 1);
 const check = <T>(arb: fc.Arbitrary<T>, numRuns: number, body: (x: T) => void) =>
-  fc.assert(fc.property(arb, body), { numRuns, seed: SEED, endOnFailure: true });
+  fc.assert(fc.property(arb, body), { numRuns: Math.max(5, Math.round(numRuns * RUNS_SCALE)), seed: SEED, endOnFailure: true });
 
 const money = (min: number, max: number) => fc.integer({ min, max });
 

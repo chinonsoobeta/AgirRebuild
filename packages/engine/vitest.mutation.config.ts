@@ -7,6 +7,8 @@ export default defineConfig({
   root: fileURLToPath(new URL("../..", import.meta.url)),
   test: {
     include: ["packages/engine/test/**/*.test.ts"],
-    testTimeout: 30000,
+    // Instrumented code runs far slower than the gate's, so a test gets longer here and the behaviour rules try fewer cases.
+    testTimeout: 180000,
+    env: { BEHAVIOUR_RUNS_SCALE: "0.1" },
   },
 });
