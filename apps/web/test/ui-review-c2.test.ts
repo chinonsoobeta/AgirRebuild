@@ -198,7 +198,9 @@ describe("card C2 unused figures", () => {
   it("card 199: shows the full count and explains a shortened English list", () => {
     state.review = { ...payload(), other: figures(1000), otherTotal: 1500, unusedTotal: 1500 };
     const words = text(render());
-    expect(words).toContain("1,500 figures in your documents were not used");
+    // Once on the Review page's lead line and once on the list itself: neither counts only the rows it shows.
+    expect(words.match(/1,500 figures in your documents were not used/g)).toHaveLength(2);
+    expect(words).not.toContain("1,000 figures in your documents");
     expect(words).toContain("Your documents have 1,500 of these figures, so this list shows 1,000: any you labelled, then the ones most likely to matter, then the first ones in each file.");
     expect(words).toContain("Agir lists some of them here"); expect(words).not.toContain("Shown so nothing is hidden");
   });

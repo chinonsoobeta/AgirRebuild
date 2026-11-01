@@ -35,6 +35,11 @@ describe("card 199 boundedForRules", () => {
     const doc = cells([[{ text: "a".repeat(MAX_RULE_TEXT + 1), ref: "A1", computed: true }]]);
     expect(boundedForRules(doc)).toEqual({ doc, cut: false });
   });
+  it.each([[300, false, 300], [301, false, 301], [302, true, 301]] as const)("counts the characters of typed cells: %i rows of the longest cell", (n, cut, kept) => {
+    const doc = cells(Array.from({ length: n }, (_, i) => [{ text: "a".repeat(MAX_RULE_TEXT), ref: `A${i + 1}` }]));
+    const result = boundedForRules(doc);
+    expect(result.cut).toBe(cut); expect(result.doc.tables[0]!.rows).toHaveLength(kept);
+  });
   it.each([[50001, false, 50001], [50002, true, 50001]] as const)("bounds %i numbered lines", (n, cut, kept) => {
     const doc = document(Array.from({ length: n }, (_, i) => `n ${i}`)), result = boundedForRules(doc);
     expect(result.cut).toBe(cut); expect(result.doc.lines).toHaveLength(kept); expect(doc.lines).toHaveLength(n);
@@ -107,5 +112,24 @@ describe("card 199 scaling", () => {
   it("keeps suite types in first-appearance order", async () => {
     const doc = await workbook("Rent roll", [["Unit", "Type", "Monthly rent"], ["101", "Two bed", 2000], ["102", "One bed", 1500], ["103", "Two bed", 2000], ["104", "One bed", 1500]]);
     expect(extractCandidates(doc).candidates.filter(c => c.fieldKey === "unit_count").map(c => [c.itemKey, c.value])).toEqual([["2BR", 2], ["1BR", 2]]);
+  });
+});
+
+describe("card 199 a wrapped paragraph stops at the limit", () => {
+  // The label ends one line and its figure starts the next, so the figure is read only when the two lines join.
+  const wrapped = (joined: number) => {
+    const end = " the land cost is", figure = "$1,000,000";
+    return document(["a".repeat(joined - figure.length - end.length) + end, figure]);
+  };
+  const land = (joined: number) => extractCandidates(wrapped(joined)).candidates.filter(c => c.fieldKey === "land_cost").map(c => c.value);
+  it("joins two lines just under the limit", () => { expect(land(MAX_RULE_TEXT - 1)).toEqual([1000000]); });
+  it("does not join two lines at the limit", () => { expect(land(MAX_RULE_TEXT)).toEqual([]); });
+  it("does not join two lines over the limit", () => { expect(land(MAX_RULE_TEXT + 100)).toEqual([]); });
+});
+
+describe("card 199 a rent line is not a list of counts", () => {
+  it("reads no mix count from a line that states a rent", () => {
+    const doc = document(["6 x Studio, rent $1,500 a month"]);
+    expect(extractCandidates(doc).candidates.filter(c => c.rule === "line:mix-count")).toEqual([]);
   });
 });

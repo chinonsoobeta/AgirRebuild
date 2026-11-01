@@ -39,6 +39,11 @@ test.each(["computed", "suggested"])("card 199: 1,000 %s figures precede a plain
   rs.slice(1).forEach(r => { if (tier === "computed") r.note = computed; else r.suggestions = ["land_cost"]; });
   expect(list(rs).listed).toEqual(rs.slice(1));
 });
+test("card 199: the list stops at the cap partway through a round of files", () => {
+  const result = list([...rows(1000, "A"), ...rows(1000, "B"), ...rows(1000, "C")]);
+  expect(result.total).toBe(3000); expect(result.listed).toHaveLength(1000);
+  expect(["A", "B", "C"].map(id => result.listed.filter(r => r.documentId === id).length)).toEqual([334, 333, 333]);
+});
 test("card 199: files take turns and small files remain whole", () => {
   const rs = [...rows(1500, "A"), ...rows(20, "B"), ...rows(1500, "C")], result = list(rs);
   expect(["A", "B", "C"].map(id => result.listed.filter(r => r.documentId === id).length)).toEqual([490, 20, 490]);
