@@ -431,6 +431,14 @@ describe("card 193: a roll's total row beside its types", () => {
       ["rentable_area_sf", "all suites", 9945], ["unit_count", "1BR", 7], ["unit_count", "Bachelor", 14],
     ]);
   });
+  test("a French total row is treated the same", () => {
+    expect(rows([...types, rule("unit_count", "Tous les logements", 21), rule("rentable_area_sf", "Tous les logements", 9945)])).toEqual([
+      ["rentable_area_sf", "Tous les logements", 9945], ["unit_count", "1BR", 7], ["unit_count", "Bachelor", 14],
+    ]);
+  });
+  test("a name that does not say it is everything keeps its count when it has an area, as card 126 set", () => {
+    expect(rows([...types, rule("unit_count", "Residential", 21), rule("rentable_area_sf", "Residential", 9945)])).toContainEqual(["unit_count", "Residential", 21]);
+  });
   test("a name holding a count that does not add up, or a rent, stays for a person", () => {
     expect(rows([...types, rule("unit_count", "all units", 30), rule("rentable_area_sf", "all units", 9945)])).toContainEqual(["unit_count", "all units", 30]);
     expect(rows([...types, rule("unit_count", "all units", 21), rule("unit_rent_monthly", "all units", 1500)])).toContainEqual(["unit_count", "all units", 21]);
