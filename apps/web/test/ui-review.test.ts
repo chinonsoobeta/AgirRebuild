@@ -42,6 +42,7 @@ const approved = ["unit_count", "unit_rent_monthly", "stabilized_occupancy_pct",
   row({ id: `ok-${i}`, fieldKey, value: 100 + i, sources: [src(100 + i, String(100 + i), `Line ${100 + i}`, "rent roll.txt")] }));
 const payload = (): ReviewData => ({
   setAsideAll: false,
+  otherTotal: 1, unusedTotal: 1,
   assumptions: [
     row({ id: "c1", fieldKey: "hard_cost", status: "conflicting", material: true, conservative: "max", value: null,
       conflictValues: [{ value: 4120000, documents: ["budget.txt"] }, { value: 4310000, documents: ["summary.txt"] }],

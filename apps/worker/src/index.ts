@@ -11,7 +11,7 @@ import { FIELDS, FIELD_BY_KEY, runPolicy, type Currency, type Policy, type Engin
 import { itemFold } from "@agir/numbers";
 import { renderArtifact, RendererUnavailableError, type ArtifactInput } from "@agir/artifacts";
 import { sha256Hex, type BlobStore, type Db } from "@agir/db";
-import { AI_AMBIGUOUS_NOTE, AI_LOW_CONFIDENCE_NOTE, applyLabels, applySuggestions, chooseByArithmetic, checkArithmetic, consolidate, extractCandidates, figureOrder, kindOf, labelPhrase, redactText, labelUnit, offerable, offeredIds, parseDocument, ocrPdf, ocrImage, UnsupportedDocumentError, MAX_OCR_PAGES, parseSavedOcr, serializeOcr, mergeOcr, isOcrLocation, REMEMBERED_NOTE, withoutLabelled, type SourcedCandidate } from "@agir/extraction";
+import { AI_AMBIGUOUS_NOTE, AI_LOW_CONFIDENCE_NOTE, applyLabels, applySuggestions, chooseByArithmetic, checkArithmetic, consolidate, extractCandidates, figureOrder, RULE_LIMIT_NOTE, kindOf, labelPhrase, redactText, labelUnit, offerable, offeredIds, parseDocument, ocrPdf, ocrImage, UnsupportedDocumentError, MAX_OCR_PAGES, parseSavedOcr, serializeOcr, mergeOcr, isOcrLocation, REMEMBERED_NOTE, withoutLabelled, type SourcedCandidate } from "@agir/extraction";
 
 export const MAX_UPLOAD_BYTES = 75 * 1024 * 1024;
 
@@ -39,6 +39,8 @@ const SUGGEST_SCHEMA = {
   } } },
 };
 const SUGGEST_BATCH = 100;
+/** At most this many figures are offered per document, the first ones in it. Each batch is a paid call, and one strange file must not cost hundreds of them. */
+const MAX_SUGGESTED = 1000;
 
 /** The real call, used only when ANTHROPIC_API_KEY is set (the SDK reads it). */
 const anthropicProvider: SuggestionProvider = async (request) => {
@@ -63,7 +65,7 @@ async function suggestLabels(deps: WorkerDeps, workspaceId: string, offered: Sou
   const figures = offered.flatMap((c, i) => {
     const context = redactText(c.context).text;
     return redactText(c.raw).spans.length || (c.context.includes(c.raw) && !context.includes(c.raw)) ? [] : [{ id: ids[i]!, raw: c.raw, value: c.value, unitSeen: c.unitSeen, location: c.location, context }];
-  });
+  }).slice(0, MAX_SUGGESTED);
   figures.sort((a, b) => (a.id < b.id ? -1 : a.id > b.id ? 1 : 0));
   const batches: (typeof figures)[] = [];
   for (let i = 0; i < figures.length; i += SUGGEST_BATCH) batches.push(figures.slice(i, i + SUGGEST_BATCH));
@@ -249,6 +251,7 @@ async function extractDocument(deps: WorkerDeps, documentId: string) {
   stageDetail = [stageDetail, ...(parsed.notes ?? [])].filter(Boolean).join("\n") || null;
   await setStage(db, d.id, "extracting", null, { page_count: parsed.pageCount, ...(parsed.needsOcr ? { needs_ocr: true } : {}) });
   const result = extractCandidates(parsed, { role: d.role_set === "deal_source" ? "deal source" : d.role_set ?? undefined });
+  if (result.notes.includes(RULE_LIMIT_NOTE)) stageDetail = [stageDetail, RULE_LIMIT_NOTE].filter(Boolean).join("\n");
   const format = result.format.mixed ? "mixed" : result.format.decimal === "." ? "1,234.56" : result.format.decimal === "," ? "1.234,56" : "not detected";
   const asSourced = (c: (typeof result.candidates)[number]): SourcedCandidate => ({ ...c, documentId: d.id, documentName: d.name });
   const suggestions = await suggestLabels(deps, d.workspace_id, offeredOf([...result.candidates, ...result.other].map(asSourced)));

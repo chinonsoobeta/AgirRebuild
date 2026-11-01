@@ -51,6 +51,7 @@ const payload = (): ReviewData => {
   ];
   return {
     setAsideAll: false,
+    otherTotal: 3, unusedTotal: 4,
     assumptions,
     missing: [{ fieldKey: "expense_ratio_pct", label: "Operating expense ratio", unit: "%", material: false, default: 35, help: null, groupLabel: "Operations", likely: [] }] as ReviewData["missing"],
     notFound: [{ fieldKey: "land_transfer_tax", label: "Land transfer tax", unit: "$", material: false, default: null, help: null, groupLabel: "Budget", likely: [] }] as ReviewData["missing"],
@@ -193,6 +194,37 @@ describe("card C2 glossary and terms", () => {
 });
 
 describe("card C2 unused figures", () => {
+  const figures = (n: number) => Array.from({ length: n }, (_, i) => ({ ...payload().other[0]!, context: `Invented context ${i}: $${1000 + i}`, raw: `$${1000 + i}`, value: 1000 + i, figureId: `invented-${i}`, location: `line ${i + 1}` }));
+  it("card 199: shows the full count and explains a shortened English list", () => {
+    state.review = { ...payload(), other: figures(1000), otherTotal: 1500, unusedTotal: 1500 };
+    const words = text(render());
+    // Once on the Review page's lead line and once on the list itself: neither counts only the rows it shows.
+    expect(words.match(/1,500 figures in your documents were not used/g)).toHaveLength(2);
+    expect(words).not.toContain("1,000 figures in your documents");
+    expect(words).toContain("Your documents have 1,500 of these figures, so this list shows 1,000: any you labelled, then the ones most likely to matter, then the first ones in each file.");
+    expect(words).toContain("Agir lists some of them here"); expect(words).not.toContain("Shown so nothing is hidden");
+  });
+  it("card 199: explains a shortened French list with localized counts", () => {
+    state.lang = "fr";
+    state.review = { ...payload(), other: figures(1000), otherTotal: 1500, unusedTotal: 1500 };
+    const html = render(), words = text(html);
+    const line = html.slice(html.indexOf("Vos documents contiennent")).split("</p>")[0]!;
+    expect(line).toContain((1500).toLocaleString("fr-CA")); expect(line).toContain((1000).toLocaleString("fr-CA"));
+    expect(words).toContain("Agir en affiche une partie ici"); expect(words).not.toContain("Affichés pour que rien ne soit caché");
+  });
+  it("card 199: keeps the complete-list explanation when nothing is cut", () => {
+    const words = text(render());
+    expect(words).not.toContain("Your documents have"); expect(words).not.toContain("Agir lists some of them here");
+    expect(words).toContain("Shown so nothing is hidden");
+  });
+  it.each([100, 101])("card 199: closed list renders rows only up to 100 groups: %i", n => {
+    state.review = { ...payload(), other: figures(n), otherTotal: n, unusedTotal: n };
+    const html = render(), unused = html.slice(html.indexOf('id="unused-figures"'));
+    expect(unused).not.toMatch(/^id="unused-figures"[^>]* open/);
+    expect((unused.match(/<mark>/g) ?? []).length).toBe(n === 100 ? 100 : 0);
+    expect(text(unused)).toContain(`${n} figures in your documents were not used`);
+  });
+
   it("shows one row per sentence, marks each number and offers no unrelated label for a heading line", () => {
     const html = render();
     const unused = html.slice(html.indexOf('id="unused-figures"'));

@@ -281,6 +281,24 @@ test("a computed figure reaches Review with a Use as figureId", async () => {
   expect(data.other).toHaveLength(1);
   expect(data.other[0]).toMatchObject({ value: 1000000, location: "Inputs!B1", note: "Worked out by a formula in this workbook, so Agir did not read it. Use it if it is the figure you want", figureId: expect.any(String) });
 });
+test("card 199: Review lists 1,000 of 1,200 invented workbook figures with full totals", async () => {
+  const ExcelJS = (await import("exceljs")).default;
+  const wb = new ExcelJS.Workbook(), sheet = wb.addWorksheet("Budget");
+  sheet.addRow(["Item", "Amount"]);
+  for (let i = 0; i < 1200; i++) sheet.addRow([`Invented line ${i}`, 1000 + i]);
+  const { deal } = await upload(new Uint8Array(await wb.xlsx.writeBuffer()), "invented.xlsx");
+  await drain({ db, store });
+  const data = await review(deal);
+  expect(data.other).toHaveLength(1000); expect(data.otherTotal).toBe(1200); expect(data.unusedTotal).toBe(1200);
+  expect((await docs(deal))[0].other_count).toBe(1200);
+  const locations = data.other.map((o: any) => o.location);
+  expect(locations).toContain("Budget!B2"); expect(locations).toContain("Budget!B1001"); expect(locations).not.toContain("Budget!B1002");
+});
+test("card 199: long text remains extracted with the rule-limit note", async () => {
+  const { deal } = await upload(new TextEncoder().encode(["Land cost: $1,000,000", "a".repeat(10001), "Hard cost: $2,000,000"].join("\n")), "long.txt");
+  await drain({ db, store });
+  expect((await docs(deal))[0]).toMatchObject({ stage: "extracted", stage_detail: "This file is too long for Agir's rules to read in full, so they may have missed figures further in." });
+});
 test("logo keeps strict JPEG ending validation", async () => {
   const jpeg = imageBytes("jpeg");
   for (const [bytes, status] of [[jpeg, 200], [Buffer.concat([jpeg, Buffer.from("trailing")]), 422]] as const) {

@@ -2,6 +2,8 @@
 import { register, type Entry, type FrenchOf } from "./entry";
 
 const s = (n: number, one: string, many: string) => (n === 1 ? one : many);
+const count = (n: number) => n.toLocaleString("en-CA");
+const compte = (n: number) => n.toLocaleString("fr-CA");
 
 export const en = {
   "review.tagBlocked": "Blocked",
@@ -21,7 +23,7 @@ export const en = {
   "review.showAll": (p) => `Show all ${p.n}`,
   "review.showFewer": "Show fewer",
   "review.approvedFoot": "Every approval keeps its source and the name of the person who gave it in the audit trail.",
-  "review.otherIntro": (p) => `${p.n} ${s(p.n, "figure", "figures")} in your documents ${s(p.n, "was", "were")} not used. They are shown so nothing is hidden, and you can label one as an input.`,
+  "review.otherIntro": (p) => `${count(p.n)} ${s(p.n, "figure", "figures")} in your documents ${s(p.n, "was", "were")} not used. ${p.cut ? "Agir lists some of them here" : "They are shown so nothing is hidden"}, and you can label one as an input.`,
   "review.aside": "About this review",
   "review.thresholds": "Advanced: pass marks",
   "review.thresholdsBody": "What this deal is judged against. A change and its reason are recorded.",
@@ -55,7 +57,7 @@ export const en = {
   "review.useFigure": "Use this figure",
   "review.labelledAs": (p) => `Labelled as ${p.field} by ${p.who}`,
   "review.undo": "Undo",
-  "review.unusedLine": (p) => `${p.n} ${s(p.n, "figure", "figures")} in your documents ${s(p.n, "was", "were")} not used. You can label one as an input.`,
+  "review.unusedLine": (p) => `${count(p.n)} ${s(p.n, "figure", "figures")} in your documents ${s(p.n, "was", "were")} not used. You can label one as an input.`,
   "review.unusedLink": "Show the figures",
   "review.fromM2": "The document gives this in square metres. Agir works in square feet and converted it.",
   "review.statedIn": (p) => `The document states this in ${p.code}. It is shown here but never used.`,
@@ -170,7 +172,8 @@ export const en = {
   "review.reopen": "Reopen",
   "review.rejected": "Rejected",
   "review.other": "Figures in the documents that Agir did not use",
-  "review.otherBody": "Shown so nothing is hidden. Output figures such as a broker's projected NOI are never taken as inputs, and a number that could be read two ways is not read at all.",
+  "review.otherBody": (p) => `${p.cut ? "" : "Shown so nothing is hidden. "}Output figures such as a broker's projected NOI are never taken as inputs, and a number that could be read two ways is not read at all.`,
+  "review.otherCut": (p) => `Your documents have ${count(p.n)} of these figures, so this list shows ${count(p.shown)}: any you labelled, then the ones most likely to matter, then the first ones in each file.`,
   "review.col.doc": "Document",
   "review.col.text": "Text",
   "review.col.whyNot": "Why it was not used",
@@ -211,7 +214,7 @@ export const fr: FrenchOf<typeof en> = {
   "review.showAll": (p) => `Tout afficher (${p.n})`,
   "review.showFewer": "Afficher moins",
   "review.approvedFoot": "Chaque approbation conserve sa source et le nom de la personne qui l'a donnée dans la piste d'audit.",
-  "review.otherIntro": (p) => `${p.n} ${s(p.n, "chiffre", "chiffres")} de vos documents ${s(p.n, "n'a pas été utilisé", "n'ont pas été utilisés")}. Ils sont affichés pour que rien ne soit caché, et vous pouvez en libeller un comme donnée.`,
+  "review.otherIntro": (p) => `${compte(p.n)} ${s(p.n, "chiffre", "chiffres")} de vos documents ${s(p.n, "n'a pas été utilisé", "n'ont pas été utilisés")}. ${p.cut ? "Agir en affiche une partie ici" : "Ils sont affichés pour que rien ne soit caché"}, et vous pouvez en libeller un comme donnée.`,
   "review.aside": "À propos de cet examen",
   "review.thresholds": "Avancé\u00a0: seuils de réussite",
   "review.thresholdsBody": "Ce à quoi ce projet est comparé. Une modification et son motif sont consignés.",
@@ -245,7 +248,7 @@ export const fr: FrenchOf<typeof en> = {
   "review.useFigure": "Utiliser ce chiffre",
   "review.labelledAs": (p) => `Libellé «\u00a0${p.field}\u00a0» par ${p.who}`,
   "review.undo": "Annuler",
-  "review.unusedLine": (p) => `${p.n} ${s(p.n, "chiffre", "chiffres")} de vos documents ${s(p.n, "n'a pas été utilisé", "n'ont pas été utilisés")}. Vous pouvez en libeller un comme donnée.`,
+  "review.unusedLine": (p) => `${compte(p.n)} ${s(p.n, "chiffre", "chiffres")} de vos documents ${s(p.n, "n'a pas été utilisé", "n'ont pas été utilisés")}. Vous pouvez en libeller un comme donnée.`,
   "review.unusedLink": "Afficher les chiffres",
   "review.fromM2": "Le document l'indique en mètres carrés. Agir travaille en pieds carrés et l'a converti.",
   "review.statedIn": (p) => `Le document l'indique en ${p.code}. Il est affiché ici, mais jamais utilisé.`,
@@ -367,7 +370,8 @@ export const fr: FrenchOf<typeof en> = {
   "review.reopen": "Rouvrir",
   "review.rejected": "Rejetées",
   "review.other": "Chiffres des documents qu'Agir n'a pas utilisés",
-  "review.otherBody": "Affichés pour que rien ne soit caché. Les résultats, comme le RNE projeté d'un courtier, ne sont jamais retenus comme données, et un nombre qui peut se lire de deux façons n'est pas lu du tout.",
+  "review.otherBody": (p) => `${p.cut ? "" : "Affichés pour que rien ne soit caché. "}Les résultats, comme le RNE projeté d'un courtier, ne sont jamais retenus comme données, et un nombre qui peut se lire de deux façons n'est pas lu du tout.`,
+  "review.otherCut": (p) => `Vos documents contiennent ${compte(p.n)} de ces chiffres\u00a0: cette liste en affiche donc ${compte(p.shown)}, d'abord ceux que vous avez libellés, puis ceux qui comptent le plus probablement, puis les premiers de chaque fichier.`,
   "review.col.doc": "Document",
   "review.col.text": "Texte",
   "review.col.whyNot": "Pourquoi il n'a pas été utilisé",
