@@ -548,7 +548,7 @@ export async function reviewView(tx: Db, dealId: string, asOf: string) {
   const { all, other } = await otherFigures(tx, dealId, assumptions);
   const docs = await currentDocuments(tx, dealId);
   // RLS on ai_readings limits this snapshot to staff, including when a client can read the deal.
-  const [stored] = await tx.query<{ outcome: "ok" | "failed"; model: string; prompt_version: string; created_at: string | Date; response: ReaderResponse | null; verification: { readings: ReadingVerification[]; conflicts: ReadingVerification[][] } | null }>(
+  const [stored] = await tx.query<{ outcome: "ok" | "failed"; model: string; prompt_version: string; created_at: string | Date; response: ReaderResponse | null; verification: { documents: { id: string }[]; readings: ReadingVerification[]; conflicts: ReadingVerification[][] } | null }>(
     `select outcome, model, prompt_version, created_at, response, verification from ai_readings where deal_id=$1 and (select w.ai_reading from deals d join workspaces w on w.id=d.workspace_id where d.id=$1) and documents_hash=$2 and prompt_version=$3 order by created_at desc, id desc limit 1`,
     [dealId, documentsHash(docs), READER_PROMPT_VERSION],
   );
@@ -567,8 +567,12 @@ export async function reviewView(tx: Db, dealId: string, asOf: string) {
     ...setAside.map((a) => ({ fieldKey: a.field_key, itemKey: a.item_key || null, label: FIELD_BY_KEY.get(a.field_key)!.label, value: a.value, why: notNeededReason(a.field_key, selling)!, sources: a.sources })),
     ...failed.filter((r) => !inMode(r)).map((r) => ({ fieldKey: r.field, itemKey: r.item, label: FIELD_BY_KEY.get(r.field)!.label, value: r.value, why: notNeededReason(r.field, selling)!, sources: [{ document_name: r.file, location: r.location, raw: r.quote }] })),
   ];
+  const readRoles = await tx.query<{ id: string; read_role: string | null }>(`select id,read_role from documents where deal_id=$1 and retired_at is null`, [dealId]);
+  const unread = stored?.outcome === "ok" ? docs.filter(d => d.stage === "extracted" && d.role_set !== "context" &&
+    !/\(context(?:, set by a person)?\)$/.test(readRoles.find(r => r.id === d.id)?.read_role ?? "") &&
+    !stored.verification?.documents.some(ref => ref.id === d.id)).map(d => d.name) : [];
   const aiReading = stored ? {
-    outcome: stored.outcome, model: stored.model, promptVersion: stored.prompt_version, createdAt: stored.created_at,
+    unread, outcome: stored.outcome, model: stored.model, promptVersion: stored.prompt_version, createdAt: stored.created_at,
     notUsed: (stored.response?.not_used ?? []).map(r => {
       const matches = docs.filter(d => d.name === r.file);
       const document = matches.length === 1 ? matches[0] : undefined;

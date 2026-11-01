@@ -1131,8 +1131,8 @@ export function Review({ dealId }: { dealId: string }) {
             </section>
           )}
 
-          {r.aiReading?.outcome === "failed" && <div className="stack tight">
-            <p className="small muted">{t("review.aiUnavailable")}</p>
+          {(r.aiReading?.outcome === "failed" || !!r.aiReading?.unread.length) && <div className="stack tight">
+            <p className="small muted">{r.aiReading?.outcome === "failed" ? t("review.aiUnavailable") : t("review.aiUnread", { names: r.aiReading!.unread.join(", ") })}</p>
             {editable && <div><button className="btn quiet sm" type="button" disabled={readAgain.isPending} onClick={() => readAgain.mutate()}>{t("review.readAgain")}</button></div>}
             <ErrorText error={readAgain.error} />
           </div>}

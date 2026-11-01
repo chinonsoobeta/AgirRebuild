@@ -136,6 +136,11 @@ async function setStage(db: Db, id: string, stage: string, detail: string | null
   );
 }
 
+/** A final-stage file may have been the last thing preventing a deal reading. */
+async function queueUnreadReading(db: Db, documentId: string) {
+  await db.query(`insert into jobs(kind,payload) select 'read_deal', jsonb_build_object('deal_id',deal_id::text,'only_unread','true') from documents where id=$1`, [documentId]);
+}
+
 async function verifyDocument(deps: WorkerDeps, documentId: string) {
   const { db, store } = deps;
   const [d] = await db.query<{ id: string; deal_id: string; workspace_id: string; name: string; kind: string; size_bytes: number; sha256: string; storage_key: string }>(
@@ -147,6 +152,7 @@ async function verifyDocument(deps: WorkerDeps, documentId: string) {
   const bytes = await store.get(d.storage_key);
   const reject = async (why: string) => {
     await setStage(db, d.id, "rejected", why);
+    await queueUnreadReading(db, d.id);
     await audit(db, d.workspace_id, d.deal_id, "document.rejected", "document", d.id, { reason: why });
   };
   if (bytes.byteLength !== Number(d.size_bytes)) return reject("The stored file does not match the size that was uploaded");
@@ -176,6 +182,7 @@ async function extractDocument(deps: WorkerDeps, documentId: string) {
     parsed = await parseDocument(bytes, d.name);
   } catch (e) {
     await setStage(db, d.id, "read_failed", (e as Error).name === "PasswordException" ? "This PDF is protected by a password. Remove the password and upload it again." : e instanceof UnsupportedDocumentError ? e.message : `Agir could not read this file: ${(e as Error).message.split("\n")[0]}`);
+    await queueUnreadReading(db, d.id);
     return;
   }
   let stageDetail: string | null = null;
@@ -187,6 +194,7 @@ async function extractDocument(deps: WorkerDeps, documentId: string) {
     const noText = image ? "Agir found no readable text in this picture. Enter its values by hand, or upload a clearer copy." : "Agir found no readable text on the scanned pages of this PDF. Enter its values by hand, or upload a clearer copy.";
     if (whole && picturePages.length > MAX_OCR_PAGES) {
       await setStage(db, d.id, "read_failed", "This scanned PDF has more than 50 pages; Agir reads scans of up to 50 pages. Split it, or enter its values by hand.", { page_count: parsed.pageCount, needs_ocr: true });
+      await queueUnreadReading(db, d.id);
       return;
     }
     let saved = parseSavedOcr(await store.getOcr(d.storage_key));
@@ -216,6 +224,7 @@ async function extractDocument(deps: WorkerDeps, documentId: string) {
         const damaged = "Agir could not open this picture. It may be damaged. Upload it again, or save it as a PDF.";
         const detail = engineMissing ? unavailable : allFailed ? (image ? damaged : unavailable) : noText;
         await setStage(db, d.id, "read_failed", detail, { page_count: parsed.pageCount, needs_ocr: true });
+        await queueUnreadReading(db, d.id);
         return;
       }
       stageDetail = image ? "Read by OCR from this picture. Check every value against the picture before approving it." : read === picturePages.length
@@ -738,9 +747,9 @@ export async function runOnce(deps: WorkerDeps): Promise<boolean> {
       const dealId = job.payload.deal_id!;
       try {
         const [deal] = await deps.db.query<{ workspace_id: string }>(`select workspace_id from deals where id=$1`, [dealId]);
-        if (deal) await readDeal(deps.db, deps.store, dealId, deal.workspace_id, deps.read);
+        if (deal) await readDeal(deps.db, deps.store, dealId, deal.workspace_id, deps.read, job.payload.only_unread === "true");
       } finally {
-        await deps.db.query(`update jobs set run_after = now() where kind = 'reconcile_deal' and status = 'queued' and payload->>'deal_id' = $1 and run_after > now()`, [dealId]);
+        if (job.payload.only_unread !== "true") await deps.db.query(`update jobs set run_after = now() where kind = 'reconcile_deal' and status = 'queued' and payload->>'deal_id' = $1 and run_after > now()`, [dealId]);
       }
     }
     else if (job.kind === "reconcile_deal") await reconcileDeal(deps.db, deps.store, job.payload.deal_id!);
@@ -756,6 +765,7 @@ export async function runOnce(deps: WorkerDeps): Promise<boolean> {
     );
     if (dead && job.payload.document_id) {
       await setStage(deps.db, job.payload.document_id, "read_failed", "Agir could not process this file after several attempts. Retry it, or upload it again.");
+      await queueUnreadReading(deps.db, job.payload.document_id);
     }
     deps.log?.({ event: dead ? "job.dead" : "job.retry", id: job.id, kind: job.kind, error: message });
   } finally { clearInterval(renewal); }
