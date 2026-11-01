@@ -347,6 +347,10 @@ export function Review({ dealId }: { dealId: string }) {
     mutationFn: () => api.post(`/deals/${dealId}/read-again`),
     onSuccess: () => refresh(),
   });
+  const readAnyway = useMutation({
+    mutationFn: (d: { id: string; role: string }) => api.post(`/documents/${d.id}/role`, { role: d.role }),
+    onSuccess: () => refresh(),
+  });
   const acceptTable = useMutation({
     mutationFn: (b: {fieldKey:string;tableId:string;optionKey:string}) => api.post(`/deals/${dealId}/proposals/accept`,b),
     onSuccess: () => refresh(),
@@ -1153,6 +1157,13 @@ export function Review({ dealId }: { dealId: string }) {
             <p className="small muted">{r.aiReading?.outcome === "failed" ? t("review.aiUnavailable") : t("review.aiUnread", { names: r.aiReading!.unread.join(", ") })}</p>
             {editable && <div><button className="btn quiet sm" type="button" disabled={readAgain.isPending} onClick={() => readAgain.mutate()}>{t("review.readAgain")}</button></div>}
             <ErrorText error={readAgain.error} />
+          </div>}
+          {!!r.aiReading?.sheetsLeftOut.length && <div className="stack tight">
+            {r.aiReading.sheetsLeftOut.map(d => <div key={d.id} className="stack tight">
+              <p className="small muted">{d.sheets.length ? t("review.sheetsLeftOut", { name: d.name, sheets: d.sheets.slice(0, 5).join(", "), more: d.sheets.length - 5 }) : t("review.fileLeftOut", { name: d.name })}</p>
+              {editable && d.readAnyway && <div><button className="btn quiet sm" type="button" disabled={readAnyway.isPending} aria-label={t("review.readAnywayLabel", { name: d.name })} onClick={() => readAnyway.mutate({ id: d.id, role: d.readAnyway! })}>{t("review.readAnyway")}</button></div>}
+            </div>)}
+            <ErrorText error={readAnyway.error} />
           </div>}
           <details id="unused-figures" className="card rv-unused" open={otherOpen} onToggle={(e) => setOtherOpen(e.currentTarget.open)}>
             <summary className="card-pad row between">

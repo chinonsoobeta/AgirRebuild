@@ -8,6 +8,7 @@ export { scoreExtraction, type GoldenEntry, type Score } from "./score.ts";
 export { ocrPdf, ocrImage } from "./ocr.ts";
 export { checkArithmetic, chooseByArithmetic } from "./arithmetic.ts";
 export { addressedText, addressedEntries } from "./addressed.ts";
+export { MAX_READING_CHARS, MAX_ASKED_READING_CHARS, MIN_SHEET_ROOM, readingTexts } from "./reading-budget.ts";
 export * from "./verify-reading.ts";
 export * from "./reader-prompt.ts";
 export { documentKind } from "./document-kind.ts";

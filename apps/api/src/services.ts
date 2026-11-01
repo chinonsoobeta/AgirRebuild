@@ -20,7 +20,7 @@ import {
 } from "@agir/contracts";
 import { assemble, buildLedger, canonicalJson, ENGINE_VERSION, heldPartnerReturns, replay } from "@agir/engine";
 import { currentDocuments, documentsHash, type Db } from "@agir/db";
-import { applyLabels, COMPUTED_NOTE, figureOrder, itemFold, labelPhrase, labelUnit, offeredIds, suggestFields, type ReaderResponse, type ReadingVerification, READER_PROMPT_VERSION, type SourcedCandidate } from "@agir/extraction";
+import { applyLabels, COMPUTED_NOTE, figureOrder, itemFold, kindOf, labelPhrase, labelUnit, offeredIds, suggestFields, type ReaderResponse, type ReadingVerification, READER_PROMPT_VERSION, type SourcedCandidate } from "@agir/extraction";
 
 export const sha256 = (s: string) => createHash("sha256").update(s).digest("hex");
 /** The hash of each registered policy, by version. A run is fresh against the hash of the policy it was made under. */
@@ -577,7 +577,7 @@ export async function reviewView(tx: Db, dealId: string, asOf: string) {
   const { all, other } = await otherFigures(tx, dealId, assumptions);
   const docs = await currentDocuments(tx, dealId);
   // RLS on ai_readings limits this snapshot to staff, including when a client can read the deal.
-  type StoredReading = { outcome: "ok" | "failed"; model: string; prompt_version: string; created_at: string | Date; response: ReaderResponse | null; verification: { documents: { id: string; name: string; sha256?: string }[]; readings: ReadingVerification[]; conflicts: ReadingVerification[][] } | null };
+  type StoredReading = { outcome: "ok" | "failed"; model: string; prompt_version: string; created_at: string | Date; response: ReaderResponse | null; verification: { documents: { id: string; name: string; sha256?: string; sheetsLeftOut?: string[] }[]; readings: ReadingVerification[]; conflicts: ReadingVerification[][] } | null };
   const [current] = await tx.query<StoredReading>(
     `select outcome, model, prompt_version, created_at, response, verification from ai_readings where deal_id=$1 and (select w.ai_reading from deals d join workspaces w on w.id=d.workspace_id where d.id=$1) and documents_hash=$2 and prompt_version=$3 order by created_at desc, id desc limit 1`,
     [dealId, documentsHash(docs), READER_PROMPT_VERSION],
@@ -630,6 +630,13 @@ export async function reviewView(tx: Db, dealId: string, asOf: string) {
       return { ...r, figureId: all.find(o => !o.label && o.documentId === document?.id && o.location === r.location && o.value === r.value)?.figureId ?? null };
     }),
     pleaseCheck: failed.filter(inMode),
+    // A person who asked for the whole file while the wider reading is on its way is not told again what the earlier one left out.
+    sheetsLeftOut: (lists?.verification?.documents ?? []).flatMap(ref => {
+      const d = docs.find(c => c.id === ref.id && c.stage === "extracted" && c.sha256 === ref.sha256);
+      if (!ref.sheetsLeftOut || !d || !isSource(d) || (lists !== current && d.role_set)) return [];
+      const role = /\(evidence/.test(readRoles.find(r => r.id === d.id)?.read_role ?? "") ? "evidence" : "deal_source";
+      return [{ id: d.id, name: d.name, sheets: kindOf(d.name) === "csv" ? [] : ref.sheetsLeftOut, readAnyway: d.role_set ? null : role }];
+    }),
   } : null;
   const { listed, total: otherTotal, unused: unusedTotal } = listedFigures(other, new Set((aiReading?.notUsed ?? []).flatMap((n) => n.figureId ?? [])));
   // Up to three unlabelled figures that may hold a missing input: those it ranks first, then the others, each in the table's order.
