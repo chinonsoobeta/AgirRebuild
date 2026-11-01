@@ -3793,7 +3793,7 @@ describe("card 160a: the deal AI reader", () => {
       return parse(...args);
     });
     const wrap = (base: Db): Db => ({ ...base, transaction: fn => base.transaction(tx => fn(wrap(tx))), query: (sql, params) => {
-      if (failure === "escaping" && sql.startsWith("select id from ai_readings")) throw new Error("Reader lookup failed");
+      if (failure === "escaping" && sql.startsWith("select id,model,prompt_version,documents_hash,verification from ai_readings")) throw new Error("Reader lookup failed");
       return base.query(sql, params);
     } });
     const wrapped = wrap(db);
@@ -4031,7 +4031,7 @@ describe("card C: the AI reading switch, the region and less stored text", () =>
     const [row] = await db.query<any>(`select * from ai_readings where deal_id=$1`, [id]);
     expect(Object.keys(row)).not.toContain("request");
     const [document] = await db.query<any>(`select id, name, sha256 from documents where deal_id=$1`, [id]);
-    expect(row.verification.documents).toEqual([{ id: document.id, name: document.name, sha256: document.sha256 }]);
+    expect(row.verification.documents).toEqual([{ id: document.id, name: document.name, sha256: document.sha256, text_sha256: expect.any(String) }]);
     expect(JSON.stringify(row.verification)).not.toContain("Unlabelled reserve");
     // A second reconcile settles the sources' regions (as before card C), so compare from there.
     await reconcileDeal(db, store, id);
@@ -4066,7 +4066,7 @@ describe("card C: the AI reading switch, the region and less stored text", () =>
     expect((await other())?.sources.some((s: any) => s.rule === "ai") ?? false).toBe(false);
     expect((await sources(id)).find(a => a.field_key === "land_cost")?.sources.some((s: any) => s.rule === "ai")).toBe(true);
     const [row] = await db.query<any>(`select verification from ai_readings where deal_id=$1`, [id]);
-    expect(row.verification.documents.map((d: any) => d.name)).toEqual(["fiction.txt"]);
+    expect(row.verification.documents.map((d: any) => d.name).sort()).toEqual(["fiction.txt", "second.txt"]);
   });
 });
 

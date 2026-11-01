@@ -1239,3 +1239,9 @@ it("Card 184 pins retry and reading wording", () => {
   expect(build("en", () => {}).t("review.aiUnavailable")).toBe("AI reading did not finish this time. The figures below come from Agir's rules and any earlier reading.");
   expect(build("fr", () => {}).t("review.aiUnavailable")).toBe("La lecture IA n’a pas abouti cette fois. Les chiffres ci-dessous viennent des règles d’Agir et de toute lecture antérieure.");
 });
+
+it("Card 186 pins the legal explanation of repeat readings and unread names", () => {
+  expect(build("en", () => {}).t("landing.legal.ai2")).toContain("A reading is stored with the deal. Agir sends a deal's documents again only when something has changed: a document is added, removed or changed in role or text, Agir's reading instructions or model are updated, or a reading failed or missed a file and someone asks Agir to read them again.");
+  expect(build("fr", () => {}).t("landing.legal.ai2")).toContain("Une lecture est conservée avec le projet. Agir n'envoie de nouveau les documents d'un projet que si quelque chose a changé\u00a0: un document est ajouté, retiré, ou son rôle ou son texte change, les consignes de lecture ou le modèle d'Agir sont mis à jour, ou une lecture a échoué ou a omis un fichier et une personne demande à Agir de les relire.");
+  expect(build("fr", () => {}).t("review.aiUnread", { names: "two.txt, three.txt" })).toBe("La lecture IA n’a pas encore couvert two.txt, three.txt. Les chiffres ci-dessous viennent des règles d’Agir et de la lecture précédente.");
+});

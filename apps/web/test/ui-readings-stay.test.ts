@@ -58,16 +58,25 @@ const text = (html: string) => html.replace(/<[^>]*>/g, " ").replaceAll("&amp;",
 it.each(["owner", "admin", "analyst", "viewer"])("read again shown only for editors with a failed reading: %s", role => {
   s.role = role;
   for (const outcome of ["failed", "ok", null]) {
-    s.review = { ...payload([]), aiReading: outcome ? {outcome, notUsed: [], pleaseCheck: []} : null };
+    s.review = { ...payload([]), aiReading: outcome ? {outcome, unread: [], notUsed: [], pleaseCheck: []} : null };
     const html = render();
     expect(html.includes(">Read again</button>")).toBe(outcome === "failed" && role !== "viewer");
   }
 });
 it("read again posts and refreshes; its French label is rendered", async () => {
   s.role = "owner"; s.lang = "fr";
-  s.review = { ...payload([]), aiReading: {outcome: "failed", notUsed: [], pleaseCheck: []} };
+  s.review = { ...payload([]), aiReading: {outcome: "failed", unread: [], notUsed: [], pleaseCheck: []} };
   expect(render()).toContain(">Relire</button>");
   const button = s.nodes.find(n => n.tag === "button" && n.props.children === "Relire");
   expect(button).toBeDefined(); await button!.props.onClick();
   const { api } = await import("../src/api"); expect(api.post).toHaveBeenCalledWith("/deals/deal-1/read-again");
+});
+
+it.each(["owner", "admin", "analyst", "viewer"])("read again and unread notice for an incomplete ok reading: %s", role => {
+  s.lang = "en"; s.role = role;
+  s.review = { ...payload([]), aiReading: { outcome: "ok", unread: ["two.txt", "three.txt"], notUsed: [], pleaseCheck: [] } };
+  const html = render();
+  expect(html.includes(">Read again</button>")).toBe(role !== "viewer");
+  expect(text(html)).toContain("AI reading has not covered two.txt, three.txt yet. The figures below come from Agir's rules and the earlier reading.");
+  expect(text(html)).not.toContain("AI reading did not finish");
 });

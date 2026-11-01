@@ -120,7 +120,7 @@ test("OCR retry reads only failed pages and retains both pages on Review", async
   await retry();
   expect(ocr).not.toHaveBeenCalled();
   expect(wrapped.putOcr).toHaveBeenCalledTimes(2);
-  expect(read).toHaveBeenCalledTimes(1);
+  expect(read).toHaveBeenCalledTimes(2);
 });
 test.each([true, false])("OCR retry failure preserves saved text for rules and loadDocument on mixed=%s", async mixed => {
   const { deal } = await upload(await pdf(mixed, false, mixed ? 2 : 3));
