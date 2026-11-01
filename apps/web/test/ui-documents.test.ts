@@ -368,4 +368,21 @@ describe("Card 189: why a file was set aside", () => {
     state.docs = [];
     expect(render()).not.toContain(banner);
   });
+
+  it("tells only an editor to choose Read it anyway", () => {
+    state.docs = [context()];
+    state.role = "viewer";
+    expect(render()).toContain(banner);
+    expect(render()).not.toContain("choose Read it anyway");
+    state.role = "owner";
+    expect(render()).toContain("choose Read it anyway");
+  });
+
+  it("keeps the way to Review when values still wait there", () => {
+    state.docs = [context()];
+    state.overview = { review: { needsReview: 2, conflicting: 1 }, documents: { total: 1, processing: 0, failed: 0 } };
+    expect(render()).toContain("Review 3 values");
+    state.overview = { review: { needsReview: 0, conflicting: 0 }, documents: { total: 1, processing: 0, failed: 0 } };
+    expect(render()).not.toContain("Review 0");
+  });
 });
