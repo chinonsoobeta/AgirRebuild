@@ -28,6 +28,13 @@ export const DOCUMENT_KINDS: Record<string, { en: string; fr: string }> = {
   "single-project court record": { en: "a court record for one project", fr: "un dossier judiciaire sur un seul projet" },
   "council report": { en: "a council report", fr: "un rapport au conseil" },
   "business plan": { en: "a business plan", fr: "un plan d'affaires" },
+  "geotechnical report": { en: "a geotechnical report", fr: "un rapport géotechnique" },
+  "environmental report": { en: "an environmental report", fr: "un rapport environnemental" },
+  "operating statement": { en: "an operating statement", fr: "un état des résultats d'exploitation" },
+  "purchase agreement": { en: "a purchase agreement", fr: "une convention d'achat" },
+  "cost report": { en: "a cost report", fr: "un rapport de coûts" },
+  "tax assessment": { en: "a tax assessment", fr: "un avis d'évaluation foncière" },
+  "draw schedule": { en: "a draw schedule", fr: "un calendrier de déboursés" },
 };
 
 export type ReadRole = { kind: string; role: "deal source" | "evidence" | "context"; byPerson: boolean };

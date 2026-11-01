@@ -468,6 +468,9 @@ const SALE_SHARES: Record<string, string> = {
 const FR_REASONS: [RegExp, string | ((m: RegExpMatchArray) => string)][] = [
   // Card 189: the note on a set-aside file's figures. A note stored before the card may say "a audit".
   [/^This document looks like an? ([^;]+); its figures are shown, not read\. (.*)$/, m => `${DOCUMENT_KINDS[m[1]!] ? `Ce document ressemble à ${DOCUMENT_KINDS[m[1]!]!.fr}` : "Ce document sert de contexte"}\u00a0; ses chiffres sont affichés, mais pas lus. ${translateMessage(m[2])}`],
+  // Card 190: the two other notes on a figure. A note stored before the card may say "a appraisal". The section stays as the document writes it.
+  [/^Read from an? ([^;]+); check it(?:\. (.*))?$/, m => `Lu dans ${DOCUMENT_KINDS[m[1]!]?.fr ?? "un document"}\u00a0; à vérifier${m[2] ? `. ${translateMessage(m[2])}` : ""}`],
+  [/^The (.+) section of an? ([^;]+); its figures are shown, not read$/, m => `La section «\u00a0${m[1]}\u00a0» d'${DOCUMENT_KINDS[m[2]!]?.fr ?? "un document"}\u00a0; ses chiffres sont affichés, mais pas lus`],
   [/^The document states a scale for this amount that Agir cannot read safely$/, "Le document indique pour ce montant une échelle qu’Agir ne peut pas lire avec certitude"],
   [/^The AI amount is under \$1,000; check whether the document states it in thousands or millions$/, "Le montant IA est inférieur à 1 000 $; vérifiez si le document l’exprime en milliers ou en millions"],
   [/^One soft-cost item \(a permit\), not the total soft cost; enter the total$/, "Un poste des coûts indirects (un permis), pas le total des coûts indirects ; entrez le total"],
