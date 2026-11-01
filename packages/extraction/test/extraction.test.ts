@@ -5224,10 +5224,12 @@ describe("card 93b local OCR", () => {
     const parsed = await parseDocument(bytes, "scan.pdf");
     expect(parsed.needsOcr).toBe(true);
     const result = await ocrPdf(bytes);
-    expect(result.pageCount).toBe(1);
-    expect(result.lines.map((l) => l.text)).toEqual(["Terminal cap rate 5.5%", "Senior loan $1,850,000 at 6.75%"]);
-    for (const line of result.lines) expect(line.location).toMatch(/^page 1, line \d \(OCR, confidence \d+%\)$/);
-    const found = extractCandidates({ ...parsed, ...result, fullText: result.lines.map((l) => l.text).join("\n") });
+    expect(result.pages.map(p => p.page)).toEqual([1]);
+    expect(result.pages[0]!.lines.map((l) => l.text)).toEqual(["Terminal cap rate 5.5%", "Senior loan $1,850,000 at 6.75%"]);
+    const { mergeOcr } = await import("../src/ocr-text.ts");
+    const merged = mergeOcr(parsed, { version: 1, ...result, notRead: [] });
+    for (const line of merged.lines) expect(line.location).toMatch(/^page 1, line \d \(OCR, confidence \d+%\)$/);
+    const found = extractCandidates(merged);
     expect(found.candidates).toContainEqual(expect.objectContaining({ fieldKey: "exit_cap_rate_pct", value: 5.5 }));
     const options = vi.mocked(createWorker).mock.calls.at(-1)![2]!;
     expect(options.gzip).toBe(true);

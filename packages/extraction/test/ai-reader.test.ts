@@ -605,3 +605,20 @@ describe("card F1: the AI reader's sale readings", () => {
     expect(verifyReading(r("land_cost", null, 650, "$", "presales.txt", "line 1", quote), presold(quote))).toEqual({ outcome: READING_FAILURE.small });
   });
 });
+
+describe("card 180 OCR verification", () => {
+  const full = "page 2, line 4 (OCR, confidence 91%)";
+  const quote = "Land cost $400,000";
+  test.each(["page 2, line 4", "page 2, line 4 (OCR, confidence 19%)", full])("preserves the source address for %s", location => {
+    const document = { ...doc("pdf"), lines: [{ text: quote, location: full }], fullText: quote };
+    for (const marked of [quote, `[${full}] ${quote}`, `[${location}] ${quote}`]) {
+      expect(verifyReading({ field: "land_cost", item: null, value: 400000, unit_seen: "$", file: "f.pdf", location, quote: marked, note: null, confidence: "high" }, [{ id: "d", name: "f.pdf", document }])).toMatchObject({ outcome: "verified", candidate: { location: full, ocr: true } });
+    }
+  });
+  test("does not mark text layer values as OCR", () => {
+    const location = "page 1, line 1";
+    const result = verifyReading({ field: "land_cost", item: null, value: 400000, unit_seen: "$", file: "f.pdf", location, quote, note: null, confidence: "high" }, [{ id: "d", name: "f.pdf", document: { ...doc("pdf"), lines: [{ text: quote, location }], fullText: quote } }]);
+    expect(result.outcome).toBe("verified");
+    expect(result.candidate).not.toHaveProperty("ocr");
+  });
+});

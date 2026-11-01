@@ -1128,3 +1128,24 @@ it("Card 174 translates the financing refusal", () => {
   expect(translateMessage("The AI read a financing figure as other costs; interest and lender fees are computed by Agir or belong to the stated interest reserve"))
     .toBe("L’IA a lu un montant de financement comme autres coûts\u00a0; les intérêts et les frais du prêteur sont calculés par Agir ou relèvent de la réserve d’intérêts déclarée");
 });
+
+it.each([
+  "Read by OCR from 1 of 2 scanned pages; the others gave no text Agir could read. Check every value against the page before approving it.",
+  "1 of 2 pages in this PDF is a picture.", "2 of 3 pages in this PDF are pictures.",
+  "Agir read text from it by OCR. Check every value read that way against the page before approving it.",
+  "Agir read text from 2 of them by OCR. Check every value read that way against the page before approving it.",
+  "Agir found no text it could read there.",
+  "Agir reads the first 50 picture pages of a PDF, so 1 page was not read.",
+  "Agir reads the first 50 picture pages of a PDF, so 2 pages were not read.",
+  "1 page could not be read. Retry the file to try again.", "2 pages could not be read. Retry the file to try again.",
+  "OCR is not available on this machine, so they were not read.",
+  "This PDF is scanned pages with no text layer, and OCR is not available on this machine. Enter its values by hand, or upload a text PDF.",
+  "Agir found no readable text on the scanned pages of this PDF. Enter its values by hand, or upload a clearer copy.",
+  "This PDF is protected by a password. Remove the password and upload it again.",
+  "page 2, line 3 (OCR, confidence 81%)",
+])("Card 180 translates %s", text => {
+  expect(build("en", () => {}).msg(text)).toBe(text);
+  const fr = build("fr", () => {}).msg(text);
+  expect(fr).not.toBe(text);
+  expect(fr).not.toContain("ne fait pas encore");
+});

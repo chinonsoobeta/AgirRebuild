@@ -257,3 +257,12 @@ describe("Documents screen", () => {
     expect(render()).not.toContain("docs-by");
   });
 });
+
+it.each(["extracted", "read_failed"])("Card 180 renders separate translated detail lines for %s", stage => {
+  state.lang = "fr";
+  state.docs = [row(stage, { stage_detail: "1 of 2 pages in this PDF is a picture.\nAgir found no text it could read there." })];
+  const html = render();
+  expect(html).toContain("1 des 2 pages");
+  expect(html).toMatch(/image\.<\/span>.*<span[^>]*>.*Agir/s);
+  expect(html).not.toContain("is a picture");
+});
