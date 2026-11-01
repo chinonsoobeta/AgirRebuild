@@ -340,6 +340,34 @@ export function pdfPageError(pages: number): Error | null {
   return pages > MAX_PDF_PAGES ? new Error("This PDF has more than 5,000 pages; Agir does not read it") : null;
 }
 
+// exceljs cannot tell a formula that returned "" from one with no saved result, so the empty result becomes one space. The bounds keep this linear on an untrusted file.
+export const blankResults = (xml: string) => xml.replace(/(<c\b[^<>]{0,200}\bt="str"[^<>]{0,200}>\s{0,20}<f\b[^<>]{0,200}(?:\/>|>[^<]*<\/f>)\s{0,20})(?:<v>\s{0,20}<\/v>|<v\s{0,20}\/>)/g, "$1<v> </v>");
+
+/** A column that numbers its own rows (a form's lookup index) holds no figures: at least 5 typed numbers, at least half of them their own row number. */
+function markRowNumbers(rows: Cell[][]): void {
+  const columns = new Map<string, { typed: Cell[]; own: number }>();
+  for (const row of rows) for (const c of row) {
+    if (c.number === undefined || c.computed || c.repeat) continue;
+    const m = /([A-Z]+)(\d+)$/.exec(c.ref)!;
+    const n = columns.get(m[1]!) ?? { typed: [], own: 0 };
+    n.typed.push(c);
+    if (c.number === Number(m[2])) n.own++;
+    columns.set(m[1]!, n);
+  }
+  for (const n of columns.values()) if (n.typed.length >= 5 && n.own * 2 >= n.typed.length) for (const c of n.typed) c.rowNumber = true;
+}
+
+/** A workbook that asks to be recalculated when opened (a script wrote it) may hold a placeholder 0 for every formula. */
+function recalculatesOnOpen(bytes: Uint8Array): boolean {
+  const b = Buffer.from(bytes.buffer, bytes.byteOffset, bytes.byteLength);
+  const h = centralDirectory(b)?.heads.find((x) => x.name === "xl/workbook.xml");
+  if (!h) return false;
+  try {
+    const xml = (h.method === 8 ? inflateRawSync(partData(b, h), { maxOutputLength: MAX_PART }) : partData(b, h)).toString("utf8");
+    return /<(?:\w+:)?calcPr\b[^<>]{0,500}\bfullCalcOnLoad="(?:1|true)"/.test(xml);
+  } catch { return false; }
+}
+
 /**
  * Excel writes relative link targets inside the package ("worksheets/sheet1.xml"); other tools write absolute ones ("/xl/worksheets/sheet1.xml"),
  * which are just as valid but which exceljs does not follow for a sheet's comments or tables. A script that rewrites a part can also leave
@@ -360,7 +388,7 @@ export function relativeLinks(bytes: Uint8Array): Uint8Array {
       let entry = { name, method, time, date, crc, size, data: partData(b, h) };
       if (name.endsWith(".rels") || (name.startsWith("xl/") && name.endsWith(".xml"))) {
         const xml = (method === 8 ? inflateRawSync(entry.data, { maxOutputLength: MAX_PART }) : entry.data).toString("utf8");
-        const rewritten = name.endsWith(".rels") ? relativeTargets(xml, name) : defaultNamespace(xml);
+        const rewritten = name.endsWith(".rels") ? relativeTargets(xml, name) : blankResults(defaultNamespace(xml));
         if (rewritten !== xml) {
           const raw = Buffer.from(rewritten, "utf8");
           entry = { ...entry, method: 8, crc: crc32(raw), size: raw.length, data: deflateRawSync(raw) };
@@ -426,6 +454,8 @@ async function parseXlsx(bytes: Uint8Array): Promise<NormalizedDocument> {
   const texts: string[] = [];
   // A formula with no saved result (a workbook written by a script) has no value: nothing is computed from the formula.
   const uncached: string[] = [];
+  const stale = recalculatesOnOpen(bytes);
+  const ZERO_DATE = Date.UTC(1899, 11, 30), FIRST_DATE = Date.UTC(1899, 11, 31);
   wb.eachSheet((ws) => {
     const rows: Cell[][] = [];
     ws.eachRow({ includeEmpty: false }, (row, r) => {
@@ -435,10 +465,17 @@ async function parseXlsx(bytes: Uint8Array): Promise<NormalizedDocument> {
         const cell = row.getCell(c);
         const ref = `${ws.name}!${columnName(c - 1)}${r}`;
         let v: unknown = cell.value;
+        let computed = false;
         if (v && typeof v === "object" && ("result" in (v as object) || "formula" in (v as object) || "sharedFormula" in (v as object))) {
-          v = (v as { result?: unknown }).result;
+          // exceljs's `value` leaves out a saved 0 or FALSE; `result` keeps them.
+          computed = true;
+          v = cell.master.result;
+          if (stale && (v === 0 || v === false || (v instanceof Date && v.getTime() === ZERO_DATE))) v = undefined;
+          if (typeof v === "string" && !v.trim()) v = null;
           if (v === undefined) uncached.push(wb.worksheets.length > 1 ? ref : ref.slice(ws.name.length + 1));
         }
+        // A date reads as written, whatever the server's time zone. A saved 0 under a date format, or a time with no date, is no date.
+        if (v instanceof Date) v = v.getTime() < FIRST_DATE ? null : v.toISOString().slice(0, 10);
         // An error result ("#REF!") is no value either.
         if (v && typeof v === "object" && "error" in (v as object)) v = null;
         if (v && typeof v === "object" && "richText" in (v as object)) {
@@ -461,6 +498,9 @@ async function parseXlsx(bytes: Uint8Array): Promise<NormalizedDocument> {
         } else {
           cells.push({ text: String(v), ref });
         }
+        if (computed) cells[cells.length - 1]!.computed = true;
+        // exceljs repeats a merged cell's value in every column it spans. A person sees it once. A cell merged down keeps its text on each row: a label that spans rows labels them all.
+        if (cell.master !== cell && Number(cell.master.col) !== c) cells[cells.length - 1]!.repeat = true;
       }
       // A value with no unit of its own, beside a cell holding only a unit word ("months", "%"), is written in that unit.
       cells.forEach((c, i) => {
@@ -469,11 +509,13 @@ async function parseXlsx(bytes: Uint8Array): Promise<NormalizedDocument> {
         if (unit) c.unit = unit;
       });
       rows.push(cells);
-      texts.push(cells.map((c) => c.text).join("\n"));
     });
+    markRowNumbers(rows);
+    for (const cells of rows) texts.push(cells.map((c) => c.text).join("\n"));
     tables.push({ name: ws.name, rows });
   });
-  const notes = uncached.length > 0 ? [`This workbook has formulas with no saved results (${uncached.join(", ")}). Open and save it in Excel to include them.`] : [];
+  const listed = uncached.slice(0, 5).join(", ") + (uncached.length > 5 ? ` and ${(uncached.length - 5).toLocaleString("en-US")} more` : "");
+  const notes = uncached.length > 0 ? [`This workbook has formulas with no saved results (${listed}). Open and save it in Excel to include them.`] : [];
   notes.push(...embeddedPictureNotes(bytes, "xl"));
   return { kind: "xlsx", lines: [], tables, pageCount: null, needsOcr: false, fullText: texts.join("\n"), notes };
 }

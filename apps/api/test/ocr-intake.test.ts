@@ -1,5 +1,5 @@
 import { afterAll, beforeAll, expect, test, vi } from "vitest";
-import { mkdtempSync } from "node:fs";
+import { readFileSync, mkdtempSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { PDFDocument } from "pdf-lib";
@@ -263,6 +263,23 @@ test("uncached Excel formulas appear on the document row", async () => {
   const { deal } = await upload(new Uint8Array(await wb.xlsx.writeBuffer()), "formula.xlsx");
   await drain({ db, store });
   expect((await docs(deal))[0]).toMatchObject({ stage: "extracted", stage_detail: "This workbook has formulas with no saved results (A1). Open and save it in Excel to include them." });
+});
+test("saved Excel results leave only the truly uncached cell on the document row", async () => {
+  const bytes = readFileSync(new URL("../../../packages/extraction/test/fixtures/formula-results.xlsx", import.meta.url));
+  const { deal } = await upload(bytes, "formula-results.xlsx");
+  await drain({ db, store });
+  expect((await docs(deal))[0]).toMatchObject({ stage: "extracted", stage_detail: "This workbook has formulas with no saved results (B7). Open and save it in Excel to include them." });
+});
+test("a computed figure reaches Review with a Use as figureId", async () => {
+  const ExcelJS = (await import("exceljs")).default;
+  const wb = new ExcelJS.Workbook(); const sheet = wb.addWorksheet("Inputs");
+  sheet.getCell("A1").value = "Land cost";
+  sheet.getCell("B1").value = { formula: "500000*2", result: 1000000 };
+  const { deal } = await upload(new Uint8Array(await wb.xlsx.writeBuffer()), "computed.xlsx");
+  await drain({ db, store });
+  const data = await review(deal);
+  expect(data.other).toHaveLength(1);
+  expect(data.other[0]).toMatchObject({ value: 1000000, location: "Inputs!B1", note: "Worked out by a formula in this workbook, so Agir did not read it. Use it if it is the figure you want", figureId: expect.any(String) });
 });
 test("logo keeps strict JPEG ending validation", async () => {
   const jpeg = imageBytes("jpeg");

@@ -2289,11 +2289,13 @@ describe("totals and their parts", () => {
     ws.getCell("B5").value = { formula: "B3*0.05", result: 10_000 } as never;
     return parseDocument(new Uint8Array(await wb.xlsx.writeBuffer()), "f.xlsx");
   }
-  test("a formula with no saved result gives no value and a document note; one with a result is read", async () => {
+  test("by the owner's decision (2026-11-01) rules do not read a computed cell: a formula with no saved result gives a document note, and one with a result is listed", async () => {
     const parsed = await formulaBook();
     const r = extractCandidates(parsed);
     expect(JSON.stringify([r.candidates, r.other, parsed.tables])).not.toContain("[object Object]");
-    expect(pick(r)).toEqual([["land_cost", 100_000], ["hard_cost", 200_000], ["contingency", 10_000]]);
+    expect(pick(r)).toEqual([["land_cost", 100_000], ["hard_cost", 200_000]]);
+    expect(r.other).toHaveLength(1);
+    expect(r.other[0]).toMatchObject({ value: 10000, location: "Budget!B5", note: "Worked out by a formula in this workbook, so Agir did not read it. Use it if it is the figure you want" });
     expect(JSON.stringify(parsed.tables)).not.toContain("#REF");
     expect(r.notes).toEqual(["This workbook has formulas with no saved results (B4). Open and save it in Excel to include them.", "Document kind: unrecognized document (deal source)"]);
   });
