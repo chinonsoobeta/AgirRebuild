@@ -17,6 +17,7 @@
     "typecheck": "tsc -b",
     "test": "vitest run",
     "gate": "node scripts/gate.mjs",
+    "mutation": "stryker run",
     "build": "npm run build -w @agir/web",
     "start": "npm run build -w @agir/web && npm run start -w @agir/api"
   },
