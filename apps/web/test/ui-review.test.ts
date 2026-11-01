@@ -35,7 +35,7 @@ import { Review } from "../src/routes/review.tsx";
 const src = (value: number, raw: string, context: string, document_name = "budget.txt") => ({ document_id: document_name, document_name, value, raw, context, location: "line 3" });
 const row = (over: Partial<Assumption>): Assumption => ({
   id: "x", fieldKey: "land_cost", itemKey: null, label: "", group: "budget", groupLabel: "Budget", unit: "$", material: false, conservative: null, status: "approved",
-  value: 1, pendingValue: null, sourceKind: "document", sources: [], conflictValues: null, reason: null, decidedBy: "Dana", decidedById: "dana", decidedAt: "2026-10-21T12:00:00Z",
+  value: 1, pendingValue: null, sourceKind: "document", sources: [], conflictValues: null, usualSource: null, reason: null, decidedBy: "Dana", decidedById: "dana", decidedAt: "2026-10-21T12:00:00Z",
   secondApprover: null, confirmedByReview: false, secondApprovedAt: null, sponsorStated: false, clientConfirmedBy: null, clientConfirmedById: null, clientConfirmedAt: null, version: 1, ...over,
 });
 const approved = ["unit_count", "unit_rent_monthly", "stabilized_occupancy_pct", "exit_cap_rate_pct", "contingency", "other_cost"].map((fieldKey, i) =>
@@ -197,5 +197,32 @@ describe("card D1 the review screen", () => {
     const top = html.slice(0, html.indexOf('id="missing"'));
     expect(top).toContain('class="rv-quick"');
     expect(buttonLabels(top)).toEqual(expect.arrayContaining(["Approve", "Edit"]));
+  });
+});
+
+
+describe("card 194 usual source", () => {
+  for (const [lang, line] of [["en", "Usually, a cost budget settles this figure."], ["fr", "En général, c'est un budget de coûts qui tranche ce chiffre."]] as const) {
+    it(`describes only the named value in ${lang} without selecting it`, () => {
+      state.lang = lang;
+      const p = payload();
+      p.assumptions.find((a) => a.id === "c1")!.usualSource = { value: 4120000, kind: "cost budget" };
+      state.review = p;
+      const html = render();
+      const choices = [...html.matchAll(/<label[^>]*class="choice[^"]*"[\s\S]*?<\/label>/g)].map((m) => m[0]);
+      expect(choices).toHaveLength(2);
+      expect(text(choices[0]!)).toContain(line);
+      expect(text(choices[1]!)).not.toContain(line);
+      expect(choices[0]).toContain(`<span class="d">budget.txt</span><span class="d">`);
+      expect(choices.join("")).not.toMatch(/checked/);
+      expect(html).toMatch(/<button[^>]*disabled=""[^>]*>Choose a value<\/button>|<button[^>]*disabled=""[^>]*>Choisir une valeur<\/button>/);
+      expect(text(choices[1]!)).toContain(lang === "en" ? "the conservative value" : "la valeur prudente");
+    });
+  }
+  it("shows no line for a kind without a label", () => {
+    const p = payload();
+    p.assumptions.find((a) => a.id === "c1")!.usualSource = { value: 4120000, kind: "unknown kind" };
+    state.review = p;
+    expect(text(render())).not.toContain("settles this figure");
   });
 });

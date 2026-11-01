@@ -38,7 +38,7 @@ import { build } from "../src/i18n.tsx";
 const src = (value: number, raw: string, context: string) => ({ document_id: "d1", document_name: "budget.txt", value, raw, context, location: "line 3" });
 const row = (over: Partial<Assumption>): Assumption => ({
   id: "x", fieldKey: "land_cost", itemKey: null, label: "", group: "budget", groupLabel: "Budget", unit: "$", material: false, conservative: null, status: "needs_review",
-  value: 1, pendingValue: null, sourceKind: "document", sources: [], conflictValues: null, reason: null, decidedBy: null, decidedById: null, decidedAt: null,
+  value: 1, pendingValue: null, sourceKind: "document", sources: [], conflictValues: null, usualSource: null, reason: null, decidedBy: null, decidedById: null, decidedAt: null,
   secondApprover: null, confirmedByReview: false, secondApprovedAt: null, sponsorStated: false, clientConfirmedBy: null, clientConfirmedById: null, clientConfirmedAt: null, version: 1, ...over,
 } as Assumption);
 const payload = (): ReviewData => {

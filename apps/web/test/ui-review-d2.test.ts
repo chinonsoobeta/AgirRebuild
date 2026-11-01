@@ -61,7 +61,7 @@ import { Review } from "../src/routes/review.tsx";
 const src = { document_id: "d1", document_name: "budget.pdf", value: 38000, raw: "$38,000", context: "Property tax $38,000", location: "page 1, line 9" };
 const row = (over: Partial<Assumption>): Assumption => ({
   id: "x", fieldKey: "land_cost", itemKey: null, label: "", group: "budget", groupLabel: "Budget", unit: "$", material: false, conservative: null, status: "needs_review",
-  value: 1, pendingValue: null, sourceKind: "document", sources: [], conflictValues: null, reason: null, decidedBy: null, decidedById: null, decidedAt: null,
+  value: 1, pendingValue: null, sourceKind: "document", sources: [], conflictValues: null, usualSource: null, reason: null, decidedBy: null, decidedById: null, decidedAt: null,
   secondApprover: null, confirmedByReview: false, secondApprovedAt: null, sponsorStated: false, clientConfirmedBy: null, clientConfirmedById: null, clientConfirmedAt: null, version: 3, ...over,
 } as Assumption);
 const payload = (assumptions: Assumption[], notFound: string[] = []): ReviewData => ({
