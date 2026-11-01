@@ -1,6 +1,6 @@
 import { isOcrLocation } from "./ocr-text.ts";
 import { FIELD_BY_KEY } from "@agir/contracts";
-import { detectFormat, normalizeText, SCALE_RE, scaleOf, SF_PER_M2, tokenize } from "@agir/numbers";
+import { detectFormat, normalizeText, SCALE_RE, scaleOf, SF_PER_M2, tokenize, type NumberToken } from "@agir/numbers";
 import { declaredScale, labelScale, statedScaleUnit } from "./candidates.ts";
 import { addressedEntries } from "./addressed.ts";
 import { canonicalItem, foldText } from "./mapping.ts";
@@ -71,6 +71,37 @@ function figureLabel(document: NormalizedDocument, location: string, line: strin
   return foldText(textBefore(document, location, line, quote) + own).replace(LABEL_START, "");
 }
 
+/** OCR may smudge separators, but never supply, drop or change a digit. */
+function smudgedFigure(quote: string, value: number): NumberToken | undefined {
+  const text = normalizeText(quote);
+  for (const run of text.matchAll(/(?<!\d)\d+(?:[ ,.]{1,2}\d+)+(?!\d)/g)) {
+    const groups = [...run[0].matchAll(/\d+/g)];
+    for (let first = 0; first < groups.length; first++) {
+      const head = groups[first]!;
+      if (!/^[1-9]\d{0,3}$/.test(head[0])) continue;
+      if (first > 0 && (head[0].length === 3 || !run[0].slice(groups[first - 1]!.index! + groups[first - 1]![0].length, head.index).includes(" "))) continue;
+      let whole = head[0];
+      for (let last = first; last < groups.length; last++) {
+        const group = groups[last]!;
+        const separator = last > first ? run[0].slice(groups[last - 1]!.index! + groups[last - 1]![0].length, group.index) : "";
+        const cents = last > first && group[0].length <= 2 && /[,.]/.test(separator);
+        if (last > first && !cents && group[0].length !== 3) break;
+        if (last > first && !cents) whole += group[0];
+        const end = group.index! + group[0].length;
+        const next = groups[last + 1];
+        if ((!next || next[0].length !== 3 && run[0].slice(end, next.index).includes(" "))
+          && Number(cents ? `${whole}.${group[0]}` : whole) === value) {
+          const start = run.index! + head.index!;
+          return { raw: text.slice(start, run.index! + end), start, end: run.index! + end, value,
+            unit: null, currency: false, currencyCode: null, scaled: false };
+        }
+        if (cents) break;
+      }
+    }
+  }
+  return undefined;
+}
+
 /** First failure wins. No model interpretation can bypass an address or number check. */
 export function verifyReading(reading: Reading, documents: readonly ReadingDocument[]): ReadingVerification {
   const field = FIELD_BY_KEY.get(reading.field);
@@ -130,12 +161,12 @@ export function verifyReading(reading: Reading, documents: readonly ReadingDocum
     const scale = SCALE_RE.exec(afterDigits);
     return scale ? scaleOf(scale[1]!) : 1;
   };
-  const token = tokens.find(t => t.unit === "bps"
+  let token = tokens.find(t => t.unit === "bps"
     ? ["senior_rate_pct", "mezz_rate_pct", "refinance_rate_pct"].includes(field.key) && t.value !== null && t.value / 100 === reading.value
     : t.value === reading.value) ?? tokens.find(t => {
     if (!money || t.value === null) return false;
     if (t.scaled && Math.abs(t.value / ownFactor(t.raw) - reading.value) < 1e-9) return true;
-    if (t.paren && field.min !== undefined && field.min >= 0 && Math.abs(t.value) === reading.value) return true;
+    if ((t.paren || isOcrLocation(location) && t.value < 0) && field.min !== undefined && field.min >= 0 && Math.abs(t.value) === reading.value) return true;
     const rule = ruleFor(t);
     return !t.scaled && rule && "factor" in rule
       && Math.abs(t.value) < 1e6 && roundedScale(t.value, rule.factor) === reading.value;
@@ -143,6 +174,12 @@ export function verifyReading(reading: Reading, documents: readonly ReadingDocum
     if (t.unit === "bps") return false;
     if (t.value === null && !format.spaceGroups) {
       const digits = /\d[\d.,\s]*/.exec(t.raw)?.[0].trim();
+      // A dollar sign after a figure is French format, where one space is a thousands group; one touching a digit starts the next figure.
+      if (digits && field.unit.startsWith("$") && /^\d{1,3} \d{3}$/.test(digits) && Number(digits.replace(" ", "")) === reading.value
+        && /^ ?\$(?!\d)/.test(normalizeText(reading.quote).slice(t.end))) {
+        ambiguous = format.decimal !== ",";
+        return true;
+      }
       // Each side is a figure of its own; "050" is not.
       if (digits && /^\d{1,3} [1-9]\d{2}$/.test(digits) && digits.split(" ").some(v => Number(v) === reading.value)) {
         ambiguous = true;
@@ -174,7 +211,14 @@ export function verifyReading(reading: Reading, documents: readonly ReadingDocum
     if (matches) ambiguous = format.decimal === null;
     return matches;
   });
+  if (!token && isOcrLocation(location) && reading.value > 0 && field.min !== undefined && field.min >= 0) {
+    token = smudgedFigure(reading.quote, reading.value);
+    if (token) ambiguous = true;
+  }
   if (!token) return { outcome: READING_FAILURE.value };
+  const ocrMinus = isOcrLocation(location) && token.value !== null && token.value < 0 && !token.paren
+    && field.min !== undefined && field.min >= 0 && reading.value >= 0;
+  if (money && ocrMinus) ambiguous = true;
   if (PRESALE_FIELDS.has(field.key) && token.unit !== "%") {
     const text = normalizeText(reading.quote);
     if (token.unit === "units" || OF_TOTAL_AFTER.test(foldText(text.slice(token.end))) || OF_TOTAL_BEFORE.test(foldText(text.slice(0, token.start)))) return { outcome: READING_FAILURE.count };
@@ -190,11 +234,11 @@ export function verifyReading(reading: Reading, documents: readonly ReadingDocum
   let unitSeen: string = token.unit === "bps" ? "bps (÷ 100)" : seen;
   if (money) {
     if (token.scaled && token.value !== null) value = token.value;
-    if (token.paren && field.min !== undefined && field.min >= 0 && reading.value >= 0) value = Math.abs(value);
+    if ((token.paren || ocrMinus) && field.min !== undefined && field.min >= 0 && reading.value >= 0) value = Math.abs(value);
     const rule = ruleFor(token);
     if (!token.scaled && (labelled(token) || !scaling.own) && rule) {
       if ("refuse" in rule || token.value === null || Math.abs(token.value) >= 1e6) return { outcome: READING_FAILURE.scale };
-      value = roundedScale(token.paren && reading.value >= 0 ? Math.abs(token.value) : token.value, rule.factor);
+      value = roundedScale((token.paren || ocrMinus) && reading.value >= 0 ? Math.abs(token.value) : token.value, rule.factor);
       unitSeen = statedScaleUnit(rule.factor);
     }
     // Card F1: a carry per unsold home per month is often a few hundred dollars.
