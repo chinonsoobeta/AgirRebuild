@@ -734,8 +734,33 @@ async function claim(db: Db): Promise<Job | null> {
   return job ?? null;
 }
 
+/** A job that has had all its attempts: its file is marked as failed, and whoever watches the worker is told. */
+async function deadJob(deps: WorkerDeps, job: Job, message: string) {
+  if (job.payload.document_id) {
+    await setStage(deps.db, job.payload.document_id, "read_failed", "Agir could not process this file after several attempts. Retry it, or upload it again.");
+    await queueUnreadReading(deps.db, job.payload.document_id);
+  }
+  deps.log?.({ event: "job.dead", id: job.id, kind: job.kind, error: message });
+}
+
+/**
+ * A job whose lease ran out had a worker that stopped without saying so, perhaps because of this job. One that has had all its attempts is given up on, as
+ * a failed job is: otherwise a file that kills the worker would kill it again every five minutes, forever.
+ */
+async function giveUp(deps: WorkerDeps) {
+  const message = "The worker stopped while running this job, on every attempt";
+  const jobs = await deps.db.query<Job>(
+    `update jobs set status = 'dead', last_error = $1, lease_until = null, updated_at = now()
+     where status = 'running' and lease_until < now() and attempts >= max_attempts
+     returning id, kind, payload, attempts, max_attempts`,
+    [message],
+  );
+  for (const job of jobs) await deadJob(deps, job, message);
+}
+
 /** Claim and run one job. Returns false when there was nothing to do. */
 export async function runOnce(deps: WorkerDeps): Promise<boolean> {
+  await giveUp(deps);
   const job = await claim(deps.db);
   if (!job) return false;
   const started = Date.now();
@@ -766,11 +791,8 @@ export async function runOnce(deps: WorkerDeps): Promise<boolean> {
       `update jobs set status = $2, last_error = $3, lease_until = null, run_after = now() + ($4 || ' seconds')::interval, updated_at = now() where id = $1`,
       [job.id, dead ? "dead" : "queued", message, String(2 ** job.attempts)],
     );
-    if (dead && job.payload.document_id) {
-      await setStage(deps.db, job.payload.document_id, "read_failed", "Agir could not process this file after several attempts. Retry it, or upload it again.");
-      await queueUnreadReading(deps.db, job.payload.document_id);
-    }
-    deps.log?.({ event: dead ? "job.dead" : "job.retry", id: job.id, kind: job.kind, error: message });
+    if (dead) await deadJob(deps, job, message);
+    else deps.log?.({ event: "job.retry", id: job.id, kind: job.kind, error: message });
   } finally { clearInterval(renewal); }
   return true;
 }

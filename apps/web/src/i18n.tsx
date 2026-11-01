@@ -687,6 +687,9 @@ const FR_REASONS: [RegExp, string | ((m: RegExpMatchArray) => string)][] = [
   [/^The file is larger than 75 MB\.?$/, "Le fichier dépasse 75 Mo."],
   [/^This PDF is scanned pages with no text layer, and OCR is not available on this machine\. Enter its values by hand, or upload a text PDF\.$/, "Ce PDF est composé de pages numérisées sans couche de texte, et la reconnaissance optique n’est pas disponible sur cette machine. Saisissez ses valeurs à la main ou téléversez un PDF textuel."],
   [/^Agir could not process this file after several attempts\./, "Agir n'a pas pu traiter ce fichier après plusieurs tentatives. Relancez-le ou téléversez-le de nouveau."],
+  [/^This file is too large for Agir to read\. Save the parts that matter in a file of their own, then upload that\.$/, "Ce fichier est trop volumineux pour qu’Agir le lise. Enregistrez les parties utiles dans un fichier à part, puis téléversez celui-ci."],
+  [/^Agir could not open this file\. It may be damaged\. Save it again, then upload it\.$/, "Agir n’a pas pu ouvrir ce fichier. Il est peut-être endommagé. Enregistrez-le de nouveau, puis téléversez-le."],
+  [/^This file has a password, or is in an older format\. Remove the password or save it as a current Excel or Word file, then upload it\.$/, "Ce fichier a un mot de passe ou est dans un ancien format. Retirez le mot de passe ou enregistrez-le comme fichier Excel ou Word récent, puis téléversez-le."],
   [/^Agir could not read this file: (.+)$/, (m) => `Agir n'a pas pu lire ce fichier : ${m[1]}`],
   // API errors.
   [/^Your role in this workspace does not allow this action$/, "Votre rôle dans cet espace ne permet pas cette action"],
