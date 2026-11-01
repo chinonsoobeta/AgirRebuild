@@ -1,14 +1,16 @@
 /// <reference types="node" />
-import { beforeEach, describe, expect, it, vi } from "vitest";
+import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import { createElement } from "react";
 import { renderToStaticMarkup } from "react-dom/server";
 import { FIELD_BY_KEY, TEMPLATES } from "@agir/contracts";
 import { QuickStart } from "../src/components/QuickStart.tsx";
+import { api } from "../src/api";
 import { build, type Lang } from "../src/i18n.tsx";
 
-const state = vi.hoisted(() => ({ template: "multiplex", lang: "en", held: false, booleanIndex: 0, types: [0] as number[] }));
+const state = vi.hoisted(() => ({ template: "multiplex", lang: "en", held: false, booleanIndex: 0, types: [0] as number[], interactive: false, hooks: [] as unknown[], index: 0, nodes: [] as { tag: string; props: Record<string, any> }[] }));
 vi.mock("@tanstack/react-query", () => ({
-  useQuery: () => ({ data: { assumptions: [] } }), useQueryClient: () => ({}), useMutation: () => ({ mutate: () => {}, reset: () => {} }),
+  useQuery: () => ({ data: { assumptions: [] } }), useQueryClient: () => ({ fetchQuery: async () => ({ assumptions: [] }), invalidateQueries: async () => {} }),
+  useMutation: (o: { mutationFn: (b: any) => Promise<any> }) => ({ mutate: (b: unknown) => o.mutationFn(b), reset: () => {} }),
 }));
 vi.mock("@tanstack/react-router", async () => {
   const { createElement } = await import("react");
@@ -22,6 +24,11 @@ vi.mock("react", async (original) => {
   const react = await original<typeof import("react")>();
   return { ...react, useState: (initial: unknown) => {
     const [value, set] = react.useState(initial);
+    if (state.interactive) {
+      const n = state.index++;
+      if (!(n in state.hooks)) state.hooks[n] = initial === "" ? state.template : n === 1 ? state.held : initial;
+      return [state.hooks[n], (v: unknown) => { state.hooks[n] = typeof v === "function" ? (v as (x: unknown) => unknown)(state.hooks[n]) : v; }];
+    }
     if (initial === "") return [state.template, set];
     if (initial === false && state.booleanIndex++ === 0) return [state.held, set];
     if (Array.isArray(initial) && initial.length === 1 && initial[0] === 0) return [state.types, set];
@@ -29,7 +36,19 @@ vi.mock("react", async (original) => {
   } };
 });
 
-const render = () => { state.booleanIndex = 0; return renderToStaticMarkup(createElement(QuickStart, { dealId: "d1" })); };
+vi.mock("../src/api", async original => {
+  const real = await original<typeof import("../src/api")>();
+  return { ...real, api: { ...real.api, post: vi.fn(async () => ({})) } };
+});
+vi.mock("react/jsx-dev-runtime", async original => {
+  const runtime = await original<typeof import("react/jsx-dev-runtime")>();
+  return { ...runtime, jsxDEV: (...args: Parameters<typeof runtime.jsxDEV>) => {
+    if (typeof args[0] === "string" && ["form", "input"].includes(args[0])) state.nodes.push({ tag: args[0], props: args[1] as Record<string, any> });
+    return runtime.jsxDEV(...args);
+  } };
+});
+afterEach(() => { state.interactive = false; vi.unstubAllGlobals(); });
+const render = () => { state.booleanIndex = 0; state.index = 0; state.nodes = []; return renderToStaticMarkup(createElement(QuickStart, { dealId: "d1" })); };
 const tr = (lang: Lang) => build(lang, () => {});
 
 describe("quick start in the design's layout (card W6)", () => {
@@ -137,4 +156,41 @@ describe("quick start in the design's layout (card W6)", () => {
     expect(html).toContain(t("quickstart.thenNote"));
     expect(html).not.toMatch(/class="(panel|h-section|input-affix)[ "]/);
   });
+});
+
+
+describe("Card 183 refused QuickStart entries", () => {
+  beforeEach(() => { state.interactive = true; state.hooks = []; vi.clearAllMocks(); });
+  for (const lang of ["en", "fr"] as const) {
+    it.each(["unit_count-0", "unit_rent_monthly-0", "refinance_month", "senior_io_months", "senior_loan_amount"])(`shows the error and posts nothing for %s in ${lang}`, async field => {
+      state.lang = lang;
+      state.held = true;
+      state.template = field === "senior_loan_amount" ? "townhomes" : "apartment";
+      render();
+      const tpl = TEMPLATES.find(x => x.key === state.template)!;
+      const values: Record<string, string> = { reason: "The sponsor supplied these values", accept: "on", "name-0": "Studio", refinance_and_hold: "1", refinance_amount: "1000000" };
+      for (const q of tpl.questions) {
+        if (q.optional && q.field !== "refinance_amount") continue;
+        const def = FIELD_BY_KEY.get(q.field)!;
+        values[q.repeatable ? `${q.field}-0` : q.field] = String(Math.max(def.min ?? 0, 1));
+      }
+      values["unit_count-0"] = "5";
+      values[field] = "1e9";
+      vi.stubGlobal("FormData", class {
+        get(k: string) { return values[k] ?? null; }
+        entries() { return Object.entries(values)[Symbol.iterator](); }
+      });
+      const form = state.nodes.find(n => n.tag === "form")!;
+      form.props.onChange({ currentTarget: {} });
+      if (field === "unit_count-0") expect(render()).toContain(tr(lang).t("quickstart.totalNone", { min: tpl.minUnits, max: tpl.maxUnits }));
+      if (field === "senior_loan_amount" || field === "senior_io_months" || field === "refinance_month") {
+        state.nodes.find(n => n.tag === "input" && n.props.name === field)!.props.onChange({ currentTarget: { value: "1e9", form: {} } });
+        if (field === "senior_loan_amount") expect(render()).toContain('name="senior_rate_pct"');
+      }
+      form.props.onSubmit({ preventDefault() {}, currentTarget: {} });
+      await Promise.resolve();
+      expect(api.post).not.toHaveBeenCalled();
+      expect(render()).toContain(lang === "en" ? "Enter a number." : "Saisissez un nombre.");
+    });
+  }
 });

@@ -1128,3 +1128,18 @@ it("Card 174 translates the financing refusal", () => {
   expect(translateMessage("The AI read a financing figure as other costs; interest and lender fees are computed by Agir or belong to the stated interest reserve"))
     .toBe("L’IA a lu un montant de financement comme autres coûts\u00a0; les intérêts et les frais du prêteur sont calculés par Agir ou relèvent de la réserve d’intérêts déclarée");
 });
+
+
+describe("Card 183 plain typed numbers", () => {
+  const common = [["1250000", 1250000], ["5.25%", 5.25], ["0", 0], ["-5", -5], ["+5", 5], [".5", .5], ["5.", 5]] as const;
+  for (const lang of ["en", "fr"] as const) {
+    const localized = lang === "en" ? [["1,250,000", 1250000], ["$1,250,000", 1250000]] as const
+      : [["1 250 000", 1250000], ["5,25", 5.25], ["1 250 000,50 $", 1250000.5]] as const;
+    it.each([...common, ...localized])(`accepts %s in ${lang}`, (raw, value) => {
+      expect(build(lang, () => {}).f.parse(raw)).toBe(value);
+    });
+    it.each(["1e9", "1E9", "0x10", "0b11", "0o7", "Infinity", "NaN", "1.2.3", "12abc", "", "   "])(`refuses %j in ${lang}`, raw => {
+      expect(() => build(lang, () => {}).f.parse(raw)).toThrow(lang === "en" ? "Enter a number." : "Saisissez un nombre.");
+    });
+  }
+});
