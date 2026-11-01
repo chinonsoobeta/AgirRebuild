@@ -128,3 +128,20 @@ test("a person-set deal source counts, and the first matching kind wins within o
   expect((await row(document)).read_role).toBe("term sheet (deal source, set by a person)");
   expect(assumption(await review(id), "senior_loan_amount").usualSource).toEqual({ value: 5000000, kind: "commitment letter" });
 });
+
+test("two files can share a name: the hint follows the file that stated the figure", async () => {
+  const lent = await deal();
+  await upload(lent, "same.txt", paper("Agreement of Purchase and Sale", "Closing takes place on the agreed date."));
+  await upload(lent, "same.txt", paper("Project notes", "Land cost: $900,000"));
+  await upload(lent, "other.txt", paper("Project notes for the lender", "Land cost: $830,000"));
+  await settle();
+  const notLent = assumption(await review(lent), "land_cost");
+  expect(notLent.status).toBe("conflicting");
+  expect(notLent.usualSource).toBeNull();
+
+  const shared = await deal();
+  await upload(shared, "same.txt", paper("Agreement of Purchase and Sale", "Land cost: $830,000"));
+  await upload(shared, "same.txt", paper("Project notes", "Land cost: $900,000"));
+  await settle();
+  expect(assumption(await review(shared), "land_cost").usualSource).toEqual({ value: 830000, kind: "purchase agreement" });
+});
