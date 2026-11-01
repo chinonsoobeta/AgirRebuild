@@ -22,7 +22,7 @@ async function ocrWorker() {
   const worker = await createWorker("eng+fra", 1, { langPath: await languagePath(), gzip: true, cacheMethod: "none", errorHandler: () => {} });
   try {
     await worker.setParameters({
-      tessedit_pageseg_mode: "3" as PSM, // Automatic layout keeps table items and amounts together.
+      tessedit_pageseg_mode: "3" as PSM, // Automatic layout finds a page's columns, turned pages and the table rows a single block drops.
       user_defined_dpi: "300", // A known resolution lets Tesseract remove thick table rules.
     });
     return worker;
@@ -31,12 +31,43 @@ async function ocrWorker() {
 
 async function recognizeLines(worker: Awaited<ReturnType<typeof ocrWorker>>, bytes: Uint8Array): Promise<OcrPage["lines"]> {
   const { data } = await worker.recognize(Buffer.from(bytes), {}, { blocks: true });
-  const lines: OcrPage["lines"] = [];
+  const lines: SeenLine[] = [];
   for (const block of data.blocks ?? []) for (const para of block.paragraphs) for (const line of para.lines) {
     const text = line.text.trim();
-    if (text) lines.push({ text, confidence: line.confidence });
+    if (text) lines.push({ text, confidence: line.confidence, box: line.bbox, baseline: line.baseline });
   }
-  return lines;
+  return joinTableRows(lines);
+}
+
+type Box = { x0: number; y0: number; x1: number; y1: number };
+type SeenLine = OcrPage["lines"][number] & { box?: Box; baseline?: Box };
+
+/** Automatic layout can list a table's names and then its amounts. A line of figures goes back beside the short line at its height, as a PDF's text layer has it. */
+function joinTableRows(lines: SeenLine[]): OcrPage["lines"] {
+  const figures = lines.filter(l => l.box && /\d/.test(l.text) && !/\p{L}{4,}/u.test(l.text)).sort((a, b) => a.box!.x0 - b.box!.x0);
+  // A page photographed or scanned slightly crooked: heights are compared along the page's own tilt.
+  const slopes = lines.flatMap(l => l.baseline && l.baseline.x1 - l.baseline.x0 >= 200 ? [(l.baseline.y1 - l.baseline.y0) / (l.baseline.x1 - l.baseline.x0)] : []).sort((a, b) => a - b);
+  const tilt = slopes[Math.floor(slopes.length / 2)] ?? 0;
+  const joined = new Set<SeenLine>();
+  for (const figure of figures) {
+    const at = figure.box!;
+    let left: SeenLine | undefined;
+    for (const line of lines) {
+      const box = line.box;
+      // A page read sideways has tall line boxes, which stand beside everything.
+      if (!box || line === figure || joined.has(line) || box.x1 > at.x0 || box.x1 - box.x0 <= box.y1 - box.y0) continue;
+      const drift = (box.y0 + box.y1) / 2 + tilt * ((at.x0 + at.x1) / 2 - (box.x0 + box.x1) / 2) - (at.y0 + at.y1) / 2;
+      if (Math.abs(drift) * 2 > Math.min(box.y1 - box.y0, at.y1 - at.y0)) continue;
+      if (!left || box.x1 > left.box!.x1) left = line;
+    }
+    // Lines this sure are kept whatever the page's confidence, so joining never changes what is kept.
+    if (!left || (left.text.match(/\p{L}{2,}/gu) ?? []).length > 8 || left.confidence < 60 || figure.confidence < 60) continue;
+    left.confidence = (left.confidence * left.text.length + figure.confidence * figure.text.length) / (left.text.length + figure.text.length);
+    left.text += " " + figure.text;
+    left.box = { ...left.box!, x1: at.x1 };
+    joined.add(figure);
+  }
+  return lines.filter(l => !joined.has(l)).map(({ text, confidence }) => ({ text, confidence }));
 }
 
 function pageConfidence(lines: OcrPage["lines"]) {
