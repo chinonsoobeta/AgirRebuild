@@ -746,7 +746,7 @@ export function Review({ dealId }: { dealId: string }) {
             {a.material && materialLink}
           </td>
           <td className="r num">{f.value(a.value, a.unit)}</td>
-          <td>{docs.size > 1 ? t("review.agree", { n: docs.size }) : a.sources[0]?.document_name}</td>
+          <td>{a.sourceKind === "analyst" ? t("review.enteredByShort", { who: a.decidedBy ?? "—" }) : docs.size > 1 ? t("review.agree", { n: docs.size }) : a.sources[0]?.document_name}</td>
           <td>
             {editable && !open && (
               <div className="acts">
@@ -766,7 +766,15 @@ export function Review({ dealId }: { dealId: string }) {
       </Fragment>
     );
   };
-  const sourceOf = (a: Assumption) => a.sources.length
+  const sourceOf = (a: Assumption) => a.sourceKind === "analyst"
+    ? <>
+        <p className="small muted">{t("review.enteredByShort", { who: a.decidedBy ?? "—" })}</p>
+        {a.sources.length > 0 && <>
+          <p className="small muted">{t("review.documentSays")}</p>
+          {distinctSources(a.sources).slice(0, 4).map((src, n) => <Quote key={n} s={src} currency={dealCurrency} />)}
+        </>}
+      </>
+    : a.sources.length
     ? distinctSources(a.sources).slice(0, 4).map((src, n) => <Quote key={n} s={src} currency={dealCurrency} fieldKey={a.sourceKind === "document" ? a.fieldKey : undefined} />)
     : <p className="small muted">{a.tableSource ? tableSourceLabel(a.tableSource, lang) : a.sourceKind === "default" ? t("review.namedDefault") : t("review.enteredByShort", { who: a.decidedBy ?? "—" })}</p>;
   const staleNote = stale && (
@@ -827,7 +835,7 @@ export function Review({ dealId }: { dealId: string }) {
   const aiChecks = r.todo.items.map((item, index) => ({ item, index })).filter(({ item }) => item.kind === "ai_check");
   // QA run 2 (breaker N7): an optional line whose stated value was rejected is not "not found"; it is listed with the reason.
   const rejectedOf = (m: { fieldKey: string; itemKey?: string | null }) =>
-    rejected.find((a) => a.fieldKey === m.fieldKey && (a.itemKey ?? null) === (m.itemKey ?? null) && fromDocument(a) && a.value !== null);
+    rejected.find((a) => a.fieldKey === m.fieldKey && (a.itemKey ?? null) === (m.itemKey ?? null) && a.sourceKind === "document" && fromDocument(a) && a.value !== null);
   const rejectedStated = r.notFound.flatMap((m) => { const a = rejectedOf(m); return a ? [{ m, a }] : []; });
   const notFound = r.notFound.filter((m) => !rejectedOf(m));
   const hasMissingSection = r.missing.length > 0 || r.notFound.length > 0 || (r.tableNotices ?? []).length > 0;
