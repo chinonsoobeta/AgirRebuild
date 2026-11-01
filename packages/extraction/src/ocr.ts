@@ -127,7 +127,8 @@ async function recognizePage(worker: Awaited<ReturnType<typeof ocrWorker>>, byte
 /** Local OCR only. Every resulting value still needs a person's check against the scanned page. */
 export async function ocrPdf(bytes: Uint8Array, pages?: number[]): Promise<{ pages: OcrPage[]; failed: number[] }> {
   const pdfjs = await import("pdfjs-dist/legacy/build/pdf.mjs");
-  const task = pdfjs.getDocument({ data: new Uint8Array(bytes), useSystemFonts: true });
+  // JBIG2 and JPEG 2000 scans decode only through pdf.js's bundled wasm; without it those pages render blank.
+  const task = pdfjs.getDocument({ data: new Uint8Array(bytes), useSystemFonts: true, wasmUrl: `${join(dirname(require.resolve("pdfjs-dist/package.json")), "wasm")}/` });
   try {
     const doc = await task.promise;
     if (!pages && doc.numPages > MAX_OCR_PAGES) throw new Error("This scanned PDF has more than 50 pages; Agir reads scans of up to 50 pages. Split it, or enter its values by hand.");
