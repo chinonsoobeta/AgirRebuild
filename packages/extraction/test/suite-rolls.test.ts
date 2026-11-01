@@ -216,6 +216,12 @@ describe("card 193: a suite-by-suite roll written as plain lines", () => {
     expect(whole(5)?.note).toMatch(/^Please check/);
   });
 
+  test("a line after the last suite that starts with a number is not taken as a suite", async () => {
+    const r = await read("Suite # Type Rent", "101 1 bedroom $1,400", "102 1 bedroom $1,400", "500 parking stalls at $4,000");
+    expect(counts(r)).toEqual([["1BR", 2, SUITE_RULE]]);
+    expect(shown(r, SUITE_NOTE)).toEqual([]);
+  });
+
   test("a roll stating yearly rents reads none of them as monthly", async () => {
     const r = await read("Suite # Type Annual Rent", "101 1 bedroom $16,800", "102 1 bedroom $16,800", "103 2 bedroom $21,600", "Total $55,200");
     expect(counts(r)).toEqual([["1BR", 2, SUITE_RULE], ["2BR", 1, SUITE_RULE]]);

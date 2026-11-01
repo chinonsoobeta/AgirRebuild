@@ -1640,8 +1640,8 @@ function namedRow(row: Cell[], table: Table, result: ExtractionResult): boolean 
 }
 
 /** Rents paired to names use only the mix stated in this document. */
-function pairedProseRents(doc: NormalizedDocument, result: ExtractionResult, excluded: boolean[]) {
-  const rentLines = doc.lines.filter((l,i) => !excluded[i] && RENT_WORD_RE.test(fold(l.text)) && /\$/.test(l.text) && /\([^)]*\)|\b(for|pour|at|a)\b/.test(fold(l.text)));
+function pairedProseRents(doc: NormalizedDocument, result: ExtractionResult, excluded: boolean[], suiteLines: Set<number>) {
+  const rentLines = doc.lines.filter((l,i) => !excluded[i] && !suiteLines.has(i) && RENT_WORD_RE.test(fold(l.text)) && /\$/.test(l.text) && /\([^)]*\)|\b(for|pour|at|a)\b/.test(fold(l.text)));
   if (!rentLines.length) return;
   const clean = (s: string) => s.trim().replace(/^(?:the|les?|la|pour|and|et)\s+/i, "").replace(/\s+(?:units?|homes?|suites?|apartments?|flats?|dwellings?|doors?|logements?|appartements?|unit[eé]s?)\b/gi, "").replace(/[.;:]+$/, "").trim();
   const nameKey = (s: string) => fold(canonicalItem(clean(s))).replace(/\b([\p{L}-]+)s\b/gu,"$1").replace(/\s+/g," ");
@@ -1652,7 +1652,7 @@ function pairedProseRents(doc: NormalizedDocument, result: ExtractionResult, exc
   const words: Record<string, number> = { ...PROSE_WORD_COUNTS, eleven: 11, twelve: 12, onze: 11, douze: 12 };
   const re = new RegExp(String.raw`\b(\d+|${Object.keys(words).join("|")})\s+(?:(x|×)\s+)?([^,;().]+?)(?=\s+(?:and|et)\s+|[,;().]|$)`, "gi");
   for (const [i,l] of doc.lines.entries()) {
-    if (excluded[i] || OTHER_RENT_RE.test(fold(l.text)) || rentLines.includes(l) || rangeEnds(l.text, tokenize(l.text,result.format)).size) continue;
+    if (excluded[i] || suiteLines.has(i) || OTHER_RENT_RE.test(fold(l.text)) || rentLines.includes(l) || rangeEnds(l.text, tokenize(l.text,result.format)).size) continue;
     const counts: Candidate[] = [];
     for (const m of l.text.matchAll(re)) {
       const n = /^\d+$/.test(m[1]!) ? Number(m[1]) : words[fold(m[1]!)];
@@ -2593,6 +2593,15 @@ function comparisonHeading(lines: string[], format: DocumentFormat): string {
   return heading.split(/\s+/).length <= 10 && /\b(comparisons?|comparables?|comps?|survey|neighbou?rs?|voisins?|anciens? locataires?)\b/i.test(heading) && !endsSentence(heading) ? heading : "";
 }
 
+/** "3 480" in an English document is two numbers, not one with a space group: split what the tokenizer refused. */
+function splitTokens(text: string, format: DocumentFormat): NumberToken[] {
+  return tokenize(text, format).flatMap((t) =>
+    t.value === null && /\s/.test(t.raw)
+      ? [...t.raw.matchAll(/\S+/g)].flatMap((w) => tokenize(w[0], format).map((x) => ({ ...x, start: t.start + w.index! + x.start, end: t.start + w.index! + x.end })))
+      : [t],
+  );
+}
+
 /**
  * Tables written as lines: a header line with no numbers whose words give a rent-roll or budget column set,
  * then one line per row. A row's values are the last run of consecutive numbers, as many as the table has numeric
@@ -2600,7 +2609,7 @@ function comparisonHeading(lines: string[], format: DocumentFormat): string {
  * Each table is rebuilt as a Table, so the same finders read it as read a spreadsheet's. Returns the table with
  * the lines after it (where a note may say what the rent column is per), and the lines it consumed.
  */
-function textTables(doc: NormalizedDocument, format: DocumentFormat, scopes: (Scope | undefined)[], excluded: boolean[]): { tables: { table: Table; notes: string[]; scope: Scope | undefined }[]; used: Set<number> } {
+function textTables(doc: NormalizedDocument, format: DocumentFormat, scopes: (Scope | undefined)[], excluded: boolean[]): { tables: { table: Table; notes: string[]; scope: Scope | undefined }[]; used: Set<number>; suiteLines: Set<number>; suiteOther: Omit<Candidate, "region">[] } {
   const out: { table: Table; notes: string[]; scope: Scope | undefined }[] = [];
   const used = new Set<number>();
   const lines = doc.lines;
@@ -2667,12 +2676,7 @@ function textTables(doc: NormalizedDocument, format: DocumentFormat, scopes: (Sc
       if (direct && direct.length === cols.length) {
         rows.push(direct); used.add(j); continue;
       }
-      // "3 480" in an English document is two numbers, not one with a space group: split what the tokenizer refused.
-      const tokens = tokenize(line.text, format).flatMap((t) =>
-        t.value === null && /\s/.test(t.raw)
-          ? [...t.raw.matchAll(/\S+/g)].flatMap((w) => tokenize(w[0], format).map((x) => ({ ...x, start: t.start + w.index! + x.start, end: t.start + w.index! + x.end })))
-          : [t],
-      );
+      const tokens = splitTokens(line.text, format);
       // The last maximal run of numbers separated only by spaces, when it is exactly as long as the numeric columns.
       const runs: NumberToken[][] = [];
       for (const t of tokens) {
@@ -2700,7 +2704,192 @@ function textTables(doc: NormalizedDocument, format: DocumentFormat, scopes: (Sc
     out.push({ table: { name: `${comparisonHeading(lines.slice(0, i).map(l => l.text), format)} Table at ${head.location}`, rows: [cols, ...rows] }, notes: lines.slice(j, j + 4).map((l) => l.text), scope: scopes[i] });
     i = j - 1;
   }
-  return { tables: out, used };
+  return { tables: out, used, ...plainSuiteRolls(doc, format, scopes, excluded, used, out) };
+}
+
+// ---- A suite-by-suite roll written as plain lines (card 193) ---------------------------------------------------------
+const SUITE_LINE_NOTE = "A suite's line in a rent roll; its other figures are shown, not read";
+const SUITE_LINE_RE = /^(?:\*{1,2}\s*)?(\d{1,4}[A-Za-z]?|[A-Za-z]{1,2}-?\d{1,4})(?:\s*\*{1,2})?(?:\s*\([^)]{1,24}\))?(?:\s+(.*))?$/;
+const SUITE_WORD_RE = /^(?:suite|apt|apartment|app|logement|unit)$/;
+const COUNT_TOTAL_RE = /^\d+\s+(?:units|suites|logements|appartements)\b/;
+const NOT_RENT_COLUMN_RE = /rent roll|rent\s?\/\s?sf|rent psf|rent per sf|rent increase|last rent|total rent|market rent|loyer du marche/g;
+
+/** A line's text for matching only: a recognized scan leaves stray pipes. */
+const suiteText = (text: string) => text.replace(/\|/g, " ").replace(/\s+/g, " ").trim();
+
+/** A type at the start of the text: `wholeUnitType` on its first words, or that type with "+ den" or "Jr.", or "N 1/2". The rest is the suite's figures. */
+function leadingSuiteType(text: string): { type: string; tail: string } | null {
+  const jr = /^jr\.?\s+/i.exec(text)?.[0] ?? "";
+  const s = text.slice(jr.length);
+  const half = /^(\d) 1\/2(?=\s|$)/.exec(s);
+  let type = half && wholeUnitType(`${half[1]}½`) ? `${half[1]}½` : null;
+  let at = half?.[0].length ?? 0;
+  if (!type) {
+    // The longest first, so "bachelor suite" is not read as "bachelor".
+    for (const w of [...s.matchAll(/\S+/g)].slice(0, 4).reverse()) {
+      if (!wholeUnitType(s.slice(0, w.index + w[0].length))) continue;
+      at = w.index + w[0].length;
+      type = s.slice(0, at);
+      break;
+    }
+  }
+  if (!type) return null;
+  const den = /^\s*\+\s*den\b/i.exec(s.slice(at))?.[0];
+  return { type: `${jr ? "Jr. " : ""}${type}${den ? " + den" : ""}`, tail: s.slice(at + (den?.length ?? 0)) };
+}
+
+/** A line that opens with a suite id; `type` is null when no known type follows the id. */
+function suiteLine(text: string): { id: string; rest: string; type: string | null; tail: string } | null {
+  const m = SUITE_LINE_RE.exec(suiteText(text));
+  if (!m) return null;
+  const rest = m[2] ?? "";
+  const found = leadingSuiteType(rest);
+  return { id: m[1]!, rest, type: found?.type ?? null, tail: found?.tail ?? rest };
+}
+
+/** A header naming a suite column and then a type column. A suite word right before "type" names the type column ("Unit Type"); plural "units" is a count column. */
+function isSuiteHeader(text: string): boolean {
+  const clean = suiteText(text);
+  if (!clean || /[.:;!?,]$/.test(clean)) return false;
+  const words = fold(clean).split(" ").map((w) => w.replace(/\.$/, ""));
+  if (words.length > 24) return false;
+  const at = words.findIndex((w, k) => SUITE_WORD_RE.test(w) && words[k + 1] !== "type");
+  return at >= 0 && words.indexOf("type", at + 1) > at;
+}
+
+const isSuiteTotal = (text: string) => ROLL_TOTAL_RE.test(fold(suiteText(text))) || COUNT_TOTAL_RE.test(fold(suiteText(text)));
+
+/**
+ * A second pass over the lines no other table took, for a roll with one line per suite: a suite's number is never a count.
+ * Its suites become a table for `fromRentRoll`, which counts them by type. Its other figures come back to be shown.
+ * `excluded` is updated: a roll's own header under a "not part of the deal" heading looks like the next heading, and must not end that section.
+ */
+function plainSuiteRolls(doc: NormalizedDocument, format: DocumentFormat, scopes: (Scope | undefined)[], excluded: boolean[], used: Set<number>, out: { table: Table; notes: string[]; scope: Scope | undefined }[]): { suiteLines: Set<number>; suiteOther: Omit<Candidate, "region">[] } {
+  const lines = doc.lines;
+  const suiteLines = new Set<number>();
+  const suiteOther: Omit<Candidate, "region">[] = [];
+  const open = (k: number) => k < lines.length && !excluded[k] && !used.has(k);
+  const parsed = (k: number) => (open(k) ? suiteLine(lines[k]!.text) : null);
+  const show = (t: NumberToken, k: number, note: string) => {
+    suiteOther.push({ fieldKey: null, itemKey: null, value: t.value, raw: t.raw.trim(), unitSeen: t.unit, location: lines[k]!.location, context: suiteText(lines[k]!.text).slice(0, 240), rule: "line:suite-row", note });
+  };
+
+  /** No header: three or more suite lines in a row, ids rising, a type repeating. A summary by type never repeats a type, and its counts do not climb. */
+  const startsHeaderless = (start: number) => {
+    const seen: { id: string; type: string }[] = [];
+    for (let k = start; k < lines.length; k++) {
+      if (!lines[k]!.text.trim()) continue;
+      const l = parsed(k);
+      if (!l?.type) break;
+      const last = seen.at(-1);
+      if (last && last.id.toUpperCase().localeCompare(l.id.toUpperCase(), undefined, { numeric: true }) >= 0) break;
+      seen.push({ id: l.id, type: canonicalItem(l.type) });
+    }
+    return seen.length >= 3 && new Set(seen.map((x) => x.type)).size < seen.length;
+  };
+
+  /** Whether the words around the header name exactly one current rent column, stated by the month or with no basis. */
+  const oneRentColumn = (header: number) => {
+    const zone = [lines[header]!.text];
+    for (const step of [-1, 1]) {
+      let taken = 0;
+      for (let k = header + step; taken < 2 && k >= 0 && k < lines.length; k += step) {
+        if (!lines[k]!.text.trim()) continue;
+        if (excluded[k] || suiteLine(lines[k]!.text)?.type) break;
+        zone.push(lines[k]!.text);
+        taken++;
+      }
+    }
+    const words = fold(zone.join(" ")).replace(NOT_RENT_COLUMN_RE, " ");
+    // The table's rent column is read by the month, so a roll that states a yearly rent is shown, not read.
+    return (words.match(/\b(?:rent|loyer)s?\b/g) ?? []).length === 1 && !ANNUAL_RE.test(words);
+  };
+
+  for (let i = 0; i < lines.length; i++) {
+    if (!open(i) || !lines[i]!.text.trim()) continue;
+    const header = isSuiteHeader(lines[i]!.text) ? i : null;
+    let first = -1;
+    if (header !== null) {
+      for (let k = i + 1; k <= i + 6 && open(k) && !isSuiteTotal(lines[k]!.text); k++) {
+        if (parsed(k)?.type) { first = k; break; }
+      }
+    } else if (startsHeaderless(i)) first = i;
+    if (first < 0) continue;
+
+    const rows: { at: number; id: string; type: string; tail: string }[] = [];
+    const strays: number[] = [];
+    let pending: number[] = [];
+    let total = -1;
+    let misses = 0;
+    for (let k = first; open(k); k++) {
+      if (!lines[k]!.text.trim()) continue;
+      if (isSuiteTotal(lines[k]!.text)) { total = k; break; }
+      const l = suiteLine(lines[k]!.text);
+      if (l?.type) {
+        rows.push({ at: k, id: l.id, type: l.type, tail: l.tail });
+        strays.push(...pending);
+        pending = [];
+        misses = 0;
+        continue;
+      }
+      // A suite id with no known type inside the run is a suite Agir cannot name; one after the last suite may be anything, and stays with the prose reader.
+      if (l) pending.push(k);
+      if (++misses > 6) break;
+    }
+    if (total >= 0) strays.push(...pending);
+    const last = total >= 0 ? total : rows.at(-1)!.at;
+
+    // The line above the run may be the roll's own column line ("Unit Type Rent"), which looks like a heading and so ended a section marked not part of the deal.
+    let columns = header ?? first - 1;
+    while (header === null && columns > 0 && !lines[columns]!.text.trim()) columns--;
+    if (excluded[columns - 1] && (header !== null || /\btype\b/i.test(lines[columns]!.text))) {
+      for (let k = columns; k <= last; k++) excluded[k] = true;
+      i = last;
+      continue;
+    }
+
+    const figures = new Map(rows.map((r) => [r.at, splitTokens(r.tail, format)]));
+    const firstMoney = (at: number) => figures.get(at)!.find((t) => t.currency);
+    const totalTokens = total >= 0 ? splitTokens(suiteText(lines[total]!.text), format) : [];
+    let rents = new Map<number, NumberToken>();
+    if (header !== null && oneRentColumn(header)) {
+      const money = rows.filter((r) => firstMoney(r.at)).length * 2 > rows.length;
+      for (const r of rows) {
+        const t = money ? firstMoney(r.at) : total >= 0 ? figures.get(r.at)![0] : undefined;
+        if (t && t.value !== null) rents.set(r.at, t);
+      }
+      if (total >= 0) {
+        const sum = [...rents.values()].reduce((n, t) => n + t.value!, 0);
+        if (!totalTokens.some((t) => t.value !== null && t.unit !== "units" && Math.abs(t.value - sum) <= 1)) rents = new Map();
+      }
+    }
+
+    const ref = lines[header ?? first]!.location;
+    const table: Table = {
+      name: `${comparisonHeading(lines.slice(0, header ?? first).map((l) => l.text), format)} Table at ${ref}`,
+      rows: [
+        ["Suite", "Type", "Rent ($)"].map((text) => ({ text, ref })),
+        ...rows.map((r) => {
+          const rent = rents.get(r.at);
+          return [r.id, r.type, rent ? r.tail.slice(rent.start, rent.end) : ""].map((text) => ({ text, ref: lines[r.at]!.location }));
+        }),
+      ],
+    };
+    out.push({ table, notes: [], scope: scopes[header ?? first] });
+
+    for (const r of rows) for (const t of figures.get(r.at)!) if (t !== rents.get(r.at)) show(t, r.at, SUITE_LINE_NOTE);
+    for (const k of strays) for (const t of splitTokens(suiteLine(lines[k]!.text)!.rest, format)) show(t, k, SUITE_LINE_NOTE);
+    for (const t of totalTokens) {
+      const differs = t.unit === "units" && t.value !== null && t.value !== rows.length;
+      show(t, total, differs ? `The roll states ${t.value} units but ${rows.length} suites were counted; check the counts by type` : ROLL_SUMMARY_NOTE);
+    }
+    for (const k of [...(header !== null ? [header] : []), ...rows.map((r) => r.at), ...strays, ...(total >= 0 ? [total] : [])]) {
+      used.add(k);
+      suiteLines.add(k);
+    }
+    i = last;
+  }
+  return { suiteLines, suiteOther };
 }
 
 /** A text with every figure that lies wholly inside a struck range taken out; each is shown with `other`, never read. */
@@ -3058,6 +3247,7 @@ export function extractCandidates(doc0: NormalizedDocument, options?: { role?: "
   const scopes = lineScopes(doc, result.format, rankIn(doc), regions);
   const excluded = excludedLines(doc, result.format);
   const text = textTables(doc, result.format, scopes, excluded);
+  for (const o of text.suiteOther) result.other.push({ region: regionAt(result, o.location, o.rule), ...o });
   let rentHeading: string | null = null;
   const lineIndex = new Map(doc.lines.map((l, i) => [l.location, i]));
   for (const para of paragraphs(doc, text.used, scopes, excluded)) {
@@ -3133,7 +3323,7 @@ export function extractCandidates(doc0: NormalizedDocument, options?: { role?: "
     if (!markedNotPart(fold(t.name).replace(new RegExp(named, "g"), " "))) for (const o of result.other.slice(beforeOther)) if (o.note === NOT_PART_NOTE) o.note = note;
     result.candidates.splice(before).forEach((c) => result.other.push({ ...c, fieldKey: null, itemKey: null, note }));
   }
-  pairedProseRents(doc, result, excluded);
+  pairedProseRents(doc, result, excluded, text.suiteLines);
   commercialLines(doc, result, text.used, excluded);
   // Apply ownership to every revenue path, including prose, labelled rows and tables.
   result.candidates = result.candidates.filter((c) => {
