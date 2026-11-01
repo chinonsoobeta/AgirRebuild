@@ -39,9 +39,9 @@ async function pdf(mixed = true, blank = false, picturePages = 1) {
   }
   return doc.save();
 }
-async function upload(bytes: Uint8Array) {
+async function upload(bytes: Uint8Array, name = "picture.pdf") {
   const deal = (await call("POST", `/api/workspaces/${ws}/deals`, { name: "Invented picture deal", assetType: "Multifamily" })).id;
-  const document = await call("PUT", `/api/deals/${deal}/documents?name=picture.pdf`, undefined, bytes);
+  const document = await call("PUT", `/api/deals/${deal}/documents?name=${encodeURIComponent(name)}`, undefined, bytes);
   return { deal, document };
 }
 const docs = (id: string) => call("GET", `/api/deals/${id}/documents`);
@@ -176,4 +176,97 @@ test("locked PDF explains how to remove the password", async () => {
   const bytes = Buffer.from("JVBERi0xLjMKJeLjz9MKMSAwIG9iago8PAovUHJvZHVjZXIgPGJhZWQxYWIxODQxNDFmOWM2OTI1YTM2MjM3OWVkODAyZDI2YzhkMTMxNzZmOTdjYzgyOGQzMzE5OWIzZjgyMmI+Cj4+CmVuZG9iagoyIDAgb2JqCjw8Ci9UeXBlIC9QYWdlcwovQ291bnQgMQovS2lkcyBbIDQgMCBSIF0KPj4KZW5kb2JqCjMgMCBvYmoKPDwKL1R5cGUgL0NhdGFsb2cKL1BhZ2VzIDIgMCBSCj4+CmVuZG9iago0IDAgb2JqCjw8Ci9UeXBlIC9QYWdlCi9SZXNvdXJjZXMgPDwKPj4KL01lZGlhQm94IFsgMC4wIDAuMCAyMDAgMjAwIF0KL1BhcmVudCAyIDAgUgo+PgplbmRvYmoKNSAwIG9iago8PAovViA1Ci9SIDYKL0xlbmd0aCAyNTYKL1AgNDI5NDk2NzI5MgovRmlsdGVyIC9TdGFuZGFyZAovTyA8ZGM0Y2UzNjY3ZDUzOTMxNDcwYTM0OTRkNjU0NTZlYzIyMmZjMzg1Mzk1MDljNmE3ZTZhN2IyODk0ZmU1ZTMzYjJhNjIyZjFlMWRhYTY1ZWU4ZDA1NzEwMmJiZjAxZDI3PgovVSA8NGRlMjYzZDg0ZWMyYTcyYWRiZDkzMGJlNTBhNWU1ODkyOWQxOTcxZjc5NjlkYWFiMmU2ODlkMjY0YWYwOWZiYjZmNzE2NzZmMDBhYmE1MDFjOTU1ZWE2NmQwMDU3MWNlPgovQ0YgPDwKL1N0ZENGIDw8Ci9BdXRoRXZlbnQgL0RvY09wZW4KL0NGTSAvQUVTVjMKL0xlbmd0aCAzMgo+Pgo+PgovU3RtRiAvU3RkQ0YKL1N0ckYgL1N0ZENGCi9PRSA8NTQzMzFiYjQzMWI5YWZiZDA3NDNmMzcxOGZkMDhhODM5NGQxMDgxNWMzMzczZmVkNTNiYmU4Zjg3ZGY2MmMzNj4KL1VFIDw5NDY3YjNiODk0ZjNlNjVhOTVlMTgxNjYwZjgwMjI1MjVmZmM4OTY0ZmEwYTM0ZTIzZTUwN2RkODc3ZjA4YTI5PgovUGVybXMgPDBiNjU2NTA5ZjBkNzAwYzIwMWFjZGU0M2UxYmE1NTZhPgo+PgplbmRvYmoKeHJlZgowIDYKMDAwMDAwMDAwMCA2NTUzNSBmIAowMDAwMDAwMDE1IDAwMDAwIG4gCjAwMDAwMDAxMTMgMDAwMDAgbiAKMDAwMDAwMDE3MiAwMDAwMCBuIAowMDAwMDAwMjIxIDAwMDAwIG4gCjAwMDAwMDAzMTUgMDAwMDAgbiAKdHJhaWxlcgo8PAovU2l6ZSA2Ci9Sb290IDMgMCBSCi9JbmZvIDEgMCBSCi9JRCBbIDwzNTM5NjMzMjMwNjI2MjYxNjU2MzM4MzI2NTMxNjIzNTYzMzYzMzYzNjE2MjY1NjYzNTYxNjY2MTY1NjYzMTMxPiA8MzUzOTYzMzIzMDYyNjI2MTY1NjMzODMyNjUzMTYyMzU2MzM2MzM2MzYxNjI2NTY2MzU2MTY2NjE2NTY2MzEzMT4gXQovRW5jcnlwdCA1IDAgUgo+PgpzdGFydHhyZWYKODcwCiUlRU9GCg==", "base64");
   const { deal } = await upload(bytes); await drain({ db, store });
   expect((await docs(deal))[0]).toMatchObject({ stage: "read_failed", stage_detail: "This PDF is protected by a password. Remove the password and upload it again." });
+});
+
+// Card 181: pictures use the same saved OCR, reader and redaction path as PDF pages.
+const imageRead = "Read by OCR from this picture. Check every value against the picture before approving it.";
+const imageDamaged = "Agir could not open this picture. It may be damaged. Upload it again, or save it as a PDF.";
+function imageBytes(format: "png" | "jpeg" = "png") {
+  const canvas = createCanvas(816, 1056), ctx = canvas.getContext("2d");
+  ctx.fillStyle = "white"; ctx.fillRect(0, 0, 816, 1056); ctx.fillStyle = "black"; ctx.font = "32px sans-serif";
+  ctx.fillText("Exit cap rate 5.5%", 55, 140); ctx.fillText("Contact test@example.com", 55, 210);
+  return format === "png" ? canvas.toBuffer("image/png") : canvas.toBuffer("image/jpeg");
+}
+test("real PNG upload, OCR provenance, saved text and fake AI reader", async () => {
+  const { deal } = await upload(imageBytes(), "picture.png");
+  const read = vi.fn(async (_request: ReaderRequest) => ({ readings: [], conflicts: [], not_used: [] }));
+  await drain({ db, store, read });
+  expect((await docs(deal))[0]).toMatchObject({ stage: "extracted", stage_detail: imageRead, needs_ocr: true });
+  expect(read.mock.calls[0]![0].messages[0]!.content).toContain("Exit cap rate 5.5%");
+  const figure = (await review(deal)).assumptions.find((a: any) => a.fieldKey === "exit_cap_rate_pct");
+  expect(figure.value).toBe(5.5); expect(figure.sources[0].ocr).toBe(true);
+  const [row] = await db.query<any>(`select storage_key from documents where deal_id=$1`, [deal]);
+  expect((await loadDocument(store, row.storage_key, "picture.png")).fullText).toContain("5.5%");
+  const [m] = await db.query<any>(`select docs_image from deal_metrics where deal_id=$1`, [deal]);
+  expect(m.docs_image).toBe(1);
+  const totals = await call("GET", `/api/workspaces/${ws}/deal-metrics`);
+  expect(totals.deals.find((d: any) => d.deal_id === deal).docs_image).toBe(1);
+  expect(totals.totals.docs_image).toBeGreaterThanOrEqual(1);
+}, 60_000);
+test.each(["jpg", "tiff"])("fake OCR %s saves once across retries and redacts before AI", async ext => {
+  const { tiffBytes } = await import("@agir/testkit");
+  const bytes = ext === "jpg" ? imageBytes("jpeg") : tiffBytes(2, 2, new Uint8Array(4));
+  const { deal, document } = await upload(bytes, `picture.${ext}`);
+  const ocr = vi.fn(fakeOcr), read = vi.fn(async (_request: ReaderRequest) => ({ readings: [], conflicts: [], not_used: [] }));
+  await drain({ db, store, ocr, read });
+  expect((await docs(deal))[0]).toMatchObject({ stage: "extracted", stage_detail: imageRead, needs_ocr: true });
+  const text = read.mock.calls[0]![0].messages[0]!.content;
+  expect(text).toContain("5.5%"); expect(text).toContain("[redacted email]"); expect(text).not.toContain("test@example.com");
+  for (let n = 0; n < 2; n++) {
+    await db.query(`insert into jobs (kind,payload) values ('extract_document',$1)`, [JSON.stringify({ document_id: document.id })]);
+    await drain({ db, store, ocr, read });
+  }
+  expect(ocr).toHaveBeenCalledTimes(1);
+});
+test.each([
+  ["missing", "This file is a picture, and OCR is not available on this machine. Enter its values by hand, or upload a text PDF."],
+  ["empty", "Agir found no readable text in this picture. Enter its values by hand, or upload a clearer copy."],
+  ["failed", imageDamaged],
+])("picture OCR %s explains read_failed", async (mode, message) => {
+  const { deal } = await upload(imageBytes(), "picture.png");
+  const noSaved = { ...store, getOcr: async () => null };
+  await drain({ db, store: noSaved, ocr: async () => {
+    if (mode === "missing") throw new Error("OCR is not available on this machine");
+    return mode === "empty" ? { pages: [{ page: 1, lines: [] }], failed: [] } : { pages: [], failed: [1] };
+  } });
+  expect((await docs(deal))[0]).toMatchObject({ stage: "read_failed", stage_detail: message, needs_ocr: true });
+});
+test("image signatures, mismatched extensions, damaged PNG and multipage TIFF", async () => {
+  const { tiffBytes } = await import("@agir/testkit");
+  for (const [bytes, name, stage, detail] of [
+    [await pdf(), "fake.png", "rejected", "The file does not start like an image"],
+    [imageBytes(), "png.jpg", "extracted", imageRead],
+    [imageBytes().subarray(0, -20), "cut.png", "read_failed", imageDamaged],
+    [tiffBytes(1, 1, new Uint8Array(1), { pages: 2 }), "multi.tif", "read_failed", "This TIFF has 2 pages. Save it as a PDF, then upload that."],
+  ] as const) {
+    const { deal } = await upload(bytes, name); await drain({ db, store: { ...store, getOcr: async () => null }, ocr: fakeOcr });
+    expect((await docs(deal))[0]).toMatchObject({ stage, stage_detail: detail });
+  }
+});
+test.each([
+  ["heic", "Agir cannot read HEIC photos. Export the photo as JPEG, then upload it."],
+  ["heif", "Agir cannot read HEIC photos. Export the photo as JPEG, then upload it."],
+  ["xls", "Agir reads Excel files saved as .xlsx. Open this one in Excel, save it as .xlsx, then upload it."],
+  ["doc", "Agir reads Word files saved as .docx. Open this one in Word, save it as .docx, then upload it."],
+  ["ppt", "Agir does not read PowerPoint files. Save this one as a PDF, then upload that."],
+  ["pptx", "Agir does not read PowerPoint files. Save this one as a PDF, then upload that."],
+  ["zip", "Upload a PDF, Excel (.xlsx), CSV, Word (.docx), text file, or a picture (PNG, JPEG or TIFF)."],
+])("upload route refusal for %s", async (ext, message) => {
+  const deal = (await call("POST", `/api/workspaces/${ws}/deals`, { name: "Refused format", assetType: "Multifamily" })).id;
+  const res = await app.request(`/api/deals/${deal}/documents?name=file.${ext.toUpperCase()}`, { method: "PUT", headers: { cookie, "x-agir": "1" }, body: new Uint8Array(imageBytes()) });
+  expect(res.status).toBe(415); expect(await res.json()).toEqual({ error: message });
+});
+test("uncached Excel formulas appear on the document row", async () => {
+  const ExcelJS = (await import("exceljs")).default;
+  const wb = new ExcelJS.Workbook(); const sheet = wb.addWorksheet("Values"); sheet.getCell("A1").value = { formula: "1+2" };
+  const { deal } = await upload(new Uint8Array(await wb.xlsx.writeBuffer()), "formula.xlsx");
+  await drain({ db, store });
+  expect((await docs(deal))[0]).toMatchObject({ stage: "extracted", stage_detail: "This workbook has formulas with no saved results (A1). Open and save it in Excel to include them." });
+});
+test("logo keeps strict JPEG ending validation", async () => {
+  const jpeg = imageBytes("jpeg");
+  for (const [bytes, status] of [[jpeg, 200], [Buffer.concat([jpeg, Buffer.from("trailing")]), 422]] as const) {
+    const res = await app.request(`/api/workspaces/${ws}/logo`, { method: "POST", headers: { cookie, "x-agir": "1" }, body: new Uint8Array(bytes) });
+    expect(res.status).toBe(status);
+  }
 });

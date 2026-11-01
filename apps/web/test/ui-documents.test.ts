@@ -266,3 +266,7 @@ it.each(["extracted", "read_failed"])("Card 180 renders separate translated deta
   expect(html).toMatch(/image\.<\/span>.*<span[^>]*>.*Agir/s);
   expect(html).not.toContain("is a picture");
 });
+
+it("Card 181 accepts picture extensions in the upload picker", () => {
+  expect(render()).toContain('accept=".pdf,.xlsx,.csv,.docx,.txt,.png,.jpg,.jpeg,.tif,.tiff"');
+});

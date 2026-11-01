@@ -1149,3 +1149,76 @@ it.each([
   expect(fr).not.toBe(text);
   expect(fr).not.toContain("ne fait pas encore");
 });
+
+
+it.each([
+  [
+    "The file does not start like an image",
+    "Le fichier ne commence pas comme une image"
+  ],
+  [
+    "Read by OCR from this picture. Check every value against the picture before approving it.",
+    "Lu par reconnaissance optique à partir de cette image. Vérifiez chaque valeur sur l’image avant de l’approuver."
+  ],
+  [
+    "Agir found no readable text in this picture. Enter its values by hand, or upload a clearer copy.",
+    "Agir n’a trouvé aucun texte lisible dans cette image. Saisissez ses valeurs à la main ou téléversez une copie plus nette."
+  ],
+  [
+    "This file is a picture, and OCR is not available on this machine. Enter its values by hand, or upload a text PDF.",
+    "Ce fichier est une image, et la reconnaissance optique n’est pas disponible sur cette machine. Saisissez ses valeurs à la main ou téléversez un PDF texte."
+  ],
+  [
+    "Agir could not open this picture. It may be damaged. Upload it again, or save it as a PDF.",
+    "Agir n’a pas pu ouvrir cette image. Elle est peut-être endommagée. Téléversez-la de nouveau ou enregistrez-la en PDF."
+  ],
+  [
+    "This TIFF has 2 pages. Save it as a PDF, then upload that.",
+    "Ce fichier TIFF compte 2 pages. Enregistrez-le en PDF, puis téléversez ce PDF."
+  ],
+  [
+    "This picture is 81 megapixels, and Agir reads pictures of up to 80. Save a smaller copy, then upload it.",
+    "Cette image compte 81 mégapixels, et Agir lit les images de 80 mégapixels au plus. Enregistrez une copie plus petite, puis téléversez-la."
+  ],
+  [
+    "Agir cannot read HEIC photos. Export the photo as JPEG, then upload it.",
+    "Agir ne lit pas les photos HEIC. Exportez la photo en JPEG, puis téléversez-la."
+  ],
+  [
+    "Agir reads Excel files saved as .xlsx. Open this one in Excel, save it as .xlsx, then upload it.",
+    "Agir lit les fichiers Excel enregistrés en .xlsx. Ouvrez celui-ci dans Excel, enregistrez-le en .xlsx, puis téléversez-le."
+  ],
+  [
+    "Agir reads Word files saved as .docx. Open this one in Word, save it as .docx, then upload it.",
+    "Agir lit les fichiers Word enregistrés en .docx. Ouvrez celui-ci dans Word, enregistrez-le en .docx, puis téléversez-le."
+  ],
+  [
+    "Agir does not read PowerPoint files. Save this one as a PDF, then upload that.",
+    "Agir ne lit pas les fichiers PowerPoint. Enregistrez celui-ci en PDF, puis téléversez ce PDF."
+  ],
+  [
+    "Upload a PDF, Excel (.xlsx), CSV, Word (.docx), text file, or a picture (PNG, JPEG or TIFF).",
+    "Téléversez un fichier PDF, Excel (.xlsx), CSV, Word (.docx) ou texte, ou une image (PNG, JPEG ou TIFF)."
+  ],
+  [
+    "This workbook has formulas with no saved results (A1, B2). Open and save it in Excel to include them.",
+    "Ce classeur contient des formules sans résultat enregistré (A1, B2). Ouvrez-le et enregistrez-le dans Excel pour les inclure."
+  ],
+  [
+    "This file has 1 picture. Agir does not read pictures inside Word or Excel files, so check it for figures.",
+    "Ce fichier contient 1 image. Agir ne lit pas les images à l’intérieur des fichiers Word ou Excel ; vérifiez si elle contient des chiffres."
+  ],
+  [
+    "This file has 2 pictures. Agir does not read pictures inside Word or Excel files, so check them for figures.",
+    "Ce fichier contient 2 images. Agir ne lit pas les images à l’intérieur des fichiers Word ou Excel ; vérifiez si elles contiennent des chiffres."
+  ]
+])("Card 181 translates %s", (en, fr) => {
+  expect(translateMessage(en)).toBe(fr);
+});
+
+it("Card 181 describes picture uploads and counts in both languages", () => {
+  expect(build("en", () => {}).t("docs.types")).toBe("PDF, Excel, CSV, Word, text or a picture (PNG, JPEG, TIFF) · up to 75 MB each · every file is checked before it is read");
+  expect(build("fr", () => {}).t("docs.types")).toBe("PDF, Excel, CSV, Word, texte ou image (PNG, JPEG, TIFF) · jusqu'à 75 Mo chacun · chaque fichier est vérifié avant d'être lu");
+  expect(build("en", () => {}).t("counts.docs")).toBe("Documents (PDF / Excel / CSV / Word / text / picture)");
+  expect(build("fr", () => {}).t("counts.docs")).toBe("Documents (PDF / Excel / CSV / Word / texte / image)");
+});

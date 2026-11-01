@@ -121,3 +121,28 @@ export async function scanPdf(jpeg: Uint8Array, pages = 1): Promise<Uint8Array> 
   for (let n = 0; n < pages; n++) pdf.addPage([612, 792]).drawImage(img, { x: 0, y: 0, width: 612, height: 792 });
   return pdf.save();
 }
+
+/** Uncompressed 8-bit grayscale TIFF, built without platform tools. */
+export function tiffBytes(width: number, height: number, gray: Uint8Array, options: { bigEndian?: boolean; pages?: number } = {}): Uint8Array {
+  const pages = options.pages ?? 1, entries = 9, directorySize = 2 + entries * 12 + 4;
+  const pixels = width * height;
+  if (gray.length !== pixels) throw new Error("TIFF grayscale data must match its dimensions");
+  const bytes = new Uint8Array(8 + pages * (directorySize + pixels));
+  const view = new DataView(bytes.buffer), little = !options.bigEndian;
+  const u16 = (at: number, n: number) => view.setUint16(at, n, little);
+  const u32 = (at: number, n: number) => view.setUint32(at, n, little);
+  bytes.set(little ? [73, 73] : [77, 77]); u16(2, 42); u32(4, 8);
+  for (let page = 0; page < pages; page++) {
+    const at = 8 + page * (directorySize + pixels), data = at + directorySize;
+    u16(at, entries);
+    const tags = [[256, 4, width], [257, 4, height], [258, 3, 8], [259, 3, 1], [262, 3, 1], [273, 4, data], [277, 3, 1], [278, 4, height], [279, 4, pixels]];
+    tags.forEach(([tag, type, value], i) => {
+      const entry = at + 2 + i * 12;
+      u16(entry, tag!); u16(entry + 2, type!); u32(entry + 4, 1);
+      if (type === 3) u16(entry + 8, value!); else u32(entry + 8, value!);
+    });
+    u32(at + 2 + entries * 12, page + 1 < pages ? data + pixels : 0);
+    bytes.set(gray, data);
+  }
+  return bytes;
+}
