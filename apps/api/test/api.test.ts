@@ -590,6 +590,21 @@ describe("model label suggestions", () => {
     expect(await byField("other_cost")).toMatchObject({ status: "needs_review", value: 5000, reason: "Its label was a model's suggestion, and suggestions are now off; confirm or reject it" });
   });
 
+  test("card 199: suggestions offer only ten batches for 1,200 invented lines", async () => {
+    await db.query(`update workspaces set label_suggestions = true where id = $1`, [sw]);
+    const d = await newDeal("Invented bounded suggestions");
+    reply = () => ok([]); calls.length = 0;
+    try {
+      await put(d, "invented.txt", Array.from({ length: 1200 }, (_, i) => `Invented line ${i}: $${1000 + i}`).join("\n"));
+      await wk();
+      expect(calls).toHaveLength(10); expect(calls.map(c => figuresOf(c).length)).toEqual(Array(10).fill(100));
+      expect(await db.query(`select * from label_suggestions where deal_id=$1`, [d])).toHaveLength(10);
+    } finally {
+      calls.length = 0;
+      await db.query(`update workspaces set label_suggestions = false where id = $1`, [sw]);
+    }
+  });
+
   test("what is offered for a label has been through the redaction pass", async () => {
     await db.query(`update workspaces set label_suggestions = true where id = $1`, [sw]);
     const d = await newDeal("Redacted suggestions");

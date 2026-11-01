@@ -59,7 +59,7 @@ vi.mock("react/jsx-dev-runtime", async (original) => {
 import { Review } from "../src/routes/review.tsx";
 
 const payload = (notNeeded: ReviewData["notNeeded"]): ReviewData => ({
-  assumptions: [], missing: [], choices: [], regions: [], tableNotices: [], aiReading: null, proposals: [], other: [], notFound: [], notNeeded,
+  assumptions: [], missing: [], choices: [], regions: [], tableNotices: [], aiReading: null, proposals: [], other: [], otherTotal: 0, unusedTotal: 0, notFound: [], notNeeded,
   readiness: { status: "ready", missing: [], conflicting: [], pending: [], impossible: [], notFound: [], choices: [], defaultable: [] },
   todo: { blocking: 0, items: [] },
 } as unknown as ReviewData);

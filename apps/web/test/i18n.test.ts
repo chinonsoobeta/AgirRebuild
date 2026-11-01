@@ -1206,6 +1206,7 @@ it.each([
     "Upload a PDF, Excel (.xlsx), CSV, Word (.docx), text file, or a picture (PNG, JPEG or TIFF).",
     "Téléversez un fichier PDF, Excel (.xlsx), CSV, Word (.docx) ou texte, ou une image (PNG, JPEG ou TIFF)."
   ],
+  ["This file is too long for Agir's rules to read in full, so they may have missed figures further in.", "Ce fichier est trop long pour que les règles d’Agir le lisent en entier ; des chiffres plus loin peuvent donc leur échapper."],
   ["A zero beside another figure in this row", "Un zéro à côté d’un autre chiffre de cette ligne"],
   ["Worked out by a formula in this workbook, so Agir did not read it. Use it if it is the figure you want", "Calculé par une formule de ce classeur, donc Agir ne l’a pas lu. Utilisez-le si c’est le chiffre voulu"],
   ["Another line of this cost is a formula, so adding the typed lines would give only part of it; enter the field by hand", "Une autre ligne de ce coût est une formule : additionner les lignes saisies n’en donnerait qu’une partie. Entrez le champ à la main"],
