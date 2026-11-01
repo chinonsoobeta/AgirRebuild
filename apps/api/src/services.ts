@@ -565,6 +565,11 @@ export async function reviewView(tx: Db, dealId: string, asOf: string) {
   const readRoles = await tx.query<{ id: string; read_role: string | null }>(`select id,read_role from documents where deal_id=$1 and retired_at is null`, [dealId]);
   const isSource = (d: typeof docs[number]) => d.role_set !== "context" &&
     !/\(context(?:, set by a person)?\)$/.test(readRoles.find(r => r.id === d.id)?.read_role ?? "");
+  // Card 189: every file read is background and Agir decided at least one, so Review says why it holds nothing from them.
+  // The same rule as setAsideAll on the Documents screen.
+  const readFiles = docs.filter(d => d.stage === "extracted");
+  const setAsideAll = !docs.some(d => ["uploaded", "checking", "reading", "extracting"].includes(d.stage)) && readFiles.length > 0 && !readFiles.some(isSource) &&
+    readFiles.some(d => !d.role_set && /\(context\)$/.test(readRoles.find(r => r.id === d.id)?.read_role ?? ""));
   const keep = (r: { file: string }) => lists === current || !!lists?.verification?.documents.some(ref => ref.name === r.file &&
     docs.some(d => d.id === ref.id && d.stage === "extracted" && isSource(d) && (ref.sha256 === undefined || ref.sha256 === d.sha256)));
   // A reading that failed its check is shown for the person to check, unless the review already holds that figure for the
@@ -603,6 +608,7 @@ export async function reviewView(tx: Db, dealId: string, asOf: string) {
       .slice(0, 3)
       .map((o) => ({ documentId: o.documentId, figureId: o.figureId!, document_name: o.document_name, location: o.location, raw: o.raw, context: o.context }));
   return {
+    setAsideAll,
     selling,
     aiReading,
     todo: todoList(readiness, assumptions, aiReading),

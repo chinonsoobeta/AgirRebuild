@@ -29,6 +29,7 @@ import type * as landingStrings from "./strings/landing";
 import type * as agirreviewStrings from "./strings/agirreview";
 import type * as shareStrings from "./strings/share";
 import { termsStore, useTerms, type TermsPref } from "./terms";
+import { DOCUMENT_KINDS } from "./documentKinds";
 import { FR_VERIFY, FR_ABSENT, FR_FIELDS, FR_METRICS, STRESS, GATES, plainTerm, plainStress, numberFormat, verdictText as sharedVerdictText, checkText as sharedCheckText, type VerdictLike, type CheckLike, CURRENCY_NAMES, FIELDS, FIELD_BY_KEY, METRIC_BY_KEY, placeLabel, type Currency, type ReadinessItem } from "@agir/contracts";
 
 export type Lang = "en" | "fr";
@@ -465,6 +466,8 @@ const SALE_SHARES: Record<string, string> = {
 };
 
 const FR_REASONS: [RegExp, string | ((m: RegExpMatchArray) => string)][] = [
+  // Card 189: the note on a set-aside file's figures. A note stored before the card may say "a audit".
+  [/^This document looks like an? ([^;]+); its figures are shown, not read\. (.*)$/, m => `${DOCUMENT_KINDS[m[1]!] ? `Ce document ressemble à ${DOCUMENT_KINDS[m[1]!]!.fr}` : "Ce document sert de contexte"}\u00a0; ses chiffres sont affichés, mais pas lus. ${translateMessage(m[2])}`],
   [/^The document states a scale for this amount that Agir cannot read safely$/, "Le document indique pour ce montant une échelle qu’Agir ne peut pas lire avec certitude"],
   [/^The AI amount is under \$1,000; check whether the document states it in thousands or millions$/, "Le montant IA est inférieur à 1 000 $; vérifiez si le document l’exprime en milliers ou en millions"],
   [/^One soft-cost item \(a permit\), not the total soft cost; enter the total$/, "Un poste des coûts indirects (un permis), pas le total des coûts indirects ; entrez le total"],

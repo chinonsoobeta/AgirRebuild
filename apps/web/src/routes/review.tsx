@@ -911,6 +911,11 @@ export function Review({ dealId }: { dealId: string }) {
           )}
           {docsBusy && <Banner tone="neutral" title={t("review.stillReading")}>{t("review.stillReadingBody")}</Banner>}
           {updating && <p className="small muted" role="status">{t("review.updating")}</p>}
+          {editable && r.setAsideAll && (
+            <Notice tone="review" role="status" title={t("review.setAside")}>
+              <Link to="/deals/$dealId/documents" params={{ dealId }}>{t("review.setAsideLink")}</Link>
+            </Notice>
+          )}
 
           <div className="card rv-top" ref={topCard}>
             {r.readiness.status === "blocked" ? (

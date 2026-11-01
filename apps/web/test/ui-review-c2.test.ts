@@ -50,6 +50,7 @@ const payload = (): ReviewData => {
     row({ id: "p4", fieldKey: "property_tax_annual", value: 38000, sources: [src(38000, "$38,000", "Property tax $38,000")] }),
   ];
   return {
+    setAsideAll: false,
     assumptions,
     missing: [{ fieldKey: "expense_ratio_pct", label: "Operating expense ratio", unit: "%", material: false, default: 35, help: null, groupLabel: "Operations", likely: [] }] as ReviewData["missing"],
     notFound: [{ fieldKey: "land_transfer_tax", label: "Land transfer tax", unit: "$", material: false, default: null, help: null, groupLabel: "Budget", likely: [] }] as ReviewData["missing"],

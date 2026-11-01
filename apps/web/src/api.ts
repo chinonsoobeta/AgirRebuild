@@ -118,6 +118,8 @@ export type Assumption = {
 };
 export type ReadinessItem = { fieldKey: string; itemKey?: string; label: string; detail?: string };
 export type Review = {
+  /** Card 189: every file read is background, and Agir decided at least one of them. */
+  setAsideAll: boolean;
   todo: { blocking: number; items: { kind: "conflict" | "impossible" | "missing" | "please_check" | "needs_review" | "awaiting" | "ai_check"; fieldKey: string; itemKey: string | null; assumptionId: string | null; blocking: boolean }[] };
   aiReading: null | { unread: string[]; outcome: "ok" | "failed"; model: string; promptVersion: string; createdAt: string;
     notUsed: { value: number; file: string; location: string; quote: string; why: string; figureId: string | null }[];

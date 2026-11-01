@@ -42,6 +42,7 @@ const row = (over: Partial<Assumption>): Assumption => ({
   secondApprover: null, confirmedByReview: false, secondApprovedAt: null, sponsorStated: false, clientConfirmedBy: null, clientConfirmedById: null, clientConfirmedAt: null, version: 1, ...over,
 });
 const payload = (): ReviewData => ({
+  setAsideAll: false,
   assumptions: [
     row({ id: "a1", fieldKey: "land_cost", value: 1150000 }),
     row({ id: "ch1", fieldKey: "refinance_term_years", group: "refinance", groupLabel: "Refinance", unit: "years", sourceKind: "analyst", value: 10, decidedBy: "Morgan", decidedById: "me-id" }),

@@ -95,6 +95,14 @@ describe("Card 189: the notice when every file was set aside", () => {
     expect(french).toContain("Choisir quoi lire à l'étape Documents");
     s.lang = "en";
   });
+  it("the French note reaches Review's list of other figures", () => {
+    s.lang = "fr"; s.role = "owner";
+    s.review = { ...payload([]), other: [{ documentId: "d", document_name: "m.txt", raw: "$65,000", value: 65000, location: "line 3", context: "Reserve: $65,000", note: "This document looks like a market report; its figures are shown, not read. No field matches this label", figureId: "f", label: null, suggestions: [] }] };
+    const french = text(render());
+    expect(french).toContain("Ce document ressemble à un rapport de marché\u00a0; ses chiffres sont affichés, mais pas lus. Aucun champ ne correspond à ce libellé");
+    expect(french).not.toContain("looks like");
+    s.lang = "en";
+  });
   it("shows nothing to a viewer, or when it is false", () => {
     s.lang = "en"; s.role = "viewer"; s.review = { ...payload([]), setAsideAll: true };
     expect(text(render())).not.toContain(notice);

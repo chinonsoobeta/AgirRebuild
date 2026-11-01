@@ -315,12 +315,12 @@ describe("Card 189: why a file was set aside", () => {
     state.role = "viewer";
     html = render();
     expect(html).toContain("Looks like a market report");
-    expect(html).not.toContain("Read it anyway");
+    expect(html).not.toContain(">Read it anyway</button>");
     state.role = "owner";
     state.docs = [row("extracted", { read_role: "appraisal (evidence)" })];
-    expect(render()).not.toContain("Read it anyway");
+    expect(render()).not.toContain(">Read it anyway</button>");
     state.docs = [context({ read_role: "market report (context, set by a person)" })];
-    expect(render()).not.toContain("Read it anyway");
+    expect(render()).not.toContain(">Read it anyway</button>");
   });
 
   const banner = "Agir set aside every file it read as background, so no figures came from them.";

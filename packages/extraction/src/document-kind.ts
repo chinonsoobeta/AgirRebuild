@@ -35,10 +35,10 @@ export const FINGERPRINTS: Fingerprint[] = [
   { kind: "business plan", role: "evidence", title: /\b(?:business plan|plan d.affaires)\b/ },
 ];
 
-const CONTEXT_PREFIX = /^This document looks like a [^;]+; its figures are shown, not read\. /;
+const CONTEXT_PREFIX = /^This document looks like an? [^;]+; its figures are shown, not read\. /;
 /** Keep the previous refusal/suggestion boundary in the existing persisted note. */
 export const originalKindNote = (note: string | null | undefined): string => (note ?? "").replace(CONTEXT_PREFIX, "");
-const contextNote = (kind: string, note?: string) => `This document looks like a ${kind}; its figures are shown, not read. ${note ?? "No field matches this label"}`;
+const contextNote = (kind: string, note?: string) => `This document looks like ${/^[aeiou]/.test(kind) ? "an" : "a"} ${kind}; its figures are shown, not read. ${note ?? "No field matches this label"}`;
 
 export function documentKind(doc: NormalizedDocument): Pick<Fingerprint, "kind" | "role"> {
   const first = doc.lines.filter(l => Number(/page (\d+)/.exec(l.location)?.[1] ?? 1) <= 3).slice(0, 120);
