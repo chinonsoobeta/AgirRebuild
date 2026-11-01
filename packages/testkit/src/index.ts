@@ -3,7 +3,8 @@
 // people; this module only reads them.
 
 import { readFileSync, readdirSync } from "node:fs";
-import { join } from "node:path";
+import { createRequire } from "node:module";
+import { dirname, join } from "node:path";
 
 export type OracleDoc = {
   name: string;
@@ -111,6 +112,19 @@ export async function documentBytes(doc: OracleDoc): Promise<Uint8Array> {
   if (doc.kind === "xlsx") return xlsxBytes(doc);
   if (doc.kind === "csv") return csvBytes(doc);
   return new TextEncoder().encode([doc.title, ...(doc.lines ?? [])].filter(Boolean).join("\n") + "\n");
+}
+
+let pageFontFamily: string | undefined;
+
+/** The font for a page that real OCR reads. "sans-serif" can be a pixel font on Linux, whose digits Tesseract misreads, so these pages name a font every machine gets from the install. */
+export function pageFont(): string {
+  if (pageFontFamily) return pageFontFamily;
+  const require = createRequire(import.meta.url);
+  const { GlobalFonts } = require("@napi-rs/canvas") as typeof import("@napi-rs/canvas");
+  const folder = join(dirname(require.resolve("pdfjs-dist/package.json")), "standard_fonts");
+  GlobalFonts.registerFromPath(join(folder, "LiberationSans-Regular.ttf"), "AgirTestSans");
+  GlobalFonts.registerFromPath(join(folder, "LiberationSans-Bold.ttf"), "AgirTestSans");
+  return pageFontFamily = "AgirTestSans";
 }
 
 /** An image-only PDF for scan-reading tests, with no text layer. */

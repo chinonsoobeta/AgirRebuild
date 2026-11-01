@@ -4,6 +4,7 @@ import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { PDFDocument } from "pdf-lib";
 import { createCanvas } from "@napi-rs/canvas";
+import { pageFont } from "@agir/testkit";
 import { fileStore, migrate, openPglite, type Db } from "@agir/db";
 import { drain, reconcileDeal, type ReaderRequest, type WorkerDeps } from "@agir/worker";
 import { parseSavedOcr } from "@agir/extraction";
@@ -29,7 +30,7 @@ async function pdf(mixed = true, blank = false, picturePages = 1) {
   if (mixed) doc.addPage([612, 792]).drawText("Land cost $400,000", { x: 72, y: 700, size: 16 });
   const canvas = createCanvas(1700, 2200), ctx = canvas.getContext("2d");
   ctx.fillStyle = "white"; ctx.fillRect(0, 0, 1700, 2200);
-  ctx.fillStyle = "black"; ctx.font = "40px sans-serif";
+  ctx.fillStyle = "black"; ctx.font = `40px ${pageFont()}`;
   ctx.fillText("Exit cap rate 5.5%", 100, 160);
   ctx.fillText("Contact test@example.com", 100, 250);
   const img = await doc.embedJpg(canvas.toBuffer("image/jpeg", 90));
@@ -183,7 +184,7 @@ const imageRead = "Read by OCR from this picture. Check every value against the 
 const imageDamaged = "Agir could not open this picture. It may be damaged. Upload it again, or save it as a PDF.";
 function imageBytes(format: "png" | "jpeg" = "png") {
   const canvas = createCanvas(816, 1056), ctx = canvas.getContext("2d");
-  ctx.fillStyle = "white"; ctx.fillRect(0, 0, 816, 1056); ctx.fillStyle = "black"; ctx.font = "32px sans-serif";
+  ctx.fillStyle = "white"; ctx.fillRect(0, 0, 816, 1056); ctx.fillStyle = "black"; ctx.font = `32px ${pageFont()}`;
   ctx.fillText("Exit cap rate 5.5%", 55, 140); ctx.fillText("Contact test@example.com", 55, 210);
   return format === "png" ? canvas.toBuffer("image/png") : canvas.toBuffer("image/jpeg");
 }
