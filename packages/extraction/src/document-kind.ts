@@ -49,7 +49,7 @@ export const FINGERPRINTS: Fingerprint[] = [
   { kind: "purchase agreement", role: "deal source", last: true, title: /\b(?:agreement of purchase and sale|purchase and sale agreement|offer to purchase|promesse d.achat|convention d.achat)\b/ },
   { kind: "cost report", role: "deal source", last: true, title: /\b(?:quantity surveyor|cost consultant|cost report|class [a-d] (?:cost )?estimate|project monitor(?:ing)? report|cost to complete)\b/ },
   { kind: "tax assessment", role: "deal source", last: true, title: /\b(?:property assessment notice|notice of assessment|property tax (?:notice|bill)|tax bill|compte de taxes|role d.evaluation)\b/ },
-  { kind: "draw schedule", role: "deal source", last: true, title: /\b(?:draw schedule|draw request|calendrier de debours|demande de deboursement)\b/ },
+  { kind: "draw schedule", role: "deal source", last: true, title: /\b(?:draw schedule|draw request|calendrier des? debours(?:es)?|demande de deboursement)\b/ },
 ];
 
 const CONTEXT_PREFIX = /^This document looks like an? [^;]+; its figures are shown, not read\. /;
@@ -59,7 +59,7 @@ const withArticle = (kind: string) => `${/^[aeiou]/.test(kind) ? "an" : "a"} ${k
 const contextNote = (kind: string, note?: string) => `This document looks like ${withArticle(kind)}; its figures are shown, not read. ${note ?? "No field matches this label"}`;
 
 /** A line that cites a source is never a title: a one-project brochure may cite a market report in its first pages. */
-const isCitation = (text: string) => /^\W*(?:sources?|notes?)\b/.test(foldText(text));
+const isCitation = (text: string) => /^\W*(?:sources?|notes?)\s*[:\-\u2013\u2014]/.test(foldText(text));
 
 export function documentKind(doc: NormalizedDocument): Pick<Fingerprint, "kind" | "role"> {
   const first = doc.lines.filter(l => Number(/page (\d+)/.exec(l.location)?.[1] ?? 1) <= 3 && !isCitation(l.text)).slice(0, 120);
