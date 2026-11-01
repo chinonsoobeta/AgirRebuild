@@ -326,6 +326,75 @@ describe("card 193: a suite-by-suite roll written as plain lines", () => {
       expect(r.candidates.filter((c) => c.itemKey?.includes("$"))).toEqual([]);
     });
 
+    // A plain number carries no $ to tell a rent from a size, and any column adds up to its own total.
+    test.each([
+      ["Square Feet", [800, 850, 900]],
+      ["Living Space", [800, 850, 900]],
+      ["Code", [44, 55, 66]],
+    ])("B1. a %s column before a plain rent, with its own total: no rent read", async (name, first) => {
+      const sum = first.reduce((n, x) => n + x, 0);
+      const r = await read(`Suite # Type ${name} Rent`, `101 1 bedroom ${first[0]} 1200`, `102 1 bedroom ${first[1]} 1250`, `103 2 bedroom ${first[2]} 1500`, `Total 3 units ${sum} 3950`);
+      expect(counts(r)).toEqual([["1BR", 2, SUITE_RULE], ["2BR", 1, SUITE_RULE]]);
+      expect(rentValues(r)).toEqual([]);
+      expect(shown(r, DIFFERENT)).toEqual([]);
+      expect(shown(r, SUITE_NOTE)).toEqual(expect.arrayContaining([...first, 1200, 1250, 1500]));
+    });
+
+    test("B1. Square Feet before a $ rent still reads the rent", async () => {
+      const r = await read("Suite # Type Square Feet Rent ($)", "101 1 bedroom 800 $1,200", "102 1 bedroom 850 $1,250", "103 2 bedroom 900 $1,500", "Total 3 units 2550 $3,950");
+      expect(rents(r)).toEqual([["2BR", 1500]]);
+      expect(shown(r, DIFFERENT)).toEqual([1200, 1250]);
+    });
+
+    test.each([
+      ["Suite # Type Rent"],
+      ["Suite # Type Monthly Rent"],
+      ["Unit # Unit Type Current Rent"],
+      ["Suite # Type Tenant Rent"],
+      ["Suite # Type Status Rent"],
+      ["Suite # Type Location & Description Rent ($)"],
+    ])("B1. %s: words that hold no figures leave a plain rent read", async (header) => {
+      const r = await read(header, "101 1 bedroom 1200", "102 1 bedroom 1250", "103 2 bedroom 1500", "Total 3 units 3950");
+      expect(rents(r)).toEqual([["2BR", 1500]]);
+      expect(shown(r, DIFFERENT)).toEqual([1200, 1250]);
+    });
+
+    test.each([["Total des loyers 3 950 $"], ["Total du loyer 3 950 $"], ["Total mensuel des loyers 3 950 $"]])("B2. %s is a French roll's total row", async (line) => {
+      const r = await readFr("Logement # Type Loyer", "101 1 chambre 1 200 $", "102 1 chambre 1 250 $", "103 2 chambres 1 500 $", line);
+      expect(shown(r, SUMMARY)).toEqual([3950]);
+      expect(rents(r)).toEqual([["2BR", 1500]]);
+      expect(shown(r, DIFFERENT)).toEqual([1200, 1250]);
+    });
+
+    test("B3. a total of something else that opens with a number keeps its reading", async () => {
+      const r = await read("Suite # Type Rent", "101 1 bedroom $1,200", "102 1 bedroom $1,250", "103 2 bedroom $1,500", "Total 2024 operating expenses $200,000");
+      expect(r.candidates.find((c) => c.value === 200000)).toMatchObject({ fieldKey: "fixed_opex_annual", rule: "line:prose" });
+      expect(shown(r, SUMMARY)).toEqual([]);
+      expect(rents(r)).toEqual([["2BR", 1500]]);
+    });
+
+    test.each([
+      ["Total 5,463 $3,950", [null, 3950]],
+      ["Total 5,463 sf $3,950", [5463, 3950]],
+      ["Total 3 apartments $3,950", [3, 3950]],
+      ["Total 3950", [3950]],
+    ])("B3. %s stays a total row", async (line, values) => {
+      const r = await read("Suite # Type Rent", "101 1 bedroom $1,200", "102 1 bedroom $1,250", "103 2 bedroom $1,500", line);
+      expect(shown(r, SUMMARY)).toEqual(values);
+      expect(rents(r)).toEqual([["2BR", 1500]]);
+    });
+
+    test("B4. a plain figure under $100 is no rent, even when the total happens to agree", async () => {
+      // "1 200 $" in an English document splits in two, and the three 1s add up to the 3 of "3 950 $".
+      const r = await read("Logement # Type Loyer Superficie", "101 1 chambre 1 200 $ 55", "102 1 chambre 1 250 $ 60", "103 2 chambres 1 500 $ 80", "Total 3 logements 3 950 $ 195");
+      expect(counts(r)).toEqual([["1BR", 2, SUITE_RULE], ["2BR", 1, SUITE_RULE]]);
+      expect(rentValues(r)).toEqual([]);
+      expect(shown(r, DIFFERENT)).toEqual([]);
+      const fr = await readFr("Logement # Type Loyer Superficie", "101 1 chambre 1 200 $ 55", "102 1 chambre 1 250 $ 60", "103 2 chambres 1 500 $ 80", "Total 3 logements 3 950 $ 195");
+      expect(rents(fr)).toEqual([["2BR", 1500]]);
+      expect(shown(fr, DIFFERENT)).toEqual([1200, 1250]);
+    });
+
     test("A4. a real summary by type stays read by the table path", async () => {
       const r = await read("Type Units Rent", "1 bedroom 12 $1,410", "2 bedroom 8 $1,800", "Total 20");
       expect(pin(r)).toEqual([["unit_count", "1BR", 12, "table:rent-roll"], ["unit_rent_monthly", "1BR", 1410, "table:rent-roll"], ["unit_count", "2BR", 8, "table:rent-roll"], ["unit_rent_monthly", "2BR", 1800, "table:rent-roll"]]);
