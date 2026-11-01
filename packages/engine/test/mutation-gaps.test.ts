@@ -2,7 +2,7 @@
 // the specification or arithmetic on small round inputs, written out. None is copied from the engine's output.
 import { describe, expect, test } from "vitest";
 import { FOR_SALE_DRAFT, POLICY_V1, RENTAL_HOLD_DRAFT, RENTAL_HOLD_INSURED_DRAFT, type Check, type EngineInput, type EquityFlow, type RunResult } from "@agir/contracts";
-import { applyStress, buildForSaleLedger, buildLedger, canonicalJson, heldPartnerReturns, irrRoots, replay, runWaterfall, underwrite, validateInput, ENGINE_VERSION } from "../src/index.ts";
+import { assemble, type AssumptionRow, applyStress, buildForSaleLedger, buildLedger, canonicalJson, heldPartnerReturns, irrRoots, replay, runWaterfall, underwrite, validateInput, ENGINE_VERSION } from "../src/index.ts";
 import { allocate, cents, drawShares, levelPayment, ratio } from "../src/math.ts";
 import { m } from "../src/metrics.ts";
 import { computeVerdict, gateStatusOf } from "../src/verdict.ts";
@@ -669,5 +669,231 @@ describe("validate, field by field", () => {
     ["slow pace", f({ absorptionPerMonth: 0.1 })],
   ] as [string, EngineInput][])("a sale accepted: %s", (_n, input) => {
     expect(() => validateInput(input)).not.toThrow();
+  });
+});
+
+// The rules are the ones stated at the top of readiness.ts: only approved and default-accepted rows are read;
+// a required field with no readable row is missing; two readable values or a conflict is conflicting; a value under review is pending.
+describe("readiness: the only road from review to the engine", () => {
+  type St = AssumptionRow["status"];
+  const row = (fieldKey: string, valueNumeric: number | null, itemKey: string | null = null, status: St = "approved"): AssumptionRow => ({ fieldKey, itemKey, valueNumeric, status });
+  const rental = (): AssumptionRow[] => [row("land_cost", 1_000_000), row("hard_cost", 0), row("soft_cost", 0), row("contingency", 0), row("construction_months", 0),
+    row("lease_up_months", 0), row("hold_years", 1), row("stabilized_occupancy_pct", 100), row("expense_ratio_pct", 0), row("exit_cap_rate_pct", 10),
+    row("selling_costs_pct", 0), row("senior_loan_amount", 0), row("unit_count", 10, "A"), row("unit_rent_monthly", 1_000, "A")];
+  const sale = (): AssumptionRow[] => [row("sell_units", 1), row("land_cost", 1_000), row("hard_cost", 0), row("soft_cost", 0), row("contingency", 0), row("construction_months", 0),
+    row("senior_loan_amount", 0), row("presold_units_pct", 0), row("deposit_pct", 0), row("absorption_units_per_month", 1), row("sales_commission_pct", 0),
+    row("closing_lag_months", 0), row("unsold_carry_monthly", 0), row("unit_count", 2, "Row"), row("unit_sale_price", 2_000, "Row")];
+  const swap = (rows: AssumptionRow[], key: string, next: Partial<AssumptionRow>, item: string | null = null) => rows.map((r) => (r.fieldKey === key && r.itemKey === item ? { ...r, ...next } : r));
+  const drop = (rows: AssumptionRow[], key: string) => rows.filter((r) => r.fieldKey !== key);
+  const keys = (xs: { fieldKey: string }[]) => xs.map((x) => x.fieldKey);
+
+  test("both base deals are ready", () => {
+    expect(assemble(rental()).readiness.status).toBe("ready");
+    expect(assemble(sale()).readiness.status).toBe("ready");
+  });
+  test("a null value is not a value: the field is missing, and only read rows reach the input", () => {
+    const r = assemble(swap(rental(), "land_cost", { valueNumeric: null }));
+    expect(keys(r.readiness.missing)).toEqual(["land_cost"]);
+    expect(r.input).toBeNull();
+    expect(assemble(swap(rental(), "land_cost", { status: "default_accepted" })).input!.budget.land).toBe(1_000_000);
+  });
+  test("a bad number is named with its reason", () => {
+    const why = (key: string, value: number) => assemble(swap(rental(), key, { valueNumeric: value })).readiness.impossible.find((x) => x.fieldKey === key)?.detail;
+    expect(why("land_cost", NaN)).toBe("not a number");
+    expect(why("land_cost", -1)).toBe("below the minimum of 0");
+    expect(why("hold_years", 0)).toBe("below the minimum of 1");
+    expect(why("construction_months", 1.5)).toBe("must be a whole number");
+    expect(why("stabilized_occupancy_pct", 101)).toBe("above the maximum of 100");
+  });
+  test("one item written two ways is one line, names both forms, and neither is read", () => {
+    const rows = [...rental(), row("unit_count", 1, "Shop"), row("unit_rent_monthly", 1, "Shop"), row("unit_count", 1, "shop"), row("unit_rent_monthly", 1, "shop")];
+    const r = assemble(rows);
+    const line = r.readiness.impossible.filter((x) => x.label.includes("one item written two ways"));
+    expect(line).toHaveLength(1);
+    expect(line[0]!.label).toBe("Shop and shop are one item written two ways");
+    expect(line[0]!.fieldKey).toBe("unit_count");
+    expect(r.readiness.conflicting).toEqual([]);
+    expect(r.input).toBeNull();
+    // A rejected form does not count as a form, and is the row the line must not point to.
+    const ok = assemble(rows.map((x) => (x.itemKey === "shop" ? { ...x, status: "rejected" as St } : x)));
+    expect(ok.readiness.status).toBe("ready");
+    expect(ok.input!.revenue.map((c) => c.key)).toEqual(["A", "Shop"]);
+    const first = assemble([row("unit_rent_monthly", 1, "Shop", "rejected"), row("unit_count", 1, "Shop"), row("unit_count", 1, "shop"), ...rental()]);
+    expect(first.readiness.impossible[0]!.fieldKey).toBe("unit_count");
+  });
+  test("rejected rows are not read; two values conflict; one conflict flag conflicts with an agreeing value", () => {
+    const rejected = assemble([...rental(), row("land_cost", 5, null, "rejected")]);
+    expect(rejected.readiness.status).toBe("ready");
+    expect(rejected.input!.budget.land).toBe(1_000_000);
+    expect(keys(assemble([...rental(), row("land_cost", 5)]).readiness.conflicting)).toEqual(["land_cost"]);
+    expect(assemble([...rental(), row("land_cost", 1_000_000)]).readiness.status).toBe("ready");
+    expect(keys(assemble([...rental(), row("land_cost", 1_000_000, null, "conflicting")]).readiness.conflicting)).toEqual(["land_cost"]);
+    expect(keys(assemble([...rental(), row("land_cost", null, null, "conflicting")]).readiness.conflicting)).toEqual(["land_cost"]);
+    const item = assemble([...rental(), row("unit_count", 11, "A")]).readiness.conflicting[0]!;
+    expect([item.fieldKey, item.itemKey, item.label]).toEqual(["unit_count", "A", "Units (A)"]);
+  });
+  test("review states are named apart; a readable row beats them; a row of another status is not pending", () => {
+    const only = (status: St) => assemble(swap(rental(), "land_cost", { status }));
+    expect(only("needs_review").readiness.pending).toEqual([{ fieldKey: "land_cost", label: "Land cost", detail: "Needs review" }]);
+    expect(only("awaiting_second_approval").readiness.pending[0]!.detail).toBe("Waiting for a second approver");
+    const mixed = assemble([...drop(rental(), "land_cost"), row("land_cost", 5, null, "needs_review"), row("land_cost", 5, null, "awaiting_second_approval")]);
+    expect(mixed.readiness.pending[0]!.detail).toBe("Waiting for a second approver");
+    const beaten = assemble([...rental(), row("land_cost", 5, null, "needs_review")]);
+    expect(beaten.readiness.pending).toEqual([]);
+    expect(beaten.input!.budget.land).toBe(1_000_000);
+    // Pending is not also missing.
+    expect(only("needs_review").readiness.missing).toEqual([]);
+  });
+  test("an unknown field is ignored", () => {
+    expect(assemble([...rental(), row("not_a_field", 1)]).readiness.status).toBe("ready");
+  });
+  test("a value from the other mode is named once, with no bounds complaint", () => {
+    const onRental = assemble([...rental(), row("presold_units_pct", 500)]).readiness.impossible;
+    expect(onRental).toEqual([{ fieldKey: "presold_units_pct", label: "Presold units applies only when the units are sold" }]);
+    const onSale = assemble([...sale(), row("hold_years", 0)]).readiness.impossible;
+    expect(onSale).toEqual([{ fieldKey: "hold_years", label: "Hold period does not apply when the units are sold" }]);
+    // sell_units = 0 is allowed on a rental, and the other-mode rule leaves other fields' lines alone.
+    expect(assemble([...rental(), row("sell_units", 0)]).readiness.status).toBe("ready");
+    const two = assemble([...rental(), row("presold_units_pct", 5), row("land_cost", 2_000_000)]).readiness;
+    expect(keys(two.conflicting)).toEqual(["land_cost"]);
+    expect(keys(two.impossible)).toEqual(["presold_units_pct"]);
+    expect(assemble([...rental(), row("land_cost", 2_000_000)]).readiness.impossible).toEqual([]);
+  });
+  test("selling and keeping cannot both be chosen", () => {
+    const r = assemble([...sale(), row("refinance_and_hold", 1)]).readiness;
+    expect(r.impossible).toEqual([{ fieldKey: "sell_units", label: "Sell the units and keep and refinance cannot both be chosen" }]);
+  });
+  test("component occupancy stands in for the deal's only when every item has one", () => {
+    const base = drop(rental(), "stabilized_occupancy_pct");
+    expect(keys(assemble(base).readiness.missing)).toEqual(["stabilized_occupancy_pct"]);
+    const each = assemble([...base, row("item_occupancy_pct", 90, "A"), row("unit_count", 1, "B"), row("unit_rent_monthly", 1, "B"), row("item_occupancy_pct", 80, "B")]);
+    expect(each.readiness.status).toBe("ready");
+    // The lowest stands in: the deal figure is never above any component's.
+    expect(each.input!.stabilizedOccupancyPct).toBe(80);
+    expect(each.input!.revenue.map((c) => c.occupancyPct)).toEqual([90, 80]);
+    expect(keys(assemble([...base, row("item_occupancy_pct", 90, "A"), row("unit_count", 1, "B"), row("unit_rent_monthly", 1, "B")]).readiness.missing)).toEqual(["stabilized_occupancy_pct"]);
+    expect(keys(assemble([...base, row("item_occupancy_pct", 90, "A", "rejected")]).readiness.missing)).toEqual(["stabilized_occupancy_pct"]);
+    expect(assemble([...rental(), row("item_occupancy_pct", 90, "A")]).input!.stabilizedOccupancyPct).toBe(100);
+    expect(assemble(rental()).input!.revenue[0]).not.toHaveProperty("occupancyPct");
+  });
+  test("an expense ratio or fixed costs: either is enough, and a blocked one does not report the other missing", () => {
+    const none = drop(rental(), "expense_ratio_pct");
+    expect(keys(assemble(none).readiness.missing)).toContain("expense_ratio_pct");
+    const fixed = assemble([...none, row("fixed_opex_annual", 500)]);
+    expect(fixed.readiness.status).toBe("ready");
+    expect(fixed.input!.fixedOpexAnnual).toBe(500);
+    expect(fixed.input).not.toHaveProperty("expenseRatioPct");
+    const pending = assemble([...none, row("fixed_opex_annual", 500, null, "needs_review")]).readiness;
+    expect(keys(pending.pending)).toEqual(["fixed_opex_annual"]);
+    expect(keys(pending.missing)).toEqual([]);
+    expect(assemble(rental()).readiness.notFound.map((x) => x.fieldKey)).not.toContain("fixed_opex_annual");
+    const v = assemble([...rental(), row("variable_expense_pct", 7)]).input!;
+    expect(v.variableExpensePct).toBe(7);
+  });
+  test("a field needed by a parent is required only when the parent is above 0", () => {
+    expect(keys(assemble(rental()).readiness.missing)).toEqual([]);
+    const loan = assemble(swap(rental(), "senior_loan_amount", { valueNumeric: 100 })).readiness.missing;
+    expect(keys(loan)).toContain("senior_rate_pct");
+    const mezz = assemble([...rental(), row("mezz_loan_amount", 100)]).readiness.missing;
+    expect(keys(mezz)).toContain("mezz_rate_pct");
+    expect(keys(assemble([...rental(), row("mezz_loan_amount", 0)]).readiness.missing)).toEqual([]);
+  });
+  test("a mezzanine is passed on with its stated terms; a rental must state its amortization, a sale takes 30 years", () => {
+    const d = assemble([...rental(), row("mezz_loan_amount", 100), row("mezz_rate_pct", 7), row("mezz_amort_years", 20), row("mezz_io_months", 2)]);
+    expect(d.input!.mezzanine).toEqual({ amount: 100, ratePct: 7, amortYears: 20, ioMonths: 2 });
+    expect(assemble([...rental(), row("mezz_loan_amount", 0)]).input).not.toHaveProperty("mezzanine");
+    expect(assemble([...sale(), row("mezz_loan_amount", 100), row("mezz_rate_pct", 7)]).input!.mezzanine).toEqual({ amount: 100, ratePct: 7, amortYears: 30, ioMonths: 0 });
+    expect(assemble([...sale(), row("mezz_loan_amount", 0)]).input).not.toHaveProperty("mezzanine");
+  });
+  test("partners, and each statement a person made, reach the input", () => {
+    const w = [row("lp_share_pct", 80), row("preferred_return_pct", 8), row("gp_promote_pct", 20)];
+    expect(assemble([...rental(), ...w]).input!.waterfall).toEqual({ lpSharePct: 80, preferredReturnPct: 8, gpPromotePct: 20 });
+    expect(assemble([...sale(), ...w]).input!.waterfall).toEqual({ lpSharePct: 80, preferredReturnPct: 8, gpPromotePct: 20 });
+    expect(assemble(rental()).input).not.toHaveProperty("waterfall");
+    expect(assemble(sale()).input).not.toHaveProperty("waterfall");
+    for (const base of [rental(), sale()]) {
+      const stated = assemble([...base, row("stated_total_cost", 0), row("equity_amount", 0), row("stated_ltc_pct", 0), row("stated_interest_reserve", 0)]).input!.stated;
+      // Stated as 0 is stated: an Unknown is not 0, and neither is 0 an Unknown.
+      expect(stated).toEqual({ totalCost: 0, equity: 0, ltcPct: 0, interestReserve: 0 });
+      expect(assemble(base).input!.stated).toEqual({});
+    }
+  });
+  test("flags are on only at 1, and each cost line reaches its place", () => {
+    const flags = assemble([...rental(), row("lease_up_ramp", 1), row("s_curve_draws", 1)]).input!;
+    expect([flags.leaseUpRamp, flags.sCurveDraws]).toEqual([true, true]);
+    const off = assemble(rental()).input!;
+    expect([off.leaseUpRamp, off.sCurveDraws]).toEqual([false, false]);
+    const costs = assemble([...rental(), row("other_cost", 7), row("land_transfer_tax", 8), row("development_charges", 9), row("gst_hst_net", 10)]).input!.budget;
+    expect(costs).toEqual({ land: 1_000_000, hard: 0, soft: 0, contingency: 0, other: 7, landTransferTax: 8, developmentCharges: 9, gstHstNet: 10 });
+    const saleCosts = assemble([...sale(), row("other_cost", 7), row("land_transfer_tax", 8)]).input!.budget;
+    expect([saleCosts.other, saleCosts.landTransferTax]).toEqual([7, 8]);
+  });
+  test("a refinance passes on its terms", () => {
+    const refi = [row("hold_years", 3), row("refinance_month", 6), row("refinance_amount", 100), row("refinance_rate_pct", 5), row("refinance_amort_years", 25), row("refinance_io_months", 3)];
+    const d = assemble([...drop(rental(), "hold_years"), ...refi]);
+    expect(d.input!.refinance).toEqual({ month: 6, amount: 100, ratePct: 5, amortYears: 25, ioMonths: 3 });
+    expect(assemble(rental()).input).not.toHaveProperty("refinance");
+  });
+  test("sale items: each missing half is named, a blocked half is not also missing, and only whole types are sold", () => {
+    expect(assemble(drop(drop(sale(), "unit_count"), "unit_sale_price")).readiness.missing).toEqual([{ fieldKey: "unit_count", label: "Unit types (at least one, with a count and a sale price)" }]);
+    expect(assemble(drop(sale(), "unit_sale_price")).readiness.missing).toEqual([{ fieldKey: "unit_sale_price", itemKey: "Row", label: "Sale price per unit (Row)" }]);
+    expect(assemble(drop(sale(), "unit_count")).readiness.missing).toEqual([{ fieldKey: "unit_count", itemKey: "Row", label: "Units (Row)" }]);
+    const pendingPrice = assemble(swap(sale(), "unit_sale_price", { status: "needs_review" }, "Row")).readiness;
+    expect(pendingPrice.missing).toEqual([]);
+    expect(keys(pendingPrice.pending)).toEqual(["unit_sale_price"]);
+    const pendingCount = assemble(swap(sale(), "unit_count", { status: "needs_review" }, "Row")).readiness;
+    expect(pendingCount.missing).toEqual([]);
+    // A value pending on another item does not excuse this one.
+    const other = assemble([...drop(sale(), "unit_sale_price"), row("unit_count", 1, "Flat"), row("unit_sale_price", 5, "Flat", "needs_review")]).readiness;
+    expect(other.missing).toEqual([{ fieldKey: "unit_sale_price", itemKey: "Row", label: "Sale price per unit (Row)" }]);
+    expect(assemble(sale()).input!.forSale!.units).toEqual([{ key: "Row", label: "Row", units: 2, price: 2_000 }]);
+  });
+  test("rental items: an empty program, a missing half, and a blocked half", () => {
+    const empty = drop(drop(rental(), "unit_count"), "unit_rent_monthly");
+    expect(assemble(empty).readiness.missing).toEqual([{ fieldKey: "unit_count", label: "Revenue program (at least one unit type or space)" }]);
+    const space = assemble([...empty, row("rentable_area_sf", 100, "Shop"), row("rent_psf_annual", 20, "Shop")]);
+    expect(space.input!.revenue).toEqual([{ key: "Shop", label: "Shop", basis: "per_sf", units: 0, areaSf: 100, rentPsfAnnual: 20 }]);
+    const occupied = assemble([...empty, row("rentable_area_sf", 100, "Shop"), row("rent_psf_annual", 20, "Shop"), row("item_occupancy_pct", 90, "Shop"), row("unit_count", 3, "Shop")]);
+    expect(occupied.input!.revenue[0]).toEqual({ key: "Shop", label: "Shop", basis: "per_sf", units: 3, areaSf: 100, rentPsfAnnual: 20, occupancyPct: 90 });
+    const noPsf = assemble([...empty, row("rentable_area_sf", 100, "Shop")]).readiness.missing;
+    expect(noPsf).toEqual([{ fieldKey: "rent_psf_annual", itemKey: "Shop", label: "Rent per SF (Shop)" }]);
+    const noRent = assemble([...empty, row("unit_count", 2, "B")]).readiness.missing;
+    expect(noRent).toEqual([{ fieldKey: "unit_rent_monthly", itemKey: "B", label: "Rent (B)" }]);
+    // Any blocked line of the item holds it back without a second complaint, whichever line it is.
+    for (const f of ["unit_count", "unit_rent_monthly", "rentable_area_sf", "item_occupancy_pct"]) {
+      const blocked = assemble([...empty, row(f, 1, "B", "needs_review")]).readiness;
+      expect(blocked.missing, f).toEqual([]);
+      expect(keys(blocked.pending), f).toEqual([f]);
+    }
+    expect(assemble([...empty, row("rent_psf_annual", 1, "B", "needs_review")]).readiness.missing).toEqual([]);
+  });
+  test("a part-unit total in a gap sentence keeps its decimals", () => {
+    const empty = drop(drop(rental(), "unit_count"), "unit_rent_monthly");
+    expect(assemble([...empty, row("unit_rent_monthly", 1234.5678, "B")]).gaps["unit_count|B"]).toBe("Type B has a rent of $1,234.5678 a month but no unit count in the documents.");
+    expect(assemble([...empty, row("item_occupancy_pct", 90, "B")]).gaps["unit_rent_monthly|B"]).toBe("Type B has no rent in the documents.");
+  });
+  test("not found: an optional line, shown only when its parent exists and no alternative was given", () => {
+    // A field no document is read for is listed as a choice, by the same test, so both lists are read together.
+    const nf = (rows: AssumptionRow[]) => { const r = assemble(rows).readiness; return [...r.notFound, ...r.choices].map((x) => x.fieldKey); };
+    const base = nf(rental());
+    for (const k of ["refinance_amount", "refinance_ltv_pct", "refinance_io_months", "refinance_insurance_premium_pct", "mezz_io_months", "senior_io_months"]) expect(base, k).not.toContain(k);
+    const refi = [row("hold_years", 3), row("refinance_month", 6), row("refinance_rate_pct", 5), row("refinance_amort_years", 25)];
+    const noLoanStated = nf([...drop(rental(), "hold_years"), ...refi]);
+    expect(noLoanStated).toContain("refinance_io_months");
+    expect(noLoanStated).toContain("refinance_insurance_premium_pct");
+    const amount = nf([...drop(rental(), "hold_years"), ...refi, row("refinance_amount", 100)]);
+    expect(amount).not.toContain("refinance_ltv_pct");
+    expect(nf([...drop(rental(), "hold_years"), ...refi, row("refinance_ltv_pct", 50)])).not.toContain("refinance_amount");
+    expect(nf([...rental(), row("mezz_loan_amount", 100), row("mezz_rate_pct", 7), row("mezz_amort_years", 20)])).toContain("mezz_io_months");
+    expect(nf(swap(rental(), "senior_loan_amount", { valueNumeric: 100 }))).toContain("senior_io_months");
+  });
+  test("what the engine refuses comes back as a blocked deal, with its sentence and field", () => {
+    const refused = (rows: AssumptionRow[]) => { const r = assemble(rows); expect(r.input).toBeNull(); expect(r.readiness.status).toBe("blocked"); return r.readiness.impossible; };
+    const noUnits = refused(swap(sale(), "unit_count", { valueNumeric: 0 }, "Row"));
+    expect(noUnits.map((x) => x.fieldKey)).toEqual(["unit_count"]);
+    expect(noUnits[0]!.label).toMatch(/^unit type "Row" needs a whole unit count/);
+    // A cost sentence names no field a person can open: the input as a whole.
+    const credit = refused([...rental().filter((r) => !["land_cost", "hard_cost", "soft_cost", "contingency"].includes(r.fieldKey)), row("land_cost", 500), row("hard_cost", 40), row("soft_cost", 30), row("contingency", 30), row("other_cost", -101)]);
+    expect(credit.map((x) => x.fieldKey)).toEqual(["input"]);
   });
 });
