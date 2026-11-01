@@ -54,7 +54,7 @@ function Result({ d, i, dealId }: { d: DocumentRow; i: I18n; dealId: string }) {
   if (FAILED.includes(d.stage)) {
     return (
       <span className="docs-fail">{t("docs.unusable")}
-        {d.stage_detail && <span className="sub">{sentence(msg(d.stage_detail))}</span>}
+        {d.stage_detail?.split("\n").map((line, n) => <span key={n} className="sub">{sentence(msg(line))}</span>)}
         <span className="sub">{t(d.stage === "rejected" ? "documents.rejectedHint" : "documents.readFailedHint")}</span>
       </span>
     );
@@ -71,7 +71,7 @@ function Result({ d, i, dealId }: { d: DocumentRow; i: I18n; dealId: string }) {
       {d.number_format && d.number_format !== "1,234.56" && d.number_format !== "not detected" && (
         <span className="sub docs-warn"><I.Eye />{t("docs.format", { f: d.number_format })}</span>
       )}
-      {d.stage_detail ? <span className="sub docs-warn"><I.Eye />{msg(d.stage_detail)}</span>
+      {d.stage_detail ? d.stage_detail.split("\n").map((line, n) => <span key={n} className="sub docs-warn"><I.Eye />{msg(line)}</span>)
         : d.needs_ocr && <span className="sub docs-warn"><I.Eye />{t("documents.ocr")}</span>}
     </>
   );

@@ -32,8 +32,9 @@ export type NormalizedDocument = {
   lines: Line[];
   tables: Table[];
   pageCount: number | null;
-  /** True when a PDF had no text layer, so nothing could be read without OCR. */
+  /** True when a PDF has pages whose text only OCR can reach. */
   needsOcr: boolean;
+  ocrPages?: number[];
   /** All readable text, for number-format detection. */
   fullText: string;
   /** What the parser could not read from the file as a whole ("formulas with no saved results"); shown with the document, never read as values. */

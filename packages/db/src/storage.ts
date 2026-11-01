@@ -1,5 +1,5 @@
 // Content-addressed file storage. Local development keeps bytes on disk; a
-// production deployment supplies an object store with the same three methods.
+// production deployment supplies an object store with the same interface.
 
 import { createHash } from "node:crypto";
 import { mkdir, readFile, writeFile, stat, unlink } from "node:fs/promises";
@@ -8,7 +8,9 @@ import { join } from "node:path";
 export interface BlobStore {
   put(bytes: Uint8Array): Promise<{ key: string; sha256: string; size: number }>;
   get(key: string): Promise<Uint8Array>;
-  /** Removes the bytes under a key. A key with no file is not an error: the bytes are gone either way. */
+  getOcr(key: string): Promise<Uint8Array | null>;
+  putOcr(key: string, bytes: Uint8Array): Promise<void>;
+  /** Removes the file and its saved OCR. A missing object is not an error. */
   delete(key: string): Promise<void>;
 }
 
@@ -34,13 +36,21 @@ export function fileStore(root: string): BlobStore {
       checkKey(key);
       return new Uint8Array(await readFile(join(root, key)));
     },
+    async getOcr(key) {
+      checkKey(key);
+      try { return new Uint8Array(await readFile(join(root, `${key}.ocr`))); }
+      catch (e) { if ((e as NodeJS.ErrnoException).code === "ENOENT") return null; throw e; }
+    },
+    async putOcr(key, bytes) {
+      checkKey(key);
+      await writeFile(join(root, `${key}.ocr`), bytes);
+    },
     async delete(key) {
       checkKey(key);
-      try {
-        await unlink(join(root, key));
-      } catch (e) {
-        if ((e as NodeJS.ErrnoException).code !== "ENOENT") throw e;
-      }
+      await Promise.all([key, `${key}.ocr`].map(async name => {
+        try { await unlink(join(root, name)); }
+        catch (e) { if ((e as NodeJS.ErrnoException).code !== "ENOENT") throw e; }
+      }));
     },
   };
 }
@@ -103,11 +113,27 @@ export function s3Store(opts: S3StoreOptions): BlobStore {
       const out = await client.send(new sdk.GetObjectCommand({ Bucket: opts.bucket, Key: prefix + key }));
       return new Uint8Array(await out.Body.transformToByteArray());
     },
+    async getOcr(key) {
+      checkKey(key);
+      const { client, sdk } = await s3();
+      try {
+        const out = await client.send(new sdk.GetObjectCommand({ Bucket: opts.bucket, Key: prefix + key + ".ocr" }));
+        return new Uint8Array(await out.Body.transformToByteArray());
+      } catch (e) {
+        const err = e as { name?: string; $metadata?: { httpStatusCode?: number } };
+        if (err.name === "NoSuchKey" || err.name === "NotFound" || err.$metadata?.httpStatusCode === 404) return null;
+        throw e;
+      }
+    },
+    async putOcr(key, bytes) {
+      checkKey(key);
+      const { client, sdk } = await s3();
+      await client.send(new sdk.PutObjectCommand({ Bucket: opts.bucket, Key: prefix + key + ".ocr", Body: bytes, ContentLength: bytes.byteLength }));
+    },
     async delete(key) {
       checkKey(key);
       const { client, sdk } = await s3();
-      // S3 answers a delete of a missing object as success, which is what the interface asks.
-      await client.send(new sdk.DeleteObjectCommand({ Bucket: opts.bucket, Key: prefix + key }));
+      await Promise.all([key, `${key}.ocr`].map(name => client.send(new sdk.DeleteObjectCommand({ Bucket: opts.bucket, Key: prefix + name }))));
     },
   };
 }

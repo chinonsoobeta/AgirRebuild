@@ -11,7 +11,7 @@ import { FIELDS, FIELD_BY_KEY, runPolicy, type Currency, type Policy, type Engin
 import { itemFold } from "@agir/numbers";
 import { renderArtifact, RendererUnavailableError, type ArtifactInput } from "@agir/artifacts";
 import { sha256Hex, type BlobStore, type Db } from "@agir/db";
-import { AI_AMBIGUOUS_NOTE, AI_LOW_CONFIDENCE_NOTE, applyLabels, applySuggestions, chooseByArithmetic, checkArithmetic, consolidate, extractCandidates, figureOrder, kindOf, labelPhrase, redactText, labelUnit, offerable, offeredIds, parseDocument, ocrPdf, REMEMBERED_NOTE, withoutLabelled, type SourcedCandidate } from "@agir/extraction";
+import { AI_AMBIGUOUS_NOTE, AI_LOW_CONFIDENCE_NOTE, applyLabels, applySuggestions, chooseByArithmetic, checkArithmetic, consolidate, extractCandidates, figureOrder, kindOf, labelPhrase, redactText, labelUnit, offerable, offeredIds, parseDocument, ocrPdf, MAX_OCR_PAGES, parseSavedOcr, serializeOcr, mergeOcr, isOcrLocation, REMEMBERED_NOTE, withoutLabelled, type SourcedCandidate } from "@agir/extraction";
 
 export const MAX_UPLOAD_BYTES = 75 * 1024 * 1024;
 
@@ -25,7 +25,7 @@ export type SuggestRequest = {
 export type SuggestReply = { model: string; stop_reason: string | null; text: string };
 export type SuggestionProvider = (request: SuggestRequest) => Promise<SuggestReply>;
 
-export type WorkerDeps = { db: Db; store: BlobStore; log?: (event: Record<string, unknown>) => void; suggest?: SuggestionProvider; read?: ReaderProvider };
+export type WorkerDeps = { db: Db; store: BlobStore; log?: (event: Record<string, unknown>) => void; suggest?: SuggestionProvider; read?: ReaderProvider; ocr?: typeof ocrPdf; leaseRenewMs?: number };
 
 const SUGGEST_SYSTEM = `You label figures that a document reader could not label. For each figure, choose one catalog key, or "ignore".
 Never change, compute, sum or convert a value. Return only ids and keys.
@@ -169,22 +169,62 @@ async function extractDocument(deps: WorkerDeps, documentId: string) {
     if (!kindOf(d.name)) throw new Error("This file type cannot be read");
     parsed = await parseDocument(bytes, d.name);
   } catch (e) {
-    await setStage(db, d.id, "read_failed", `Agir could not read this file: ${(e as Error).message.split("\n")[0]}`);
+    await setStage(db, d.id, "read_failed", (e as Error).name === "PasswordException" ? "This PDF is protected by a password. Remove the password and upload it again." : `Agir could not read this file: ${(e as Error).message.split("\n")[0]}`);
     return;
   }
+  let stageDetail: string | null = null;
   if (parsed.needsOcr) {
-    const unavailable = "This PDF is scanned pages with no text layer. Agir does not run OCR yet: enter its values by hand, or upload a text PDF.";
-    try {
-      const result = await ocrPdf(bytes);
-      if (!result.lines.length) {
-        await setStage(db, d.id, "read_failed", unavailable, { page_count: parsed.pageCount, needs_ocr: true });
+    const picturePages = parsed.ocrPages!;
+    const whole = picturePages.length === parsed.pageCount;
+    const unavailable = "This PDF is scanned pages with no text layer, and OCR is not available on this machine. Enter its values by hand, or upload a text PDF.";
+    const noText = "Agir found no readable text on the scanned pages of this PDF. Enter its values by hand, or upload a clearer copy.";
+    if (whole && picturePages.length > MAX_OCR_PAGES) {
+      await setStage(db, d.id, "read_failed", "This scanned PDF has more than 50 pages; Agir reads scans of up to 50 pages. Split it, or enter its values by hand.", { page_count: parsed.pageCount, needs_ocr: true });
+      return;
+    }
+    let saved = parseSavedOcr(await store.getOcr(d.storage_key));
+    let engineMissing = false;
+    if (!saved || saved.failed.length) {
+      try {
+        const result = await (deps.ocr ?? ocrPdf)(bytes, saved ? saved.failed : picturePages.slice(0, MAX_OCR_PAGES));
+        if (saved) {
+          const added = result.pages.filter(page => !saved!.pages.some(existing => existing.page === page.page));
+          const changed = added.length > 0 || JSON.stringify(saved.failed) !== JSON.stringify(result.failed);
+          saved = { ...saved, pages: [...saved.pages, ...added].sort((a, b) => a.page - b.page), failed: result.failed };
+          if (changed) await store.putOcr(d.storage_key, serializeOcr(saved));
+        } else {
+          saved = { version: 1, ...result, notRead: picturePages.slice(MAX_OCR_PAGES) };
+          if (saved.pages.length || !saved.failed.length) await store.putOcr(d.storage_key, serializeOcr(saved));
+        }
+      } catch (e) {
+        deps.log?.({ event: "ocr.unavailable", document_id: d.id, message: (e as Error).message });
+        engineMissing = !saved;
+      }
+    }
+    if (saved) parsed = mergeOcr(parsed, saved);
+    const read = new Set(parsed.lines.filter(l => isOcrLocation(l.location)).map(l => /^page (\d+)/.exec(l.location)![1])).size;
+    if (whole) {
+      if (!read) {
+        await setStage(db, d.id, "read_failed", engineMissing || saved?.failed.length === picturePages.length ? unavailable : noText, { page_count: parsed.pageCount, needs_ocr: true });
         return;
       }
-      parsed = { ...parsed, ...result, fullText: result.lines.map((l) => l.text).join("\n") };
-    } catch (e) {
-      const message = (e as Error).message;
-      await setStage(db, d.id, "read_failed", message === "OCR is not available on this machine" ? unavailable : message, { page_count: parsed.pageCount, needs_ocr: true });
-      return;
+      stageDetail = read === picturePages.length
+        ? `Read by OCR from ${parsed.pageCount} scanned ${parsed.pageCount === 1 ? "page" : "pages"}. Check every value against the page before approving it.`
+        : `Read by OCR from ${read} of ${parsed.pageCount} scanned pages; the others gave no text Agir could read. Check every value against the page before approving it.`;
+    } else {
+      const messages = [`${picturePages.length} of ${parsed.pageCount} pages in this PDF ${picturePages.length === 1 ? "is a picture" : "are pictures"}.`];
+      if (engineMissing) messages.push("OCR is not available on this machine, so they were not read.");
+      else {
+        messages.push(read ? picturePages.length === 1
+          ? "Agir read text from it by OCR. Check every value read that way against the page before approving it."
+          : `Agir read text from ${read} of them by OCR. Check every value read that way against the page before approving it.`
+          : "Agir found no text it could read there.");
+      }
+      const notRead = picturePages.slice(MAX_OCR_PAGES).length;
+      if (notRead) messages.push(`Agir reads the first 50 picture pages of a PDF, so ${notRead} ${notRead === 1 ? "page was" : "pages were"} not read.`);
+      const failed = saved?.failed.length ?? 0;
+      if (failed) messages.push(`${failed} ${failed === 1 ? "page" : "pages"} could not be read. Retry the file to try again.`);
+      stageDetail = messages.join("\n");
     }
   }
   await setStage(db, d.id, "extracting", null, { page_count: parsed.pageCount, ...(parsed.needsOcr ? { needs_ocr: true } : {}) });
@@ -212,7 +252,7 @@ async function extractDocument(deps: WorkerDeps, documentId: string) {
     }
     await tx.query(
       `update documents set stage = 'extracted', stage_detail = $4, read_role = $5, candidate_count = $2, number_format = $3, updated_at = now() where id = $1`,
-      [d.id, result.candidates.length, format, parsed.needsOcr ? `Read by OCR from ${parsed.pageCount} scanned ${parsed.pageCount === 1 ? "page" : "pages"}. Check every value against the page before approving it.` : null, result.notes.find(n => n.startsWith("Document kind: "))?.slice("Document kind: ".length) ?? null],
+      [d.id, result.candidates.length, format, stageDetail, result.notes.find(n => n.startsWith("Document kind: "))?.slice("Document kind: ".length) ?? null],
     );
     // Read once per job: with AI reading off for the workspace, the rules reconcile alone, as with no key.
     aiRead = Boolean(deps.read || process.env.ANTHROPIC_API_KEY) && (await aiReadingOn(tx, d.workspace_id)) && !(await currentDocuments(tx, d.deal_id)).some(doc => ["uploaded", "checking", "reading", "extracting"].includes(doc.stage));
@@ -278,16 +318,16 @@ export async function reconcileDeal(db: Db, store: BlobStore, dealId: string) {
     if (!deal) return;
     const rows = await tx.query<{
       id: string; document_id: string; document_name: string; field_key: string; item_key: string | null; value: number;
-      raw: string; unit_seen: string | null; location: string; context: string; rule: string; note: string | null; alternatives: string[] | null; needs_ocr: boolean; region: SourcedCandidate["region"];
+      raw: string; unit_seen: string | null; location: string; context: string; rule: string; note: string | null; alternatives: string[] | null; region: SourcedCandidate["region"];
     }>(
-      `select c.id, c.document_id, d.name as document_name, c.field_key, c.item_key, c.value, c.raw, c.unit_seen, c.location, c.context, c.rule, c.note, c.alternatives, c.region, d.needs_ocr
+      `select c.id, c.document_id, d.name as document_name, c.field_key, c.item_key, c.value, c.raw, c.unit_seen, c.location, c.context, c.rule, c.note, c.alternatives, c.region
        from candidates c join documents d on d.id = c.document_id
        where c.deal_id = $1 and c.field_key is not null and c.value is not null and d.retired_at is null and d.stage = 'extracted'`,
       [dealId],
     );
     const toSourced = (r: (typeof rows)[number]): SourcedCandidate => ({
       fieldKey: r.field_key, itemKey: r.item_key, value: r.value, raw: r.raw, unitSeen: r.unit_seen, location: r.location,
-      context: r.context, rule: r.rule, ...(r.region ? { region: r.region } : {}), ...(r.alternatives ? { alternatives: r.alternatives } : {}), ...(r.note ? { note: r.note } : {}), documentId: r.document_id, documentName: r.document_name, ...(r.needs_ocr ? { ocr: true } : {}),
+      context: r.context, rule: r.rule, ...(r.region ? { region: r.region } : {}), ...(r.alternatives ? { alternatives: r.alternatives } : {}), ...(r.note ? { note: r.note } : {}), documentId: r.document_id, documentName: r.document_name, ...(isOcrLocation(r.location) ? { ocr: true } : {}),
     });
     const sourced = rows.map(toSourced);
     // A stored suggestion counts only while the workspace switch is on, and only after the boundary has checked it. The model is never called here.
@@ -298,7 +338,7 @@ export async function reconcileDeal(db: Db, store: BlobStore, dealId: string) {
     const unlabelled = figureOrder(
       (
         await tx.query<(typeof rows)[number]>(
-          `select c.id, c.document_id, d.name as document_name, c.field_key, c.item_key, c.value, c.raw, c.unit_seen, c.location, c.context, c.rule, c.note, c.alternatives, c.region, d.needs_ocr
+          `select c.id, c.document_id, d.name as document_name, c.field_key, c.item_key, c.value, c.raw, c.unit_seen, c.location, c.context, c.rule, c.note, c.alternatives, c.region
            from candidates c join documents d on d.id = c.document_id
            where c.deal_id = $1 and c.field_key is null and c.value is not null and d.retired_at is null and d.stage = 'extracted'`,
           [dealId],
@@ -673,6 +713,10 @@ export async function runOnce(deps: WorkerDeps): Promise<boolean> {
   const job = await claim(deps.db);
   if (!job) return false;
   const started = Date.now();
+  const renewal = setInterval(() => {
+    void deps.db.query(`update jobs set lease_until = now() + interval '5 minutes' where id = $1 and status = 'running'`, [job.id]).catch(() => {});
+  }, deps.leaseRenewMs ?? 60_000);
+  renewal.unref();
   try {
     if (job.kind === "verify_document") await verifyDocument(deps, job.payload.document_id!);
     else if (job.kind === "extract_document") await extractDocument(deps, job.payload.document_id!);
@@ -691,7 +735,7 @@ export async function runOnce(deps: WorkerDeps): Promise<boolean> {
       await setStage(deps.db, job.payload.document_id, "read_failed", "Agir could not process this file after several attempts. Retry it, or upload it again.");
     }
     deps.log?.({ event: dead ? "job.dead" : "job.retry", id: job.id, kind: job.kind, error: message });
-  }
+  } finally { clearInterval(renewal); }
   return true;
 }
 

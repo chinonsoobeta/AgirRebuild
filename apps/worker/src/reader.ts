@@ -2,7 +2,7 @@ import Anthropic from "@anthropic-ai/sdk";
 import { zodOutputFormat } from "@anthropic-ai/sdk/helpers/zod";
 import * as z from "zod/v4";
 import { currentDocuments, documentsHash, type Db, type BlobStore } from "@agir/db";
-import { addressedText, documentKind, parseDocument, redactDocument, verifyReadings, READER_PROMPT, READER_PROMPT_VERSION, type ReaderResponse, type ReadingDocument, type Redaction } from "@agir/extraction";
+import { addressedText, documentKind, parseDocument, parseSavedOcr, mergeOcr, redactDocument, verifyReadings, READER_PROMPT, READER_PROMPT_VERSION, type ReaderResponse, type ReadingDocument, type Redaction } from "@agir/extraction";
 
 const unit = z.enum(["$", "%", "sf", "m2", "$/sf", "$/m2", "months", "years", "units", "x", "vacancy_%"]);
 const value = { value: z.number(), unit_seen: unit, file: z.string(), location: z.string(), quote: z.string() };
@@ -19,6 +19,13 @@ const provider: ReaderProvider = async request => {
   return reply.parsed_output;
 };
 export { currentDocuments, documentsHash };
+
+/** Both the first AI reading and replay use the OCR saved beside the original file. */
+export async function loadDocument(store: BlobStore, storageKey: string, name: string) {
+  const document = await parseDocument(await store.get(storageKey), name);
+  const saved = parseSavedOcr(await store.getOcr(storageKey));
+  return saved ? mergeOcr(document, saved) : document;
+}
 
 /** What a stored reading keeps of each document it used: the bytes stay in the blob store, so a replay parses them again. */
 type DocumentRef = { id: string; name: string; sha256: string };
@@ -53,7 +60,7 @@ export async function readDeal(db: Db, store: BlobStore, dealId: string, workspa
   // Parsing failures also leave a safe failure row and allow the rules to reconcile.
   try {
     for (const d of extracted) {
-      const document = await parseDocument(await store.get(d.storage_key), d.name);
+      const document = await loadDocument(store, d.storage_key, d.name);
       if ((d.role_set ?? documentKind(document).role) === "context") continue;
       // Card S7: the model sees, and its quotes are checked against, the redacted text; the rule reader keeps the original.
       const redacted = redactDocument(document);
@@ -89,7 +96,7 @@ export async function storedReadings(db: Db, store: BlobStore, dealId: string) {
   for (const d of stored.verification.documents) {
     const current = docs.find(c => c.id === d.id && c.name === d.name && c.stage === "extracted" && (!("sha256" in d) || c.sha256 === d.sha256));
     if (!current) continue;
-    const document = "document" in d ? d.document : await parseDocument(await store.get(current.storage_key), d.name);
+    const document = "document" in d ? d.document : await loadDocument(store, current.storage_key, d.name);
     documents.push({ id: d.id, name: d.name, document: redacted ? redactDocument(document).document : document });
     refs.push({ id: d.id, name: d.name, sha256: current.sha256 });
   }

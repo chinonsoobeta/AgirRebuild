@@ -1,3 +1,4 @@
+import { isOcrLocation } from "./ocr-text.ts";
 import { FIELD_BY_KEY } from "@agir/contracts";
 import { detectFormat, normalizeText, SCALE_RE, scaleOf, SF_PER_M2, tokenize } from "@agir/numbers";
 import { declaredScale, labelScale, statedScaleUnit } from "./candidates.ts";
@@ -81,13 +82,17 @@ export function verifyReading(reading: Reading, documents: readonly ReadingDocum
   if (field.itemized ? !wholeUnitCount && !itemKey?.trim() : itemKey !== null) return { outcome: READING_FAILURE.item };
   const matches = documents.filter(d => d.name === reading.file);
   const doc = matches.length === 1 ? matches[0] : undefined;
-  const location = reading.location.replace(/^(.*![A-Z]+\d+)\.\.[A-Z]+\d+$/, "$1");
+  const withoutOcr = (address: string) => address.replace(/ \(OCR, confidence [^)]*\)$/, "");
+  let location = withoutOcr(reading.location).replace(/^(.*![A-Z]+\d+)\.\.[A-Z]+\d+$/, "$1");
   // The model sometimes copies the address marker into its quote ("[line 4] Loan amount: $3,900,000"); the marker is not
   // document text, so it is dropped before the quote is looked for (QA run 3, skeptic R1).
-  const marker = `[${reading.location}] `;
-  if (reading.quote.startsWith(marker)) reading = { ...reading, quote: reading.quote.slice(marker.length) };
-  const entries = doc ? addressedEntries(doc.document).filter(e => e.location === location) : [];
+  const entries = doc ? addressedEntries(doc.document).filter(e => withoutOcr(e.location) === location) : [];
   if (!doc || entries.length !== 1) return { outcome: READING_FAILURE.address };
+  for (const address of [reading.location, entries[0]!.location]) {
+    const marker = `[${address}] `;
+    if (reading.quote.startsWith(marker)) reading = { ...reading, quote: reading.quote.slice(marker.length) };
+  }
+  location = entries[0]!.location;
   if (!entries[0]!.text.includes(reading.quote)) return { outcome: READING_FAILURE.quote };
   // Interest and lender fees are computed by the engine; as other costs they would count twice.
   if (field.key === "other_cost" && FINANCING.test(figureLabel(doc.document, location, entries[0]!.text, reading.quote).replace(EXCLUDING, " "))) {
@@ -202,7 +207,7 @@ export function verifyReading(reading: Reading, documents: readonly ReadingDocum
   return { outcome: "verified", candidate: {
     // The rule reader's name for the same type ("Two-bedroom" and "2BR" are "2BR"), so the two group in consolidate (QA card C1).
     fieldKey: field.key, itemKey: itemKey === null ? null : canonicalItem(itemKey.trim()), value, unitSeen, raw: token.raw,
-    documentId: doc.id, documentName: doc.name, location: reading.location, context: reading.quote,
+    documentId: doc.id, documentName: doc.name, location: isOcrLocation(location) ? location : reading.location, ...(isOcrLocation(location) ? { ocr: true } : {}), context: reading.quote,
     rule: "ai", ...(ambiguous ? { ambiguous: true as const } : {}), confidence: reading.confidence, ...(reading.note ? { note: reading.note } : {}),
   } };
 }

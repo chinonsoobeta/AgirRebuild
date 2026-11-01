@@ -93,7 +93,8 @@ likely place for code execution and must be the most locked-down process Agir ru
 - **No inbound network.** Egress allow-list: Postgres, the blob store, the KMS, `api.anthropic.com`. Nothing else, so
   a compromised parser cannot exfiltrate anywhere Agir does not already send data.
 - Decrypt in memory only, one deal at a time; never write plaintext to disk. OCR uses `mkdtemp` for language data
-  only; keep it so.
+  only; keep it so. Saved OCR text is document content, stored beside its file, and goes through the same envelope
+  encryption as the file when S1 lands.
 - Chromium for PDFs runs in the same jail with its sandbox on.
 - The zip-bomb and page caps exist (card 47b). Add **ClamAV** to the worker image: it is cheap, it answers plan step
   L4's EICAR test, and it reverses ADR 0001's "out of scope" on a stated basis.

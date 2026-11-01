@@ -11,3 +11,5 @@ export * from "./verify-reading.ts";
 export * from "./reader-prompt.ts";
 export { documentKind } from "./document-kind.ts";
 export { redactDocument, redactText, redactionSpans, redactionMarker, type Redaction, type RedactionKind, type RedactedSpan } from "./redact.ts";
+
+export * from "./ocr-text.ts";

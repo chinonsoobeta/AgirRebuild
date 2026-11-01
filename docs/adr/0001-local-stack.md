@@ -13,8 +13,7 @@ architecture and changes three pieces so it runs on one laptop with no services:
 | pnpm + Turborepo | npm workspaces | pnpm was not installed; nothing depends on it. |
 | Tailwind + shadcn/ui | Plain CSS with the Ink & Signal tokens | Fewer dependencies; the design is small and exact. |
 
-Not built yet, and said so in the product: OCR (a scanned PDF with no text layer is marked
-"could not be read" with a plain explanation) and market data.
+Not built yet, and said so in the product: market data.
 
 Virus scanning is out of scope for now (decided 2026-09-24). Uploads are checked structurally:
 the file type matches its content, the size and SHA-256 fingerprint match what was uploaded,

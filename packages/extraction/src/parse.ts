@@ -55,11 +55,14 @@ export function parseCsv(text: string): string[][] {
   return rows;
 }
 
-/** The thin horizontal strokes and fills a page draws, as [x0, x1, y] in page space. Only plain scaling and translation are followed; a rotated or skewed drawing is left out. */
-async function horizontalRules(pdfjs: typeof import("pdfjs-dist/legacy/build/pdf.mjs"), page: PDFPageProxy): Promise<[number, number, number][]> {
+/** One operator walk counts picture paints and their coverage, and finds thin horizontal rules as [x0, x1, y]. Rotated or skewed strokes are excluded from the rules. */
+async function horizontalRules(pdfjs: typeof import("pdfjs-dist/legacy/build/pdf.mjs"), page: PDFPageProxy): Promise<{ rules: [number, number, number][]; images: number; paths: number; cover: number }> {
   const { OPS } = pdfjs;
   const paints = new Set<number>([OPS.stroke, OPS.closeStroke, OPS.fill, OPS.eoFill, OPS.fillStroke, OPS.eoFillStroke, OPS.closeFillStroke, OPS.closeEOFillStroke]);
   const list = await page.getOperatorList();
+  const imageOps = new Set<number>([OPS.paintImageXObject, OPS.paintInlineImageXObject, OPS.paintImageMaskXObject, OPS.paintImageXObjectRepeat, OPS.paintImageMaskXObjectRepeat, OPS.paintInlineImageXObjectGroup, OPS.paintImageMaskXObjectGroup]);
+  let images = 0, paths = 0, area = 0;
+  const pageArea = Math.abs((page.view[2]! - page.view[0]!) * (page.view[3]! - page.view[1]!));
   type M = [number, number, number, number, number, number];
   const mul = (a: M, b: M): M => [a[0] * b[0] + a[1] * b[2], a[0] * b[1] + a[1] * b[3], a[2] * b[0] + a[3] * b[2], a[2] * b[1] + a[3] * b[3], a[4] * b[0] + a[5] * b[2] + b[4], a[4] * b[1] + a[5] * b[3] + b[5]];
   let ctm: M = [1, 0, 0, 1, 0, 0];
@@ -67,6 +70,8 @@ async function horizontalRules(pdfjs: typeof import("pdfjs-dist/legacy/build/pdf
   const rules: [number, number, number][] = [];
   list.fnArray.forEach((fn, i) => {
     const args = list.argsArray[i] as unknown[];
+    if (fn === OPS.constructPath) paths++;
+    if (imageOps.has(fn)) { images++; area += Math.abs(ctm[0] * ctm[3] - ctm[1] * ctm[2]); }
     if (fn === OPS.save || fn === OPS.paintFormXObjectBegin) {
       saved.push(ctm);
       if (fn === OPS.paintFormXObjectBegin && Array.isArray(args?.[0])) ctm = mul(args[0] as M, ctm);
@@ -81,7 +86,7 @@ async function horizontalRules(pdfjs: typeof import("pdfjs-dist/legacy/build/pdf
       if (y1! - y0! <= 1.5 && x1! - x0! > 0) rules.push([x0!, x1!, (y0! + y1!) / 2]);
     }
   });
-  return rules;
+  return { rules, images, paths, cover: Math.min(1, area / pageArea) };
 }
 
 // Struck text is wrapped in these private-use marks while a line or cell is put together; `unmark` takes them out and returns the ranges.
@@ -165,11 +170,15 @@ async function parsePdf(bytes: Uint8Array): Promise<NormalizedDocument> {
   }
   const lines: Line[] = [];
   let chars = 0;
+  const ocrPages: number[] = [];
   for (let p = 1; p <= doc.numPages; p++) {
     const page = await doc.getPage(p);
     const content = await page.getTextContent();
     // A page drawn rotated is not checked for strike-through lines.
-    const rules = page.rotate === 0 ? await horizontalRules(pdfjs, page) : [];
+    const pageChars = content.items.reduce((n, item) => n + ("str" in item ? item.str.replace(/\s/g, "").length : 0), 0);
+    const drawing = page.rotate === 0 || pageChars < 200 ? await horizontalRules(pdfjs, page) : { rules: [], images: 0, paths: 0, cover: 0 };
+    const rules = page.rotate === 0 ? drawing.rules : [];
+    if (pageChars < 16 && (drawing.images > 0 || drawing.paths > 50) || pageChars < 200 && drawing.cover >= 0.5) ocrPages.push(p);
     // Group text items into lines by their baseline.
     const rows = new Map<number, PdfPiece[]>();
     for (const item of content.items as { str?: string; transform?: number[]; width?: number; height?: number }[]) {
@@ -197,7 +206,8 @@ async function parsePdf(bytes: Uint8Array): Promise<NormalizedDocument> {
   }
   const pageCount = doc.numPages;
   await task.destroy();
-  return { kind: "pdf", lines, tables: [], pageCount, needsOcr: chars < 16, fullText: lines.map((l) => l.text).join("\n") };
+  if (chars < 16) ocrPages.splice(0, ocrPages.length, ...Array.from({ length: pageCount }, (_, i) => i + 1));
+  return { kind: "pdf", lines, tables: [], pageCount, needsOcr: ocrPages.length > 0, ...(ocrPages.length ? { ocrPages } : {}), fullText: lines.map((l) => l.text).join("\n") };
 }
 
 /** A unit written alone, as a quoted number-format literal or in the cell beside a value; anything longer is a note, not a unit. */

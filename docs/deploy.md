@@ -29,11 +29,16 @@ The API serves the web app and the API and, with `DATABASE_URL` set, does not ru
 checking, reading and extracting documents, reconciling, and rendering memos (the PDF needs Chromium, so the worker
 image needs it). With no `DATABASE_URL` (embedded PGlite) the API runs the worker in its own process, and
 `AGIR_EMBEDDED_WORKER=1` forces that on Postgres too.
+OCR runs inside the worker.
+In a measured run on a development Mac, a page took 0.59 s at the median and 26 s at the slowest, and memory for
+the OCR child reached about 1.1 GB, so the worker's memory limit should allow for that.
 
 Both apply migrations at start. In compose the worker starts only after the API answers `/api/health`, so the two
 never migrate at once. Elsewhere, start the API first.
 
 ## The shared store rule
+
+Saved OCR text sits beside its file as `<key>.ocr` in the same store.
 
 The API writes uploaded files into the blob store and the worker reads them; the worker writes rendered memos and the
 API serves them. **Both must use the same store.** A mismatch fails silently at first: uploads succeed, then every
@@ -126,6 +131,6 @@ section reports both, as Agir checked them when the package was made.
 ## Not done
 
 Per ADR 0002, still to build before real documents: TLS and HSTS at the edge, and TLS to Postgres
-(`sslmode=verify-full`); envelope encryption of blobs and a KMS (S1, S4); the worker jail: read-only root, an egress
-allow-list, Chromium's sandbox, ClamAV (S3); a mail provider (production sends no email today); off-host copies and
-a schedule for the backups.
+(`sslmode=verify-full`); envelope encryption of blobs, including saved OCR text, and a KMS (S1, S4); the worker jail:
+read-only root, an egress allow-list, Chromium's sandbox, ClamAV (S3); a mail provider (production sends no email
+today); off-host copies and a schedule for the backups.
