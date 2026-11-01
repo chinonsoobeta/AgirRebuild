@@ -1,0 +1,1 @@
+Invented scanned pages for tests. Each is one page of the same made-up budget, drawn in Liberation Sans and stored as a single image: `scan-jbig2.pdf` as JBIG2 (MMR-coded), `scan-jpx.pdf` as JPEG 2000.
