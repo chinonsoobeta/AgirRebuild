@@ -111,7 +111,7 @@ export type Source = { document_id: string; document_name: string; value: number
 export type Assumption = {
   id: string; fieldKey: string; itemKey: string | null; label: string; group: string; groupLabel: string; unit: string; material: boolean;
   conservative: "max" | "min" | null; status: string; value: number | null; pendingValue: number | null; sourceKind: "document" | "analyst" | "default" | "table"; source?: string; tableSource?: import("@agir/contracts").TableSource;
-  sources: Source[]; conflictValues: { value: number; documents: string[] }[] | null; reason: string | null; decidedBy: string | null;
+  sources: Source[]; conflictValues: { value: number; documents: string[] }[] | null; usualSource: { value: number; kind: string } | null; reason: string | null; decidedBy: string | null;
   decidedById: string | null; decidedAt: string | null; secondApprover: string | null; confirmedByReview: boolean; secondApprovedAt: string | null; sponsorStated: boolean;
   /** The deal's client said the broker's value is right (card 89); not an independent confirmation. A client cannot see another client's name. */
   clientConfirmedBy: string | null; clientConfirmedById: string | null; clientConfirmedAt: string | null; version: number;

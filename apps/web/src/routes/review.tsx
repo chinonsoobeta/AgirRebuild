@@ -9,6 +9,7 @@ import { Notice, Tag } from "../components/kit";
 import { ThresholdList, Thresholds } from "../components/thresholds";
 import * as I from "../components/icons";
 import { useI18n, type Lang } from "../i18n";
+import { DOCUMENT_KINDS } from "../documentKinds";
 import "../strings/documents";
 import "../strings/quickstart";
 import "../strings/review";
@@ -649,6 +650,7 @@ export function Review({ dealId }: { dealId: string }) {
             </div>
           )}
           {(a.conflictValues ?? []).map((v) => {
+            const usualKind = a.usualSource?.value === v.value ? DOCUMENT_KINDS[a.usualSource.kind]?.[lang] : undefined;
             const conservative = a.conservative && v.value === (a.conservative === "max" ? Math.max(...vals) : Math.min(...vals));
             return (
               <label key={v.value} className={choice === v.value ? "choice on" : "choice"}>
@@ -656,6 +658,7 @@ export function Review({ dealId }: { dealId: string }) {
                 <span className="rv-grow">
                   <span className="t num">{f.value(v.value, a.unit)}{conservative && <span className="muted">{t("review.conservative")}</span>}</span>
                   <span className="d">{v.documents.map((d) => msg(d)).join(", ")}</span>
+                  {usualKind && <span className="d">{t("review.usualSource", { kind: usualKind })}</span>}
                   {distinctSources(a.sources.filter((s) => !foreignIn(s, dealCurrency) && Math.abs(s.value - v.value) < 0.5)).map((s, i) => <Quote key={i} s={s} currency={dealCurrency} fieldKey={a.sourceKind === "document" ? a.fieldKey : undefined} />)}
                 </span>
               </label>

@@ -100,6 +100,7 @@ export const en = {
   "review.statedWaiting": (p) => (p.n === 1 ? "One value was stated by one person and is not independently confirmed; it is listed under Approved." : `${p.n} values were stated by one person and are not independently confirmed; they are listed under Approved.`),
   "review.conflicting": "Conflicting",
   "review.conservative": " · the conservative value",
+  "review.usualSource": (p) => `Usually, ${p.kind} settles this figure.`,
   "review.choosingNote": (p) => `Choosing a documented value needs no second approver. Entering a different one ${p.material ? "does" : "needs a reason"}.`,
   "review.enterDifferent": "Enter a different value",
   "review.choose": "Choose a value",
@@ -293,6 +294,7 @@ export const fr: FrenchOf<typeof en> = {
   "review.statedWaiting": (p) => (p.n === 1 ? "Une valeur a été déclarée par une seule personne et n'est pas confirmée de façon indépendante\u00a0; elle figure sous Approuvées." : `${p.n} valeurs ont été déclarées par une seule personne et ne sont pas confirmées de façon indépendante\u00a0; elles figurent sous Approuvées.`),
   "review.conflicting": "En conflit",
   "review.conservative": " · la valeur prudente",
+  "review.usualSource": (p) => `En général, c'est ${p.kind} qui tranche ce chiffre.`,
   "review.choosingNote": (p) =>
     `Choisir une valeur documentée ne requiert pas de second approbateur. En saisir une autre ${p.material ? "en requiert un" : "exige une justification"}.`,
   "review.enterDifferent": "Saisir une autre valeur",

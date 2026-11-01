@@ -619,6 +619,16 @@ export async function reviewView(tx: Db, dealId: string, asOf: string) {
     tableNotices,
     assumptions: assumptions.map((a) => {
       const def = FIELD_BY_KEY.get(a.field_key)!;
+      const kinds = a.field_key === "unit_count" ? ["rent roll"]
+        : a.field_key === "land_cost" ? ["purchase agreement"]
+        : def.group === "budget" ? ["cost budget", "cost report"]
+        : ["senior", "mezzanine", "refinance"].includes(def.group) ? ["commitment letter", "term sheet", "credit letter"] : [];
+      const usualValues = a.status === "conflicting" && (a.conflict_values?.length ?? 0) > 1
+        ? a.conflict_values!.flatMap(v => {
+          const kind = kinds.find(kind => v.documents.some(name => docs.some(d => d.name === name && d.stage === "extracted" &&
+            /^(.*) \(deal source(?:, set by a person)?\)$/.exec(readRoles.find(r => r.id === d.id)?.read_role ?? "")?.[1] === kind)));
+          return kind ? [{ value: v.value, kind }] : [];
+        }) : [];
       return {
         id: a.id,
         fieldKey: a.field_key,
@@ -637,6 +647,7 @@ export async function reviewView(tx: Db, dealId: string, asOf: string) {
         ...(tableSource(a) ? {tableSource:tableSource(a)} : {}),
         sources: a.sources,
         conflictValues: a.conflict_values,
+        usualSource: usualValues.length === 1 ? usualValues[0]! : null,
         reason: a.reason,
         decidedBy: a.decided_by_name,
         decidedById: a.decided_by,
