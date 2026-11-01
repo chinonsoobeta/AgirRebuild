@@ -417,3 +417,22 @@ const PIN12: unknown[] = [["unit_count", "1BR", 12, "line:prose"], ["unit_count"
 const PIN13: unknown[] = [["unit_count", "1BR", 12, "line:prose"], ["unit_count", "2BR", 18, "line:prose"], ["unit_count", "3BR", 24, "line:prose"]];
 const PIN14: unknown[] = [["unit_count", "1BR", 12, "line:prose"], ["unit_count", "1BR", 8, "line:prose"], ["unit_count", "2BR", 4, "line:prose"]];
 const PIN24: unknown[] = [["unit_count", "1BR", 1, "line:prose"], ["unit_count", "1BR", 2, "line:prose"]];
+
+describe("card 193: a roll's total row beside its types", () => {
+  const rule = (fieldKey: string, itemKey: string, value: number) => ({ fieldKey, itemKey, value, location: "page 1, line 20", raw: String(value), unitSeen: null, context: "", rule: "line:prose", note: null, documentId: "b", documentName: "b.pdf" }) as unknown as SourcedCandidate;
+  const rows = (cs: SourcedCandidate[]) => consolidate(cs, "CAD").map(p => [p.fieldKey, p.itemKey, p.value]);
+  const types = [rule("unit_count", "1BR", 7), rule("unit_count", "Bachelor", 14)];
+
+  test("a total that adds up is not a third type, even when the total row also states its area", () => {
+    expect(rows([...types, rule("unit_count", "all units", 21), rule("rentable_area_sf", "all units", 9945)])).toEqual([
+      ["rentable_area_sf", "all units", 9945], ["unit_count", "1BR", 7], ["unit_count", "Bachelor", 14],
+    ]);
+    expect(rows([...types, rule("unit_count", "all suites", 21), rule("rentable_area_sf", "all suites", 9945)])).toEqual([
+      ["rentable_area_sf", "all suites", 9945], ["unit_count", "1BR", 7], ["unit_count", "Bachelor", 14],
+    ]);
+  });
+  test("a name holding a count that does not add up, or a rent, stays for a person", () => {
+    expect(rows([...types, rule("unit_count", "all units", 30), rule("rentable_area_sf", "all units", 9945)])).toContainEqual(["unit_count", "all units", 30]);
+    expect(rows([...types, rule("unit_count", "all units", 21), rule("unit_rent_monthly", "all units", 1500)])).toContainEqual(["unit_count", "all units", 21]);
+  });
+});
