@@ -1206,6 +1206,10 @@ it.each([
     "Upload a PDF, Excel (.xlsx), CSV, Word (.docx), text file, or a picture (PNG, JPEG or TIFF).",
     "Téléversez un fichier PDF, Excel (.xlsx), CSV, Word (.docx) ou texte, ou une image (PNG, JPEG ou TIFF)."
   ],
+  ["A zero beside another figure in this row", "Un zéro à côté d’un autre chiffre de cette ligne"],
+  ["Worked out by a formula in this workbook, so Agir did not read it. Use it if it is the figure you want", "Calculé par une formule de ce classeur, donc Agir ne l’a pas lu. Utilisez-le si c’est le chiffre voulu"],
+  ["Another line of this cost is a formula, so adding the typed lines would give only part of it; enter the field by hand", "Une autre ligne de ce coût est une formule : additionner les lignes saisies n’en donnerait qu’une partie. Entrez le champ à la main"],
+  ["This workbook has formulas with no saved results (B3, B4, B7, B8, B9 and 1,204 more). Open and save it in Excel to include them.", "Ce classeur contient des formules sans résultat enregistré (B3, B4, B7, B8, B9 et 1\u00a0204 de plus). Ouvrez-le et enregistrez-le dans Excel pour les inclure."],
   [
     "This workbook has formulas with no saved results (A1, B2). Open and save it in Excel to include them.",
     "Ce classeur contient des formules sans résultat enregistré (A1, B2). Ouvrez-le et enregistrez-le dans Excel pour les inclure."
