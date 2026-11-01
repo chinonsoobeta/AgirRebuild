@@ -43,3 +43,22 @@ describe("the context note in French", () => {
     expect(translateMessage(note)).toBe(french);
   });
 });
+
+// Card 190: the two other notes on a figure, in French. Section text stays as the document writes it.
+describe("the notes on a figure in French", () => {
+  const shown = "ses chiffres sont affichés, mais pas lus";
+  it.each([
+    ["Read from a term sheet; check it", "Lu dans une lettre d'offre\u00a0; à vérifier"],
+    ["Read from an appraisal; check it", "Lu dans une évaluation\u00a0; à vérifier"],
+    ["Read from a appraisal; check it", "Lu dans une évaluation\u00a0; à vérifier"],
+    ["Read from an unrecognized document; check it", "Lu dans un document\u00a0; à vérifier"],
+    ["Read from a thing nobody listed; check it", "Lu dans un document\u00a0; à vérifier"],
+    ["Read from an appraisal; check it. No field matches this label", "Lu dans une évaluation\u00a0; à vérifier. Aucun champ ne correspond à ce libellé"],
+    ["Read from a thing nobody listed; check it. No field matches this label", "Lu dans un document\u00a0; à vérifier. Aucun champ ne correspond à ce libellé"],
+    ["The risk factors section of a business plan; its figures are shown, not read", `La section «\u00a0risk factors\u00a0» d'un plan d'affaires\u00a0; ${shown}`],
+    ["The risk factors section of an offering memorandum for one project; its figures are shown, not read", `La section «\u00a0risk factors\u00a0» d'une notice d'offre pour un seul projet\u00a0; ${shown}`],
+    ["The bilan section of a thing nobody listed; its figures are shown, not read", `La section «\u00a0bilan\u00a0» d'un document\u00a0; ${shown}`],
+  ])("%s", (note, french) => {
+    expect(translateMessage(note)).toBe(french);
+  });
+});
