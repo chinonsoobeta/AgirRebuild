@@ -1,7 +1,7 @@
 import { isOcrLocation } from "./ocr-text.ts";
 import { FIELD_BY_KEY } from "@agir/contracts";
 import { detectFormat, normalizeText, SCALE_RE, scaleOf, SF_PER_M2, tokenize, type NumberToken } from "@agir/numbers";
-import { declaredScale, labelScale, statedScaleUnit } from "./candidates.ts";
+import { declaredScale, labelScale, noteStatesScale, statedScaleUnit } from "./candidates.ts";
 import { addressedEntries } from "./addressed.ts";
 import { canonicalItem, foldText } from "./mapping.ts";
 import type { NormalizedDocument } from "./document.ts";
@@ -241,6 +241,8 @@ export function verifyReading(reading: Reading, documents: readonly ReadingDocum
       value = roundedScale((token.paren || ocrMinus) && reading.value >= 0 ? Math.abs(token.value) : token.value, rule.factor);
       unitSeen = statedScaleUnit(rule.factor);
     }
+    // Recognition can smudge the heading that states a table's scale. The reader still saw it, so its note refuses a figure the text would pass as dollars.
+    if (!token.scaled && !rule && reading.note && noteStatesScale(reading.note) && Math.abs(value) < 1e6) return { outcome: READING_FAILURE.scale };
     // Card F1: a carry per unsold home per month is often a few hundred dollars.
     if (value !== 0 && Math.abs(value) < 1000 && field.key !== "unsold_carry_monthly") return { outcome: READING_FAILURE.small };
   }
