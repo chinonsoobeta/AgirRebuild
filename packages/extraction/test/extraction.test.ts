@@ -5207,11 +5207,11 @@ vi.mock("tesseract.js", async (original) => {
 describe("card 93b local OCR", () => {
   const scan = async (pages = 1) => {
     const { createCanvas } = await import("@napi-rs/canvas");
-    const { scanPdf } = await import("@agir/testkit");
+    const { pageFont, scanPdf } = await import("@agir/testkit");
     const canvas = createCanvas(1700, 2200);
     const ctx = canvas.getContext("2d");
     ctx.fillStyle = "white"; ctx.fillRect(0, 0, 1700, 2200);
-    ctx.fillStyle = "black"; ctx.font = "40px sans-serif";
+    ctx.fillStyle = "black"; ctx.font = `40px ${pageFont()}`;
     ctx.fillText("Terminal cap rate 5.5%", 100, 160);
     ctx.fillText("Senior loan $1,850,000 at 6.75%", 100, 250);
     return scanPdf(canvas.toBuffer("image/jpeg", 90), pages);

@@ -1,8 +1,9 @@
 import { expect, test } from "vitest";
 import { createCanvas, type Canvas } from "@napi-rs/canvas";
-import { scanPdf } from "@agir/testkit";
+import { pageFont, scanPdf } from "@agir/testkit";
 import { ocrImage, ocrPdf } from "../src/ocr.ts";
 
+const font = pageFont();
 const rows = [
   ["Land", "1,250,000"], ["Hard costs", "8,430,000"], ["Soft costs", "1,120,500"],
   ["Contingency", "421,500"], ["Financing fees", "96,250"], ["Interest reserve", "514,000"],
@@ -14,15 +15,15 @@ const rows = [
 function page(rule = 0, band = false): Canvas {
   const canvas = createCanvas(2550, 3300), ctx = canvas.getContext("2d");
   ctx.fillStyle = "white"; ctx.fillRect(0, 0, canvas.width, canvas.height);
-  ctx.fillStyle = "black"; ctx.font = "bold 56px sans-serif";
+  ctx.fillStyle = "black"; ctx.font = `bold 56px ${font}`;
   ctx.fillText("Sources and uses of funds", 200, 260);
-  ctx.font = "40px sans-serif";
+  ctx.font = `40px ${font}`;
   ctx.fillText("The figures below come from the owner's budget for this invented building and were reviewed in spring.", 200, 340);
   const left = 200, mid = 1500, right = 2350, y = 520;
   if (band) ctx.fillRect(left, y - 70, right - left, 70);
-  ctx.fillStyle = band ? "white" : "black"; ctx.font = "bold 40px sans-serif";
+  ctx.fillStyle = band ? "white" : "black"; ctx.font = `bold 40px ${font}`;
   ctx.fillText("Item", left + 30, y - 24); ctx.fillText("Amount", mid + 30, y - 24);
-  ctx.fillStyle = "black"; ctx.font = "40px sans-serif";
+  ctx.fillStyle = "black"; ctx.font = `40px ${font}`;
   rows.forEach(([item, amount], i) => {
     ctx.fillText(item, left + 30, y + i * 86 + 58);
     ctx.fillText(amount, mid + 30, y + i * 86 + 58);
@@ -82,7 +83,7 @@ const prose = [
 function bare(draw: (ctx: ReturnType<Canvas["getContext"]>) => void, skew = 0) {
   const canvas = createCanvas(2550, 3300), ctx = canvas.getContext("2d");
   ctx.fillStyle = "white"; ctx.fillRect(0, 0, canvas.width, canvas.height);
-  ctx.fillStyle = "black"; ctx.font = "40px sans-serif";
+  ctx.fillStyle = "black"; ctx.font = `40px ${font}`;
   if (skew) { ctx.translate(1275, 1650); ctx.rotate(skew * Math.PI / 180); ctx.translate(-1275, -1650); }
   draw(ctx);
   return canvas;
@@ -93,9 +94,13 @@ test.each([
   ["a table alone, wide gap", () => bare(ctx => table(ctx, 230, 1530))],
   ["a table alone, narrow gap", () => bare(ctx => table(ctx, 230, 800))],
   ["a table alone, tilted 2 degrees", () => bare(ctx => table(ctx, 230, 1530), 2)],
+  ["a table alone, turned 90", () => turn(bare(ctx => table(ctx, 230, 1530)), 90)],
+  ["a table alone, turned 180", () => turn(bare(ctx => table(ctx, 230, 1530)), 180)],
+  ["a table alone, turned 270", () => turn(bare(ctx => table(ctx, 230, 1530)), 270)],
+  ["a table alone, tilted 2 degrees and turned 90", () => turn(bare(ctx => table(ctx, 230, 1530), 2), 90)],
   ["a table beside prose", () => bare(ctx => {
     prose.forEach((text, i) => ctx.fillText(text, 150, 578 + i * 86));
-    ctx.font = "36px sans-serif"; table(ctx, 1450, 2050);
+    ctx.font = `36px ${font}`; table(ctx, 1450, 2050);
   })],
 ] as const)("%s keeps each amount on its name's line", async (_name, draw) => {
   const result = await ocrImage(draw().toBuffer("image/png"));

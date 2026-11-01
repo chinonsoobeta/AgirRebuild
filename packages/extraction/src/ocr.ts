@@ -42,8 +42,20 @@ async function recognizeLines(worker: Awaited<ReturnType<typeof ocrWorker>>, byt
 type Box = { x0: number; y0: number; x1: number; y1: number };
 type SeenLine = OcrPage["lines"][number] & { box?: Box; baseline?: Box };
 
+/** A page Tesseract read sideways has lines running down the picture, with the next line to their left. Here across and down mean what they do on any page. */
+function upright(lines: SeenLine[]): SeenLine[] {
+  const characters = (tall: boolean) => lines.reduce((sum, { box, text }) => box && box.y1 - box.y0 > box.x1 - box.x0 === tall ? sum + text.length : sum, 0);
+  if (characters(true) <= characters(false)) return lines;
+  return lines.map(l => ({
+    ...l,
+    ...(l.box ? { box: { x0: l.box.y0, y0: -l.box.x1, x1: l.box.y1, y1: -l.box.x0 } } : {}),
+    ...(l.baseline ? { baseline: { x0: l.baseline.y0, y0: -l.baseline.x0, x1: l.baseline.y1, y1: -l.baseline.x1 } } : {}),
+  }));
+}
+
 /** Automatic layout can list a table's names and then its amounts. A line of figures goes back beside the short line at its height, as a PDF's text layer has it. */
-function joinTableRows(lines: SeenLine[]): OcrPage["lines"] {
+function joinTableRows(seen: SeenLine[]): OcrPage["lines"] {
+  const lines = upright(seen);
   const figures = lines.filter(l => l.box && /\d/.test(l.text) && !/\p{L}{4,}/u.test(l.text)).sort((a, b) => a.box!.x0 - b.box!.x0);
   // A page photographed or scanned slightly crooked: heights are compared along the page's own tilt.
   const slopes = lines.flatMap(l => l.baseline && l.baseline.x1 - l.baseline.x0 >= 200 ? [(l.baseline.y1 - l.baseline.y0) / (l.baseline.x1 - l.baseline.x0)] : []).sort((a, b) => a - b);
@@ -54,7 +66,7 @@ function joinTableRows(lines: SeenLine[]): OcrPage["lines"] {
     let left: SeenLine | undefined;
     for (const line of lines) {
       const box = line.box;
-      // A page read sideways has tall line boxes, which stand beside everything.
+      // A line running the other way across the page is tall, and stands beside everything.
       if (!box || line === figure || joined.has(line) || box.x1 > at.x0 || box.x1 - box.x0 <= box.y1 - box.y0) continue;
       const drift = (box.y0 + box.y1) / 2 + tilt * ((at.x0 + at.x1) / 2 - (box.x0 + box.x1) / 2) - (at.y0 + at.y1) / 2;
       if (Math.abs(drift) * 2 > Math.min(box.y1 - box.y0, at.y1 - at.y0)) continue;

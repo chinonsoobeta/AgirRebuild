@@ -3062,11 +3062,11 @@ describe("a client never sees another client (task 91a)", () => {
 describe("card 93b scanned uploads", () => {
   test("extracts a scan and preserves its OCR warning and source rule", async () => {
     const { createCanvas } = await import("@napi-rs/canvas");
-    const { scanPdf } = await import("@agir/testkit");
+    const { pageFont, scanPdf } = await import("@agir/testkit");
     const canvas = createCanvas(1700, 2200);
     const ctx = canvas.getContext("2d");
     ctx.fillStyle = "white"; ctx.fillRect(0, 0, 1700, 2200);
-    ctx.fillStyle = "black"; ctx.font = "40px sans-serif";
+    ctx.fillStyle = "black"; ctx.font = `40px ${pageFont()}`;
     ctx.fillText("Exit cap rate 5.5%", 100, 160);
     const d = (await call(alice, "POST", `/api/workspaces/${ws}/deals`, { name: "OCR review example", assetType: "Multifamily" })).json.id;
     const bytes = await scanPdf(canvas.toBuffer("image/jpeg", 90));

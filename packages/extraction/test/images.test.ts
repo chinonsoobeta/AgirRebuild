@@ -1,13 +1,13 @@
 import { expect, test } from "vitest";
 import { createCanvas } from "@napi-rs/canvas";
-import { tiffBytes } from "@agir/testkit";
+import { pageFont, tiffBytes } from "@agir/testkit";
 import * as extraction from "../src/index.ts";
 import JSZip from "jszip";
 import ExcelJS from "exceljs";
 
 const damaged = "Agir could not open this picture. It may be damaged. Upload it again, or save it as a PDF.";
 const canvas = createCanvas(816, 1056), ctx = canvas.getContext("2d");
-ctx.fillStyle = "white"; ctx.fillRect(0, 0, 816, 1056); ctx.fillStyle = "black"; ctx.font = "32px sans-serif"; ctx.fillText("Land cost $400,000", 55, 140);
+ctx.fillStyle = "white"; ctx.fillRect(0, 0, 816, 1056); ctx.fillStyle = "black"; ctx.font = `32px ${pageFont()}`; ctx.fillText("Land cost $400,000", 55, 140);
 const png = canvas.toBuffer("image/png"), jpeg = canvas.toBuffer("image/jpeg");
 const rgba = ctx.getImageData(0, 0, 816, 1056).data;
 const gray = Uint8Array.from({ length: 816 * 1056 }, (_, i) => rgba[i * 4]!);
