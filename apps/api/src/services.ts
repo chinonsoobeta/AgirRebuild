@@ -548,10 +548,25 @@ export async function reviewView(tx: Db, dealId: string, asOf: string) {
   const { all, other } = await otherFigures(tx, dealId, assumptions);
   const docs = await currentDocuments(tx, dealId);
   // RLS on ai_readings limits this snapshot to staff, including when a client can read the deal.
-  const [stored] = await tx.query<{ outcome: "ok" | "failed"; model: string; prompt_version: string; created_at: string | Date; response: ReaderResponse | null; verification: { documents: { id: string }[]; readings: ReadingVerification[]; conflicts: ReadingVerification[][] } | null }>(
+  type StoredReading = { outcome: "ok" | "failed"; model: string; prompt_version: string; created_at: string | Date; response: ReaderResponse | null; verification: { documents: { id: string; name: string; sha256?: string }[]; readings: ReadingVerification[]; conflicts: ReadingVerification[][] } | null };
+  const [current] = await tx.query<StoredReading>(
     `select outcome, model, prompt_version, created_at, response, verification from ai_readings where deal_id=$1 and (select w.ai_reading from deals d join workspaces w on w.id=d.workspace_id where d.id=$1) and documents_hash=$2 and prompt_version=$3 order by created_at desc, id desc limit 1`,
     [dealId, documentsHash(docs), READER_PROMPT_VERSION],
   );
+  let earlier: StoredReading | undefined;
+  if ((!current || current.outcome === "failed") && !docs.some(d => ["uploaded", "checking", "reading", "extracting"].includes(d.stage))) {
+    [earlier] = await tx.query<StoredReading>(
+      `select outcome, model, prompt_version, created_at, response, verification from ai_readings where deal_id=$1 and (select w.ai_reading from deals d join workspaces w on w.id=d.workspace_id where d.id=$1) and outcome='ok' order by created_at desc, id desc limit 1`,
+      [dealId],
+    );
+  }
+  const stored = current ?? earlier;
+  const lists = current?.outcome === "ok" ? current : earlier;
+  const readRoles = await tx.query<{ id: string; read_role: string | null }>(`select id,read_role from documents where deal_id=$1 and retired_at is null`, [dealId]);
+  const isSource = (d: typeof docs[number]) => d.role_set !== "context" &&
+    !/\(context(?:, set by a person)?\)$/.test(readRoles.find(r => r.id === d.id)?.read_role ?? "");
+  const keep = (r: { file: string }) => lists === current || !!lists?.verification?.documents.some(ref => ref.name === r.file &&
+    docs.some(d => d.id === ref.id && d.stage === "extracted" && isSource(d) && (ref.sha256 === undefined || ref.sha256 === d.sha256)));
   // A reading that failed its check is shown for the person to check, unless the review already holds that figure for the
   // field (the rules read it): then the card would only repeat a row that is already waiting for approval (QA run 3, skeptic R1).
   const alreadyRead = (r: { field: string; value: number }) => assumptions.some((a) => a.status !== "rejected" && a.field_key === r.field && a.value !== null && Math.abs(a.value - r.value) < 0.5);
@@ -559,21 +574,22 @@ export async function reviewView(tx: Db, dealId: string, asOf: string) {
     ? [{ field: r.field, item: r.item, value: r.value, file: r.file, location: r.location, quote: r.quote, reason: verification.outcome }] : [];
   // Card F1: a failed reading of a field this deal's mode does not use is not asked about; it is listed as not needed.
   const inMode = (r: { field: string }) => notNeededReason(r.field, selling) === null;
-  const failed = stored ? [
-    ...(stored.response?.readings ?? []).flatMap((r, i) => rejectedReading(r, stored.verification?.readings[i])),
-    ...(stored.response?.conflicts ?? []).flatMap((c, i) => c.values.flatMap((v, j) => rejectedReading({ ...v, field: c.field, item: c.item, note: c.why, confidence: "high" }, stored.verification?.conflicts[i]?.[j]))),
+  const failed = lists ? [
+    ...(lists.response?.readings ?? []).flatMap((r, i) => keep(r) ? rejectedReading(r, lists.verification?.readings[i]) : []),
+    ...(lists.response?.conflicts ?? []).flatMap((c, i) => c.values.flatMap((v, j) => keep(v) ? rejectedReading({ ...v, field: c.field, item: c.item, note: c.why, confidence: "high" }, lists.verification?.conflicts[i]?.[j]) : [])),
   ] : [];
   const notNeeded = [
     ...setAside.map((a) => ({ fieldKey: a.field_key, itemKey: a.item_key || null, label: FIELD_BY_KEY.get(a.field_key)!.label, value: a.value, why: notNeededReason(a.field_key, selling)!, sources: a.sources })),
     ...failed.filter((r) => !inMode(r)).map((r) => ({ fieldKey: r.field, itemKey: r.item, label: FIELD_BY_KEY.get(r.field)!.label, value: r.value, why: notNeededReason(r.field, selling)!, sources: [{ document_name: r.file, location: r.location, raw: r.quote }] })),
   ];
-  const readRoles = await tx.query<{ id: string; read_role: string | null }>(`select id,read_role from documents where deal_id=$1 and retired_at is null`, [dealId]);
-  const unread = stored?.outcome === "ok" ? docs.filter(d => d.stage === "extracted" && d.role_set !== "context" &&
-    !/\(context(?:, set by a person)?\)$/.test(readRoles.find(r => r.id === d.id)?.read_role ?? "") &&
+  // While a reconcile is queued or running the AI may still be reading these files, so none is called unread yet;
+  // the screen reads the review again when the update ends.
+  const settled = stored?.outcome === "ok" && !(await tx.query<{ updating: boolean }>(`select fn_deal_updating($1) as updating`, [dealId]))[0]!.updating;
+  const unread = settled ? docs.filter(d => d.stage === "extracted" && isSource(d) &&
     !stored.verification?.documents.some(ref => ref.id === d.id)).map(d => d.name) : [];
   const aiReading = stored ? {
     unread, outcome: stored.outcome, model: stored.model, promptVersion: stored.prompt_version, createdAt: stored.created_at,
-    notUsed: (stored.response?.not_used ?? []).map(r => {
+    notUsed: (lists?.response?.not_used ?? []).filter(keep).map(r => {
       const matches = docs.filter(d => d.name === r.file);
       const document = matches.length === 1 ? matches[0] : undefined;
       return { ...r, figureId: all.find(o => !o.label && o.documentId === document?.id && o.location === r.location && o.value === r.value)?.figureId ?? null };
