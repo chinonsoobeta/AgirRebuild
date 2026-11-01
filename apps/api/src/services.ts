@@ -549,7 +549,7 @@ export async function reviewView(tx: Db, dealId: string, asOf: string) {
   const docs = await currentDocuments(tx, dealId);
   // RLS on ai_readings limits this snapshot to staff, including when a client can read the deal.
   const [stored] = await tx.query<{ outcome: "ok" | "failed"; model: string; prompt_version: string; created_at: string | Date; response: ReaderResponse | null; verification: { readings: ReadingVerification[]; conflicts: ReadingVerification[][] } | null }>(
-    `select outcome, model, prompt_version, created_at, response, verification from ai_readings where deal_id=$1 and documents_hash=$2 and prompt_version=$3 order by created_at desc, id desc limit 1`,
+    `select outcome, model, prompt_version, created_at, response, verification from ai_readings where deal_id=$1 and (select w.ai_reading from deals d join workspaces w on w.id=d.workspace_id where d.id=$1) and documents_hash=$2 and prompt_version=$3 order by created_at desc, id desc limit 1`,
     [dealId, documentsHash(docs), READER_PROMPT_VERSION],
   );
   // A reading that failed its check is shown for the person to check, unless the review already holds that figure for the

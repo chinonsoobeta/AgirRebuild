@@ -569,6 +569,8 @@ export async function reconcileDeal(db: Db, store: BlobStore, dealId: string) {
         } else await tx.query(`update assumptions set sources = $2, updated_at = now() where id = $1`, [e.id, JSON.stringify(sources)]);
       }
     }
+    const currentDocs = await currentDocuments(tx, dealId);
+    const readingOn = await aiReadingOn(tx, deal.workspace_id);
     for (const e of existing) {
       const key = `${e.field_key}|${e.item_key}`;
       // No proposal for a hand entry or an accepted default: the label that disagreed went, and nothing else did (card 58b).
@@ -591,7 +593,8 @@ export async function reconcileDeal(db: Db, store: BlobStore, dealId: string) {
       if (!e.sources?.length && (e.status === "approved" || e.status === "needs_review")) continue;
       // A value whose every source was a model's suggestion leaves because the switch is off, not because a document went.
       const everyRule = (r: string) => !!e.sources?.length && e.sources.every((x) => (x as { rule?: string }).rule === r);
-      const gone = !on && everyRule("suggested") ? "Its label was a model's suggestion, and suggestions are now off" : everyRule("labelled") ? "The label a person gave its figure was removed" : everyRule("remembered") ? "The label it was remembered from was removed" : "Its source document was removed";
+      const remaining = currentDocs.filter(d => e.sources.some(s => s.document_id === d.id));
+      const gone = !on && everyRule("suggested") ? "Its label was a model's suggestion, and suggestions are now off" : everyRule("labelled") ? "The label a person gave its figure was removed" : everyRule("remembered") ? "The label it was remembered from was removed" : !remaining.length ? "Its source document was removed" : remaining.every(d => d.role_set === "context") ? "Its document is now marked as background only" : everyRule("ai") && !readingOn ? "AI reading was turned off, and only AI reading found this figure" : "The latest reading of the documents did not use this figure";
       if (e.status === "needs_review" || e.status === "conflicting") {
         await tx.query(`update assumptions set status = 'rejected', sources = '[]', conflict_values = null, reason = $2, version = version + 1, updated_at = now() where id = $1`, [
           e.id,
@@ -731,6 +734,15 @@ export async function runOnce(deps: WorkerDeps): Promise<boolean> {
   try {
     if (job.kind === "verify_document") await verifyDocument(deps, job.payload.document_id!);
     else if (job.kind === "extract_document") await extractDocument(deps, job.payload.document_id!);
+    else if (job.kind === "read_deal") {
+      const dealId = job.payload.deal_id!;
+      try {
+        const [deal] = await deps.db.query<{ workspace_id: string }>(`select workspace_id from deals where id=$1`, [dealId]);
+        if (deal) await readDeal(deps.db, deps.store, dealId, deal.workspace_id, deps.read);
+      } finally {
+        await deps.db.query(`update jobs set run_after = now() where kind = 'reconcile_deal' and status = 'queued' and payload->>'deal_id' = $1 and run_after > now()`, [dealId]);
+      }
+    }
     else if (job.kind === "reconcile_deal") await reconcileDeal(deps.db, deps.store, job.payload.deal_id!);
     else if (job.kind === "render_artifact") await renderJob(deps, job.payload.artifact_id!);
     await deps.db.query(`update jobs set status = 'done', lease_until = null, updated_at = now() where id = $1`, [job.id]);

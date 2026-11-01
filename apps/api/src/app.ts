@@ -697,6 +697,11 @@ export function createApp({ db, store, secureCookies, demoSignIn = false, trustP
     return c.json({ ok: true });
   });
 
+  app.post("/api/deals/:id/read-again", async (c) => {
+    await as(c, (tx) => tx.query(`select fn_read_again($1)`, [c.req.param("id")]));
+    return c.json({ ok: true });
+  });
+
   app.post("/api/documents/:id/retry", async (c) => {
     await as(c, (tx) => tx.query(`select fn_retry_document($1)`, [c.req.param("id")]));
     return c.json({ ok: true });

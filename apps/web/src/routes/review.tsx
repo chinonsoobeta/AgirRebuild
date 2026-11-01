@@ -342,6 +342,10 @@ export function Review({ dealId }: { dealId: string }) {
     mutationFn: (group: ReviewData["regions"][number]) => api.post(`/deals/${dealId}/regions/confirm`, { documentId: group.documentId, source: group.source, table: group.table }),
     onSuccess: () => refresh(),
   });
+  const readAgain = useMutation({
+    mutationFn: () => api.post(`/deals/${dealId}/read-again`),
+    onSuccess: () => refresh(),
+  });
   const acceptTable = useMutation({
     mutationFn: (b: {fieldKey:string;tableId:string;optionKey:string}) => api.post(`/deals/${dealId}/proposals/accept`,b),
     onSuccess: () => refresh(),
@@ -1127,7 +1131,11 @@ export function Review({ dealId }: { dealId: string }) {
             </section>
           )}
 
-          {r.aiReading?.outcome === "failed" && <p className="small muted">{t("review.aiUnavailable")}</p>}
+          {r.aiReading?.outcome === "failed" && <div className="stack tight">
+            <p className="small muted">{t("review.aiUnavailable")}</p>
+            {editable && <div><button className="btn quiet sm" type="button" disabled={readAgain.isPending} onClick={() => readAgain.mutate()}>{t("review.readAgain")}</button></div>}
+            <ErrorText error={readAgain.error} />
+          </div>}
           <details id="unused-figures" className="card rv-unused" open={otherOpen} onToggle={(e) => setOtherOpen(e.currentTarget.open)}>
             <summary className="card-pad row between">
               <span className="muted">{t("review.otherIntro", { n: otherCount })}</span>
