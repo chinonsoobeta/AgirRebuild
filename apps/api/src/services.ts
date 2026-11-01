@@ -625,7 +625,8 @@ export async function reviewView(tx: Db, dealId: string, asOf: string) {
         : ["senior", "mezzanine", "refinance"].includes(def.group) ? ["commitment letter", "term sheet", "credit letter"] : [];
       const usualValues = a.status === "conflicting" && (a.conflict_values?.length ?? 0) > 1
         ? a.conflict_values!.flatMap(v => {
-          const kind = kinds.find(kind => v.documents.some(name => docs.some(d => d.name === name && d.stage === "extracted" &&
+          // By the source's own file, since two different files can share a name.
+          const kind = kinds.find(kind => a.sources.some(s => s.value === v.value && docs.some(d => d.id === s.document_id && d.stage === "extracted" &&
             /^(.*) \(deal source(?:, set by a person)?\)$/.exec(readRoles.find(r => r.id === d.id)?.read_role ?? "")?.[1] === kind)));
           return kind ? [{ value: v.value, kind }] : [];
         }) : [];
