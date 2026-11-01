@@ -7,3 +7,5 @@ dist
 apps/web/dist
 deploy/backups
 .qa-data
+reports/
+.stryker-tmp/

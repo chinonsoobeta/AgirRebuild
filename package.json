@@ -17,10 +17,13 @@
     "typecheck": "tsc -b",
     "test": "vitest run",
     "gate": "node scripts/gate.mjs",
+    "mutation": "stryker run",
     "build": "npm run build -w @agir/web",
     "start": "npm run build -w @agir/web && npm run start -w @agir/api"
   },
   "devDependencies": {
+    "@stryker-mutator/core": "^10.1.1",
+    "@stryker-mutator/vitest-runner": "^10.1.1",
     "@types/node": "^22.10.0",
     "axe-core": "^4.13.0",
     "fast-check": "^4.3.0",
