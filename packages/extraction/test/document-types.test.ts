@@ -96,6 +96,18 @@ describe("a citation is never a title", () => {
   test("a cited guide is not a guidebook", () => {
     expect(documentKind(doc("Maple Court", "Source: CMHC guide to rental housing", "Table of contents", ...filler)).kind).toBe("unrecognized document");
   });
+  test.each(["Source: CMHC Rental Market Report", "Sources : CMHC Rental Market Report", "Source - CMHC Rental Market Report", "Note \u2013 see the Rental Market Report", "(Notes: Rental Market Report)"])("written with a colon or a dash, this is a citation: %s", citation => {
+    expect(documentKind(doc("Maple Court", citation, "The vacancy rate here is low", ...filler)).kind).toBe("unrecognized document");
+  });
+  // The words alone do not make a citation: of 30 lines in the public documents' first pages that start this way, 13 are not citations.
+  test("a title that opens with Notes is still a title", () => {
+    expect(documentKind(doc("Notes on the 2025 Rental Market Report", "The vacancy rate is low", ...filler))).toEqual(expect.objectContaining({ kind: "market report", role: "context" }));
+    expect(documentKind(doc("Notes on the geotechnical investigation", ...soil, ...filler))).toEqual(expect.objectContaining({ kind: "geotechnical report", role: "context" }));
+  });
+  test("a table heading that opens with Sources still takes its place among the first lines", () => {
+    const lines = [...padding.slice(0, 6), "Sources and uses", "Source of funds", "Geotechnical Report", ...soil, ...filler];
+    expect(documentKind(doc(...lines)).kind).toBe("unrecognized document");
+  });
 });
 
 describe("names that change no reading", () => {
@@ -104,7 +116,7 @@ describe("names that change no reading", () => {
     ["purchase agreement", ["Agreement of Purchase and Sale", "Purchase and Sale Agreement", "Offer to Purchase", "Promesse d'achat", "Convention d'achat"]],
     ["cost report", ["Quantity Surveyor Report", "Cost Consultant Letter", "Cost Report No. 4", "Class C Estimate", "Project Monitor Report", "Cost to complete"]],
     ["tax assessment", ["Property Assessment Notice", "Notice of Assessment", "Property Tax Bill", "Tax bill", "Compte de taxes", "Rôle d'évaluation"]],
-    ["draw schedule", ["Draw Schedule", "Draw Request No. 3", "Calendrier de débours", "Demande de déboursement"]],
+    ["draw schedule", ["Draw Schedule", "Draw Request No. 3", "Calendrier de débours", "Calendrier de déboursés", "Calendrier des déboursés", "Demande de déboursement"]],
   ];
   const each = named.flatMap(([kind, titles]) => titles.map(title => [kind, title] as const));
   test.each(each)("%s over 80 words: %s", (kind, title) => {
