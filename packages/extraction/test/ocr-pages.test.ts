@@ -72,6 +72,84 @@ describe("picture pages", () => {
   });
 });
 
+describe("a figure goes back beside the line at its height", () => {
+  type Box = { x0: number; y0: number; x1: number; y1: number };
+  const line = (text: string, x0: number, y0: number, x1: number, y1: number, confidence = 90, baseline?: Box) =>
+    ({ text, confidence, bbox: { x0, y0, x1, y1 }, baseline: baseline ?? { x0, y0: y1, x1, y1 } });
+  const png = () => {
+    const canvas = createCanvas(1800, 2400), ctx = canvas.getContext("2d");
+    ctx.fillStyle = "white"; ctx.fillRect(0, 0, 1800, 2400);
+    return canvas.toBuffer("image/png");
+  };
+  async function read(lines: ReturnType<typeof line>[]) {
+    const { createWorker } = await import("tesseract.js");
+    const worker = { recognize: vi.fn().mockResolvedValue({ data: { blocks: [{ paragraphs: [{ lines }] }] } }), setParameters: vi.fn(), terminate: vi.fn() };
+    vi.mocked(createWorker).mockResolvedValue(worker as never);
+    return (await ocrImage(png())).pages[0]!.lines;
+  }
+  const texts = async (lines: ReturnType<typeof line>[]) => (await read(lines)).map(l => l.text);
+  test("names listed before their amounts come back together, in the names' order", async () => {
+    expect(await texts([
+      line("Land", 100, 100, 200, 140), line("Hard costs", 100, 200, 300, 240),
+      line("1,250,000", 900, 102, 1100, 142), line("8,430,000", 900, 202, 1100, 242),
+    ])).toEqual(["Land 1,250,000", "Hard costs 8,430,000"]);
+  });
+  test("several figures on one row join from left to right", async () => {
+    expect(await texts([
+      line("441", 1200, 100, 1280, 140), line("Studio", 100, 100, 240, 140),
+      line("$1,470", 800, 100, 950, 140), line("6", 500, 100, 520, 140),
+    ])).toEqual(["Studio 6 $1,470 441"]);
+  });
+  test("a figure joins the nearest line on its left", async () => {
+    expect(await texts([
+      line("Far away", 100, 100, 300, 140), line("Land", 500, 100, 600, 140), line("1,250,000", 900, 100, 1100, 140),
+    ])).toEqual(["Far away", "Land 1,250,000"]);
+  });
+  test("a figure at another height stays on its own line", async () => {
+    const lines = [line("Land", 100, 100, 200, 140), line("1,250,000", 900, 121, 1100, 161)];
+    expect(await texts(lines)).toEqual(["Land", "1,250,000"]);
+  });
+  test("half a line apart is still the same height", async () => {
+    expect(await texts([line("Land", 100, 100, 200, 140), line("1,250,000", 900, 120, 1100, 160)])).toEqual(["Land 1,250,000"]);
+  });
+  test("a figure to the left of a line stays on its own line", async () => {
+    expect(await texts([line("1,250,000", 100, 100, 300, 140), line("Land", 500, 100, 600, 140)])).toEqual(["1,250,000", "Land"]);
+  });
+  test("a line holding a long word is not a figure", async () => {
+    expect(await texts([line("Land", 100, 100, 200, 140), line("Phase 2", 900, 100, 1100, 140)])).toEqual(["Land", "Phase 2"]);
+  });
+  test.each([[8, true], [9, false]])("a line of %s words taking a figure: %s", async (words, joins) => {
+    const text = Array.from({ length: words }, () => "word").join(" ");
+    expect(await texts([line(text, 100, 100, 800, 140), line("1,250,000", 900, 100, 1100, 140)])).toEqual(joins ? [`${text} 1,250,000`] : [text, "1,250,000"]);
+  });
+  test.each([[59.9, 90], [90, 59.9]])("confidence %s and %s stays apart, so joining never changes what is kept", async (left, figure) => {
+    expect(await texts([line("Land", 100, 100, 200, 140, left), line("1,250,000", 900, 100, 1100, 140, figure)])).toEqual(["Land", "1,250,000"]);
+  });
+  test("confidence of a joined line is weighted by length", async () => {
+    const [joined] = await read([line("Land", 100, 100, 200, 140, 60), line("1,250,000", 900, 100, 1100, 140, 90)]);
+    expect(joined!.confidence).toBeCloseTo((4 * 60 + 9 * 90) / 13, 6);
+    expect(Object.keys(joined!).sort()).toEqual(["confidence", "text"]);
+  });
+  test("heights follow the page's own tilt", async () => {
+    // One pixel down for every fifty across: the amount sits 24 px below its name's height.
+    const tilted = (text: string, x0: number, y0: number, x1: number) => line(text, x0, y0, x1, y0 + (x1 - x0) / 50 + 40, 90, { x0, y0: y0 + 40, x1, y1: y0 + 40 + (x1 - x0) / 50 });
+    expect(await texts([
+      tilted("A long sentence that gives the page its tilt", 100, 40, 1600),
+      tilted("Land", 100, 300, 200), tilted("1,250,000", 1300, 324, 1500),
+    ])).toEqual(["A long sentence that gives the page its tilt", "Land 1,250,000"]);
+  });
+  test("a level page keeps a figure 24 px lower apart", async () => {
+    expect(await texts([
+      line("A long sentence that gives the page its tilt", 100, 40, 1600, 80),
+      line("Land", 100, 300, 200, 340), line("1,250,000", 1300, 324, 1500, 364),
+    ])).toEqual(["A long sentence that gives the page its tilt", "Land", "1,250,000"]);
+  });
+  test("a page read sideways has tall boxes, and a column of figures does not gather on one", async () => {
+    const figures = [300, 500, 700, 900].map((y, i) => line(`${i + 1},000`, 900, y, 1000, y + 40));
+    expect(await texts([line("Sideways words read as one tall line", 100, 100, 160, 1400), ...figures])).toEqual(["Sideways words read as one tall line", "1,000", "2,000", "3,000", "4,000"]);
+  });
+});
+
 describe("card 195 page settings and retries", () => {
   const png = (width = 1800, height = 2400) => {
     const canvas = createCanvas(width, height), ctx = canvas.getContext("2d");

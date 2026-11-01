@@ -70,3 +70,38 @@ test.each([
   const whole = rows.filter(([item, amount]) => lines.some(line => line.text.includes(item) && line.text.includes(amount)));
   expect(whole.length, JSON.stringify(lines)).toBeGreaterThanOrEqual(minimum);
 }, 120_000);
+
+const prose = [
+  "This left column is plain running text about a building",
+  "that does not exist. It goes on for a few lines so that",
+  "the column holds real sentences beside the table on the",
+  "right of the sheet, as a brochure or a staff report would.",
+  "Nothing in these sentences is a figure and none of them",
+  "should end up with an amount from the other column.",
+];
+function bare(draw: (ctx: ReturnType<Canvas["getContext"]>) => void, skew = 0) {
+  const canvas = createCanvas(2550, 3300), ctx = canvas.getContext("2d");
+  ctx.fillStyle = "white"; ctx.fillRect(0, 0, canvas.width, canvas.height);
+  ctx.fillStyle = "black"; ctx.font = "40px sans-serif";
+  if (skew) { ctx.translate(1275, 1650); ctx.rotate(skew * Math.PI / 180); ctx.translate(-1275, -1650); }
+  draw(ctx);
+  return canvas;
+}
+const table = (ctx: ReturnType<Canvas["getContext"]>, item: number, amount: number) =>
+  rows.forEach(([name, figure], i) => { ctx.fillText(name, item, 578 + i * 86); ctx.fillText(figure, amount, 578 + i * 86); });
+test.each([
+  ["a table alone, wide gap", () => bare(ctx => table(ctx, 230, 1530))],
+  ["a table alone, narrow gap", () => bare(ctx => table(ctx, 230, 800))],
+  ["a table alone, tilted 2 degrees", () => bare(ctx => table(ctx, 230, 1530), 2)],
+  ["a table beside prose", () => bare(ctx => {
+    prose.forEach((text, i) => ctx.fillText(text, 150, 578 + i * 86));
+    ctx.font = "36px sans-serif"; table(ctx, 1450, 2050);
+  })],
+] as const)("%s keeps each amount on its name's line", async (_name, draw) => {
+  const result = await ocrImage(draw().toBuffer("image/png"));
+  const lines = result.pages.flatMap(p => p.lines);
+  const whole = rows.filter(([item, amount]) => lines.some(line => line.text.includes(item) && line.text.includes(amount)));
+  expect(whole.length, JSON.stringify(lines)).toBeGreaterThanOrEqual(13);
+  // Prose keeps its own sentences: no long line takes an amount.
+  expect(lines.filter(line => (line.text.match(/\p{L}{2,}/gu) ?? []).length > 8 && /\d,\d{3}/.test(line.text))).toEqual([]);
+}, 120_000);
