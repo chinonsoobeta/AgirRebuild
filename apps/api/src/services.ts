@@ -575,7 +575,8 @@ export async function reviewView(tx: Db, dealId: string, asOf: string) {
   // A reading that failed its check is shown for the person to check, unless the review already holds that figure for the
   // field (the rules read it): then the card would only repeat a row that is already waiting for approval (QA run 3, skeptic R1).
   const alreadyRead = (r: { field: string; value: number }) => assumptions.some((a) => a.status !== "rejected" && a.field_key === r.field && a.value !== null && Math.abs(a.value - r.value) < 0.5);
-  const rejectedReading = (r: ReaderResponse["readings"][number], verification: ReadingVerification | undefined) => verification && verification.outcome !== "verified" && !alreadyRead(r)
+  // Card 192: a person can do nothing with a field Agir does not have, so it is not asked about; the stored reply keeps it.
+  const rejectedReading = (r: ReaderResponse["readings"][number], verification: ReadingVerification | undefined) => verification && verification.outcome !== "verified" && FIELD_BY_KEY.has(r.field) && !alreadyRead(r)
     ? [{ field: r.field, item: r.item, value: r.value, file: r.file, location: r.location, quote: r.quote, reason: verification.outcome }] : [];
   // Card F1: a failed reading of a field this deal's mode does not use is not asked about; it is listed as not needed.
   const inMode = (r: { field: string }) => notNeededReason(r.field, selling) === null;

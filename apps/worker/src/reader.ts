@@ -4,10 +4,12 @@ import * as z from "zod/v4";
 import { currentDocuments, documentsHash, sha256Hex, type Db, type BlobStore } from "@agir/db";
 import { addressedText, documentKind, parseDocument, parseSavedOcr, mergeOcr, redactDocument, verifyReadings, type ReadingVerification, READER_PROMPT, READER_PROMPT_VERSION, type ReaderResponse, type ReadingDocument, type Redaction } from "@agir/extraction";
 
-const unit = z.enum(["$", "%", "sf", "m2", "$/sf", "$/m2", "months", "years", "units", "x", "vacancy_%"]);
+// Card 192: the SDK sends an enum as a description, so the API does not hold the model to the list. These stay strings here,
+// so one odd label fails its own reading in verifyReading instead of throwing away the whole paid reply.
+const unit = z.string().describe("One of: $, %, sf, m2, $/sf, $/m2, months, years, units, x, vacancy_%");
 const value = { value: z.number(), unit_seen: unit, file: z.string(), location: z.string(), quote: z.string() };
 const schema = z.object({
-  readings: z.array(z.object({ ...value, field: z.string(), item: z.string().nullable(), note: z.string().nullable(), confidence: z.enum(["high", "medium", "low"]) })),
+  readings: z.array(z.object({ ...value, field: z.string(), item: z.string().nullable(), note: z.string().nullable(), confidence: z.string().describe("One of: high, medium, low") })),
   conflicts: z.array(z.object({ field: z.string(), item: z.string().nullable(), values: z.array(z.object(value)), why: z.string() })),
   not_used: z.array(z.object({ value: z.number(), file: z.string(), location: z.string(), quote: z.string(), why: z.string() })),
 });

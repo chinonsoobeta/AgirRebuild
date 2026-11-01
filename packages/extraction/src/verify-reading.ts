@@ -7,9 +7,9 @@ import { canonicalItem, foldText } from "./mapping.ts";
 import type { NormalizedDocument } from "./document.ts";
 import type { SourcedCandidate } from "./consolidate.ts";
 
-export type ReaderUnit = "$" | "%" | "sf" | "m2" | "$/sf" | "$/m2" | "months" | "years" | "units" | "x" | "vacancy_%";
-export type ReadingValue = { value: number; unit_seen: ReaderUnit; file: string; location: string; quote: string };
-export type Reading = ReadingValue & { field: string; item: string | null; note: string | null; confidence: "high" | "medium" | "low" };
+// Card 192: labels are the model's words, not a closed list; verifyReading decides what each one means.
+export type ReadingValue = { value: number; unit_seen: string; file: string; location: string; quote: string };
+export type Reading = ReadingValue & { field: string; item: string | null; note: string | null; confidence: string };
 export type ReaderResponse = {
   readings: Reading[];
   conflicts: { field: string; item: string | null; values: ReadingValue[]; why: string }[];
@@ -37,7 +37,7 @@ const NOT_MONTHLY_PACE = /^\s*(?:[a-z]+\s+){0,2}?(?:per|a|an|each|every|par|\/)\
 
 export const AI_LOW_CONFIDENCE_NOTE = "Please check: every source is a low-confidence AI reading";
 export const AI_AMBIGUOUS_NOTE = "Please check: the separator in this figure can be read more than one way; the AI read it as shown";
-export type ReadingVerification = { outcome: string; candidate?: SourcedCandidate & { confidence: Reading["confidence"]; ambiguous?: true } };
+export type ReadingVerification = { outcome: string; candidate?: SourcedCandidate & { confidence: "high" | "medium" | "low"; ambiguous?: true } };
 
 const UNIT_COUNT_TOTAL_NAMES = new Set([
   "total", "grand total", "total units", "total unit", "units total", "total unit count", "total number of units",
@@ -182,7 +182,11 @@ export function verifyReading(reading: Reading, documents: readonly ReadingDocum
   if (field.key === "absorption_units_per_month" && NOT_MONTHLY_PACE.test(foldText(normalizeText(reading.quote).slice(token.end)))) return { outcome: READING_FAILURE.unit };
   if (token.currencyCode !== null && token.currencyCode !== "CAD") return { outcome: READING_FAILURE.unit };
   let value = reading.value;
-  const seen = reading.unit_seen;
+  // The reader schema names money per unit and annual rent by their printed money/area unit.
+  const unit = field.unit === "$/unit/mo" ? "$" : field.unit === "$/sf/yr" ? "$/sf" : field.unit;
+  // Card 192: the prompt's field table shows the field's own unit, and the model sometimes copies it. On another field it stays
+  // unknown: a per-unit monthly label on an annual total would be a different number.
+  const seen = reading.unit_seen === field.unit ? unit : reading.unit_seen;
   let unitSeen: string = token.unit === "bps" ? "bps (÷ 100)" : seen;
   if (money) {
     if (token.scaled && token.value !== null) value = token.value;
@@ -196,8 +200,6 @@ export function verifyReading(reading: Reading, documents: readonly ReadingDocum
     // Card F1: a carry per unsold home per month is often a few hundred dollars.
     if (value !== 0 && Math.abs(value) < 1000 && field.key !== "unsold_carry_monthly") return { outcome: READING_FAILURE.small };
   }
-  // The reader schema names money per unit and annual rent by their printed money/area unit.
-  const unit = field.unit === "$/unit/mo" ? "$" : field.unit === "$/sf/yr" ? "$/sf" : field.unit;
   if (seen === "m2" && unit === "sf") value *= SF_PER_M2;
   else if (seen === "$/m2" && unit === "$/sf") value /= SF_PER_M2;
   else if (seen === "years" && unit === "months") value *= 12;
@@ -208,7 +210,9 @@ export function verifyReading(reading: Reading, documents: readonly ReadingDocum
     // The rule reader's name for the same type ("Two-bedroom" and "2BR" are "2BR"), so the two group in consolidate (QA card C1).
     fieldKey: field.key, itemKey: itemKey === null ? null : canonicalItem(itemKey.trim()), value, unitSeen, raw: token.raw,
     documentId: doc.id, documentName: doc.name, location: isOcrLocation(location) ? location : reading.location, ...(isOcrLocation(location) ? { ocr: true } : {}), context: reading.quote,
-    rule: "ai", ...(ambiguous ? { ambiguous: true as const } : {}), confidence: reading.confidence, ...(reading.note ? { note: reading.note } : {}),
+    rule: "ai", ...(ambiguous ? { ambiguous: true as const } : {}),
+    // A label we cannot understand reads as "check this".
+    confidence: reading.confidence === "high" || reading.confidence === "medium" ? reading.confidence : "low", ...(reading.note ? { note: reading.note } : {}),
   } };
 }
 
