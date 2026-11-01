@@ -20,5 +20,8 @@
   "cleanTempDir": "always",
   "symlinkNodeModules": true,
   "incremental": true,
-  "incrementalFile": "reports/mutation/incremental.json"
+  "incrementalFile": "reports/mutation/incremental.json",
+  "thresholds": {
+    "break": 92
+  }
 }

@@ -1,78 +1,127 @@
 # Engine mutation testing
 
-**Status: the final run has not happened.** The baseline below is real. The score after the new tests is unknown, because swap was over the 1,800 MB limit set for starting a Stryker run (2,131 MB of 3,072 MB on 2026-11-01). Rerun with the command below and fill in the "after" column.
-
-## What ran
-
-- Tool: Stryker 10.1.1 with the vitest runner, over `packages/engine/src/**/*.ts`. Config: `stryker.config.json` and `packages/engine/vitest.mutation.config.ts`.
-- Baseline: started 2026-10-31 20:30 PDT, took 203m43s, 4,536 mutants. It ran on the 359 engine tests that existed before `behaviour.test.ts` and `mutation-gaps.test.ts`.
-- Rerun, one process at a time, after checking `sysctl vm.swapusage`:
+Stryker 10.1.1 with the vitest runner, over `packages/engine/src/**/*.ts`: 4,536 mutants. Config: `stryker.config.json` and `packages/engine/vitest.mutation.config.ts`. Mutation testing is not part of the gate. Run it on engine changes, one process at a time, after checking `sysctl vm.swapusage` and `memory_pressure -Q`:
 
 ```
 bash /Users/chinonsoobeta/agir-v2/.worktrees/heavy.sh npm run mutation
 ```
 
-The run is incremental: it reuses `reports/mutation/incremental.json` where code and covering tests are unchanged. Delete that file for a clean run. Reports are in `reports/mutation/` and are not committed. Mutation testing is not part of the gate.
+The run is incremental: it reuses `reports/mutation/incremental.json` where code and covering tests are unchanged. Delete that file for a clean run, which takes hours. Reports are in `reports/mutation/` and are not committed.
 
-## Scores per file
+**Bar.** `thresholds.break` in `stryker.config.json` is 92, about two points under the final score of 94.27, so a real loss of test strength fails the run and ordinary drift does not.
 
-| File | Mutants | Killed | Survived | Timeout | No coverage | Baseline score | After |
-|---|---|---:|---:|---:|---:|---:|---|
-| canonical | 36 | 28 | 7 | 0 | 1 | 77.8 | not run |
-| checks | 329 | 243 | 77 | 0 | 9 | 73.9 | not run |
-| explore | 488 | 384 | 57 | 5 | 28 | 82.1 | not run |
-| forsale | 366 | 304 | 53 | 2 | 7 | 83.6 | not run |
-| irr | 111 | 67 | 39 | 3 | 2 | 63.1 | not run |
-| ledger | 674 | 555 | 106 | 9 | 2 | 83.9 | not run |
-| math | 102 | 75 | 19 | 1 | 7 | 74.5 | not run |
-| metrics | 449 | 322 | 76 | 0 | 51 | 71.7 | not run |
-| readiness | 948 | 766 | 156 | 0 | 26 | 80.8 | not run |
-| stress | 116 | 107 | 9 | 0 | 0 | 92.2 | not run |
-| underwrite | 86 | 60 | 21 | 0 | 5 | 69.8 | not run |
-| validate | 523 | 352 | 139 | 0 | 32 | 67.3 | not run |
-| verdict | 236 | 207 | 28 | 0 | 1 | 87.7 | not run |
-| waterfall | 72 | 59 | 13 | 0 | 0 | 81.9 | not run |
-| **All** | **4,536** | **3,529** | **800** | **20** | **171** | **78.52** | not run |
+**Scale.** In these runs the property rules ran at a tenth of their cases (`BEHAVIOUR_RUNS_SCALE=0.1`) with a 180 s limit per test, so that one run stays within hours. The baseline had neither, and had none of the property rules. A kill that needs a rare generated case could be missed at this scale, so the scores lean low rather than high.
 
-16 mutants ended in a runtime error (14 in explore, 2 in ledger) and are not in the score.
+## Scores
 
-The baseline overstates what was proven in one respect. `sale-explore-pins.json` and the for-sale hash pins hold engine output, so they kill mutants without showing the output is right. Stryker stops at the first kill, so the share of kills owed to them is not known.
+Score is (killed + timeout) / all mutants, runtime errors left out. Cells are score, then survived and no coverage in brackets.
 
-## Surviving mutants, from the baseline
+| File | Baseline | First final run | Last run |
+|---|---:|---:|---:|
+| canonical | 77.78 (7, 1) | 100.00 (0, 0) | 100.00 (0, 0) |
+| checks | 73.86 (77, 9) | 86.32 (39, 6) | 95.74 (8, 6) |
+| explore | 82.07 (57, 28) | 82.07 (57, 28) | 94.09 (26, 2) |
+| forsale | 83.61 (53, 7) | 87.43 (39, 7) | 89.62 (31, 7) |
+| irr | 63.06 (39, 2) | 71.17 (30, 2) | 76.58 (24, 2) |
+| ledger | 83.68 (106, 2) | 87.35 (84, 1) | 89.00 (73, 1) |
+| math | 74.51 (19, 7) | 98.04 (2, 0) | 99.02 (1, 0) |
+| metrics | 71.71 (76, 51) | 89.76 (44, 2) | 96.88 (12, 2) |
+| readiness | 80.80 (156, 26) | 91.24 (83, 0) | 95.25 (45, 0) |
+| stress | 92.24 (9, 0) | 98.28 (2, 0) | 98.28 (2, 0) |
+| underwrite | 69.77 (21, 5) | 90.70 (8, 0) | 91.86 (7, 0) |
+| validate | 67.30 (139, 32) | 99.24 (4, 0) | 99.81 (1, 0) |
+| verdict | 87.71 (28, 1) | 97.88 (5, 0) | 98.31 (4, 0) |
+| waterfall | 81.94 (13, 0) | 93.06 (5, 0) | 93.06 (5, 0) |
+| **All** | **78.52** (800, 171) | **90.09** (402, 46) | **94.27** (239, 20) |
 
-These groups come from reading the code. None has been confirmed by a rerun, so "should die" below is an expectation.
+The last run took 87 minutes: 4,241 killed, 21 timeouts, 15 runtime errors.
 
-### Equivalent: no input can tell them apart
+After it, five readiness tests were added and one corrected, aimed at readiness 135:76, 145, 195, 220:84, 228:44 and 349:65. Those kills are not counted in the table.
 
-- irr:8 sign flip gives the same roots. irr:34-37: no sign change has no roots anyway. Bisection tolerances and irr:14, 17, 25 cannot be reached. irr:51 finiteness.
-- ledger:169 `interestByTranche` is never read. ledger:175-185, 214-221: solver transients, because at the fixed point there is no shortfall. ledger:116, 118, 143, 246, 247, 307-309, 398, 443, 450, 463. ledger:333 and 404 are twin guards. ledger:331: the validator already forces a refinance.
-- stress:20 (0 times x), stress:42. forsale:35, 58, 90, 150, 162, 175, 199. verdict:11, 54: `m()` guarantees a null value unless valid. metrics:83, 88, 118. waterfall:41: only a zero-amount flow differs.
-- readiness: the `mezz_amort_years` fallback of 30 on a rental cannot be reached, because that field is required once a mezzanine exists.
+The hash pins (`sale-explore-pins.json`, the for-sale hash pins) hold engine output, so some kills show a change and not that the output is right. Stryker stops at the first kill, so their share is not known.
 
-### False survivors
+## What is left, by reason
 
-Four mutants are marked survived with 0 tests completed, from worker crashes: ledger:144, math:29, validate:122, stress:14.
+Every remaining Survived or NoCoverage mutant is in a group below. "Equivalent" means no input gives a different result.
 
-### Not derivable at reasonable cost
+### Equivalent
 
-- ledger:260, forsale:188 and checks:85 (`funding_not_converged`): no known input reaches them.
-- explore: not worked through. Breakeven and tornado survivors need numbers from a solver, and those were not derived by hand. 57 survived, 28 no coverage.
+**irr**
+- 8: flipping the sign of every flow gives the same roots.
+- 14, 17, 25: bisection stops on an interval under 1e-12 long before 200 iterations; a sign change always brackets a root, and the exit after the loop is never reached.
+- 34-37: zero flows add nothing to NPV; with flows of one sign, NPV never crosses zero, so the early return only saves time.
+- 39: a stray entry in the grid gives NaN at the first comparison and is skipped.
+- 40-42: the grid accumulates in floats, so r is never exactly -0.5, 1 or 10 at those comparisons (the last value is 9.999999999999831).
+- 46: reading past the grid gives undefined, then NaN, which is skipped.
+- 51 (`isFinite`): at r above -0.5 and t under about 40 years, NPV is finite. 51:101 (`prevV !== 0`): twin of the exact-zero test on the previous step, which has already added that root; the dedupe at 59 removes it.
+- 59 (`<=` to `<`): needs two roots exactly 1e-6 apart in floats. Roots closer and further are tested.
 
-### Worth a person's look
+**math, stress, underwrite, validate, verdict, waterfall**
+- math:23: when values tie, a comparator that is always positive keeps the original order, which is what the tie-break does.
+- stress:20: with `other` of 0, multiplying by anything gives 0. stress:42: the validator ties `exit: for_sale` and `forSale` together.
+- underwrite:24: a validated input throws nothing else inside that call. underwrite:38, 40; verdict:11, 54; metrics:10: `m()` gives a null value unless the status is VALID, so reading status or value alone agrees.
+- validate:10: `Number.isFinite` already refuses anything that is not a number.
+- waterfall:27: a negative flow treated as a distribution gets the same split and raises the hurdle by the same amount. waterfall:41: only adds a zero row.
 
-- readiness:49-61, the problem-to-field table: only `unit_count` and `input` are pinned here. A wrong field sends a person to the wrong line.
-- ledger:437, 438 (`m < S`): see the known failure below. These may die only by making the `test.fails` pass.
+**checks**
+- 25, 29: a premium above 0 needs a refinance, and every tier has its ceiling; `undefined` comparisons are false.
+- 88: accrued interest above 0 needs a mezzanine above 0.
 
-### Should die in the rerun
+**metrics**
+- 23: an empty status falls to NOT_MEANINGFUL inside `m()`.
+- 69: a null profit gives a null ratio anyway. 83, 83 NoCoverage: debt in place always gives a debt yield.
+- 118: gross rent of 0 makes the ratio Unknown either way.
+- 126, 127: zero amounts add nothing. 161: guarded by a premium, which needs a refinance. 194: `m()` again.
+- 207: a refinance falls before the sale, so its window has at least a month.
 
-The new tests target math, irr, canonical, waterfall, stress, funding and refinance arithmetic, metric edges, checks, verdict words, every validate branch, for-sale rows and readiness rules. Error-message mutants were given lowest priority.
+**forsale**
+- 58: floor of 0 sales at n = 0. 70, 74: with construction above 0, month 0 interest is zero, so the branch adds nothing.
+- 79, 90, 126: flows are already in date order, and a comparator of the wrong sign leaves V8's order unchanged for ascending input. 123: negating every date's total gives the same number of sign changes.
+- 140: line 174 overrides it. 142, 175: the validator requires a unit.
+- 150: one sign change has at most one root, and no root gives NaN, which is Unknown.
+- 151: a string in an array has no key. 153: zero flows add nothing; and a contribution total of NaN and a positive one take the same branch, while no contributions leave nothing to map.
+- 155, 163, 174: `""` as status falls to NOT_MEANINGFUL in `m()`.
+- 114: needs a reconciliation of exactly 0.01 in floats. 199: comparing with undefined is false.
+
+**ledger**
+- 116, 118, 143, 144, 307-309: spreading a zero amount, or a zero-length lease-up, adds zero.
+- 152, 169: `interestByTranche` is returned by the simulation but nothing reads it.
+- 175-185, 196, 203, 214-221: solver transients. At the fixed point there is no shortfall and no unused budget, and the outer solve finds the same equity.
+- 246, 247, 260, 262: array length and initial values are overwritten; 200 iterations are not reached by a converging solve.
+- 265: float boundary (`<` to `<=` at 0.005) and the second clause. Senior exhausted implies mezzanine exhausted, so overrun and unused commitment cannot both remain. That guard looks unreachable.
+- 270 (`equityBudget === 0`): when the next budget is 0 and this one is not, the following pass reaches the same point and stops there.
+- 331: the validator forces a refinance on a held deal. 375: a forward NOI of 0 gives value 0 both ways. 404: twin of the guard at 333, which throws first.
+- 431, 463: 0 either way. 443, 450: `NaN` and past-the-end rows are not read by what follows.
+- 479, 485: needs exactly 0.005 in floats.
+
+**explore**
+- 84, 152, 331: `m()` gives null unless VALID.
+- 89, 99, 100: label of a scenario that is built, read for its metrics and dropped.
+- 118, 119: a shock moves the refinance by exactly the timeline's shift, so month + shift is already within S and T-1 and neither clamp binds.
+- 237: first = 0 returned on the line above. 263, 265: a validated line has one basis or the other.
+- 288, 290: `underwrite`, called next, validates the same input and throws the same error; the exploration has no other refused input.
+- 300, 301: only error-severity checks are read, and the covenant check that uses this figure is never an error.
+
+**readiness**
+- 36, 37: `undefined` comparisons are false.
+- 87, 89: a rejected row is not readable anyway; the fallback array is replaced.
+- 181: with either figure absent the item is already missing, so no input is built.
+- 242, 246: no field with a `required` other than false has `absentMeans`.
+- 249: every key in `missing` is a real field. 359: `assemble` throws nothing else there.
+
+### Unreachable by any known input
+
+- checks:85-86, forsale:188, ledger:260 (`funding_not_converged`): the solve converged on everything tried. Left as a guard.
+- readiness:49-58: rows of the problem-to-field table that name `unit_sale_price`, `unit_count`, the presale shares, sales pace, closing lag and carry. Field bounds in the contract (`pct` 0-100, absorption at least 0.01, lag 0-60, carry and price at least 0) refuse the value first, so `validateInput`'s sentence never arrives through `assemble`, and the person is still sent to the field by the bounds check. These rows are dead.
+
+### Only wording differs
+
+- readiness:49-61, the `^` removed from each pattern: none of these phrases appears mid-sentence in another problem.
+- explore:341, 342: `limit > 0` to `>= 0` changes "-0" to "+0" when a driver has no reach at all.
+- ledger:288: the text of an error `underwrite` catches and turns into a check with its own message.
 
 ## Known failure and silences
 
-- `test.fails` in `behaviour.test.ts`: a rental with no build shows no cost or equity on its monthly rows, while its flows show the contribution. The sale ledger places them at month 0.
+- `test.fails` in `behaviour.test.ts`: a rental with no build shows no cost or equity on its monthly rows, while its flows show the contribution. The sale ledger places them at month 0. ledger:437, 438 (`m < S`) survive because of this; `m < S` to true is arguably the fix.
 - A for-sale delay can raise the multiple while profit falls, when mezzanine interest paid in kind replaces equity. Rule 3 is held to profit on cost for that case only. See the comment at rule 3.
 - The specification is silent on a refinance value when forward NOI is not positive (the code uses 0), and on sub-cent differences between rounded monthly allocations and unrounded costs.
-
-## Recommended bar
-
-Do not set a final bar until the rerun gives real numbers. Then set `thresholds.break` about two points under the final overall score, so a real loss of test strength fails and ordinary drift does not. Keep it out of the gate and run it on engine changes, because a clean run takes hours. Until then, the only defensible floor is the baseline: 78.
