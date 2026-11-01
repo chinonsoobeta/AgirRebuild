@@ -4,11 +4,11 @@ import v8 from "node:v8";
 import vm from "node:vm";
 import JSZip from "jszip";
 import { readFileSync } from "node:fs";
-import { describe, expect, test } from "vitest";
+import { describe, expect, test, vi } from "vitest";
 import ExcelJS from "exceljs";
 import * as pdfjs from "pdfjs-dist/legacy/build/pdf.mjs";
 import {
-  parseDocument, UnsupportedDocumentError, FILE_TOO_LARGE, FILE_DAMAGED, FILE_LOCKED,
+  parseDocument, refusalFor, UnsupportedDocumentError, FILE_TOO_LARGE, FILE_DAMAGED, FILE_LOCKED,
   MAX_PDF_ITEMS, MAX_PDF_COLUMN_WORK, MAX_PDF_STRIKE_WORK, MAX_PDF_PAGE_COMMANDS, MAX_PDF_COMMANDS,
   MAX_WORKBOOK_CELLS, MAX_WORKBOOK_TAGS, MAX_WORD_TAGS, MAX_MERGED_RANGES, MAX_SHEETS, MAX_TEXT_PIECES,
   assertStartTags, textItems, drawingList, pdfReadingOrder, pdfRowKey,
@@ -75,7 +75,13 @@ const merges = (n: number) => `<mergeCells count="${n}">${Array.from({ length: n
 const merge = (ref: string) => `<mergeCells count="1"><mergeCell ref="${ref}"/></mergeCells>`;
 const oneCellRows = (n: number, col = "A") => Array.from({ length: n }, (_, i) => `<row r="${i + 1}"><c r="${col}${i + 1}"><v>${i + 1}</v></c></row>`).join("");
 
-// The constants and helper exports are introduced by Card 200.
+test("the plain words are pinned", () => {
+  expect([FILE_TOO_LARGE, FILE_DAMAGED, FILE_LOCKED]).toEqual([
+    "This file is too large for Agir to read. Save the parts that matter in a file of their own, then upload that.",
+    "Agir could not open this file. It may be damaged. Save it again, then upload it.",
+    "This file has a password, or is in an older format. Remove the password or save it as a current Excel or Word file, then upload it.",
+  ]);
+});
 test("the limits are pinned", () => {
   expect([MAX_PDF_ITEMS, MAX_PDF_COLUMN_WORK, MAX_PDF_STRIKE_WORK, MAX_PDF_PAGE_COMMANDS, MAX_PDF_COMMANDS,
     MAX_WORKBOOK_CELLS, MAX_WORKBOOK_TAGS, MAX_WORD_TAGS, MAX_MERGED_RANGES, MAX_SHEETS, MAX_TEXT_PIECES])
@@ -90,13 +96,18 @@ describe("workbooks", () => {
     const p = parseDocument(await xlsx(sheet({ after: merges(n) })), "a.xlsx");
     if (n > 10000) await refused(p); else expect(values(await p)).toEqual(["1", "2"]);
   }, LONG);
-  test.each([499999, 500001])("one-cell rows %i", async n => {
+  test.each([499999, 500000, 500001])("one-cell rows %i", async n => {
     const p = parseDocument(await xlsx(sheet({ rows: oneCellRows(n) })), "a.xlsx");
     if (n > 500000) await refused(p); else expect((await p).tables[0]!.rows).toHaveLength(n);
   }, LONG);
   test.each([61, 62])("padded XFD rows %i", async n => {
     const p = parseDocument(await xlsx(sheet({ rows: oneCellRows(n, "XFD") })), "a.xlsx");
     if (n === 62) await refused(p); else expect((await p).tables[0]!.rows.reduce((sum, r) => sum + r.length, 0)).toBe(999424);
+  }, LONG);
+  test.each([["VD", true], ["VE", false]] as const)("padded cells at the limit, the last row out to %s", async (col, read) => {
+    const rows = oneCellRows(61, "XFD") + `<row r="62"><c r="${col}62"><v>1</v></c></row>`;
+    const p = parseDocument(await xlsx(sheet({ rows })), "a.xlsx");
+    if (!read) await refused(p); else expect((await p).tables[0]!.rows.reduce((sum, r) => sum + r.length, 0)).toBe(1_000_000);
   }, LONG);
   test.each([2147483647, 1048576])("last row %i", async n => {
     const p = parseDocument(await xlsx(sheet({ rows: `<row r="${n}"><c r="A${n}"><v>1</v></c></row>` })), "a.xlsx");
@@ -132,6 +143,23 @@ test.each(["cols", "validation", "name"])("does not expand unused %s", async blo
   expect(performance.now() - start).toBeLessThan(5000);
 });
 
+const wholeSheet = '<dataValidations count="1"><dataValidation type="whole" sqref="A1:XFD1048576"/></dataValidations>';
+test("does not expand a second unused block", async () => {
+  const first = '<dataValidations count="1"><dataValidation type="whole" sqref="A1"/></dataValidations>';
+  const start = performance.now();
+  expect(values(await parseDocument(await xlsx(sheet({ after: first + wholeSheet })), "a.xlsx"))).toEqual(["1", "2"]);
+  expect(performance.now() - start).toBeLessThan(5000);
+});
+
+test("a folder in front of a sheet's path does not skip the clean-up", async () => {
+  const z = await JSZip.loadAsync(await xlsx(sheet({ after: wholeSheet })));
+  z.file("x/xl/worksheets/sheet1.xml", await z.file("xl/worksheets/sheet1.xml")!.async("string"));
+  z.remove("xl/worksheets/sheet1.xml");
+  const start = performance.now();
+  await parseDocument(await z.generateAsync({ type: "uint8array", compression: "DEFLATE" }), "a.xlsx");
+  expect(performance.now() - start).toBeLessThan(5000);
+});
+
 test("removing all three unused blocks preserves workbook JSON", async () => {
   const wb = new ExcelJS.Workbook(), ws = wb.addWorksheet("Budget");
   ws.columns = [{ width: 25 }, { width: 18 }];
@@ -158,6 +186,10 @@ test.each([
   if (!read) await refused(p);
   else { const d = await p; if (ext === "txt") expect(d.lines).toHaveLength(ch === "," ? 1 : 0); else expect(d.tables[0]!.rows[0]).toHaveLength(1000001); }
 }, LONG);
+
+test("text: an unknown kind keeps its own refusal, however many lines it has", async () => {
+  await refused(parseDocument(text("\n".repeat(1000001)), "a.weird"), refusalFor("a.weird"));
+});
 
 test.each([100000, 500001])("Word paragraphs %i", async n => {
   const p = parseDocument(await docx("<w:p/>".repeat(n)), "a.docx");
@@ -211,6 +243,20 @@ describe("PDFs through parseDocument", () => {
   test.each([44000, 45000])("strike work at %i pieces", async n => {
     const p = parseDocument(pdf([strike(n)]), "a.pdf"); if (n === 45000) await refused(p); else expect((await p).lines).toHaveLength(n);
   }, LONG);
+  test("gutter work adds up across pages", async () => {
+    // Each page asks 50 million of the column search, so two reach the limit and three pass it.
+    await refused(parseDocument(pdf(Array(3).fill(gutters(5000))), "a.pdf"));
+  }, LONG);
+  test("strike work adds up across pages", async () => {
+    await refused(parseDocument(pdf(Array(2).fill(strike(32000))), "a.pdf"));
+  }, LONG);
+  test("refused PDFs leave nothing behind", async () => {
+    await turn(); collect();
+    const before = process.memoryUsage().heapUsed;
+    for (let i = 0; i < 5; i++) await refused(parseDocument(pdf([saves(1000002)]), "a.pdf"));
+    await turn(); await turn(); collect();
+    expect(process.memoryUsage().heapUsed - before).toBeLessThan(200 * 1024 * 1024);
+  }, LONG);
   test("the total item refusal settles across pages", async () => {
     await refused(parseDocument(pdf(Array(5).fill(tall(450000))), "a.pdf"));
   }, LONG);
@@ -258,6 +304,60 @@ test.each([0, 100000000 - 4, 100000000 - 3])("column work with %i already spent"
   else { pdfReadingOrder(rows, spent); expect(spent.columns).toBe(columns + 4); }
 });
 
+test("column work counts the search inside each column and in the rows after them", () => {
+  const piece = (x: number, end: number, s: string) => ({ x, end, size: 8, s });
+  const twoColumns = Array.from({ length: 6 }, () => [
+    piece(10, 60, "alpha"), piece(90, 180, "beta gamma delta epsilon zeta"), piece(250, 300, "theta iota kappa lambda mu"), piece(350, 400, "nu"),
+  ]);
+  const rest = [[piece(10, 560, "one long line across the page")], [piece(10, 60, "a"), piece(500, 560, "b")], [piece(10, 60, "c"), piece(500, 560, "d")]];
+  const spent = { columns: 0 };
+  const order = pdfReadingOrder([...twoColumns, ...rest], spent);
+  // Four gap positions by 29 pieces, then one by 12 in each column, then one by 5 in the rows after them.
+  expect(spent.columns).toBe(4 * 29 + 12 + 12 + 5);
+  expect(order.map(row => row.map(p => p.s)[0])).toEqual([...Array(6).fill("alpha"), ...Array(6).fill("theta iota kappa lambda mu"), "one long line across the page", "a", "c"]);
+});
+
+test("a merged range is refused from its whole area, before ExcelJS expands it", async () => {
+  const bytes = await xlsx(sheet({ after: merge("A1:Z200000") }));
+  const started = performance.now();
+  await refused(parseDocument(bytes, "a.xlsx"));
+  // The count takes a few milliseconds. ExcelJS would take about seven seconds over this merge before a later count refused it.
+  expect(performance.now() - started).toBeLessThan(2000);
+});
+
+test("a PDF of more than 5,000 pages is not read", async () => {
+  const blank = Array<string>(5000).fill("");
+  expect((await parseDocument(pdf(blank), "a.pdf")).pageCount).toBe(5000);
+  await expect(parseDocument(pdf([...blank, ""]), "a.pdf")).rejects.toThrow("This PDF has more than 5,000 pages");
+}, LONG);
+
+// pdf.js does not export these classes, so reach them through one document. An earlier test's document, let go on a later turn, is gone first.
+async function pdfjsPrototypes() {
+  await turn(); await turn();
+  const task = pdfjs.getDocument({ data: pdf([""]), useSystemFonts: true });
+  const page = await (await task.promise).getPage(1);
+  const found = { task: Object.getPrototypeOf(task), page: Object.getPrototypeOf(page) };
+  await task.destroy();
+  return found;
+}
+
+describe("what pdf.js holds is let go", () => {
+  test("each page's lists are freed as it ends", async () => {
+    const cleanup = vi.spyOn((await pdfjsPrototypes()).page, "cleanup");
+    try { await parseDocument(pdf(["", ""]), "a.pdf"); expect(cleanup).toHaveBeenCalledTimes(2); }
+    finally { cleanup.mockRestore(); }
+  });
+  test("the document is let go after the turn that reads it, not during it", async () => {
+    const destroy = vi.spyOn((await pdfjsPrototypes()).task, "destroy");
+    try {
+      await parseDocument(pdf([""]), "a.pdf");
+      expect(destroy).toHaveBeenCalledTimes(0);
+      await turn();
+      expect(destroy).toHaveBeenCalledTimes(1);
+    } finally { destroy.mockRestore(); }
+  });
+});
+
 describe("refused streams never end the process", () => {
   async function noRejections(run: () => Promise<void>) {
     const errors: unknown[] = [], listener = (e: unknown) => { errors.push(e); };
@@ -265,6 +365,17 @@ describe("refused streams never end the process", () => {
     try { await run(); await turn(); await turn(); expect(errors).toEqual([]); }
     finally { process.removeListener("unhandledRejection", listener); }
   }
+  test("a failure to let a document go is not a crash", async () => {
+    // Not a vitest spy: its bookkeeping handles the rejection, and this test is about nothing handling it.
+    const { task: prototype } = await pdfjsPrototypes();
+    const real = prototype.destroy;
+    let calls = 0;
+    prototype.destroy = () => { calls++; return Promise.reject(new Error("pdf.js could not stop")); };
+    try {
+      await noRejections(async () => { await parseDocument(pdf([""]), "a.pdf"); });
+      expect(calls).toBe(1);
+    } finally { prototype.destroy = real; }
+  });
   for (const method of ["text", "drawing"] as const) {
     test.each([50, 101, 1000, 1001, 5000, 20000].flatMap(n => [0, 50, 100, 101, 1000].map(room => ({ n, room }))))(`${method} n=$n room=$room`, async ({ n, room }) => {
       await noRejections(async () => onPage(method === "text" ? tall(n) : saves(n), async page => {

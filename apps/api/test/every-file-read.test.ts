@@ -288,6 +288,16 @@ test("a file that stopped the worker with attempts left is tried again", async (
   expect(log).not.toHaveBeenCalledWith(expect.objectContaining({ event: "job.dead" }));
 });
 
+test("a job that fails with attempts left says so in the log, then is given up on after its last", async () => {
+  const id = await deal(), log = vi.fn(), read = reader();
+  const { broken } = await deadFile(id);
+  await drain({ db, store: broken, read, log });
+  expect(log).toHaveBeenCalledWith(expect.objectContaining({ event: "job.retry", kind: "extract_document", error: "fake store unavailable" }));
+  expect(log).not.toHaveBeenCalledWith(expect.objectContaining({ event: "job.dead" }));
+  await kill({ db, store: broken, read, log });
+  expect(log).toHaveBeenCalledWith(expect.objectContaining({ event: "job.dead", kind: "extract_document", error: "fake store unavailable" }));
+});
+
 test("a job with a lease still running is left alone", async () => {
   const id = await deal(), read = reader(), log = vi.fn();
   const document = await upload(id, "notes.txt", quote);
@@ -296,6 +306,30 @@ test("a job with a lease still running is left alone", async () => {
   expect(await jobOf(document)).toMatchObject({ status: "running", attempts: 3 });
   expect(log).not.toHaveBeenCalledWith(expect.objectContaining({ event: "job.dead" }));
   await db.query(`update jobs set status='done', lease_until=null where kind='verify_document' and payload->>'document_id'=$1`, [document]);
+});
+
+test("once a file is given up on, the deal's other file gets its reading", async () => {
+  const id = await deal(), read = reader();
+  const stuck = await upload(id, "stuck.txt", "Held by a worker");
+  await db.query(`update jobs set status='running', attempts=max_attempts, lease_until=now() + interval '4 minutes' where kind='verify_document' and payload->>'document_id'=$1`, [stuck]);
+  await upload(id, "notes.txt", quote);
+  await drain({ db, store, read });
+  // The reading waits while a file is still in progress.
+  expect(read).not.toHaveBeenCalled();
+  await stopped(stuck, "max_attempts");
+  await drain({ db, store, read });
+  expect(read).toHaveBeenCalledTimes(1);
+  expect(JSON.stringify(read.mock.calls[0]![0])).toContain("notes.txt");
+});
+
+test("a reading that stopped the worker on every attempt is given up on, and no file changes", async () => {
+  const { id, document, read } = await setup();
+  const log = vi.fn();
+  await db.query(`insert into jobs(kind,payload,status,attempts,lease_until) values('read_deal',$1,'running',3,now() - interval '1 minute')`, [JSON.stringify({ deal_id: id })]);
+  await drain({ db, store, read, log });
+  expect(log).toHaveBeenCalledWith(expect.objectContaining({ event: "job.dead", kind: "read_deal" }));
+  const [d] = await db.query<any>(`select stage from documents where id=$1`, [document]);
+  expect(d.stage).toBe("extracted");
 });
 
 test("a file too large to read fails in plain words, and the deal's other file is still read", async () => {
