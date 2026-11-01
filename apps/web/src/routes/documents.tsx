@@ -177,8 +177,9 @@ export function Documents({ dealId }: { dealId: string }) {
           <Notice title={t("documents.banner.reading", { n: list.filter((d) => !DONE.includes(d.stage)).length || added.length })} role="status" />
         ) : setAsideAll ? (
           <Notice tone="review" role="status" title={t("documents.banner.setAside")}>
-            <p className="small">{t("documents.banner.setAsideHelp")}</p>
+            {editable && <p className="small">{t("documents.banner.setAsideHelp")}</p>}
             {failedCount > 0 && <p className="small">{t("documents.banner.failed", { n: failedCount })}</p>}
+            {toReview > 0 && <Link className="btn primary sm" to="/deals/$dealId/review" params={{ dealId }}>{t("documents.banner.go", { n: toReview })}</Link>}
           </Notice>
         ) : showDone ? (
           <Notice tone="pass" role="status" title={t("documents.banner.done", { files: filesRead, n: toReview })}>
