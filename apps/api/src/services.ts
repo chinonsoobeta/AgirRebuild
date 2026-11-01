@@ -20,7 +20,7 @@ import {
 } from "@agir/contracts";
 import { assemble, buildLedger, canonicalJson, ENGINE_VERSION, heldPartnerReturns, replay } from "@agir/engine";
 import { currentDocuments, documentsHash, type Db } from "@agir/db";
-import { applyLabels, figureOrder, itemFold, labelPhrase, labelUnit, offeredIds, suggestFields, type ReaderResponse, type ReadingVerification, READER_PROMPT_VERSION, type SourcedCandidate } from "@agir/extraction";
+import { applyLabels, COMPUTED_NOTE, figureOrder, itemFold, labelPhrase, labelUnit, offeredIds, suggestFields, type ReaderResponse, type ReadingVerification, READER_PROMPT_VERSION, type SourcedCandidate } from "@agir/extraction";
 
 export const sha256 = (s: string) => createHash("sha256").update(s).digest("hex");
 /** The hash of each registered policy, by version. A run is fresh against the hash of the policy it was made under. */
@@ -472,6 +472,35 @@ async function otherFigures(tx: Db, dealId: string, assumptions: Pick<Assumption
   return { all, other };
 }
 
+/** Review lists at most this many figures. Agir read them all; a page of tens of thousands helps nobody. */
+const MAX_LISTED_FIGURES = 1000;
+/** One figure as Review shows it: the same number in the same sentence is one row. */
+const listedKey = (o: { documentId: string; context: string; raw: string }) => `${o.documentId}\u0000${o.context}\u0000${o.raw}`;
+
+/**
+ * The figures Review lists, in the list's own order, and how many there are before the limit. A figure a person labelled always stays,
+ * then a formula's result and a figure the AI reading named, then one with a suggested field, then the rest. Within each of those the files
+ * take turns, each from its first row, so a small file is not lost behind a large one.
+ */
+export function listedFigures<O extends { documentId: string; location: string; context: string; raw: string; value: number | null; note: string | null; figureId: string | null; label: unknown; suggestions: string[] }>(other: O[], named: Set<string>) {
+  const total = new Set(other.map(listedKey)).size;
+  const unused = other.filter((o) => o.figureId && o.value !== null && !o.label).length;
+  if (total <= MAX_LISTED_FIGURES) return { listed: other, total, unused };
+  const keep = new Set(other.filter((o) => o.label).map(listedKey));
+  const { compare } = new Intl.Collator("en", { numeric: true });
+  const inRowOrder = [...other].sort((a, b) => compare(a.location, b.location));
+  const tiers: ((o: O) => boolean)[] = [(o) => o.note === COMPUTED_NOTE || (!!o.figureId && named.has(o.figureId)), (o) => o.suggestions.length > 0, () => true];
+  for (const tier of tiers) {
+    const files = new Map<string, O[]>();
+    for (const o of inRowOrder) if (tier(o)) { const rows = files.get(o.documentId); if (rows) rows.push(o); else files.set(o.documentId, [o]); }
+    const queues = [...files.values()];
+    for (let turn = 0; keep.size < MAX_LISTED_FIGURES && queues.some((q) => turn < q.length); turn++) {
+      for (const q of queues) if (turn < q.length && keep.size < MAX_LISTED_FIGURES) keep.add(listedKey(q[turn]!));
+    }
+  }
+  return { listed: other.filter((o) => keep.has(listedKey(o))), total, unused };
+}
+
 /**
  * The deal's documents (QA run 2, skeptic N2). used_count is the number of current values with a source in the document, from
  * the rules or the AI reading; candidate_count stays what the rules alone found. other_count is the figures no reader used.
@@ -602,6 +631,7 @@ export async function reviewView(tx: Db, dealId: string, asOf: string) {
     }),
     pleaseCheck: failed.filter(inMode),
   } : null;
+  const { listed, total: otherTotal, unused: unusedTotal } = listedFigures(other, new Set((aiReading?.notUsed ?? []).flatMap((n) => n.figureId ?? [])));
   // Up to three unlabelled figures that may hold a missing input: those it ranks first, then the others, each in the table's order.
   const likely = (fieldKey: string) =>
     other.filter((o) => o.suggestions.includes(fieldKey))
@@ -676,7 +706,9 @@ export async function reviewView(tx: Db, dealId: string, asOf: string) {
       const def = FIELD_BY_KEY.get(m.fieldKey)!;
       return { ...m, unit: def.unit, material: def.material, default: def.default ?? null, help: def.help ?? null, groupLabel: FIELD_GROUP_LABELS[def.group] };
     }),
-    other,
+    other: listed,
+    otherTotal,
+    unusedTotal,
     notNeeded,
   };
 }

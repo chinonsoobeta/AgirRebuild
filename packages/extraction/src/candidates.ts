@@ -3,6 +3,7 @@ import { FIELD_BY_KEY, OUTPUT_LIKE_PHRASES } from "@agir/contracts";
 import { detectFormat, normalizeText, SF_PER_M2, tokenize, unitTypesIn, wholeUnitType, type CurrencyCode, type DocumentFormat, type NumberToken } from "@agir/numbers";
 import type { Cell, NormalizedDocument, Table } from "./document.ts";
 import { applyDocumentKind } from "./document-kind.ts";
+import { boundedForRules, digitRuns, MAX_RULE_TEXT, MAX_RULE_WORK, RULE_LIMIT_NOTE } from "./rule-limits.ts";
 import { unconditioned, commercialItem, commercialLabel, genericCommercial, PROPERTY_TAX_WORD, BASIS_AFTER_RE, CREDIT_NOTE, REPLACED_LOAN, DEPOSIT_NOTE, DEPOSIT_RE, LTV_BASIS, canonicalItem, costSentence, currencyOf, flagRead, flagSentence, hasPhrase, isOperatingTarget, isExitCapLabel, isTakeoutTimingLabel, isPlainRentLabel, loanNameOnly, loanTerm, mapToken, normalizeLabel, withoutTaxBasis, OLD_SHEET_RE, rankScope, typeItem, SCENARIO_SHEET_NOTE, SCENARIO_SHEET_RE, SUPERSEDED_LABEL_NOTE, scopeIn, scopesIn, withCurrency, type MapOptions, type Mapped, type Scope } from "./mapping.ts";
 
 /** One value found in one document, with where it came from and why it was (or was not) mapped. */
@@ -144,6 +145,8 @@ type Base = { region: Region; raw: string; location: string; context: string; ru
 
 /** The documents that are a builder's quote: there, a Total is the hard cost. */
 const quoteDocs = new WeakSet<ExtractionResult>();
+/** Figures times characters read so far in each pass, against MAX_RULE_WORK. */
+const ruleWork = new WeakMap<ExtractionResult, { spent: number; over: boolean }>();
 const QUOTE_WORD_RE = /\b(quote|quotation|estimate|tender|bid|soumission|devis)\b/;
 const BUILDER_WORD_RE = /\b(builders?|contractors?|contracting|entrepreneurs?|constructeurs?|constructions?|general contractor)\b/;
 
@@ -298,7 +301,7 @@ function paragraphs(doc: NormalizedDocument, skip: Set<number>, scopes: (Scope |
     // Card 118: a figure-first "figure — label" line starts its own paragraph, and in a Word file laid out that way no paragraph joins the one before it.
     // Card 118 audit: elsewhere a sentence wrapped across Word paragraphs still joins ("The committed principal is" / "$2,850,000 …").
     const figureFirst = doc.kind === "docx" && cur?.segs.at(-1)!.location !== line.location && [prev, doc.lines[li + 1]?.text ?? ""].some((l) => FIGURE_FIRST_RE.test(l));
-    if (cur && !FIGURE_FIRST_RE.test(text) && !figureFirst && continues(prev, text)) {
+    if (cur && cur.text.length + text.length < MAX_RULE_TEXT && !FIGURE_FIRST_RE.test(text) && !figureFirst && continues(prev, text)) {
       cur.segs.push({ start: cur.text.length + 1, location: line.location });
       cur.text += " " + text;
     } else {
@@ -381,7 +384,7 @@ const EXAMPLE_RE = /\b(?:examples?|exemples?)\b/g;
 const EXAMPLE_BEFORE = /(?:\bfor|\bpar|\b(?:rue|avenue|av|boulevard|boul|chemin|route|place|rang)(?:\s+(?:de l['’]|de la |du |des |d['’]))?)\s*$/;
 const EXAMPLE_AFTER = /^\s+(?:street|st|ave|avenue|road|rd|drive|dr|way|blvd|boulevard|lane|ln|crescent|court|place|plaza|park|square|building|tower|inc|corp|ltd|llc|group|holdings|properties|developments|capital|realty|homes)\b/;
 
-const ADDRESS_LIKE_RE = /\S*@\S*|(?<![\p{L}\p{N}])[\p{L}\p{N}_-]+(?:\.[\p{L}\p{N}_-]+)+(?:\/\S*)?/gu;
+const ADDRESS_LIKE_RE = /\S{0,200}@\S{0,200}|(?<![\p{L}\p{N}])[\p{L}\p{N}_-]+(?:\.[\p{L}\p{N}_-]+)+(?:\/\S*)?/gu;
 
 /** Whether a row, line or heading says, in English or French, that its figures are an example, for reference, or not part of the deal. */
 function markedNotPart(text: string): boolean {
@@ -541,7 +544,7 @@ const RATE_BESIDE_RE = /^\s*(?:at|à|a|au taux de)\s*$/i;
 const RATE_BASIS_RE = /^\s*(?:of|de|du|des|d)\b|\b(?:ltv|ltc|loan[- ]to|ratio|dcr|dscr|pret[- ]valeur|rpv|interest[- ]only|io|interets? seulement)\b/;
 const LATER_FIGURE_NOTE = "A later figure in this row; Agir reads one figure per row. Label it if it is the one to use";
 const ZERO_BESIDE_NOTE = "A zero beside another figure in this row";
-const COMPUTED_NOTE = "Worked out by a formula in this workbook, so Agir did not read it. Use it if it is the figure you want";
+export const COMPUTED_NOTE = "Worked out by a formula in this workbook, so Agir did not read it. Use it if it is the figure you want";
 const PARTIAL_BUDGET_NOTE = "Another line of this cost is a formula, so adding the typed lines would give only part of it; enter the field by hand";
 const MAX_ROW_FIGURES = 12;
 const PER_UNIT_NOTE = "A per-door share of a cost, not the line's total; enter the total";
@@ -651,7 +654,7 @@ const LEADER_RE = /^(.*?\p{L}[^.]*?)\s*(?:\.\s*){3,}(?=\S)/u;
 function labelValueForm(text: string): string {
   const stop = FULL_STOP_LABEL_RE.exec(text);
   if (stop && stop[1]!.split(/\s+/).length <= 5 && !ABBREVIATIONS.has(/(\p{L}+)$/u.exec(stop[1]!)?.[1]?.toLowerCase() ?? "")) return stop[1]! + ":" + text.slice(stop[1]!.length + 1);
-  const leader = LEADER_RE.exec(text);
+  const leader = /\.\s*\.\s*\./.test(text) ? LEADER_RE.exec(text) : null;
   return leader ? leader[1]! + ":" + " ".repeat(leader[0].length - leader[1]!.length - 1) + text.slice(leader[0].length) : text;
 }
 
@@ -683,6 +686,9 @@ function figureDashItems(text: string, format: DocumentFormat): { token: NumberT
 
 function readSentence(sentence: { text: string; start: number }, para0: Paragraph, result: ExtractionResult, carried: string | null = null, priorBudget: string | null = null) {
   const text = labelValueForm(normalizeText(sentence.text));
+  const work = ruleWork.get(result)!;
+  work.spent += digitRuns(text) * text.length;
+  if (work.spent > MAX_RULE_WORK) { work.over = true; return; }
   const quote = quoteDocs.has(result);
   const lineStart = para0.segs.filter(g => g.start <= sentence.start).at(-1)?.start ?? 0;
   const loanLead = para0.text.slice(lineStart, sentence.start).split(/[.!?]\s+/).pop() ?? "";
@@ -1361,13 +1367,16 @@ function fromRentRoll(table: Table, headerRow: number, roles: Roles, result: Ext
   const repeats = new Map<string, number>();
   for (const row of body) if (row.some((c) => c.text)) repeats.set(typeOf(row).type, (repeats.get(typeOf(row).type) ?? 0) + 1);
   const suiteRows: { type: string; ref: string; cands: Candidate[] }[] = [];
+  // The roll's commercial names, asked by every row, so worked out once.
+  let commercial: string[] | undefined;
+  const commercialNamesOf = () => (commercial ??= [...new Set(body.map(r => r[roles.item[0]!]!.text).filter(n => commercialItem(n) && !/\b(?:area|rent|loyer|surface|superficie|tarif)\b/i.test(n)))]);
   for (let r = headerRow + 1; r < table.rows.length; r++) {
     const row = table.rows[r]!;
     const itemParts = roles.item.map((i) => row[i]?.text ?? "").filter(Boolean);
     const itemText = itemParts.join(" ").trim();
     if (!itemText) continue;
     const rowContext = `${table.name}: ${row.map((c) => c.text).join(" | ")}`;
-    const commercialNames = [...new Set(body.map(r => r[roles.item[0]!]!.text).filter(n => commercialItem(n) && !/\b(?:area|rent|loyer|surface|superficie|tarif)\b/i.test(n)))];
+    const commercialNames = commercialNamesOf();
     const summaryCells = row.filter(c => c.text || c.number !== undefined);
     if (commercialNames.length === 1 && summaryCells.length === 2) {
       const t = rollToken(summaryCells[1]!, result.format);
@@ -1478,8 +1487,9 @@ function fromRentRoll(table: Table, headerRow: number, roles: Roles, result: Ext
     add("item_occupancy_pct", roles.occupancy);
   }
   // Suites of one type become one item: the rows are the count, the areas add up, and a rent is read only when every suite has the same one.
-  for (const type of new Set(suiteRows.map((x) => x.type))) {
-    const rows = suiteRows.filter((x) => x.type === type);
+  const suitesByType = new Map<string, typeof suiteRows>();
+  for (const x of suiteRows) { const same = suitesByType.get(x.type); if (same) same.push(x); else suitesByType.set(x.type, [x]); }
+  for (const [type, rows] of suitesByType) {
     const all = rows.flatMap((x) => x.cands);
     const base = { itemKey: type, unitSeen: "units", context: `${table.name}: ${type}`, rule: SUITE_RULE };
     // The count is the rows, or the sum of the count column when the roll has one.
@@ -1664,6 +1674,7 @@ function pairedProseRents(doc: NormalizedDocument, result: ExtractionResult, exc
   if (!rentLines.length) return;
   const clean = (s: string) => s.trim().replace(/^(?:the|les?|la|pour|and|et)\s+/i, "").replace(/\s+(?:units?|homes?|suites?|apartments?|flats?|dwellings?|doors?|logements?|appartements?|unit[eé]s?)\b/gi, "").replace(/[.;:]+$/, "").trim();
   const nameKey = (s: string) => fold(canonicalItem(clean(s))).replace(/\b([\p{L}-]+)s\b/gu,"$1").replace(/\s+/g," ");
+  const isRentLine = new Set(rentLines);
   const mix = new Map<string,string>();
   const remember = (name: string) => { if (!mix.has(nameKey(name))) mix.set(nameKey(name), canonicalItem(clean(name))); };
   result.candidates.filter(c => c.fieldKey === "unit_count" && c.itemKey && c.itemKey !== "All units").forEach(c => remember(c.itemKey!));
@@ -1671,7 +1682,7 @@ function pairedProseRents(doc: NormalizedDocument, result: ExtractionResult, exc
   const words: Record<string, number> = { ...PROSE_WORD_COUNTS, eleven: 11, twelve: 12, onze: 11, douze: 12 };
   const re = new RegExp(String.raw`\b(\d+|${Object.keys(words).join("|")})\s+(?:(x|×)\s+)?([^,;().]+?)(?=\s+(?:and|et)\s+|[,;().]|$)`, "gi");
   for (const [i,l] of doc.lines.entries()) {
-    if (excluded[i] || suiteLines.has(i) || OTHER_RENT_RE.test(fold(l.text)) || rentLines.includes(l) || rangeEnds(l.text, tokenize(l.text,result.format)).size) continue;
+    if (excluded[i] || suiteLines.has(i) || OTHER_RENT_RE.test(fold(l.text)) || isRentLine.has(l) || rangeEnds(l.text, tokenize(l.text,result.format)).size) continue;
     const counts: Candidate[] = [];
     for (const m of l.text.matchAll(re)) {
       const n = /^\d+$/.test(m[1]!) ? Number(m[1]) : words[fold(m[1]!)];
@@ -2481,6 +2492,9 @@ function readTable(table0: Table, result: ExtractionResult, notes: string[] = []
       // The item a block heading named, until a blank row or a total row.
       let block = s.item;
       const valueFirstSection = isValueFirstSection(s.rows, result.format);
+      // Whether any row of this section is a total, asked by every two-cell row, so worked out once.
+      let hasTotal: boolean | undefined;
+      const totalInSection = () => (hasTotal ??= s.rows.some((r) => TOTAL_RE.test(labelOf(r, result.format)?.text ?? "")));
       const otherCategory = (cat: string) => [...catOf.values()].some((c) => fold(c) !== fold(cat));
       s.rows.forEach((row0) => {
         const cat = catOf.get(row0);
@@ -2569,7 +2583,7 @@ function readTable(table0: Table, result: ExtractionResult, notes: string[] = []
             }
           }
           const commercialMapped = commercialLabel(labelCell.text, t, commercialItem(labelCell.text) ?? (block && commercialItem(block) ? block : commercial), cell.text.slice(t.end));
-          const legacyMapped = mapToken(relative ? labelCell.text.replace(BLOCK_RELATIVE_RE, "") : labelCell.text, t, { numberCell: cell.number !== undefined, budget: /\b(?:water and wastewater)\b/.test(fold(labelCell.text)) && /\b(?:budget|costs?|couts?|uses|emplois)\b/.test(fold(table.name)), scope, loanContext, budgetConcept: filledCells(row).length === 2 && !s.rows.some((r) => TOTAL_RE.test(labelOf(r, result.format)?.text ?? "")), ahead: cell.text.slice(0, t.start), after: cell.text.slice(t.end), quote: quoteDocs.has(result) });
+          const legacyMapped = mapToken(relative ? labelCell.text.replace(BLOCK_RELATIVE_RE, "") : labelCell.text, t, { numberCell: cell.number !== undefined, budget: /\b(?:water and wastewater)\b/.test(fold(labelCell.text)) && /\b(?:budget|costs?|couts?|uses|emplois)\b/.test(fold(table.name)), scope, loanContext, budgetConcept: filledCells(row).length === 2 && !totalInSection(), ahead: cell.text.slice(0, t.start), after: cell.text.slice(t.end), quote: quoteDocs.has(result) });
           let mapped = commercialMapped && !(legacyMapped.kind === "field" && commercialMapped.kind === "field" && legacyMapped.fieldKey === commercialMapped.fieldKey) ? commercialMapped : legacyMapped;
           if (mapped.kind !== "field" && t.value !== null && (t.unit === "$" || t.currency) && closesUses(labelCell.text, read)) mapped = mapToken("total project cost", t, { scope: s.scope });
           if (block && mapped.kind === "field" && BLOCK_FIELDS.has(mapped.fieldKey) && !(mapped.itemKey && unitTypesIn(mapped.itemKey).length > 0)) mapped = { ...mapped, itemKey: block };
@@ -3342,8 +3356,11 @@ function dealFigures(doc: NormalizedDocument, result: ExtractionResult) {
 }
 
 /** Every candidate value in one document. Deterministic: no model is consulted. */
-export function extractCandidates(doc0: NormalizedDocument, options?: { role?: "deal source" | "evidence" | "context" }): ExtractionResult {
+export function extractCandidates(whole: NormalizedDocument, options?: { role?: "deal source" | "evidence" | "context" }): ExtractionResult {
+  const { doc: doc0, cut } = boundedForRules(whole);
   const result: ExtractionResult = { format: detectFormat(doc0.fullText), candidates: [], other: [], notes: [...(doc0.notes ?? [])] };
+  const work = { spent: 0, over: false };
+  ruleWork.set(result, work);
   const regions = new Map<string, Partial<Region>>();
   documentRegions.set(result, { regions, tableSource: doc0.kind === "xlsx" || doc0.kind === "csv" ? "sheet" : "table" });
   for (const table of doc0.tables) tableRegions(table, result);
@@ -3393,9 +3410,11 @@ export function extractCandidates(doc0: NormalizedDocument, options?: { role?: "
       if (counts.length > 0 && counts.every((c) => c.fieldKey === "unit_count")) rentHeading = item;
     } else { result.candidates.splice(before[0]!); result.other.splice(before[1]!); }
   }
+  let tableRefs: Set<string> | undefined;
+  const inTable = (ref: string | undefined) => (tableRefs ??= new Set(text.tables.flatMap((t) => t.table.rows.flatMap((r) => r.map((c) => c.ref))))).has(ref as string);
   doc.lines.forEach((l, i) => {
     if (!excluded[i] && !text.used.has(i)) {
-      const row = l.text.includes("|") || text.tables.some((t) => t.table.rows.some((r) => r.some((c) => c.ref === doc.lines[i - 1]?.location))) ? null : flatRollRow(l.text, l.location);
+      const row = l.text.includes("|") || inTable(doc.lines[i - 1]?.location) ? null : flatRollRow(l.text, l.location);
       if (row && (wholeUnitType(row[0]!.text) || /^(row homes?|townhouses?|duplex)$/i.test(row[0]!.text)) && !NON_ROLL_RE.test(fold(row[0]!.text))) {
         fromRentRoll({ name: `Table at ${l.location}`, rows: [row] }, -1, { item: [0], units: 1, rent: 2, rentBasis: "monthly", psfHeader: false, areaM2: false, rentPerM2: false, areaTotal: false }, result);
         text.used.add(i);
@@ -3495,6 +3514,7 @@ export function extractCandidates(doc0: NormalizedDocument, options?: { role?: "
     seen.add(k);
     return true;
   });
+  if (cut || work.over) result.notes.push(RULE_LIMIT_NOTE);
   return result;
 }
 

@@ -134,6 +134,9 @@ export type Review = {
   notFound: Review["missing"];
   choices: Review["missing"];
   other: { documentId: string; document_name: string; raw: string; value: number | null; location: string; context: string; note: string | null; figureId: string | null; label: { fieldKey: string; itemKey: string | null; by: string; at: string } | null; suggestions: string[] }[];
+  /** How many figures there are before Review's limit, counted the way the list counts them, and how many of those could be labelled. */
+  otherTotal: number;
+  unusedTotal: number;
   /** Card F1: readings for a field this deal's mode does not use; never offered for approval. */
   selling?: boolean;
   notNeeded?: { fieldKey: string; itemKey: string | null; label: string; value: number | null; why: string; sources: { document_name: string; location: string }[] }[];

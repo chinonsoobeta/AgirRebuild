@@ -431,7 +431,7 @@ export function Review({ dealId }: { dealId: string }) {
     return !!d && d.extractable === false && !d.itemized && d.required === false && !!d.absentMeans;
   });
   const focused = pending.find((a) => a.id === focus) ?? pending[0];
-  const unused = r.other.filter((o) => o.figureId && o.value !== null && !o.label).length;
+  const unused = r.unusedTotal;
   const itemNames = [...new Set(r.assumptions.map((a) => a.itemKey).filter((i): i is string => !!i))];
   const plainPending = pending.filter(a => r.todo.items.some(item => item.kind === "needs_review" && item.assumptionId === a.id));
   const docsBusy = deal.data.documents.processing > 0;
@@ -904,7 +904,9 @@ export function Review({ dealId }: { dealId: string }) {
   );
   const otherGroups = groupOther(r.other);
   const notNeeded = r.notNeeded ?? [];
-  const otherCount = otherGroups.reduce((n, g) => n + g.length, 0) + notNeeded.length;
+  const otherShown = otherGroups.reduce((n, g) => n + g.length, 0);
+  const otherCut = r.otherTotal > otherShown;
+  const otherCount = r.otherTotal + notNeeded.length;
 
   return (
     <>
@@ -1154,12 +1156,13 @@ export function Review({ dealId }: { dealId: string }) {
           </div>}
           <details id="unused-figures" className="card rv-unused" open={otherOpen} onToggle={(e) => setOtherOpen(e.currentTarget.open)}>
             <summary className="card-pad row between">
-              <span className="muted">{t("review.otherIntro", { n: otherCount })}</span>
+              <span className="muted">{t("review.otherIntro", { n: otherCount, cut: otherCut })}</span>
               <span className="rv-link">{t("review.unusedLink")}</span>
             </summary>
             <div className="card-pad stack tight rv-unused-body">
               <h2 className="h3">{t("review.other")}</h2>
-              <p className="small muted">{t("review.otherBody")}</p>
+              <p className="small muted">{t("review.otherBody", { cut: otherCut })}</p>
+              {otherCut && <p className="small muted">{t("review.otherCut", { n: r.otherTotal, shown: otherShown })}</p>}
               {!!r.aiReading?.notUsed.length && <section className="stack tight">
                 <h3 className="h3">{t("review.aiUnused")}</h3>
                 {r.aiReading.notUsed.map((item, i) => {
@@ -1181,7 +1184,8 @@ export function Review({ dealId }: { dealId: string }) {
                 </div>)}
               </section>}
               <ErrorText error={label.error ?? unlabel.error} />
-              <div className="scroll">
+              {/* A long list waits until the person opens it, so typing elsewhere on this page never redraws it. */}
+              {(otherOpen || otherGroups.length <= 100) && <div className="scroll">
                 <table className="table">
                   <thead><tr><th>{t("review.col.doc")}</th><th>{t("review.col.text")}</th><th>{t("review.col.whyNot")}</th></tr></thead>
                   <tbody>
@@ -1213,7 +1217,7 @@ export function Review({ dealId }: { dealId: string }) {
                     ))}
                   </tbody>
                 </table>
-              </div>
+              </div>}
             </div>
           </details>
         </div>
