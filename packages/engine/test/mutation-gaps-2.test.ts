@@ -546,7 +546,8 @@ describe("readiness: who is named, and who is not", () => {
     expect(keys(item.missing)).toEqual(["land_cost"]);
     const pendingItem = R([...without(rental(), "land_cost"), row("unit_count", 1, "B", "needs_review")]);
     expect(keys(pendingItem.missing)).toEqual(["land_cost"]);
-    const wrong = R([...without(rental(), "land_cost"), row("land_cost", null), row("hard_cost", -1)]);
+    const wrong = R([...without(rental(), "land_cost", "hard_cost"), row("land_cost", null), row("hard_cost", -1)]);
+    expect(keys(wrong.impossible)).toEqual(["hard_cost"]);
     expect(keys(wrong.missing)).toEqual(["land_cost"]);
   });
   test("occupancy stands in only with items, and a rejected item does not count against it", () => {
@@ -590,6 +591,32 @@ describe("readiness: who is named, and who is not", () => {
     expect(none).toEqual(expect.arrayContaining(["refinance_amount", "refinance_ltv_pct"]));
     expect(shown(heldRows(row("refinance_amount", 100)))).not.toContain("refinance_ltv_pct");
     expect(shown(heldRows(row("refinance_ltv_pct", 50)))).not.toContain("refinance_amount");
+  });
+  test("two items' values from the other mode are each named, valid or not", () => {
+    const r = R([...rental(), row("unit_sale_price", 5, "A"), row("unit_sale_price", 7, "B")]);
+    expect(r.impossible.map((x) => x.itemKey)).toEqual(["A", "B"]);
+  });
+  test("a blocked rent line holds its item, but a line that is not about rent does not", () => {
+    const held = R([...rental(), row("unit_count", 2, "C", "needs_review")]);
+    expect(held.pending.map((x) => [x.fieldKey, x.itemKey])).toEqual([["unit_count", "C"]]);
+    expect(held.missing).toEqual([]);
+    const other = R([...rental(), row("unit_count", 2, "C"), row("unit_sale_price", 5, "C")]);
+    expect(other.impossible.map((x) => [x.fieldKey, x.itemKey])).toEqual([["unit_sale_price", "C"]]);
+    expect(other.missing).toEqual([{ fieldKey: "unit_rent_monthly", itemKey: "C", label: "Rent (C)" }]);
+  });
+  test("an insurance term under dispute is a conflict, not also missing", () => {
+    const insured = [...without(heldRows(row("refinance_amount", 100), row("refinance_insurance_premium_pct", 4)), "unit_count"), row("unit_count", 7, "A"), row("refinance_term_years", 5), row("refinance_term_years", 10)];
+    const r = R(insured);
+    expect(keys(r.conflicting)).toEqual(["refinance_term_years"]);
+    expect(r.missing).toEqual([]);
+  });
+  test("select points are offered only when there is a premium", () => {
+    const shown = (rows: AssumptionRow[]) => { const r = R(rows); return [...r.notFound, ...r.choices].map((x) => x.fieldKey); };
+    expect(shown(heldRows(row("refinance_amount", 100), row("refinance_insurance_premium_pct", 4)))).toContain("refinance_mli_select_points");
+    expect(shown(heldRows(row("refinance_amount", 100)))).not.toContain("refinance_mli_select_points");
+  });
+  test("a rental's stated total cost keeps its number", () => {
+    expect(assemble([...rental(), row("stated_total_cost", 5)]).input!.stated.totalCost).toBe(5);
   });
   test("a sale's stated total cost keeps its number", () => {
     expect(assemble([...sale(), row("stated_total_cost", 5)]).input!.stated.totalCost).toBe(5);
