@@ -385,4 +385,18 @@ describe("Card 189: why a file was set aside", () => {
     state.overview = { review: { needsReview: 0, conflicting: 0 }, documents: { total: 1, processing: 0, failed: 0 } };
     expect(render()).not.toContain("Review 0");
   });
+
+  it("does not claim a set-aside file holds no values", () => {
+    state.docs = [context({ candidate_count: 0, used_count: 0 })];
+    expect(render()).not.toContain("No underwriting values");
+    expect(render()).toContain("Not read for values");
+    state.lang = "fr";
+    expect(render()).toContain("Non lu pour les valeurs");
+    state.lang = "en";
+    state.docs = [row("extracted", { read_role: "market report (context)", role_set: "context", candidate_count: 0, used_count: 0 })];
+    expect(render()).toContain("Not read for values");
+    state.docs = [row("extracted", { read_role: "term sheet (deal source)", candidate_count: 0, used_count: 0 })];
+    expect(render()).toContain("No underwriting values");
+    expect(render()).not.toContain("Not read for values");
+  });
 });
