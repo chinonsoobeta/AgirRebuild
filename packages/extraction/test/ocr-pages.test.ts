@@ -144,6 +144,37 @@ describe("a figure goes back beside the line at its height", () => {
       line("Land", 100, 300, 200, 340), line("1,250,000", 1300, 324, 1500, 364),
     ])).toEqual(["A long sentence that gives the page its tilt", "Land", "1,250,000"]);
   });
+  // Tesseract's own view of a page turned 90 degrees: lines run down the picture and the next line stands to the left.
+  const down = (text: string, x0: number, y0: number, x1: number, y1: number, confidence = 90, baseline?: Box) =>
+    line(text, x0, y0, x1, y1, confidence, baseline ?? { x0, y0, x1: x0, y1 });
+  test("a page read sideways joins along its own lines, in the names' order", async () => {
+    expect(await texts([
+      down("Land", 2722, 233, 2752, 316), down("Hard costs", 2636, 233, 2666, 420),
+      down("1,250,000", 2717, 1533, 2750, 1706), down("8,430,000", 2631, 1532, 2664, 1706),
+    ])).toEqual(["Land 1,250,000", "Hard costs 8,430,000"]);
+  });
+  test("on a page read sideways, a figure on another line stays apart", async () => {
+    expect(await texts([down("Land", 2722, 233, 2752, 316), down("1,250,000", 2631, 1532, 2664, 1706)])).toEqual(["Land", "1,250,000"]);
+  });
+  test("on a page read sideways, a figure earlier along the line does not join", async () => {
+    expect(await texts([down("Land", 2722, 1533, 2752, 1706), down("1,250,000", 2717, 233, 2750, 406)])).toEqual(["Land", "1,250,000"]);
+  });
+  test("on a page read sideways, heights follow the page's own tilt", async () => {
+    const slope = (x0: number, y0: number, y1: number) => ({ x0, y0, x1: x0 + (y1 - y0) / 50, y1 });
+    const figure = down("1,250,000", 2726, 1500, 2756, 1700, 90, slope(2726, 1500, 1700));
+    const name = "Land and improvements at the rear";
+    expect(await texts([down(name, 2700, 200, 2730, 500, 90, slope(2700, 200, 500)), figure])).toEqual([`${name} 1,250,000`]);
+    expect(await texts([down(name, 2700, 200, 2730, 500), down("1,250,000", 2726, 1500, 2756, 1700)])).toEqual([name, "1,250,000"]);
+  });
+  test("a line running across a page read sideways takes no figure", async () => {
+    const lines = [down("Land and improvements", 2722, 233, 2752, 1000), line("Stamp", 100, 1700, 300, 1740), down("1,250,000", 2717, 1800, 2750, 2000)];
+    expect(await texts(lines)).toEqual(["Land and improvements 1,250,000", "Stamp"]);
+    expect(await texts([line("Stamp", 2600, 233, 2800, 263), down("Land and improvements", 2000, 233, 2030, 1000), down("1,250,000", 2717, 1800, 2750, 2000)])).toEqual(["Stamp", "Land and improvements", "1,250,000"]);
+  });
+  test("a page read sideways is told by most of its characters, not most of its lines", async () => {
+    const stray = ["1", "2", "3"].map((text, i) => line(text, 100 + i * 200, 100, 120 + i * 200, 140));
+    expect(await texts([...stray, line("Land", 100, 300, 200, 340), line("1,250,000", 900, 302, 1100, 342)])).toEqual(["1", "2", "3", "Land 1,250,000"]);
+  });
   test("a page read sideways has tall boxes, and a column of figures does not gather on one", async () => {
     const figures = [300, 500, 700, 900].map((y, i) => line(`${i + 1},000`, 900, y, 1000, y + 40));
     expect(await texts([line("Sideways words read as one tall line", 100, 100, 160, 1400), ...figures])).toEqual(["Sideways words read as one tall line", "1,000", "2,000", "3,000", "4,000"]);

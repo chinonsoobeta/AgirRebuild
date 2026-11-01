@@ -94,6 +94,10 @@ test.each([
   ["a table alone, wide gap", () => bare(ctx => table(ctx, 230, 1530))],
   ["a table alone, narrow gap", () => bare(ctx => table(ctx, 230, 800))],
   ["a table alone, tilted 2 degrees", () => bare(ctx => table(ctx, 230, 1530), 2)],
+  ["a table alone, turned 90", () => turn(bare(ctx => table(ctx, 230, 1530)), 90)],
+  ["a table alone, turned 180", () => turn(bare(ctx => table(ctx, 230, 1530)), 180)],
+  ["a table alone, turned 270", () => turn(bare(ctx => table(ctx, 230, 1530)), 270)],
+  ["a table alone, tilted 2 degrees and turned 90", () => turn(bare(ctx => table(ctx, 230, 1530), 2), 90)],
   ["a table beside prose", () => bare(ctx => {
     prose.forEach((text, i) => ctx.fillText(text, 150, 578 + i * 86));
     ctx.font = `36px ${font}`; table(ctx, 1450, 2050);
