@@ -200,7 +200,7 @@ export function numberFormat(lang: Lang) {
     let t = String(raw ?? "").replace(/[\s  $%]/g, "");
     t = fr ? t.replace(/,/g, ".") : t.replace(/,/g, "");
     const n = Number(t);
-    if (!t || !Number.isFinite(n)) throw new Error(fr ? "Saisissez un nombre." : "Enter a number.");
+    if (!/^[+-]?(\d+(\.\d*)?|\.\d+)$/.test(t) || !Number.isFinite(n)) throw new Error(fr ? "Saisissez un nombre." : "Enter a number.");
     return n;
   };
   return { value, delta, suffix, date, bytes, parse, money: (v: number) => keep(money(v)) };
