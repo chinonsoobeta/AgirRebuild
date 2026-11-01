@@ -130,3 +130,49 @@ describe("Card 196 audit: what a dollar sign and a lone figure do not prove", ()
     expect(verify(figure, false)).toEqual({ outcome: READING_FAILURE.value });
   });
 });
+
+describe("Card 196 audit: a scale the reader saw and the text no longer shows", () => {
+  function read(lines: string[], figure: { value: number; quote: string; note: string | null }, ocr = true) {
+    const tag = ocr ? " (OCR, confidence 90%)" : "";
+    const document: NormalizedDocument = {
+      kind: "pdf", lines: lines.map((text, i) => ({ location: `page 1, line ${i + 1}${tag}`, text })),
+      tables: [], pageCount: 1, needsOcr: false, fullText: lines.join("\n"),
+    };
+    return verifyReading({ field: "hard_cost", item: null, value: figure.value, unit_seen: "$", file: "invented.pdf",
+      location: `page 1, line ${lines.indexOf(figure.quote) + 1}`, quote: figure.quote, note: figure.note, confidence: "high" },
+    [{ id: "invented", name: "invented.pdf", document }]);
+  }
+  const row = "Hard costs 120 4,300 6,500 10,920";
+  const figure = { value: 10920, quote: row, note: "Figure in $000's per the table header." };
+  const settled = "Price 1,025,000.00";
+
+  test.each([
+    ["a smudged heading and an unsettled format", ["Harbour Row budget ($000's) (8000's) ($000's)", row]],
+    ["a smudged heading and a settled format", ["Harbour Row budget (5000's) {$000's}", row, settled]],
+    ["no heading left at all", ["Harbour Row budget", row, settled]],
+  ])("the reader's note refuses the figure under %s", (_, lines) => {
+    expect(read(lines, figure)).toEqual({ outcome: READING_FAILURE.scale });
+  });
+  test("a heading too long to count refuses it on a text layer as well", () => {
+    const heading = "All figures below are stated ($000's) except where a note on this page says otherwise, and the totals may not add";
+    expect(read([heading, row, settled], figure, false)).toEqual({ outcome: READING_FAILURE.scale });
+  });
+  test.each(["Montant en milliers de dollars.", "Stated (in thousands).", "Stated in $M."])("the note %s counts", note => {
+    expect(read(["Harbour Row budget", row, settled], { ...figure, note })).toEqual({ outcome: READING_FAILURE.scale });
+  });
+  test("a heading Agir can read still scales the figure", () => {
+    const result = read(["Harbour Row budget ($000's) ($000's)", row, settled], figure);
+    expect(result.outcome).toBe("verified");
+    expect(result.candidate).toMatchObject({ value: 10920000 });
+  });
+  test.each([
+    ["no note", { ...figure, note: null }],
+    ["a note about rounding", { ...figure, note: "Rounded to the nearest thousand." }],
+    ["a note about another page, on a figure in full dollars", { value: 1920000, quote: "Hard costs 1,920,000", note: "The summary on page 6 is in $000's." }],
+    ["its own scale written beside it", { value: 10900000, quote: "Hard costs $10.9 million", note: "Stated in millions." }],
+  ])("%s stays as it was", (_, reading) => {
+    const result = read(["Harbour Row budget", reading.quote, settled], reading);
+    expect(result.outcome).toBe("verified");
+    expect(result.candidate).toMatchObject({ value: reading.value });
+  });
+});
