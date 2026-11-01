@@ -635,6 +635,10 @@ const FR_REASONS: [RegExp, string | ((m: RegExpMatchArray) => string)][] = [
   [/^A sales pace not stated per month; enter the units sold per month$/, "Un rythme de vente qui n’est pas donné par mois\u00a0; entrez les logements vendus par mois"],
   [/^Interest on buyers' deposits, not the deposit$/, "Des intérêts sur les dépôts des acheteurs, pas le dépôt"],
   [/^A price that names no home type and is not per home; enter the price per home$/, "Un prix qui ne nomme aucun type de logement et n’est pas par logement\u00a0; entrez le prix par logement"],
+  // Card 193: a suite-by-suite rent roll.
+  [/^Suites of this type rent at different amounts; enter the rent to use$/, "Les logements de ce type sont loués à des montants différents\u00a0; entrez le loyer à utiliser"],
+  [/^A suite's line in a rent roll; its other figures are shown, not read$/, "La ligne d’un logement dans un état des loyers\u00a0; ses autres chiffres sont affichés, pas lus"],
+  [/^The roll states (\S+) units but (\S+) suites were counted; check the counts by type$/, m => `L’état des loyers indique ${m[1]} logements, mais ${m[2]} logements ont été comptés\u00a0; vérifiez les nombres par type`],
   [/^Homes of this type are listed at different prices; enter the price to use$/, "Les logements de ce type sont inscrits à des prix différents\u00a0; entrez le prix à utiliser"],
   [/^A total or an unnamed row of the price list; not read$/, "Un total ou une ligne sans nom de la liste de prix\u00a0; non lu"],
   [/^Not a sale price$/, "Pas un prix de vente"],

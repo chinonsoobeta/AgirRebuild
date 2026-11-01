@@ -12,6 +12,12 @@ import { describeEvent } from "../src/routes/audit.tsx";
 import { I18nProvider, build, checkText, dealStatus, translateMessage, verdictText, type Key } from "../src/i18n.tsx";
 
 describe("a run's source labels in French", () => {
+  it("says the notes of a suite-by-suite roll in French (card 193)", () => {
+    expect(translateMessage("Suites of this type rent at different amounts; enter the rent to use")).toBe("Les logements de ce type sont loués à des montants différents\u00a0; entrez le loyer à utiliser");
+    expect(translateMessage("A suite's line in a rent roll; its other figures are shown, not read")).toBe("La ligne d’un logement dans un état des loyers\u00a0; ses autres chiffres sont affichés, pas lus");
+    expect(translateMessage("The roll states 13 units but 3 suites were counted; check the counts by type")).toBe("L’état des loyers indique 13 logements, mais 3 logements ont été comptés\u00a0; vérifiez les nombres par type");
+  });
+
   it("uses the owner's short bilingual published-table labels", () => {
     const source = { tableId: "premium", optionKey: "select", publisher: "CMHC", title: "Title retained in the source snapshot", effective: "2025-07-14", acceptedBy: "Dana Analyst", fields: ["refinance_ltv_pct", "refinance_amort_years", "refinance_mli_select_points"] };
     expect(tableSourceLabel(source)).toBe("Published table: CMHC, effective 2025-07-14 · accepted by Dana Analyst · uses stated: Refinance loan-to-value, Refinance amortization, MLI Select points");

@@ -98,8 +98,11 @@ function buildingTotals(cs: readonly SourcedCandidate[]): Set<SourcedCandidate> 
   const out = new Set<SourcedCandidate>();
   if (counts.length < 2) return out;
   for (const [name, values] of by) {
-    if (typed(name) || commercialItem(name) || values.some(c => ["unit_rent_monthly", "rent_psf_annual", "rentable_area_sf", "area_per_unit"].includes(c.fieldKey ?? ""))) continue;
+    if (typed(name) || commercialItem(name) || values.some(c => ["unit_rent_monthly", "rent_psf_annual"].includes(c.fieldKey ?? ""))) continue;
     const count = values.filter(c => c.fieldKey === "unit_count" && c.value !== null);
+    // A roll's total row may state its area too, so an area keeps a name a type unless the name says it is everything and its count adds up to the mix.
+    const everything = /^(?:all|tous les|toutes les) (?:units|suites|apartments|logements|appartements|unites)$/.test(foldText(name));
+    if (values.some(c => ["rentable_area_sf", "area_per_unit"].includes(c.fieldKey ?? "")) && !(everything && sum !== null && count.length > 0 && count.every(c => c.value === sum))) continue;
     const generic = /^(?:all units|residential(?: units)?|apartments?|town-?homes?|homes?|units?|building|logements?|residentiel)$/i.test(foldText(name));
     const project = /\b(?:project|projet|building|immeuble|street|road|avenue|lane|rue|chemin|residences)\b/.test(foldText(name));
     // A place heading followed by the programme's dwellings describes the building, rather than a layout row.
