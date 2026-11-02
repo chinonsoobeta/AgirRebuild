@@ -124,17 +124,32 @@ async function recognizePage(worker: Awaited<ReturnType<typeof ocrWorker>>, byte
   return first;
 }
 
+const pdfjsFolder = dirname(require.resolve("pdfjs-dist/package.json"));
+
+/**
+ * How a page is drawn for recognition. JBIG2 and JPEG 2000 scans decode only through pdf.js's bundled wasm; without it those pages render blank.
+ * A font the PDF does not embed comes from pdf.js's own files, so a page reads the same on every system. Linux's fallback can be a pixel font whose digits Tesseract misreads.
+ */
+export const pageDrawing = {
+  useSystemFonts: false,
+  standardFontDataUrl: `${join(pdfjsFolder, "standard_fonts")}/`,
+  wasmUrl: `${join(pdfjsFolder, "wasm")}/`,
+};
+let fallbacksNamed = false;
+
 /** Local OCR only. Every resulting value still needs a person's check against the scanned page. */
 export async function ocrPdf(bytes: Uint8Array, pages?: number[]): Promise<{ pages: OcrPage[]; failed: number[] }> {
   const pdfjs = await import("pdfjs-dist/legacy/build/pdf.mjs");
-  // JBIG2 and JPEG 2000 scans decode only through pdf.js's bundled wasm; without it those pages render blank.
-  const task = pdfjs.getDocument({ data: new Uint8Array(bytes), useSystemFonts: true, wasmUrl: `${join(dirname(require.resolve("pdfjs-dist/package.json")), "wasm")}/` });
+  const task = pdfjs.getDocument({ data: new Uint8Array(bytes), ...pageDrawing });
   try {
     const doc = await task.promise;
     if (!pages && doc.numPages > MAX_OCR_PAGES) throw new Error("This scanned PDF has more than 50 pages; Agir reads scans of up to 50 pages. Split it, or enter its values by hand.");
     let canvasModule: typeof import("@napi-rs/canvas");
     try { canvasModule = await import("@napi-rs/canvas"); }
     catch { throw new Error("OCR is not available on this machine"); }
+    // pdf.js falls back to these names for a font it has no file for. Only the letters' shapes matter here, so one face serves all three.
+    if (!fallbacksNamed) for (const family of ["sans-serif", "serif", "monospace"]) canvasModule.GlobalFonts.registerFromPath(join(pdfjsFolder, "standard_fonts", "LiberationSans-Regular.ttf"), family);
+    fallbacksNamed = true;
     const worker = await ocrWorker();
     try {
       const result: OcrPage[] = [], failed: number[] = [];
