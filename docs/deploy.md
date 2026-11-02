@@ -30,8 +30,16 @@ checking, reading and extracting documents, reconciling, and rendering memos (th
 image needs it). With no `DATABASE_URL` (embedded PGlite) the API runs the worker in its own process, and
 `AGIR_EMBEDDED_WORKER=1` forces that on Postgres too.
 OCR runs inside the worker.
-In a measured run on a development Mac, a page took 0.59 s at the median and 26 s at the slowest, and memory for
-the OCR child reached about 1.1 GB, so the worker's memory limit should allow for that.
+In measured runs on a development Mac, a page took 0.59 s at the median and 26 s at the slowest, a file of 50 picture
+pages took up to 130 s, and memory for the OCR child reached 1 to 2 GB. Parsing takes about 750 MB of heap for a workbook
+at the cell limit and about 1 GB for a PDF page at the drawing limit. Allow the worker for all of that, and on a machine
+with little memory set `NODE_OPTIONS=--max-old-space-size=` to what it can spare, because Node sizes its heap from the
+machine and the compose file sets no limit.
+
+The worker runs one job at a time. A job holds a 5-minute lease and renews it each minute. A job whose lease runs out on
+its last attempt, usually because the file ended the process, ends as dead: its file is marked as failed and
+`AGIR_ALERT_URL` hears of it, so a crash cannot repeat for ever. A job has no limit on its time. A parse that hangs keeps
+renewing its lease and holds that worker until it restarts.
 
 Both apply migrations at start. In compose the worker starts only after the API answers `/api/health`, so the two
 never migrate at once. Elsewhere, start the API first.

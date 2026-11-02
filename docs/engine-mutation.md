@@ -3,7 +3,7 @@
 Stryker 10.1.1 with the vitest runner, over `packages/engine/src/**/*.ts`: 4,536 mutants. Config: `stryker.config.json` and `packages/engine/vitest.mutation.config.ts`. Mutation testing is not part of the gate. Run it on engine changes, one process at a time, after checking `sysctl vm.swapusage` and `memory_pressure -Q`:
 
 ```
-bash /Users/chinonsoobeta/agir-v2/.worktrees/heavy.sh npm run mutation
+npm run mutation
 ```
 
 The run is incremental: it reuses `reports/mutation/incremental.json` where code and covering tests are unchanged. Delete that file for a clean run, which takes hours. Reports are in `reports/mutation/` and are not committed.

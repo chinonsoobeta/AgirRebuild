@@ -35,6 +35,9 @@ work it describes.
 | `env -u ANTHROPIC_API_KEY NODE_OPTIONS=--max-old-space-size=3072 VITEST_MAX_WORKERS=2 npm run gate -- --tier=release` | Both typechecks, 6682 tests in 72 files, the fallback test (1 passed, 252 skipped), web build, `performance budget` (first visit 547.4 kB of 690, largest chunk 339.9 kB of 500, all JavaScript 939.8 kB of 1200, CSS 37.6 kB of 60) and the accessibility scan (92 scans, 0 violations), in 172 s; PR tier 6682 tests in 72 files | 2026-10-25, `card/I-strings-by-screen` |
 | `env -u ANTHROPIC_API_KEY NODE_OPTIONS=--max-old-space-size=3072 VITEST_MAX_WORKERS=2 bash .worktrees/heavy.sh npm run gate -- --tier=release` | From the `main` checkout after the wave-1 merges: both typechecks, 6983 tests in 83 files, the fallback test (1 passed, 257 skipped), web build, `performance budget` (first visit 563.3 kB of 690, largest chunk 341.4 kB of 500, all JavaScript 1015.3 kB of 1200, CSS 45.1 kB of 60) and the accessibility scan (92 scans, 0 violations); swap 0.74 GB | 2026-10-30, `main` `821619a` |
 | The same gate, from the main checkout | Both typechecks, 6786 tests in 74 files, the fallback test (1 passed, 252 skipped), web build within budget (first visit 558.1 kB of 690, largest chunk 341.4 kB of 500), 92 accessibility scans with 0 violations. A worktree without its own `node_modules` builds the web app without the vendor chunk (one 540 kB file) and fails the chunk budget for no code reason: run this gate from the main checkout. | 2026-10-27, `main` `dbb4e2b` (launch QA fixes and the static-shell fix) |
+| The same gate, from the main checkout | Both typechecks, 8508 tests and 1 expected fail in 113 files, the fallback test (1 passed, 259 skipped), web build within budget (first visit 575.7 kB of 690, all JavaScript 1036.3 kB of 1200, largest chunk 341.4 kB of 500, CSS 45.1 kB of 60), 92 accessibility scans with 0 violations | 2026-11-01, `integration/docs-engine` `1c0a278` |
+| The same gate, inside the production image on Linux, arm64 | The same, with 8507 tests, 1 expected fail and 1 skipped (its word list is not in the image) | 2026-11-01, `integration/docs-engine` `1c0a278` |
+| The production image and compose in a throwaway VM: Postgres 16 at migration `0039`, with deals, runs and memos, then upgraded to `0043` | 151 named checks, 0 failed. Audit chains, old runs and memos unchanged; strangers refused; races answer with no server error; of 13 uploads 11 read, and a HEIC and a 1.5 KB merged-range file refused in words; a job whose lease ran out on its last attempt ended dead and marked its file failed; 45 OCR tests in the image; a live reading of an invented deal; backup, an empty stack and restore with the repo's scripts | 2026-11-01, `integration/docs-engine` `1c0a278` |
 
 The first walk ran on `ui/redesign`, where migrations go to `0029` as on `main`. The second ran on `ui/y-screens`,
 which adds `0031` and `0032`. `0030` is on `ui/w12-email` only. The three touch different objects (`0030` a new table
@@ -495,6 +498,153 @@ vitest must run from the repository root with the root config (`--root apps/web`
 screen's strings and fails three i18n tests for no code reason).
 
 
+## Documents and the engine (2026-10-31 to 2026-11-01)
+
+All of this was built on `integration/docs-engine`. It adds migrations `0041` to `0043`, which need a person's review
+like the others, and Stryker, so run `npm install` after pulling it. No engine source file changed.
+
+| Card | What changed |
+|---|---|
+| 180, 180b | A PDF's picture pages are read by OCR, page by page, up to 50 a file. Both readers get the same text, saved beside the file. A value from OCR is marked to check, and the Documents screen says what was read. |
+| 181 | PNG, JPEG and single-page TIFF upload and are read by OCR (migration `0041`). HEIC, `.xls`, `.doc` and PowerPoint get a refusal that names the next step. Parser notes show on the document row. |
+| 183 | A typed number means what it looks like: "1e9" and "0x10" are refused. After a person changes a value and reopens it, Review names the person. |
+| 184 | A value Agir read stays while its document stays (migration `0042`): a reading replays from earlier successful readings, unless a newer one speaks for that field or a person decided. |
+| 186 | Every file that needs reading reaches the AI reader, whatever happened to the others, and only when it needs to (migration `0043`). A failed wider reading leaves the earlier one alone. |
+| 187 | Review keeps an earlier reading's lists while its documents stay. |
+| 189 | Review and Documents say why a file was set aside, and an editor can read it anyway. |
+| 190 | Each paper gets a name. Soil and site reports are set aside. Only a colon or a dash makes a line a citation. |
+| 192 | One odd label costs one reading, never the whole paid reply. A failed reading of a field Agir does not have is not asked about. |
+| 193 | A rent roll written as plain lines is counted by type, and a suite's number is never a count. |
+| 194 | When two papers disagree, Review says which kind of paper usually settles that figure. |
+| 195 | OCR states the page's resolution, uses automatic layout, retries a badly read page turned, enlarges a small picture, and puts a table's amounts back beside their names. |
+| 196 | A figure recognition smudged is kept for a person to check when its digits match exactly. A figure whose reader says it has a scale the text no longer shows is refused. |
+| 197 | JBIG2 and JPEG 2000 scans render. A page of shifted letters is decoded. A page of junk text also goes to OCR. |
+| 198 | The rules read what a person typed, never a formula's result. See below. |
+| 199 | Review lists at most 1,000 unused figures, with the count. The rule pass has limits. Two workbook costs that grew with the square of the rows are gone. Paid label suggestions stop at 1,000 figures. |
+| 200 | Files that cannot fit are refused before they are opened, in plain words. A job whose worker stopped on its last attempt ends as dead. |
+| 201 | The AI reader gets a known size. Review names what it did not get and offers Read it anyway. |
+| Final check | OCR draws every page with pdf.js's own fonts, on every system. Before this, a font a PDF does not embed came from the system, and on Linux that is a pixel font: an invented page's 1,025,000 read as 1,825,060. |
+| `engine/quality-bars` | Behaviour rules for the engine, tests from surviving mutants, a check against figures stated in public documents, and Stryker outside the gate: [engine-mutation.md](engine-mutation.md). |
+
+Cards 182, 182b and 185 (reference workbooks), 188 (public documents) and 191 (a scan test set) made test material
+outside the repository.
+
+### What the rules read from a workbook
+
+The owner's decision of 2026-11-01: rules do not read a computed cell. A formula's saved result stays on the document
+for the AI reader and is listed under the figures Agir did not use. A row's shape still counts every figure, so one
+formula cannot turn a schedule or a budget into another kind of row.
+
+The owner approved a schedule rule of "more than 12 figures, typed rows only". What is built counts figures of any
+kind, and such a row is not read at all, because real forms carry schedules made of formulas.
+
+Other cells that are not a reading: a column where most typed figures equal their own row number; a value merged across
+cells, which counts once; a zero beside another figure; a zero date; a saved blank; and a saved 0 or FALSE in a workbook
+that recalculates on open. A budget field with any formula line is not added up from its typed lines, since that sum
+would be a part stated as the whole. A printed total reads alone.
+
+### Limits
+
+Each limit counts what the file holds, never the clock, so the same file always reads the same way. All sit above the
+largest real file measured.
+
+| Limit | Value | Largest real | Past it |
+|---|---|---|---|
+| Workbook cells, counting merged cells and padding | 1,000,000 | 407,000 | refused |
+| Workbook start tags | 4,000,000 | 1,145,000 | refused |
+| Workbook merged ranges | 10,000 | 4,051 | refused |
+| Workbook sheets | 1,000 | 31 | refused |
+| Word start tags | 500,000 | 20,300 | refused |
+| Text or CSV pieces | 1,000,000 | 869 | refused |
+| PDF text items | 2,000,000 | 171,303 | refused |
+| PDF drawing commands, one page | 1,000,000 | 373,286 | refused |
+| PDF drawing commands, whole file | 20,000,000 | 1,777,596 | refused |
+| PDF column search | 100,000,000 | 26,800,000 | refused |
+| PDF strike check | 2,000,000,000 | 243,000,000 | refused |
+| Rule pass: line length, figures, characters, work | 10,000; 50,000; 3,000,000; 20,000,000 | 2,285; 43,661; 913,936; 6,304,687 | the rules stop, the document says so, the AI reader still reads it |
+| Review's list of unused figures | 1,000 rows | 21,780 | the rest are counted |
+| AI reader, workbooks and CSVs | 500,000 characters, whole sheets, smallest first | | named on Review with Read it anyway |
+| AI reader, after Read it anyway | 1,500,000 characters | | named on Review |
+
+The figure limit sits only 15% above the largest real document. PDFs and other text are never cut for the AI reader.
+Beside long PDFs, workbooks keep 200,000 characters.
+
+The AI reader's cap is in characters. Measured on workbooks, one character is 0.51 to 0.64 tokens, so 500,000 characters
+is about 300,000 tokens (prose runs near 0.30, so that rate is wrong here). The wider room stays under the model's limit
+of 1,000,000 tokens up to a rate of about 0.66. Past it the API refuses at once with no charge, and the earlier reading
+stands.
+
+A person's role on a file counts as asking, including one set before the first reading. Every later reading of that deal
+then uses the wider room, up to about $3.80 at list price, until the role is taken back.
+
+### A file that stops the worker
+
+Before card 200 a 1.5 KB workbook could end the worker, and the job then ran again each time its 5-minute lease ran out,
+for ever. Now such files are refused, and a job whose lease runs out on its last attempt ends as dead, marks its file as
+failed and tells `AGIR_ALERT_URL`. A person sees the file as in progress for up to about 15 minutes.
+
+The limits catch accidental shapes and simple deliberate ones. A package built to get past them is bounded by the give-up:
+three crashes, then a plain failure. A hung promise is not bounded, because the lease keeps renewing. The general answer
+is parsing in a separate process with its own memory and time limits, which is a design decision for the owner.
+
+The drawing limit counts inside a private pdf.js method (`_renderPageChunk`), because pdf.js offers no public hook, and a
+test pins it, so an upgrade that renames it fails loudly. `parsePdf` never cancels a text stream and never awaits
+`task.destroy()`: cancelling can reject a promise nothing holds, which ends a Node process, and pdf.js's worker then waits
+for ever. Memory stayed flat over 200 refusals. A similar window could exist on the drawing stream. It never appeared in
+90 refusals, and the give-up bounds it.
+
+### Measured on this branch
+
+The rules alone, `main` against this branch, on the blind sets. Right counts include conflicts named:
+
+| Set | Right | Missing | Wrong | False conflicts | Spurious |
+|---|---|---|---|---|---|
+| Development, 105 deals, 1,815 values | 1,755 to 1,743 | 58 to 70 | 0, 0 | 2, 2 | 11 to 10 |
+| Held out (v11, v12), 42 deals, 912 values | 644 to 643 | 261 to 262 | 4, 4 | 3, 3 | 1, 1 |
+
+Every lost value sits in a formula cell, mostly a stated total. The AI reader still gets those cells and they are listed
+for a person. That is the cost of the owner's decision.
+
+Workbooks on `main` and on this branch, rules only:
+
+| Workbook | Readings | Unused rows |
+|---|---|---|
+| tamarack-six | 75 to 20 | 20,766 to 925 |
+| fireweed-fourplex | 38 to 14 | 21,797 to 412 |
+| harbour-lane | 65 to 21 | 34,208 to 449 |
+| alder-court | 70 to 15 | 2,782 to 294 |
+| cinder-yard | 63 to 17 | 2,747 to 293 |
+| tallgrass-terrace | 100 to 21 | 2,791 to 339 |
+| junction-block | 64 to 18 | 4,337 to 344 |
+| Real form 2024-001 | 59 to 33 | 12,670 to 2,622 |
+| Real form 2024-041 | 55 to 33 | 11,694 to 2,537 |
+
+The real forms' "before" is the branch before card 198. Rule time on them fell from about 25 s to about 10 s. Across the
+1,124 blind-set documents and the nine workbooks, cards 200 and 201 changed no reading, and the parsed text of all 1,133
+files is the same as before those cards. These comparisons ran on `ead377b`, the commit before the font fix. They do not go
+through OCR, which is all that fix touches.
+
+Two paid reads at the cap: invented alder-court, 477,250 characters, 306,209 tokens in, 17.9 s, $1.27 at list price, 30
+readings, all verified and all equal to the workbook's known inputs. Real 2024-001, redacted, 494,457 characters, 257,277
+tokens in, batch, $0.53, 12 readings, all verified, no junk, with no rents because that sheet is left out.
+
+Review with 20,000 unused rows: 341 KB of JSON (was 6,723), no long tasks (was 225 ms), 906 page nodes with the table
+closed (was 220,911), 13 MB of heap (was 167).
+
+Mutation results, each by a script that breaks the code and runs its tests, sources restored by hash: card 198, 76 of 76;
+card 199, 59 of 59; card 200, 92 of 95 with three judged equivalent or not worth a 7-second test; card 201, 57 of 58 with
+one equivalent.
+
+The fix to OCR's fonts, on real files: 50 of the 1,078 pages that go to OCR draw differently (36 unique pages). On the Mac,
+20 of those read the same, and 16 differ only on maps, title searches and directory pages. Nothing failed and none holds a
+deal figure. Read alone, those 16 pages gave the rules nothing before and give one junk reading now, a job number beside an
+area label, which waits for a person like any value from OCR. Nine mutants of the fix, 9 killed, one of them after a new test.
+
+The real forms are two Georgia DCA 2024 housing tax credit applications, public record, from
+[the state's page](https://dca.georgia.gov/2024-9-core-applications-submitted). They list names and contact details, so
+they stay outside the repository and were never given to a builder. One redacted capped read of one form went to the AI.
+
+
 ## Model suggestions
 
 A model may suggest a label for a figure the reader could not label; a person confirms it (task 50b).
@@ -574,6 +724,42 @@ A model may suggest a label for a figure the reader could not label; a person co
   the moment between the purge and the delete would lose its file. Jobs already queued for a closed workspace
   (reading a document, rendering a report) still run until it is purged. With `AGIR_RETENTION_DAYS` unset, a closed
   workspace is kept for good.
+- **The rules do not read a formula's result, and some of what that costs is plain.** A constant-only formula such as
+  `=1000000` is not read. A budget field with any formula line has no rule reading unless a typed total exists. A values-only
+  copy of a workbook reads as typed, schedules included. A typed sheet marked "OLD" reads like any other. The AI reader
+  still gets all of these, and a computed figure is listed for a person, but with the dropdown only, no one-click
+  suggestion. A rent roll with a computed annual column is refused as "More than one rent col", as before this work.
+- **Junk rule readings on a long real form.** On the first Georgia form the rules give 33 readings, 15 of them usable and
+  18 junk, such as a `unit_count` of 2020 or 35000. Nine of the junk readings still show as rows to clear on Review. None
+  is approved by itself.
+- **A real form's rents can miss the AI reader.** At the approved cap the Georgia form's revenue sheet (160,000 characters)
+  is
+  left out, because whole sheets go smallest first. Review names it and Read it anyway sends the form (about 711,000 tokens,
+  about $2.85 at list price). The rules still read it. Putting sheets named for rents first is an owner choice for later.
+- **The AI reader's cap counts characters, not tokens.** A file of very short cells could cost more than the figure says.
+  How long the wider reading takes was not measured at its full size: 306,000 tokens took 18 s, the limit is 140 s.
+- **PDFs past the model's limit fail the reading,** as before: a PDF is never cut.
+- **A file past a parse limit is refused whole.** That includes a workbook with a stray value far to the right on many rows,
+  a
+  very long table (50,000 rows of 25 columns) and a heavy drawing set. Text and figures in it are not read. The word for a
+  password-protected Office file has only been tried on an invented file header, not on a real protected file.
+- **No limit on a job's time.** A parse that hangs holds its worker, since the lease keeps renewing; three crashes are the
+  bound only for a file that ends the process. A person's retry of such a file can repeat up to three crashes. Parsing in a
+  separate process is the general answer and an owner decision.
+- **Past the rules' work limit, every later sentence in that file goes unread by the rules.** The document says so.
+- **Review still loads every unused figure of a deal per request,** about 1 s at 20,000 rows. The rows past 1,000 are counted
+  but not shown and cannot be downloaded. The list keeps text order of addresses, so B10 comes before B2.
+- **With the embedded worker, a long rule pass blocks the API.** Polling connections dropped during long passes in test
+  runs; the
+  cause was not proved, and production runs the worker on its own.
+- **Redaction passes a phone number stored as a plain number,** by design: digits with no separators are never taken for a
+  phone.
+- **The API test suite's sign-ups can trip the limit of 20 a minute** if the suite runs much faster than it does here.
+- **A JBIG2 or JPEG 2000 file logs pdf.js warnings when it is first read.** `parsePdf` gives no `wasmUrl`, because it does
+  not need the picture, so "JBig2 failed to initialize" and the like appear in the worker's log. `ocrPdf` does give it, and
+  those scans read correctly on Mac and Linux.
+- **OCR on a table of near-identical rows in a fixed-width font can split each row into its words.** An invented page of 23
+  such rows gave 67 lines on the Mac and 68 on Linux. A natural typed page in the same font reads right on the Mac.
 
 ## Deviations from the plan
 
