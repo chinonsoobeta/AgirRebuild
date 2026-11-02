@@ -125,3 +125,14 @@ test("rules still read land cost from the omitted Ledger", async () => {
   expect(sent(read)).not.toContain("[Ledger!"); expect(await figure(id)).toMatchObject({ value: 1000000 });
   expect((await figure(id)).sources.some((s: any) => s.rule !== "ai" && s.location.includes("Ledger!"))).toBe(true);
 });
+// What the audit added: a file is named only while what the reading said of it still holds.
+test.each([
+  ["no longer reads", `update documents set stage='read_failed' where id=$1`],
+  ["now holds other bytes", `update documents set sha256=repeat('0',64) where id=$1`],
+  ["now reads as background", `update documents set read_role='site report (context)' where id=$1`],
+])("a file that %s is not named", async (_what, sql) => {
+  const { id, document } = await setup();
+  expect((await review(id)).aiReading.sheetsLeftOut).toEqual(omitted(document));
+  await db.query(sql, [document]);
+  expect((await review(id)).aiReading.sheetsLeftOut).toEqual([]);
+});

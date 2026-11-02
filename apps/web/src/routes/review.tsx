@@ -1158,6 +1158,7 @@ export function Review({ dealId }: { dealId: string }) {
             {editable && <div><button className="btn quiet sm" type="button" disabled={readAgain.isPending} onClick={() => readAgain.mutate()}>{t("review.readAgain")}</button></div>}
             <ErrorText error={readAgain.error} />
           </div>}
+          {readAnyway.isSuccess && (docsBusy || updating) && <p className="small muted" role="status">{t("review.readingNow")}</p>}
           {!!r.aiReading?.sheetsLeftOut.length && <div className="stack tight">
             {r.aiReading.sheetsLeftOut.map(d => <div key={d.id} className="stack tight">
               <p className="small muted">{d.sheets.length ? t("review.sheetsLeftOut", { name: d.name, sheets: d.sheets.slice(0, 5).join(", "), more: d.sheets.length - 5 }) : t("review.fileLeftOut", { name: d.name })}</p>

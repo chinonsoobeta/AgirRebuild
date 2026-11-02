@@ -33,6 +33,10 @@ test.each([
 ] as { sheets: [string, number][]; left: string[] }[])("ordinary whole sheet boundary $sheets", ({ sheets, left }) => {
   expect(readingTexts([workbook(sheets)])[0]!.sheetsLeftOut).toEqual(left);
 });
+test("a Word file's tables go whole: only a workbook's or a CSV's are sheets", () => {
+  const word: ReadingInput = { name: "w.docx", asked: false, document: { ...pdf(10).document, kind: "docx", tables: [table("Table 1", 600000)] } };
+  expect(readingTexts([word])).toEqual([{ text: textOf(word), sheetsLeftOut: [] }]);
+});
 test("PDF stays whole and leaves the minimum sheet room", () => {
   const p = pdf(450000), result = readingTexts([p, workbook([["A", 100000], ["B", 300000]])]);
   expect(result[0]).toEqual({ text: textOf(p), sheetsLeftOut: [] });
