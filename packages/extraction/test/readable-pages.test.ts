@@ -1,7 +1,10 @@
 import { expect, test } from "vitest";
-import { readFile } from "node:fs/promises";
+import { GlobalFonts } from "@napi-rs/canvas";
+import { readFile, stat } from "node:fs/promises";
+import { join } from "node:path";
 import { PDFDocument, PDFDict, PDFName, StandardFonts, type PDFFont } from "pdf-lib";
 import { parseDocument, ocrPdf, mergeOcr, verifyReading, extractCandidates } from "../src/index.ts";
+import { pageDrawing } from "../src/ocr.ts";
 
 type Map = (byte: number) => number;
 const hex = (c: number, n = 2) => c.toString(16).padStart(n, "0").toUpperCase();
@@ -107,6 +110,35 @@ test("recognizes an undecodable page and merges beside the original 23 lines", a
   expect(merged.lines).toHaveLength(46);
   expect(merged.lines.slice(0, 23)).toEqual(doc.lines);
   expect(merged.lines.slice(23)).toContainEqual(expect.objectContaining({ text: budget[0] }));
+}, 60_000);
+// A page must read the same on the machine that serves it. Linux's fallback can be a pixel font: this page's 1,025,000 read as 1,825,060 there.
+test("a font the PDF does not embed is drawn from pdf.js's own files", async () => {
+  expect(pageDrawing.useSystemFonts).toBe(false);
+  await expect(stat(join(pageDrawing.standardFontDataUrl, "LiberationSans-Regular.ttf"))).resolves.toBeTruthy();
+  await expect(stat(join(pageDrawing.wasmUrl, "jbig2.wasm"))).resolves.toBeTruthy();
+  const bytes = await pdf([[{ text: "Land cost 1,025,000" }]]);
+  await ocrPdf(bytes, [1]);
+  const families = () => JSON.stringify(GlobalFonts.families.filter(f => ["sans-serif", "serif", "monospace"].includes(f.family)));
+  const named = families();
+  for (const family of ["sans-serif", "serif", "monospace"]) expect(named).toContain(`"${family}"`);
+  await ocrPdf(bytes, [1]);
+  expect(families()).toBe(named);
+}, 60_000);
+test.each([
+  ["a standard font", StandardFonts.TimesRoman, null],
+  ["a common name for one", StandardFonts.Helvetica, "Arial"],
+  ["a sans-serif font it has no file for", StandardFonts.Helvetica, "FooSans"],
+  ["a bold font it has no file for", StandardFonts.HelveticaBold, "FooSans-Bold"],
+  ["a serif font it has no file for", StandardFonts.TimesRoman, "Garamond"],
+] as const)("reads a page in %s that the PDF does not embed", async (_name, standard, base) => {
+  const doc = await PDFDocument.create();
+  const font = await doc.embedFont(standard);
+  const page = doc.addPage([612, 792]);
+  budget.forEach((text, i) => page.drawText(text, { x: 50, y: 740 - i * 22, size: 13, font }));
+  await font.embed();
+  if (base) doc.context.lookup(font.ref, PDFDict).set(PDFName.of("BaseFont"), PDFName.of(base));
+  const { pages } = await ocrPdf(new Uint8Array(await doc.save()), [1]);
+  expect(pages[0]!.lines.map(l => l.text)).toEqual(budget);
 }, 60_000);
 test.each(["jbig2", "jpx"])("reads invented %s scan through recognition and verification", async format => {
   const bytes = new Uint8Array(await readFile(new URL(`./fixtures/scan-${format}.pdf`, import.meta.url)));
