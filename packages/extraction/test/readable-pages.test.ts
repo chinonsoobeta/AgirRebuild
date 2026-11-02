@@ -1,4 +1,4 @@
-import { expect, test } from "vitest";
+import { expect, test, vi } from "vitest";
 import { GlobalFonts } from "@napi-rs/canvas";
 import { readFile, stat } from "node:fs/promises";
 import { join } from "node:path";
@@ -118,11 +118,13 @@ test("a font the PDF does not embed is drawn from pdf.js's own files", async () 
   await expect(stat(join(pageDrawing.wasmUrl, "jbig2.wasm"))).resolves.toBeTruthy();
   const bytes = await pdf([[{ text: "Land cost 1,025,000" }]]);
   await ocrPdf(bytes, [1]);
-  const families = () => JSON.stringify(GlobalFonts.families.filter(f => ["sans-serif", "serif", "monospace"].includes(f.family)));
-  const named = families();
-  for (const family of ["sans-serif", "serif", "monospace"]) expect(named).toContain(`"${family}"`);
+  const named = GlobalFonts.families.map(f => f.family);
+  for (const family of ["sans-serif", "serif", "monospace"]) expect(named).toContain(family);
+  // A worker lives long and each naming holds a font's file in memory, so they are named once.
+  const again = vi.spyOn(GlobalFonts, "registerFromPath");
   await ocrPdf(bytes, [1]);
-  expect(families()).toBe(named);
+  expect(again).not.toHaveBeenCalled();
+  again.mockRestore();
 }, 60_000);
 test.each([
   ["a standard font", StandardFonts.TimesRoman, null],
