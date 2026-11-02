@@ -260,3 +260,93 @@ test("an outage with several damaged files costs one reading's attempts, and Rea
   const again = reader(); await call("POST", `/api/deals/${id}/read-again`); await drain({ db, store, read: again });
   expect(again).toHaveBeenCalledTimes(1); expect(await figure(id)).toMatchObject({ value: 5.5 });
 });
+
+const stopped = (document: string, attempts: string) => db.query(`update jobs set status='running', attempts=${attempts}, lease_until=now() - interval '1 minute' where kind='verify_document' and payload->>'document_id'=$1`, [document]);
+const jobOf = async (document: string) => (await db.query<any>(`select status,attempts,last_error,lease_until from jobs where kind='verify_document' and payload->>'document_id'=$1`, [document]))[0];
+
+test("a file that stopped the worker on every attempt is given up on", async () => {
+  const id = await deal(), read = reader(), log = vi.fn();
+  const document = await upload(id, "notes.txt", quote);
+  await stopped(document, "max_attempts");
+  await drain({ db, store, read, log });
+  expect(await jobOf(document)).toMatchObject({ status: "dead", attempts: 3, last_error: "The worker stopped while running this job, on every attempt", lease_until: null });
+  const [d] = await db.query<any>(`select stage,stage_detail from documents where id=$1`, [document]);
+  expect(d).toEqual({ stage: "read_failed", stage_detail: "Agir could not process this file after several attempts. Retry it, or upload it again." });
+  expect(log).toHaveBeenCalledWith(expect.objectContaining({ event: "job.dead", kind: "verify_document", error: "The worker stopped while running this job, on every attempt" }));
+  // It never ran again.
+  expect(log).not.toHaveBeenCalledWith(expect.objectContaining({ event: "job.done", kind: "verify_document" }));
+});
+
+test("a file that stopped the worker with attempts left is tried again", async () => {
+  const id = await deal(), read = reader(), log = vi.fn();
+  const document = await upload(id, "notes.txt", quote);
+  await stopped(document, "1");
+  await drain({ db, store, read, log });
+  expect(await jobOf(document)).toMatchObject({ status: "done", attempts: 2 });
+  const [d] = await db.query<any>(`select stage from documents where id=$1`, [document]);
+  expect(d.stage).toBe("extracted");
+  expect(log).not.toHaveBeenCalledWith(expect.objectContaining({ event: "job.dead" }));
+});
+
+test("a job that fails with attempts left says so in the log, then is given up on after its last", async () => {
+  const id = await deal(), log = vi.fn(), read = reader();
+  const { broken } = await deadFile(id);
+  await drain({ db, store: broken, read, log });
+  expect(log).toHaveBeenCalledWith(expect.objectContaining({ event: "job.retry", kind: "extract_document", error: "fake store unavailable" }));
+  expect(log).not.toHaveBeenCalledWith(expect.objectContaining({ event: "job.dead" }));
+  await kill({ db, store: broken, read, log });
+  expect(log).toHaveBeenCalledWith(expect.objectContaining({ event: "job.dead", kind: "extract_document", error: "fake store unavailable" }));
+});
+
+test("a job with a lease still running is left alone", async () => {
+  const id = await deal(), read = reader(), log = vi.fn();
+  const document = await upload(id, "notes.txt", quote);
+  await db.query(`update jobs set status='running', attempts=max_attempts, lease_until=now() + interval '4 minutes' where kind='verify_document' and payload->>'document_id'=$1`, [document]);
+  await drain({ db, store, read, log });
+  expect(await jobOf(document)).toMatchObject({ status: "running", attempts: 3 });
+  expect(log).not.toHaveBeenCalledWith(expect.objectContaining({ event: "job.dead" }));
+  await db.query(`update jobs set status='done', lease_until=null where kind='verify_document' and payload->>'document_id'=$1`, [document]);
+});
+
+test("once a file is given up on, the deal's other file gets its reading", async () => {
+  const id = await deal(), read = reader();
+  const stuck = await upload(id, "stuck.txt", "Held by a worker");
+  await db.query(`update jobs set status='running', attempts=max_attempts, lease_until=now() + interval '4 minutes' where kind='verify_document' and payload->>'document_id'=$1`, [stuck]);
+  await upload(id, "notes.txt", quote);
+  await drain({ db, store, read });
+  // The reading waits while a file is still in progress.
+  expect(read).not.toHaveBeenCalled();
+  await stopped(stuck, "max_attempts");
+  await drain({ db, store, read });
+  expect(read).toHaveBeenCalledTimes(1);
+  expect(JSON.stringify(read.mock.calls[0]![0])).toContain("notes.txt");
+});
+
+test("a reading that stopped the worker on every attempt is given up on, and no file changes", async () => {
+  const { id, document, read } = await setup();
+  const log = vi.fn();
+  await db.query(`insert into jobs(kind,payload,status,attempts,lease_until) values('read_deal',$1,'running',3,now() - interval '1 minute')`, [JSON.stringify({ deal_id: id })]);
+  await drain({ db, store, read, log });
+  expect(log).toHaveBeenCalledWith(expect.objectContaining({ event: "job.dead", kind: "read_deal" }));
+  const [d] = await db.query<any>(`select stage from documents where id=$1`, [document]);
+  expect(d.stage).toBe("extracted");
+});
+
+test("a file too large to read fails in plain words, and the deal's other file is still read", async () => {
+  const JSZip = (await import("jszip")).default;
+  const zip = new JSZip();
+  zip.file("[Content_Types].xml", `<?xml version="1.0"?><Types xmlns="http://schemas.openxmlformats.org/package/2006/content-types"><Default Extension="rels" ContentType="application/vnd.openxmlformats-package.relationships+xml"/><Default Extension="xml" ContentType="application/xml"/><Override PartName="/xl/workbook.xml" ContentType="application/vnd.openxmlformats-officedocument.spreadsheetml.sheet.main+xml"/><Override PartName="/xl/worksheets/sheet1.xml" ContentType="application/vnd.openxmlformats-officedocument.spreadsheetml.worksheet+xml"/></Types>`);
+  zip.file("_rels/.rels", `<?xml version="1.0"?><Relationships xmlns="http://schemas.openxmlformats.org/package/2006/relationships"><Relationship Id="rId1" Type="http://schemas.openxmlformats.org/officeDocument/2006/relationships/officeDocument" Target="xl/workbook.xml"/></Relationships>`);
+  zip.file("xl/_rels/workbook.xml.rels", `<?xml version="1.0"?><Relationships xmlns="http://schemas.openxmlformats.org/package/2006/relationships"><Relationship Id="rId1" Type="http://schemas.openxmlformats.org/officeDocument/2006/relationships/worksheet" Target="worksheets/sheet1.xml"/></Relationships>`);
+  zip.file("xl/workbook.xml", `<?xml version="1.0"?><workbook xmlns="http://schemas.openxmlformats.org/spreadsheetml/2006/main" xmlns:r="http://schemas.openxmlformats.org/officeDocument/2006/relationships"><sheets><sheet name="Budget" sheetId="1" r:id="rId1"/></sheets></workbook>`);
+  zip.file("xl/worksheets/sheet1.xml", `<?xml version="1.0"?><worksheet xmlns="http://schemas.openxmlformats.org/spreadsheetml/2006/main"><sheetData><row r="1"><c r="A1"><v>1</v></c></row></sheetData><mergeCells count="1"><mergeCell ref="A1:XFD1048576"/></mergeCells></worksheet>`);
+  const id = await deal(), read = reader();
+  const large = await upload(id, "model.xlsx", new Uint8Array(await zip.generateAsync({ type: "uint8array" })));
+  const notes = await upload(id, "notes.txt", quote);
+  await drain({ db, store, read });
+  const stages = await db.query<any>(`select id,stage,stage_detail from documents where deal_id=$1`, [id]);
+  expect(stages.find((d: any) => d.id === large)).toMatchObject({ stage: "read_failed", stage_detail: "This file is too large for Agir to read. Save the parts that matter in a file of their own, then upload that." });
+  expect(stages.find((d: any) => d.id === notes)).toMatchObject({ stage: "extracted" });
+  expect(read).toHaveBeenCalledTimes(1);
+  expect((await jobOf(large))?.status).toBe("done");
+});

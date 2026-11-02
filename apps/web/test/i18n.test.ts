@@ -1158,6 +1158,10 @@ it.each([
 
 
 it.each([
+  ["This file is too large for Agir to read. Save the parts that matter in a file of their own, then upload that.", "Ce fichier est trop volumineux pour qu’Agir le lise. Enregistrez les parties utiles dans un fichier à part, puis téléversez celui-ci."],
+  ["Agir could not open this file. It may be damaged. Save it again, then upload it.", "Agir n’a pas pu ouvrir ce fichier. Il est peut-être endommagé. Enregistrez-le de nouveau, puis téléversez-le."],
+  ["This file has a password, or is in an older format. Remove the password or save it as a current Excel or Word file, then upload it.", "Ce fichier a un mot de passe ou est dans un ancien format. Retirez le mot de passe ou enregistrez-le comme fichier Excel ou Word récent, puis téléversez-le."],
+
   [
     "The file does not start like an image",
     "Le fichier ne commence pas comme une image"

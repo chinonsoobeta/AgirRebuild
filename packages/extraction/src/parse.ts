@@ -1,6 +1,6 @@
 import { deflateRawSync, inflateRawSync, crc32 } from "node:zlib";
 import { codeOf } from "@agir/numbers";
-import type { PDFPageProxy } from "pdfjs-dist/legacy/build/pdf.mjs";
+import type { PDFDocumentProxy, PDFPageProxy } from "pdfjs-dist/legacy/build/pdf.mjs";
 import { columnName, type Cell, type CellUnit, type Line, type NormalizedDocument, type Table } from "./document.ts";
 import { pictureInfo } from "./image.ts";
 
@@ -67,11 +67,28 @@ export function parseCsv(text: string): string[][] {
   return rows;
 }
 
+/**
+ * A page's drawing list. pdf.js sets no limit on it, and it builds the list on promises alone, so a timer barely gets a turn: 10 ticks of 10 ms in 4.6 seconds.
+ * So this counts each chunk as it arrives, in pdf.js's own private method. A refusal leaves the list short, and `parsePdf` destroys the task, which stops the rest.
+ */
+export function drawingList(page: PDFPageProxy, room: number) {
+  const inner = page as unknown as { _renderPageChunk(chunk: { length: number }, state: { operatorList: { fnArray: unknown[] } }): void };
+  const add = inner._renderPageChunk;
+  return new Promise<Awaited<ReturnType<PDFPageProxy["getOperatorList"]>>>((resolve, reject) => {
+    inner._renderPageChunk = (chunk, state) => {
+      if (state.operatorList.fnArray.length + chunk.length > room) reject(new UnsupportedDocumentError(FILE_TOO_LARGE));
+      else add.call(page, chunk, state);
+    };
+    // The counting method holds this promise and so the finished list. Put pdf.js's own back, or `page.cleanup` frees nothing. After a refusal it stays, so what is still on its way is not kept.
+    page.getOperatorList().then((list) => { inner._renderPageChunk = add; resolve(list); }, reject);
+  });
+}
+
 /** One operator walk counts picture paints and their coverage, and finds thin horizontal rules as [x0, x1, y]. Rotated or skewed strokes are excluded from the rules. */
-async function horizontalRules(pdfjs: typeof import("pdfjs-dist/legacy/build/pdf.mjs"), page: PDFPageProxy): Promise<{ rules: [number, number, number][]; images: number; paths: number; cover: number }> {
+async function horizontalRules(pdfjs: typeof import("pdfjs-dist/legacy/build/pdf.mjs"), page: PDFPageProxy, room: number): Promise<{ rules: [number, number, number][]; images: number; paths: number; cover: number; commands: number }> {
   const { OPS } = pdfjs;
   const paints = new Set<number>([OPS.stroke, OPS.closeStroke, OPS.fill, OPS.eoFill, OPS.fillStroke, OPS.eoFillStroke, OPS.closeFillStroke, OPS.closeEOFillStroke]);
-  const list = await page.getOperatorList();
+  const list = await drawingList(page, room);
   const imageOps = new Set<number>([OPS.paintImageXObject, OPS.paintInlineImageXObject, OPS.paintImageMaskXObject, OPS.paintImageXObjectRepeat, OPS.paintImageMaskXObjectRepeat, OPS.paintInlineImageXObjectGroup, OPS.paintImageMaskXObjectGroup]);
   let images = 0, paths = 0, area = 0;
   const pageArea = Math.abs((page.view[2]! - page.view[0]!) * (page.view[3]! - page.view[1]!));
@@ -98,7 +115,7 @@ async function horizontalRules(pdfjs: typeof import("pdfjs-dist/legacy/build/pdf
       if (y1! - y0! <= 1.5 && x1! - x0! > 0) rules.push([x0!, x1!, (y0! + y1!) / 2]);
     }
   });
-  return { rules, images, paths, cover: Math.min(1, area / pageArea) };
+  return { rules, images, paths, cover: Math.min(1, area / pageArea), commands: list.fnArray.length };
 }
 
 // Struck text is wrapped in these private-use marks while a line or cell is put together; `unmark` takes them out and returns the ranges.
@@ -118,7 +135,7 @@ function pdfWords(parts: PdfPiece[]): string {
 }
 
 /** Only persistent gutters with prose on both sides justify changing row order. */
-function pdfReadingOrder(rows: PdfPiece[][]): PdfPiece[][] {
+export function pdfReadingOrder(rows: PdfPiece[][], spent: { columns: number }): PdfPiece[][] {
   const wide = (a: PdfPiece, b: PdfPiece) => b.x - a.end >= Math.max(18, 2 * Math.min(a.size, b.size));
   const cells = (row: PdfPiece[]) => {
     const out: PdfPiece[][] = [];
@@ -143,6 +160,9 @@ function pdfReadingOrder(rows: PdfPiece[][]): PdfPiece[][] {
   });
   const positions = new Set<number>();
   for (const row of rows) row.forEach((p, i) => { if (i && wide(row[i - 1]!, p)) positions.add((row[i - 1]!.end + p.x) / 2); });
+  // Each gap position is tried against every piece of text.
+  spent.columns += positions.size * rows.reduce((n, row) => n + row.length, 0);
+  if (spent.columns > MAX_PDF_COLUMN_WORK) throw new UnsupportedDocumentError(FILE_TOO_LARGE);
   let best: { x: number; from: number; to: number; support: number } | null = null;
   for (const x of positions) {
     let from = 0, support = 0, leftProse = 0, rightProse = 0;
@@ -168,24 +188,59 @@ function pdfReadingOrder(rows: PdfPiece[][]): PdfPiece[][] {
   const run = rows.slice(cut.from, cut.to);
   const left = run.map(row => row.filter(p => p.end <= cut.x)).filter(row => row.length);
   const right = run.map(row => row.filter(p => p.x >= cut.x)).filter(row => row.length);
-  return [...rows.slice(0, cut.from), ...pdfReadingOrder(left), ...pdfReadingOrder(right), ...pdfReadingOrder(rows.slice(cut.to))];
+  return [...rows.slice(0, cut.from), ...pdfReadingOrder(left, spent), ...pdfReadingOrder(right, spent), ...pdfReadingOrder(rows.slice(cut.to), spent)];
+}
+
+/** A page's text, stopping at the limit: compressed, a few KB can hold tens of millions of pieces, each an object in memory. */
+export async function textItems(page: PDFPageProxy, room: number) {
+  const items: Awaited<ReturnType<PDFPageProxy["getTextContent"]>>["items"] = [];
+  const reader = page.streamTextContent().getReader();
+  for (;;) {
+    const { done, value } = await reader.read();
+    if (done) return items;
+    items.push(...value.items);
+    // Never cancelled: as a page's last chunk goes out, pdf.js's cancel rejects a promise nothing holds, and that ends a Node process. `parsePdf` lets the stream go.
+    if (items.length > room) throw new UnsupportedDocumentError(FILE_TOO_LARGE);
+  }
+}
+
+/** The row a text item joins: the first started within 2 points of its baseline, else its own. `started` holds each row's place in the order they began. */
+export function pdfRowKey(started: Map<number, number>, y: number): number {
+  let key = y, first = Infinity;
+  for (const d of [-2, -1, 0, 1, 2]) {
+    const k = y + d, at = started.get(k);
+    if (at !== undefined && at < first && Math.abs(k - y) <= 2) {
+      first = at;
+      key = k;
+    }
+  }
+  if (!started.has(key)) started.set(key, started.size);
+  return key;
 }
 
 async function parsePdf(bytes: Uint8Array): Promise<NormalizedDocument> {
   const pdfjs = await import("pdfjs-dist/legacy/build/pdf.mjs");
   const task = pdfjs.getDocument({ data: new Uint8Array(bytes), useSystemFonts: true });
-  const doc = await task.promise;
-  const tooLong = pdfPageError(doc.numPages);
-  if (tooLong) {
-    await task.destroy();
-    throw tooLong;
+  try {
+    return await readPdf(pdfjs, await task.promise);
+  } finally {
+    // After this turn, when no stream is in that last moment, and not awaited: pdf.js's worker waits for ever on a text stream let go, so this may never end. What it holds is then collected.
+    setImmediate(() => void task.destroy().catch(() => {}));
   }
+}
+
+async function readPdf(pdfjs: typeof import("pdfjs-dist/legacy/build/pdf.mjs"), doc: PDFDocumentProxy): Promise<NormalizedDocument> {
+  const tooLong = pdfPageError(doc.numPages);
+  if (tooLong) throw tooLong;
   const lines: Line[] = [];
   let chars = 0;
   const ocrPages: number[] = [];
+  let items = 0, strikeWork = 0, commands = 0;
+  const spent = { columns: 0 };
   for (let p = 1; p <= doc.numPages; p++) {
     const page = await doc.getPage(p);
-    const content = await page.getTextContent();
+    const content = { items: await textItems(page, MAX_PDF_ITEMS - items) };
+    items += content.items.length;
     const text = content.items.flatMap(item => "str" in item ? [item.str] : []).join("").replace(/\s/g, "");
     // A symbol font can store its text 0xF000 above the bytes it means. A page mostly of such characters is that text; elsewhere they are bullets and stay.
     const shifted = (text.match(/[\uf000-\uf0ff]/g) ?? []).length;
@@ -199,11 +254,15 @@ async function parsePdf(bytes: Uint8Array): Promise<NormalizedDocument> {
     const pageChars = content.items.reduce((n, item) => n + ("str" in item ? item.str.replace(/\s/g, "").length : 0), 0);
     // Text a font maps to control characters or U+FFFD can't be read, though the page looks fine. Five such characters and one in ten sends it to recognition.
     const undecodable = content.items.reduce((n, item) => n + ("str" in item ? (item.str.replace(/\s/g, "").match(/[\ufffd\u0000-\u001f\u007f-\u009f]/g) ?? []).length : 0), 0);
-    const drawing = page.rotate === 0 || pageChars < 200 ? await horizontalRules(pdfjs, page) : { rules: [], images: 0, paths: 0, cover: 0 };
+    const drawing = page.rotate === 0 || pageChars < 200 ? await horizontalRules(pdfjs, page, Math.min(MAX_PDF_PAGE_COMMANDS, MAX_PDF_COMMANDS - commands)) : { rules: [], images: 0, paths: 0, cover: 0, commands: 0 };
+    commands += drawing.commands;
     const rules = page.rotate === 0 ? drawing.rules : [];
+    strikeWork += rules.length * content.items.length;
+    if (strikeWork > MAX_PDF_STRIKE_WORK) throw new UnsupportedDocumentError(FILE_TOO_LARGE);
     if (pageChars < 16 && (drawing.images > 0 || drawing.paths > 50) || pageChars < 200 && drawing.cover >= 0.5 || undecodable >= 5 && undecodable * 10 >= pageChars) ocrPages.push(p);
     // Group text items into lines by their baseline.
     const rows = new Map<number, PdfPiece[]>();
+    const started = new Map<number, number>();
     for (const item of content.items as { str?: string; transform?: number[]; width?: number; height?: number }[]) {
       if (!item.str?.trim() || !item.transform) continue;
       const [a, b, , d, x, base] = item.transform as [number, number, number, number, number, number];
@@ -213,12 +272,12 @@ async function parsePdf(bytes: Uint8Array): Promise<NormalizedDocument> {
       const covered = (r: [number, number, number]) => Math.max(0, Math.min(r[1], x + width) - Math.max(r[0], x)) >= 0.9 * width;
       const struck = b === 0 && a > 0 && width > 0 && item.str.trim() !== "" && rules.some((r) => r[2] >= base + 0.2 * size && r[2] <= base + 0.6 * size && covered(r));
       const y = Math.round(base);
-      const key = [...rows.keys()].find((k) => Math.abs(k - y) <= 2) ?? y;
+      const key = pdfRowKey(started, y);
       const list = rows.get(key) ?? [];
       list.push({ x, end: x + width, size, s: struck ? STRIKE_ON + item.str + STRIKE_OFF : item.str });
       rows.set(key, list);
     }
-    const ordered = pdfReadingOrder([...rows.entries()].sort((a, b) => b[0] - a[0]).map(([, parts]) => parts.sort((a, b) => a.x - b.x)));
+    const ordered = pdfReadingOrder([...rows.entries()].sort((a, b) => b[0] - a[0]).map(([, parts]) => parts.sort((a, b) => a.x - b.x)), spent);
     ordered.forEach((parts, i) => {
       const { text, struck } = unmark(pdfWords(parts));
       if (text) {
@@ -226,9 +285,9 @@ async function parsePdf(bytes: Uint8Array): Promise<NormalizedDocument> {
         lines.push({ text, location: `page ${p}, line ${i + 1}`, ...(struck.length > 0 ? { struck } : {}) });
       }
     });
+    page.cleanup();
   }
   const pageCount = doc.numPages;
-  await task.destroy();
   if (chars < 16) ocrPages.splice(0, ocrPages.length, ...Array.from({ length: pageCount }, (_, i) => i + 1));
   return { kind: "pdf", lines, tables: [], pageCount, needsOcr: ocrPages.length > 0, ...(ocrPages.length ? { ocrPages } : {}), fullText: lines.map((l) => l.text).join("\n") };
 }
@@ -246,7 +305,62 @@ function unitOfWord(w: string): CellUnit | null {
 const MAX_PART = 250 * 1024 * 1024;
 const MAX_PACKAGE = 500 * 1024 * 1024;
 export const MAX_PDF_PAGES = 5000;
+/** Pieces of text in a whole PDF. The largest real PDF measured has 171,303. */
+export const MAX_PDF_ITEMS = 2_000_000;
+/** The search for columns tries each gap position against every piece of text, over all pages: 100 million takes about 18 seconds. The largest real PDF measured asks 26.8 million. */
+export const MAX_PDF_COLUMN_WORK = 100_000_000;
+/** The check for struck text tries each piece against every thin line, over all pages: 2 billion takes about 7 seconds. The largest real PDF measured asks 243 million. */
+export const MAX_PDF_STRIKE_WORK = 2_000_000_000;
+/** Drawing commands on one page, then in a whole PDF. A million on a page hold about 1 GB until the page is done, and 20 million take about a minute. The largest real PDF measured has 373,286 on a page and 1,777,596 in all. */
+export const MAX_PDF_PAGE_COMMANDS = 1_000_000;
+export const MAX_PDF_COMMANDS = 20_000_000;
+/**
+ * What a workbook may hold, counting rows, every cell of a merged range, and the empty cells that pad a row. exceljs and this parser keep an object
+ * for each, about 0.75 KB, so this keeps one file to about 750 MB of memory. The largest real workbook measured has 407,000.
+ */
+export const MAX_WORKBOOK_CELLS = 1_000_000;
+/** Text runs, shared strings and comments are smaller objects, so a workbook may hold more of those. The largest real workbook measured has 1,145,000 start tags. */
+export const MAX_WORKBOOK_TAGS = 4_000_000;
+/** mammoth keeps about 1.2 KB for each paragraph. The largest real Word file measured has 20,300 start tags. */
+export const MAX_WORD_TAGS = 500_000;
+/** exceljs compares each merged range with all those before it, so 10,000 take about 3.5 seconds and 20,000 about 15. The largest real workbook measured has 4,051. */
+export const MAX_MERGED_RANGES = 10_000;
+/** exceljs walks every row number up to a sheet's last, so each sheet costs time, however empty. The largest real workbook measured has 31. */
+export const MAX_SHEETS = 1000;
+/** Excel's own last row. A row number past it takes exceljs half a minute or more to walk. */
+const LAST_ROW = 1_048_576;
+/** A line of a text file or a field of a CSV is an object to this parser. The largest real text file measured has 869 lines. */
+export const MAX_TEXT_PIECES = 1_000_000;
+export const FILE_TOO_LARGE = "This file is too large for Agir to read. Save the parts that matter in a file of their own, then upload that.";
+export const FILE_DAMAGED = "Agir could not open this file. It may be damaged. Save it again, then upload it.";
+export const FILE_LOCKED = "This file has a password, or is in an older format. Remove the password or save it as a current Excel or Word file, then upload it.";
+/** A password-protected Excel or Word file is this older container with the package encrypted inside it, not a zip. */
+const OLE_FILE = Buffer.from("d0cf11e0a1b11ae1", "hex");
 const SPREADSHEET_MAIN = "http://schemas.openxmlformats.org/spreadsheetml/2006/main";
+
+/**
+ * Nothing here reads these, and exceljs turns each into one object per cell it names, on load: a validation of a whole sheet, a named range, a width
+ * given to a billion columns. A file of a few KB can run the worker out of memory, and whole-column validations are common in real workbooks.
+ */
+const UNUSED_BLOCKS = ["cols", "dataValidations", "definedNames"];
+function withoutUnusedBlocks(xml: string): string {
+  for (const tag of UNUSED_BLOCKS) {
+    const open = `<${tag}`, close = `</${tag}>`;
+    let at = xml.indexOf(open);
+    if (at < 0) continue;
+    const kept: string[] = [];
+    let from = 0;
+    for (; at >= 0; at = xml.indexOf(open, from)) {
+      const end = xml.indexOf(close, at);
+      if (end < 0) break;
+      kept.push(xml.slice(from, at));
+      from = end + close.length;
+    }
+    kept.push(xml.slice(from));
+    xml = kept.join("");
+  }
+  return xml;
+}
 
 /** Internal absolute targets become relative to the folder holding the described part; an external target is never touched. */
 function relativeTargets(xml: string, name: string): string {
@@ -322,8 +436,10 @@ const partData = (b: Buffer, h: ZipHead) => {
 function assertPackageSize(bytes: Uint8Array): void {
   const b = Buffer.from(bytes.buffer, bytes.byteOffset, bytes.byteLength);
   const dir = centralDirectory(b);
-  let refuse = dir?.refuse ?? false;
-  for (const h of dir?.heads ?? []) {
+  // exceljs and mammoth open a package with bytes in front of it, and this directory reader does not, so every check here would pass it by.
+  if (!dir) throw new UnsupportedDocumentError(b.subarray(0, OLE_FILE.length).equals(OLE_FILE) ? FILE_LOCKED : FILE_DAMAGED);
+  let refuse = dir.refuse;
+  for (const h of dir.heads) {
     if (refuse || h.method !== 8) continue;
     try {
       inflateRawSync(partData(b, h), { maxOutputLength: Math.max(h.size, 1) });
@@ -333,6 +449,54 @@ function assertPackageSize(bytes: Uint8Array): void {
     }
   }
   if (refuse) throw new Error("This file expands to more than 500 MB when opened; Agir does not read it");
+}
+
+const columnNumber = (letters: string) => [...letters].reduce((n, ch) => n * 26 + ch.charCodeAt(0) - 64, 0);
+/** How many cells a <mergeCell> tag fills in. One this cannot read counts as too many, so exceljs never gets to expand it. */
+function mergedCells(tag: string): number {
+  const ref = /\sref\s*=\s*(?:"([^"]*)"|'([^']*)')/.exec(tag);
+  const range = /^\$?([A-Z]{1,3})\$?(\d{1,7})(?::\$?([A-Z]{1,3})\$?(\d{1,7}))?$/.exec(ref?.[1] ?? ref?.[2] ?? "");
+  if (!range) return Infinity;
+  const [, left, top, right = left!, bottom = top!] = range;
+  return (Math.abs(columnNumber(right) - columnNumber(left!)) + 1) * (Math.abs(Number(bottom) - Number(top)) + 1);
+}
+
+/** One part of a package, inflated. Null when it will not inflate: the reader that opens it then gets to say so. */
+function partBytes(b: Buffer, h: ZipHead): Buffer | null {
+  try {
+    return h.method === 8 ? inflateRawSync(partData(b, h), { maxOutputLength: MAX_PART }) : partData(b, h);
+  } catch {
+    return null;
+  }
+}
+
+/** A package whose XML holds too many start tags would not fit in memory once opened. Counted on the bytes, so a huge part never becomes a string. */
+export function assertStartTags(bytes: Uint8Array, limit: number): void {
+  const b = Buffer.from(bytes.buffer, bytes.byteOffset, bytes.byteLength);
+  let tags = 0;
+  for (const h of centralDirectory(b)?.heads ?? []) {
+    if (!/\.(?:xml|rels)$/i.test(h.name)) continue;
+    const xml = partBytes(b, h);
+    for (let at = xml?.indexOf(0x3c) ?? -1; at >= 0; at = xml!.indexOf(0x3c, at + 1)) {
+      const next = xml![at + 1];
+      if (next !== 0x2f && next !== 0x3f && next !== 0x21 && ++tags > limit) throw new UnsupportedDocumentError(FILE_TOO_LARGE); // Not </, <? or <!.
+    }
+  }
+}
+
+/** A workbook that would not fit in memory is refused before exceljs opens it. */
+function assertWorkbookSize(linked: Uint8Array): void {
+  const b = Buffer.from(linked.buffer, linked.byteOffset, linked.byteLength);
+  const sheets = (centralDirectory(b)?.heads ?? []).filter((h) => /xl\/worksheets\/[^/]*\.xml$/.test(h.name));
+  if (sheets.length > MAX_SHEETS) throw new UnsupportedDocumentError(FILE_TOO_LARGE);
+  let cells = 0, merged = 0;
+  for (const h of sheets) {
+    const xml = partBytes(b, h)?.toString("utf8") ?? "";
+    for (const [tag] of xml.matchAll(/<(?:c|row)[\s/>]|<mergeCell\s[^<>]*>/g)) {
+      if (tag[1] === "m") { merged++; cells += mergedCells(tag); } else cells++;
+      if (cells > MAX_WORKBOOK_CELLS || merged > MAX_MERGED_RANGES) throw new UnsupportedDocumentError(FILE_TOO_LARGE);
+    }
+  }
 }
 
 /** A PDF above MAX_PDF_PAGES is refused; null when the count is allowed. */
@@ -386,9 +550,9 @@ export function relativeLinks(bytes: Uint8Array): Uint8Array {
     for (const h of dir.heads) {
       const { name, method, time, date, crc, size } = h;
       let entry = { name, method, time, date, crc, size, data: partData(b, h) };
-      if (name.endsWith(".rels") || (name.startsWith("xl/") && name.endsWith(".xml"))) {
+      if (name.endsWith(".rels") || (name.includes("xl/") && name.endsWith(".xml"))) {
         const xml = (method === 8 ? inflateRawSync(entry.data, { maxOutputLength: MAX_PART }) : entry.data).toString("utf8");
-        const rewritten = name.endsWith(".rels") ? relativeTargets(xml, name) : blankResults(defaultNamespace(xml));
+        const rewritten = name.endsWith(".rels") ? relativeTargets(xml, name) : blankResults(withoutUnusedBlocks(defaultNamespace(xml)));
         if (rewritten !== xml) {
           const raw = Buffer.from(rewritten, "utf8");
           entry = { ...entry, method: 8, crc: crc32(raw), size: raw.length, data: deflateRawSync(raw) };
@@ -448,7 +612,9 @@ async function parseXlsx(bytes: Uint8Array): Promise<NormalizedDocument> {
   const ExcelJS = (await import("exceljs")).default;
   const wb = new ExcelJS.Workbook();
   assertPackageSize(bytes);
+  assertStartTags(bytes, MAX_WORKBOOK_TAGS);
   const linked = relativeLinks(bytes);
+  assertWorkbookSize(linked);
   await wb.xlsx.load(linked.buffer.slice(linked.byteOffset, linked.byteOffset + linked.byteLength) as ArrayBuffer);
   const tables: Table[] = [];
   const texts: string[] = [];
@@ -456,11 +622,15 @@ async function parseXlsx(bytes: Uint8Array): Promise<NormalizedDocument> {
   const uncached: string[] = [];
   const stale = recalculatesOnOpen(bytes);
   const ZERO_DATE = Date.UTC(1899, 11, 30), FIRST_DATE = Date.UTC(1899, 11, 31);
+  let padded = 0;
   wb.eachSheet((ws) => {
+    if ((ws.lastRow?.number ?? 0) > LAST_ROW) throw new UnsupportedDocumentError(FILE_TOO_LARGE);
     const rows: Cell[][] = [];
     ws.eachRow({ includeEmpty: false }, (row, r) => {
       const cells: Cell[] = [];
       const count = Math.max(row.cellCount, row.actualCellCount);
+      padded += count;
+      if (padded > MAX_WORKBOOK_CELLS) throw new UnsupportedDocumentError(FILE_TOO_LARGE);
       for (let c = 1; c <= count; c++) {
         const cell = row.getCell(c);
         const ref = `${ws.name}!${columnName(c - 1)}${r}`;
@@ -551,6 +721,7 @@ function unmark(marked: string): { text: string; struck: [number, number][] } {
 async function parseDocx(bytes: Uint8Array): Promise<NormalizedDocument> {
   const mammoth = (await import("mammoth")).default;
   assertPackageSize(bytes);
+  assertStartTags(bytes, MAX_WORD_TAGS);
   const { value: html } = await mammoth.convertToHtml({ buffer: Buffer.from(bytes) });
   const lines: Line[] = [];
   const tables: Table[] = [];
@@ -626,6 +797,9 @@ export async function parseDocument(bytes: Uint8Array, fileName: string): Promis
   if (kind === "pdf") return parsePdf(bytes);
   if (kind === "xlsx") return parseXlsx(bytes);
   if (kind === "docx") return parseDocx(bytes);
+  // Counted before the text is split: a field of a CSV ends at a comma or a line end, and a line of text at a newline.
+  const pieces = bytes.reduce((n, byte) => (byte === 0x0a || (kind === "csv" && (byte === 0x2c || byte === 0x0d)) ? n + 1 : n), 0);
+  if (kind && pieces > MAX_TEXT_PIECES) throw new UnsupportedDocumentError(FILE_TOO_LARGE);
   const text = new TextDecoder("utf-8", { fatal: false }).decode(bytes);
   if (kind === "csv") {
     const rows = parseCsv(text).map((r, i) => r.map((t, c) => ({ text: t.trim(), ref: `${columnName(c)}${i + 1}` })));
