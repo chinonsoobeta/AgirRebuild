@@ -124,6 +124,8 @@ export type Review = {
   aiReading: null | { unread: string[]; outcome: "ok" | "failed"; model: string; promptVersion: string; createdAt: string;
     notUsed: { value: number; file: string; location: string; quote: string; why: string; figureId: string | null }[];
     pleaseCheck: { field: string; item: string | null; value: number; file: string; location: string; quote: string; reason: string }[];
+    /** What long workbooks kept from the AI reader. No sheets means the whole file. `readAnyway` is the role to ask with, null once a person has asked. */
+    sheetsLeftOut: { id: string; name: string; sheets: string[]; readAnyway: "deal_source" | "evidence" | null }[];
   };
   regions: { documentId: string; documentName: string; source: string; table: string; fields: string[]; ids: string[]; leftOut: { id: string; reason: string }[] }[];
   proposals: import("@agir/contracts").Proposal[];
