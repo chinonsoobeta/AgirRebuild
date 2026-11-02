@@ -9,6 +9,7 @@ import { Notice, Tag } from "../components/kit";
 import { ThresholdList, Thresholds } from "../components/thresholds";
 import * as I from "../components/icons";
 import { useI18n, type Lang } from "../i18n";
+import { DOCUMENT_KINDS } from "../documentKinds";
 import "../strings/documents";
 import "../strings/quickstart";
 import "../strings/review";
@@ -342,6 +343,14 @@ export function Review({ dealId }: { dealId: string }) {
     mutationFn: (group: ReviewData["regions"][number]) => api.post(`/deals/${dealId}/regions/confirm`, { documentId: group.documentId, source: group.source, table: group.table }),
     onSuccess: () => refresh(),
   });
+  const readAgain = useMutation({
+    mutationFn: () => api.post(`/deals/${dealId}/read-again`),
+    onSuccess: () => refresh(),
+  });
+  const readAnyway = useMutation({
+    mutationFn: (d: { id: string; role: string }) => api.post(`/documents/${d.id}/role`, { role: d.role }),
+    onSuccess: () => refresh(),
+  });
   const acceptTable = useMutation({
     mutationFn: (b: {fieldKey:string;tableId:string;optionKey:string}) => api.post(`/deals/${dealId}/proposals/accept`,b),
     onSuccess: () => refresh(),
@@ -426,7 +435,7 @@ export function Review({ dealId }: { dealId: string }) {
     return !!d && d.extractable === false && !d.itemized && d.required === false && !!d.absentMeans;
   });
   const focused = pending.find((a) => a.id === focus) ?? pending[0];
-  const unused = r.other.filter((o) => o.figureId && o.value !== null && !o.label).length;
+  const unused = r.unusedTotal;
   const itemNames = [...new Set(r.assumptions.map((a) => a.itemKey).filter((i): i is string => !!i))];
   const plainPending = pending.filter(a => r.todo.items.some(item => item.kind === "needs_review" && item.assumptionId === a.id));
   const docsBusy = deal.data.documents.processing > 0;
@@ -645,6 +654,7 @@ export function Review({ dealId }: { dealId: string }) {
             </div>
           )}
           {(a.conflictValues ?? []).map((v) => {
+            const usualKind = a.usualSource?.value === v.value ? DOCUMENT_KINDS[a.usualSource.kind]?.[lang] : undefined;
             const conservative = a.conservative && v.value === (a.conservative === "max" ? Math.max(...vals) : Math.min(...vals));
             return (
               <label key={v.value} className={choice === v.value ? "choice on" : "choice"}>
@@ -652,6 +662,7 @@ export function Review({ dealId }: { dealId: string }) {
                 <span className="rv-grow">
                   <span className="t num">{f.value(v.value, a.unit)}{conservative && <span className="muted">{t("review.conservative")}</span>}</span>
                   <span className="d">{v.documents.map((d) => msg(d)).join(", ")}</span>
+                  {usualKind && <span className="d">{t("review.usualSource", { kind: usualKind })}</span>}
                   {distinctSources(a.sources.filter((s) => !foreignIn(s, dealCurrency) && Math.abs(s.value - v.value) < 0.5)).map((s, i) => <Quote key={i} s={s} currency={dealCurrency} fieldKey={a.sourceKind === "document" ? a.fieldKey : undefined} />)}
                 </span>
               </label>
@@ -739,7 +750,7 @@ export function Review({ dealId }: { dealId: string }) {
             {a.material && materialLink}
           </td>
           <td className="r num">{f.value(a.value, a.unit)}</td>
-          <td>{docs.size > 1 ? t("review.agree", { n: docs.size }) : a.sources[0]?.document_name}</td>
+          <td>{a.sourceKind === "analyst" ? t("review.enteredByShort", { who: a.decidedBy ?? "—" }) : docs.size > 1 ? t("review.agree", { n: docs.size }) : a.sources[0]?.document_name}</td>
           <td>
             {editable && !open && (
               <div className="acts">
@@ -759,7 +770,15 @@ export function Review({ dealId }: { dealId: string }) {
       </Fragment>
     );
   };
-  const sourceOf = (a: Assumption) => a.sources.length
+  const sourceOf = (a: Assumption) => a.sourceKind === "analyst"
+    ? <>
+        <p className="small muted">{t("review.enteredByShort", { who: a.decidedBy ?? "—" })}</p>
+        {a.sources.length > 0 && <>
+          <p className="small muted">{t("review.documentSays")}</p>
+          {distinctSources(a.sources).slice(0, 4).map((src, n) => <Quote key={n} s={src} currency={dealCurrency} />)}
+        </>}
+      </>
+    : a.sources.length
     ? distinctSources(a.sources).slice(0, 4).map((src, n) => <Quote key={n} s={src} currency={dealCurrency} fieldKey={a.sourceKind === "document" ? a.fieldKey : undefined} />)
     : <p className="small muted">{a.tableSource ? tableSourceLabel(a.tableSource, lang) : a.sourceKind === "default" ? t("review.namedDefault") : t("review.enteredByShort", { who: a.decidedBy ?? "—" })}</p>;
   const staleNote = stale && (
@@ -820,7 +839,7 @@ export function Review({ dealId }: { dealId: string }) {
   const aiChecks = r.todo.items.map((item, index) => ({ item, index })).filter(({ item }) => item.kind === "ai_check");
   // QA run 2 (breaker N7): an optional line whose stated value was rejected is not "not found"; it is listed with the reason.
   const rejectedOf = (m: { fieldKey: string; itemKey?: string | null }) =>
-    rejected.find((a) => a.fieldKey === m.fieldKey && (a.itemKey ?? null) === (m.itemKey ?? null) && fromDocument(a) && a.value !== null);
+    rejected.find((a) => a.fieldKey === m.fieldKey && (a.itemKey ?? null) === (m.itemKey ?? null) && a.sourceKind === "document" && fromDocument(a) && a.value !== null);
   const rejectedStated = r.notFound.flatMap((m) => { const a = rejectedOf(m); return a ? [{ m, a }] : []; });
   const notFound = r.notFound.filter((m) => !rejectedOf(m));
   const hasMissingSection = r.missing.length > 0 || r.notFound.length > 0 || (r.tableNotices ?? []).length > 0;
@@ -889,7 +908,9 @@ export function Review({ dealId }: { dealId: string }) {
   );
   const otherGroups = groupOther(r.other);
   const notNeeded = r.notNeeded ?? [];
-  const otherCount = otherGroups.reduce((n, g) => n + g.length, 0) + notNeeded.length;
+  const otherShown = otherGroups.reduce((n, g) => n + g.length, 0);
+  const otherCut = r.otherTotal > otherShown;
+  const otherCount = r.otherTotal + notNeeded.length;
 
   return (
     <>
@@ -907,6 +928,11 @@ export function Review({ dealId }: { dealId: string }) {
           )}
           {docsBusy && <Banner tone="neutral" title={t("review.stillReading")}>{t("review.stillReadingBody")}</Banner>}
           {updating && <p className="small muted" role="status">{t("review.updating")}</p>}
+          {editable && r.setAsideAll && (
+            <Notice tone="review" role="status" title={t("review.setAside")}>
+              <Link to="/deals/$dealId/documents" params={{ dealId }}>{t("review.setAsideLink")}</Link>
+            </Notice>
+          )}
 
           <div className="card rv-top" ref={topCard}>
             {r.readiness.status === "blocked" ? (
@@ -1127,15 +1153,28 @@ export function Review({ dealId }: { dealId: string }) {
             </section>
           )}
 
-          {r.aiReading?.outcome === "failed" && <p className="small muted">{t("review.aiUnavailable")}</p>}
+          {(r.aiReading?.outcome === "failed" || !!r.aiReading?.unread.length) && <div className="stack tight">
+            <p className="small muted">{r.aiReading?.outcome === "failed" ? t("review.aiUnavailable") : t("review.aiUnread", { names: r.aiReading!.unread.join(", ") })}</p>
+            {editable && <div><button className="btn quiet sm" type="button" disabled={readAgain.isPending} onClick={() => readAgain.mutate()}>{t("review.readAgain")}</button></div>}
+            <ErrorText error={readAgain.error} />
+          </div>}
+          {readAnyway.isSuccess && (docsBusy || updating) && <p className="small muted" role="status">{t("review.readingNow")}</p>}
+          {!!r.aiReading?.sheetsLeftOut.length && <div className="stack tight">
+            {r.aiReading.sheetsLeftOut.map(d => <div key={d.id} className="stack tight">
+              <p className="small muted">{d.sheets.length ? t("review.sheetsLeftOut", { name: d.name, sheets: d.sheets.slice(0, 5).join(", "), more: d.sheets.length - 5 }) : t("review.fileLeftOut", { name: d.name })}</p>
+              {editable && d.readAnyway && <div><button className="btn quiet sm" type="button" disabled={readAnyway.isPending} aria-label={t("review.readAnywayLabel", { name: d.name })} onClick={() => readAnyway.mutate({ id: d.id, role: d.readAnyway! })}>{t("review.readAnyway")}</button></div>}
+            </div>)}
+            <ErrorText error={readAnyway.error} />
+          </div>}
           <details id="unused-figures" className="card rv-unused" open={otherOpen} onToggle={(e) => setOtherOpen(e.currentTarget.open)}>
             <summary className="card-pad row between">
-              <span className="muted">{t("review.otherIntro", { n: otherCount })}</span>
+              <span className="muted">{t("review.otherIntro", { n: otherCount, cut: otherCut })}</span>
               <span className="rv-link">{t("review.unusedLink")}</span>
             </summary>
             <div className="card-pad stack tight rv-unused-body">
               <h2 className="h3">{t("review.other")}</h2>
-              <p className="small muted">{t("review.otherBody")}</p>
+              <p className="small muted">{t("review.otherBody", { cut: otherCut })}</p>
+              {otherCut && <p className="small muted">{t("review.otherCut", { n: r.otherTotal, shown: otherShown })}</p>}
               {!!r.aiReading?.notUsed.length && <section className="stack tight">
                 <h3 className="h3">{t("review.aiUnused")}</h3>
                 {r.aiReading.notUsed.map((item, i) => {
@@ -1157,7 +1196,8 @@ export function Review({ dealId }: { dealId: string }) {
                 </div>)}
               </section>}
               <ErrorText error={label.error ?? unlabel.error} />
-              <div className="scroll">
+              {/* A long list waits until the person opens it, so typing elsewhere on this page never redraws it. */}
+              {(otherOpen || otherGroups.length <= 100) && <div className="scroll">
                 <table className="table">
                   <thead><tr><th>{t("review.col.doc")}</th><th>{t("review.col.text")}</th><th>{t("review.col.whyNot")}</th></tr></thead>
                   <tbody>
@@ -1189,7 +1229,7 @@ export function Review({ dealId }: { dealId: string }) {
                     ))}
                   </tbody>
                 </table>
-              </div>
+              </div>}
             </div>
           </details>
         </div>

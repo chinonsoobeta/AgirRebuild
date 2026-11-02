@@ -23,3 +23,13 @@ describe("real files parse to the same candidates", () => {
     });
   }
 });
+
+test("TIFF fixture preserves dimensions, page count and byte order", async () => {
+  const { tiffBytes } = await import("../src/index.ts");
+  const { pictureInfo } = await import("@agir/extraction");
+  for (const bigEndian of [false, true]) {
+    const bytes = tiffBytes(2, 3, new Uint8Array([0, 50, 100, 150, 200, 255]), { bigEndian, pages: 2 });
+    expect(bytes.slice(0, 2)).toEqual(new Uint8Array(bigEndian ? [77, 77] : [73, 73]));
+    expect(pictureInfo(bytes)).toEqual({ format: "tiff", width: 2, height: 3, pages: 2 });
+  }
+});

@@ -230,3 +230,11 @@ describe("a client's settings", () => {
     expect(text(html)).not.toContain("Everyone here can see every deal");
   });
 });
+
+it("Card 181 includes pictures in each deal's document counts", () => {
+  const counts = { docs_pdf: 1, docs_xlsx: 2, docs_csv: 3, docs_docx: 4, docs_txt: 5, docs_image: 6, docs_no_candidates: 0, figures_read: 0, figures_confirmed_from_suggestion: 0, figures_typed: 0, actions_until_runnable: 0 };
+  state.metrics = { deals: [{ ...counts, deal_id: "d1", name: "Picture counts" }], totals: { ...counts, deals: 1 } };
+  const html = text(section(render(), "counts"));
+  expect(html).toContain("Documents (PDF / Excel / CSV / Word / text / picture)");
+  expect(html).toContain("1 / 2 / 3 / 4 / 5 / 6");
+});

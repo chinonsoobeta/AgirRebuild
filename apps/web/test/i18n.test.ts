@@ -12,6 +12,12 @@ import { describeEvent } from "../src/routes/audit.tsx";
 import { I18nProvider, build, checkText, dealStatus, translateMessage, verdictText, type Key } from "../src/i18n.tsx";
 
 describe("a run's source labels in French", () => {
+  it("says the notes of a suite-by-suite roll in French (card 193)", () => {
+    expect(translateMessage("Suites of this type rent at different amounts; enter the rent to use")).toBe("Les logements de ce type sont loués à des montants différents\u00a0; entrez le loyer à utiliser");
+    expect(translateMessage("A suite's line in a rent roll; its other figures are shown, not read")).toBe("La ligne d’un logement dans un état des loyers\u00a0; ses autres chiffres sont affichés, pas lus");
+    expect(translateMessage("The roll states 13 units but 3 suites were counted; check the counts by type")).toBe("L’état des loyers indique 13 logements, mais 3 logements ont été comptés\u00a0; vérifiez les nombres par type");
+  });
+
   it("uses the owner's short bilingual published-table labels", () => {
     const source = { tableId: "premium", optionKey: "select", publisher: "CMHC", title: "Title retained in the source snapshot", effective: "2025-07-14", acceptedBy: "Dana Analyst", fields: ["refinance_ltv_pct", "refinance_amort_years", "refinance_mli_select_points"] };
     expect(tableSourceLabel(source)).toBe("Published table: CMHC, effective 2025-07-14 · accepted by Dana Analyst · uses stated: Refinance loan-to-value, Refinance amortization, MLI Select points");
@@ -1127,4 +1133,145 @@ it.each([
 it("Card 174 translates the financing refusal", () => {
   expect(translateMessage("The AI read a financing figure as other costs; interest and lender fees are computed by Agir or belong to the stated interest reserve"))
     .toBe("L’IA a lu un montant de financement comme autres coûts\u00a0; les intérêts et les frais du prêteur sont calculés par Agir ou relèvent de la réserve d’intérêts déclarée");
+});
+
+it.each([
+  "Read by OCR from 1 of 2 scanned pages; the others gave no text Agir could read. Check every value against the page before approving it.",
+  "1 of 2 pages in this PDF is a picture.", "2 of 3 pages in this PDF are pictures.",
+  "Agir read text from it by OCR. Check every value read that way against the page before approving it.",
+  "Agir read text from 2 of them by OCR. Check every value read that way against the page before approving it.",
+  "Agir found no text it could read there.",
+  "Agir reads the first 50 picture pages of a PDF, so 1 page was not read.",
+  "Agir reads the first 50 picture pages of a PDF, so 2 pages were not read.",
+  "1 page could not be read. Retry the file to try again.", "2 pages could not be read. Retry the file to try again.",
+  "OCR is not available on this machine, so they were not read.",
+  "This PDF is scanned pages with no text layer, and OCR is not available on this machine. Enter its values by hand, or upload a text PDF.",
+  "Agir found no readable text on the scanned pages of this PDF. Enter its values by hand, or upload a clearer copy.",
+  "This PDF is protected by a password. Remove the password and upload it again.",
+  "page 2, line 3 (OCR, confidence 81%)",
+])("Card 180 translates %s", text => {
+  expect(build("en", () => {}).msg(text)).toBe(text);
+  const fr = build("fr", () => {}).msg(text);
+  expect(fr).not.toBe(text);
+  expect(fr).not.toContain("ne fait pas encore");
+});
+
+
+it.each([
+  ["This file is too large for Agir to read. Save the parts that matter in a file of their own, then upload that.", "Ce fichier est trop volumineux pour qu’Agir le lise. Enregistrez les parties utiles dans un fichier à part, puis téléversez celui-ci."],
+  ["Agir could not open this file. It may be damaged. Save it again, then upload it.", "Agir n’a pas pu ouvrir ce fichier. Il est peut-être endommagé. Enregistrez-le de nouveau, puis téléversez-le."],
+  ["This file has a password, or is in an older format. Remove the password or save it as a current Excel or Word file, then upload it.", "Ce fichier a un mot de passe ou est dans un ancien format. Retirez le mot de passe ou enregistrez-le comme fichier Excel ou Word récent, puis téléversez-le."],
+
+  [
+    "The file does not start like an image",
+    "Le fichier ne commence pas comme une image"
+  ],
+  [
+    "Read by OCR from this picture. Check every value against the picture before approving it.",
+    "Lu par reconnaissance optique à partir de cette image. Vérifiez chaque valeur sur l’image avant de l’approuver."
+  ],
+  [
+    "Agir found no readable text in this picture. Enter its values by hand, or upload a clearer copy.",
+    "Agir n’a trouvé aucun texte lisible dans cette image. Saisissez ses valeurs à la main ou téléversez une copie plus nette."
+  ],
+  [
+    "This file is a picture, and OCR is not available on this machine. Enter its values by hand, or upload a text PDF.",
+    "Ce fichier est une image, et la reconnaissance optique n’est pas disponible sur cette machine. Saisissez ses valeurs à la main ou téléversez un PDF texte."
+  ],
+  [
+    "Agir could not open this picture. It may be damaged. Upload it again, or save it as a PDF.",
+    "Agir n’a pas pu ouvrir cette image. Elle est peut-être endommagée. Téléversez-la de nouveau ou enregistrez-la en PDF."
+  ],
+  [
+    "This TIFF has 2 pages. Save it as a PDF, then upload that.",
+    "Ce fichier TIFF compte 2 pages. Enregistrez-le en PDF, puis téléversez ce PDF."
+  ],
+  [
+    "This picture is 81 megapixels, and Agir reads pictures of up to 80. Save a smaller copy, then upload it.",
+    "Cette image compte 81 mégapixels, et Agir lit les images de 80 mégapixels au plus. Enregistrez une copie plus petite, puis téléversez-la."
+  ],
+  [
+    "Agir cannot read HEIC photos. Export the photo as JPEG, then upload it.",
+    "Agir ne lit pas les photos HEIC. Exportez la photo en JPEG, puis téléversez-la."
+  ],
+  [
+    "Agir reads Excel files saved as .xlsx. Open this one in Excel, save it as .xlsx, then upload it.",
+    "Agir lit les fichiers Excel enregistrés en .xlsx. Ouvrez celui-ci dans Excel, enregistrez-le en .xlsx, puis téléversez-le."
+  ],
+  [
+    "Agir reads Word files saved as .docx. Open this one in Word, save it as .docx, then upload it.",
+    "Agir lit les fichiers Word enregistrés en .docx. Ouvrez celui-ci dans Word, enregistrez-le en .docx, puis téléversez-le."
+  ],
+  [
+    "Agir does not read PowerPoint files. Save this one as a PDF, then upload that.",
+    "Agir ne lit pas les fichiers PowerPoint. Enregistrez celui-ci en PDF, puis téléversez ce PDF."
+  ],
+  [
+    "Upload a PDF, Excel (.xlsx), CSV, Word (.docx), text file, or a picture (PNG, JPEG or TIFF).",
+    "Téléversez un fichier PDF, Excel (.xlsx), CSV, Word (.docx) ou texte, ou une image (PNG, JPEG ou TIFF)."
+  ],
+  ["This file is too long for Agir's rules to read in full, so they may have missed figures further in.", "Ce fichier est trop long pour que les règles d’Agir le lisent en entier ; des chiffres plus loin peuvent donc leur échapper."],
+  ["A zero beside another figure in this row", "Un zéro à côté d’un autre chiffre de cette ligne"],
+  ["Worked out by a formula in this workbook, so Agir did not read it. Use it if it is the figure you want", "Calculé par une formule de ce classeur, donc Agir ne l’a pas lu. Utilisez-le si c’est le chiffre voulu"],
+  ["Another line of this cost is a formula, so adding the typed lines would give only part of it; enter the field by hand", "Une autre ligne de ce coût est une formule : additionner les lignes saisies n’en donnerait qu’une partie. Entrez le champ à la main"],
+  ["This workbook has formulas with no saved results (B3, B4, B7, B8, B9 and 1,204 more). Open and save it in Excel to include them.", "Ce classeur contient des formules sans résultat enregistré (B3, B4, B7, B8, B9 et 1\u00a0204 de plus). Ouvrez-le et enregistrez-le dans Excel pour les inclure."],
+  [
+    "This workbook has formulas with no saved results (A1, B2). Open and save it in Excel to include them.",
+    "Ce classeur contient des formules sans résultat enregistré (A1, B2). Ouvrez-le et enregistrez-le dans Excel pour les inclure."
+  ],
+  [
+    "This file has 1 picture. Agir does not read pictures inside Word or Excel files, so check it for figures.",
+    "Ce fichier contient 1 image. Agir ne lit pas les images à l’intérieur des fichiers Word ou Excel ; vérifiez si elle contient des chiffres."
+  ],
+  [
+    "This file has 2 pictures. Agir does not read pictures inside Word or Excel files, so check them for figures.",
+    "Ce fichier contient 2 images. Agir ne lit pas les images à l’intérieur des fichiers Word ou Excel ; vérifiez si elles contiennent des chiffres."
+  ]
+])("Card 181 translates %s", (en, fr) => {
+  expect(translateMessage(en)).toBe(fr);
+});
+
+it("Card 181 describes picture uploads and counts in both languages", () => {
+  expect(build("en", () => {}).t("docs.types")).toBe("PDF, Excel, CSV, Word, text or a picture (PNG, JPEG, TIFF) · up to 75 MB each · every file is checked before it is read");
+  expect(build("fr", () => {}).t("docs.types")).toBe("PDF, Excel, CSV, Word, texte ou image (PNG, JPEG, TIFF) · jusqu'à 75 Mo chacun · chaque fichier est vérifié avant d'être lu");
+  expect(build("en", () => {}).t("counts.docs")).toBe("Documents (PDF / Excel / CSV / Word / text / picture)");
+  expect(build("fr", () => {}).t("counts.docs")).toBe("Documents (PDF / Excel / CSV / Word / texte / image)");
+});
+
+it.each([
+  ["Its document is now marked as background only", "Son document est maintenant marqué comme contexte seulement"],
+  ["AI reading was turned off, and only AI reading found this figure", "La lecture IA a été désactivée, et elle seule avait trouvé ce chiffre"],
+  ["The latest reading of the documents did not use this figure", "La dernière lecture des documents n’a pas retenu ce chiffre"],
+])("Card 184 translates %s and the approved variant", (en, fr) => {
+  expect(build("en", () => {}).msg(en)).toBe(en);
+  expect(translateMessage(en)).toBe(fr);
+  expect(translateMessage(en + "; confirm or reject it")).toBe(fr + " ; confirmez-la ou rejetez-la");
+});
+it("Card 184 pins retry and reading wording", () => {
+  expect(translateMessage("Agir is still reading this deal. Try again when it finishes.")).toBe("Agir lit encore ce projet. Réessayez lorsque la lecture sera terminée.");
+  expect(build("en", () => {}).t("review.readAgain")).toBe("Read again");
+  expect(build("fr", () => {}).t("review.readAgain")).toBe("Relire");
+  expect(build("en", () => {}).t("review.aiUnavailable")).toBe("AI reading did not finish this time. The figures below come from Agir's rules and any earlier reading.");
+  expect(build("fr", () => {}).t("review.aiUnavailable")).toBe("La lecture IA n’a pas abouti cette fois. Les chiffres ci-dessous viennent des règles d’Agir et de toute lecture antérieure.");
+});
+
+it("Card 186 pins the legal explanation of repeat readings and unread names", () => {
+  expect(build("en", () => {}).t("landing.legal.ai2")).toContain("A reading is stored with the deal. Agir sends a deal's documents again only when something has changed: a document is added, removed or changed in role or text, Agir's reading instructions or model are updated, or a reading failed or missed a file and someone asks Agir to read them again.");
+  expect(build("fr", () => {}).t("landing.legal.ai2")).toContain("Une lecture est conservée avec le projet. Agir n'envoie de nouveau les documents d'un projet que si quelque chose a changé\u00a0: un document est ajouté, retiré, ou son rôle ou son texte change, les consignes de lecture ou le modèle d'Agir sont mis à jour, ou une lecture a échoué ou a omis un fichier et une personne demande à Agir de les relire.");
+  expect(build("fr", () => {}).t("review.aiUnread", { names: "two.txt, three.txt" })).toBe("La lecture IA n’a pas encore couvert two.txt, three.txt. Les chiffres ci-dessous viennent des règles d’Agir et de la lecture précédente.");
+});
+
+
+describe("Card 183 plain typed numbers", () => {
+  const common = [["1250000", 1250000], ["5.25%", 5.25], ["0", 0], ["-5", -5], ["+5", 5], [".5", .5], ["5.", 5]] as const;
+  for (const lang of ["en", "fr"] as const) {
+    const localized = lang === "en" ? [["1,250,000", 1250000], ["$1,250,000", 1250000]] as const
+      : [["1 250 000", 1250000], ["5,25", 5.25], ["1 250 000,50 $", 1250000.5]] as const;
+    it.each([...common, ...localized])(`accepts %s in ${lang}`, (raw, value) => {
+      expect(build(lang, () => {}).f.parse(raw)).toBe(value);
+    });
+    it.each(["1e9", "1E9", "0x10", "0b11", "0o7", "Infinity", "NaN", "1.2.3", "12abc", "", "   "])(`refuses %j in ${lang}`, raw => {
+      expect(() => build(lang, () => {}).f.parse(raw)).toThrow(lang === "en" ? "Enter a number." : "Saisissez un nombre.");
+    });
+  }
 });

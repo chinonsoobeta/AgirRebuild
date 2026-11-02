@@ -1,5 +1,5 @@
 /// <reference types="node" />
-import { beforeEach, describe, expect, it, vi } from "vitest";
+import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import { createElement } from "react";
 import { renderToStaticMarkup } from "react-dom/server";
 import { api, type Assumption, type Review as ReviewData } from "../src/api";
@@ -61,7 +61,7 @@ import { Review } from "../src/routes/review.tsx";
 const src = { document_id: "d1", document_name: "budget.pdf", value: 38000, raw: "$38,000", context: "Property tax $38,000", location: "page 1, line 9" };
 const row = (over: Partial<Assumption>): Assumption => ({
   id: "x", fieldKey: "land_cost", itemKey: null, label: "", group: "budget", groupLabel: "Budget", unit: "$", material: false, conservative: null, status: "needs_review",
-  value: 1, pendingValue: null, sourceKind: "document", sources: [], conflictValues: null, reason: null, decidedBy: null, decidedById: null, decidedAt: null,
+  value: 1, pendingValue: null, sourceKind: "document", sources: [], conflictValues: null, usualSource: null, reason: null, decidedBy: null, decidedById: null, decidedAt: null,
   secondApprover: null, confirmedByReview: false, secondApprovedAt: null, sponsorStated: false, clientConfirmedBy: null, clientConfirmedById: null, clientConfirmedAt: null, version: 3, ...over,
 } as Assumption);
 const payload = (assumptions: Assumption[], notFound: string[] = []): ReviewData => ({
@@ -129,4 +129,70 @@ describe("a rejected stated value on Review (card D2)", () => {
     expect(words).toContain("Absent des documents (facultatif)");
     expect(words).not.toContain("Rejetées à l'examen");
   });
+});
+
+
+afterEach(() => vi.unstubAllGlobals());
+
+describe("Card 183 value authorship", () => {
+  it.each(["en", "fr"] as const)("names the person before the document evidence in %s", lang => {
+    s.lang = lang;
+    s.review = payload([row({ value: 450000, sourceKind: "analyst", decidedBy: "Morgan", sources: [src] })]);
+    const html = render();
+    const cells = html.match(/<tr id="row-x"[^>]*>(.*?)<\/tr>/)![1]!.split("</td>");
+    const entered = lang === "en" ? "Entered by Morgan" : "Saisie par Morgan";
+    expect.soft(text(cells[2]!)).toBe(entered);
+    const source = html.match(/<tr class="rv-src">(.*?)<\/tr>/)![1]!;
+    expect(text(source)).toMatch(new RegExp(`^${entered} .*${lang === "en" ? "The document says" : "Le document indique"} .*budget\\.pdf`));
+    expect(source).toContain("<mark>$38,000</mark>");
+    expect(text(source)).toContain("Property tax");
+  });
+  it.each(["en", "fr"] as const)("names the person without a document heading when there are no sources in %s", lang => {
+    s.lang = lang;
+    s.review = payload([row({ sourceKind: "analyst", decidedBy: "Morgan" })]);
+    const html = render();
+    const entered = lang === "en" ? "Entered by Morgan" : "Saisie par Morgan";
+    expect(text(html.match(/<tr id="row-x"[^>]*>(.*?)<\/tr>/)![1]!.split("</td>")[2]!)).toBe(entered);
+    expect(text(html.match(/<tr class="rv-src">(.*?)<\/tr>/)![1]!)).toBe(entered);
+  });
+  it.each(["en", "fr"] as const)("keeps a document value's source column and quote unchanged in %s", lang => {
+    s.lang = lang;
+    s.review = payload([row({ value: 38000, sources: [src] })]);
+    const html = render();
+    expect(text(html.match(/<tr id="row-x"[^>]*>(.*?)<\/tr>/)![1]!.split("</td>")[2]!)).toBe("budget.pdf");
+    const source = html.match(/<tr class="rv-src">(.*?)<\/tr>/)![1]!;
+    expect(source).toContain("<mark>$38,000</mark>");
+    expect(text(source)).toContain("budget.pdf");
+    expect(text(source)).not.toMatch(/Entered by|Saisie par|The document says|Le document indique/);
+  });
+});
+
+describe("Card 183 refused Review entries", () => {
+  for (const lang of ["en", "fr"] as const) {
+    it.each(["modify", "entry", "add"])(`shows the parse error and posts nothing for %s in ${lang}`, path => {
+      s.lang = lang;
+      s.interactive = true;
+      s.review = payload(path === "modify" ? [row({})] : [], path === "entry" ? ["land_cost"] : []);
+      render();
+      if (path === "modify") button(lang === "en" ? "Edit" : "Modifier").props.onClick();
+      if (path === "entry") button(lang === "en" ? "Enter a value" : "Saisir une valeur").props.onClick();
+      if (path === "add") button(lang === "en" ? "Add a unit type or space" : "Ajouter un type de logement ou d'espace").props.onClick();
+      render();
+      const values: Record<string, string> = { value: "1e9", name: "Studio", reason: "The sponsor supplied these values", "count-value": "2", "rent-value": "1e9" };
+      vi.stubGlobal("FormData", class { get(k: string) { return values[k] ?? null; } });
+      const form = s.nodes.find(n => n.tag === "form" && (path === "add" ? String(n.props.className).includes("card-pad") : true))!;
+      form.props.onSubmit({ preventDefault() {}, currentTarget: {} });
+      expect(api.post).not.toHaveBeenCalled();
+      expect(text(render())).toContain(lang === "en" ? "Enter a number." : "Saisissez un nombre.");
+    });
+  }
+});
+
+
+it.each(["en", "fr"] as const)("Card 183 does not call a rejected analyst override a document-stated value in %s", lang => {
+  s.lang = lang;
+  s.review = payload([row({ fieldKey: "property_tax_annual", status: "rejected", value: 45000, sourceKind: "analyst", sources: [src], decidedBy: "Morgan" })], ["property_tax_annual"]);
+  const html = render();
+  expect(html).not.toContain('id="rejected-stated"');
+  expect(text(html)).toContain(lang === "en" ? "Not in the documents (optional)" : "Absent des documents (facultatif)");
 });

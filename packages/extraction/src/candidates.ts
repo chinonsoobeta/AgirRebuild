@@ -3,6 +3,7 @@ import { FIELD_BY_KEY, OUTPUT_LIKE_PHRASES } from "@agir/contracts";
 import { detectFormat, normalizeText, SF_PER_M2, tokenize, unitTypesIn, wholeUnitType, type CurrencyCode, type DocumentFormat, type NumberToken } from "@agir/numbers";
 import type { Cell, NormalizedDocument, Table } from "./document.ts";
 import { applyDocumentKind } from "./document-kind.ts";
+import { boundedForRules, digitRuns, MAX_RULE_TEXT, MAX_RULE_WORK, RULE_LIMIT_NOTE } from "./rule-limits.ts";
 import { unconditioned, commercialItem, commercialLabel, genericCommercial, PROPERTY_TAX_WORD, BASIS_AFTER_RE, CREDIT_NOTE, REPLACED_LOAN, DEPOSIT_NOTE, DEPOSIT_RE, LTV_BASIS, canonicalItem, costSentence, currencyOf, flagRead, flagSentence, hasPhrase, isOperatingTarget, isExitCapLabel, isTakeoutTimingLabel, isPlainRentLabel, loanNameOnly, loanTerm, mapToken, normalizeLabel, withoutTaxBasis, OLD_SHEET_RE, rankScope, typeItem, SCENARIO_SHEET_NOTE, SCENARIO_SHEET_RE, SUPERSEDED_LABEL_NOTE, scopeIn, scopesIn, withCurrency, type MapOptions, type Mapped, type Scope } from "./mapping.ts";
 
 /** One value found in one document, with where it came from and why it was (or was not) mapped. */
@@ -76,12 +77,22 @@ const closesUses = (label: string, read: Iterable<string>) => {
   return BARE_TOTAL_RE.test(fold(label)) && !keys.has("stated_total_cost") && [...keys].filter((k) => BUDGET_FIELDS.has(k)).length >= 2;
 };
 
+/** A money figure, or a large bare one that is not a year: the kind of line a total adds up. */
+const addsToTotal = (t: NumberToken) => t.value !== null && (t.unit === "$" || t.currency || (t.unit === null && Math.abs(t.value) >= 1000 && !(t.value >= 1900 && t.value <= 2100)));
+
 /** A whole year written as a bare number (1900 to 2100): the header of a row of years, not an amount. */
 function isYearToken(t: NumberToken): boolean {
   return t.value !== null && t.unit === null && !t.currency && Number.isInteger(t.value) && t.value >= 1900 && t.value <= 2100;
 }
 
+/** A figure rules may read: one the author typed. A formula's result is the workbook's arithmetic; the AI reader may still quote it. */
 function cellToken(cell: Cell, format: DocumentFormat): NumberToken | null {
+  return cell.computed ? null : figureToken(cell, format);
+}
+
+/** Any figure in a cell, whoever wrote it. It answers whether a row holds a figure, and never reads one. */
+function figureToken(cell: Cell, format: DocumentFormat): NumberToken | null {
+  if (cell.rowNumber || cell.repeat) return null;
   if (cell.number !== undefined) {
     return {
       raw: cell.stored === undefined ? cell.text : `${cell.text} (cell value ${cell.stored})`,
@@ -134,6 +145,8 @@ type Base = { region: Region; raw: string; location: string; context: string; ru
 
 /** The documents that are a builder's quote: there, a Total is the hard cost. */
 const quoteDocs = new WeakSet<ExtractionResult>();
+/** Figures times characters read so far in each pass, against MAX_RULE_WORK. */
+const ruleWork = new WeakMap<ExtractionResult, { spent: number; over: boolean }>();
 const QUOTE_WORD_RE = /\b(quote|quotation|estimate|tender|bid|soumission|devis)\b/;
 const BUILDER_WORD_RE = /\b(builders?|contractors?|contracting|entrepreneurs?|constructeurs?|constructions?|general contractor)\b/;
 
@@ -288,7 +301,7 @@ function paragraphs(doc: NormalizedDocument, skip: Set<number>, scopes: (Scope |
     // Card 118: a figure-first "figure — label" line starts its own paragraph, and in a Word file laid out that way no paragraph joins the one before it.
     // Card 118 audit: elsewhere a sentence wrapped across Word paragraphs still joins ("The committed principal is" / "$2,850,000 …").
     const figureFirst = doc.kind === "docx" && cur?.segs.at(-1)!.location !== line.location && [prev, doc.lines[li + 1]?.text ?? ""].some((l) => FIGURE_FIRST_RE.test(l));
-    if (cur && !FIGURE_FIRST_RE.test(text) && !figureFirst && continues(prev, text)) {
+    if (cur && cur.text.length + text.length < MAX_RULE_TEXT && !FIGURE_FIRST_RE.test(text) && !figureFirst && continues(prev, text)) {
       cur.segs.push({ start: cur.text.length + 1, location: line.location });
       cur.text += " " + text;
     } else {
@@ -371,7 +384,7 @@ const EXAMPLE_RE = /\b(?:examples?|exemples?)\b/g;
 const EXAMPLE_BEFORE = /(?:\bfor|\bpar|\b(?:rue|avenue|av|boulevard|boul|chemin|route|place|rang)(?:\s+(?:de l['’]|de la |du |des |d['’]))?)\s*$/;
 const EXAMPLE_AFTER = /^\s+(?:street|st|ave|avenue|road|rd|drive|dr|way|blvd|boulevard|lane|ln|crescent|court|place|plaza|park|square|building|tower|inc|corp|ltd|llc|group|holdings|properties|developments|capital|realty|homes)\b/;
 
-const ADDRESS_LIKE_RE = /\S*@\S*|(?<![\p{L}\p{N}])[\p{L}\p{N}_-]+(?:\.[\p{L}\p{N}_-]+)+(?:\/\S*)?/gu;
+const ADDRESS_LIKE_RE = /\S{0,200}@\S{0,200}|(?<![\p{L}\p{N}])[\p{L}\p{N}_-]+(?:\.[\p{L}\p{N}_-]+)+(?:\/\S*)?/gu;
 
 /** Whether a row, line or heading says, in English or French, that its figures are an example, for reference, or not part of the deal. */
 function markedNotPart(text: string): boolean {
@@ -530,6 +543,10 @@ const RATE_BESIDE_RE = /^\s*(?:at|à|a|au taux de)\s*$/i;
 // An interest-only word after it ("at 11% interest only") leaves the figure unread, as before.
 const RATE_BASIS_RE = /^\s*(?:of|de|du|des|d)\b|\b(?:ltv|ltc|loan[- ]to|ratio|dcr|dscr|pret[- ]valeur|rpv|interest[- ]only|io|interets? seulement)\b/;
 const LATER_FIGURE_NOTE = "A later figure in this row; Agir reads one figure per row. Label it if it is the one to use";
+const ZERO_BESIDE_NOTE = "A zero beside another figure in this row";
+export const COMPUTED_NOTE = "Worked out by a formula in this workbook, so Agir did not read it. Use it if it is the figure you want";
+const PARTIAL_BUDGET_NOTE = "Another line of this cost is a formula, so adding the typed lines would give only part of it; enter the field by hand";
+const MAX_ROW_FIGURES = 12;
 const PER_UNIT_NOTE = "A per-door share of a cost, not the line's total; enter the total";
 const STRUCK_NOTE = "Struck through in the document; the figure written in its place replaces it";
 const PER_UNIT_REFUSED_NOTE = "The line's first figure is a price per unit; this number is not stated as its total";
@@ -637,7 +654,7 @@ const LEADER_RE = /^(.*?\p{L}[^.]*?)\s*(?:\.\s*){3,}(?=\S)/u;
 function labelValueForm(text: string): string {
   const stop = FULL_STOP_LABEL_RE.exec(text);
   if (stop && stop[1]!.split(/\s+/).length <= 5 && !ABBREVIATIONS.has(/(\p{L}+)$/u.exec(stop[1]!)?.[1]?.toLowerCase() ?? "")) return stop[1]! + ":" + text.slice(stop[1]!.length + 1);
-  const leader = LEADER_RE.exec(text);
+  const leader = /\.\s*\.\s*\./.test(text) ? LEADER_RE.exec(text) : null;
   return leader ? leader[1]! + ":" + " ".repeat(leader[0].length - leader[1]!.length - 1) + text.slice(leader[0].length) : text;
 }
 
@@ -669,6 +686,9 @@ function figureDashItems(text: string, format: DocumentFormat): { token: NumberT
 
 function readSentence(sentence: { text: string; start: number }, para0: Paragraph, result: ExtractionResult, carried: string | null = null, priorBudget: string | null = null) {
   const text = labelValueForm(normalizeText(sentence.text));
+  const work = ruleWork.get(result)!;
+  work.spent += digitRuns(text) * text.length;
+  if (work.spent > MAX_RULE_WORK) { work.over = true; return; }
   const quote = quoteDocs.has(result);
   const lineStart = para0.segs.filter(g => g.start <= sentence.start).at(-1)?.start ?? 0;
   const loanLead = para0.text.slice(lineStart, sentence.start).split(/[.!?]\s+/).pop() ?? "";
@@ -1347,13 +1367,16 @@ function fromRentRoll(table: Table, headerRow: number, roles: Roles, result: Ext
   const repeats = new Map<string, number>();
   for (const row of body) if (row.some((c) => c.text)) repeats.set(typeOf(row).type, (repeats.get(typeOf(row).type) ?? 0) + 1);
   const suiteRows: { type: string; ref: string; cands: Candidate[] }[] = [];
+  // The roll's commercial names, asked by every row, so worked out once.
+  let commercial: string[] | undefined;
+  const commercialNamesOf = () => (commercial ??= [...new Set(body.map(r => r[roles.item[0]!]!.text).filter(n => commercialItem(n) && !/\b(?:area|rent|loyer|surface|superficie|tarif)\b/i.test(n)))]);
   for (let r = headerRow + 1; r < table.rows.length; r++) {
     const row = table.rows[r]!;
     const itemParts = roles.item.map((i) => row[i]?.text ?? "").filter(Boolean);
     const itemText = itemParts.join(" ").trim();
     if (!itemText) continue;
     const rowContext = `${table.name}: ${row.map((c) => c.text).join(" | ")}`;
-    const commercialNames = [...new Set(body.map(r => r[roles.item[0]!]!.text).filter(n => commercialItem(n) && !/\b(?:area|rent|loyer|surface|superficie|tarif)\b/i.test(n)))];
+    const commercialNames = commercialNamesOf();
     const summaryCells = row.filter(c => c.text || c.number !== undefined);
     if (commercialNames.length === 1 && summaryCells.length === 2) {
       const t = rollToken(summaryCells[1]!, result.format);
@@ -1409,6 +1432,11 @@ function fromRentRoll(table: Table, headerRow: number, roles: Roles, result: Ext
       if (idx === undefined) return;
       const cell = row[idx];
       if (!cell || (!cell.text && cell.number === undefined)) return;
+      if (cell.computed) {
+        const x = figureToken(cell, result.format);
+        if (x) result.other.push({ region: rentRegion(cell, row), fieldKey: null, itemKey: null, value: x.value, raw: x.raw, unitSeen: x.unit, location: cell.ref, context: `${table.name}: ${itemText}`, rule: "table:rent-roll", note: COMPUTED_NOTE });
+        return;
+      }
       const t = rollToken(cell, result.format);
       if (fieldKey === "unit_rent_monthly" && roles.rent !== undefined && NON_HOME_RENT_RE.test(headerOf(table.rows[headerRow]?.[roles.rent] ?? { text: "", ref: "" }))) {
         if (t) result.other.push({ region: rentRegion(cell, row), fieldKey: null, itemKey: null, value: t.value, raw: t.raw, unitSeen: t.unit, location: cell.ref, context: rowContext, rule: "table:rent-roll", note: "Not a home rent" });
@@ -1459,8 +1487,9 @@ function fromRentRoll(table: Table, headerRow: number, roles: Roles, result: Ext
     add("item_occupancy_pct", roles.occupancy);
   }
   // Suites of one type become one item: the rows are the count, the areas add up, and a rent is read only when every suite has the same one.
-  for (const type of new Set(suiteRows.map((x) => x.type))) {
-    const rows = suiteRows.filter((x) => x.type === type);
+  const suitesByType = new Map<string, typeof suiteRows>();
+  for (const x of suiteRows) { const same = suitesByType.get(x.type); if (same) same.push(x); else suitesByType.set(x.type, [x]); }
+  for (const [type, rows] of suitesByType) {
     const all = rows.flatMap((x) => x.cands);
     const base = { itemKey: type, unitSeen: "units", context: `${table.name}: ${type}`, rule: SUITE_RULE };
     // The count is the rows, or the sum of the count column when the roll has one.
@@ -1640,11 +1669,12 @@ function namedRow(row: Cell[], table: Table, result: ExtractionResult): boolean 
 }
 
 /** Rents paired to names use only the mix stated in this document. */
-function pairedProseRents(doc: NormalizedDocument, result: ExtractionResult, excluded: boolean[]) {
-  const rentLines = doc.lines.filter((l,i) => !excluded[i] && RENT_WORD_RE.test(fold(l.text)) && /\$/.test(l.text) && /\([^)]*\)|\b(for|pour|at|a)\b/.test(fold(l.text)));
+function pairedProseRents(doc: NormalizedDocument, result: ExtractionResult, excluded: boolean[], suiteLines: Set<number>) {
+  const rentLines = doc.lines.filter((l,i) => !excluded[i] && !suiteLines.has(i) && RENT_WORD_RE.test(fold(l.text)) && /\$/.test(l.text) && /\([^)]*\)|\b(for|pour|at|a)\b/.test(fold(l.text)));
   if (!rentLines.length) return;
   const clean = (s: string) => s.trim().replace(/^(?:the|les?|la|pour|and|et)\s+/i, "").replace(/\s+(?:units?|homes?|suites?|apartments?|flats?|dwellings?|doors?|logements?|appartements?|unit[eé]s?)\b/gi, "").replace(/[.;:]+$/, "").trim();
   const nameKey = (s: string) => fold(canonicalItem(clean(s))).replace(/\b([\p{L}-]+)s\b/gu,"$1").replace(/\s+/g," ");
+  const isRentLine = new Set(rentLines);
   const mix = new Map<string,string>();
   const remember = (name: string) => { if (!mix.has(nameKey(name))) mix.set(nameKey(name), canonicalItem(clean(name))); };
   result.candidates.filter(c => c.fieldKey === "unit_count" && c.itemKey && c.itemKey !== "All units").forEach(c => remember(c.itemKey!));
@@ -1652,7 +1682,7 @@ function pairedProseRents(doc: NormalizedDocument, result: ExtractionResult, exc
   const words: Record<string, number> = { ...PROSE_WORD_COUNTS, eleven: 11, twelve: 12, onze: 11, douze: 12 };
   const re = new RegExp(String.raw`\b(\d+|${Object.keys(words).join("|")})\s+(?:(x|×)\s+)?([^,;().]+?)(?=\s+(?:and|et)\s+|[,;().]|$)`, "gi");
   for (const [i,l] of doc.lines.entries()) {
-    if (excluded[i] || OTHER_RENT_RE.test(fold(l.text)) || rentLines.includes(l) || rangeEnds(l.text, tokenize(l.text,result.format)).size) continue;
+    if (excluded[i] || suiteLines.has(i) || OTHER_RENT_RE.test(fold(l.text)) || isRentLine.has(l) || rangeEnds(l.text, tokenize(l.text,result.format)).size) continue;
     const counts: Candidate[] = [];
     for (const m of l.text.matchAll(re)) {
       const n = /^\d+$/.test(m[1]!) ? Number(m[1]) : words[fold(m[1]!)];
@@ -1762,14 +1792,14 @@ function structuredRollRow(row: Cell[], table: Table, result: ExtractionResult, 
   for (const c of cells) {
     const match = /^(.*)(?: - | \/ )(.*)$/.exec(c.text);
     if (!match || (homeRole(fold(match[2]!)) && (COUNT_WORD_RE.test(fold(match[2]!)) || RENT_WORD_RE.test(fold(match[2]!)) || MONTHLY_RE.test(fold(match[2]!))))) continue;
-    const values = cells.filter((v) => v !== c && cellToken(v, result.format));
+    const values = cells.filter((v) => v !== c && figureToken(v, result.format));
     if (values.length === 1 && add(match[2]!, match[1]!, values[0]!)) return true;
   }
   if (!HOMES_SHEET_RE.test(fold(table.name)) || NON_ROLL_RE.test(fold(table.name)) || cells.length < 3) return false;
   const nameCell = cells[0]!;
   // A suite, unit or lot number names one door or one lot, not a type with a count.
   if (nameCell.number !== undefined || /^(?:suite|unit|apt|apartment|door|lot|stall|#)\s*#?\s*\d/i.test(nameCell.text.trim()) || NON_ROLL_RE.test(fold(nameCell.text))) return false;
-  const values = cells.slice(1).filter((c) => cellToken(c, result.format));
+  const values = cells.slice(1).filter((c) => figureToken(c, result.format));
   const n = values[0] && cellToken(values[0], result.format);
   const r = values[1] && cellToken(values[1], result.format);
   if (values.length !== 2 || !n || !r || n.unit !== null || !Number.isInteger(n.value) || n.value! <= 0 || n.value! > 1000 || r.value! < 100 || ![null, "$", "$/mo"].includes(r.unit)) return false;
@@ -1919,10 +1949,28 @@ function fromBudget(table: Table, headerRow: number, roles: BudgetRoles, result:
   const totals: Candidate[] = [];
   let started = false;
   let segment: { value: number; unitSeen: string; ref: string; label: string; shown: Candidate }[] = [];
+  // A formula line since the segment began: the typed lines no longer add up to the total below them.
+  let segmentPartial = false;
+  // The fields with a formula line, whose typed lines are only part of the cost, and whether the table has any formula line at all.
+  const partial = new Set<string>();
+  let formulaLine = false;
   // Since the last total: whether an unread line was seen, and the fields a concept named. A concept line beside unread lines
   // that no total adds up may be only part of its field ("Framing" beside "Mechanical"), so it is shown, not read.
   let unreadInRun = false;
   const conceptInRun = new Set<string>();
+  const setAside = (key: string, note: string) => {
+    const acc = components.get(key);
+    if (!acc) return;
+    components.delete(key);
+    for (const r of acc.rows) result.other.push({ region: regionAt(result, r.ref, "table:budget"), fieldKey: null, itemKey: null, value: r.value, raw: String(r.value), unitSeen: "$", location: r.ref, context: `${table.name}: ${r.label}`, rule: "table:budget", note });
+  };
+  const retractConcepts = () => {
+    if (unreadInRun) for (const key of conceptInRun) {
+      if (!components.get(key)?.alias) setAside(key, CONCEPT_BESIDE_UNREAD_NOTE);
+    }
+    unreadInRun = false;
+    conceptInRun.clear();
+  };
   for (let r = headerRow + 1; r < table.rows.length; r++) {
     const row = table.rows[r]!;
     const labelCell = row[roles.label];
@@ -1940,7 +1988,7 @@ function fromBudget(table: Table, headerRow: number, roles: BudgetRoles, result:
       if (t && !isYearToken(t)) result.other.push({ region: budgetRegion(amountCell, row), fieldKey: null, itemKey: null, value: t.value, raw: t.raw, unitSeen: t.unit, location: amountCell.ref, context: `${table.name}: ${row.filter((c) => c.number === undefined && c.text.trim()).map((c) => c.text.trim()).join(" ")}`.slice(0, 240), rule: "table:budget", note: "No budget line matches this label" });
       continue;
     }
-    const basisNotes = category ? row.filter((c, i) => i !== roles.label && i !== roles.amount && i !== roles.category && c.text.trim() && !cellToken(c, result.format)).map(c => c.text.trim()) : [];
+    const basisNotes = category ? row.filter((c, i) => i !== roles.label && i !== roles.amount && i !== roles.category && c.text.trim() && !figureToken(c, result.format)).map(c => c.text.trim()) : [];
     const displayLabel = [category ? `${category}: ${labelCell.text}` : labelCell.text, ...basisNotes].join(" ");
     // The amounts of other revisions, or of columns whose order is not told, are shown and never read.
     for (const c of [...(roles.others ?? []), ...(roles.ambiguous ? [roles.amount] : [])]) {
@@ -1955,7 +2003,7 @@ function fromBudget(table: Table, headerRow: number, roles: BudgetRoles, result:
       if (o && !isYearToken(o)) result.other.push({ region: budgetRegion(cell, row), fieldKey: null, itemKey: null, value: o.value, raw: o.raw, unitSeen: o.unit, location: cell.ref, context: `${table.name}: ${displayLabel}`, rule: "table:budget", note: "Another column of this budget row; not read" });
     }
     if (roles.ambiguous) continue;
-    const t = cellToken(amountCell, result.format);
+    const t = figureToken(amountCell, result.format);
     if (!t) continue;
     if (t.value === null && !result.format.mixed && result.format.decimal === null && /^\(\d{1,3}(?:,\d{3})+\)$/.test(amountCell.text.trim())) {
       const accounting = tokenize(amountCell.text, { ...result.format, decimal: "." }, true)[0];
@@ -1963,22 +2011,25 @@ function fromBudget(table: Table, headerRow: number, roles: BudgetRoles, result:
     }
     // A row whose own label or note says it is not part of the deal, or one under such a heading, is shown and never read, summed or totalled.
     if (excluded || (!!category && /\b(?:usd|us dollars|alternative|optional|supplier quote)\b/i.test(displayLabel)) || (category && (markedNotPart(category) || MEMO_SECTION_RE.test(fold(category)))) || row.some((c) => markedNotPart(c.text))) {
+      if (amountCell.computed) continue;
       result.other.push({ region: budgetRegion(amountCell, row), fieldKey: null, itemKey: null, value: t.value, raw: t.raw, unitSeen: t.unit, location: amountCell.ref, context: `${table.name}: ${displayLabel}`, rule: "table:budget", note: NOT_PART_NOTE });
       continue;
     }
     // An amount whose own cell says it is per door is a share, not the line: it is shown and never read, summed or totalled.
     if (perUnit(amountCell.text, t, displayLabel)) {
+      if (amountCell.computed) continue;
       result.other.push({ region: budgetRegion(amountCell, row), fieldKey: null, itemKey: null, value: t.value, raw: t.raw, unitSeen: t.unit, location: amountCell.ref, context: `${table.name}: ${displayLabel}`, rule: "table:budget", note: PER_UNIT_NOTE });
       continue;
     }
     // A row in a budget sheet that is not money ("Loan-to-cost | 70%") is a label and value.
     if (t.unit !== null && t.unit !== "$") {
-      push(result, labelCell.text, t, amountCell.ref, `${table.name}: ${displayLabel} ${amountCell.text}`, "table:label-value", { scope });
+      if (!amountCell.computed) push(result, labelCell.text, t, amountCell.ref, `${table.name}: ${displayLabel} ${amountCell.text}`, "table:label-value", { scope });
       continue;
     }
     // A figure the label says is part of another budget field adds nothing of its own.
     const counted = partOfNote(labelCell.text, false);
     if (counted) {
+      if (amountCell.computed) continue;
       result.other.push({ region: budgetRegion(amountCell, row), fieldKey: null, itemKey: null, value: t.value, raw: t.raw, unitSeen: "$", location: amountCell.ref, context: `${table.name}: ${displayLabel}`, rule: "table:budget", note: counted });
       continue;
     }
@@ -1987,24 +2038,37 @@ function fromBudget(table: Table, headerRow: number, roles: BudgetRoles, result:
     const statedTotal = STATED_TOTAL.test(normalizeLabel(labelCell.text).label) || (CLOSING_TOTAL.test(normalizeLabel(labelCell.text).label) && (!!category || /\b(?:close|closing|cloture)\b/.test(fold(labelCell.text))));
     const usesTotal = USES_TOTAL_RE.test(labelCell.text.trim());
     const isTotal = statedTotal || usesTotal || TOTAL_RE.test(labelCell.text) || !!categoryTotal || !!trailingTotal?.test(labelCell.text);
+    const moneyToken: NumberToken = { ...t, currency: true, unit: t.unit ?? "$" };
+    // Only an unnamed line inherits its category. A named field or an explicit refusal keeps its own meaning.
+    const categoryKey = category && budgetCategory(category);
+    // The line's own words still apply their guards (a fee, interest, an amount to date): the category is read with them.
+    const withCategory = (m: ReturnType<typeof mapToken>) => {
+      if (m.kind !== "unmapped" || !categoryKey) return m;
+      const inherited = mapToken(`${FIELD_BY_KEY.get(categoryKey)!.aliases[0]!} - ${labelCell.text}`, moneyToken, { scope, budget: true, quote: quoteDocs.has(result) });
+      return inherited.kind === "ignored" || (inherited.kind === "field" && inherited.fieldKey === categoryKey) ? inherited : m;
+    };
+    // A computed amount is never read or summed. It is listed when it belongs to a budget field, and that field's typed lines are then only part of it. A computed total still ends the run above it.
+    if (amountCell.computed) {
+      const named = withCategory(mapToken(usesTotal ? "total project cost" : isTotal ? labelCell.text.replace(TOTAL_RE, "").replace(trailingTotal ?? /$^/, "").trim() || labelCell.text : labelCell.text, moneyToken, { scope, budget: true }));
+      if (named.kind === "field") {
+        result.other.push({ region: budgetRegion(amountCell, row), fieldKey: null, itemKey: null, value: t.value, raw: t.raw, unitSeen: t.unit, location: amountCell.ref, context: `${table.name}: ${displayLabel}`, rule: "table:budget", note: COMPUTED_NOTE });
+        if (!isTotal) partial.add(`${named.fieldKey}|${withCurrency("$", t.currencyCode ?? currencyOf(named.unitSeen))}`);
+      }
+      if (isTotal) { retractConcepts(); started = true; segment = []; segmentPartial = false; }
+      else { unreadInRun = true; segmentPartial = true; formulaLine = true; }
+      continue;
+    }
     // Unread rows with nothing read or totalled above them are the whole table's breakdown of its first total.
     for (const cell of row) markRegion(result, cell.ref, { rowRole: isTotal ? "total" : "line" });
     const bare = !started;
     if (isTotal) started = true;
     const lines = segment;
-    if (isTotal) segment = [];
+    const partialLines = segmentPartial;
+    if (isTotal) { segment = []; segmentPartial = false; }
     const labelText = isTotal ? labelCell.text.replace(TOTAL_RE, "").replace(trailingTotal ?? /$^/, "").trim() || labelCell.text : labelCell.text;
-    const moneyToken: NumberToken = { ...t, currency: true, unit: t.unit ?? "$" };
     const quoted = quoteDocs.has(result) ? mapToken(labelCell.text, moneyToken, { scope, budget: true, quote: true }) : null;
-    const closing = isTotal && closesUses(labelCell.text, [...components.values()].map((c) => c.fieldKey)) && table.rows.slice(r + 1).every((x) => !x[roles.amount] || !cellToken(x[roles.amount]!, result.format));
-    let mapped = quoted?.kind === "field" && quoted.quote ? quoted : mapToken(closing || usesTotal ? "total project cost" : isTotal && (/development|project/i.test(labelCell.text) || statedTotal) ? labelCell.text : labelText, moneyToken, { scope, budget: true, usesCategory: !!category && /^(?:uses?|emplois|costs?|couts|budget)$/.test(fold(category)), quote: quoteDocs.has(result) });
-    // Only an unnamed line inherits its category. A named field or an explicit refusal keeps its own meaning.
-    const categoryKey = category && budgetCategory(category);
-    // The line's own words still apply their guards (a fee, interest, an amount to date): the category is read with them.
-    if (mapped.kind === "unmapped" && categoryKey) {
-      const inherited = mapToken(`${FIELD_BY_KEY.get(categoryKey)!.aliases[0]!} - ${labelCell.text}`, moneyToken, { scope, budget: true, quote: quoteDocs.has(result) });
-      if (inherited.kind === "ignored" || (inherited.kind === "field" && inherited.fieldKey === categoryKey)) mapped = inherited;
-    }
+    const closing = isTotal && closesUses(labelCell.text, [...components.values()].map((c) => c.fieldKey)) && table.rows.slice(r + 1).every((x) => !x[roles.amount] || !figureToken(x[roles.amount]!, result.format));
+    let mapped = withCategory(quoted?.kind === "field" && quoted.quote ? quoted : mapToken(closing || usesTotal ? "total project cost" : isTotal && (/development|project/i.test(labelCell.text) || statedTotal) ? labelCell.text : labelText, moneyToken, { scope, budget: true, usesCategory: !!category && /^(?:uses?|emplois|costs?|couts|budget)$/.test(fold(category)), quote: quoteDocs.has(result) }));
     if (mapped.kind !== "field" || FIELD_BY_KEY.get(mapped.fieldKey)?.unit !== "$") {
       const shown: Candidate = {
         region: budgetRegion(amountCell, row),
@@ -2057,15 +2121,12 @@ function fromBudget(table: Table, headerRow: number, roles: BudgetRoles, result:
       // The unread rows are the subtotal's parts only when they add up to it, with the rows already read as its field (those are then not the whole of it); otherwise the subtotal is read alone.
       const parts = lines.filter((l) => l.unitSeen === cand.unitSeen);
       const key = `${mapped.fieldKey}|${cand.unitSeen}`;
-      const read = parts.length > 0 ? components.get(key) : undefined;
+      const read = parts.length > 0 || partialLines ? components.get(key) : undefined;
       const sum = parts.reduce((n, l) => n + l.value, 0) + (read?.sum ?? 0);
-      if (parts.length > 0 && (bare || Math.abs(sum - mapped.value) <= parts.length + (read?.rows.length ?? 0))) for (const l of parts) add(l.value, l.unitSeen, l.ref, l.label);
+      if (parts.length > 0 && !partialLines && (bare || Math.abs(sum - mapped.value) <= parts.length + (read?.rows.length ?? 0))) for (const l of parts) add(l.value, l.unitSeen, l.ref, l.label);
       else {
         for (const l of lines) l.shown.note = NOT_SHOWN_NOTE;
-        if (read) {
-          components.delete(key);
-          for (const r of read.rows) result.other.push({ region: regionAt(result, r.ref, "table:budget"), fieldKey: null, itemKey: null, value: r.value, raw: String(r.value), unitSeen: "$", location: r.ref, context: `${table.name}: ${r.label}`, rule: "table:budget", note: NOT_SHOWN_NOTE });
-        }
+        if (read) setAside(key, NOT_SHOWN_NOTE);
       }
       continue;
     }
@@ -2073,16 +2134,13 @@ function fromBudget(table: Table, headerRow: number, roles: BudgetRoles, result:
     if (mapped.concept) conceptInRun.add(`${mapped.fieldKey}|${cand.unitSeen}`);
     else {
       segment = [];
+      segmentPartial = false;
       started = true;
     }
     add(mapped.value, cand.unitSeen!, amountCell.ref, displayLabel);
   }
-  if (unreadInRun) for (const key of conceptInRun) {
-    const acc = components.get(key);
-    if (!acc || acc.alias) continue;
-    components.delete(key);
-    for (const r of acc.rows) result.other.push({ region: regionAt(result, r.ref, "table:budget"), fieldKey: null, itemKey: null, value: r.value, raw: String(r.value), unitSeen: "$", location: r.ref, context: `${table.name}: ${r.label}`, rule: "table:budget", note: CONCEPT_BESIDE_UNREAD_NOTE });
-  }
+  retractConcepts();
+  for (const key of partial) setAside(key, PARTIAL_BUDGET_NOTE);
   for (const acc of components.values()) {
     result.candidates.push({
       region: { ...regionAt(result, acc.refs, "table:budget"), columnRole: "amount" },
@@ -2102,7 +2160,8 @@ function fromBudget(table: Table, headerRow: number, roles: BudgetRoles, result:
     const comp = t.fieldKey === "stated_total_cost"
       ? { sum: [...components.values()].filter((c) => c.unitSeen === t.unitSeen && FIELD_BY_KEY.get(c.fieldKey)?.group === "budget").reduce((sum, c) => sum + c.sum, 0) }
       : components.get(`${t.fieldKey}|${t.unitSeen}`);
-    const differs = comp && Math.abs(comp.sum - (t.value ?? 0)) > 1;
+    // With a formula line in the table, the sum of the typed lines says nothing about the printed total.
+    const differs = comp && !(formulaLine && t.fieldKey === "stated_total_cost") && Math.abs(comp.sum - (t.value ?? 0)) > 1;
     if (!comp || t.fieldKey === "stated_total_cost" || differs) result.candidates.push({ ...t, ...(differs ? { note: `The printed total does not equal the sum of its lines (${comp.sum.toLocaleString("en-US")})` } : {}) });
   }
 }
@@ -2143,21 +2202,21 @@ function categoryCells(rows: Cell[][], format: DocumentFormat, sheet: string): M
   for (const r of rows) if (revenue(r)) {
     const cells = filledCells(r);
     const label = cells[1]?.text.split(/ - | \/ /)[0] ?? "";
-    if (homeRole(fold(label)) && cells.slice(2).filter(c => cellToken(c, format)).length === 1) out.set(r, cells[0]!);
+    if (homeRole(fold(label)) && cells.slice(2).filter(c => figureToken(c, format)).length === 1) out.set(r, cells[0]!);
   }
   // A real header row (a budget or rent-roll column set) names the columns itself.
   if (rows.some((r) => !revenue(r) && !r.some((c) => c.number !== undefined) && (rentRollRoles(r) || budgetRoles(r)))) return out;
   const pair = (r: Cell[]) => {
     const [a, b, ...rest] = r.filter((c) => c.text || c.number !== undefined);
     const text = (c: Cell | undefined) => c !== undefined && c.number === undefined && /^\p{L}/u.test(c.text) && !isValueText(c, format);
-    return text(a) && text(b) && rest.some((c) => cellToken(c, format)) ? { a: a!, b: b! } : null;
+    return text(a) && text(b) && rest.some((c) => figureToken(c, format)) ? { a: a!, b: b! } : null;
   };
   const found = rows.flatMap((r) => { const p = pair(r); return p ? [{ r, ...p }] : []; });
   // These categories are explicit even on a mixed input sheet with many unrelated row families.
   if (/^(?:budget|base|inputs?|uses|emplois)(?:\b|$)/i.test(sheet)) {
     for (const f of found) if (costCategory(f.a.text) || /^(?:inputs?|assumptions?|hypotheses)$/i.test(fold(f.a.text))) out.set(f.r, f.a);
   }
-  const figures = rows.filter((r) => r.some((c) => cellToken(c, format))).length;
+  const figures = rows.filter((r) => r.some((c) => figureToken(c, format))).length;
   if (!found.length || found.length < 0.6 * figures || (found.length < 3 && !found.every(f => costCategory(f.a.text) || /^(?:inputs?|assumptions?|hypotheses)$/.test(fold(f.a.text))))) return out;
   const key = (c: Cell) => fold(c.text).replace(/\s+/g, " ").trim();
   const cats = new Map<string, number>();
@@ -2200,8 +2259,8 @@ function blockHeading(row: Cell[], next: Cell[] | undefined, scope: Scope, forma
   const c = filled[0];
   if (filled.length !== 1 || !c || c.number !== undefined || !(unitTypesIn(c.text).length > 0 || (/^\p{L}/u.test(c.text) && !REFERENCE_RE.test(fold(c.text)))) || /[.!?:]$/.test(c.text) || c.text.trim().split(/\s+/).length > 8 || scopeIn(c.text) || NOT_HEADING_RE.test(fold(c.text))) return null;
   const label = next?.find((x) => x.text && x.number === undefined);
-  const cell = label && next!.slice(next!.indexOf(label) + 1).find((x) => cellToken(x, format));
-  const t = cell && cellToken(cell, format);
+  const cell = label && next!.slice(next!.indexOf(label) + 1).find((x) => figureToken(x, format));
+  const t = cell && figureToken(cell, format);
   const m = label && t ? mapToken(label.text, t, { scope }) : null;
   return m?.kind === "field" && BLOCK_FIELDS.has(m.fieldKey) && !(m.itemKey && unitTypesIn(m.itemKey).length > 0) ? c.text.trim() : null;
 }
@@ -2209,7 +2268,7 @@ function blockHeading(row: Cell[], next: Cell[] | undefined, scope: Scope, forma
 /** A text cell that is one complete number and nothing else: "7.25%", "900k", "(4,000)", "$1.2M", "1,2 M$". */
 function isValueText(cell: Cell, format: DocumentFormat): boolean {
   if (cell.number !== undefined || !cell.text) return false;
-  const t = cellToken(cell, format);
+  const t = figureToken(cell, format);
   return !!t && !cell.text.slice(0, t.start).trim() && /^[\s)]*$/.test(cell.text.slice(t.end));
 }
 
@@ -2227,7 +2286,7 @@ function valueFirst(row: Cell[], format: DocumentFormat): { label: Cell; value: 
   if (!label) return null;
   const at = row.indexOf(label);
   const value = row.slice(0, at).filter((c) => c.number !== undefined || isValueText(c, format)).pop();
-  if (!value || REFERENCE_RE.test(fold(value.text)) || row.slice(at + 1).some((c) => cellToken(c, format))) return null;
+  if (!value || REFERENCE_RE.test(fold(value.text)) || row.slice(at + 1).some((c) => figureToken(c, format))) return null;
   return { label, value };
 }
 
@@ -2240,7 +2299,7 @@ function isValueFirstSection(rows: Cell[][], format: DocumentFormat): boolean {
     if (!label) continue;
     const vf = valueFirst(row, format);
     if (vf) first++;
-    else if (row.slice(row.indexOf(label) + 1).some((c) => cellToken(c, format))) last++;
+    else if (row.slice(row.indexOf(label) + 1).some((c) => figureToken(c, format))) last++;
   }
   return first >= 2 && first > last;
 }
@@ -2271,7 +2330,7 @@ function isSentenceCell(c: Cell, row: Cell[], format: DocumentFormat): boolean {
 function fromTable(table: Table, result: ExtractionResult, notes: string[] = [], scope?: Scope) {
   const periods = new Map<number, string>();
   const rows = table.rows.map(row => {
-    if (row.every(c => !cellToken(c, result.format))) {
+    if (row.every(c => !figureToken(c, result.format))) {
       row.forEach((c, col) => {
         const words = fold(c.text);
         if (/\b(?:annual(?:ly)?|yearly|annuel(?:le)?s?|monthly|mensuel(?:le)?s?)\b/.test(words)) periods.set(col, c.text);
@@ -2280,7 +2339,7 @@ function fromTable(table: Table, result: ExtractionResult, notes: string[] = [],
       return row;
     }
     const label = row.find(c => PROPERTY_TAX_WORD.test(fold(c.text)));
-    const amount = row.findIndex(c => !!cellToken(c, result.format));
+    const amount = row.findIndex(c => !!figureToken(c, result.format));
     const period = periods.get(amount);
     return label && period ? row.map(c => c === label ? { ...c, text: `${c.text} (${period})` } : c) : row;
   });
@@ -2393,7 +2452,7 @@ function readTable(table0: Table, result: ExtractionResult, notes: string[] = []
     for (const row of section.rows) {
       const cat = catOf.get(row);
       const cells = filledCells(row);
-      const figures = cells.slice(1).filter(c => cellToken(c, result.format));
+      const figures = cells.slice(1).filter(c => figureToken(c, result.format));
       const rollLabel = / - | \/ /.test(cells[0]?.text ?? "") ? cells[0]!.text.split(/ - | \/ /)[0]! : "";
       const budget = !homeRole(fold(rollLabel)) && (cat ? costCategory(cat) : section.costSection) && (cells.length === 2 || (!!cat && figures.length === 1 && cells.indexOf(figures[0]!) > 0 && cells.slice(1).filter(c => c !== figures[0]).every(c => /^(?:note|notes)$/i.test(c.text.trim()) || /\b(?:tax|basis|package)\b/i.test(c.text))));
       const last = parts.at(-1);
@@ -2416,7 +2475,7 @@ function readTable(table0: Table, result: ExtractionResult, notes: string[] = []
     else if (s.categoryBudget) {
       const rows = s.rows.map(row => {
         const cells = filledCells(row);
-        const amount = cells.slice(1).find(c => cellToken(c, result.format));
+        const amount = cells.slice(1).find(c => figureToken(c, result.format));
         return amount ? [cells[0]!, amount, ...cells.slice(1).filter(c => c !== amount)] : cells;
       });
       rows.forEach((row, i) => { const cat = catOf.get(s.rows[i]!); if (cat) catOf.set(row, cat); });
@@ -2425,11 +2484,17 @@ function readTable(table0: Table, result: ExtractionResult, notes: string[] = []
     else {
       // A plain two-column sheet: each row is "label: value". Money rows that name nothing are the lines of the next total or subtotal row.
       let lines: { value: number; ref: string; label: string }[] = [];
+      // A row of formulas or a schedule among them: the typed lines no longer add up to the total below.
+      let linesPartial = false;
+      const endLines = () => { lines = []; linesPartial = false; };
       // The fields read since the last blank row: a bare "Total" closes a uses block that names two budget fields.
       const read = new Set<string>();
       // The item a block heading named, until a blank row or a total row.
       let block = s.item;
       const valueFirstSection = isValueFirstSection(s.rows, result.format);
+      // Whether any row of this section is a total, asked by every two-cell row, so worked out once.
+      let hasTotal: boolean | undefined;
+      const totalInSection = () => (hasTotal ??= s.rows.some((r) => TOTAL_RE.test(labelOf(r, result.format)?.text ?? "")));
       const otherCategory = (cat: string) => [...catOf.values()].some((c) => fold(c) !== fold(cat));
       s.rows.forEach((row0) => {
         const cat = catOf.get(row0);
@@ -2442,7 +2507,7 @@ function readTable(table0: Table, result: ExtractionResult, notes: string[] = []
         // A sentence cell is read as a sentence under the scope and exclusion in force for its row; the other cells of the row read as usual.
         const row = row0.filter((c) => !isSentenceCell(c, row0, result.format));
         for (const c of row0) {
-          if (row.includes(c)) continue;
+          if (row.includes(c) || c.computed || c.repeat) continue;
           const para: Paragraph = { text: c.text.trim(), segs: [{ start: 0, location: c.ref }], scope: s.loanScope ? s.scope : undefined, excluded: s.excluded || catExcluded || row.some((x) => markedNotPart(x.text)) };
           for (const sentence of sentences(para.text)) readSentence(sentence, para, result);
         }
@@ -2463,7 +2528,7 @@ function readTable(table0: Table, result: ExtractionResult, notes: string[] = []
           return;
         }
         const answer = after.find((c) => c.text);
-        const flag = answer ? flagRead(labelCell.text, answer.text) : null;
+        const flag = answer && !answer.computed ? flagRead(labelCell.text, answer.text) : null;
         if (answer && flag) {
           result.candidates.push({ region: regionAt(result, answer.ref, "table:label-value"), fieldKey: flag.fieldKey, itemKey: null, value: flag.value, raw: answer.text, unitSeen: "flag", location: answer.ref, context: `${table.name}: ${labelCell.text} ${answer.text}`.slice(0, 240), rule: "table:label-value" });
           return;
@@ -2473,6 +2538,13 @@ function readTable(table0: Table, result: ExtractionResult, notes: string[] = []
           const m = mapToken(relative ? labelCell.text.replace(BLOCK_RELATIVE_RE, "") : labelCell.text, x, { scope, loanContext, ahead: c.text.slice(0, x.start), after: c.text.slice(x.end), quote: quoteDocs.has(result) });
           return m.kind === "ignored" ? m.reason : m.kind === "field" ? LATER_FIGURE_NOTE : "No field matches this label";
         };
+        // A row of more than 12 figures is a schedule, with a column per month or scenario. It holds no input, so it is neither read nor listed.
+        const schedule = after.filter((c) => figureToken(c, result.format)).length > MAX_ROW_FIGURES;
+        if (schedule) {
+          if (TOTAL_RE.test(labelCell.text)) endLines();
+          else linesPartial = true;
+          return;
+        }
         // Each figure after the one the label used or showed is shown, never read (task 65); a row of years adds none.
         const rest = (from: Cell, note: string | null) => {
           // A unit type's digit ("1-bed", "2 BR") is not a figure.
@@ -2483,6 +2555,17 @@ function readTable(table0: Table, result: ExtractionResult, notes: string[] = []
             result.other.push({ region: regionAt(result, c.ref, "table:label-value"), fieldKey: null, itemKey: null, value: x.value, raw: x.raw, unitSeen: x.unit, location: c.ref, context: rowContext(table.name, cat, row, labelCell, c), rule: "table:label-value", note: own });
           }
         };
+        // A row with no typed figure reads nothing. Its first computed figure is listed when the label names a field, and a computed total still ends the lines above it.
+        if (!after.some((c) => cellToken(c, result.format))) {
+          const cell = after.find((c) => figureToken(c, result.format));
+          const x = cell && figureToken(cell, result.format);
+          if (!cell || !x) return;
+          const note = laterNote(cell, x);
+          if (note === LATER_FIGURE_NOTE) result.other.push({ region: regionAt(result, cell.ref, "table:label-value"), fieldKey: null, itemKey: null, value: x.value, raw: x.raw, unitSeen: x.unit, location: cell.ref, context: rowContext(table.name, cat, row, labelCell, cell), rule: "table:label-value", note: COMPUTED_NOTE });
+          if (TOTAL_RE.test(labelCell.text)) endLines();
+          else if (note === "No field matches this label" && addsToTotal(x)) linesPartial = true;
+          return;
+        }
         // The cell a per-unit budget figure hands the line to (task 68): skipped to, once the cells before it are shown.
         let skipTo: Cell | null = null;
         for (const cell of after) {
@@ -2491,8 +2574,16 @@ function readTable(table0: Table, result: ExtractionResult, notes: string[] = []
           const t = cellToken(cell, result.format);
           if (!t) continue;
           const base = { region: regionAt(result, cell.ref, "table:label-value"), raw: t.raw, location: cell.ref, context: rowContext(table.name, cat, row, labelCell, cell), rule: "table:label-value" };
+          if (t.value === 0) {
+            // A zero (a phase with none of this cost) does not hide the figure beside it.
+            const figureBeside = after.some((c) => { if (c === cell) return false; const x = figureToken(c, result.format); return x && x.value !== null && x.value !== 0 && x.value !== 1 && !isYearToken(x); });
+            if (figureBeside) {
+              result.other.push({ ...base, fieldKey: null, itemKey: null, value: t.value, unitSeen: t.unit, note: ZERO_BESIDE_NOTE });
+              continue;
+            }
+          }
           const commercialMapped = commercialLabel(labelCell.text, t, commercialItem(labelCell.text) ?? (block && commercialItem(block) ? block : commercial), cell.text.slice(t.end));
-          const legacyMapped = mapToken(relative ? labelCell.text.replace(BLOCK_RELATIVE_RE, "") : labelCell.text, t, { numberCell: cell.number !== undefined, budget: /\b(?:water and wastewater)\b/.test(fold(labelCell.text)) && /\b(?:budget|costs?|couts?|uses|emplois)\b/.test(fold(table.name)), scope, loanContext, budgetConcept: filledCells(row).length === 2 && !s.rows.some((r) => TOTAL_RE.test(labelOf(r, result.format)?.text ?? "")), ahead: cell.text.slice(0, t.start), after: cell.text.slice(t.end), quote: quoteDocs.has(result) });
+          const legacyMapped = mapToken(relative ? labelCell.text.replace(BLOCK_RELATIVE_RE, "") : labelCell.text, t, { numberCell: cell.number !== undefined, budget: /\b(?:water and wastewater)\b/.test(fold(labelCell.text)) && /\b(?:budget|costs?|couts?|uses|emplois)\b/.test(fold(table.name)), scope, loanContext, budgetConcept: filledCells(row).length === 2 && !totalInSection(), ahead: cell.text.slice(0, t.start), after: cell.text.slice(t.end), quote: quoteDocs.has(result) });
           let mapped = commercialMapped && !(legacyMapped.kind === "field" && commercialMapped.kind === "field" && legacyMapped.fieldKey === commercialMapped.fieldKey) ? commercialMapped : legacyMapped;
           if (mapped.kind !== "field" && t.value !== null && (t.unit === "$" || t.currency) && closesUses(labelCell.text, read)) mapped = mapToken("total project cost", t, { scope: s.scope });
           if (block && mapped.kind === "field" && BLOCK_FIELDS.has(mapped.fieldKey) && !(mapped.itemKey && unitTypesIn(mapped.itemKey).length > 0)) mapped = { ...mapped, itemKey: block };
@@ -2510,7 +2601,7 @@ function readTable(table0: Table, result: ExtractionResult, notes: string[] = []
             break;
           }
           // A budget or financing figure whose own cell says it is per door is a share, not the line: the next cell for the same line is read instead (task 68).
-          const shareLabel = `${cat ?? ""} ${labelCell.text} ${row.slice(row.indexOf(labelCell) + 1, row.indexOf(cell)).filter((c) => !cellToken(c, result.format)).map((c) => c.text).join(" ")}`;
+          const shareLabel = `${cat ?? ""} ${labelCell.text} ${row.slice(row.indexOf(labelCell) + 1, row.indexOf(cell)).filter((c) => !figureToken(c, result.format)).map((c) => c.text).join(" ")}`;
           const shareField = perUnit(cell.text, t, shareLabel) ? budgetFieldOf(shareLabel.replace(PER_DOOR_LABEL_RE, " ")) : null;
           if ((mapped.kind === "field" && PER_UNIT_FIELDS.has(mapped.fieldKey) && perUnit(cell.text, t, BUDGET_LINES.has(mapped.fieldKey) ? shareLabel : "")) || shareField !== null) {
             result.other.push({ ...base, fieldKey: null, itemKey: null, value: t.value, unitSeen: t.unit, note: PER_UNIT_NOTE });
@@ -2538,15 +2629,15 @@ function readTable(table0: Table, result: ExtractionResult, notes: string[] = []
           if (mapped.kind === "field") read.add(mapped.fieldKey);
           if (TOTAL_RE.test(labelCell.text)) {
             const def = mapped.kind === "field" ? FIELD_BY_KEY.get(mapped.fieldKey) : undefined;
-            if (mapped.kind === "field" && def?.unit === "$" && mapped.fieldKey !== "stated_total_cost" && mapped.fieldKey !== "fixed_opex_annual" && lines.length > 0) {
+            if (mapped.kind === "field" && def?.unit === "$" && mapped.fieldKey !== "stated_total_cost" && mapped.fieldKey !== "fixed_opex_annual" && lines.length > 0 && !linesPartial) {
               const sum = lines.reduce((n, l) => n + l.value, 0);
               if (Math.abs(sum - mapped.value) > 1) {
                 result.candidates.push({ ...base, region: regionAt(result, lines.map((l) => l.ref), "table:budget-sum"), fieldKey: mapped.fieldKey, itemKey: null, value: sum, raw: sum.toString(), unitSeen: withCurrency("$", t.currencyCode), location: lines.map((l) => l.ref).join(", "), context: `${table.name}: ${lines.map((l) => l.label).join(" + ")}`.slice(0, 240), rule: "table:budget-sum" });
               }
             }
-            lines = [];
-          } else if (mapped.kind === "unmapped" && t.value !== null && (t.unit === "$" || t.currency || (t.unit === null && Math.abs(t.value) >= 1000 && !(t.value >= 1900 && t.value <= 2100)))) {
-            lines.push({ value: t.value, ref: cell.ref, label: labelCell.text });
+            endLines();
+          } else if (mapped.kind === "unmapped" && addsToTotal(t)) {
+            lines.push({ value: t.value!, ref: cell.ref, label: labelCell.text });
           }
           break;
         }
@@ -2593,6 +2684,15 @@ function comparisonHeading(lines: string[], format: DocumentFormat): string {
   return heading.split(/\s+/).length <= 10 && /\b(comparisons?|comparables?|comps?|survey|neighbou?rs?|voisins?|anciens? locataires?)\b/i.test(heading) && !endsSentence(heading) ? heading : "";
 }
 
+/** "3 480" in an English document is two numbers, not one with a space group: split what the tokenizer refused. */
+function splitTokens(text: string, format: DocumentFormat): NumberToken[] {
+  return tokenize(text, format).flatMap((t) =>
+    t.value === null && /\s/.test(t.raw)
+      ? [...t.raw.matchAll(/\S+/g)].flatMap((w) => tokenize(w[0], format).map((x) => ({ ...x, start: t.start + w.index! + x.start, end: t.start + w.index! + x.end })))
+      : [t],
+  );
+}
+
 /**
  * Tables written as lines: a header line with no numbers whose words give a rent-roll or budget column set,
  * then one line per row. A row's values are the last run of consecutive numbers, as many as the table has numeric
@@ -2600,7 +2700,7 @@ function comparisonHeading(lines: string[], format: DocumentFormat): string {
  * Each table is rebuilt as a Table, so the same finders read it as read a spreadsheet's. Returns the table with
  * the lines after it (where a note may say what the rent column is per), and the lines it consumed.
  */
-function textTables(doc: NormalizedDocument, format: DocumentFormat, scopes: (Scope | undefined)[], excluded: boolean[]): { tables: { table: Table; notes: string[]; scope: Scope | undefined }[]; used: Set<number> } {
+function textTables(doc: NormalizedDocument, format: DocumentFormat, scopes: (Scope | undefined)[], excluded: boolean[]): { tables: { table: Table; notes: string[]; scope: Scope | undefined }[]; used: Set<number>; suiteLines: Set<number>; suiteOther: Omit<Candidate, "region">[] } {
   const out: { table: Table; notes: string[]; scope: Scope | undefined }[] = [];
   const used = new Set<number>();
   const lines = doc.lines;
@@ -2667,12 +2767,7 @@ function textTables(doc: NormalizedDocument, format: DocumentFormat, scopes: (Sc
       if (direct && direct.length === cols.length) {
         rows.push(direct); used.add(j); continue;
       }
-      // "3 480" in an English document is two numbers, not one with a space group: split what the tokenizer refused.
-      const tokens = tokenize(line.text, format).flatMap((t) =>
-        t.value === null && /\s/.test(t.raw)
-          ? [...t.raw.matchAll(/\S+/g)].flatMap((w) => tokenize(w[0], format).map((x) => ({ ...x, start: t.start + w.index! + x.start, end: t.start + w.index! + x.end })))
-          : [t],
-      );
+      const tokens = splitTokens(line.text, format);
       // The last maximal run of numbers separated only by spaces, when it is exactly as long as the numeric columns.
       const runs: NumberToken[][] = [];
       for (const t of tokens) {
@@ -2683,6 +2778,8 @@ function textTables(doc: NormalizedDocument, format: DocumentFormat, scopes: (Sc
       const run = runs.filter((x) => x.length === numeric.length).pop();
       if (!run) break;
       const itemText = line.text.slice(0, run[0]!.start).trim();
+      // A suite's line with figures still in its name: the numbers at the end (a date's year or day) are not the table's columns.
+      if (kind === "rent") { const suite = suiteLine(itemText); if (suite?.type && /\d/.test(suite.tail)) break; }
       // A budget amount is money, so a page number or a count in a footer is not a line.
       if ((!/\p{L}/u.test(itemText) && !wholeUnitType(itemText)) || (kind === "budget" && !(run[0]!.currency || (run[0]!.unit === null && Math.abs(run[0]!.value ?? 0) >= 1000)))) break;
       const trailing = line.text.slice(run[run.length - 1]!.end).trim();
@@ -2700,7 +2797,218 @@ function textTables(doc: NormalizedDocument, format: DocumentFormat, scopes: (Sc
     out.push({ table: { name: `${comparisonHeading(lines.slice(0, i).map(l => l.text), format)} Table at ${head.location}`, rows: [cols, ...rows] }, notes: lines.slice(j, j + 4).map((l) => l.text), scope: scopes[i] });
     i = j - 1;
   }
-  return { tables: out, used };
+  return { tables: out, used, ...plainSuiteRolls(doc, format, scopes, excluded, used, out) };
+}
+
+// ---- A suite-by-suite roll written as plain lines (card 193) ---------------------------------------------------------
+const SUITE_LINE_NOTE = "A suite's line in a rent roll; its other figures are shown, not read";
+const SUITE_LINE_RE = /^(?:\*{1,2}\s*)?(\d{1,4}[A-Za-z]?|[A-Za-z]{1,2}-?\d{1,4})(?:\s*\*{1,2})?(?:\s*\([^)]{1,24}\))?(?:\s+(.*))?$/;
+const SUITE_WORD_RE = /^(?:suite|apt|apartment|app|logement|unit)$/;
+const COUNT_TOTAL_RE = /^\d+\s+(?:units|suites|logements|appartements)\b/;
+// Narrower than ROLL_TOTAL_RE: "Total operating expenses" and "All suites are rented" are not the roll's total.
+const SUITE_TOTAL_RE = /^(?:(?:grand|sub|sous)[- ]*)?totals?\s*(?:[:\u2013\u2014-]\s*)?(?:$|[$(]|\d[\d\s.,]*(?:$|[$(]|(?:units?|suites?|logements?|app?art(?:e)?ments?|sf|sq|pi2|m2)\b)|(?:(?:monthly|annual|mensuel(?:le)?s?|annuel(?:le)?s?)\s+)?(?:d(?:es?|u)\s+)?(?:rents?|loyers?|units?|suites?|logements?|app?art(?:e)?ments?)\b)/;
+// Columns named before the rent on the header line: one holding money could take the rent's place in a row; one holding other numbers stands before it.
+const MONEY_COLUMN_RE = /\b(?:deposits?|depots?|parking|stationnement|stalls?|storage|pets?|charges?|fees?|frais)\b/;
+const NUMBER_COLUMN_RE = /\b(?:size|sf|sq|sqft|square|feet|ft|area|superficie|pi2|m2|baths?|bathrooms?|beds?|bedrooms?|floor|etage)\b/;
+// Words before the rent column that hold no figures, or only qualify the rent. A plain number has no $ to tell a rent from a size, and any column adds up to its own total, so anything else stops a plain read.
+const NO_FIGURES_RE = /\b(?:suites?|units?|apt|apartments?|app|appartements?|logements?|no|number|numero|types?|location|description|emplacement|tenants?|names?|locataires?|noms?|occupants?|status|statut|monthly|mensuel(?:le)?|current|actual|actuel(?:le)?|contract|in[- ]place|base|gross|net)\b/g;
+// A plain figure this small is a fragment or another column, even when the total happens to agree.
+const MIN_PLAIN_RENT = 100;
+const NOT_RENT_COLUMN_RE = /rent roll|rent\s?\/\s?sf|rent psf|rent per sf|rent increase|last rent|total rent|market rent|loyer du marche/g;
+
+/** A line's text for matching only: a recognized scan leaves stray pipes. */
+const suiteText = (text: string) => text.replace(/\|/g, " ").replace(/\s+/g, " ").trim();
+
+/** A type at the start of the text: `wholeUnitType` on its first words, or that type with "+ den" or "Jr.", or "N 1/2". The rest is the suite's figures. */
+function leadingSuiteType(text: string): { type: string; tail: string } | null {
+  const jr = /^jr\.?\s+/i.exec(text)?.[0] ?? "";
+  const s = text.slice(jr.length);
+  const half = /^(\d) 1\/2(?=\s|$)/.exec(s);
+  let type = half && wholeUnitType(`${half[1]}½`) ? `${half[1]}½` : null;
+  let at = half?.[0].length ?? 0;
+  if (!type) {
+    // The longest first, so "bachelor suite" is not read as "bachelor".
+    for (const w of [...s.matchAll(/\S+/g)].slice(0, 4).reverse()) {
+      if (!wholeUnitType(s.slice(0, w.index + w[0].length))) continue;
+      at = w.index + w[0].length;
+      type = s.slice(0, at);
+      break;
+    }
+  }
+  if (!type) return null;
+  const den = /^\s*\+\s*den\b/i.exec(s.slice(at))?.[0];
+  return { type: `${jr ? "Jr. " : ""}${type}${den ? " + den" : ""}`, tail: s.slice(at + (den?.length ?? 0)) };
+}
+
+/** A line that opens with a suite id; `type` is null when no known type follows the id. */
+function suiteLine(text: string): { id: string; rest: string; type: string | null; tail: string } | null {
+  const m = SUITE_LINE_RE.exec(suiteText(text));
+  if (!m) return null;
+  const rest = m[2] ?? "";
+  const found = leadingSuiteType(rest);
+  return { id: m[1]!, rest, type: found?.type ?? null, tail: found?.tail ?? rest };
+}
+
+/** A header naming a suite column and then a type column. A suite word right before "type" names the type column ("Unit Type"); plural "units" is a count column. */
+function isSuiteHeader(text: string): boolean {
+  const clean = suiteText(text);
+  if (!clean || /[.:;!?,]$/.test(clean)) return false;
+  const words = fold(clean).split(" ").map((w) => w.replace(/\.$/, ""));
+  if (words.length > 24) return false;
+  const at = words.findIndex((w, k) => SUITE_WORD_RE.test(w) && words[k + 1] !== "type");
+  return at >= 0 && words.indexOf("type", at + 1) > at;
+}
+
+const isSuiteTotal = (text: string) => SUITE_TOTAL_RE.test(fold(suiteText(text))) || COUNT_TOTAL_RE.test(fold(suiteText(text)));
+
+/**
+ * A second pass over the lines no other table took, for a roll with one line per suite: a suite's number is never a count.
+ * Its suites become a table for `fromRentRoll`, which counts them by type. Its other figures come back to be shown.
+ * `excluded` is updated: a roll's own header under a "not part of the deal" heading looks like the next heading, and must not end that section.
+ */
+function plainSuiteRolls(doc: NormalizedDocument, format: DocumentFormat, scopes: (Scope | undefined)[], excluded: boolean[], used: Set<number>, out: { table: Table; notes: string[]; scope: Scope | undefined }[]): { suiteLines: Set<number>; suiteOther: Omit<Candidate, "region">[] } {
+  const lines = doc.lines;
+  const suiteLines = new Set<number>();
+  const suiteOther: Omit<Candidate, "region">[] = [];
+  const open = (k: number) => k < lines.length && !excluded[k] && !used.has(k);
+  const parsed = (k: number) => (open(k) ? suiteLine(lines[k]!.text) : null);
+  const show = (t: NumberToken, k: number, note: string) => {
+    suiteOther.push({ fieldKey: null, itemKey: null, value: t.value, raw: t.raw.trim(), unitSeen: t.unit, location: lines[k]!.location, context: suiteText(lines[k]!.text).slice(0, 240), rule: "line:suite-row", note });
+  };
+
+  /** No header: three or more suite lines in a row, ids rising, a type repeating. A summary by type never repeats a type, and its counts do not climb. */
+  const startsHeaderless = (start: number) => {
+    const seen: { id: string; type: string }[] = [];
+    for (let k = start; k < lines.length; k++) {
+      if (!lines[k]!.text.trim()) continue;
+      const l = parsed(k);
+      if (!l?.type) break;
+      const last = seen.at(-1);
+      if (last && last.id.toUpperCase().localeCompare(l.id.toUpperCase(), undefined, { numeric: true }) >= 0) break;
+      seen.push({ id: l.id, type: canonicalItem(l.type) });
+    }
+    return seen.length >= 3 && new Set(seen.map((x) => x.type)).size < seen.length;
+  };
+
+  /**
+   * How the header places the one current rent column; null when rents cannot be read. The rent word must be on the header line itself:
+   * on a wrapped line above or below, the order of the columns is unknown. `numberBefore`: a column of other numbers stands before the rent.
+   * `plainFirst`: nothing before the rent can hold a number, so a row's first plain number is its rent.
+   */
+  const rentColumn = (header: number): { numberBefore: boolean; plainFirst: boolean } | null => {
+    const zone = [lines[header]!.text];
+    for (const step of [-1, 1]) {
+      let taken = 0;
+      for (let k = header + step; taken < 2 && k >= 0 && k < lines.length; k += step) {
+        if (!lines[k]!.text.trim()) continue;
+        if (excluded[k] || suiteLine(lines[k]!.text)?.type) break;
+        zone.push(lines[k]!.text);
+        taken++;
+      }
+    }
+    const rentWord = /\b(?:rent|loyer)s?\b/g;
+    const words = fold(zone.join(" ")).replace(NOT_RENT_COLUMN_RE, " ");
+    // The table's rent column is read by the month, so a roll that states a yearly rent is shown, not read.
+    if ((words.match(rentWord) ?? []).length !== 1 || ANNUAL_RE.test(words)) return null;
+    const own = fold(suiteText(lines[header]!.text)).replace(NOT_RENT_COLUMN_RE, " ").replace(/²/g, "2");
+    const at = own.search(rentWord);
+    if (at < 0) return null;
+    const before = own.slice(0, at);
+    if (MONEY_COLUMN_RE.test(before)) return null;
+    return { numberBefore: NUMBER_COLUMN_RE.test(before), plainFirst: !before.replace(NO_FIGURES_RE, " ").replace(/[^a-z0-9]+/g, " ").trim() };
+  };
+
+  for (let i = 0; i < lines.length; i++) {
+    if (!open(i) || !lines[i]!.text.trim()) continue;
+    const header = isSuiteHeader(lines[i]!.text) ? i : null;
+    let first = -1;
+    if (header !== null) {
+      for (let k = i + 1; k <= i + 6 && open(k) && !isSuiteTotal(lines[k]!.text); k++) {
+        if (parsed(k)?.type) { first = k; break; }
+      }
+    } else if (startsHeaderless(i)) first = i;
+    if (first < 0) continue;
+
+    const rows: { at: number; id: string; type: string; tail: string }[] = [];
+    const strays: number[] = [];
+    let pending: number[] = [];
+    let total = -1;
+    let misses = 0;
+    for (let k = first; open(k); k++) {
+      if (!lines[k]!.text.trim()) continue;
+      if (isSuiteTotal(lines[k]!.text)) { total = k; break; }
+      const l = suiteLine(lines[k]!.text);
+      if (l?.type) {
+        rows.push({ at: k, id: l.id, type: l.type, tail: l.tail });
+        strays.push(...pending);
+        pending = [];
+        misses = 0;
+        continue;
+      }
+      // A suite id with no known type inside the run is a suite Agir cannot name; one after the last suite may be anything, and stays with the prose reader.
+      if (l) pending.push(k);
+      if (++misses > 6) break;
+    }
+    if (total >= 0) strays.push(...pending);
+    const last = total >= 0 ? total : rows.at(-1)!.at;
+
+    // The line above the run may be the roll's own column line ("Unit Type Rent"), which looks like a heading and so ended a section marked not part of the deal.
+    let columns = header ?? first - 1;
+    while (header === null && columns > 0 && !lines[columns]!.text.trim()) columns--;
+    if (excluded[columns - 1] && (header !== null || /\btype\b/i.test(lines[columns]!.text))) {
+      for (let k = columns; k <= last; k++) excluded[k] = true;
+      i = last;
+      continue;
+    }
+
+    const figures = new Map(rows.map((r) => [r.at, splitTokens(r.tail, format)]));
+    const totalTokens = total >= 0 ? splitTokens(suiteText(lines[total]!.text), format) : [];
+    let rents = new Map<number, NumberToken>();
+    const column = header !== null ? rentColumn(header) : null;
+    if (column) {
+      // A row's money rent is its first $ figure, unless a plain number stands before it that the header does not account for.
+      const moneyRent = (at: number) => {
+        const tokens = figures.get(at)!;
+        const k = tokens.findIndex((t) => t.currency);
+        return k >= 0 && (k === 0 || column.numberBefore) ? tokens[k] : undefined;
+      };
+      const money = rows.filter((r) => moneyRent(r.at)).length * 2 > rows.length;
+      for (const r of rows) {
+        const t = money ? moneyRent(r.at) : total >= 0 && column.plainFirst ? figures.get(r.at)![0] : undefined;
+        if (t && t.value !== null && (money || t.value >= MIN_PLAIN_RENT)) rents.set(r.at, t);
+      }
+      if (total >= 0) {
+        const sum = [...rents.values()].reduce((n, t) => n + t.value!, 0);
+        if (!totalTokens.some((t) => t.value !== null && t.unit !== "units" && Math.abs(t.value - sum) <= 1)) rents = new Map();
+      }
+    }
+
+    const ref = lines[header ?? first]!.location;
+    const table: Table = {
+      name: `${comparisonHeading(lines.slice(0, header ?? first).map((l) => l.text), format)} Table at ${ref}`,
+      rows: [
+        ["Suite", "Type", "Rent ($)"].map((text) => ({ text, ref })),
+        ...rows.map((r) => {
+          const rent = rents.get(r.at);
+          return [r.id, r.type, rent ? rent.raw.trim() : ""].map((text) => ({ text, ref: lines[r.at]!.location }));
+        }),
+      ],
+    };
+    out.push({ table, notes: [], scope: scopes[header ?? first] });
+
+    for (const r of rows) for (const t of figures.get(r.at)!) if (t !== rents.get(r.at)) show(t, r.at, SUITE_LINE_NOTE);
+    for (const k of strays) for (const t of splitTokens(suiteLine(lines[k]!.text)!.rest, format)) show(t, k, SUITE_LINE_NOTE);
+    for (const t of totalTokens) {
+      const differs = t.unit === "units" && t.value !== null && t.value !== rows.length;
+      show(t, total, differs ? `The roll states ${t.value} units but ${rows.length} suites were counted; check the counts by type` : ROLL_SUMMARY_NOTE);
+    }
+    for (const k of [...(header !== null ? [header] : []), ...rows.map((r) => r.at), ...strays, ...(total >= 0 ? [total] : [])]) {
+      used.add(k);
+      suiteLines.add(k);
+    }
+    i = last;
+  }
+  return { suiteLines, suiteOther };
 }
 
 /** A text with every figure that lies wholly inside a struck range taken out; each is shown with `other`, never read. */
@@ -2817,11 +3125,16 @@ export function declaredScale(doc: NormalizedDocument, format: DocumentFormat, l
 // A label states a scale only as a marker: in brackets, after "in" or "en", or with a dollar sign. A bare "Thousand" or "mille" is a word of a figure written in words.
 const LABEL_MARKER_RE = /\([^()]*\)|(?:\b(?:in|en)\s+|\$\s?)(?:thousands?|millions?|milliers?)\b|\$\s?['’]?000s?\b|\b000s?\s?\$|['’]000s?\b|\$\s?mm\b|(?<!\d\s?)(?:\$\s?[mk]\b|\b[mk]\$)/g;
 
+const labelRuling = (label: string) => rulingOf([...fold(label).matchAll(LABEL_MARKER_RE)].flatMap((m) => statedScales(m[0])));
+
 /** The money scale a figure's own label states ("Required mortgage ($M)", "Land (in thousands)"), when it states exactly one. */
 export function labelScale(label: string): { factor: number } | null {
-  const rule = rulingOf([...fold(label).matchAll(LABEL_MARKER_RE)].flatMap((m) => statedScales(m[0])));
+  const rule = labelRuling(label);
   return rule && "factor" in rule ? rule : null;
 }
+
+/** Whether a reader's note speaks of a money scale, clearly or not. */
+export const noteStatesScale = (note: string) => labelRuling(note) !== null;
 
 export function statedScaleUnit(factor: number): string {
   return `$ (stated in ${factor === 1e3 ? "thousands" : "millions"}; × ${factor.toLocaleString("en-US")})`;
@@ -3043,8 +3356,11 @@ function dealFigures(doc: NormalizedDocument, result: ExtractionResult) {
 }
 
 /** Every candidate value in one document. Deterministic: no model is consulted. */
-export function extractCandidates(doc0: NormalizedDocument, options?: { role?: "deal source" | "evidence" | "context" }): ExtractionResult {
+export function extractCandidates(whole: NormalizedDocument, options?: { role?: "deal source" | "evidence" | "context" }): ExtractionResult {
+  const { doc: doc0, cut } = boundedForRules(whole);
   const result: ExtractionResult = { format: detectFormat(doc0.fullText), candidates: [], other: [], notes: [...(doc0.notes ?? [])] };
+  const work = { spent: 0, over: false };
+  ruleWork.set(result, work);
   const regions = new Map<string, Partial<Region>>();
   documentRegions.set(result, { regions, tableSource: doc0.kind === "xlsx" || doc0.kind === "csv" ? "sheet" : "table" });
   for (const table of doc0.tables) tableRegions(table, result);
@@ -3058,6 +3374,7 @@ export function extractCandidates(doc0: NormalizedDocument, options?: { role?: "
   const scopes = lineScopes(doc, result.format, rankIn(doc), regions);
   const excluded = excludedLines(doc, result.format);
   const text = textTables(doc, result.format, scopes, excluded);
+  for (const o of text.suiteOther) result.other.push({ region: regionAt(result, o.location, o.rule), ...o });
   let rentHeading: string | null = null;
   const lineIndex = new Map(doc.lines.map((l, i) => [l.location, i]));
   for (const para of paragraphs(doc, text.used, scopes, excluded)) {
@@ -3093,9 +3410,11 @@ export function extractCandidates(doc0: NormalizedDocument, options?: { role?: "
       if (counts.length > 0 && counts.every((c) => c.fieldKey === "unit_count")) rentHeading = item;
     } else { result.candidates.splice(before[0]!); result.other.splice(before[1]!); }
   }
+  let tableRefs: Set<string> | undefined;
+  const inTable = (ref: string | undefined) => (tableRefs ??= new Set(text.tables.flatMap((t) => t.table.rows.flatMap((r) => r.map((c) => c.ref))))).has(ref as string);
   doc.lines.forEach((l, i) => {
     if (!excluded[i] && !text.used.has(i)) {
-      const row = l.text.includes("|") || text.tables.some((t) => t.table.rows.some((r) => r.some((c) => c.ref === doc.lines[i - 1]?.location))) ? null : flatRollRow(l.text, l.location);
+      const row = l.text.includes("|") || inTable(doc.lines[i - 1]?.location) ? null : flatRollRow(l.text, l.location);
       if (row && (wholeUnitType(row[0]!.text) || /^(row homes?|townhouses?|duplex)$/i.test(row[0]!.text)) && !NON_ROLL_RE.test(fold(row[0]!.text))) {
         fromRentRoll({ name: `Table at ${l.location}`, rows: [row] }, -1, { item: [0], units: 1, rent: 2, rentBasis: "monthly", psfHeader: false, areaM2: false, rentPerM2: false, areaTotal: false }, result);
         text.used.add(i);
@@ -3133,7 +3452,7 @@ export function extractCandidates(doc0: NormalizedDocument, options?: { role?: "
     if (!markedNotPart(fold(t.name).replace(new RegExp(named, "g"), " "))) for (const o of result.other.slice(beforeOther)) if (o.note === NOT_PART_NOTE) o.note = note;
     result.candidates.splice(before).forEach((c) => result.other.push({ ...c, fieldKey: null, itemKey: null, note }));
   }
-  pairedProseRents(doc, result, excluded);
+  pairedProseRents(doc, result, excluded, text.suiteLines);
   commercialLines(doc, result, text.used, excluded);
   // Apply ownership to every revenue path, including prose, labelled rows and tables.
   result.candidates = result.candidates.filter((c) => {
@@ -3195,6 +3514,7 @@ export function extractCandidates(doc0: NormalizedDocument, options?: { role?: "
     seen.add(k);
     return true;
   });
+  if (cut || work.over) result.notes.push(RULE_LIMIT_NOTE);
   return result;
 }
 

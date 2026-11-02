@@ -1,5 +1,8 @@
 import { describe, expect, test } from "vitest";
-import { s3Store, sha256Hex } from "@agir/db";
+import { mkdtemp, rm } from "node:fs/promises";
+import { tmpdir } from "node:os";
+import { join } from "node:path";
+import { fileStore, s3Store, sha256Hex } from "@agir/db";
 
 // A fake S3: the SDK's send replaced by a function over a map. No network.
 function fakeS3() {
@@ -14,6 +17,7 @@ function fakeS3() {
         objects.set(id, new Uint8Array(cmd.input.Body!));
         return {};
       }
+      if (command === "DeleteObjectCommand") { objects.delete(id); return {}; }
       const found = objects.get(id);
       if (!found) throw Object.assign(new Error("not found"), { name: command === "HeadObjectCommand" ? "NotFound" : "NoSuchKey", $metadata: { httpStatusCode: 404 } });
       if (command === "HeadObjectCommand") return { ContentLength: found.byteLength };
@@ -74,4 +78,21 @@ describe("s3Store", () => {
     const store = s3Store({ bucket: "agir", region: "ca-central-1", client });
     await expect(store.put(bytes)).rejects.toThrow("denied");
   });
+});
+
+for (const kind of ["file", "s3"]) test(`${kind} OCR sidecar round trip and deletion`, async () => {
+  const root = await mkdtemp(join(tmpdir(), "agir-ocr-store-"));
+  try {
+    const store = kind === "file" ? fileStore(root) : s3Store({ bucket: "agir", prefix: "test/", region: "ca-central-1", client: fakeS3().client });
+    const { key } = await store.put(bytes);
+    expect(await store.getOcr(key)).toBeNull();
+    await store.putOcr(key, bytes);
+    expect(await store.getOcr(key)).toEqual(bytes);
+    await store.delete(key);
+    expect(await store.getOcr(key)).toBeNull();
+    await expect(store.get(key)).rejects.toThrow();
+    await store.delete(key);
+    await expect(store.getOcr("../bad")).rejects.toThrow("Invalid storage key");
+    await expect(store.putOcr("../bad", bytes)).rejects.toThrow("Invalid storage key");
+  } finally { await rm(root, { recursive: true, force: true }); }
 });

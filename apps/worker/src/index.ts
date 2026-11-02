@@ -11,7 +11,7 @@ import { FIELDS, FIELD_BY_KEY, runPolicy, type Currency, type Policy, type Engin
 import { itemFold } from "@agir/numbers";
 import { renderArtifact, RendererUnavailableError, type ArtifactInput } from "@agir/artifacts";
 import { sha256Hex, type BlobStore, type Db } from "@agir/db";
-import { AI_AMBIGUOUS_NOTE, AI_LOW_CONFIDENCE_NOTE, applyLabels, applySuggestions, chooseByArithmetic, checkArithmetic, consolidate, extractCandidates, figureOrder, kindOf, labelPhrase, redactText, labelUnit, offerable, offeredIds, parseDocument, ocrPdf, REMEMBERED_NOTE, withoutLabelled, type SourcedCandidate } from "@agir/extraction";
+import { AI_AMBIGUOUS_NOTE, AI_LOW_CONFIDENCE_NOTE, applyLabels, applySuggestions, chooseByArithmetic, checkArithmetic, consolidate, extractCandidates, figureOrder, RULE_LIMIT_NOTE, kindOf, labelPhrase, redactText, labelUnit, offerable, offeredIds, parseDocument, ocrPdf, ocrImage, UnsupportedDocumentError, MAX_OCR_PAGES, parseSavedOcr, serializeOcr, mergeOcr, isOcrLocation, REMEMBERED_NOTE, withoutLabelled, type SourcedCandidate } from "@agir/extraction";
 
 export const MAX_UPLOAD_BYTES = 75 * 1024 * 1024;
 
@@ -25,7 +25,7 @@ export type SuggestRequest = {
 export type SuggestReply = { model: string; stop_reason: string | null; text: string };
 export type SuggestionProvider = (request: SuggestRequest) => Promise<SuggestReply>;
 
-export type WorkerDeps = { db: Db; store: BlobStore; log?: (event: Record<string, unknown>) => void; suggest?: SuggestionProvider; read?: ReaderProvider };
+export type WorkerDeps = { db: Db; store: BlobStore; log?: (event: Record<string, unknown>) => void; suggest?: SuggestionProvider; read?: ReaderProvider; ocr?: typeof ocrPdf; leaseRenewMs?: number };
 
 const SUGGEST_SYSTEM = `You label figures that a document reader could not label. For each figure, choose one catalog key, or "ignore".
 Never change, compute, sum or convert a value. Return only ids and keys.
@@ -39,6 +39,8 @@ const SUGGEST_SCHEMA = {
   } } },
 };
 const SUGGEST_BATCH = 100;
+/** At most this many figures are offered per document, the first ones in it. Each batch is a paid call, and one strange file must not cost hundreds of them. */
+const MAX_SUGGESTED = 1000;
 
 /** The real call, used only when ANTHROPIC_API_KEY is set (the SDK reads it). */
 const anthropicProvider: SuggestionProvider = async (request) => {
@@ -63,7 +65,7 @@ async function suggestLabels(deps: WorkerDeps, workspaceId: string, offered: Sou
   const figures = offered.flatMap((c, i) => {
     const context = redactText(c.context).text;
     return redactText(c.raw).spans.length || (c.context.includes(c.raw) && !context.includes(c.raw)) ? [] : [{ id: ids[i]!, raw: c.raw, value: c.value, unitSeen: c.unitSeen, location: c.location, context }];
-  });
+  }).slice(0, MAX_SUGGESTED);
   figures.sort((a, b) => (a.id < b.id ? -1 : a.id > b.id ? 1 : 0));
   const batches: (typeof figures)[] = [];
   for (let i = 0; i < figures.length; i += SUGGEST_BATCH) batches.push(figures.slice(i, i + SUGGEST_BATCH));
@@ -104,6 +106,12 @@ type Job = { id: number; kind: string; payload: Record<string, string>; attempts
 
 function sniff(kind: string, bytes: Uint8Array): string | null {
   const head = new TextDecoder("latin1").decode(bytes.slice(0, 8));
+  if (kind === "image" && !(
+    [0x89, 0x50, 0x4e, 0x47, 0x0d, 0x0a, 0x1a, 0x0a].every((x, i) => bytes[i] === x) ||
+    (bytes[0] === 0xff && bytes[1] === 0xd8 && bytes[2] === 0xff) ||
+    (bytes[0] === 73 && bytes[1] === 73 && bytes[2] === 42 && bytes[3] === 0) ||
+    (bytes[0] === 77 && bytes[1] === 77 && bytes[2] === 0 && bytes[3] === 42)
+  )) return "The file does not start like an image";
   if (kind === "pdf" && !head.startsWith("%PDF-")) return "The file does not start like a PDF";
   if ((kind === "xlsx" || kind === "docx") && !head.startsWith("PK\u0003\u0004")) return `The file is not an Office ${kind.toUpperCase()} package`;
   if (kind === "csv" || kind === "txt") {
@@ -130,6 +138,11 @@ async function setStage(db: Db, id: string, stage: string, detail: string | null
   );
 }
 
+/** A final-stage file may have been the last thing preventing a deal reading. */
+async function queueUnreadReading(db: Db, documentId: string) {
+  await db.query(`insert into jobs(kind,payload) select 'read_deal', jsonb_build_object('deal_id',deal_id::text,'only_unread','true') from documents where id=$1`, [documentId]);
+}
+
 async function verifyDocument(deps: WorkerDeps, documentId: string) {
   const { db, store } = deps;
   const [d] = await db.query<{ id: string; deal_id: string; workspace_id: string; name: string; kind: string; size_bytes: number; sha256: string; storage_key: string }>(
@@ -141,6 +154,7 @@ async function verifyDocument(deps: WorkerDeps, documentId: string) {
   const bytes = await store.get(d.storage_key);
   const reject = async (why: string) => {
     await setStage(db, d.id, "rejected", why);
+    await queueUnreadReading(db, d.id);
     await audit(db, d.workspace_id, d.deal_id, "document.rejected", "document", d.id, { reason: why });
   };
   if (bytes.byteLength !== Number(d.size_bytes)) return reject("The stored file does not match the size that was uploaded");
@@ -169,26 +183,75 @@ async function extractDocument(deps: WorkerDeps, documentId: string) {
     if (!kindOf(d.name)) throw new Error("This file type cannot be read");
     parsed = await parseDocument(bytes, d.name);
   } catch (e) {
-    await setStage(db, d.id, "read_failed", `Agir could not read this file: ${(e as Error).message.split("\n")[0]}`);
+    await setStage(db, d.id, "read_failed", (e as Error).name === "PasswordException" ? "This PDF is protected by a password. Remove the password and upload it again." : e instanceof UnsupportedDocumentError ? e.message : `Agir could not read this file: ${(e as Error).message.split("\n")[0]}`);
+    await queueUnreadReading(db, d.id);
     return;
   }
+  let stageDetail: string | null = null;
   if (parsed.needsOcr) {
-    const unavailable = "This PDF is scanned pages with no text layer. Agir does not run OCR yet: enter its values by hand, or upload a text PDF.";
-    try {
-      const result = await ocrPdf(bytes);
-      if (!result.lines.length) {
-        await setStage(db, d.id, "read_failed", unavailable, { page_count: parsed.pageCount, needs_ocr: true });
-        return;
-      }
-      parsed = { ...parsed, ...result, fullText: result.lines.map((l) => l.text).join("\n") };
-    } catch (e) {
-      const message = (e as Error).message;
-      await setStage(db, d.id, "read_failed", message === "OCR is not available on this machine" ? unavailable : message, { page_count: parsed.pageCount, needs_ocr: true });
+    const picturePages = parsed.ocrPages!;
+    const whole = picturePages.length === parsed.pageCount;
+    const image = parsed.kind === "image";
+    const unavailable = image ? "This file is a picture, and OCR is not available on this machine. Enter its values by hand, or upload a text PDF." : "This PDF is scanned pages with no text layer, and OCR is not available on this machine. Enter its values by hand, or upload a text PDF.";
+    const noText = image ? "Agir found no readable text in this picture. Enter its values by hand, or upload a clearer copy." : "Agir found no readable text on the scanned pages of this PDF. Enter its values by hand, or upload a clearer copy.";
+    if (whole && picturePages.length > MAX_OCR_PAGES) {
+      await setStage(db, d.id, "read_failed", "This scanned PDF has more than 50 pages; Agir reads scans of up to 50 pages. Split it, or enter its values by hand.", { page_count: parsed.pageCount, needs_ocr: true });
+      await queueUnreadReading(db, d.id);
       return;
     }
+    let saved = parseSavedOcr(await store.getOcr(d.storage_key));
+    let engineMissing = false;
+    if (!saved || saved.failed.length) {
+      try {
+        const result = await (deps.ocr ?? (image ? ocrImage : ocrPdf))(bytes, saved ? saved.failed : picturePages.slice(0, MAX_OCR_PAGES));
+        if (saved) {
+          const added = result.pages.filter(page => !saved!.pages.some(existing => existing.page === page.page));
+          const changed = added.length > 0 || JSON.stringify(saved.failed) !== JSON.stringify(result.failed);
+          saved = { ...saved, pages: [...saved.pages, ...added].sort((a, b) => a.page - b.page), failed: result.failed };
+          if (changed) await store.putOcr(d.storage_key, serializeOcr(saved));
+        } else {
+          saved = { version: 1, ...result, notRead: picturePages.slice(MAX_OCR_PAGES) };
+          if (saved.pages.length || !saved.failed.length) await store.putOcr(d.storage_key, serializeOcr(saved));
+        }
+      } catch (e) {
+        deps.log?.({ event: "ocr.unavailable", document_id: d.id, message: (e as Error).message });
+        engineMissing = !saved;
+      }
+    }
+    if (saved) parsed = mergeOcr(parsed, saved);
+    const read = new Set(parsed.lines.filter(l => isOcrLocation(l.location)).map(l => /^page (\d+)/.exec(l.location)![1])).size;
+    if (whole) {
+      if (!read) {
+        const allFailed = saved?.failed.length === picturePages.length;
+        const damaged = "Agir could not open this picture. It may be damaged. Upload it again, or save it as a PDF.";
+        const detail = engineMissing ? unavailable : allFailed ? (image ? damaged : unavailable) : noText;
+        await setStage(db, d.id, "read_failed", detail, { page_count: parsed.pageCount, needs_ocr: true });
+        await queueUnreadReading(db, d.id);
+        return;
+      }
+      stageDetail = image ? "Read by OCR from this picture. Check every value against the picture before approving it." : read === picturePages.length
+        ? `Read by OCR from ${parsed.pageCount} scanned ${parsed.pageCount === 1 ? "page" : "pages"}. Check every value against the page before approving it.`
+        : `Read by OCR from ${read} of ${parsed.pageCount} scanned pages; the others gave no text Agir could read. Check every value against the page before approving it.`;
+    } else {
+      const messages = [`${picturePages.length} of ${parsed.pageCount} pages in this PDF ${picturePages.length === 1 ? "is a picture" : "are pictures"}.`];
+      if (engineMissing) messages.push("OCR is not available on this machine, so they were not read.");
+      else {
+        messages.push(read ? picturePages.length === 1
+          ? "Agir read text from it by OCR. Check every value read that way against the page before approving it."
+          : `Agir read text from ${read} of them by OCR. Check every value read that way against the page before approving it.`
+          : "Agir found no text it could read there.");
+      }
+      const notRead = picturePages.slice(MAX_OCR_PAGES).length;
+      if (notRead) messages.push(`Agir reads the first 50 picture pages of a PDF, so ${notRead} ${notRead === 1 ? "page was" : "pages were"} not read.`);
+      const failed = saved?.failed.length ?? 0;
+      if (failed) messages.push(`${failed} ${failed === 1 ? "page" : "pages"} could not be read. Retry the file to try again.`);
+      stageDetail = messages.join("\n");
+    }
   }
+  stageDetail = [stageDetail, ...(parsed.notes ?? [])].filter(Boolean).join("\n") || null;
   await setStage(db, d.id, "extracting", null, { page_count: parsed.pageCount, ...(parsed.needsOcr ? { needs_ocr: true } : {}) });
   const result = extractCandidates(parsed, { role: d.role_set === "deal_source" ? "deal source" : d.role_set ?? undefined });
+  if (result.notes.includes(RULE_LIMIT_NOTE)) stageDetail = [stageDetail, RULE_LIMIT_NOTE].filter(Boolean).join("\n");
   const format = result.format.mixed ? "mixed" : result.format.decimal === "." ? "1,234.56" : result.format.decimal === "," ? "1.234,56" : "not detected";
   const asSourced = (c: (typeof result.candidates)[number]): SourcedCandidate => ({ ...c, documentId: d.id, documentName: d.name });
   const suggestions = await suggestLabels(deps, d.workspace_id, offeredOf([...result.candidates, ...result.other].map(asSourced)));
@@ -212,7 +275,7 @@ async function extractDocument(deps: WorkerDeps, documentId: string) {
     }
     await tx.query(
       `update documents set stage = 'extracted', stage_detail = $4, read_role = $5, candidate_count = $2, number_format = $3, updated_at = now() where id = $1`,
-      [d.id, result.candidates.length, format, parsed.needsOcr ? `Read by OCR from ${parsed.pageCount} scanned ${parsed.pageCount === 1 ? "page" : "pages"}. Check every value against the page before approving it.` : null, result.notes.find(n => n.startsWith("Document kind: "))?.slice("Document kind: ".length) ?? null],
+      [d.id, result.candidates.length, format, stageDetail, result.notes.find(n => n.startsWith("Document kind: "))?.slice("Document kind: ".length) ?? null],
     );
     // Read once per job: with AI reading off for the workspace, the rules reconcile alone, as with no key.
     aiRead = Boolean(deps.read || process.env.ANTHROPIC_API_KEY) && (await aiReadingOn(tx, d.workspace_id)) && !(await currentDocuments(tx, d.deal_id)).some(doc => ["uploaded", "checking", "reading", "extracting"].includes(doc.stage));
@@ -278,16 +341,16 @@ export async function reconcileDeal(db: Db, store: BlobStore, dealId: string) {
     if (!deal) return;
     const rows = await tx.query<{
       id: string; document_id: string; document_name: string; field_key: string; item_key: string | null; value: number;
-      raw: string; unit_seen: string | null; location: string; context: string; rule: string; note: string | null; alternatives: string[] | null; needs_ocr: boolean; region: SourcedCandidate["region"];
+      raw: string; unit_seen: string | null; location: string; context: string; rule: string; note: string | null; alternatives: string[] | null; region: SourcedCandidate["region"];
     }>(
-      `select c.id, c.document_id, d.name as document_name, c.field_key, c.item_key, c.value, c.raw, c.unit_seen, c.location, c.context, c.rule, c.note, c.alternatives, c.region, d.needs_ocr
+      `select c.id, c.document_id, d.name as document_name, c.field_key, c.item_key, c.value, c.raw, c.unit_seen, c.location, c.context, c.rule, c.note, c.alternatives, c.region
        from candidates c join documents d on d.id = c.document_id
        where c.deal_id = $1 and c.field_key is not null and c.value is not null and d.retired_at is null and d.stage = 'extracted'`,
       [dealId],
     );
     const toSourced = (r: (typeof rows)[number]): SourcedCandidate => ({
       fieldKey: r.field_key, itemKey: r.item_key, value: r.value, raw: r.raw, unitSeen: r.unit_seen, location: r.location,
-      context: r.context, rule: r.rule, ...(r.region ? { region: r.region } : {}), ...(r.alternatives ? { alternatives: r.alternatives } : {}), ...(r.note ? { note: r.note } : {}), documentId: r.document_id, documentName: r.document_name, ...(r.needs_ocr ? { ocr: true } : {}),
+      context: r.context, rule: r.rule, ...(r.region ? { region: r.region } : {}), ...(r.alternatives ? { alternatives: r.alternatives } : {}), ...(r.note ? { note: r.note } : {}), documentId: r.document_id, documentName: r.document_name, ...(isOcrLocation(r.location) ? { ocr: true } : {}),
     });
     const sourced = rows.map(toSourced);
     // A stored suggestion counts only while the workspace switch is on, and only after the boundary has checked it. The model is never called here.
@@ -298,7 +361,7 @@ export async function reconcileDeal(db: Db, store: BlobStore, dealId: string) {
     const unlabelled = figureOrder(
       (
         await tx.query<(typeof rows)[number]>(
-          `select c.id, c.document_id, d.name as document_name, c.field_key, c.item_key, c.value, c.raw, c.unit_seen, c.location, c.context, c.rule, c.note, c.alternatives, c.region, d.needs_ocr
+          `select c.id, c.document_id, d.name as document_name, c.field_key, c.item_key, c.value, c.raw, c.unit_seen, c.location, c.context, c.rule, c.note, c.alternatives, c.region
            from candidates c join documents d on d.id = c.document_id
            where c.deal_id = $1 and c.field_key is null and c.value is not null and d.retired_at is null and d.stage = 'extracted'`,
           [dealId],
@@ -518,6 +581,8 @@ export async function reconcileDeal(db: Db, store: BlobStore, dealId: string) {
         } else await tx.query(`update assumptions set sources = $2, updated_at = now() where id = $1`, [e.id, JSON.stringify(sources)]);
       }
     }
+    const currentDocs = await currentDocuments(tx, dealId);
+    const readingOn = await aiReadingOn(tx, deal.workspace_id);
     for (const e of existing) {
       const key = `${e.field_key}|${e.item_key}`;
       // No proposal for a hand entry or an accepted default: the label that disagreed went, and nothing else did (card 58b).
@@ -540,7 +605,8 @@ export async function reconcileDeal(db: Db, store: BlobStore, dealId: string) {
       if (!e.sources?.length && (e.status === "approved" || e.status === "needs_review")) continue;
       // A value whose every source was a model's suggestion leaves because the switch is off, not because a document went.
       const everyRule = (r: string) => !!e.sources?.length && e.sources.every((x) => (x as { rule?: string }).rule === r);
-      const gone = !on && everyRule("suggested") ? "Its label was a model's suggestion, and suggestions are now off" : everyRule("labelled") ? "The label a person gave its figure was removed" : everyRule("remembered") ? "The label it was remembered from was removed" : "Its source document was removed";
+      const remaining = currentDocs.filter(d => e.sources.some(s => s.document_id === d.id));
+      const gone = !on && everyRule("suggested") ? "Its label was a model's suggestion, and suggestions are now off" : everyRule("labelled") ? "The label a person gave its figure was removed" : everyRule("remembered") ? "The label it was remembered from was removed" : !remaining.length ? "Its source document was removed" : remaining.every(d => d.role_set === "context") ? "Its document is now marked as background only" : everyRule("ai") && !readingOn ? "AI reading was turned off, and only AI reading found this figure" : "The latest reading of the documents did not use this figure";
       if (e.status === "needs_review" || e.status === "conflicting") {
         await tx.query(`update assumptions set status = 'rejected', sources = '[]', conflict_values = null, reason = $2, version = version + 1, updated_at = now() where id = $1`, [
           e.id,
@@ -668,14 +734,52 @@ async function claim(db: Db): Promise<Job | null> {
   return job ?? null;
 }
 
+/** A job that has had all its attempts: its file is marked as failed, and whoever watches the worker is told. */
+async function deadJob(deps: WorkerDeps, job: Job, message: string) {
+  if (job.payload.document_id) {
+    await setStage(deps.db, job.payload.document_id, "read_failed", "Agir could not process this file after several attempts. Retry it, or upload it again.");
+    await queueUnreadReading(deps.db, job.payload.document_id);
+  }
+  deps.log?.({ event: "job.dead", id: job.id, kind: job.kind, error: message });
+}
+
+/**
+ * A job whose lease ran out had a worker that stopped without saying so, perhaps because of this job. One that has had all its attempts is given up on, as
+ * a failed job is: otherwise a file that kills the worker would kill it again every five minutes, forever.
+ */
+async function giveUp(deps: WorkerDeps) {
+  const message = "The worker stopped while running this job, on every attempt";
+  const jobs = await deps.db.query<Job>(
+    `update jobs set status = 'dead', last_error = $1, lease_until = null, updated_at = now()
+     where status = 'running' and lease_until < now() and attempts >= max_attempts
+     returning id, kind, payload, attempts, max_attempts`,
+    [message],
+  );
+  for (const job of jobs) await deadJob(deps, job, message);
+}
+
 /** Claim and run one job. Returns false when there was nothing to do. */
 export async function runOnce(deps: WorkerDeps): Promise<boolean> {
+  await giveUp(deps);
   const job = await claim(deps.db);
   if (!job) return false;
   const started = Date.now();
+  const renewal = setInterval(() => {
+    void deps.db.query(`update jobs set lease_until = now() + interval '5 minutes' where id = $1 and status = 'running'`, [job.id]).catch(() => {});
+  }, deps.leaseRenewMs ?? 60_000);
+  renewal.unref();
   try {
     if (job.kind === "verify_document") await verifyDocument(deps, job.payload.document_id!);
     else if (job.kind === "extract_document") await extractDocument(deps, job.payload.document_id!);
+    else if (job.kind === "read_deal") {
+      const dealId = job.payload.deal_id!;
+      try {
+        const [deal] = await deps.db.query<{ workspace_id: string }>(`select workspace_id from deals where id=$1`, [dealId]);
+        if (deal) await readDeal(deps.db, deps.store, dealId, deal.workspace_id, deps.read, job.payload.only_unread === "true");
+      } finally {
+        if (job.payload.only_unread !== "true") await deps.db.query(`update jobs set run_after = now() where kind = 'reconcile_deal' and status = 'queued' and payload->>'deal_id' = $1 and run_after > now()`, [dealId]);
+      }
+    }
     else if (job.kind === "reconcile_deal") await reconcileDeal(deps.db, deps.store, job.payload.deal_id!);
     else if (job.kind === "render_artifact") await renderJob(deps, job.payload.artifact_id!);
     await deps.db.query(`update jobs set status = 'done', lease_until = null, updated_at = now() where id = $1`, [job.id]);
@@ -687,11 +791,9 @@ export async function runOnce(deps: WorkerDeps): Promise<boolean> {
       `update jobs set status = $2, last_error = $3, lease_until = null, run_after = now() + ($4 || ' seconds')::interval, updated_at = now() where id = $1`,
       [job.id, dead ? "dead" : "queued", message, String(2 ** job.attempts)],
     );
-    if (dead && job.payload.document_id) {
-      await setStage(deps.db, job.payload.document_id, "read_failed", "Agir could not process this file after several attempts. Retry it, or upload it again.");
-    }
-    deps.log?.({ event: dead ? "job.dead" : "job.retry", id: job.id, kind: job.kind, error: message });
-  }
+    if (dead) await deadJob(deps, job, message);
+    else deps.log?.({ event: "job.retry", id: job.id, kind: job.kind, error: message });
+  } finally { clearInterval(renewal); }
   return true;
 }
 

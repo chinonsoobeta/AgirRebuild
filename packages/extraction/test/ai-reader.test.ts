@@ -605,3 +605,48 @@ describe("card F1: the AI reader's sale readings", () => {
     expect(verifyReading(r("land_cost", null, 650, "$", "presales.txt", "line 1", quote), presold(quote))).toEqual({ outcome: READING_FAILURE.small });
   });
 });
+
+describe("card 180 OCR verification", () => {
+  const full = "page 2, line 4 (OCR, confidence 91%)";
+  const quote = "Land cost $400,000";
+  test.each(["page 2, line 4", "page 2, line 4 (OCR, confidence 19%)", full])("preserves the source address for %s", location => {
+    const document = { ...doc("pdf"), lines: [{ text: quote, location: full }], fullText: quote };
+    for (const marked of [quote, `[${full}] ${quote}`, `[${location}] ${quote}`]) {
+      expect(verifyReading({ field: "land_cost", item: null, value: 400000, unit_seen: "$", file: "f.pdf", location, quote: marked, note: null, confidence: "high" }, [{ id: "d", name: "f.pdf", document }])).toMatchObject({ outcome: "verified", candidate: { location: full, ocr: true } });
+    }
+  });
+  test("does not mark text layer values as OCR", () => {
+    const location = "page 1, line 1";
+    const result = verifyReading({ field: "land_cost", item: null, value: 400000, unit_seen: "$", file: "f.pdf", location, quote, note: null, confidence: "high" }, [{ id: "d", name: "f.pdf", document: { ...doc("pdf"), lines: [{ text: quote, location }], fullText: quote } }]);
+    expect(result.outcome).toBe("verified");
+    expect(result.candidate).not.toHaveProperty("ocr");
+  });
+});
+
+describe("Card 192: one odd label costs one reading", () => {
+  const rentLine = "Studios would bring in $1,500 every month.", areaLine = "The shops would bring in $30 a year on each foot.";
+  const labelled = { ...doc("txt"), fullText: `${rentLine}\n${areaLine}`, lines: [{ location: "line 1", text: rentLine }, { location: "line 2", text: areaLine }] };
+  const docs = [{ id: "d", name: "fiction.txt", document: labelled }];
+  const rent: Reading = { ...reading, field: "unit_rent_monthly", item: "studio", value: 1500, unit_seen: "$/unit/mo", quote: "$1,500" };
+  const area: Reading = { ...reading, field: "rent_psf_annual", item: "shops", value: 30, unit_seen: "$/sf/yr", location: "line 2", quote: "$30" };
+
+  test("the field's own unit counts as its reader unit, and the candidate holds the canonical one", () => {
+    expect(verifyReading(rent, docs)).toMatchObject({ outcome: "verified", candidate: { value: 1500, unitSeen: "$" } });
+    expect(verifyReading(area, docs)).toMatchObject({ outcome: "verified", candidate: { value: 30, unitSeen: "$/sf" } });
+  });
+  test.each([
+    ["fixed_opex_annual", null, "$/unit/mo"],
+    ["unit_sale_price", "studio", "$/unit/mo"],
+    ["unit_rent_monthly", "studio", "$/sf/yr"],
+    ["land_cost", null, "per year"],
+    ["unit_rent_monthly", "studio", ""],
+  ])("%s labelled %s %s fails with the unit reason", (field, item, unit_seen) => {
+    expect(verifyReading({ ...rent, field, item, unit_seen }, docs)).toEqual({ outcome: READING_FAILURE.unit });
+  });
+  test.each(["very high", "HIGH", ""])("a confidence of '%s' is low on the candidate", confidence => {
+    expect(verifyReading({ ...rent, unit_seen: "$", confidence }, docs).candidate?.confidence).toBe("low");
+  });
+  test.each(["high", "medium", "low"])("a confidence of %s is kept", confidence => {
+    expect(verifyReading({ ...rent, unit_seen: "$", confidence }, docs).candidate?.confidence).toBe(confidence);
+  });
+});

@@ -107,6 +107,7 @@ describe("purging closed workspaces", () => {
   });
 
   test("after the period, its data goes, its audit events stay, and a file a live workspace shares is kept", async () => {
+    await db.query(`insert into jobs(kind,payload) values ('read_deal', $1)`, [JSON.stringify({ deal_id: id.deal })]);
     const eventsBefore = await count(`audit_events where workspace_id = $1`, [id.ws]);
     await db.query(`update workspaces set closed_at = now() - interval '31 days' where id = $1`, [id.ws]);
     const keys = (await db.query<{ storage_key: string }>(`select * from fn_purge_closed_workspaces(interval '30 days')`)).map((r) => r.storage_key).sort();

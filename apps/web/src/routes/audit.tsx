@@ -35,6 +35,7 @@ export function describeEvent(i: I18n, e: AuditEvent): string {
       return i.t("docs.role.changed", { old: role(p.old), new: role(p.new) });
     }
     case "document.retired": return fr ? `A retiré ${p.name}` : `Removed ${p.name}`;
+    case "deal.read_again": return fr ? "A demandé à Agir de relire les documents du projet" : "Asked Agir to read the deal's documents again";
     case "document.retried": return fr ? "A relancé la lecture d'un document" : "Retried reading a document";
     case "assumptions.reconciled": {
       const done = fr ? "A mis à jour la file d'examen à partir des documents" : "Updated the review queue from the documents";

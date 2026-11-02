@@ -1,14 +1,15 @@
+import { isOcrLocation } from "./ocr-text.ts";
 import { FIELD_BY_KEY } from "@agir/contracts";
-import { detectFormat, normalizeText, SCALE_RE, scaleOf, SF_PER_M2, tokenize } from "@agir/numbers";
-import { declaredScale, labelScale, statedScaleUnit } from "./candidates.ts";
+import { detectFormat, normalizeText, SCALE_RE, scaleOf, SF_PER_M2, tokenize, type NumberToken } from "@agir/numbers";
+import { declaredScale, labelScale, noteStatesScale, statedScaleUnit } from "./candidates.ts";
 import { addressedEntries } from "./addressed.ts";
 import { canonicalItem, foldText } from "./mapping.ts";
 import type { NormalizedDocument } from "./document.ts";
 import type { SourcedCandidate } from "./consolidate.ts";
 
-export type ReaderUnit = "$" | "%" | "sf" | "m2" | "$/sf" | "$/m2" | "months" | "years" | "units" | "x" | "vacancy_%";
-export type ReadingValue = { value: number; unit_seen: ReaderUnit; file: string; location: string; quote: string };
-export type Reading = ReadingValue & { field: string; item: string | null; note: string | null; confidence: "high" | "medium" | "low" };
+// Card 192: labels are the model's words, not a closed list; verifyReading decides what each one means.
+export type ReadingValue = { value: number; unit_seen: string; file: string; location: string; quote: string };
+export type Reading = ReadingValue & { field: string; item: string | null; note: string | null; confidence: string };
 export type ReaderResponse = {
   readings: Reading[];
   conflicts: { field: string; item: string | null; values: ReadingValue[]; why: string }[];
@@ -36,7 +37,7 @@ const NOT_MONTHLY_PACE = /^\s*(?:[a-z]+\s+){0,2}?(?:per|a|an|each|every|par|\/)\
 
 export const AI_LOW_CONFIDENCE_NOTE = "Please check: every source is a low-confidence AI reading";
 export const AI_AMBIGUOUS_NOTE = "Please check: the separator in this figure can be read more than one way; the AI read it as shown";
-export type ReadingVerification = { outcome: string; candidate?: SourcedCandidate & { confidence: Reading["confidence"]; ambiguous?: true } };
+export type ReadingVerification = { outcome: string; candidate?: SourcedCandidate & { confidence: "high" | "medium" | "low"; ambiguous?: true } };
 
 const UNIT_COUNT_TOTAL_NAMES = new Set([
   "total", "grand total", "total units", "total unit", "units total", "total unit count", "total number of units",
@@ -70,6 +71,37 @@ function figureLabel(document: NormalizedDocument, location: string, line: strin
   return foldText(textBefore(document, location, line, quote) + own).replace(LABEL_START, "");
 }
 
+/** OCR may smudge separators, but never supply, drop or change a digit. */
+function smudgedFigure(quote: string, value: number): NumberToken | undefined {
+  const text = normalizeText(quote);
+  for (const run of text.matchAll(/(?<!\d)\d+(?:[ ,.]{1,2}\d+)+(?!\d)/g)) {
+    const groups = [...run[0].matchAll(/\d+/g)];
+    for (let first = 0; first < groups.length; first++) {
+      const head = groups[first]!;
+      if (!/^[1-9]\d{0,3}$/.test(head[0])) continue;
+      if (first > 0 && (head[0].length === 3 || !run[0].slice(groups[first - 1]!.index! + groups[first - 1]![0].length, head.index).includes(" "))) continue;
+      let whole = head[0];
+      for (let last = first; last < groups.length; last++) {
+        const group = groups[last]!;
+        const separator = last > first ? run[0].slice(groups[last - 1]!.index! + groups[last - 1]![0].length, group.index) : "";
+        const cents = last > first && group[0].length <= 2 && /[,.]/.test(separator);
+        if (last > first && !cents && group[0].length !== 3) break;
+        if (last > first && !cents) whole += group[0];
+        const end = group.index! + group[0].length;
+        const next = groups[last + 1];
+        if ((!next || next[0].length !== 3 && run[0].slice(end, next.index).includes(" "))
+          && Number(cents ? `${whole}.${group[0]}` : whole) === value) {
+          const start = run.index! + head.index!;
+          return { raw: text.slice(start, run.index! + end), start, end: run.index! + end, value,
+            unit: null, currency: false, currencyCode: null, scaled: false };
+        }
+        if (cents) break;
+      }
+    }
+  }
+  return undefined;
+}
+
 /** First failure wins. No model interpretation can bypass an address or number check. */
 export function verifyReading(reading: Reading, documents: readonly ReadingDocument[]): ReadingVerification {
   const field = FIELD_BY_KEY.get(reading.field);
@@ -81,13 +113,17 @@ export function verifyReading(reading: Reading, documents: readonly ReadingDocum
   if (field.itemized ? !wholeUnitCount && !itemKey?.trim() : itemKey !== null) return { outcome: READING_FAILURE.item };
   const matches = documents.filter(d => d.name === reading.file);
   const doc = matches.length === 1 ? matches[0] : undefined;
-  const location = reading.location.replace(/^(.*![A-Z]+\d+)\.\.[A-Z]+\d+$/, "$1");
+  const withoutOcr = (address: string) => address.replace(/ \(OCR, confidence [^)]*\)$/, "");
+  let location = withoutOcr(reading.location).replace(/^(.*![A-Z]+\d+)\.\.[A-Z]+\d+$/, "$1");
   // The model sometimes copies the address marker into its quote ("[line 4] Loan amount: $3,900,000"); the marker is not
   // document text, so it is dropped before the quote is looked for (QA run 3, skeptic R1).
-  const marker = `[${reading.location}] `;
-  if (reading.quote.startsWith(marker)) reading = { ...reading, quote: reading.quote.slice(marker.length) };
-  const entries = doc ? addressedEntries(doc.document).filter(e => e.location === location) : [];
+  const entries = doc ? addressedEntries(doc.document).filter(e => withoutOcr(e.location) === location) : [];
   if (!doc || entries.length !== 1) return { outcome: READING_FAILURE.address };
+  for (const address of [reading.location, entries[0]!.location]) {
+    const marker = `[${address}] `;
+    if (reading.quote.startsWith(marker)) reading = { ...reading, quote: reading.quote.slice(marker.length) };
+  }
+  location = entries[0]!.location;
   if (!entries[0]!.text.includes(reading.quote)) return { outcome: READING_FAILURE.quote };
   // Interest and lender fees are computed by the engine; as other costs they would count twice.
   if (field.key === "other_cost" && FINANCING.test(figureLabel(doc.document, location, entries[0]!.text, reading.quote).replace(EXCLUDING, " "))) {
@@ -125,12 +161,12 @@ export function verifyReading(reading: Reading, documents: readonly ReadingDocum
     const scale = SCALE_RE.exec(afterDigits);
     return scale ? scaleOf(scale[1]!) : 1;
   };
-  const token = tokens.find(t => t.unit === "bps"
+  let token = tokens.find(t => t.unit === "bps"
     ? ["senior_rate_pct", "mezz_rate_pct", "refinance_rate_pct"].includes(field.key) && t.value !== null && t.value / 100 === reading.value
     : t.value === reading.value) ?? tokens.find(t => {
     if (!money || t.value === null) return false;
     if (t.scaled && Math.abs(t.value / ownFactor(t.raw) - reading.value) < 1e-9) return true;
-    if (t.paren && field.min !== undefined && field.min >= 0 && Math.abs(t.value) === reading.value) return true;
+    if ((t.paren || isOcrLocation(location) && t.value < 0) && field.min !== undefined && field.min >= 0 && Math.abs(t.value) === reading.value) return true;
     const rule = ruleFor(t);
     return !t.scaled && rule && "factor" in rule
       && Math.abs(t.value) < 1e6 && roundedScale(t.value, rule.factor) === reading.value;
@@ -138,6 +174,12 @@ export function verifyReading(reading: Reading, documents: readonly ReadingDocum
     if (t.unit === "bps") return false;
     if (t.value === null && !format.spaceGroups) {
       const digits = /\d[\d.,\s]*/.exec(t.raw)?.[0].trim();
+      // A dollar sign after a figure is French format, where one space is a thousands group; one touching a digit starts the next figure.
+      if (digits && field.unit.startsWith("$") && /^\d{1,3} \d{3}$/.test(digits) && Number(digits.replace(" ", "")) === reading.value
+        && /^ ?\$(?!\d)/.test(normalizeText(reading.quote).slice(t.end))) {
+        ambiguous = format.decimal !== ",";
+        return true;
+      }
       // Each side is a figure of its own; "050" is not.
       if (digits && /^\d{1,3} [1-9]\d{2}$/.test(digits) && digits.split(" ").some(v => Number(v) === reading.value)) {
         ambiguous = true;
@@ -169,7 +211,14 @@ export function verifyReading(reading: Reading, documents: readonly ReadingDocum
     if (matches) ambiguous = format.decimal === null;
     return matches;
   });
+  if (!token && isOcrLocation(location) && reading.value > 0 && field.min !== undefined && field.min >= 0) {
+    token = smudgedFigure(reading.quote, reading.value);
+    if (token) ambiguous = true;
+  }
   if (!token) return { outcome: READING_FAILURE.value };
+  const ocrMinus = isOcrLocation(location) && token.value !== null && token.value < 0 && !token.paren
+    && field.min !== undefined && field.min >= 0 && reading.value >= 0;
+  if (money && ocrMinus) ambiguous = true;
   if (PRESALE_FIELDS.has(field.key) && token.unit !== "%") {
     const text = normalizeText(reading.quote);
     if (token.unit === "units" || OF_TOTAL_AFTER.test(foldText(text.slice(token.end))) || OF_TOTAL_BEFORE.test(foldText(text.slice(0, token.start)))) return { outcome: READING_FAILURE.count };
@@ -177,22 +226,26 @@ export function verifyReading(reading: Reading, documents: readonly ReadingDocum
   if (field.key === "absorption_units_per_month" && NOT_MONTHLY_PACE.test(foldText(normalizeText(reading.quote).slice(token.end)))) return { outcome: READING_FAILURE.unit };
   if (token.currencyCode !== null && token.currencyCode !== "CAD") return { outcome: READING_FAILURE.unit };
   let value = reading.value;
-  const seen = reading.unit_seen;
+  // The reader schema names money per unit and annual rent by their printed money/area unit.
+  const unit = field.unit === "$/unit/mo" ? "$" : field.unit === "$/sf/yr" ? "$/sf" : field.unit;
+  // Card 192: the prompt's field table shows the field's own unit, and the model sometimes copies it. On another field it stays
+  // unknown: a per-unit monthly label on an annual total would be a different number.
+  const seen = reading.unit_seen === field.unit ? unit : reading.unit_seen;
   let unitSeen: string = token.unit === "bps" ? "bps (÷ 100)" : seen;
   if (money) {
     if (token.scaled && token.value !== null) value = token.value;
-    if (token.paren && field.min !== undefined && field.min >= 0 && reading.value >= 0) value = Math.abs(value);
+    if ((token.paren || ocrMinus) && field.min !== undefined && field.min >= 0 && reading.value >= 0) value = Math.abs(value);
     const rule = ruleFor(token);
     if (!token.scaled && (labelled(token) || !scaling.own) && rule) {
       if ("refuse" in rule || token.value === null || Math.abs(token.value) >= 1e6) return { outcome: READING_FAILURE.scale };
-      value = roundedScale(token.paren && reading.value >= 0 ? Math.abs(token.value) : token.value, rule.factor);
+      value = roundedScale((token.paren || ocrMinus) && reading.value >= 0 ? Math.abs(token.value) : token.value, rule.factor);
       unitSeen = statedScaleUnit(rule.factor);
     }
+    // Recognition can smudge the heading that states a table's scale. The reader still saw it, so its note refuses a figure the text would pass as dollars.
+    if (!token.scaled && !rule && reading.note && noteStatesScale(reading.note) && Math.abs(value) < 1e6) return { outcome: READING_FAILURE.scale };
     // Card F1: a carry per unsold home per month is often a few hundred dollars.
     if (value !== 0 && Math.abs(value) < 1000 && field.key !== "unsold_carry_monthly") return { outcome: READING_FAILURE.small };
   }
-  // The reader schema names money per unit and annual rent by their printed money/area unit.
-  const unit = field.unit === "$/unit/mo" ? "$" : field.unit === "$/sf/yr" ? "$/sf" : field.unit;
   if (seen === "m2" && unit === "sf") value *= SF_PER_M2;
   else if (seen === "$/m2" && unit === "$/sf") value /= SF_PER_M2;
   else if (seen === "years" && unit === "months") value *= 12;
@@ -202,8 +255,10 @@ export function verifyReading(reading: Reading, documents: readonly ReadingDocum
   return { outcome: "verified", candidate: {
     // The rule reader's name for the same type ("Two-bedroom" and "2BR" are "2BR"), so the two group in consolidate (QA card C1).
     fieldKey: field.key, itemKey: itemKey === null ? null : canonicalItem(itemKey.trim()), value, unitSeen, raw: token.raw,
-    documentId: doc.id, documentName: doc.name, location: reading.location, context: reading.quote,
-    rule: "ai", ...(ambiguous ? { ambiguous: true as const } : {}), confidence: reading.confidence, ...(reading.note ? { note: reading.note } : {}),
+    documentId: doc.id, documentName: doc.name, location: isOcrLocation(location) ? location : reading.location, ...(isOcrLocation(location) ? { ocr: true } : {}), context: reading.quote,
+    rule: "ai", ...(ambiguous ? { ambiguous: true as const } : {}),
+    // A label we cannot understand reads as "check this".
+    confidence: reading.confidence === "high" || reading.confidence === "medium" ? reading.confidence : "low", ...(reading.note ? { note: reading.note } : {}),
   } };
 }
 

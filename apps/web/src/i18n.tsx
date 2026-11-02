@@ -29,6 +29,7 @@ import type * as landingStrings from "./strings/landing";
 import type * as agirreviewStrings from "./strings/agirreview";
 import type * as shareStrings from "./strings/share";
 import { termsStore, useTerms, type TermsPref } from "./terms";
+import { DOCUMENT_KINDS } from "./documentKinds";
 import { FR_VERIFY, FR_ABSENT, FR_FIELDS, FR_METRICS, STRESS, GATES, plainTerm, plainStress, numberFormat, verdictText as sharedVerdictText, checkText as sharedCheckText, type VerdictLike, type CheckLike, CURRENCY_NAMES, FIELDS, FIELD_BY_KEY, METRIC_BY_KEY, placeLabel, type Currency, type ReadinessItem } from "@agir/contracts";
 
 export type Lang = "en" | "fr";
@@ -465,6 +466,11 @@ const SALE_SHARES: Record<string, string> = {
 };
 
 const FR_REASONS: [RegExp, string | ((m: RegExpMatchArray) => string)][] = [
+  // Card 189: the note on a set-aside file's figures. A note stored before the card may say "a audit".
+  [/^This document looks like an? ([^;]+); its figures are shown, not read\. (.*)$/, m => `${DOCUMENT_KINDS[m[1]!] ? `Ce document ressemble à ${DOCUMENT_KINDS[m[1]!]!.fr}` : "Ce document sert de contexte"}\u00a0; ses chiffres sont affichés, mais pas lus. ${translateMessage(m[2])}`],
+  // Card 190: the two other notes on a figure. A note stored before the card may say "a appraisal". The section stays as the document writes it.
+  [/^Read from an? ([^;]+); check it(?:\. (.*))?$/, m => `Lu dans ${DOCUMENT_KINDS[m[1]!]?.fr ?? "un document"}\u00a0; à vérifier${m[2] ? `. ${translateMessage(m[2])}` : ""}`],
+  [/^The (.+) section of an? ([^;]+); its figures are shown, not read$/, m => `La section «\u00a0${m[1]}\u00a0» d'${DOCUMENT_KINDS[m[2]!]?.fr ?? "un document"}\u00a0; ses chiffres sont affichés, mais pas lus`],
   [/^The document states a scale for this amount that Agir cannot read safely$/, "Le document indique pour ce montant une échelle qu’Agir ne peut pas lire avec certitude"],
   [/^The AI amount is under \$1,000; check whether the document states it in thousands or millions$/, "Le montant IA est inférieur à 1 000 $; vérifiez si le document l’exprime en milliers ou en millions"],
   [/^One soft-cost item \(a permit\), not the total soft cost; enter the total$/, "Un poste des coûts indirects (un permis), pas le total des coûts indirects ; entrez le total"],
@@ -525,6 +531,17 @@ const FR_REASONS: [RegExp, string | ((m: RegExpMatchArray) => string)][] = [
   [/^the table charges per five-year period; enter the premium yourself$/, "Le tableau facture par période de cinq ans ; saisissez la prime vous-même"],
   [/^The loan-to-value is outside this product's premium table; enter the premium yourself\.$/, "Le ratio prêt-valeur dépasse les limites du tableau des primes de ce produit ; saisissez la prime vous-même."],
   [/^The further 2% above \$3,000,000 and its rental exemption need a person; enter the amount\.$/, "Les 2 % supplémentaires au-delà de 3 000 000 $ et leur exemption locative exigent l’examen d’une personne ; saisissez le montant."],
+  [/^Read by OCR from (\d+) of (\d+) scanned pages; the others gave no text Agir could read\. Check every value against the page before approving it\.$/, (m) => `Lu par reconnaissance optique à partir de ${m[1]} des ${m[2]} pages numérisées ; Agir n’a trouvé aucun texte lisible sur les autres. Vérifiez chaque valeur sur la page avant de l’approuver.`],
+  [/^(\d+) of (\d+) pages in this PDF (?:is a picture|are pictures)\.$/, (m) => `${m[1]} des ${m[2]} pages de ce PDF ${m[1] === "1" ? "est une image" : "sont des images"}.`],
+  [/^Agir read text from it by OCR\. Check every value read that way against the page before approving it\.$/, "Agir y a lu du texte par reconnaissance optique. Vérifiez chaque valeur lue de cette façon sur la page avant de l’approuver."],
+  [/^Agir read text from (\d+) of them by OCR\. Check every value read that way against the page before approving it\.$/, (m) => `Agir a lu du texte sur ${m[1]} de ces pages par reconnaissance optique. Vérifiez chaque valeur lue de cette façon sur la page avant de l’approuver.`],
+  [/^Agir found no text it could read there\.$/, "Agir n’y a trouvé aucun texte lisible."],
+  [/^Agir reads the first 50 picture pages of a PDF, so (\d+) (?:page was|pages were) not read\.$/, (m) => `Agir lit les 50 premières pages en image d’un PDF ; ${m[1]} ${m[1] === "1" ? "page n’a donc pas été lue" : "pages n’ont donc pas été lues"}.`],
+  [/^(\d+) pages? could not be read\. Retry the file to try again\.$/, (m) => `${m[1]} ${m[1] === "1" ? "page n’a pas pu être lue" : "pages n’ont pas pu être lues"}. Relancez le fichier pour réessayer.`],
+  [/^OCR is not available on this machine, so they were not read\.$/, "La reconnaissance optique n’est pas disponible sur cette machine ; ces pages n’ont donc pas été lues."],
+  [/^Agir found no readable text on the scanned pages of this PDF\. Enter its values by hand, or upload a clearer copy\.$/, "Agir n’a trouvé aucun texte lisible sur les pages numérisées de ce PDF. Saisissez ses valeurs à la main ou téléversez une copie plus nette."],
+  [/^This PDF is protected by a password\. Remove the password and upload it again\.$/, "Ce PDF est protégé par un mot de passe. Retirez le mot de passe et téléversez-le de nouveau."],
+  [/^page (\d+), line (\d+) \(OCR, confidence (\d+)%\)$/, (m) => `page ${m[1]}, ligne ${m[2]} (ROC, confiance ${m[3]} %)`],
   [/^Read by OCR from (\d+) scanned pages?\. Check every value against the page before approving it\.$/, (m) => `Lu par reconnaissance optique à partir de ${m[1]} ${m[1] === "1" ? "page numérisée" : "pages numérisées"}. Vérifiez chaque valeur sur la page avant de l'approuver.`],
   [/^This scanned PDF has more than 50 pages; Agir reads scans of up to 50 pages\. Split it, or enter its values by hand\.$/, "Ce PDF numérisé dépasse 50 pages ; Agir lit les numérisations de 50 pages au plus. Divisez-le ou saisissez ses valeurs à la main."],
   [/^OCR is not available on this machine$/, "La reconnaissance optique n'est pas disponible sur cette machine"],
@@ -591,6 +608,13 @@ const FR_REASONS: [RegExp, string | ((m: RegExpMatchArray) => string)][] = [
   [/^Approved earlier$/, "Approuvée précédemment"],
   [/^Entered by an analyst$/, "Saisie par un analyste"],
   [/^Default accepted$/, "Valeur par défaut acceptée"],
+  [/^Its document is now marked as background only$/, "Son document est maintenant marqué comme contexte seulement"],
+  [/^Its document is now marked as background only; confirm or reject it$/, "Son document est maintenant marqué comme contexte seulement ; confirmez-la ou rejetez-la"],
+  [/^AI reading was turned off, and only AI reading found this figure$/, "La lecture IA a été désactivée, et elle seule avait trouvé ce chiffre"],
+  [/^AI reading was turned off, and only AI reading found this figure; confirm or reject it$/, "La lecture IA a été désactivée, et elle seule avait trouvé ce chiffre ; confirmez-la ou rejetez-la"],
+  [/^The latest reading of the documents did not use this figure$/, "La dernière lecture des documents n’a pas retenu ce chiffre"],
+  [/^The latest reading of the documents did not use this figure; confirm or reject it$/, "La dernière lecture des documents n’a pas retenu ce chiffre ; confirmez-la ou rejetez-la"],
+  [/^Agir is still reading this deal\. Try again when it finishes\.$/, "Agir lit encore ce projet. Réessayez lorsque la lecture sera terminée."],
   [/^Its source document was removed; confirm or reject it$/, "Son document source a été retiré ; confirmez-la ou rejetez-la"],
   [/^Its source document was removed$/, "Son document source a été retiré"],
   [/^The label it was remembered from was removed; confirm or reject it$/, "L'étiquette dont elle avait été retenue a été retirée ; confirmez-la ou rejetez-la"],
@@ -611,6 +635,10 @@ const FR_REASONS: [RegExp, string | ((m: RegExpMatchArray) => string)][] = [
   [/^A sales pace not stated per month; enter the units sold per month$/, "Un rythme de vente qui n’est pas donné par mois\u00a0; entrez les logements vendus par mois"],
   [/^Interest on buyers' deposits, not the deposit$/, "Des intérêts sur les dépôts des acheteurs, pas le dépôt"],
   [/^A price that names no home type and is not per home; enter the price per home$/, "Un prix qui ne nomme aucun type de logement et n’est pas par logement\u00a0; entrez le prix par logement"],
+  // Card 193: a suite-by-suite rent roll.
+  [/^Suites of this type rent at different amounts; enter the rent to use$/, "Les logements de ce type sont loués à des montants différents\u00a0; entrez le loyer à utiliser"],
+  [/^A suite's line in a rent roll; its other figures are shown, not read$/, "La ligne d’un logement dans un état des loyers\u00a0; ses autres chiffres sont affichés, pas lus"],
+  [/^The roll states (\S+) units but (\S+) suites were counted; check the counts by type$/, m => `L’état des loyers indique ${m[1]} logements, mais ${m[2]} logements ont été comptés\u00a0; vérifiez les nombres par type`],
   [/^Homes of this type are listed at different prices; enter the price to use$/, "Les logements de ce type sont inscrits à des prix différents\u00a0; entrez le prix à utiliser"],
   [/^A total or an unnamed row of the price list; not read$/, "Un total ou une ligne sans nom de la liste de prix\u00a0; non lu"],
   [/^Not a sale price$/, "Pas un prix de vente"],
@@ -627,10 +655,29 @@ const FR_REASONS: [RegExp, string | ((m: RegExpMatchArray) => string)][] = [
   [/^(.+?), (page \d+, line \d+|line \d+|paragraph \d+)$/, (m) => `${m[1]}, ${translateMessage(m[2])}`],
   [/^A document states this in (.+); this deal is in (CAD|USD|AUD)\. Enter the amount in \2\.$/, (m) => `Un document l'indique en ${m[1]!.replace(" and ", " et ")} ; ce dossier est en ${m[2]}. Saisissez le montant en ${m[2]}.`],
   [/^A document states this in (.+); this deal does not state its currency\. Enter the amount\.$/, (m) => `Un document l'indique en ${m[1]!.replace(" and ", " et ")} ; ce dossier n'indique pas sa devise. Saisissez le montant.`],
+  [/^A zero beside another figure in this row$/, "Un zéro à côté d’un autre chiffre de cette ligne"],
+  [/^Worked out by a formula in this workbook, so Agir did not read it\. Use it if it is the figure you want$/, "Calculé par une formule de ce classeur, donc Agir ne l’a pas lu. Utilisez-le si c’est le chiffre voulu"],
+  [/^Another line of this cost is a formula, so adding the typed lines would give only part of it; enter the field by hand$/, "Une autre ligne de ce coût est une formule : additionner les lignes saisies n’en donnerait qu’une partie. Entrez le champ à la main"],
   [/^No field matches this label$/, "Aucun champ ne correspond à ce libellé"],
   [/^No budget line matches this label$/, "Aucune ligne de budget ne correspond à ce libellé"],
   [/^Another number on this line was used$/, "Un autre nombre de cette ligne a été retenu"],
   [/^Looks like .+, but the number is not written as .+\. Enter it by hand if it is\.$/, "Ressemble à un champ connu, mais le nombre n'est pas écrit dans l'unité attendue. Saisissez-le à la main s'il y a lieu."],
+  [/^The file does not start like an image$/, "Le fichier ne commence pas comme une image"],
+  [/^Read by OCR from this picture\. Check every value against the picture before approving it\.$/, "Lu par reconnaissance optique à partir de cette image. Vérifiez chaque valeur sur l’image avant de l’approuver."],
+  [/^Agir found no readable text in this picture\. Enter its values by hand, or upload a clearer copy\.$/, "Agir n’a trouvé aucun texte lisible dans cette image. Saisissez ses valeurs à la main ou téléversez une copie plus nette."],
+  [/^This file is a picture, and OCR is not available on this machine\. Enter its values by hand, or upload a text PDF\.$/, "Ce fichier est une image, et la reconnaissance optique n’est pas disponible sur cette machine. Saisissez ses valeurs à la main ou téléversez un PDF texte."],
+  [/^Agir could not open this picture\. It may be damaged\. Upload it again, or save it as a PDF\.$/, "Agir n’a pas pu ouvrir cette image. Elle est peut-être endommagée. Téléversez-la de nouveau ou enregistrez-la en PDF."],
+  [/^This TIFF has (\d+) pages\. Save it as a PDF, then upload that\.$/, (m) => `Ce fichier TIFF compte ${m[1]} pages. Enregistrez-le en PDF, puis téléversez ce PDF.`],
+  [/^This picture is (\d+) megapixels, and Agir reads pictures of up to 80\. Save a smaller copy, then upload it\.$/, (m) => `Cette image compte ${m[1]} mégapixels, et Agir lit les images de 80 mégapixels au plus. Enregistrez une copie plus petite, puis téléversez-la.`],
+  [/^Agir cannot read HEIC photos\. Export the photo as JPEG, then upload it\.$/, "Agir ne lit pas les photos HEIC. Exportez la photo en JPEG, puis téléversez-la."],
+  [/^Agir reads Excel files saved as \.xlsx\. Open this one in Excel, save it as \.xlsx, then upload it\.$/, "Agir lit les fichiers Excel enregistrés en .xlsx. Ouvrez celui-ci dans Excel, enregistrez-le en .xlsx, puis téléversez-le."],
+  [/^Agir reads Word files saved as \.docx\. Open this one in Word, save it as \.docx, then upload it\.$/, "Agir lit les fichiers Word enregistrés en .docx. Ouvrez celui-ci dans Word, enregistrez-le en .docx, puis téléversez-le."],
+  [/^Agir does not read PowerPoint files\. Save this one as a PDF, then upload that\.$/, "Agir ne lit pas les fichiers PowerPoint. Enregistrez celui-ci en PDF, puis téléversez ce PDF."],
+  [/^Upload a PDF, Excel \(\.xlsx\), CSV, Word \(\.docx\), text file, or a picture \(PNG, JPEG or TIFF\)\.$/, "Téléversez un fichier PDF, Excel (.xlsx), CSV, Word (.docx) ou texte, ou une image (PNG, JPEG ou TIFF)."],
+  [/^This file is too long for Agir's rules to read in full, so they may have missed figures further in\.$/, "Ce fichier est trop long pour que les règles d’Agir le lisent en entier\u00a0; des chiffres plus loin peuvent donc leur échapper."],
+  [/^This workbook has formulas with no saved results \((.+)\)\. Open and save it in Excel to include them\.$/, (m) => `Ce classeur contient des formules sans résultat enregistré (${m[1]!.replace(/ and ([\d,]+) more$/, (_, n: string) => ` et ${n.replace(/,/g, "\u00a0")} de plus`)}). Ouvrez-le et enregistrez-le dans Excel pour les inclure.`],
+  [/^This file has 1 picture\. Agir does not read pictures inside Word or Excel files, so check it for figures\.$/, "Ce fichier contient 1 image. Agir ne lit pas les images à l’intérieur des fichiers Word ou Excel ; vérifiez si elle contient des chiffres."],
+  [/^This file has (\d+) pictures\. Agir does not read pictures inside Word or Excel files, so check them for figures\.$/, (m) => `Ce fichier contient ${m[1]} images. Agir ne lit pas les images à l’intérieur des fichiers Word ou Excel ; vérifiez si elles contiennent des chiffres.`],
   [/^The file does not start like a PDF$/, "Le fichier ne commence pas comme un PDF"],
   [/^The file is not an Office (\w+) package$/, (m) => `Le fichier n'est pas un paquet Office ${m[1]}`],
   [/^A text file cannot contain binary data$/, "Un fichier texte ne peut pas contenir de données binaires"],
@@ -638,8 +685,11 @@ const FR_REASONS: [RegExp, string | ((m: RegExpMatchArray) => string)][] = [
   [/^The stored file does not match the size that was uploaded$/, "Le fichier stocké ne correspond pas à la taille téléversée"],
   [/^The stored file does not match the fingerprint recorded at upload$/, "Le fichier stocké ne correspond pas à l'empreinte consignée au téléversement"],
   [/^The file is larger than 75 MB\.?$/, "Le fichier dépasse 75 Mo."],
-  [/^This PDF is scanned pages with no text layer\./, "Ce PDF est composé de pages numérisées sans couche de texte. Agir ne fait pas encore de reconnaissance optique : saisissez ses valeurs à la main ou téléversez un PDF textuel."],
+  [/^This PDF is scanned pages with no text layer, and OCR is not available on this machine\. Enter its values by hand, or upload a text PDF\.$/, "Ce PDF est composé de pages numérisées sans couche de texte, et la reconnaissance optique n’est pas disponible sur cette machine. Saisissez ses valeurs à la main ou téléversez un PDF textuel."],
   [/^Agir could not process this file after several attempts\./, "Agir n'a pas pu traiter ce fichier après plusieurs tentatives. Relancez-le ou téléversez-le de nouveau."],
+  [/^This file is too large for Agir to read\. Save the parts that matter in a file of their own, then upload that\.$/, "Ce fichier est trop volumineux pour qu’Agir le lise. Enregistrez les parties utiles dans un fichier à part, puis téléversez celui-ci."],
+  [/^Agir could not open this file\. It may be damaged\. Save it again, then upload it\.$/, "Agir n’a pas pu ouvrir ce fichier. Il est peut-être endommagé. Enregistrez-le de nouveau, puis téléversez-le."],
+  [/^This file has a password, or is in an older format\. Remove the password or save it as a current Excel or Word file, then upload it\.$/, "Ce fichier a un mot de passe ou est dans un ancien format. Retirez le mot de passe ou enregistrez-le comme fichier Excel ou Word récent, puis téléversez-le."],
   [/^Agir could not read this file: (.+)$/, (m) => `Agir n'a pas pu lire ce fichier : ${m[1]}`],
   // API errors.
   [/^Your role in this workspace does not allow this action$/, "Votre rôle dans cet espace ne permet pas cette action"],
@@ -703,7 +753,6 @@ const FR_REASONS: [RegExp, string | ((m: RegExpMatchArray) => string)][] = [
   [/^The inputs changed after this run\. Run underwriting again before recording a decision\.$/, "Les données ont changé après cette analyse. Relancez l'analyse avant de consigner une décision."],
   [/^A newer run exists\. Decide on the latest run\.$/, "Une analyse plus récente existe. Décidez sur la plus récente."],
   [/^Approving against a (\w+) verdict needs a written reason/, "Approuver malgré le verdict exige une justification écrite (au moins 20 caractères)"],
-  [/^Upload a PDF, Excel \(\.xlsx\), CSV, Word \(\.docx\) or text file\.$/, "Téléversez un fichier PDF, Excel (.xlsx), CSV, Word (.docx) ou texte."],
   [/^The file is empty\.$/, "Le fichier est vide."],
   [/^Only a document that could not be read can be retried$/, "Seul un document qui n'a pas pu être lu peut être relancé"],
   [/^Something went wrong on our side\. It has been logged\.$/, "Un problème est survenu de notre côté. Il a été consigné."],

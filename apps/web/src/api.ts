@@ -111,17 +111,21 @@ export type Source = { document_id: string; document_name: string; value: number
 export type Assumption = {
   id: string; fieldKey: string; itemKey: string | null; label: string; group: string; groupLabel: string; unit: string; material: boolean;
   conservative: "max" | "min" | null; status: string; value: number | null; pendingValue: number | null; sourceKind: "document" | "analyst" | "default" | "table"; source?: string; tableSource?: import("@agir/contracts").TableSource;
-  sources: Source[]; conflictValues: { value: number; documents: string[] }[] | null; reason: string | null; decidedBy: string | null;
+  sources: Source[]; conflictValues: { value: number; documents: string[] }[] | null; usualSource: { value: number; kind: string } | null; reason: string | null; decidedBy: string | null;
   decidedById: string | null; decidedAt: string | null; secondApprover: string | null; confirmedByReview: boolean; secondApprovedAt: string | null; sponsorStated: boolean;
   /** The deal's client said the broker's value is right (card 89); not an independent confirmation. A client cannot see another client's name. */
   clientConfirmedBy: string | null; clientConfirmedById: string | null; clientConfirmedAt: string | null; version: number;
 };
 export type ReadinessItem = { fieldKey: string; itemKey?: string; label: string; detail?: string };
 export type Review = {
+  /** Card 189: every file read is background, and Agir decided at least one of them. */
+  setAsideAll: boolean;
   todo: { blocking: number; items: { kind: "conflict" | "impossible" | "missing" | "please_check" | "needs_review" | "awaiting" | "ai_check"; fieldKey: string; itemKey: string | null; assumptionId: string | null; blocking: boolean }[] };
-  aiReading: null | { outcome: "ok" | "failed"; model: string; promptVersion: string; createdAt: string;
+  aiReading: null | { unread: string[]; outcome: "ok" | "failed"; model: string; promptVersion: string; createdAt: string;
     notUsed: { value: number; file: string; location: string; quote: string; why: string; figureId: string | null }[];
     pleaseCheck: { field: string; item: string | null; value: number; file: string; location: string; quote: string; reason: string }[];
+    /** What long workbooks kept from the AI reader. No sheets means the whole file. `readAnyway` is the role to ask with, null once a person has asked. */
+    sheetsLeftOut: { id: string; name: string; sheets: string[]; readAnyway: "deal_source" | "evidence" | null }[];
   };
   regions: { documentId: string; documentName: string; source: string; table: string; fields: string[]; ids: string[]; leftOut: { id: string; reason: string }[] }[];
   proposals: import("@agir/contracts").Proposal[];
@@ -132,6 +136,9 @@ export type Review = {
   notFound: Review["missing"];
   choices: Review["missing"];
   other: { documentId: string; document_name: string; raw: string; value: number | null; location: string; context: string; note: string | null; figureId: string | null; label: { fieldKey: string; itemKey: string | null; by: string; at: string } | null; suggestions: string[] }[];
+  /** How many figures there are before Review's limit, counted the way the list counts them, and how many of those could be labelled. */
+  otherTotal: number;
+  unusedTotal: number;
   /** Card F1: readings for a field this deal's mode does not use; never offered for approval. */
   selling?: boolean;
   notNeeded?: { fieldKey: string; itemKey: string | null; label: string; value: number | null; why: string; sources: { document_name: string; location: string }[] }[];

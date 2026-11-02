@@ -590,6 +590,21 @@ describe("model label suggestions", () => {
     expect(await byField("other_cost")).toMatchObject({ status: "needs_review", value: 5000, reason: "Its label was a model's suggestion, and suggestions are now off; confirm or reject it" });
   });
 
+  test("card 199: suggestions offer only ten batches for 1,200 invented lines", async () => {
+    await db.query(`update workspaces set label_suggestions = true where id = $1`, [sw]);
+    const d = await newDeal("Invented bounded suggestions");
+    reply = () => ok([]); calls.length = 0;
+    try {
+      await put(d, "invented.txt", Array.from({ length: 1200 }, (_, i) => `Invented line ${i}: $${1000 + i}`).join("\n"));
+      await wk();
+      expect(calls).toHaveLength(10); expect(calls.map(c => figuresOf(c).length)).toEqual(Array(10).fill(100));
+      expect(await db.query(`select * from label_suggestions where deal_id=$1`, [d])).toHaveLength(10);
+    } finally {
+      calls.length = 0;
+      await db.query(`update workspaces set label_suggestions = false where id = $1`, [sw]);
+    }
+  });
+
   test("what is offered for a label has been through the redaction pass", async () => {
     await db.query(`update workspaces set label_suggestions = true where id = $1`, [sw]);
     const d = await newDeal("Redacted suggestions");
@@ -1518,7 +1533,7 @@ describe("card 61: Canadian cost lines and a mortgage insurance premium are ente
       await db.query(`update assumptions set field_key = 'other_cost', status = 'approved' where deal_id = $1 and field_key = 'development_charges'`, [d]);
       expect(await rowsOf(d, "development_charges")).toEqual([]);
       await upload(d, "notes.txt", "Site visit notes, nothing priced.\n");
-      expect(await rowsOf(d, "other_cost")).toMatchObject([{ status: "needs_review", value: 85000, reason: "Its source document was removed; confirm or reject it" }]);
+      expect(await rowsOf(d, "other_cost")).toMatchObject([{ status: "needs_review", value: 85000, reason: "The latest reading of the documents did not use this figure; confirm or reject it" }]);
       expect(await rowsOf(d, "development_charges")).toMatchObject([{ status: "needs_review", value: 85000 }]);
     });
   });
@@ -3062,11 +3077,11 @@ describe("a client never sees another client (task 91a)", () => {
 describe("card 93b scanned uploads", () => {
   test("extracts a scan and preserves its OCR warning and source rule", async () => {
     const { createCanvas } = await import("@napi-rs/canvas");
-    const { scanPdf } = await import("@agir/testkit");
+    const { pageFont, scanPdf } = await import("@agir/testkit");
     const canvas = createCanvas(1700, 2200);
     const ctx = canvas.getContext("2d");
     ctx.fillStyle = "white"; ctx.fillRect(0, 0, 1700, 2200);
-    ctx.fillStyle = "black"; ctx.font = "40px sans-serif";
+    ctx.fillStyle = "black"; ctx.font = `40px ${pageFont()}`;
     ctx.fillText("Exit cap rate 5.5%", 100, 160);
     const d = (await call(alice, "POST", `/api/workspaces/${ws}/deals`, { name: "OCR review example", assetType: "Multifamily" })).json.id;
     const bytes = await scanPdf(canvas.toBuffer("image/jpeg", 90));
@@ -3793,7 +3808,7 @@ describe("card 160a: the deal AI reader", () => {
       return parse(...args);
     });
     const wrap = (base: Db): Db => ({ ...base, transaction: fn => base.transaction(tx => fn(wrap(tx))), query: (sql, params) => {
-      if (failure === "escaping" && sql.startsWith("select id from ai_readings")) throw new Error("Reader lookup failed");
+      if (failure === "escaping" && sql.startsWith("select id,model,prompt_version,documents_hash,verification from ai_readings")) throw new Error("Reader lookup failed");
       return base.query(sql, params);
     } });
     const wrapped = wrap(db);
@@ -3846,11 +3861,12 @@ describe("card 160a: the deal AI reader", () => {
     expect(land.conflict_values.map((v: any) => v.value)).toEqual([400000, 500000]);
     expect(land.sources.some((s: any) => s.rule === "ai")).toBe(true);
     expect(land.sources.some((s: any) => s.rule !== "ai")).toBe(true);
-    // A retired document changes the hash; its stored reading no longer participates.
+    // Retiring another document changes the hash, but this figure's own document stays, so its reading stays (card 184).
     await db.query(`update documents set retired_at=now() where deal_id=$1 and name='second.txt'`, [id]);
     await reconcileDeal(db, store, id);
     const [after] = await db.query<any>(`select * from assumptions where deal_id=$1 and field_key='land_cost'`, [id]);
-    expect(after.sources.some((s: any) => s.rule === "ai")).toBe(false);
+    expect(after.sources.some((s: any) => s.rule === "ai")).toBe(true);
+    expect(after.status).toBe("conflicting");
   });
   test("retries once, stores a safe failure and keeps the rule reader", async () => {
     const id = await setup();
@@ -4030,7 +4046,7 @@ describe("card C: the AI reading switch, the region and less stored text", () =>
     const [row] = await db.query<any>(`select * from ai_readings where deal_id=$1`, [id]);
     expect(Object.keys(row)).not.toContain("request");
     const [document] = await db.query<any>(`select id, name, sha256 from documents where deal_id=$1`, [id]);
-    expect(row.verification.documents).toEqual([{ id: document.id, name: document.name, sha256: document.sha256 }]);
+    expect(row.verification.documents).toEqual([{ id: document.id, name: document.name, sha256: document.sha256, text_sha256: expect.any(String) }]);
     expect(JSON.stringify(row.verification)).not.toContain("Unlabelled reserve");
     // A second reconcile settles the sources' regions (as before card C), so compare from there.
     await reconcileDeal(db, store, id);
@@ -4065,7 +4081,7 @@ describe("card C: the AI reading switch, the region and less stored text", () =>
     expect((await other())?.sources.some((s: any) => s.rule === "ai") ?? false).toBe(false);
     expect((await sources(id)).find(a => a.field_key === "land_cost")?.sources.some((s: any) => s.rule === "ai")).toBe(true);
     const [row] = await db.query<any>(`select verification from ai_readings where deal_id=$1`, [id]);
-    expect(row.verification.documents.map((d: any) => d.name)).toEqual(["fiction.txt"]);
+    expect(row.verification.documents.map((d: any) => d.name).sort()).toEqual(["fiction.txt", "second.txt"]);
   });
 });
 

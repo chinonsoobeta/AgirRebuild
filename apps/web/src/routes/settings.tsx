@@ -117,7 +117,7 @@ export function LogoPanel({ workspaceId, hasLogo }: { workspaceId: string; hasLo
 }
 
 /** Production counts per deal (card 155): counts and durations only, for the owner. */
-type DealCounts = { deal_id?: string; name?: string; docs_pdf: number; docs_xlsx: number; docs_csv: number; docs_docx: number; docs_txt: number; docs_no_candidates: number;
+type DealCounts = { deal_id?: string; name?: string; docs_pdf: number; docs_xlsx: number; docs_csv: number; docs_docx: number; docs_txt: number; docs_image: number; docs_no_candidates: number;
   figures_read: number; figures_confirmed_from_suggestion: number; figures_typed: number; actions_until_runnable: number; minutes_upload_to_run?: number | null };
 export function CountsPanel({ workspaceId }: { workspaceId: string }) {
   const { t, lang } = useI18n();
@@ -127,7 +127,7 @@ export function CountsPanel({ workspaceId }: { workspaceId: string }) {
   const q = useQuery({ queryKey: ["deal-metrics", workspaceId], queryFn: () => api.get<{ deals: DealCounts[]; totals: DealCounts & { deals: number; archived_deals?: number;
     runs?: number; first_run_at?: string | null; reports?: number; reports_shared?: number } }>(`/workspaces/${workspaceId}/deal-metrics`) });
   const cells = (r: DealCounts) => [
-    [r.docs_pdf, r.docs_xlsx, r.docs_csv, r.docs_docx, r.docs_txt].join(" / "), r.docs_no_candidates, r.figures_read,
+    [r.docs_pdf, r.docs_xlsx, r.docs_csv, r.docs_docx, r.docs_txt, r.docs_image].join(" / "), r.docs_no_candidates, r.figures_read,
     r.figures_confirmed_from_suggestion, r.figures_typed, r.actions_until_runnable,
   ];
   const deals = q.data?.deals ?? [];

@@ -3,6 +3,7 @@ import { SF_PER_M2 } from "@agir/numbers";
 import { assemble, type AssumptionRow } from "@agir/engine";
 import { chooseByArithmetic, checkArithmetic, WAIVED_NOTE, REMEMBERED_NOTE, applyLabels, itemFold, applySuggestions, labelPhrase, labelUnit, consolidate, extractCandidates, offerable, offeredIds, figureOrder, withoutLabelled, normalizeLabel, parseDocument, scoreExtraction, suggestFields, type Cell, type NormalizedDocument, type SourcedCandidate, type Table } from "../src/index.ts";
 import { MAX_PDF_PAGES, pdfPageError, relativeLinks } from "../src/parse.ts";
+import { originalKindNote } from "../src/document-kind.ts";
 import { loadOracles, toNormalized } from "./oracle.ts";
 
 const key = (f: string, i: string | null) => (i ? `${f}|${i}` : f);
@@ -2288,11 +2289,13 @@ describe("totals and their parts", () => {
     ws.getCell("B5").value = { formula: "B3*0.05", result: 10_000 } as never;
     return parseDocument(new Uint8Array(await wb.xlsx.writeBuffer()), "f.xlsx");
   }
-  test("a formula with no saved result gives no value and a document note; one with a result is read", async () => {
+  test("by the owner's decision (2026-11-01) rules do not read a computed cell: a formula with no saved result gives a document note, and one with a result is listed", async () => {
     const parsed = await formulaBook();
     const r = extractCandidates(parsed);
     expect(JSON.stringify([r.candidates, r.other, parsed.tables])).not.toContain("[object Object]");
-    expect(pick(r)).toEqual([["land_cost", 100_000], ["hard_cost", 200_000], ["contingency", 10_000]]);
+    expect(pick(r)).toEqual([["land_cost", 100_000], ["hard_cost", 200_000]]);
+    expect(r.other).toHaveLength(1);
+    expect(r.other[0]).toMatchObject({ value: 10000, location: "Budget!B5", note: "Worked out by a formula in this workbook, so Agir did not read it. Use it if it is the figure you want" });
     expect(JSON.stringify(parsed.tables)).not.toContain("#REF");
     expect(r.notes).toEqual(["This workbook has formulas with no saved results (B4). Open and save it in Excel to include them.", "Document kind: unrecognized document (deal source)"]);
   });
@@ -5206,11 +5209,11 @@ vi.mock("tesseract.js", async (original) => {
 describe("card 93b local OCR", () => {
   const scan = async (pages = 1) => {
     const { createCanvas } = await import("@napi-rs/canvas");
-    const { scanPdf } = await import("@agir/testkit");
+    const { pageFont, scanPdf } = await import("@agir/testkit");
     const canvas = createCanvas(1700, 2200);
     const ctx = canvas.getContext("2d");
     ctx.fillStyle = "white"; ctx.fillRect(0, 0, 1700, 2200);
-    ctx.fillStyle = "black"; ctx.font = "40px sans-serif";
+    ctx.fillStyle = "black"; ctx.font = `40px ${pageFont()}`;
     ctx.fillText("Terminal cap rate 5.5%", 100, 160);
     ctx.fillText("Senior loan $1,850,000 at 6.75%", 100, 250);
     return scanPdf(canvas.toBuffer("image/jpeg", 90), pages);
@@ -5224,10 +5227,12 @@ describe("card 93b local OCR", () => {
     const parsed = await parseDocument(bytes, "scan.pdf");
     expect(parsed.needsOcr).toBe(true);
     const result = await ocrPdf(bytes);
-    expect(result.pageCount).toBe(1);
-    expect(result.lines.map((l) => l.text)).toEqual(["Terminal cap rate 5.5%", "Senior loan $1,850,000 at 6.75%"]);
-    for (const line of result.lines) expect(line.location).toMatch(/^page 1, line \d \(OCR, confidence \d+%\)$/);
-    const found = extractCandidates({ ...parsed, ...result, fullText: result.lines.map((l) => l.text).join("\n") });
+    expect(result.pages.map(p => p.page)).toEqual([1]);
+    expect(result.pages[0]!.lines.map((l) => l.text)).toEqual(["Terminal cap rate 5.5%", "Senior loan $1,850,000 at 6.75%"]);
+    const { mergeOcr } = await import("../src/ocr-text.ts");
+    const merged = mergeOcr(parsed, { version: 1, ...result, notRead: [] });
+    for (const line of merged.lines) expect(line.location).toMatch(/^page 1, line \d \(OCR, confidence \d+%\)$/);
+    const found = extractCandidates(merged);
     expect(found.candidates).toContainEqual(expect.objectContaining({ fieldKey: "exit_cap_rate_pct", value: 5.5 }));
     const options = vi.mocked(createWorker).mock.calls.at(-1)![2]!;
     expect(options.gzip).toBe(true);
@@ -9682,5 +9687,22 @@ describe("Card 170: declared money scale spellings", () => {
   ] as const)("%s %s", async (file, text, field, value) => {
     const document = await parseDocument(new TextEncoder().encode(text), file);
     expect(extractCandidates(document).candidates.filter(c => c.fieldKey === field).map(c => c.value)).toEqual([value]);
+  });
+});
+
+describe("the context note's article (card 189)", () => {
+  const filler = Array.from({ length: 20 }, () => "The narrative explains the purpose and background of this document.");
+  const read = (...lines: string[]) => extractCandidates(toNormalized({ name: "invented.pdf", kind: "pdf", lines }));
+  test.each([
+    ["an audit", ["Office of the Auditor General", "Table of contents"]],
+    ["an organization budget", ["Budget notes", "Our operating portfolios"]],
+    ["a market report", ["Market report", "Vacancy rate statistics"]],
+  ])("%s", (phrase, head) => {
+    const c = read(...head, ...filler, "Land cost: $830,000").other.find(c => c.value === 830000)!;
+    expect(c.note).toContain(`This document looks like ${phrase}; its figures are shown, not read.`);
+    expect(originalKindNote(c.note)).toBe("No field matches this label");
+  });
+  test.each(["a", "an"])("originalKindNote strips a note stored with %s", article => {
+    expect(originalKindNote(`This document looks like ${article} audit; its figures are shown, not read. No field matches this label`)).toBe("No field matches this label");
   });
 });

@@ -9,6 +9,7 @@ const ACRONYMS = new Set([
   "DSCR", // debt service coverage ratio
   "RCSD", // ratio de couverture du service de la dette (DSCR in French)
   "JPEG", // the image format
+  "TIFF", // the image format
 ]);
 const SHOUTING = /(?<![\p{L}\p{N}])\p{Lu}{4,}(?![\p{L}\p{N}])/gu;
 

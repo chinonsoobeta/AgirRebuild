@@ -29,11 +29,24 @@ The API serves the web app and the API and, with `DATABASE_URL` set, does not ru
 checking, reading and extracting documents, reconciling, and rendering memos (the PDF needs Chromium, so the worker
 image needs it). With no `DATABASE_URL` (embedded PGlite) the API runs the worker in its own process, and
 `AGIR_EMBEDDED_WORKER=1` forces that on Postgres too.
+OCR runs inside the worker.
+In measured runs on a development Mac, a page took 0.59 s at the median and 26 s at the slowest, a file of 50 picture
+pages took up to 130 s, and memory for the OCR child reached 1 to 2 GB. Parsing takes about 750 MB of heap for a workbook
+at the cell limit and about 1 GB for a PDF page at the drawing limit. Allow the worker for all of that, and on a machine
+with little memory set `NODE_OPTIONS=--max-old-space-size=` to what it can spare, because Node sizes its heap from the
+machine and the compose file sets no limit.
+
+The worker runs one job at a time. A job holds a 5-minute lease and renews it each minute. A job whose lease runs out on
+its last attempt, usually because the file ended the process, ends as dead: its file is marked as failed and
+`AGIR_ALERT_URL` hears of it, so a crash cannot repeat for ever. A job has no limit on its time. A parse that hangs keeps
+renewing its lease and holds that worker until it restarts.
 
 Both apply migrations at start. In compose the worker starts only after the API answers `/api/health`, so the two
 never migrate at once. Elsewhere, start the API first.
 
 ## The shared store rule
+
+Saved OCR text sits beside its file as `<key>.ocr` in the same store.
 
 The API writes uploaded files into the blob store and the worker reads them; the worker writes rendered memos and the
 API serves them. **Both must use the same store.** A mismatch fails silently at first: uploads succeed, then every
@@ -126,6 +139,6 @@ section reports both, as Agir checked them when the package was made.
 ## Not done
 
 Per ADR 0002, still to build before real documents: TLS and HSTS at the edge, and TLS to Postgres
-(`sslmode=verify-full`); envelope encryption of blobs and a KMS (S1, S4); the worker jail: read-only root, an egress
-allow-list, Chromium's sandbox, ClamAV (S3); a mail provider (production sends no email today); off-host copies and
-a schedule for the backups.
+(`sslmode=verify-full`); envelope encryption of blobs, including saved OCR text, and a KMS (S1, S4); the worker jail:
+read-only root, an egress allow-list, Chromium's sandbox, ClamAV (S3); a mail provider (production sends no email
+today); off-host copies and a schedule for the backups.

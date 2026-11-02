@@ -17,6 +17,12 @@ export type Cell = {
   unit?: CellUnit;
   /** A percent-formatted cell's own stored value (0.03 for "3%"), kept as provenance. */
   stored?: number;
+  /** The cell holds a formula. Its value is the workbook's own arithmetic, not a figure the author typed. */
+  computed?: true;
+  /** The cell numbers its own row in a form's index column. It is not a figure. */
+  rowNumber?: true;
+  /** The cell is a later column of a merged cell, repeating what its first column holds. */
+  repeat?: true;
   /** The currency the cell's number format names ("[$USD]", "US$"); absent for a plain or locale-only dollar. */
   currency?: CurrencyCode;
   ref: string;
@@ -28,12 +34,13 @@ export type Cell = {
 export type Table = { name: string; rows: Cell[][]; at?: number };
 
 export type NormalizedDocument = {
-  kind: "pdf" | "xlsx" | "csv" | "docx" | "txt";
+  kind: "pdf" | "xlsx" | "csv" | "docx" | "txt" | "image";
   lines: Line[];
   tables: Table[];
   pageCount: number | null;
-  /** True when a PDF had no text layer, so nothing could be read without OCR. */
+  /** True when a picture or PDF has pages whose text only OCR can reach. */
   needsOcr: boolean;
+  ocrPages?: number[];
   /** All readable text, for number-format detection. */
   fullText: string;
   /** What the parser could not read from the file as a whole ("formulas with no saved results"); shown with the document, never read as values. */

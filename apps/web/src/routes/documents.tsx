@@ -7,6 +7,7 @@ import { ChoiceCards, Notice, Tag } from "../components/kit";
 import * as I from "../components/icons";
 import { QuickStart } from "../components/QuickStart";
 import { useI18n, type I18n } from "../i18n";
+import { DOCUMENT_KINDS, parseReadRole } from "../documentKinds";
 import "../strings/documents";
 
 const ROLE_CHOICES = ["", "deal_source", "evidence", "context"] as const;
@@ -54,7 +55,7 @@ function Result({ d, i, dealId }: { d: DocumentRow; i: I18n; dealId: string }) {
   if (FAILED.includes(d.stage)) {
     return (
       <span className="docs-fail">{t("docs.unusable")}
-        {d.stage_detail && <span className="sub">{sentence(msg(d.stage_detail))}</span>}
+        {d.stage_detail?.split("\n").map((line, n) => <span key={n} className="sub">{sentence(msg(line))}</span>)}
         <span className="sub">{t(d.stage === "rejected" ? "documents.rejectedHint" : "documents.readFailedHint")}</span>
       </span>
     );
@@ -66,12 +67,13 @@ function Result({ d, i, dealId }: { d: DocumentRow; i: I18n; dealId: string }) {
   return (
     <>
       {/* QA run 2 (skeptic N2): one number, honestly named: the values in use from this file, or before that what the rules found. */}
-      {d.used_count > 0 ? t("docs.used", { n: d.used_count }) : d.candidate_count > 0 ? t("docs.byRules", { n: d.candidate_count }) : t("docs.noValues")}
+      {d.used_count > 0 ? t("docs.used", { n: d.used_count }) : d.candidate_count > 0 ? t("docs.byRules", { n: d.candidate_count })
+        : t(d.role_set === "context" || parseReadRole(d.read_role)?.role === "context" ? "docs.notRead" : "docs.noValues")}
       {d.other_count > 0 && <span className="sub">{t("docs.other", { n: d.other_count })} (<Link to="/deals/$dealId/review" params={{ dealId }} hash="unused-figures">{t("documents.otherShow")}</Link>)</span>}
       {d.number_format && d.number_format !== "1,234.56" && d.number_format !== "not detected" && (
         <span className="sub docs-warn"><I.Eye />{t("docs.format", { f: d.number_format })}</span>
       )}
-      {d.stage_detail ? <span className="sub docs-warn"><I.Eye />{msg(d.stage_detail)}</span>
+      {d.stage_detail ? d.stage_detail.split("\n").map((line, n) => <span key={n} className="sub docs-warn"><I.Eye />{msg(line)}</span>)
         : d.needs_ocr && <span className="sub docs-warn"><I.Eye />{t("documents.ocr")}</span>}
     </>
   );
@@ -148,6 +150,12 @@ export function Documents({ dealId }: { dealId: string }) {
   // The count Review shows: the values waiting for a person there, from the same overview the stepper reads.
   const toReview = (o.review?.needsReview ?? 0) + (o.review?.conflicting ?? 0);
   const addedNow = added.length > 0;
+  // Card 189: every file read is background and Agir decided at least one of them, so "0 values to review" would mislead.
+  // The same rule as setAsideAll in reviewView.
+  const readFiles = list.filter((d) => d.stage === "extracted");
+  const setAsideAll = !reading && readFiles.length > 0
+    && readFiles.every((d) => d.role_set === "context" || parseReadRole(d.read_role)?.role === "context")
+    && readFiles.some((d) => { const r = parseReadRole(d.read_role); return !d.role_set && r?.role === "context" && !r.byPerson; });
   // The files the overview counts as read: the banner's count on a return visit, before or without the list (QA card D3).
   const filesRead = Math.max(readCount, o.documents.total - o.documents.failed - o.documents.processing);
   // The green "N values to review" banner shows whenever values wait for review, not only right after an upload (QA card D3).
@@ -168,6 +176,12 @@ export function Documents({ dealId }: { dealId: string }) {
       <div className="stack">
         {addedNow && reading ? (
           <Notice title={t("documents.banner.reading", { n: list.filter((d) => !DONE.includes(d.stage)).length || added.length })} role="status" />
+        ) : setAsideAll ? (
+          <Notice tone="review" role="status" title={t("documents.banner.setAside")}>
+            {editable && <p className="small">{t("documents.banner.setAsideHelp")}</p>}
+            {failedCount > 0 && <p className="small">{t("documents.banner.failed", { n: failedCount })}</p>}
+            {toReview > 0 && <Link className="btn primary sm" to="/deals/$dealId/review" params={{ dealId }}>{t("documents.banner.go", { n: toReview })}</Link>}
+          </Notice>
         ) : showDone ? (
           <Notice tone="pass" role="status" title={t("documents.banner.done", { files: filesRead, n: toReview })}>
             {failedCount > 0 && <p className="small">{t("documents.banner.failed", { n: failedCount })}</p>}
@@ -201,7 +215,7 @@ export function Documents({ dealId }: { dealId: string }) {
               {(upload.isPending || (addedNow && reading)) && (
                 <p className="small docs-inline" role="status"><I.Spinner />{upload.isPending ? t("docs.uploading") : t("documents.inline.reading")}</p>
               )}
-              <input ref={input} id="doc-upload" type="file" multiple accept=".pdf,.xlsx,.csv,.docx,.txt" className="sr-only" tabIndex={-1} aria-label={t("docs.choose")} onChange={(e) => pick(e.target.files)} />
+              <input ref={input} id="doc-upload" type="file" multiple accept=".pdf,.xlsx,.csv,.docx,.txt,.png,.jpg,.jpeg,.tif,.tiff" className="sr-only" tabIndex={-1} aria-label={t("docs.choose")} onChange={(e) => pick(e.target.files)} />
             </div>
             <div className="card card-pad">
               <ChoiceCards
@@ -228,9 +242,11 @@ export function Documents({ dealId }: { dealId: string }) {
               <thead><tr><th>{t("docs.col.doc")}</th><th>{t("docs.col.stages")}</th><th>{t("docs.col.result")}</th><th>{t("documents.col.role")}</th><th className="r"><span className="sr-only">{t("docs.actions")}</span></th></tr></thead>
               <tbody>
                 {list.map((d) => {
-                  const readRole = /\((deal source|evidence|context)(?:, set by a person)?\)$/.exec(d.read_role ?? "")?.[1];
-                  const usedRole = readRole === "deal source" ? "deal_source" : readRole === "evidence" || readRole === "context" ? readRole : null;
-                  const byPerson = d.read_role?.includes(", set by a person)");
+                  const parsed = parseReadRole(d.read_role);
+                  const usedRole = parsed?.role === "deal source" ? "deal_source" : parsed?.role ?? null;
+                  const byPerson = parsed?.byPerson;
+                  // Card 189: Agir's own decision on a file it finished, in a kind it can name.
+                  const label = d.stage === "extracted" && !d.role_set && parsed && !parsed.byPerson ? DOCUMENT_KINDS[parsed.kind]?.[i.lang] : undefined;
                   const open = changing === d.id;
                   const asking = removing === d.id;
                   return (
@@ -250,6 +266,14 @@ export function Documents({ dealId }: { dealId: string }) {
                         {usedRole ? t(byPerson ? "docs.role.you" : "docs.role.agir", { role: t(ROLE_KEYS[usedRole]) })
                           : d.role_set ? t("docs.role.you", { role: t(ROLE_KEYS[d.role_set]) })
                           : <><span aria-hidden="true" className="muted">—</span><span className="sr-only">{t("documents.noRole")}</span></>}
+                        {label && (
+                          <span className="sub">
+                            {t(parsed!.role === "context" ? "docs.why.context" : parsed!.role === "evidence" ? "docs.why.evidence" : "docs.why.source", { kind: label })}
+                            {editable && parsed!.role === "context" && (
+                              <>{" "}<button type="button" className="docs-link" aria-label={t("docs.readAnywayLabel", { name: d.name })} disabled={setRole.isPending} onClick={() => setRole.mutate({ id: d.id, value: "deal_source" })}>{t("docs.readAnyway")}</button></>
+                            )}
+                          </span>
+                        )}
                         {editable && (
                           <span className="sub">
                             <button type="button" className="docs-link" aria-expanded={open} aria-label={t("docs.role.change", { name: d.name })} onClick={() => setChanging(open ? null : d.id)}>{t("documents.change")}</button>

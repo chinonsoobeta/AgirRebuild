@@ -7,7 +7,7 @@ import { z } from "zod";
 import { FIELD_BY_KEY, outsideWindow, windowMessage, validateThreshold, COUNTRIES, CURRENCIES, FIELDS, FIELD_GROUP_LABELS, METRICS, isSigned, POLICIES, POLICY_V1, PROVINCE_CODES, REVIEW_MODES, runPolicy, type EngineInput, type Policy } from "@agir/contracts";
 import { asUser, type BlobStore, type Db } from "@agir/db";
 import { breakeven, DRIVERS, driversFor, SALE_DRIVERS, EngineInputError, explore, grid, tornado, type DriverKey, type Shock } from "@agir/engine";
-import { canonicalItem, itemFold, kindOf } from "@agir/extraction";
+import { canonicalItem, itemFold, kindOf, refusalFor, imageInfo } from "@agir/extraction";
 import { MAX_UPLOAD_BYTES } from "@agir/worker";
 import { checkPassword, countSessions, createSession, deviceLabel, endOtherSessions, endSession, hashPassword, listSessions, PASSWORD_RULE, SESSION_DAYS, userForSession } from "./auth.ts";
 import { addressTaken, emailAuth } from "./email-auth.ts";
@@ -559,7 +559,7 @@ export function createApp({ db, store, secureCookies, demoSignIn = false, trustP
       const runCounts = { runs: r?.n ?? 0, first_run_at: r?.first ? new Date(r.first).toISOString() : null, reports: f?.n ?? 0, reports_shared: f?.shared ?? 0 };
       return { deals, archived: a?.n ?? 0, runCounts };
     });
-    const summed = ["docs_pdf", "docs_xlsx", "docs_csv", "docs_docx", "docs_txt", "docs_deal_source", "docs_evidence", "docs_context", "docs_no_candidates", "figures_read", "figures_confirmed_from_suggestion", "figures_typed", "actions_until_runnable"];
+    const summed = ["docs_pdf", "docs_xlsx", "docs_csv", "docs_docx", "docs_txt", "docs_image", "docs_deal_source", "docs_evidence", "docs_context", "docs_no_candidates", "figures_read", "figures_confirmed_from_suggestion", "figures_typed", "actions_until_runnable"];
     const totals: Record<string, number | string | null> = { deals: deals.length, archived_deals: archived };
     for (const k of summed) totals[k] = deals.reduce((n, d) => n + Number(d[k] ?? 0), 0);
     return c.json({ deals, totals: { ...totals, ...runCounts } });
@@ -664,7 +664,7 @@ export function createApp({ db, store, secureCookies, demoSignIn = false, trustP
     const role = z.enum(["deal_source", "evidence", "context"]).nullable().parse(c.req.query("role") ?? null);
     const name = (c.req.query("name") ?? "").trim();
     const kind = kindOf(name);
-    if (!name || !kind) return c.json({ error: "Upload a PDF, Excel (.xlsx), CSV, Word (.docx) or text file." }, 415);
+    if (!name || !kind) return c.json({ error: refusalFor(name) }, 415);
     const length = Number(c.req.header("content-length") ?? 0);
     if (length > MAX_UPLOAD_BYTES) return c.json({ error: "The file is larger than 75 MB." }, 413);
     const bytes = new Uint8Array(await c.req.arrayBuffer());
@@ -694,6 +694,11 @@ export function createApp({ db, store, secureCookies, demoSignIn = false, trustP
 
   app.post("/api/documents/:id/retire", async (c) => {
     await as(c, (tx) => tx.query(`select fn_retire_document($1)`, [c.req.param("id")]));
+    return c.json({ ok: true });
+  });
+
+  app.post("/api/deals/:id/read-again", async (c) => {
+    await as(c, (tx) => tx.query(`select fn_read_again($1)`, [c.req.param("id")]));
     return c.json({ ok: true });
   });
 
@@ -1227,7 +1232,6 @@ async function sharedPage(q: Db, rows: SharedFileRow[]) {
 
 const LOGO_MAX_BYTES = 500 * 1024;
 const LOGO_MAX_SIDE = 4096;
-const PNG_IEND = [0, 0, 0, 0, 0x49, 0x45, 0x4e, 0x44, 0xae, 0x42, 0x60, 0x82];
 
 /** Reads a request body up to `max` bytes; past that it stops reading and cancels the rest (null). */
 async function readCapped(body: ReadableStream<Uint8Array> | null, max: number): Promise<Uint8Array | null> {
@@ -1246,38 +1250,4 @@ async function readCapped(body: ReadableStream<Uint8Array> | null, max: number):
   let at = 0;
   for (const c of chunks) { out.set(c, at); at += c.byteLength; }
   return out;
-}
-
-/**
- * A logo's type from its first bytes (never its name), and its size from the PNG IHDR chunk or the JPEG start-of-frame marker.
- * The file must also end as its format does (the PNG IEND chunk, the JPEG end-of-image marker), so a header alone is refused.
- * This is not a decoder: a whole file with damaged image data still passes.
- */
-export function imageInfo(b: Uint8Array): { mime: "image/png" | "image/jpeg"; width: number; height: number } | "unknown" | "unreadable" {
-  const dv = new DataView(b.buffer, b.byteOffset, b.byteLength);
-  const sized = (mime: "image/png" | "image/jpeg", width: number, height: number) => (width > 0 && height > 0 ? { mime, width, height } : "unreadable" as const);
-  if (b.length >= 8 && [0x89, 0x50, 0x4e, 0x47, 0x0d, 0x0a, 0x1a, 0x0a].every((x, i) => b[i] === x)) {
-    if (b.length < 45 || dv.getUint32(8) !== 13 || String.fromCharCode(...b.slice(12, 16)) !== "IHDR") return "unreadable";
-    if (!PNG_IEND.every((x, i) => b[b.length - 12 + i] === x)) return "unreadable";
-    return sized("image/png", dv.getUint32(16), dv.getUint32(20));
-  }
-  if (b.length >= 3 && b[0] === 0xff && b[1] === 0xd8 && b[2] === 0xff) {
-    if (b[b.length - 2] !== 0xff || b[b.length - 1] !== 0xd9) return "unreadable";
-    let i = 2;
-    while (i + 4 <= b.length) {
-      if (b[i] !== 0xff) return "unreadable";
-      const marker = b[i + 1]!;
-      if (marker === 0xff) { i += 1; continue; }
-      if (marker === 0x01 || (marker >= 0xd0 && marker <= 0xd8)) { i += 2; continue; }
-      if (marker === 0xd9 || marker === 0xda) return "unreadable"; // the image data starts before any frame header
-      const length = dv.getUint16(i + 2);
-      if (length < 2) return "unreadable";
-      if (marker >= 0xc0 && marker <= 0xcf && marker !== 0xc4 && marker !== 0xc8 && marker !== 0xcc) {
-        return i + 9 <= b.length ? sized("image/jpeg", dv.getUint16(i + 7), dv.getUint16(i + 5)) : "unreadable";
-      }
-      i += 2 + length;
-    }
-    return "unreadable";
-  }
-  return "unknown";
 }

@@ -20,7 +20,7 @@ import {
 } from "@agir/contracts";
 import { assemble, buildLedger, canonicalJson, ENGINE_VERSION, heldPartnerReturns, replay } from "@agir/engine";
 import { currentDocuments, documentsHash, type Db } from "@agir/db";
-import { applyLabels, figureOrder, itemFold, labelPhrase, labelUnit, offeredIds, suggestFields, type ReaderResponse, type ReadingVerification, READER_PROMPT_VERSION, type SourcedCandidate } from "@agir/extraction";
+import { applyLabels, COMPUTED_NOTE, figureOrder, itemFold, kindOf, labelPhrase, labelUnit, offeredIds, suggestFields, type ReaderResponse, type ReadingVerification, READER_PROMPT_VERSION, type SourcedCandidate } from "@agir/extraction";
 
 export const sha256 = (s: string) => createHash("sha256").update(s).digest("hex");
 /** The hash of each registered policy, by version. A run is fresh against the hash of the policy it was made under. */
@@ -472,6 +472,35 @@ async function otherFigures(tx: Db, dealId: string, assumptions: Pick<Assumption
   return { all, other };
 }
 
+/** Review lists at most this many figures. Agir read them all; a page of tens of thousands helps nobody. */
+const MAX_LISTED_FIGURES = 1000;
+/** One figure as Review shows it: the same number in the same sentence is one row. */
+const listedKey = (o: { documentId: string; context: string; raw: string }) => `${o.documentId}\u0000${o.context}\u0000${o.raw}`;
+
+/**
+ * The figures Review lists, in the list's own order, and how many there are before the limit. A figure a person labelled always stays,
+ * then a formula's result and a figure the AI reading named, then one with a suggested field, then the rest. Within each of those the files
+ * take turns, each from its first row, so a small file is not lost behind a large one.
+ */
+export function listedFigures<O extends { documentId: string; location: string; context: string; raw: string; value: number | null; note: string | null; figureId: string | null; label: unknown; suggestions: string[] }>(other: O[], named: Set<string>) {
+  const total = new Set(other.map(listedKey)).size;
+  const unused = other.filter((o) => o.figureId && o.value !== null && !o.label).length;
+  if (total <= MAX_LISTED_FIGURES) return { listed: other, total, unused };
+  const keep = new Set(other.filter((o) => o.label).map(listedKey));
+  const { compare } = new Intl.Collator("en", { numeric: true });
+  const inRowOrder = [...other].sort((a, b) => compare(a.location, b.location));
+  const tiers: ((o: O) => boolean)[] = [(o) => o.note === COMPUTED_NOTE || (!!o.figureId && named.has(o.figureId)), (o) => o.suggestions.length > 0, () => true];
+  for (const tier of tiers) {
+    const files = new Map<string, O[]>();
+    for (const o of inRowOrder) if (tier(o)) { const rows = files.get(o.documentId); if (rows) rows.push(o); else files.set(o.documentId, [o]); }
+    const queues = [...files.values()];
+    for (let turn = 0; keep.size < MAX_LISTED_FIGURES && queues.some((q) => turn < q.length); turn++) {
+      for (const q of queues) if (turn < q.length && keep.size < MAX_LISTED_FIGURES) keep.add(listedKey(q[turn]!));
+    }
+  }
+  return { listed: other.filter((o) => keep.has(listedKey(o))), total, unused };
+}
+
 /**
  * The deal's documents (QA run 2, skeptic N2). used_count is the number of current values with a source in the document, from
  * the rules or the AI reading; candidate_count stays what the rules alone found. other_count is the figures no reader used.
@@ -548,34 +577,68 @@ export async function reviewView(tx: Db, dealId: string, asOf: string) {
   const { all, other } = await otherFigures(tx, dealId, assumptions);
   const docs = await currentDocuments(tx, dealId);
   // RLS on ai_readings limits this snapshot to staff, including when a client can read the deal.
-  const [stored] = await tx.query<{ outcome: "ok" | "failed"; model: string; prompt_version: string; created_at: string | Date; response: ReaderResponse | null; verification: { readings: ReadingVerification[]; conflicts: ReadingVerification[][] } | null }>(
-    `select outcome, model, prompt_version, created_at, response, verification from ai_readings where deal_id=$1 and documents_hash=$2 and prompt_version=$3 order by created_at desc, id desc limit 1`,
+  type StoredReading = { outcome: "ok" | "failed"; model: string; prompt_version: string; created_at: string | Date; response: ReaderResponse | null; verification: { documents: { id: string; name: string; sha256?: string; sheetsLeftOut?: string[] }[]; readings: ReadingVerification[]; conflicts: ReadingVerification[][] } | null };
+  const [current] = await tx.query<StoredReading>(
+    `select outcome, model, prompt_version, created_at, response, verification from ai_readings where deal_id=$1 and (select w.ai_reading from deals d join workspaces w on w.id=d.workspace_id where d.id=$1) and documents_hash=$2 and prompt_version=$3 order by created_at desc, id desc limit 1`,
     [dealId, documentsHash(docs), READER_PROMPT_VERSION],
   );
+  let earlier: StoredReading | undefined;
+  if ((!current || current.outcome === "failed") && !docs.some(d => ["uploaded", "checking", "reading", "extracting"].includes(d.stage))) {
+    [earlier] = await tx.query<StoredReading>(
+      `select outcome, model, prompt_version, created_at, response, verification from ai_readings where deal_id=$1 and (select w.ai_reading from deals d join workspaces w on w.id=d.workspace_id where d.id=$1) and outcome='ok' order by created_at desc, id desc limit 1`,
+      [dealId],
+    );
+  }
+  const stored = current ?? earlier;
+  const lists = current?.outcome === "ok" ? current : earlier;
+  const readRoles = await tx.query<{ id: string; read_role: string | null }>(`select id,read_role from documents where deal_id=$1 and retired_at is null`, [dealId]);
+  const isSource = (d: typeof docs[number]) => d.role_set !== "context" &&
+    !/\(context(?:, set by a person)?\)$/.test(readRoles.find(r => r.id === d.id)?.read_role ?? "");
+  // Card 189: every file read is background and Agir decided at least one, so Review says why it holds nothing from them.
+  // The same rule as setAsideAll on the Documents screen.
+  const readFiles = docs.filter(d => d.stage === "extracted");
+  const setAsideAll = !docs.some(d => ["uploaded", "checking", "reading", "extracting"].includes(d.stage)) && readFiles.length > 0 && !readFiles.some(isSource) &&
+    readFiles.some(d => !d.role_set && /\(context\)$/.test(readRoles.find(r => r.id === d.id)?.read_role ?? ""));
+  const keep = (r: { file: string }) => lists === current || !!lists?.verification?.documents.some(ref => ref.name === r.file &&
+    docs.some(d => d.id === ref.id && d.stage === "extracted" && isSource(d) && (ref.sha256 === undefined || ref.sha256 === d.sha256)));
   // A reading that failed its check is shown for the person to check, unless the review already holds that figure for the
   // field (the rules read it): then the card would only repeat a row that is already waiting for approval (QA run 3, skeptic R1).
   const alreadyRead = (r: { field: string; value: number }) => assumptions.some((a) => a.status !== "rejected" && a.field_key === r.field && a.value !== null && Math.abs(a.value - r.value) < 0.5);
-  const rejectedReading = (r: ReaderResponse["readings"][number], verification: ReadingVerification | undefined) => verification && verification.outcome !== "verified" && !alreadyRead(r)
+  // Card 192: a person can do nothing with a field Agir does not have, so it is not asked about; the stored reply keeps it.
+  const rejectedReading = (r: ReaderResponse["readings"][number], verification: ReadingVerification | undefined) => verification && verification.outcome !== "verified" && FIELD_BY_KEY.has(r.field) && !alreadyRead(r)
     ? [{ field: r.field, item: r.item, value: r.value, file: r.file, location: r.location, quote: r.quote, reason: verification.outcome }] : [];
   // Card F1: a failed reading of a field this deal's mode does not use is not asked about; it is listed as not needed.
   const inMode = (r: { field: string }) => notNeededReason(r.field, selling) === null;
-  const failed = stored ? [
-    ...(stored.response?.readings ?? []).flatMap((r, i) => rejectedReading(r, stored.verification?.readings[i])),
-    ...(stored.response?.conflicts ?? []).flatMap((c, i) => c.values.flatMap((v, j) => rejectedReading({ ...v, field: c.field, item: c.item, note: c.why, confidence: "high" }, stored.verification?.conflicts[i]?.[j]))),
+  const failed = lists ? [
+    ...(lists.response?.readings ?? []).flatMap((r, i) => keep(r) ? rejectedReading(r, lists.verification?.readings[i]) : []),
+    ...(lists.response?.conflicts ?? []).flatMap((c, i) => c.values.flatMap((v, j) => keep(v) ? rejectedReading({ ...v, field: c.field, item: c.item, note: c.why, confidence: "high" }, lists.verification?.conflicts[i]?.[j]) : [])),
   ] : [];
   const notNeeded = [
     ...setAside.map((a) => ({ fieldKey: a.field_key, itemKey: a.item_key || null, label: FIELD_BY_KEY.get(a.field_key)!.label, value: a.value, why: notNeededReason(a.field_key, selling)!, sources: a.sources })),
     ...failed.filter((r) => !inMode(r)).map((r) => ({ fieldKey: r.field, itemKey: r.item, label: FIELD_BY_KEY.get(r.field)!.label, value: r.value, why: notNeededReason(r.field, selling)!, sources: [{ document_name: r.file, location: r.location, raw: r.quote }] })),
   ];
+  // While a reconcile is queued or running the AI may still be reading these files, so none is called unread yet;
+  // the screen reads the review again when the update ends.
+  const settled = stored?.outcome === "ok" && !(await tx.query<{ updating: boolean }>(`select fn_deal_updating($1) as updating`, [dealId]))[0]!.updating;
+  const unread = settled ? docs.filter(d => d.stage === "extracted" && isSource(d) &&
+    !stored.verification?.documents.some(ref => ref.id === d.id)).map(d => d.name) : [];
   const aiReading = stored ? {
-    outcome: stored.outcome, model: stored.model, promptVersion: stored.prompt_version, createdAt: stored.created_at,
-    notUsed: (stored.response?.not_used ?? []).map(r => {
+    unread, outcome: stored.outcome, model: stored.model, promptVersion: stored.prompt_version, createdAt: stored.created_at,
+    notUsed: (lists?.response?.not_used ?? []).filter(keep).map(r => {
       const matches = docs.filter(d => d.name === r.file);
       const document = matches.length === 1 ? matches[0] : undefined;
       return { ...r, figureId: all.find(o => !o.label && o.documentId === document?.id && o.location === r.location && o.value === r.value)?.figureId ?? null };
     }),
     pleaseCheck: failed.filter(inMode),
+    // A person who asked for the whole file while the wider reading is on its way is not told again what the earlier one left out.
+    sheetsLeftOut: (lists?.verification?.documents ?? []).flatMap(ref => {
+      const d = docs.find(c => c.id === ref.id && c.stage === "extracted" && c.sha256 === ref.sha256);
+      if (!ref.sheetsLeftOut || !d || !isSource(d) || (lists !== current && d.role_set)) return [];
+      const role = /\(evidence/.test(readRoles.find(r => r.id === d.id)?.read_role ?? "") ? "evidence" : "deal_source";
+      return [{ id: d.id, name: d.name, sheets: kindOf(d.name) === "csv" ? [] : ref.sheetsLeftOut, readAnyway: d.role_set ? null : role }];
+    }),
   } : null;
+  const { listed, total: otherTotal, unused: unusedTotal } = listedFigures(other, new Set((aiReading?.notUsed ?? []).flatMap((n) => n.figureId ?? [])));
   // Up to three unlabelled figures that may hold a missing input: those it ranks first, then the others, each in the table's order.
   const likely = (fieldKey: string) =>
     other.filter((o) => o.suggestions.includes(fieldKey))
@@ -583,6 +646,7 @@ export async function reviewView(tx: Db, dealId: string, asOf: string) {
       .slice(0, 3)
       .map((o) => ({ documentId: o.documentId, figureId: o.figureId!, document_name: o.document_name, location: o.location, raw: o.raw, context: o.context }));
   return {
+    setAsideAll,
     selling,
     aiReading,
     todo: todoList(readiness, assumptions, aiReading),
@@ -592,6 +656,17 @@ export async function reviewView(tx: Db, dealId: string, asOf: string) {
     tableNotices,
     assumptions: assumptions.map((a) => {
       const def = FIELD_BY_KEY.get(a.field_key)!;
+      const kinds = a.field_key === "unit_count" ? ["rent roll"]
+        : a.field_key === "land_cost" ? ["purchase agreement"]
+        : def.group === "budget" ? ["cost budget", "cost report"]
+        : ["senior", "mezzanine", "refinance"].includes(def.group) ? ["commitment letter", "term sheet", "credit letter"] : [];
+      const usualValues = a.status === "conflicting" && (a.conflict_values?.length ?? 0) > 1
+        ? a.conflict_values!.flatMap(v => {
+          // By the source's own file, since two different files can share a name.
+          const kind = kinds.find(kind => a.sources.some(s => s.value === v.value && docs.some(d => d.id === s.document_id && d.stage === "extracted" &&
+            /^(.*) \(deal source(?:, set by a person)?\)$/.exec(readRoles.find(r => r.id === d.id)?.read_role ?? "")?.[1] === kind)));
+          return kind ? [{ value: v.value, kind }] : [];
+        }) : [];
       return {
         id: a.id,
         fieldKey: a.field_key,
@@ -610,6 +685,7 @@ export async function reviewView(tx: Db, dealId: string, asOf: string) {
         ...(tableSource(a) ? {tableSource:tableSource(a)} : {}),
         sources: a.sources,
         conflictValues: a.conflict_values,
+        usualSource: usualValues.length === 1 ? usualValues[0]! : null,
         reason: a.reason,
         decidedBy: a.decided_by_name,
         decidedById: a.decided_by,
@@ -637,7 +713,9 @@ export async function reviewView(tx: Db, dealId: string, asOf: string) {
       const def = FIELD_BY_KEY.get(m.fieldKey)!;
       return { ...m, unit: def.unit, material: def.material, default: def.default ?? null, help: def.help ?? null, groupLabel: FIELD_GROUP_LABELS[def.group] };
     }),
-    other,
+    other: listed,
+    otherTotal,
+    unusedTotal,
     notNeeded,
   };
 }

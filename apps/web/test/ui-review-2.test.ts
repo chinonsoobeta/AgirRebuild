@@ -38,10 +38,12 @@ import { Review } from "../src/routes/review.tsx";
 
 const row = (over: Partial<Assumption>): Assumption => ({
   id: "x", fieldKey: "land_cost", itemKey: null, label: "", group: "budget", groupLabel: "Budget", unit: "$", material: false, conservative: null, status: "approved",
-  value: 1, pendingValue: null, sourceKind: "document", sources: [], conflictValues: null, reason: null, decidedBy: "Dana", decidedById: "dana", decidedAt: "2026-10-21T12:00:00Z",
+  value: 1, pendingValue: null, sourceKind: "document", sources: [], conflictValues: null, usualSource: null, reason: null, decidedBy: "Dana", decidedById: "dana", decidedAt: "2026-10-21T12:00:00Z",
   secondApprover: null, confirmedByReview: false, secondApprovedAt: null, sponsorStated: false, clientConfirmedBy: null, clientConfirmedById: null, clientConfirmedAt: null, version: 1, ...over,
 });
 const payload = (): ReviewData => ({
+  setAsideAll: false,
+  otherTotal: 0, unusedTotal: 0,
   assumptions: [
     row({ id: "a1", fieldKey: "land_cost", value: 1150000 }),
     row({ id: "ch1", fieldKey: "refinance_term_years", group: "refinance", groupLabel: "Refinance", unit: "years", sourceKind: "analyst", value: 10, decidedBy: "Morgan", decidedById: "me-id" }),
